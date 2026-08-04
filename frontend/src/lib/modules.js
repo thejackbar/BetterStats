@@ -130,7 +130,7 @@ export const MODULE_GROUPS = {
 //
 // BetterClubManager is NOT here either — it stopped being its own product when
 // it merged into BetterClubhouse. Its screens are the People and Club sections
-// of that sidebar, still gated to super_admin while they run on demo data.
+// of that sidebar, still gated to super_admin while their CRUD is finished.
 export const CORE_TILES = [
   {
     key: 'stats',

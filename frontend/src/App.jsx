@@ -192,6 +192,7 @@ const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
 const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
+const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
 const CommsSettings = lazy(() => import('./pages/admin/bettercomms/CommsSettings'))
 
@@ -326,12 +327,12 @@ export default function App() {
           <Route path="/admin/clubhouse/settings" element={<ProtectedRoute><ClubhouseSettings /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
           {/* Old entry points, kept so bookmarks and links still land somewhere. */}
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub/roster" element={<Navigate to="/admin/clubhouse/roster" replace />} />
           <Route path="/admin/comms/segments" element={<Navigate to="/admin/clubhouse/audiences" replace />} />
-          <Route path="/admin/comms/lists" element={<Navigate to="/admin/clubhouse/audiences" replace />} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -465,6 +466,7 @@ export default function App() {
               spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
+          <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
           <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />

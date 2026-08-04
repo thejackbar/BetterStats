@@ -33,6 +33,9 @@ export default function ClubDiary({ st, patch, narrow }) {
   const tab = st.diaryTab || 'plan'
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
+  // Which season "Generate" targets. Null until the officer picks one, so the
+  // default can follow the data (the first season not yet generated).
+  const [pickedYear, setPickedYear] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -77,7 +80,22 @@ export default function ClubDiary({ st, patch, narrow }) {
   const nowUTC = Date.now()
   // season window: prefer the club's own season years, else derive from today
   const nowY = new Date().getUTCFullYear(), nowM = new Date().getUTCMonth()
-  const seasonYear = years[0] || (nowM >= 6 ? nowY : nowY - 1)
+  // The season we are actually IN (rolls in July), kept separate from the
+  // newest season that happens to have a generated plan. Conflating the two is
+  // what made "Generate" always offer next season even when this one had never
+  // been generated.
+  const currentSeasonYear = nowM >= 6 ? nowY : nowY - 1
+  const seasonYear = years[0] || currentSeasonYear
+  // Offer the first season from this one onwards that hasn't been generated
+  // yet, so a club with nothing generated is offered THIS season.
+  const nextUngenerated = (() => {
+    let y = currentSeasonYear
+    while (years.includes(y)) y += 1
+    return y
+  })()
+  const seasonLabel = y => `${y}/${String((y + 1) % 100).padStart(2, '0')}`
+  const genYear = pickedYear ?? nextUngenerated
+  const setGenYear = setPickedYear
   const SEASON_START = Date.UTC(seasonYear, 6, 1)
   const TODAY_DAY = Math.round((nowUTC - SEASON_START) / 86400000)
   const dayOf = (iso) => iso ? Math.round((Date.parse(iso) - SEASON_START) / 86400000) : null
@@ -283,10 +301,23 @@ export default function ClubDiary({ st, patch, narrow }) {
           <div className="pb-scroll" style={{ borderLeft: `1px solid ${C.hair}`, background: C.surface, padding: '18px 16px', overflowY: 'auto', alignSelf: 'stretch' }}>
             <div style={cap}>GENERATE A SEASON</div>
             <p style={{ fontSize: 12.5, color: C.dim, margin: '0 0 12px', lineHeight: 1.5 }}>Materialises every active definition into dated tasks for the season you pick. Nothing is locked — edit the generated plan freely afterwards.</p>
+            <select value={genYear} onChange={e => setGenYear(Number(e.target.value))}
+              style={{ width: '100%', marginBottom: 8, padding: '8px 10px', borderRadius: 8, fontSize: 13, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text }}>
+              {[currentSeasonYear - 1, currentSeasonYear, currentSeasonYear + 1, currentSeasonYear + 2].map(y => (
+                <option key={y} value={y}>{seasonLabel(y)}{years.includes(y) ? ' · already generated' : ''}</option>
+              ))}
+            </select>
             <button onClick={() => {
-              const target = (years[0] || seasonYear) + 1
-              api.diaryGenerateSeason(target).then(() => patch({ toast: { tone: 'ok', title: 'Generated ' + target + '/' + String((target + 1) % 100).padStart(2, '0') + ' from your templates.', body: defs.length + ' definitions materialised into dated tasks. Open the season plan to review.' } })).catch(() => patch({ toast: { tone: 'block', title: 'Could not generate the season.', body: 'Check the club diary configuration and try again.' } }))
-            }} style={{ width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Generate {(years[0] || seasonYear) + 1}/{String(((years[0] || seasonYear) + 2) % 100).padStart(2, '0')} plan</button>
+              const target = genYear
+              api.diaryGenerateSeason(target)
+                .then(() => patch({ toast: { tone: 'ok', title: 'Generated ' + seasonLabel(target) + ' from your templates.', body: defs.length + ' definitions materialised into dated tasks. Open the season plan to review.' } }))
+                .catch(() => patch({ toast: { tone: 'block', title: 'Could not generate the season.', body: 'Check the club diary configuration and try again.' } }))
+            }} style={{ width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#0a0d14', cursor: 'pointer' }}>Generate {seasonLabel(genYear)} plan</button>
+            {years.includes(genYear) && (
+              <p style={{ fontSize: 11.5, color: C.warn, margin: '8px 0 0', lineHeight: 1.5 }}>
+                {seasonLabel(genYear)} already has a plan. Generating again tops it up from your definitions rather than starting over.
+              </p>
+            )}
           </div>
         </div>
       )}

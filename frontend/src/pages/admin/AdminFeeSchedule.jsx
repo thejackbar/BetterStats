@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
+import { Link } from 'react-router-dom'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
@@ -215,9 +216,17 @@ export default function AdminFeeSchedule() {
   }
 
   return (
-    <BetterFeesLayout>
+    <BetterFeesLayout
+      title="Rate card"
+      caption="What each kind of member pays"
+      actions={
+        <Link to="/admin/fees/membership-types"
+          className="px-3 py-2 rounded-lg text-[13px] border border-pb-hairline2 text-pb-dim hover:text-pb-text whitespace-nowrap">
+          Membership types
+        </Link>
+      }
+    >
       <div className="max-w-4xl">
-        <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Fee Schedule</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
           The membership rate card for a season. Each tier sets a one-off membership fee and a per-day match fee
           (set match fee to 0 for Upfront tiers who prepay). Match fee owed = days played × the tier's per-day rate.

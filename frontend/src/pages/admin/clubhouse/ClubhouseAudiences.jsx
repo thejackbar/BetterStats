@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
@@ -212,8 +212,12 @@ export default function ClubhouseAudiences() {
 
           <div className="mt-4 space-y-2.5 px-1">
             <Note toneKey="calm">
-              This replaced Contacts, Lists and Segments. A hand-picked list is an audience whose rule is
-              "these people", so there is only one idea to learn.
+              This replaced Segments. Contacts and hand-picked lists are still their own screens until an
+              audience can carry a "these people" rule:{' '}
+              <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
+              {' · '}
+              <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
+              {'. '}Both can still be picked as the audience when you compose.
             </Note>
             <Note title="Club scope only" toneKey="calm">
               These conditions read your own club's people — the directory, accounts, roster and email activity.
