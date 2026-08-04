@@ -17,13 +17,30 @@
 #
 # Also add `bs_afl_pgdata:` to the central file's top-level volumes: block.
 #
-# First bring-up:
-#   cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
-#   docker compose build bs-afl-backend bs-afl-frontend
-#   docker compose up -d --no-deps bs-afl-database bs-afl-backend bs-afl-frontend
+# First bring-up (git pull FIRST — football-landing/ must exist on the box —
+# and set the two .env vars above, or postgres won't initialise):
+#   git -C /srv/docker/betterstats pull origin main
+#   cd /srv/docker
+#   export COMPOSE_PROJECT_NAME=bltbox_docker_app   # load-bearing, as always
+#   export COMPOSE_IGNORE_ORPHANS=1                 # silences other apps' noise
+#   docker compose build bs-afl-backend bs-afl-frontend bs-football-landing
+#   docker compose up -d bs-football-landing bs-afl-database bs-afl-backend bs-afl-frontend
+#   docker compose logs --tail=20 bs-afl-backend    # want "Application startup complete."
 #   docker compose exec bs-afl-backend python -m app.scripts.afl_bootstrap <playhq_org_id> <username> '<password>' --sync
+#
+# NOTE: no --no-deps on the FIRST bring-up. The dependency closure of these
+# four services is exactly these four, so the flag protects nothing here,
+# while omitting it guarantees bs-afl-backend waits for the database's
+# service_healthy gate (it exits on a refused connection otherwise; it would
+# recover via restart: unless-stopped, but with an alarming first-run
+# traceback). DO use --no-deps on later redeploys of just the backend/
+# frontend, where it stops bs-afl-database being recreated — same reasoning
+# as deploy.sh.
+#
 # First boot creates the schema in the empty database automatically (no
-# init.sql, no alembic — the AFL lifespan owns its schema).
+# init.sql, no alembic — the AFL lifespan owns its schema). The bootstrap
+# --sync is long-running (Curtin Uni Wesley is ~890 games) — run it where you
+# can leave it, or drop --sync and trigger the sync from the admin page.
 # nginx-proxy-manager (betterat.football umbrella — ONE proxy host entry):
 #   betterat.football + www.betterat.football -> http://bs-football-landing:80
 #   plus a CUSTOM LOCATION on that same entry: /afl -> http://bs-afl-frontend:80
