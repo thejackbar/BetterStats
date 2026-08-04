@@ -2,15 +2,16 @@
 season + grade filterable. BOG is a flat count of best-players mentions (per
 the product decision; ranking is stored for future weighted views).
 
-club_bf_votes/comp_bf_votes are a different shape of stat from the other four:
-they only ever come from a historical Import Stats upload (routers/afl/imports.py)
-— PlayHQ has no concept of club-internal best & fairest voting, so
-afl_player_season_stats (wholly derived from synced game lines, see
-services/afl/sync.py's _rollup_season_stats) never carries them. They're
-queried straight off afl_imported_stats instead of the usual pss table, and
-— because afl_imported_stats has no real grade_id, only a free-text
-grade_label — a grade filter is not applied to a votes stat; a season filter
-still works since imported rows do carry a resolved season_id.
+Every stat here combines SYNCED (afl_player_season_stats) with IMPORTED
+(afl_imported_stats, from a historical Import Stats upload) the same way the
+admin Players list already does — sync wins per (player, season), imported
+only fills a genuine gap — because without this, a club whose whole history
+came from an Import Stats upload had real numbers in the admin Players list
+but an empty public leaderboard (only afl_player_season_stats was ever read
+here). A grade filter now also reaches imported rows: routers/afl/imports.py
+promotes a resolved (season, grade label) into a real Grade row at commit
+time, so afl_imported_stats.grade_id is a normal grade_id like any synced
+row's — no free-text grade_label matching needed here.
 """
 import uuid
 from typing import Optional
@@ -24,12 +25,7 @@ from app.services.afl.aggregations import matching_grade_ids
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
 
-_STATS = {
-    "goals": "SUM(pss.goals)",
-    "games": "SUM(pss.games)",
-    "bogs": "SUM(pss.bog_count)",
-    "behinds": "SUM(pss.behinds)",
-}
+_STATS = {"goals": "goals", "games": "games", "bogs": "bog_count", "behinds": "behinds"}
 _VOTE_STATS = {"club_bf_votes": "club_bf_votes", "comp_bf_votes": "comp_bf_votes"}
 
 
@@ -42,14 +38,20 @@ async def leaderboard(org_id: uuid.UUID,
                       db: AsyncSession = Depends(get_db)):
     if stat not in _STATS and stat not in _VOTE_STATS:
         raise HTTPException(status_code=422, detail=f"stat must be one of {sorted({*_STATS, *_VOTE_STATS})}")
+    params: dict = {"org": str(org_id), "lim": limit}
 
     if stat in _VOTE_STATS:
+        # Club/competition B&F votes only ever come from an Import Stats
+        # upload — PlayHQ has no concept of club-internal B&F voting, so
+        # afl_player_season_stats never carries them at all.
         col = _VOTE_STATS[stat]
         clauses = ["i.organisation_id = :org"]
-        params: dict = {"org": str(org_id), "lim": limit}
         if season_id:
             clauses.append("i.season_id = :season")
             params["season"] = str(season_id)
+        if grade_id:
+            clauses.append("i.grade_id = ANY(:grade)")
+            params["grade"] = await matching_grade_ids(db, org_id, grade_id)
         where = " AND ".join(clauses)
         res = await db.execute(text(f"""
             SELECT i.player_id, p.name, p.display_name_override, p.photo_url,
@@ -68,30 +70,48 @@ async def leaderboard(org_id: uuid.UUID,
         """), params)
         return {"stat": stat, "rows": [dict(r._mapping) for r in res]}
 
-    agg = _STATS[stat]
-    clauses = ["pss.organisation_id = :org"]
-    params: dict = {"org": str(org_id), "lim": limit}
-    if season_id:
-        clauses.append("pss.season_id = :season")
-        params["season"] = str(season_id)
+    value_col = _STATS[stat]
+
     if grade_id:
-        clauses.append("pss.grade_id = ANY(:grade)")
         params["grade"] = await matching_grade_ids(db, org_id, grade_id)
+        synced_grade_clause = "s.grade_id = ANY(:grade)"
+        imported_grade_clause = "i.grade_id = ANY(:grade)"
     else:
-        clauses.append("pss.grade_id IS NULL")
-    where = " AND ".join(clauses)
+        synced_grade_clause = "s.grade_id IS NULL"
+        imported_grade_clause = "TRUE"
+
+    season_clause_s = ""
+    season_clause_i = ""
+    if season_id:
+        params["season"] = str(season_id)
+        season_clause_s = "AND s.season_id = :season"
+        season_clause_i = "AND i.season_id = :season"
+
     res = await db.execute(text(f"""
-        SELECT pss.player_id, p.name, p.display_name_override, p.photo_url,
-               SUM(pss.games) AS games,
-               SUM(pss.goals) AS goals,
-               SUM(pss.behinds) AS behinds,
-               SUM(pss.bog_count) AS bogs,
-               {agg} AS value
-        FROM afl_player_season_stats pss
-        JOIN players p ON p.id = pss.player_id
-        WHERE {where}
-        GROUP BY pss.player_id, p.name, p.display_name_override, p.photo_url
-        HAVING {agg} > 0
+        WITH combined AS (
+            SELECT s.player_id, s.games, s.goals, s.behinds, s.bog_count
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND {synced_grade_clause} {season_clause_s}
+            UNION ALL
+            SELECT i.player_id, i.games_played AS games, i.goals, i.behinds, i.bog_count
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org AND {imported_grade_clause} {season_clause_i}
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
+               SUM(c.games) AS games,
+               SUM(c.goals) AS goals,
+               SUM(c.behinds) AS behinds,
+               SUM(c.bog_count) AS bogs,
+               SUM(c.{value_col}) AS value
+        FROM combined c
+        JOIN players p ON p.id = c.player_id
+        GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
+        HAVING SUM(c.{value_col}) > 0
         ORDER BY value DESC, games ASC, p.name
         LIMIT :lim
     """), params)

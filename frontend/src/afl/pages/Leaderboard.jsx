@@ -9,8 +9,8 @@ const STATS = [
   { key: 'goals', label: 'Goals' },
   { key: 'games', label: 'Games' },
   { key: 'bogs', label: 'Best on Ground' },
-  { key: 'club_bf_votes', label: 'Club B&F votes', noGrade: true },
-  { key: 'comp_bf_votes', label: 'Competition B&F votes', noGrade: true },
+  { key: 'club_bf_votes', label: 'Club B&F votes' },
+  { key: 'comp_bf_votes', label: 'Competition B&F votes' },
 ]
 
 export default function Leaderboard() {
@@ -23,17 +23,15 @@ export default function Leaderboard() {
   const base = `/${club.slug}`
 
   const statInfo = STATS.find(s => s.key === stat)
-  const gradeDisabled = !!statInfo?.noGrade
 
   useEffect(() => { setGradeId(null) }, [seasonId])
-  useEffect(() => { if (gradeDisabled) setGradeId(null) }, [gradeDisabled])
 
   useEffect(() => {
     setLoading(true)
-    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeDisabled ? null : gradeId, limit: 50 })
+    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, limit: 50 })
       .then(setData)
       .finally(() => setLoading(false))
-  }, [club.id, stat, seasonId, gradeId, gradeDisabled])
+  }, [club.id, stat, seasonId, gradeId])
 
   const gradeOptions = (club.grades || [])
     .filter(g => !seasonId || (g.season_ids || []).includes(seasonId))
@@ -46,15 +44,9 @@ export default function Leaderboard() {
         <div className="ml-auto flex flex-wrap gap-2">
           <Select value={seasonId} onChange={setSeasonId} placeholder="All seasons"
                   options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))} />
-          <Select value={gradeDisabled ? null : gradeId} onChange={setGradeId} disabled={gradeDisabled}
-                  placeholder={gradeDisabled ? 'Whole club' : 'All grades'} options={gradeOptions} />
+          <Select value={gradeId} onChange={setGradeId} placeholder="All grades" options={gradeOptions} />
         </div>
       </div>
-      {gradeDisabled && (
-        <p className="text-xs text-pb-faint -mt-2">
-          B&F votes come from imported historical records, which aren't split by grade — this is always a whole-club total.
-        </p>
-      )}
 
       <div className="flex gap-1">
         {STATS.map(s => (

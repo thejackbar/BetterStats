@@ -123,12 +123,21 @@ function valueLabel(value, idName, kind) {
   return idName.get(value) || '(selected)'
 }
 
+// A sheet's season label is very often already exactly what the season
+// should be called ("1969", "Summer 1972/73") — no reason to ask the admin
+// to retype it. Pulls out a 4-digit year if one's present anywhere in it.
+function parseSeasonGuess(label) {
+  const s = String(label || '').trim()
+  const m = s.match(/(19|20)\d{2}/)
+  return { name: s, year: m ? parseInt(m[0], 10) : null }
+}
+
 // Searchable combobox shared by the Players/Seasons/Grades steps — renders
 // only a handful of options at a time so it stays snappy on a big roster.
 // A hand-kept historical sheet often predates anything the club has synced,
 // so — for seasons only — there's a way to mint one on the spot rather than
 // forcing every pre-sync decade into "unassigned".
-function SearchSelect({ value, idName, candidates, options, onChange, kind, onCreateSeason }) {
+function SearchSelect({ value, idName, candidates, options, onChange, kind, onCreateSeason, rawLabel }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [creating, setCreating] = useState(false)
@@ -145,7 +154,14 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, onCr
   const pick = v => { onChange(v); setOpen(false); setQ('') }
   const closeAll = () => { setOpen(false); setCreating(false); setCreateErr(null) }
   const unresolved = !value
+  const guess = kind === 'season' ? parseSeasonGuess(rawLabel) : null
 
+  function openCreateForm() {
+    setNewName(guess?.name || '')
+    setNewYear(guess?.year ? String(guess.year) : '')
+    setCreateErr(null)
+    setCreating(true)
+  }
   async function submitNewSeason() {
     const n = newName.trim()
     if (!n) { setCreateErr('Name is required'); return }
@@ -155,6 +171,14 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, onCr
       setNewName(''); setNewYear('')
       pick(s.id)
     } catch (e) { setCreateErr(e.message) } finally { setCreatingBusy(false) }
+  }
+  async function quickCreateSeason() {
+    if (!guess?.name) return
+    setCreatingBusy(true); setCreateErr(null)
+    try {
+      const s = await onCreateSeason(guess)
+      pick(s.id)
+    } catch (e) { setCreateErr(e.message); setCreating(false) } finally { setCreatingBusy(false) }
   }
 
   const item = 'block w-full text-left px-2 py-1 text-[12px] text-pb-dim hover:bg-pb-surface2 hover:text-pb-text rounded'
@@ -197,7 +221,13 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, onCr
             {kind === 'season' && (
               <>
                 <button className={item} onClick={() => pick('__unassigned__')}>↪ Unassigned (no matching season)</button>
-                <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
+                {guess?.name && (
+                  <button className={item} onClick={quickCreateSeason} disabled={creatingBusy}>
+                    {creatingBusy ? 'Adding…' : `⚡ Create "${guess.name}"${guess.year ? ` (${guess.year})` : ''}`}
+                  </button>
+                )}
+                <button className={item} onClick={openCreateForm}>+ Create new season (edit name/year)</button>
+                {createErr && <p className="px-2 text-[10px] text-pb-red/70">{createErr}</p>}
               </>
             )}
             {kind === 'grade' && (
@@ -234,9 +264,10 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, onCr
 const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
 const PAGE_SIZE = 50
 
-function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, nextLabel, onNext, onBack, loading, onCreateSeason }) {
+function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, nextLabel, onNext, onBack, loading, onCreateSeason, onBulkCreateSeasons, bulkCreating }) {
   const [onlyReview, setOnlyReview] = useState(true)
   const [page, setPage] = useState(0)
+  const noMatchCount = useMemo(() => rows.filter(r => r.status === 'none').length, [rows])
 
   const idName = useMemo(() => {
     const m = new Map()
@@ -275,6 +306,13 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
               className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-2.5 py-1 text-pb-faint hover:text-pb-text">
               {onlyReview ? `SHOW ALL ${counts.total}` : 'NEEDS REVIEW ONLY'}
             </button>
+            {kind === 'season' && noMatchCount > 0 && (
+              <button onClick={onBulkCreateSeasons} disabled={bulkCreating}
+                title="Creates a season named after each unmatched label (parsing out a year where there is one) and assigns it — no retyping needed for sheets that just use bare years."
+                className="font-mono text-[10px] tracking-wide2 rounded px-2.5 py-1 font-semibold text-black bg-[var(--pb-accent)] disabled:opacity-50">
+                {bulkCreating ? 'CREATING…' : `CREATE SEASONS FOR ALL UNMATCHED (${noMatchCount})`}
+              </button>
+            )}
             {pageCount > 1 && (
               <span className="ml-auto flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                 <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="border pb-hairline rounded px-2 py-0.5 disabled:opacity-40">←</button>
@@ -304,7 +342,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
                       <SearchSelect value={valueFor(r)} idName={idName} candidates={candidates} options={allOptions}
-                        onChange={v => onChange(r, v)} kind={kind} onCreateSeason={onCreateSeason} />
+                        onChange={v => onChange(r, v)} kind={kind} onCreateSeason={onCreateSeason} rawLabel={r.raw_label} />
                     </td>
                   </tr>
                 )
@@ -792,6 +830,30 @@ export default function AflAdminImport() {
     return s
   }
 
+  // "Create seasons for all unmatched" — a sheet like a decades-long club
+  // history sheet routinely has 50+ distinct bare-year labels with no
+  // matching season; doing each one by hand through the picker doesn't
+  // scale. Sequential (not parallel) so two labels that resolve to the same
+  // season name don't race each other into a duplicate-name 409.
+  const [bulkCreatingSeasons, setBulkCreatingSeasons] = useState(false)
+  async function bulkCreateSeasons() {
+    const targets = (resolved?.seasons || []).filter(s => s.status === 'none' && !seasonOverrides[s.raw_label])
+    if (!targets.length) return
+    setBulkCreatingSeasons(true)
+    let created = 0, failed = 0
+    for (const s of targets) {
+      try {
+        const season = await createSeason(parseSeasonGuess(s.raw_label))
+        setSOverride(s.raw_label, season.id)
+        created++
+      } catch (e) { failed++ }
+    }
+    setBulkCreatingSeasons(false)
+    toast[failed ? 'error' : 'success'](
+      `Created ${created} season${created === 1 ? '' : 's'}` + (failed ? ` — ${failed} couldn't be created (name already exists; pick it from the list instead)` : '')
+    )
+  }
+
   const required = ['player_name']
   const mapReady = required.every(f => mappedColumn(f))
   const unresolved = resolved?.totals?.players_unresolved || 0
@@ -952,6 +1014,8 @@ export default function AflAdminImport() {
           valueFor={r => seasonOverrides[r.raw_label] ?? (r.season_id || (r.is_prior ? '__unassigned__' : ''))}
           onChange={(r, v) => setSOverride(r.raw_label, v)}
           onCreateSeason={createSeason}
+          onBulkCreateSeasons={bulkCreateSeasons}
+          bulkCreating={bulkCreatingSeasons}
           nextLabel={hasGradeCol ? 'NEXT: GRADES →' : 'NEXT: CONFIRM →'}
           onNext={() => setStep(hasGradeCol ? 'grades' : 'confirm')}
           onBack={() => setStep('players')}
