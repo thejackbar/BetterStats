@@ -28,6 +28,22 @@ async def main() -> None:
     from app.services.afl import sync as afl_sync
 
     async with async_session_maker() as session:
+        # The schema is created by app.afl_main's lifespan on first boot, not
+        # here. Running this against a never-started backend would otherwise
+        # fail with a wall of raw SQL ('relation "organisations" does not
+        # exist') that reads like a code bug rather than an ordering mistake.
+        try:
+            await session.execute(select(User).limit(1))
+        except Exception:
+            print(
+                "The AFL database has no schema yet — start the backend once "
+                "so it can create the tables, then re-run this:\n"
+                "  docker compose up -d bs-afl-database bs-afl-backend\n"
+                "  docker compose logs --tail=5 bs-afl-backend"
+                "   # wait for 'Application startup complete.'"
+            )
+            sys.exit(1)
+
         org = await afl_sync.register_organisation(session, playhq_org_id)
         print(f"organisation: {org.name} ({org.id}) slug={org.slug}")
 
