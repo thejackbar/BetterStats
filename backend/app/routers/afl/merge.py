@@ -27,23 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_MERGES, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club, get_current_user
+from app.services.afl.aggregations import _resolve_canonical_grade
+from app.services.afl.grade_labels import GRADE_CATEGORIES, normalise_category, suggest_category
 from app.services.afl.sync import _rollup_season_stats
 from app.services.audit_log import log_activity
 from app.services.player_aliases import seed_alias_on_rename
 
 router = APIRouter(prefix="/club-admin", tags=["afl-merge"])
-
-
-def _resolve_canonical_grade(chain: dict[str, str], name: str, _seen: set | None = None) -> str:
-    """Follow the alias chain to its root, guarding against a cycle."""
-    seen = _seen or set()
-    if name in seen:
-        return name
-    seen.add(name)
-    nxt = chain.get(name)
-    if nxt is None:
-        return name
-    return _resolve_canonical_grade(chain, nxt, seen)
 
 
 class MergeGradesRequest(BaseModel):
@@ -165,6 +155,155 @@ async def list_grade_names(
         ORDER BY gr.name
     """), {"org": str(club.id)})
     return {"names": [r[0] for r in rows.all()]}
+
+
+@router.get("/grades-with-stats")
+async def list_grades_with_stats(
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Distinct grade names in this club with aggregate stats, applying
+    active merges — the same shape cricket's grades-with-stats returns
+    (grade_name/display_name/category/is_public/games/players/aliases),
+    goals in place of runs."""
+    org_id = str(club.id)
+    raw = await db.execute(text("""
+        SELECT
+            gr.name AS grade_name,
+            COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
+            MAX(gr.category) AS category,
+            bool_and(COALESCE(gr.is_public, true)) AS is_public,
+            COUNT(DISTINCT g.id) AS games,
+            COUNT(DISTINCT l.player_id) AS players,
+            COALESCE(SUM(l.goals), 0) AS goals
+        FROM grades gr
+        JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN games g ON g.grade_id = gr.id
+        LEFT JOIN afl_player_game_lines l ON l.game_id = g.id AND l.player_id IS NOT NULL
+        WHERE s.organisation_id = :org
+        GROUP BY gr.name
+        ORDER BY gr.name
+    """), {"org": org_id})
+    raw_rows = [dict(r) for r in raw.mappings().all()]
+
+    log_rows = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": org_id})
+    alias_to_canonical = {r["alias_name"]: r["canonical_name"] for r in log_rows.mappings().all()}
+
+    display_name_map = {row["grade_name"]: row["display_name"] for row in raw_rows}
+    category_by_name = {row["grade_name"]: normalise_category(row["category"]) for row in raw_rows}
+
+    bucket: dict[str, dict] = {}
+    for row in raw_rows:
+        name = row["grade_name"]
+        canonical = _resolve_canonical_grade(alias_to_canonical, name)
+        slot = bucket.setdefault(canonical, {
+            "grade_name": canonical, "display_name": display_name_map.get(canonical, canonical),
+            "games": 0, "players": 0, "goals": 0, "aliases": [], "category": None, "is_public": True,
+        })
+        slot["games"] += int(row["games"] or 0)
+        slot["goals"] += int(row["goals"] or 0)
+        slot["players"] = max(slot["players"], int(row["players"] or 0))
+        if slot["category"] is None:
+            slot["category"] = normalise_category(row["category"])
+        slot["is_public"] = slot["is_public"] and bool(row["is_public"])
+        if name != canonical:
+            slot["aliases"].append(name)
+
+    for canonical, slot in bucket.items():
+        if category_by_name.get(canonical):
+            slot["category"] = category_by_name[canonical]
+        slot["suggested_category"] = suggest_category(slot["display_name"] or canonical)
+        slot["category_confirmed"] = slot["category"] is not None
+        slot["category"] = slot["category"] or slot["suggested_category"]
+
+    out = list(bucket.values())
+    out.sort(key=lambda r: r["display_name"].lower())
+    return out
+
+
+def _grade_name_group(chain: dict[str, str], target: str) -> set[str]:
+    names = {target}
+    for alias in chain:
+        if _resolve_canonical_grade(chain, alias) == target:
+            names.add(alias)
+    return names
+
+
+class GradeClassifyRequest(BaseModel):
+    grade_name: str
+    category: str | None = None
+    is_public: bool | None = None
+
+
+@router.patch("/grades/classify")
+async def classify_grade(
+    req: GradeClassifyRequest,
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_MERGES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Set a grade's public category and/or visibility. Applies to every
+    grade row that rolls up to this name (the canonical name plus any merged
+    aliases) across all seasons, matching how the display-name override and
+    a merge itself already attach club-wide, not per-season."""
+    org_id = str(club.id)
+    logs = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": org_id})
+    chain = {r["alias_name"]: r["canonical_name"] for r in logs.mappings().all()}
+    names = list(_grade_name_group(chain, req.grade_name))
+
+    sets: list[str] = []
+    params: dict = {"org": org_id, "names": names}
+    if req.category is not None:
+        cat = normalise_category(req.category)
+        if cat is None:
+            raise HTTPException(status_code=400, detail=f"Category must be one of {', '.join(GRADE_CATEGORIES)}")
+        sets.append("category = :category")
+        params["category"] = cat
+    if req.is_public is not None:
+        sets.append("is_public = :is_public")
+        params["is_public"] = req.is_public
+    if not sets:
+        return {"updated": 0, "grade_name": req.grade_name}
+
+    result = await db.execute(text(f"""
+        UPDATE grades gr SET {", ".join(sets)}
+        FROM seasons s WHERE gr.season_id = s.id AND s.organisation_id = :org AND gr.name = ANY(:names)
+    """), params)
+    await db.commit()
+    return {"updated": result.rowcount, "grade_name": req.grade_name,
+            "category": params.get("category"), "is_public": params.get("is_public")}
+
+
+@router.post("/grades/apply-suggestions")
+async def apply_grade_suggestions(
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(require_cap(MANAGE_MERGES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Persist the name-based category suggestion for every not-yet-categorised
+    grade in the club. One-click starting point; admins can still correct any."""
+    org_id = str(club.id)
+    rows = await db.execute(text("""
+        SELECT DISTINCT gr.name FROM grades gr
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org AND gr.category IS NULL
+    """), {"org": org_id})
+    names = [r[0] for r in rows.all()]
+    updated = 0
+    for name in names:
+        res = await db.execute(text("""
+            UPDATE grades gr SET category = :cat
+            FROM seasons s WHERE gr.season_id = s.id AND s.organisation_id = :org
+              AND gr.name = :name AND gr.category IS NULL
+        """), {"cat": suggest_category(name), "org": org_id, "name": name})
+        updated += res.rowcount or 0
+    await db.commit()
+    return {"updated": updated, "grades": len(names)}
 
 
 # ─── Merge Players ────────────────────────────────────────────────────────────

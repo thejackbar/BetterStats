@@ -81,6 +81,11 @@ export const aflApi = {
   undoGradeMerge: (mergeLogId) => request('/club-admin/undo-grade-merge', {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
+  listGradesWithStats: () => request('/club-admin/grades-with-stats'),
+  classifyGrade: (gradeName, { category, is_public } = {}) => request('/club-admin/grades/classify', {
+    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+  }),
+  applyGradeSuggestions: () => request('/club-admin/grades/apply-suggestions', { method: 'POST' }),
 
   // Admin — Award Definitions (catalog)
   listAwardDefinitions: () => request('/award-definitions'),
