@@ -458,6 +458,10 @@ export const api = {
   rosterDeletePattern: (id) => request(`/club-admin/roster/patterns/${id}`, { method: 'DELETE' }),
   rosterGetSettings: () => request('/club-admin/roster/settings'),
   rosterSetSettings: (data) => request('/club-admin/roster/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Everyone rostered on for a day / week / month, with the contacts behind
+  // them — what "email everyone rostered this week" resolves to.
+  rosterContacts: (scope = 'week', on) =>
+    request(`/club-admin/roster/contacts?scope=${scope}${on ? `&on=${on}` : ''}`),
   rosterWeek: (weekStart) => request(`/club-admin/roster/week${weekStart ? '?week_start=' + weekStart : ''}`),
   rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),

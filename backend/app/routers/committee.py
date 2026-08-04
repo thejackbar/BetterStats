@@ -340,13 +340,19 @@ class DocumentCreate(BaseModel):
     url: str
     position_id: Optional[str] = None
     notes: Optional[str] = None
+    # Migration 217 — what this document belongs to, so a quote hangs off the
+    # action that asked for it. Both null = a club-wide governance doc.
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
 
 
 @router.post("/documents")
 async def create_document(data: DocumentCreate, _: User = _require, club: Organisation = Depends(get_current_club),
                           db: AsyncSession = Depends(get_db)):
     fields = data.model_dump()
-    fields["position_id"] = uuid.UUID(fields["position_id"]) if fields.get("position_id") else None
+    for key in ("position_id", "entity_id"):
+        if key in fields:
+            fields[key] = uuid.UUID(fields[key]) if fields.get(key) else None
     try:
         d = await committee_service.create_document(db, club.id, **fields)
     except ValueError as e:
@@ -361,6 +367,10 @@ class DocumentPatch(BaseModel):
     url: Optional[str] = None
     position_id: Optional[str] = None
     notes: Optional[str] = None
+    # Migration 217 — what this document belongs to, so a quote hangs off the
+    # action that asked for it. Both null = a club-wide governance doc.
+    entity_type: Optional[str] = None
+    entity_id: Optional[str] = None
 
 
 @router.patch("/documents/{doc_id}")

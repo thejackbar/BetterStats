@@ -157,6 +157,72 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   only their shell, language and naming changed. The BetterClubhouse **logo mark
   also does not exist yet** — the lockup currently reuses `betteradmin.svg`.
 
+## BetterClubhouse follow-up: roster fix, committee governance (v9.4.0–v9.5.0, Aug 2026)
+
+The audit that followed the merge found one real bug, a pile of orphaned
+editors, and a set of genuinely-unbuilt committee features. All three are done.
+
+- **The Roster bug was a permanently empty week, not a load failure.** A club
+  that opened the roster BEFORE configuring any operational areas got a
+  `roster_weeks` row created with zero shifts, and nothing ever regenerated it —
+  every later visit found the empty draft week and returned it, so the roster
+  stayed blank forever. `services/roster.py` now regenerates shifts when it
+  finds a `draft` week with none (`_has_shifts` → `_generate_shifts`). Verified
+  against real Postgres: 0 → 30 shifts. The screen's error state also shows the
+  real message and HTTP status now instead of a bare shrug.
+- **~5,300 lines of working CRUD were orphaned since `6ff23c6`** (pre-existing,
+  not caused by the merge): Committee, Events, Facilities, Club Diary,
+  Families, Qualifications and Volunteer hours all had full editors with no
+  route. Routed back and linked from the read-only screen that shows their
+  data. `AdminCommittee` lives at **`/admin/clubhouse/committee/manage`**
+  (`requireRole="super_admin"`), reached from the Clubhouse Committee screen —
+  `/admin/committee` is the Clubhouse screen, not the editor.
+- **Migration 217 — committee governance.** `club_objectives`,
+  `committee_task_dependencies`, `meeting_motion_votes`, `committee_notes`;
+  plus columns on `committee_tasks` (objective_id, budget_estimate,
+  actual_expenditure, percent_complete, start_date, closed_by_member_id,
+  outcome_notes, meeting_id, motion_id), `meeting_motions` (is_resolution,
+  resolution_ref, resolved_at) and `committee_documents` (entity_type,
+  entity_id). Mirrored idempotently in `main.py`'s lifespan as usual.
+  **Only a carried/passed motion can become a resolution** (`make_resolution`
+  raises otherwise). Per-member votes RE-DERIVE the tallies, so a club that
+  just counts hands still only stores a count.
+- **`frontend/src/components/admin/clubmanager/governance.jsx`** is the whole
+  governance UI: `NoteThread`, `AttachedDocuments`, `ActionPlanPanel`,
+  `MotionGovernance` (vote matrix + resolution toggle), `ObjectivesTab` and
+  `ActionTimeline` (the Gantt). The timeline groups rows by objective, derives
+  the critical path from `depends_on` over not-done actions, and lists undated
+  actions underneath. Two things to leave alone: its month ruler shares the
+  rows' `w-[38%]` + `flex-1` geometry rather than guessing offsets
+  arithmetically, and **ticks snap to the 1st of the month** (iterating
+  `min + n months` mislabels a mid-month start and drops the final month).
+  `chain()` carries a `walking` cycle guard — nothing server-side rejects
+  A-waits-on-B-waits-on-A, only self-dependency, so without it a saved cycle
+  hangs the tab.
+- **Pydantic models are the trap when adding a column here.** New fields on
+  `TaskCreate`/`TaskPatch`/`DocumentCreate`/`DocumentPatch` silently never
+  reach the service if you only add them to the migration and the service —
+  that's what made `objective_progress` report 0 actions. Also: after
+  `commit()` the instance is expired, so serialising it lazy-loads outside the
+  greenlet and 500s with `MissingGreenlet` — `await db.refresh(obj)` before
+  returning (the vote and resolution endpoints both need it).
+- **`owes_money` is an audience condition**, resolved server-side from the same
+  `_financials` the Accounts screen runs (`fees.owing_player_ids`), so "email
+  everyone who owes" targets exactly the people that screen lists. It's a
+  `SPECIAL_FIELDS` member in `comms_segments.py` — precomputed once per query,
+  not a per-row join. Verified it partitions exactly (13 owing + 287 settled =
+  300 contacts).
+- **`services/roster.py::rostered_contacts`** derives a shift's date as
+  `w.week_start + s.day_of_week` and backs the roster's "email everyone
+  rostered" for a day/week/month, which hands off to the normal comms composer.
+- **Still open, needs a decision**: file **upload** against a committee record
+  (documents stay link-based by design — governance docs live where the club
+  already keeps them), and any committee ↔ BetterStats Awards "Office Bearer"
+  sync. Those two are unrelated things that share a name: a Clubhouse committee
+  position IS a committee-flagged `club_role` (migration 198), whereas "Office
+  Bearer" in Awards is an achievement category. Don't wire them together
+  without asking.
+
 ## Multi-sport: the AFL silo (Aug 2026)
 
 **One codebase, per-sport operational silos.** BetterStats now also serves AFL

@@ -406,14 +406,15 @@ async def create_document(session: AsyncSession, org_id, **fields) -> CommitteeD
         raise ValueError("Title and URL are required")
     d = CommitteeDocument(organisation_id=org_id, title=title[:300], url=url[:2000],
                           category=fields.get("category") or "governance",
-                          position_id=fields.get("position_id"), notes=fields.get("notes"))
+                          position_id=fields.get("position_id"), notes=fields.get("notes"),
+                          entity_type=fields.get("entity_type"), entity_id=fields.get("entity_id"))
     session.add(d)
     await session.flush()
     return d
 
 
 async def update_document(session: AsyncSession, d: CommitteeDocument, **fields) -> CommitteeDocument:
-    for f in ("title", "category", "url", "position_id", "notes"):
+    for f in ("title", "category", "url", "position_id", "notes", "entity_type", "entity_id"):
         if f in fields and fields[f] is not None:
             setattr(d, f, fields[f])
     return d

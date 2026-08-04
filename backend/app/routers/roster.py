@@ -5,7 +5,7 @@ rules engine in services/roster.py. Gated on MANAGE_VOLUNTEERS.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -192,6 +192,29 @@ async def get_week(week_start: Optional[str] = Query(None), _: User = _cap, club
         "candidates": [_cand_api(c) for c in await svc.candidates(db, club.id)],
         "settings": await svc.get_settings(db, club.id),
     }
+
+
+@router.get("/contacts")
+async def rostered_contacts(
+    scope: str = Query("week", pattern="^(day|week|month)$"),
+    on: Optional[str] = Query(None, description="Any date inside the period; defaults to today"),
+    _: User = _cap, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db),
+):
+    """Everyone rostered on for a day, week or month — the set behind
+    "email everyone rostered this week"."""
+    try:
+        anchor_day = date.fromisoformat(on) if on else date.today()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="`on` must be YYYY-MM-DD")
+    if scope == "day":
+        start = end = anchor_day
+    elif scope == "month":
+        start = anchor_day.replace(day=1)
+        end = (start + timedelta(days=32)).replace(day=1) - timedelta(days=1)
+    else:
+        start = anchor_day - timedelta(days=anchor_day.weekday())
+        end = start + timedelta(days=6)
+    return {"scope": scope, **await svc.rostered_contacts(db, club.id, start, end)}
 
 
 @router.post("/week/{week_id}/assign")

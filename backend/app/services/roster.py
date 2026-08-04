@@ -460,3 +460,38 @@ async def seed_starter_areas(db: AsyncSession, org_id) -> int:
             await add_pattern(db, org_id, aid, day_of_week=p[0], start_time=p[1], end_time=p[2], headcount=p[3])
         seeded += 1
     return seeded
+
+
+async def rostered_contacts(db: AsyncSession, org_id, start: date, end: date) -> dict:
+    """Everyone rostered on between two dates, with the email contact behind
+    them where there is one.
+
+    A shift's date is its week's Monday plus its day_of_week — shifts store the
+    day, not a date, so the window has to be applied to the derived date rather
+    than to a column. `end` is inclusive: an officer asking for "this week"
+    means Monday to Sunday, not Monday to Saturday.
+    """
+    rows = (await db.execute(text("""
+        SELECT DISTINCT fm.id AS member_id, fm.full_name, fm.player_id, c.id AS contact_id, c.email
+        FROM roster_shifts s
+        JOIN roster_weeks w ON w.id = s.roster_week_id
+        JOIN fee_members fm ON fm.id = s.assignee_member_id
+        LEFT JOIN comms_contacts c ON c.player_id = fm.player_id AND c.organisation_id = :org
+        WHERE s.organisation_id = :org
+          AND s.assignee_member_id IS NOT NULL
+          AND (w.week_start + s.day_of_week) BETWEEN :start AND :end
+        ORDER BY fm.full_name
+    """), {"org": org_id, "start": start, "end": end})).mappings().all()
+
+    people = [{
+        "member_id": str(r["member_id"]), "full_name": r["full_name"],
+        "contact_id": str(r["contact_id"]) if r["contact_id"] else None,
+        "email": r["email"],
+    } for r in rows]
+    return {
+        "from": start.isoformat(), "to": end.isoformat(),
+        "people": people,
+        # What the composer needs to be handed a ready-made recipient set.
+        "contact_ids": [p["contact_id"] for p in people if p["contact_id"]],
+        "unreachable": [p["full_name"] for p in people if not p["contact_id"]],
+    }
