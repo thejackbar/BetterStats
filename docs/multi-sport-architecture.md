@@ -286,13 +286,17 @@ FIFA football is one code and one instance, so several hostnames all point at
 the SAME `bs-football-frontend`:
 
 ```
-betterat.soccer      -> bs-football-frontend   (visitor sees "Soccer")
-betterat.football    -> bs-football-frontend   (for UK/European visitors; sees "Football")
+betterat.soccer        -> bs-football-frontend   (AU/US entry; visitor sees "Soccer")
+a football-named host   -> bs-football-frontend   (UK/Europe entry; visitor sees "Football")
 ```
 
 Both are proxy hosts in nginx-proxy-manager resolving to the one upstream. The
 instance reads the incoming hostname and presents the region-correct label and
-canonical URLs, per "One code, many regional names" above. The one firm rule
+canonical URLs, per "One code, many regional names" above. (The bare
+`betterat.football` domain is NOT one of these direct aliases; it is the shared
+front door that asks which football code the visitor wants, see "Many codes, one
+word" below, and hands a FIFA-football choice off to the football-named host so
+a UK visitor still lands on and stays on a football name.) The one firm rule
 lives here, and it is a presentation rule the single instance enforces:
 
 - A visitor arriving on a soccer host sees only soccer wording and soccer
@@ -301,42 +305,51 @@ lives here, and it is a presentation rule the single instance enforces:
   tag, share card, email) to a visitor who came in as "football", so the UK is
   never shown a soccer address even though it is the same backend.
 
-### Many codes, one domain (AFL and NRL)
+### Many codes, one word: disambiguate by asking, not by DNS or geo
 
-This is the genuinely different case: AFL and NRL are DIFFERENT sporting codes,
-so different instances, that happen to share the `.football` domain. Give each a
-code-explicit subdomain, each its own fully independent stack:
+AFL, FIFA football and rugby league are DIFFERENT sporting codes, each its own
+fully independent stack with its own frontend, backend and database
+(`bs-afl-*`, `bs-football-*`, `bs-nrl-*`). They only collide on the WORD
+"football", and that collision is resolved in the application, not in DNS.
 
-```
-afl.betterat.football   -> AFL stack   (bs-afl-frontend)
-nrl.betterat.football   -> NRL stack   (bs-nrl-frontend)
-```
+Do NOT split the word by subdomain (`afl.betterat.football`,
+`nrl.betterat.football`) and do NOT geo-route the bare domain. Instead, the
+shared `betterat.football` entry point disambiguates by asking the visitor:
 
-### The apex is the only place region routing is legitimate
+- When a new visitor comes to register a club and the sport they want is
+  "football", the site asks which football code they mean (AFL, FIFA football,
+  rugby league, and so on), then sends them to that code's own frontend to
+  complete registration.
+- The choice is the user's explicit answer, so it is correct regardless of the
+  visitor's country. It never depends on guessing from geo, and there is no
+  per-code subdomain to maintain.
+- An existing club or user already knows and bookmarks its own code's canonical
+  address and goes straight there. The chooser is an onboarding funnel, not a
+  gate every visit passes through.
 
-`betterat.football` bare means different sports in different countries: AFL or
-NRL to an Australian, FIFA football to a Briton. So the apex is the one place a
-region decision is legitimate. Route it at the edge (the Cloudflare worker you
-already run is the right layer): UK and European visitors go to the FIFA-football
-instance (`bs-football`) presented as "Football", Australian visitors go to a
-small AFL/NRL chooser. That is the deliberate and only exception to "no geo routing";
-every code-explicit subdomain (`afl.`, `nrl.`) still resolves to exactly one
-stack regardless of who asks.
+Each code still needs its own reachable canonical address to be sent to. That is
+its own domain where one exists (`betterat.cricket` today, and a per-code domain
+for each football code as you acquire them), with `betterat.football` acting as
+the shared front door that hands off to the chosen code. Which exact addresses
+each code lands on is a domain-acquisition and product decision; the
+architecture only requires that the hand-off targets a code's OWN frontend and
+that FIFA football's soccer/football label still follows the hostname the
+visitor ends up on (so a UK visitor lands on and stays on a football-named
+host, never a soccer one).
 
 Three things to hold the line on:
 
-- **Keep the code explicit in the hostname wherever it is unambiguous.** Do not
-  disambiguate a code by URL path (`betterat.football/afl`); path prefixes couple
-  codes at the proxy and complicate the SPA. Geo routing is confined to the
-  ambiguous apex and nowhere else.
+- **Disambiguate "football" in the app, by asking.** No per-code subdomain, no
+  geo routing, no URL path (`betterat.football/afl`) splitting one frontend. The
+  visitor's answer at registration is what picks the code, and the hand-off goes
+  to that code's own frontend.
 - **The soccer/football rule is a presentation rule inside one instance.** The
-  single football instance shows region-correct wording and canonical URLs by
-  hostname, and never leaks a soccer address to a football visitor. It is not two
-  instances.
-- **Do not let one "football" stack serve both AFL and NRL.** They are
-  different sporting codes with different feeds, stats and competitions, so each
-  is its own stack. `.football` is a shared street address, not a shared
-  building.
+  single FIFA-football instance shows region-correct wording and canonical URLs
+  by hostname, and never leaks a soccer address to a football visitor. It is not
+  two instances.
+- **Do not let one stack serve two codes.** AFL, FIFA football and rugby league
+  each have their own frontend, backend and database. `.football` is a shared
+  front door, not a shared building.
 
 ## Database
 
@@ -406,9 +419,11 @@ seams after two sports are live is much harder.
    suites, shipped to the current cricket stack with nothing user-visible
    changing.
 2. **Templatise deploy, compose and backups by sport.** Prove you can stand up
-   a second, empty stack (`afl`, on `betterat.football`) running the same image
-   with `SPORT=afl` and a stub AFL plugin: the shell, the branding, an empty
-   database, the domain, the backup timer. No AFL data yet.
+   a second, empty stack (`afl`, its own `bs-afl-*` services on its own canonical
+   address) running the same image with `SPORT=afl` and a stub AFL plugin: the
+   shell, the branding, an empty database, the backup timer. No AFL data yet.
+   The `betterat.football` front-door chooser (which football code?) is a later,
+   separate piece of onboarding work, not part of standing up the stack.
 3. **Build the AFL plugin.** The AFL data source adapter, stat schema,
    scorecard renderer and IQ metrics. All net-new code under `sports/afl`, zero
    risk to cricket because cricket never loads it.
@@ -420,13 +435,16 @@ seams after two sports are live is much harder.
 - Pooling every sport into one database with a `sport_id` discriminator. Breaks
   isolation, independent deploy, and per-sport backup.
 - Forking the repo per sport. Breaks fix-once.
-- One "football" stack serving both AFL and NRL. Different sports; share the
-  domain, not the stack.
+- One stack serving two codes (AFL and rugby league, or either and FIFA
+  football). Each code is its own frontend, backend and database; share the
+  `.football` front door, not the stack.
 - Splitting one sporting code into per-region instances. FIFA football is one
   code, so one instance; the regional names are presentation on that single
   instance, not separate stacks.
-- Encoding a specific code in a URL path. Keep it explicit in the hostname; the
-  only legitimate geo routing is the genuinely ambiguous apex (`betterat.football`).
+- Splitting the ambiguous word "football" by DNS subdomain
+  (`afl.betterat.football`), URL path (`betterat.football/afl`), or geo routing.
+  Resolve it in the app: ask the visitor which football code at registration and
+  hand off to that code's own frontend.
 - Emitting a `.soccer` canonical URL, share card or email to a visitor who
   arrived as "football". The soccer/football label follows the request hostname.
 - Carrying `bc-`/`bettercricket-`/`betterstats-` forward as the service prefix
@@ -448,10 +466,12 @@ seams after two sports are live is much harder.
   public sites at `betterat.<sport>`.
 - Domains map to instances flexibly: one-to-one on a dedicated TLD; many
   hostnames to one instance where a code has region-varying names (soccer and
-  football both point at the one football stack, which shows region-correct wording
-  by hostname and never leaks a soccer URL to a football visitor); and
-  subdomain-per-code where one TLD fronts several codes (`afl.`/`nrl.betterat.football`).
-  Geo routing is allowed only at the ambiguous apex.
+  football both point at the one `bs-football` stack, which shows region-correct
+  wording by hostname and never leaks a soccer URL to a football visitor); and,
+  where one word like "football" spans several codes, a shared `betterat.football`
+  front door that asks the visitor which football code they mean at registration
+  and hands off to that code's own frontend. No per-code subdomains, no geo
+  routing.
 - Databases share the core schema and diverge only in the statline and
   analytics, with sport-specific attributes carried as nullable columns or a
   JSONB blob.
