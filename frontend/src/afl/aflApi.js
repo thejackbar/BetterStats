@@ -162,6 +162,7 @@ export const aflApi = {
 
   // Admin — Import Stats (historical CSV import)
   importsTemplateUrl: () => `${BASE}/club-admin/imports/template.csv`,
+  importsSeasons: () => request('/club-admin/imports/seasons'),
   importsPreview: (file) => {
     const fd = new FormData()
     fd.append('file', file)
