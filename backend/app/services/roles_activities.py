@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -23,7 +23,9 @@ from app.models.db import (
 
 # ─── Starter sets ────────────────────────────────────────────────────────────
 STARTER_ROLE_TYPES = [
-    ("Committee Member", "Elected/appointed committee positions."),
+    ("Office Bearer", "Executive committee — President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
+    ("Committee Member", "General elected/appointed committee positions."),
+    ("Official", "Formal match roles on the scorecard — umpires and scorers."),
     ("Ground Staff", "Ground, nets and facility upkeep."),
     ("Coach", "Coaching and player development."),
     ("Food & Beverage", "Canteen, bar and catering."),
@@ -37,12 +39,18 @@ STARTER_ROLES = [
     ("Groundskeeper", "Ground Staff"),
     ("Canteen Manager", "Food & Beverage"),
     ("Bar Steward", "Food & Beverage"),
-    ("Scorer", "Other"),
+    ("Umpire", "Official"),
+    ("Scorer", "Official"),
     ("Team Manager", "Other"),
     ("First Aid Officer", "Other"),
     ("Cleaner", "Other"),
     ("Photographer", "Other"),
 ]
+
+# The executive office bearers among the committee roles — they get the
+# "Office Bearer" role type (still committee-category); the rest get
+# "Committee Member". Matches committee.py's own office-bearer name set.
+_OFFICE_BEARER_TITLES = {"president", "vice president", "treasurer", "secretary"}
 
 # (title, description) — the elected/appointed COMMITTEE roles. These are the
 # same roles the Committee Administration "Positions" tab holds terms against
@@ -94,16 +102,34 @@ STARTER_ACTIVITIES = [
 ]
 
 
+# Role-type categories: 'committee' types drive committee positions; everything
+# else is a non-committee role (Roles list). 'official' = formal match roles
+# recorded on the scorecard (umpire, scorer) which can carry a certification/
+# training qualification. Activity types don't use this.
+ROLE_TYPE_CATEGORIES = ["committee", "official", "volunteer", "paid", "third_party", "other"]
+
+
+def normalise_role_category(v):
+    if v is None:
+        return None
+    v = str(v).strip().lower().replace(" ", "_").replace("-", "_")
+    return v if v in ROLE_TYPE_CATEGORIES else None
+
+
 # ─── Serialisers ─────────────────────────────────────────────────────────────
 def _type_dict(t) -> dict:
-    return {"id": str(t.id), "name": t.name, "description": t.description,
-            "sort_order": t.sort_order, "is_active": t.is_active}
+    d = {"id": str(t.id), "name": t.name, "description": t.description,
+         "sort_order": t.sort_order, "is_active": t.is_active}
+    if hasattr(t, "category"):  # role types carry a category; activity types don't
+        d["category"] = t.category
+    return d
 
 
-def _role_dict(r: ClubRole, type_name: Optional[str] = None) -> dict:
+def _role_dict(r: ClubRole, type_name: Optional[str] = None, type_category: Optional[str] = None) -> dict:
     return {"id": str(r.id), "title": r.title,
             "role_type_id": str(r.role_type_id) if r.role_type_id else None,
-            "role_type_name": type_name, "description": r.description,
+            "role_type_name": type_name, "role_type_category": type_category,
+            "description": r.description,
             "is_committee": r.is_committee,
             "sort_order": r.sort_order, "is_active": r.is_active}
 
@@ -159,8 +185,8 @@ async def _get_or_create_type(session: AsyncSession, model, org_id, name: str):
 
 
 async def _update_type(session: AsyncSession, t, **fields):
-    for f in ("name", "description", "sort_order", "is_active"):
-        if f in fields and fields[f] is not None:
+    for f in ("name", "description", "sort_order", "is_active", "category"):
+        if f in fields and fields[f] is not None and hasattr(t, f):
             setattr(t, f, fields[f])
     return t
 
@@ -193,10 +219,16 @@ async def list_role_types(session, org_id, *, include_inactive=False):
 
 
 async def create_role_type(session, org_id, **kw):
-    return await _create_type(session, ClubRoleType, org_id, **kw)
+    cat = normalise_role_category(kw.pop("category", None))
+    t = await _create_type(session, ClubRoleType, org_id, **kw)
+    if cat:
+        t.category = cat
+    return t
 
 
 async def update_role_type(session, t, **kw):
+    if "category" in kw:
+        kw["category"] = normalise_role_category(kw["category"])
     return await _update_type(session, t, **kw)
 
 
@@ -205,7 +237,20 @@ async def archive_role_type(session, t):
 
 
 async def seed_starter_role_types(session, org_id) -> int:
-    return await _seed_types(session, ClubRoleType, org_id, STARTER_ROLE_TYPES)
+    n = await _seed_types(session, ClubRoleType, org_id, STARTER_ROLE_TYPES)
+    # Classify the starter types (default is 'volunteer'): the committee grouping
+    # is a committee type, "Other" is other. Clubs re-classify the rest (paid,
+    # third_party…) themselves via Areas & Roles.
+    await session.execute(text(
+        "UPDATE club_role_types SET category='committee' WHERE organisation_id=:org AND lower(name) IN ('committee member', 'office bearer')"
+    ), {"org": org_id})
+    await session.execute(text(
+        "UPDATE club_role_types SET category='official' WHERE organisation_id=:org AND lower(name)='official'"
+    ), {"org": org_id})
+    await session.execute(text(
+        "UPDATE club_role_types SET category='other' WHERE organisation_id=:org AND lower(name)='other'"
+    ), {"org": org_id})
+    return n
 
 
 async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = False,
@@ -219,7 +264,7 @@ async def list_roles(session: AsyncSession, org_id, *, include_inactive: bool = 
         stmt = stmt.where(ClubRole.is_committee.is_(committee))
     stmt = stmt.order_by(ClubRole.is_committee.desc(), ClubRole.sort_order, func.lower(ClubRole.title))
     rows = (await session.execute(stmt)).all()
-    return [_role_dict(r, t.name if t else None) for r, t in rows]
+    return [_role_dict(r, t.name if t else None, t.category if t else None) for r, t in rows]
 
 
 async def create_role(session: AsyncSession, org_id, *, title: str, role_type_id=None,
@@ -276,7 +321,8 @@ async def seed_starter_roles(session: AsyncSession, org_id, *, committee: bool =
                 if not cur.is_active:
                     cur.is_active = True; seeded += 1
                 continue
-            rtype = await _get_or_create_type(session, ClubRoleType, org_id, "Committee Member")
+            type_name = "Office Bearer" if title.lower() in _OFFICE_BEARER_TITLES else "Committee Member"
+            rtype = await _get_or_create_type(session, ClubRoleType, org_id, type_name)
             session.add(ClubRole(organisation_id=org_id, title=title, description=desc,
                                  role_type_id=rtype.id if rtype else None, is_committee=True, sort_order=i))
             seeded += 1

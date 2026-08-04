@@ -1,5 +1,54 @@
 # BetterStats — Claude Session Notes
 
+## Multi-sport: the AFL silo (Aug 2026)
+
+**One codebase, per-sport operational silos.** BetterStats now also serves AFL
+(BetterFootball, betterat.football) from THIS repo — separate docker services
+(`bs-afl-frontend` / `bs-afl-backend` / `bs-afl-database`), separate database,
+same source. Full architecture + product decisions:
+**`docs/afl-betterstats-plan.md`**; the PlayHQ AFL API investigation behind it:
+**`docs/afl-playhq-data-source.md`**. Key facts:
+
+- **Backend**: `app/afl_main.py` is the AFL entrypoint (`uvicorn
+  app.afl_main:app`, env `SPORT=afl` + its own `DATABASE_URL`) — cricket's
+  `app/main.py` is untouched and must stay that way. AFL reuses the shared
+  models (organisations/users/auth/seasons/grades/games/players/sync_runs) and
+  the whole `routers/auth.py` stack; AFL-specific code lives in
+  `models/afl.py`, `services/afl/`, `routers/afl/`. The AFL DB is created by
+  `create_all` on first boot (cricket tables exist empty there by design).
+- **Identity**: every AFL synced row's PK is `uuid5(org, playhq_id)` from day
+  one (org itself `uuid5(AFL_NS, org_code)`) — the cricket shared-GUID
+  collision saga cannot recur. Raw PlayHQ ids live in
+  `grassroots_id`/`playhq_id` columns and are what API calls use. Players key
+  on the PlayHQ *profile* id (stable per person), not participant id.
+- **PlayHQ AFL API**: two public unauthenticated GraphQL endpoints —
+  `api.playhq.com/graphql` (header `tenant: afl`, lowercase) and
+  `spectator.playhq.com/graphql` (header `X-PHQ-Tenant: afl`) for
+  play-by-play. GraphQL rejects unused variables (a trimmed query that keeps
+  a var declaration 400s every call). Old games (pre-~2024) legitimately
+  return "not electronically scored" from the spectator API — empty events
+  are a normal state.
+- **`afl_game_details.synced_at` is the incremental-sync signal** (NULL =
+  discovered, stats not yet pulled) — it must never get a server default.
+- **Frontend**: one app, sport picked at build time — `VITE_SPORT=afl` mounts
+  `src/afl/AflApp.jsx` (App.jsx early-returns it; cricket bundle unchanged).
+  AFL pages reuse the shared theme tokens/contexts/components. Dockerfile
+  args: `VITE_SPORT=afl` + `NGINX_CONF=nginx.afl.conf` (which proxies /api to
+  `bs-afl-backend` — never the cricket backend).
+- **Stats model (pass 1, per product decision)**: games played, goals,
+  behinds, Best on Ground (flat count; per-game ranking stored for future
+  weighted views), quarter scores + play-by-play per game. No StatLab, no
+  Yearbook, no Website module for AFL. Season aggregates are OUR rollup from
+  per-game lines (`afl_player_season_stats`, recomputed every sync).
+- **Ops**: service definitions to merge into the central compose file:
+  `ops/afl/docker-compose.afl.yml`. First admin + club:
+  `python -m app.scripts.afl_bootstrap <playhq_org_id> <user> '<pw>' --sync`.
+  Test club: Curtin Uni Wesley, PlayHQ org code `d14445c4`.
+- **Next passes (agreed direction)**: public self-serve registration wired to
+  betterat.football; weekly sync scheduler; BetterSelect AFL (drag-and-drop
+  field whiteboard — FF/HF/C/HB/FB + Followers, 12–18 on field, up to 20
+  bench); then the other modules, each with an AFL review before enabling.
+
 ## Password-protected "Draft" pages + trial-ended unpause requests (v9.0.0, Aug 2026)
 
 A third public-page state alongside `is_active`'s Active/Inactive: the page exists

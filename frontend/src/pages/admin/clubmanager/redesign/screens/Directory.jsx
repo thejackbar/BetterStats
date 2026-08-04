@@ -49,11 +49,11 @@ export default function Directory({ st, patch, narrow }) {
   const [activities, setActivities] = useState([])
   const [logForm, setLogForm] = useState({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
 
-  const reload = () => api.dirPeople().then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
+  const reload = () => api.dirPeople(st.dirShowArchived).then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
+  useEffect(() => { reload() }, [st.dirShowArchived]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    reload()
-    api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee))).catch(() => {})
+    api.raRoles().then(r => setRoleCatalogue((r?.roles || r || []).filter(x => !x.is_committee && x.role_type_category !== 'committee'))).catch(() => {})
     api.qualListTypes().then(r => setQualTypes(r?.types || r || [])).catch(() => {})
     api.dirCommitteePositions().then(r => setPositions(r?.positions || [])).catch(() => {})
     api.raActivities().then(r => setActivities(r?.activities || r || [])).catch(() => {})
@@ -77,30 +77,32 @@ export default function Directory({ st, patch, narrow }) {
   const selId = st.dirSel && (people || []).some(p => p.key === st.dirSel) ? st.dirSel : (list[0] ? list[0].key : null)
   const sel = (people || []).find(p => p.key === selId) || null
 
+  // Load (or reload) one member's quals + hours + overlays into the detail
+  // cache. Called both on select and after a mutation — a mutation can't rely
+  // on the select effect re-running (member_id is unchanged), so it re-fetches
+  // through here directly.
+  const loadDetail = (memberId) => Promise.all([
+    api.qualListMemberQualifications(memberId).catch(() => []),
+    api.volunteerListHours(memberId).catch(() => []),
+    api.dirMemberOverlays(memberId).catch(() => ({ committee: [], families: [] })),
+  ]).then(([qRes, hRes, oRes]) => {
+    const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
+      id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
+      expiry: x.expires_at || x.expiry || null,
+    }))
+    const raw = (Array.isArray(hRes) ? hRes : (hRes?.hours || []))
+    const byAct = {}
+    raw.forEach(h => {
+      const a = h.activity || h.activity_name || h.activity_type || 'Other'
+      byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
+    })
+    const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
+    const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
+    setDetail(d => ({ ...d, [memberId]: { quals, hours, hoursRaw: raw, overlays } }))
+  })
   useEffect(() => {
     if (!sel || !sel.member_id || detail[sel.member_id]) return
-    let alive = true
-    Promise.all([
-      api.qualListMemberQualifications(sel.member_id).catch(() => []),
-      api.volunteerListHours(sel.member_id).catch(() => []),
-      api.dirMemberOverlays(sel.member_id).catch(() => ({ committee: [], families: [] })),
-    ]).then(([qRes, hRes, oRes]) => {
-      if (!alive) return
-      const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
-        id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
-        expiry: x.expires_at || x.expiry || null,
-      }))
-      const raw = (Array.isArray(hRes) ? hRes : (hRes?.hours || []))
-      const byAct = {}
-      raw.forEach(h => {
-        const a = h.activity || h.activity_name || h.activity_type || 'Other'
-        byAct[a] = (byAct[a] || 0) + Number(h.hours || 0)
-      })
-      const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
-      const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
-      setDetail(d => ({ ...d, [sel.member_id]: { quals, hours, hoursRaw: raw, overlays } }))
-    })
-    return () => { alive = false }
+    loadDetail(sel.member_id)
   }, [sel?.member_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const det = sel && sel.member_id ? detail[sel.member_id] : null
@@ -108,8 +110,9 @@ export default function Directory({ st, patch, narrow }) {
   const hours = det?.hours || []
   const overlays = det?.overlays || { committee: [], families: [], shifts_this_week: 0, diary_open: 0 }
   const hoursRaw = det?.hoursRaw || []
-  // force the lazy detail effect to re-fetch this member after a mutation
-  const refreshMember = async (mid) => { setDetail(d => { const n = { ...d }; delete n[mid]; return n }); await reload() }
+  // Re-fetch this member's detail directly (not via the select effect, which
+  // won't re-run for the same member_id) and refresh the people list.
+  const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
   const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', notes: '' } })
@@ -129,6 +132,10 @@ export default function Directory({ st, patch, narrow }) {
     if (!p.member_id) return
     if (!window.confirm('Archive ' + p.name + '? They can be restored later, and their history is kept.')) return
     setBusy(true); try { await api.dirArchiveMember(p.member_id); await reload(); patch({ dirSel: null }) } finally { setBusy(false) }
+  }
+  const restore = async (p) => {
+    if (!p.member_id) return
+    setBusy(true); try { await api.dirRestoreMember(p.member_id); await reload() } finally { setBusy(false) }
   }
   const assignRole = async (p, roleId) => {
     if (!roleId) return
@@ -212,6 +219,7 @@ export default function Directory({ st, patch, narrow }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
+          <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
           <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
           <button onClick={openAdd} style={btnP}>+ Add person</button>
@@ -227,7 +235,7 @@ export default function Directory({ st, patch, narrow }) {
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, cursor: 'pointer', border: p.key === selId ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent', background: p.key === selId ? 'rgba(99,102,241,0.08)' : 'transparent' }}>
                 <Avatar p={p} size={30} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600, color: p.archived ? C.faint : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}{p.archived ? <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em', color: C.warn, border: `1px solid ${C.warn}66`, borderRadius: 3, padding: '1px 4px', marginLeft: 6 }}>ARCHIVED</span> : null}</div>
                   <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{roleTitles(p).join(' · ') || (p.segs[0] || 'Member')}</div>
                 </div>
                 {p.flagged > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.warn, flexShrink: 0 }} />}
@@ -250,8 +258,10 @@ export default function Directory({ st, patch, narrow }) {
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                {sel.member_id && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
-                {sel.member_id && <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>}
+                {sel.member_id && !sel.archived && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
+                {sel.member_id && (sel.archived
+                  ? <button onClick={() => restore(sel)} disabled={busy} style={{ ...btnP, opacity: busy ? 0.6 : 1 }}>Restore</button>
+                  : <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>)}
               </div>
             </div>
 
@@ -370,16 +380,16 @@ export default function Directory({ st, patch, narrow }) {
                   <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {overlays.committee.map(c => (
-                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
-                          {c.name}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'rgba(99,102,241,0.15)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'rgba(99,102,241,0.45)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
                         </span>
                       ))}
                       {overlays.committee.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No committee position.</span>}
                     </div>
                     <div style={{ marginTop: 8 }}>
-                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 240, opacity: busy ? 0.6 : 1 }}>
+                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 260, opacity: busy ? 0.6 : 1 }}>
                         <option value="">{positions.length ? '+ Assign a position…' : 'No positions set up'}</option>
-                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.is_office_bearer ? ' (office bearer)' : ''}</option>)}
                       </select>
                     </div>
                     <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>

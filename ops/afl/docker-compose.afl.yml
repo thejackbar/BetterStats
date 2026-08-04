@@ -1,0 +1,91 @@
+# bs-afl-* service definitions — the AFL silo (docs/afl-betterstats-plan.md).
+#
+# These entries are meant to be merged into the central
+# /srv/docker/docker-compose.yaml (project bltbox_docker_app), same as the
+# betterstats-* services — NOT run as their own compose project (see the
+# June 2026 compose-project-split post-mortem in CLAUDE.md). Written to match
+# the central file's conventions (absolute build paths, container_name,
+# docker-shared-net, healthchecked db + service_healthy dependency).
+#
+# New vars for /srv/docker/.env — generate with:
+#   AFL_DB_PASSWORD:  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; echo
+#     (alphanumeric-only on purpose — the value is interpolated into the
+#      postgresql:// URLs, where @ : / # ? would break the DSN)
+#   AFL_SECRET_KEY:   openssl rand -hex 32
+#     (do NOT reuse BETTERSTATS_SECRET_KEY — distinct keys keep the two
+#      products' session cookies from validating across silos)
+#
+# Also add `bs_afl_pgdata:` to the central file's top-level volumes: block.
+#
+# First bring-up:
+#   cd /srv/docker && export COMPOSE_PROJECT_NAME=bltbox_docker_app
+#   docker compose build bs-afl-backend bs-afl-frontend
+#   docker compose up -d --no-deps bs-afl-database bs-afl-backend bs-afl-frontend
+#   docker compose exec bs-afl-backend python -m app.scripts.afl_bootstrap <playhq_org_id> <username> '<password>' --sync
+# First boot creates the schema in the empty database automatically (no
+# init.sql, no alembic — the AFL lifespan owns its schema).
+# nginx-proxy-manager: route afl.betterat.football at
+# bs-afl-frontend on docker-shared-net (mirror the betterstats.cricket entry).
+
+services:
+  bs-afl-database:
+    image: postgres:15
+    container_name: bs-afl-database
+    environment:
+      POSTGRES_DB: betterstats_afl
+      POSTGRES_USER: afl
+      POSTGRES_PASSWORD: ${AFL_DB_PASSWORD}
+    volumes:
+      - bs_afl_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U afl -d betterstats_afl"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+  bs-afl-backend:
+    build: /srv/docker/betterstats/backend
+    container_name: bs-afl-backend
+    # Same image source as betterstats-backend; the AFL silo differs only by
+    # entrypoint + env. The command override is LOAD-BEARING — the Dockerfile's
+    # default CMD runs cricket's alembic + app.main. app.afl_main also refuses
+    # to boot unless SPORT=afl, so a mis-wiring fails loudly.
+    command: uvicorn app.afl_main:app --host 0.0.0.0 --port 8000
+    environment:
+      SPORT: afl
+      DATABASE_URL: postgresql+asyncpg://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
+      SYNC_DATABASE_URL: postgresql://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
+      SECRET_KEY: ${AFL_SECRET_KEY}
+      PUBLIC_BASE_URL: https://afl.betterat.football
+      CORS_ORIGINS: https://afl.betterat.football
+    expose:
+      - "8000"
+    depends_on:
+      bs-afl-database:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+  bs-afl-frontend:
+    build:
+      context: /srv/docker/betterstats/frontend
+      args:
+        VITE_SPORT: afl
+        NGINX_CONF: nginx.afl.conf
+    container_name: bs-afl-frontend
+    expose:
+      - "80"
+    depends_on:
+      - bs-afl-backend
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+# Merge into the central file's existing top-level blocks:
+#
+# volumes:
+#   bs_afl_pgdata:

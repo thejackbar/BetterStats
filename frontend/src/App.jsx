@@ -246,7 +246,21 @@ function DashboardRedirect() {
   return <Navigate to={`/${clubSlug}`} replace />
 }
 
+// Multi-sport: when this build is an AFL silo (VITE_SPORT=afl, the
+// bs-afl-frontend service), mount the AFL app tree instead of the cricket
+// one. import.meta.env.VITE_SPORT is statically replaced at build time, so
+// the cricket bundle carries none of the AFL pages and vice versa — see
+// docs/afl-betterstats-plan.md.
+const AflApp = lazy(() => import('./afl/AflApp'))
+
 export default function App() {
+  if (import.meta.env.VITE_SPORT === 'afl') {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <AflApp />
+      </Suspense>
+    )
+  }
   return (
     <AuthProvider>
       <ThemeProvider>

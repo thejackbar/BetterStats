@@ -393,7 +393,7 @@ export const api = {
     request(`/club-admin/volunteers/hours/${id}`, { method: 'DELETE' }),
 
   // BetterClubManager Directory (core capability, not a paid module)
-  dirPeople: () => request('/club-admin/directory/people'),
+  dirPeople: (includeArchived) => request(`/club-admin/directory/people${includeArchived ? '?include_archived=true' : ''}`),
   dirCreateMember: (data) => request('/club-admin/directory/people', { method: 'POST', body: JSON.stringify(data) }),
   dirUpdateMember: (id, data) => request(`/club-admin/directory/people/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   dirArchiveMember: (id) => request(`/club-admin/directory/people/${id}/archive`, { method: 'POST' }),
