@@ -247,6 +247,17 @@ class Organisation(Base):
     hero_image_url = Column(Text, nullable=True)
     theme_mode = Column(Text, default="auto", nullable=True)
     theme_config = Column(JSONB, nullable=True)
+    # Public-site typography (migration 215) — see app/services/fonts.py and
+    # frontend/src/lib/theme.js. Two independent roles (display heading / body
+    # text), each either unset (app default), a curated built-in preset, or an
+    # uploaded font file. font_config carries the per-role selection
+    # (`{"display": {"source": "upload"|"preset", "preset": ..., "family": ..., "v": ...}, "body": {...}}`);
+    # the uploaded bytes live in their own columns, mirroring logo_data/logo_mime.
+    font_config = Column(JSONB, nullable=True)
+    font_display_data = Column(LargeBinary, nullable=True)
+    font_display_mime = Column(Text, nullable=True)
+    font_body_data = Column(LargeBinary, nullable=True)
+    font_body_mime = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
     # BetterSelect: a player is "dormant" (hidden from default selection) if they

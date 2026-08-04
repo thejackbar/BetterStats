@@ -8,6 +8,13 @@
  */
 
 :root {
+  /* Typography — the app default; a club's own choice (preset or uploaded
+     font) overrides these via <style id="club-theme"> (see useClubTheme /
+     buildThemeCss in lib/theme.js). Always defined here so font-display/
+     font-body/font-sans stay valid CSS on pages with no club context. */
+  --pb-font-display: 'Geist','Barlow Condensed','Oswald',sans-serif;
+  --pb-font-body:    'Geist','Inter',system-ui,sans-serif;
+
   /* Brand + semantic colours (shared across light and dark) */
   --pb-accent:          #16c784;
   /* Secondary club accent + the primary→secondary gradient built from it.

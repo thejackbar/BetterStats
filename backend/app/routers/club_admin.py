@@ -1,7 +1,7 @@
 """Admin API routes — all require authentication."""
 import json as _json
 import secrets as _secrets
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -41,6 +41,7 @@ from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
 from app.services import playhq_client
 from app.services.name_format import name_sort_key
+from app.services import fonts as font_service
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -718,6 +719,10 @@ class SettingsPatch(BaseModel):
     accent_color: Optional[str] = None
     theme_mode: Optional[str] = None
     theme_config: Optional[dict] = None
+    # Public-site typography — see _sanitize_font_config. Choosing between an
+    # already-uploaded file and a curated preset, or clearing back to the app
+    # default; the uploaded bytes themselves only ever come from POST /font/{role}.
+    font_config: Optional[dict] = None
     player_name_format: Optional[str] = None
     dormancy_months: Optional[int] = None
     default_team_size: Optional[int] = None
@@ -803,6 +808,31 @@ def _sanitize_theme_config(raw: dict) -> dict:
     return clean
 
 
+def _sanitize_font_config(raw: dict, existing: Optional[dict]) -> dict:
+    """Keep only recognised roles/sources. A 'preset' entry just needs a valid
+    key from the curated list. An 'upload' entry keeps the family (+ cache-bust
+    version) from whatever the /font/{role} upload endpoint actually stored —
+    never trust a client-supplied family string here, since this generic PATCH
+    only ever chooses BETWEEN an already-uploaded file and a preset (or clears
+    back to the app default); it never sets the uploaded bytes themselves."""
+    existing = existing or {}
+    clean: dict = {}
+    for role in font_service.FONT_ROLES:
+        entry = raw.get(role)
+        if not isinstance(entry, dict):
+            continue
+        source = entry.get("source")
+        if source == "preset":
+            preset = entry.get("preset")
+            if preset in font_service.FONT_PRESET_KEYS_BY_ROLE[role]:
+                clean[role] = {"source": "preset", "preset": preset}
+        elif source == "upload":
+            prior = existing.get(role) or {}
+            if prior.get("source") == "upload" and prior.get("family"):
+                clean[role] = {"source": "upload", "family": prior["family"], "v": prior.get("v")}
+    return clean
+
+
 @router.get("/settings")
 async def get_settings(
     current_user: User = Depends(get_current_user),
@@ -818,6 +848,7 @@ async def get_settings(
         "accent_color": club.accent_color,
         "theme_mode": club.theme_mode,
         "theme_config": club.theme_config or {},
+        **font_service.public_font_fields(club),
         "logo_url": club.logo_url,
         "hero_image_url": club.hero_image_url,
         "is_active": club.is_active,
@@ -863,6 +894,8 @@ async def patch_settings(
         # still read it directly (share cards, public club payloads).
         if clean.get("accent"):
             club.accent_color = clean["accent"]
+    if data.font_config is not None:
+        club.font_config = _sanitize_font_config(data.font_config, club.font_config) or None
     if data.player_name_format is not None and data.player_name_format in ("last_first", "first_last", "first_initial_last", "last_first_initial"):
         club.player_name_format = data.player_name_format
     if data.dormancy_months is not None:
@@ -989,6 +1022,82 @@ async def delete_logo(
     club.logo_url = None
     await db.commit()
     return {"status": "cleared"}
+
+
+# ---------------------------------------------------------------------------
+# Public-site typography (custom font upload)
+# ---------------------------------------------------------------------------
+
+_FONT_NAME_RE = re.compile(r"[^A-Za-z0-9 \-_.]+")
+
+
+def _clean_font_family(raw: str, fallback: str) -> str:
+    name = _FONT_NAME_RE.sub("", (raw or "").strip())
+    name = re.sub(r"\s+", " ", name).strip()
+    return (name or fallback)[:60]
+
+
+@router.post("/font/{role}")
+async def upload_font(
+    role: str,
+    file: UploadFile = File(...),
+    family: Optional[str] = Form(None),
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a club's own font file for one typography role (display heading
+    or body text) — e.g. a licensed Clash Display .woff2 to match the club's
+    own website. See app/services/fonts.py for the accepted formats."""
+    if role not in font_service.FONT_ROLES:
+        raise HTTPException(404, "Unknown font role")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in font_service.FONT_ALLOWED_EXTS:
+        raise HTTPException(400, "Font files only (woff2, woff, ttf, otf)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "Empty file")
+    if len(data) > font_service.FONT_MAX_BYTES:
+        raise HTTPException(400, "Font file must be 6 MB or smaller")
+
+    fallback_name = Path(file.filename or "Custom Font").stem
+    clean_family = _clean_font_family(family, fallback_name)
+    version = uuid.uuid4().hex[:8]
+
+    if role == "display":
+        club.font_display_data = data
+        club.font_display_mime = font_service.mime_for_ext(ext)
+    else:
+        club.font_body_data = data
+        club.font_body_mime = font_service.mime_for_ext(ext)
+
+    cfg = dict(club.font_config or {})
+    cfg[role] = {"source": "upload", "family": clean_family, "v": version}
+    club.font_config = cfg
+    await db.commit()
+    return font_service.public_font_fields(club)
+
+
+@router.delete("/font/{role}")
+async def delete_font(
+    role: str,
+    current_user: User = Depends(require_cap(MANAGE_SETTINGS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    if role not in font_service.FONT_ROLES:
+        raise HTTPException(404, "Unknown font role")
+    if role == "display":
+        club.font_display_data = None
+        club.font_display_mime = None
+    else:
+        club.font_body_data = None
+        club.font_body_mime = None
+    cfg = dict(club.font_config or {})
+    cfg.pop(role, None)
+    club.font_config = cfg or None
+    await db.commit()
+    return {"status": "cleared", "font_config": club.font_config}
 
 
 # ---------------------------------------------------------------------------
