@@ -78,13 +78,13 @@ function clubDirectoryUrl(code) {
 }
 
 // Deep-link for a resolved `club` object (see the live feed's `club` field) —
-// an onboarded club (org_id set) goes straight to its Club Directory row,
-// a still-prospect club falls back to a name search, same pattern as
-// clubDirectoryUrl above.
-function marketingClubUrl(club) {
-  return club.org_id
-    ? `/admin/super/marketing?org_id=${encodeURIComponent(club.org_id)}`
-    : `/admin/super/marketing?q=${encodeURIComponent(club.name)}`
+// straight to the Sales Pipeline, pre-searched to this club's name (SuperCrm
+// reads the same ?q= param the Club Directory search uses). Works for a
+// still-prospect club and an already-onboarded customer alike, since a
+// customer's won deal keeps its marketing_club_name and is still searchable
+// there.
+function salesPipelineUrl(club) {
+  return `/admin/super/crm?q=${encodeURIComponent(club.name)}`
 }
 
 // Which club a live-feed visitor is associated with — resolved server-side
@@ -94,9 +94,9 @@ function marketingClubUrl(club) {
 function ClubAssocBadge({ club }) {
   if (!club) return null
   return (
-    <a href={marketingClubUrl(club)} target="_blank" rel="noopener noreferrer"
+    <a href={salesPipelineUrl(club)} target="_blank" rel="noopener noreferrer"
       className="inline-flex items-center gap-1 shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded border pb-hairline hover:text-pb-accent hover:border-pb-accent max-w-[110px]"
-      title={`${club.is_customer ? 'Customer' : 'Prospect'} club, from a tracked link/email — not necessarily the page they're on. Open in Club Directory.`}
+      title={`${club.is_customer ? 'Customer' : 'Prospect'} club, from a tracked link/email — not necessarily the page they're on. Open in Sales Pipeline.`}
       onClick={e => e.stopPropagation()}>
       <span>{club.is_customer ? '⭐' : '🎯'}</span>
       <span className="truncate">{club.name}</span>
