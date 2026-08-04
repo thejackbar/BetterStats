@@ -4379,6 +4379,12 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS member_category TEXT"))
         await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ"))
 
+    # Migration 213: role-type categories + committee office-bearer flag.
+    # Byte-identical to alembic/versions/213_role_type_category.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("ALTER TABLE club_role_types ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'volunteer'"))
+        await conn.execute(text("ALTER TABLE committee_positions ADD COLUMN IF NOT EXISTS is_office_bearer BOOLEAN NOT NULL DEFAULT FALSE"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

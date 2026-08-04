@@ -15,7 +15,18 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.database_url, echo=False)
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    # See settings.db_pool_* for why the SQLAlchemy defaults (5+10) are too
+    # small here. pool_pre_ping recovers a connection the DB/proxy dropped out
+    # from under us (returns a live conn instead of a dead-socket error).
+    pool_size=settings.db_pool_size,
+    max_overflow=settings.db_max_overflow,
+    pool_timeout=settings.db_pool_timeout,
+    pool_recycle=settings.db_pool_recycle,
+    pool_pre_ping=True,
+)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -2654,6 +2665,9 @@ class CommitteePosition(Base):
     # responsibilities are kept in sync from the linked role, so the one catalogue
     # is edited in Roles. NULL only for legacy rows created before the link.
     role_id = Column(UUID(as_uuid=True), ForeignKey("club_roles.id", ondelete="SET NULL"), nullable=True)
+    # Executive/legal office bearers (President, VP, Treasurer, Secretary) vs
+    # general elected committee members.
+    is_office_bearer = Column(Boolean, nullable=False, server_default="false", default=False)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -3161,6 +3175,9 @@ class ClubRoleType(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
+    # committee / volunteer / paid / third_party / other — drives which surfaces
+    # a role of this type appears on (committee positions vs the Roles list).
+    category = Column(Text, nullable=False, server_default="volunteer", default="volunteer")
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

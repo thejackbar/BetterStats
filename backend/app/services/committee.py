@@ -142,6 +142,14 @@ def _nomination_dict(n: AgmNomination) -> dict:
 
 # ─── Positions ────────────────────────────────────────────────────────────────
 
+# The executive/legal office bearers, matched by position name on first seed.
+_OFFICE_BEARER_NAMES = {"president", "vice president", "vice-president", "treasurer", "secretary"}
+
+
+def _is_office_bearer_name(name: str) -> bool:
+    return (name or "").strip().lower() in _OFFICE_BEARER_NAMES
+
+
 async def sync_committee_positions(session: AsyncSession, org_id) -> None:
     """A committee position IS a committee-flagged club_role (migration 198).
     The catalogue is edited in Roles; this keeps a committee_position row per
@@ -164,7 +172,8 @@ async def sync_committee_positions(session: AsyncSession, org_id) -> None:
         pos = by_role.get(role.id) or by_name.get(role.title.lower())
         if pos is None:
             pos = CommitteePosition(organisation_id=org_id, name=role.title[:120],
-                                    responsibilities=role.description, role_id=role.id, sort_order=role.sort_order)
+                                    responsibilities=role.description, role_id=role.id, sort_order=role.sort_order,
+                                    is_office_bearer=_is_office_bearer_name(role.title))
             session.add(pos)
             changed = True
             continue
