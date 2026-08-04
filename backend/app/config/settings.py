@@ -3,6 +3,12 @@ from typing import List
 
 
 class Settings(BaseSettings):
+    # Which sporting code this deployment serves. Each sport runs as its own
+    # operational silo (own docker services + database) built from this one
+    # codebase — see docs/afl-betterstats-plan.md. The cricket entrypoint
+    # (app.main) never reads this; sport-specific entrypoints (app.afl_main)
+    # assert it so a mis-wired env can't run the wrong sport against a DB.
+    sport: str = "cricket"  # cricket | afl
     database_url: str = "postgresql+asyncpg://cricket:cricket@db/betterstats"
     sync_database_url: str = "postgresql://cricket:cricket@db/betterstats"
     secret_key: str = "changeme-secret-key-32-chars-min"

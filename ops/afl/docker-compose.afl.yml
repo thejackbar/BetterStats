@@ -1,0 +1,76 @@
+# bs-afl-* service definitions — the AFL silo (docs/afl-betterstats-plan.md).
+#
+# For Elton: these entries are meant to be merged into the central
+# /srv/docker/docker-compose.yaml (project bltbox_docker_app), same as the
+# betterstats-* services — NOT run as their own compose project (see the
+# June 2026 compose-project-split post-mortem in CLAUDE.md). Set the
+# referenced variables in /srv/docker/.env:
+#   AFL_DB_PASSWORD=<generate one>
+#   AFL_SECRET_KEY=<generate one — do NOT reuse the cricket secret, the two
+#                   silos' session cookies must not validate across products>
+#
+# Then: docker compose build bs-afl-frontend bs-afl-backend
+#       docker compose up -d --no-deps bs-afl-database bs-afl-backend bs-afl-frontend
+# First boot creates the schema in the empty database automatically. Create the
+# first admin + club with:
+#   docker compose exec bs-afl-backend python -m app.scripts.afl_bootstrap <playhq_org_id> <username> '<password>' --sync
+# nginx-proxy-manager: route betterat.football's club-app hostname at
+# bs-afl-frontend on docker-shared-net (mirror the betterstats.cricket entry).
+
+services:
+  bs-afl-database:
+    image: postgres:15
+    container_name: bs-afl-database
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: betterstats_afl
+      POSTGRES_USER: afl
+      POSTGRES_PASSWORD: ${AFL_DB_PASSWORD}
+    volumes:
+      - bs_afl_pgdata:/var/lib/postgresql/data
+    networks:
+      - default
+
+  bs-afl-backend:
+    build:
+      context: ./betterstats/backend
+    image: bs-afl-backend
+    container_name: bs-afl-backend
+    restart: unless-stopped
+    # Same image as betterstats-backend; only the entrypoint + env differ.
+    # No alembic here — the AFL lifespan owns its schema (fresh DB, ORM-current).
+    command: uvicorn app.afl_main:app --host 0.0.0.0 --port 8000
+    environment:
+      SPORT: afl
+      DATABASE_URL: postgresql+asyncpg://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
+      SYNC_DATABASE_URL: postgresql://afl:${AFL_DB_PASSWORD}@bs-afl-database/betterstats_afl
+      SECRET_KEY: ${AFL_SECRET_KEY}
+      COOKIE_SECURE: "true"
+      PUBLIC_BASE_URL: https://betterat.football
+      CORS_ORIGINS: https://betterat.football
+    depends_on:
+      - bs-afl-database
+    networks:
+      - default
+
+  bs-afl-frontend:
+    build:
+      context: ./betterstats/frontend
+      args:
+        VITE_SPORT: afl
+        NGINX_CONF: nginx.afl.conf
+    image: bs-afl-frontend
+    container_name: bs-afl-frontend
+    restart: unless-stopped
+    depends_on:
+      - bs-afl-backend
+    networks:
+      - default
+      - docker-shared-net
+
+volumes:
+  bs_afl_pgdata:
+
+networks:
+  docker-shared-net:
+    external: true
