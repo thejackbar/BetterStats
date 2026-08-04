@@ -1328,6 +1328,21 @@ async def lifespan(app: FastAPI):
             "ON usage_events(resolved_marketing_club_id, created_at DESC) "
             "WHERE resolved_marketing_club_id IS NOT NULL"
         ))
+        # Migration 214: ip_hash had never been indexed here, so
+        # usage_tracker._enrich_geo's post-lookup backfill (WHERE ip_hash = ...)
+        # was a full scan of an append-only, never-pruned table on every
+        # newly-seen IP — holding a connection and row locks long enough for
+        # concurrent ones to drain the pool ("QueuePool limit of size 20
+        # overflow 30 reached"). The second index covers the Usage map's own
+        # read: anonymous geo-enriched rows by recency.
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_ip_hash_created "
+            "ON usage_events(ip_hash, created_at DESC) WHERE ip_hash IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_usage_events_geo_map "
+            "ON usage_events(created_at DESC) WHERE lat IS NOT NULL AND user_id IS NULL"
+        ))
         # Backup/restore task tracking (migration 170) — one row per backup or
         # restore run (scheduled via the host systemd timer, or triggered on
         # demand from Super Admin), so the Backups page can show a history plus
@@ -4491,7 +4506,12 @@ _USAGE_SKIP_PREFIXES = (
     "/health",
     "/uploads/",
     "/club-admin/notifications/count",
-    "/usage/event",
+    # Whole /usage/ family, not just /usage/event: the endpoints here record
+    # their own breadcrumb, so a middleware `api` row on top is a second write
+    # (and a second pooled connection) per call for no extra information.
+    # /usage/heartbeat fires every ~25s per open tab, so it was the single
+    # biggest source of that duplication.
+    "/usage/",
     "/club-admin/usage/",
     "/docs",
     "/openapi.json",
