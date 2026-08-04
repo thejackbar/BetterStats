@@ -318,6 +318,19 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     }
 
 
+@router.get("/seasons")
+async def list_org_seasons(
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's seasons for the Seasons step's full "search all seasons"
+    picker — the auto-matched candidates already come back on each row from
+    /resolve, but a manual full browse needs the whole list up front."""
+    rows = await _org_seasons(db, club.id)
+    return [{"id": sid, "name": name, "year": year} for sid, name, year in rows]
+
+
 @router.get("/template.csv")
 async def template():
     output = io.StringIO()
