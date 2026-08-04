@@ -23,7 +23,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from sqlalchemy import inspect as sa_inspect, text
+from sqlalchemy.schema import CreateColumn
 
 from app.config.settings import settings
 from app.models.db import Base, engine
@@ -59,6 +60,50 @@ if settings.sport != "afl":
     )
 
 
+async def _sync_missing_columns(conn):
+    """Base.metadata.create_all only creates TABLES that don't exist yet — it
+    never ALTERs a table that's already there to add a column the model
+    gained afterwards. That's invisible for cricket-only models (cricket's
+    own main.py lifespan mirrors its migrations with idempotent ALTERs), but
+    a column added to a SHARED model (Organisation, Player, User, ...) after
+    the AFL database already has that table previously went unnoticed here —
+    e.g. the club-custom-fonts migration added five columns to Organisation;
+    AFL's organisations table predated it, so create_all silently skipped
+    them and every request touching Organisation (login, /auth/me, club
+    lookup — nearly everything) started 500ing with UndefinedColumnError.
+    Diff the ORM metadata against the live schema and add whatever's
+    missing, so any future shared-model column addition self-heals here
+    instead of taking AFL down again. Each column runs in its own SAVEPOINT
+    so one that can't apply cleanly (e.g. NOT NULL with no default on an
+    already-populated table) is logged and skipped without aborting the
+    outer transaction the rest of this lifespan still needs."""
+    def _inspect(sync_conn):
+        inspector = sa_inspect(sync_conn)
+        return {t: {c["name"] for c in inspector.get_columns(t)} for t in inspector.get_table_names()}
+
+    existing = await conn.run_sync(_inspect)
+    for table in Base.metadata.tables.values():
+        existing_cols = existing.get(table.name)
+        if existing_cols is None:
+            continue  # brand new table — create_all just made it with every column already
+        for column in table.columns:
+            if column.name in existing_cols:
+                continue
+
+            def _compile_ddl(sync_conn, col=column):
+                return str(CreateColumn(col).compile(dialect=sync_conn.dialect))
+
+            ddl = await conn.run_sync(_compile_ddl)
+            try:
+                async with conn.begin_nested():
+                    await conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN IF NOT EXISTS {ddl}'))
+                logger.info("afl_main: added missing column %s.%s (shared-model migration self-heal)",
+                            table.name, column.name)
+            except Exception:  # noqa: BLE001 — one bad column must not abort the whole boot
+                logger.exception("afl_main: could not add column %s.%s — needs a manual ALTER",
+                                  table.name, column.name)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with engine.begin() as conn:
@@ -69,6 +114,7 @@ async def lifespan(app: FastAPI):
         except Exception:  # noqa: BLE001 — extension may need superuser; PG13+ doesn't need it
             logger.info("pgcrypto extension not created (fine on Postgres 13+)")
         await conn.run_sync(Base.metadata.create_all)
+        await _sync_missing_columns(conn)
 
         # Raw-SQL tables the shared code writes that live outside the ORM
         # metadata (created by cricket's lifespan there; mirrored here).
