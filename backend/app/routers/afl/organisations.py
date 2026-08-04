@@ -66,7 +66,10 @@ async def get_summary(org_id: uuid.UUID,
     if season_id:
         params["season"] = str(season_id)
 
+    _TOP_COLS = {"goals": "goals", "games": "games", "bogs": "bog_count"}
+
     async def _top(order: str):
+        col = _TOP_COLS[order]
         res = await db.execute(text(f"""
             SELECT pss.player_id, p.name, p.display_name_override, p.photo_url,
                    COALESCE(SUM(pss.games),0) AS games,
@@ -76,8 +79,8 @@ async def get_summary(org_id: uuid.UUID,
             JOIN players p ON p.id = pss.player_id
             WHERE pss.organisation_id = :org AND pss.grade_id IS NULL {season_clause}
             GROUP BY pss.player_id, p.name, p.display_name_override, p.photo_url
-            HAVING COALESCE(SUM(pss.{order}),0) > 0
-            ORDER BY {order} DESC, games DESC
+            HAVING COALESCE(SUM(pss.{col}),0) > 0
+            ORDER BY COALESCE(SUM(pss.{col}),0) DESC, games DESC
             LIMIT 5
         """), params)
         return [dict(r._mapping) for r in res]

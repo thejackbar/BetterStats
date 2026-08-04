@@ -71,7 +71,11 @@ class AflGameDetails(Base):
     venue_name = Column(Text, nullable=True)
     venue_suburb = Column(Text, nullable=True)
     events_synced_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    synced_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # When the per-game STATS last landed (gameView parsed into periods/lines).
+    # NULL = discovered only — this is the incremental sync's "still needs a
+    # stats pull" signal, so it must NOT have a server default (a discovery
+    # insert would otherwise read as already-synced and be skipped forever).
+    synced_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
 
 class AflGamePeriod(Base):
