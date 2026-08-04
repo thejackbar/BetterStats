@@ -2027,7 +2027,7 @@ async def live(
                lower(substring(ev.path from 'utm_source=([^&]+)')) AS utm_source,
                substring(ev.path from 'utm_campaign=([^&]+)') AS utm_campaign,
                mc.id AS club_id, mc.name AS club_name,
-               mc.existing_org_id AS club_org_id, o.slug AS club_org_slug,
+               mc.existing_org_id AS club_org_id,
                EXISTS (
                    SELECT 1 FROM usage_events h
                    WHERE {online_base.replace('ue.', 'h.')}
@@ -2036,7 +2036,6 @@ async def live(
                ) AS is_online
         FROM ev
         LEFT JOIN marketing_clubs mc ON mc.id::text = ev.resolved_club_cid
-        LEFT JOIN organisations o ON o.id = mc.existing_org_id
         ORDER BY ev.created_at DESC
     """))).mappings().all()
 
@@ -2083,8 +2082,6 @@ async def live(
              "club": ({
                  "id": str(r["club_id"]), "name": r["club_name"],
                  "is_customer": r["club_org_id"] is not None,
-                 "org_id": str(r["club_org_id"]) if r["club_org_id"] else None,
-                 "org_slug": r["club_org_slug"],
              } if r["club_id"] else None)}
             for r in recent
         ],

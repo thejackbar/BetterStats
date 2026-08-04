@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
@@ -1020,6 +1020,13 @@ function SettingsModal({ open, onClose, onManageStages }) {
 
 export default function SuperCrm() {
   const toast = useToast()
+  // A deep link (e.g. the Usage page's Live feed club badge) can arrive with
+  // ?q=<club name> to land pre-searched on that club's deal(s) — same param
+  // name/shape as the Club Directory's own q= search, applied once on mount
+  // (searchParams itself is intentionally not a filters.q dependency below,
+  // so typing in the search box doesn't fight the URL back).
+  const [searchParams] = useSearchParams()
+  const initialQ = searchParams.get('q') || ''
   const [view, setView] = useState('board')
   const [deals, setDeals] = useState([])
   const [stages, setStages] = useState([])
@@ -1037,7 +1044,7 @@ export default function SuperCrm() {
   const [showStages, setShowStages] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [owners, setOwners] = useState([])
-  const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [filters, setFilters] = useState(() => initialQ ? { ...EMPTY_FILTERS, q: initialQ } : EMPTY_FILTERS)
   const [sortBy, setSortBy] = useState('')
   const [sortDir, setSortDir] = useState('asc')
   const [recalcRunning, setRecalcRunning] = useState(false)
