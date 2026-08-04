@@ -376,7 +376,9 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
             ))
 
         bog_by_pid, bog_by_name = _bog_by_line_key(side_stats)
-        is_ours = (side == our_side)
+        # Attribute by the side's own team id, not our_side — when two of the
+        # club's teams meet each other, BOTH sides' players are ours.
+        is_ours = str(team.get("id")) in our_team_ids
         team_name = team.get("name")
         seen_participants: set[str] = set()
         for pl in side_stats.get("players") or []:
@@ -427,7 +429,7 @@ async def _sync_game_stats(session: AsyncSession, org: Organisation,
             key = pid or f"bogname:{_norm_name(name)}"
             player_id = None
             profile_id = (part.get("profile") or {}).get("id")
-            if side == our_side:
+            if is_ours:
                 player_id = await _resolve_org_player(
                     session, org, profile_id, key, name, player_cache)
             session.add(AflPlayerGameLine(
@@ -455,8 +457,10 @@ async def _sync_game_events(session: AsyncSession, org: Organisation,
         AflPlayerGameLine.game_id == game_row.id,
         AflPlayerGameLine.player_id.is_not(None)))
     our_lines = res.scalars().all()
-    by_number = {l.jumper_number: l.player_id for l in our_lines if l.jumper_number}
-    by_name = {_norm_name(l.name): l.player_id for l in our_lines}
+    # Per-side maps: jumper numbers repeat across the two teams, and in an
+    # intra-club game both sides are ours.
+    by_number = {(l.side, l.jumper_number): l.player_id for l in our_lines if l.jumper_number}
+    by_name = {(l.side, _norm_name(l.name)): l.player_id for l in our_lines}
 
     await session.execute(delete(AflGameEvent).where(AflGameEvent.game_id == game_row.id))
     ordered = sorted(events, key=lambda e: int(e.get("timestamp") or 0))
@@ -468,9 +472,10 @@ async def _sync_game_events(session: AsyncSession, org: Organisation,
             m = _SCORER_RE.match(desc)
             if m:
                 scorer_number, scorer_name = m.group(1), m.group(2)
-        our_side = details.our_side
-        if scorer_name and our_side and ev.get("side") == our_side:
-            player_id = by_number.get(scorer_number) or by_name.get(_norm_name(scorer_name))
+        ev_side = ev.get("side")
+        if scorer_name and ev_side:
+            player_id = (by_number.get((ev_side, scorer_number))
+                         or by_name.get((ev_side, _norm_name(scorer_name))))
         session.add(AflGameEvent(
             id=derive_id(org.id, f"event:{details.playhq_id}:{ev.get('id')}"),
             game_id=game_row.id,
