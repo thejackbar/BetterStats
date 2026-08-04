@@ -33,7 +33,7 @@ rule to each layer you named: domain, nginx-proxy-manager, docker services,
 source code, GitHub repo, database, bltbox folder layout, and backups.
 
 "Sport as configuration, not as a fork." The active sport is chosen by one
-environment variable (`SPORT=cricket|afl|soccer|...`). The same image, pointed
+environment variable (`SPORT=cricket|afl|football|...`). The same image, pointed
 at a different database with a different `SPORT` value and a different hostname,
 IS the AFL instance. A single sporting code is always a single instance, even
 when the world calls it by different names in different places (see "One code,
@@ -73,7 +73,7 @@ backend/app/
       profile.py        # labels, stat columns, scorecard shape, brand
       migrations/       # cricket-only Alembic revisions
     afl/                # future: the same shape, AFL implementations
-    soccer/
+    football/           # future: FIFA football (labelled soccer or football by region)
   sport_registry.py     # SPORT env -> the active SportPlugin
 ```
 
@@ -200,7 +200,7 @@ one database, one stack, globally.
 
 FIFA football is the case that tests this. It is a single sporting code, so it
 is a single operational instance: all of its clubs, everywhere, live in one
-`bs-soccer-*` stack and one database. The catch is only that the world calls
+`bs-football-*` stack and one database. The catch is only that the world calls
 that one code by different names, "soccer" in Australia and the USA, "football"
 in the UK and Europe, and the wrong word in the wrong place is unacceptable
 rather than merely awkward. But that is a matter of what the single instance is
@@ -210,21 +210,27 @@ So region here is a **presentation dimension within one instance**, not a second
 instance and not a second env var:
 
 ```
-bs-soccer-frontend  bs-soccer-backend  bs-soccer-db  bs-soccer-backup-agent
+bs-football-frontend  bs-football-backend  bs-football-db  bs-football-backup-agent
 ```
 
-- The internal code identifier is `soccer` because it is globally unambiguous:
-  nobody reads "soccer" as AFL or rugby league. `SPORT=soccer` everywhere,
-  services `bs-soccer-*`, one database.
+- The internal code identifier is `football` (FIFA football is THE football).
+  `SPORT=football` everywhere, services `bs-football-*`, one database. Every
+  regional hostname resolves to `bs-football-frontend`.
 - The public LABEL is chosen per request from the hostname the visitor arrived
   on. A visitor on `betterat.soccer` sees "Soccer" and soccer canonical URLs; a
-  visitor on the UK football host sees "Football" and football canonical URLs.
-  Same backend, same data, different wording and different canonical host.
+  visitor on `betterat.football` (UK/Europe) sees "Football" and football
+  canonical URLs. Same backend, same data, different wording and different
+  canonical host.
+
+Do not confuse the internal SERVICE name with the shared DOMAIN. `bs-football-*`
+is specifically FIFA football. The `.football` DOMAIN is a shared street address
+that also fronts AFL and rugby league (below), each of which resolves to its OWN
+frontend (`bs-afl-frontend`, `bs-nrl-frontend`), never to `bs-football-frontend`.
 
 This keeps the "never show a soccer name in the UK" rule as a presentation
 concern the single instance handles by looking at the request origin, rather
 than something that needs a whole separate stack. (If data-residency law ever
-forces UK soccer data to be hosted in the UK, that is a hosting decision, the
+forces UK football data to be hosted in the UK, that is a hosting decision, the
 same single-code stack deployed on a UK box, not a second sporting code.)
 
 Key rules, each of which is a direct lesson from the June 2026 outage
@@ -253,7 +259,7 @@ a tiny generator or a per-sport compose override; the generator route is
 cleaner as the sport count grows.
 
 Capacity: the box already runs about 26 containers. Cricket plus AFL plus
-soccer adds roughly 12 more, which is fine. When a sport outgrows the shared
+football adds roughly 12 more, which is fine. When a sport outgrows the shared
 box, move that sport's stack to its own host with no code change: same image,
 same template, different machine. Nothing in the application couples a sport to
 a box, so this is a pure ops move and also the strongest available runtime
@@ -277,11 +283,11 @@ kinds of problem, so keep them apart.
 ### Many hostnames, one instance (FIFA football)
 
 FIFA football is one code and one instance, so several hostnames all point at
-the SAME `bs-soccer-frontend`:
+the SAME `bs-football-frontend`:
 
 ```
-betterat.soccer      -> bs-soccer-frontend   (visitor sees "Soccer")
-betterat.football    -> bs-soccer-frontend   (for UK/European visitors; sees "Football")
+betterat.soccer      -> bs-football-frontend   (visitor sees "Soccer")
+betterat.football    -> bs-football-frontend   (for UK/European visitors; sees "Football")
 ```
 
 Both are proxy hosts in nginx-proxy-manager resolving to the one upstream. The
@@ -312,8 +318,8 @@ nrl.betterat.football   -> NRL stack   (bs-nrl-frontend)
 NRL to an Australian, FIFA football to a Briton. So the apex is the one place a
 region decision is legitimate. Route it at the edge (the Cloudflare worker you
 already run is the right layer): UK and European visitors go to the FIFA-football
-(soccer) instance presented as "Football", Australian visitors go to a small
-AFL/NRL chooser. That is the deliberate and only exception to "no geo routing";
+instance (`bs-football`) presented as "Football", Australian visitors go to a
+small AFL/NRL chooser. That is the deliberate and only exception to "no geo routing";
 every code-explicit subdomain (`afl.`, `nrl.`) still resolves to exactly one
 stack regardless of who asks.
 
@@ -324,7 +330,7 @@ Three things to hold the line on:
   codes at the proxy and complicate the SPA. Geo routing is confined to the
   ambiguous apex and nowhere else.
 - **The soccer/football rule is a presentation rule inside one instance.** The
-  single soccer instance shows region-correct wording and canonical URLs by
+  single football instance shows region-correct wording and canonical URLs by
   hostname, and never leaks a soccer address to a football visitor. It is not two
   instances.
 - **Do not let one "football" stack serve both AFL and NRL.** They are
@@ -442,7 +448,7 @@ seams after two sports are live is much harder.
   public sites at `betterat.<sport>`.
 - Domains map to instances flexibly: one-to-one on a dedicated TLD; many
   hostnames to one instance where a code has region-varying names (soccer and
-  football both point at the one soccer stack, which shows region-correct wording
+  football both point at the one football stack, which shows region-correct wording
   by hostname and never leaks a soccer URL to a football visitor); and
   subdomain-per-code where one TLD fronts several codes (`afl.`/`nrl.betterat.football`).
   Geo routing is allowed only at the ambiguous apex.
