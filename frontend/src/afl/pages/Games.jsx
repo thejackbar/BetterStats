@@ -15,7 +15,7 @@ export default function Games() {
   const base = `/${club.slug}`
 
   const gradeOptions = useMemo(() => {
-    const grades = (club.grades || []).filter(g => !seasonId || g.season_id === seasonId)
+    const grades = (club.grades || []).filter(g => !seasonId || (g.season_ids || []).includes(seasonId))
     return grades.map(g => ({ value: g.id, label: g.display_name_override || g.name }))
   }, [club.grades, seasonId])
 

@@ -82,8 +82,8 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
   listGradesWithStats: () => request('/club-admin/grades-with-stats'),
-  classifyGrade: (gradeName, { category, is_public } = {}) => request('/club-admin/grades/classify', {
-    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+  classifyGrade: (gradeName, { category, is_public, display_name } = {}) => request('/club-admin/grades/classify', {
+    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public, display_name }),
   }),
   applyGradeSuggestions: () => request('/club-admin/grades/apply-suggestions', { method: 'POST' }),
 

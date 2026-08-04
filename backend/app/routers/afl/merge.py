@@ -236,6 +236,7 @@ class GradeClassifyRequest(BaseModel):
     grade_name: str
     category: str | None = None
     is_public: bool | None = None
+    display_name: str | None = None  # "" clears the override; omit to leave unchanged
 
 
 @router.patch("/grades/classify")
@@ -267,6 +268,9 @@ async def classify_grade(
     if req.is_public is not None:
         sets.append("is_public = :is_public")
         params["is_public"] = req.is_public
+    if req.display_name is not None:
+        sets.append("display_name_override = :display_name")
+        params["display_name"] = req.display_name.strip() or None
     if not sets:
         return {"updated": 0, "grade_name": req.grade_name}
 
