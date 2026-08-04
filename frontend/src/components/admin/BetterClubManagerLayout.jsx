@@ -1,7 +1,5 @@
-import { useState, useEffect } from 'react'
 import { CAP } from '../../lib/capabilities'
-import { api } from '../../lib/api'
-import ModuleLayout from './ModuleLayout'
+import BetterClubhouseLayout from './BetterClubhouseLayout'
 
 // BetterClubManager — the club back office as its own Core surface (provisional
 // name). Same GROUPS model as BetterStats: home shows one card per group, each
@@ -58,23 +56,10 @@ export function navFromGroups(groups) {
   ]
 }
 
-export default function BetterClubManagerLayout({ children, title, actions }) {
-  // Member Portal is gated by a platform flag (per club / globally), same as it
-  // was in the main admin sidebar — hidden until a super admin switches it on.
-  const [memberPortalVisible, setMemberPortalVisible] = useState(false)
-  useEffect(() => {
-    let alive = true
-    api.memberPortalStatus()
-      .then(s => { if (alive) setMemberPortalVisible(!!s?.enabled) })
-      .catch(() => {})
-    return () => { alive = false }
-  }, [])
-
-  const nav = navFromGroups(withPortal(memberPortalVisible))
-
-  return (
-    <ModuleLayout moduleName="ClubManager" nav={nav} title={title} actions={actions}>
-      {children}
-    </ModuleLayout>
-  )
+// BetterClubManager stopped being its own surface when it merged into
+// BetterClubhouse — these tools are the People and Club sections of that one
+// sidebar. GROUPS above is still exported because BetterClubManagerHome's
+// ModuleHub reads it; the shell it renders is the merged one.
+export default function BetterClubManagerLayout(props) {
+  return <BetterClubhouseLayout {...props} />
 }

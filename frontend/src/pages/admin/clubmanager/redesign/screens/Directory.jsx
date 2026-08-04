@@ -191,7 +191,7 @@ export default function Directory({ st, patch, narrow }) {
   const removeHours = async (id) => { setBusy(true); try { await api.volunteerDeleteHours(id); await refreshMember(sel.member_id) } finally { setBusy(false) } }
 
   const pill = (active, tone = 'accent') => {
-    const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
+    const on = { accent: ['color-mix(in srgb, var(--pb-accent) 45%, transparent)', 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', C.accent], amber: ['rgba(245,181,66,0.45)', 'rgba(245,181,66,0.12)', C.warn] }[tone]
     return { padding: '5px 11px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: `1px solid ${active ? on[0] : C.hair2}`, background: active ? on[1] : 'transparent', color: active ? on[2] : C.dim }
   }
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
@@ -232,7 +232,7 @@ export default function Directory({ st, patch, narrow }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {list.map(p => (
               <div key={p.key} onClick={() => patch({ dirSel: p.key })}
-                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, cursor: 'pointer', border: p.key === selId ? '1px solid rgba(99,102,241,0.4)' : '1px solid transparent', background: p.key === selId ? 'rgba(99,102,241,0.08)' : 'transparent' }}>
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: 8, cursor: 'pointer', border: p.key === selId ? '1px solid color-mix(in srgb, var(--pb-accent) 40%, transparent)' : '1px solid transparent', background: p.key === selId ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : 'transparent' }}>
                 <Avatar p={p} size={30} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: p.archived ? C.faint : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}{p.archived ? <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em', color: C.warn, border: `1px solid ${C.warn}66`, borderRadius: 3, padding: '1px 4px', marginLeft: 6 }}>ARCHIVED</span> : null}</div>
@@ -284,7 +284,7 @@ export default function Directory({ st, patch, narrow }) {
                 <div style={cap}>ROLES</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                   {(sel.roles || []).map(r => (
-                    <span key={r.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(99,102,241,0.15)', color: C.accent, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                    <span key={r.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
                       <span onClick={() => patch({ dirRole: r.title, dirSeg: 'All' })} style={{ cursor: 'pointer' }}>{r.title}</span>
                       <span onClick={() => removeRole(sel, r.id)} title="Remove role" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
                     </span>
@@ -380,7 +380,7 @@ export default function Directory({ st, patch, narrow }) {
                   <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {overlays.committee.map(c => (
-                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'rgba(99,102,241,0.15)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'rgba(99,102,241,0.45)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
                           {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
                         </span>
                       ))}

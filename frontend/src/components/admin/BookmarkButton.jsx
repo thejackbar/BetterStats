@@ -23,7 +23,9 @@ const BookmarkIcon = ({ filled, size = 16 }) => (
 // header unchanged — the core admin nav and every module surface. `pageLabel` is
 // the name to store when bookmarking the current page; the host layout passes
 // the one it already knows (its page title / nav label).
-export default function BookmarkButton({ pageLabel }) {
+// `drop` — which way the menu opens. Default hangs below (a page header);
+// 'up' is for the module sidebar footer, where below is off-screen.
+export default function BookmarkButton({ pageLabel, drop = 'down' }) {
   const location = useLocation()
   const { bookmarks, isBookmarked, toggle, remove } = useBookmarks(true)
   const [open, setOpen] = useState(false)
@@ -53,7 +55,7 @@ export default function BookmarkButton({ pageLabel }) {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(o => !o)}
-        className="w-8 h-8 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
+        className="w-6 h-6 flex items-center justify-center rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition"
         title="Bookmarks"
         aria-label="Bookmarks"
         aria-haspopup="menu"
@@ -66,7 +68,7 @@ export default function BookmarkButton({ pageLabel }) {
 
       {open && (
         <div
-          className="absolute right-0 mt-2 w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-pb-hairline bg-pb-surface shadow-xl z-50 py-1"
+          className={`absolute w-64 max-h-[70vh] overflow-y-auto rounded-lg border border-pb-hairline bg-pb-surface shadow-xl z-50 py-1 ${drop === 'up' ? 'bottom-full mb-2 left-0' : 'right-0 mt-2'}`}
           role="menu"
         >
           <button

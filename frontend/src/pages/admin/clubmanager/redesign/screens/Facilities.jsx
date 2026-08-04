@@ -134,7 +134,7 @@ export default function Facilities({ st, patch, narrow }) {
               <div style={{ display: 'grid', gridTemplateColumns: '200px repeat(7, minmax(0, 1fr))', position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
                 <div style={{ padding: '9px 14px', borderRight: `1px solid ${C.hair}`, fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest, display: 'flex', alignItems: 'center' }}>FACILITY</div>
                 {DOW.map((d, i) => (
-                  <div key={i} style={{ padding: '9px 11px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 2, background: i >= 5 ? 'rgba(99,102,241,0.05)' : undefined }}>
+                  <div key={i} style={{ padding: '9px 11px', borderRight: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 2, background: i >= 5 ? 'color-mix(in srgb, var(--pb-accent) 5%, transparent)' : undefined }}>
                     <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faint }}>{d.toUpperCase()}</span>
                     <span style={{ fontSize: 12.5, fontWeight: 600, color: C.dim }}>{dates[i]}</span>
                   </div>
@@ -151,7 +151,7 @@ export default function Facilities({ st, patch, narrow }) {
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>{hours.toFixed(0)}h booked</div>
                     </div>
                     {DOW.map((_, d) => (
-                      <div key={d} style={{ position: 'relative', borderRight: `1px solid ${C.hair}`, height: FAC_ROW_H, background: d >= 5 ? 'rgba(99,102,241,0.03)' : undefined }}>
+                      <div key={d} style={{ position: 'relative', borderRight: `1px solid ${C.hair}`, height: FAC_ROW_H, background: d >= 5 ? 'color-mix(in srgb, var(--pb-accent) 3%, transparent)' : undefined }}>
                         {mine.filter(b => b.day === d).map(b => <Block key={b.id} b={b} />)}
                       </div>
                     ))}

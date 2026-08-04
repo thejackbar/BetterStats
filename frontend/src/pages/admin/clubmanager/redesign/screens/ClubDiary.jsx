@@ -18,7 +18,7 @@ function mapFreq(f) {
   return m[(f || '').toLowerCase()] || (f ? f[0].toUpperCase() + f.slice(1) : 'Other')
 }
 const TONE = {
-  done: { fg: '#16c784', label: 'DONE' }, open: { fg: '#6366F1', label: 'IN PROGRESS' },
+  done: { fg: '#16c784', label: 'DONE' }, open: { fg: 'var(--pb-accent)', label: 'IN PROGRESS' },
   overdue: { fg: '#ef5b5b', label: 'OVERDUE' }, blocked: { fg: '#ef5b5b', label: 'BLOCKED' },
   upcoming: { fg: '#5b6072', label: 'NOT STARTED' }, recurs: { fg: '#06b6d4', label: 'RECURS' },
 }
@@ -150,7 +150,7 @@ export default function ClubDiary({ st, patch, narrow }) {
   const trackGrid = `linear-gradient(to right, ${stops.join(', ')})`
 
   const pill = (active, tone = 'accent') => {
-    const on = { accent: ['rgba(99,102,241,0.45)', 'rgba(99,102,241,0.12)', C.accent], red: ['rgba(239,91,91,0.45)', 'rgba(239,91,91,0.12)', C.block] }[tone]
+    const on = { accent: ['color-mix(in srgb, var(--pb-accent) 45%, transparent)', 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', C.accent], red: ['rgba(239,91,91,0.45)', 'rgba(239,91,91,0.12)', C.block] }[tone]
     return { padding: '5px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: `1px solid ${active ? on[0] : C.hair2}`, background: active ? on[1] : 'transparent', color: active ? on[2] : C.dim }
   }
   const clamp = (v) => Math.max(0, Math.min(100, v))
@@ -226,7 +226,7 @@ export default function ClubDiary({ st, patch, narrow }) {
                       const width = hasBar ? Math.max(1.4, clamp((Math.max(1, t.dueDay - t.startDay) / SEASON_DAYS) * 100)) : 0
                       const overBudget = t.spent > t.budget && t.budget > 0
                       return (
-                        <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '330px 1fr', borderBottom: `1px solid ${C.surface2}`, background: st.task === t.id ? 'rgba(99,102,241,0.06)' : 'transparent' }}>
+                        <div key={t.id} style={{ display: 'grid', gridTemplateColumns: '330px 1fr', borderBottom: `1px solid ${C.surface2}`, background: st.task === t.id ? 'color-mix(in srgb, var(--pb-accent) 6%, transparent)' : 'transparent' }}>
                           <div onClick={() => patch({ task: t.id })} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '9px 14px', borderRight: `1px solid ${C.hair}`, cursor: 'pointer', minWidth: 0 }}>
                             <span style={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: tone.fg }} />
                             <div style={{ minWidth: 0, flex: 1 }}>
@@ -237,7 +237,7 @@ export default function ClubDiary({ st, patch, narrow }) {
                             {onCp && <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.1em', padding: '2px 5px', borderRadius: 4, background: 'rgba(239,91,91,0.15)', color: C.block, flexShrink: 0 }}>CP</span>}
                           </div>
                           <div style={{ position: 'relative', height: 42, backgroundImage: trackGrid }}>
-                            {TODAY_DAY >= 0 && TODAY_DAY <= SEASON_DAYS && <div style={{ position: 'absolute', top: 0, bottom: 0, left: (TODAY_DAY / SEASON_DAYS) * 100 + '%', width: 1, background: 'rgba(99,102,241,0.45)' }} />}
+                            {TODAY_DAY >= 0 && TODAY_DAY <= SEASON_DAYS && <div style={{ position: 'absolute', top: 0, bottom: 0, left: (TODAY_DAY / SEASON_DAYS) * 100 + '%', width: 1, background: 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' }} />}
                             {hasBar && (
                               <div onClick={() => patch({ task: t.id })} style={{ position: 'absolute', top: '50%', transform: 'translateY(-50%)', left: left + '%', width: width + '%', height: 20, borderRadius: 5, display: 'flex', alignItems: 'center', padding: '0 6px', overflow: 'hidden', cursor: 'pointer',
                                 ...(t.recurs ? { backgroundImage: `repeating-linear-gradient(90deg, ${tone.fg}55 0 6px, transparent 6px 12px)`, border: `1px dashed ${tone.fg}66` } : { background: `color-mix(in srgb, ${tone.fg} 22%, transparent)`, border: `1px solid ${onCp ? tone.fg : `color-mix(in srgb, ${tone.fg} 45%, transparent)`}` }),

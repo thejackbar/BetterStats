@@ -1,5 +1,104 @@
 # BetterStats — Claude Session Notes
 
+## BetterAdmin → BetterClubhouse: four sub-modules merged into one (v9.3.0, Aug 2026)
+
+BetterFees, BetterComms, BetterMerch and BetterClubManager shared a codebase but
+not a design language, and duplicated three person lists, two money ledgers, two
+Square connections and three reports surfaces. They are now **one module,
+BetterClubhouse**, on the old BetterAdmin amber. Handoff:
+**`docs/design_handoff_betterclubhouse/`** (`README.md` is the spec,
+`BetterClubhouse.dc.html` the prototype, `BetterAdmin Review.dc.html` the why,
+`PROJECT_RULES.md` the scope rule below).
+
+- **The `admin` key is unchanged.** Only display names moved —
+  `MODULE_GROUPS.admin.name`, `moduleBrand('admin').name` and the backend
+  `BILLABLE_MODULE_NAMES[admin]` read "BetterClubhouse". Entitlement, billing,
+  `org_module_subscriptions` and every stored row still key on `admin` /
+  `fees|comms|merch|crm`. **Two things deliberately still say BetterAdmin**: the
+  public marketing site (incl. the `/modules/betteradmin` URL, its SEO/OG
+  metadata and the dated blog articles) and `billing_pricing.py` / `pricing.js`,
+  which are a hand-synced pair feeding Stripe Product creation — an existing
+  Stripe Product keeps its old name until it's renamed in the dashboard. Both
+  are commercial calls, not design ones.
+- **`components/admin/ModuleLayout.jsx` is the shell for every module surface**
+  and now carries the whole design: 232px sidebar (not 240), club identity +
+  season line, module lockup (the `← Back to admin` link is gone), grouped nav
+  with count badges, and — the load-bearing decision — the **module switcher,
+  account and bookmarks in the sidebar FOOTER**, which frees the sticky screen
+  header for title + mono caption + `?` + filters + stat readouts + one primary
+  action. New optional props: `caption`, `onHelp`, `filters`, `stats`, `bare`
+  (screen owns its padding), `hideHeader` (screen draws its own — the
+  transitional escape hatch the promoted ClubManager screens use). **One
+  breakpoint for the module: `lg` (1024px)**, sidebar becomes a drawer below it.
+- **`components/admin/ui.jsx` is the one admin UI language** — Button,
+  TextInput/Select/Field/SearchInput, FilterPill, StatCard, StatReadout,
+  Caption/FieldLabel/StatLabel, AttentionRow, TableWrap/TableHead/TableRow/
+  TableFootRow/Cell, Badge, Chip, Initials, ListRow, Drawer, Toast, Note,
+  HelpDot. **Use these instead of writing a local copy** (that's what produced
+  the four divergent sets). Two rules: mono is for labels and figures only,
+  never buttons/headings/body; and text on an accent fill is `ON_ACCENT`
+  (`#0a0d14`), one answer everywhere. Accent tints come from `TINT` (color-mix,
+  NOT `rgba(var(--pb-accent-rgb), α)` — that var is space-separated and the
+  comma-form rgba can't parse it).
+- **`--pb-accent-ink`** (theme.css) is the accent as *text*, darkened on light
+  so amber stays legible on white. It's derived from whatever `--pb-accent`
+  resolves to **on the element it's computed on**, so any surface that
+  re-points `--pb-accent` must also carry **`.pb-ink`** (ModuleLayout's root
+  does). `--pb-positive-ink` / `--pb-red-ink` are the same idea, static.
+  `.pb-card` radius went 6px → 10px, which moves most of the app onto the new
+  scale in one change.
+- **`BetterClubhouseLayout`** owns the merged nav: six capability-gated groups
+  (People / Money / Stock / Comms / Club / Setup) with `Today` above the first
+  heading. Items carry `cap` (a capability, or an array meaning any-of),
+  `module` (one of the umbrella's paid keys — the whole group disappears for a
+  club that doesn't hold it) and `super` (the ClubManager screens, still on demo
+  data and still `requireRole="super_admin"` in App.jsx). **The four old layouts
+  are thin wrappers over it now**, which is how every existing screen inherited
+  the shell without being rewritten. `BetterMerchLayout` still owns the
+  storefront flag and passes `storefront` down.
+- **Counts are computed once**: `pages/admin/clubhouse/data.js`'s
+  `useClubhouseData` (module-level cache, 60s TTL) + `deriveCounts` feed the
+  sidebar badge, the Today row, the Accounts KPI and the Reports figures from
+  the same fetch. **Don't denormalise these** — if issuing a shirt changes a
+  balance, all of them have to move together.
+- **New screens** (`pages/admin/clubhouse/`): `ClubhouseToday` (the front door —
+  aggregates money/stock/comms, omits a row whose count is zero),
+  `ClubhouseAudiences` (replaces Contacts + Lists + Segments; both
+  `/admin/comms/segments` and `/admin/comms/lists` now redirect here),
+  `ClubhouseIntegrations` (Square + Xero + email sending, each linking to the
+  screen that owns the setup), `ClubhouseReports` (source selector),
+  `ClubhouseSettings` (the screen-introduction flag).
+- **Screen introductions** (`clubhouse/intro.jsx`): `'always' | 'once' | 'never'`,
+  **per person** (localStorage per user id), default `once`. Today never gets
+  one; a deep link (`navigate(to, { state: { skipIntro: true } })` — every Today
+  action uses it) always skips AND marks seen; the `?` reopens on demand in every
+  mode. `useScreenIntro` decides **once at mount** in a state initialiser —
+  deriving it live flashes the page for one frame, because marking the screen
+  seen re-renders it away.
+- **The indigo is retired.** Every `#6366F1` / `rgba(99,102,241,α)` in
+  `pages/admin/clubmanager/` became `var(--pb-accent)` / `color-mix`, and
+  `MODULE_BRAND.clubmanager` is gone (aliased to `admin`). `ClubManagerApp`
+  dropped its own 232px sidebar and renders inside `BetterClubhouseLayout`
+  (`bare hideHeader`); its screen comes from the route via `initialScreen`,
+  synced by an effect because React can reuse the component across two routes.
+- **⚠ BetterComms scope rule — hard, not a preference.** Club scope reads the
+  club's own people; Super Admin scope is BetterCricket's sales telemetry
+  against the Clubs Directory. **Never expose the Super Admin fields, context
+  bar or copy in a club build** — not behind a dropdown, not greyed out, not
+  listed and disabled. Enforced structurally: `segmentFields.jsx` exports
+  `CLUB_FIELD_DEFS` (imported by Audiences) and `DIRECTORY_FIELD_DEFS` (imported
+  ONLY by `SuperDirectoryAudiences`, `/admin/super/directory-audiences`), with
+  no runtime context switch to get it wrong; `CommsContextBar` no longer renders
+  in the club layout. Apply the same rule to any future module that gains a
+  platform-side mode.
+- **Not done, and it's the real work**: step 4 of the handoff's sequencing —
+  joining the data. The Directory is still not the one person list (Fees
+  members, Comms contacts and the ClubManager directory remain three), and a
+  member still has a fee balance and a merch balance rather than one account.
+  Accounts, Directory and Inventory therefore keep their existing data layers;
+  only their shell, language and naming changed. The BetterClubhouse **logo mark
+  also does not exist yet** — the lockup currently reuses `betteradmin.svg`.
+
 ## Multi-sport: the AFL silo (Aug 2026)
 
 **One codebase, per-sport operational silos.** BetterStats now also serves AFL

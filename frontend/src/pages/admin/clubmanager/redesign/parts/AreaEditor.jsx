@@ -10,7 +10,7 @@ import { C, MONO } from '../ui'
 // secondary tab (see AreasRoles).
 
 const DOW = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const SWATCHES = ['#f5b542', '#f97316', '#3b82f6', '#06b6d4', '#16c784', '#a855f7', '#6366F1', '#ef5b5b']
+const SWATCHES = ['#f5b542', '#f97316', '#3b82f6', '#06b6d4', '#16c784', '#a855f7', 'var(--pb-accent)', '#ef5b5b']
 const fmtHour = (h) => { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); if (hh >= 24) return '12am'; let b = hh % 12; if (b === 0) b = 12; return b + (mm ? ':' + String(mm).padStart(2, '0') : '') + (hh >= 12 ? 'pm' : 'am') }
 
 const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '7px 10px', color: C.text, fontSize: 13, outline: 'none', width: '100%' }
@@ -139,7 +139,7 @@ export default function AreaEditor() {
             <div key={a.id}
               onDragOver={e => { if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== a.id) setOverId(a.id) } }}
               onDrop={e => { e.preventDefault(); move(dragId, a.id) }}
-              style={{ background: C.surface, border: `1px solid ${isOver ? C.accent : C.hair}`, borderRadius: 9, padding: '13px 15px', boxShadow: isOver ? 'inset 0 2px 0 #6366F1' : undefined, opacity: dragId === a.id ? 0.5 : 1 }}>
+              style={{ background: C.surface, border: `1px solid ${isOver ? C.accent : C.hair}`, borderRadius: 9, padding: '13px 15px', boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : undefined, opacity: dragId === a.id ? 0.5 : 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(a.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }} title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: a.color || C.accent, flexShrink: 0 }} />
@@ -152,7 +152,7 @@ export default function AreaEditor() {
               <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, margin: '6px 0 0' }}>{[a.required_role_name, a.required_qualification_name ? 'must hold ' + a.required_qualification_name : null].filter(Boolean).join(' · ') || 'Any role · no qualification'}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 9 }}>
                 {(a.patterns || []).map(p => (
-                  <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: MONO, fontSize: 9.5, padding: '3px 5px 3px 7px', borderRadius: 5, background: `color-mix(in srgb, ${a.color || '#6366F1'} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${a.color || '#6366F1'} 35%, transparent)`, color: a.color || '#6366F1' }}>
+                  <span key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: MONO, fontSize: 9.5, padding: '3px 5px 3px 7px', borderRadius: 5, background: `color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 12%, transparent)`, border: `1px solid color-mix(in srgb, ${a.color || 'var(--pb-accent)'} 35%, transparent)`, color: a.color || 'var(--pb-accent)' }}>
                     {DOW[p.day_of_week]} {fmtHour(p.start_time)}–{fmtHour(p.end_time)}{p.headcount > 1 ? ' ×' + p.headcount : ''}
                     {open && <span onClick={() => delPattern(p.id)} title="Remove" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 12 }}>×</span>}
                   </span>
