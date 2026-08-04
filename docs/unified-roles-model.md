@@ -90,7 +90,7 @@ BetterStats `player_achievements` → holdings:
 |---|---|---|
 | Executive Committee | governance | Office Bearer |
 | General Committee | governance | Committee Member |
-| Captains | **playing** (derived — see §5) | Captain |
+| Captains | **playing** — a MANUAL season appointment (see §5) | Captain (team encoded in the name, e.g. "1st XI Captain") |
 | Coaches | operational | Coach |
 | Other Roles | operational / other | (match by name, else Other) |
 
@@ -137,21 +137,36 @@ operational; the engagement basis is captured separately later.)
   a holding.
 - Directory/committee assignment (built this session) repoints to holdings.
 
-**Phase 5 — derived playing holdings from PlayHQ.**
-- Captain/Vice-Captain (and Player) holdings are **derived** from the sync
-  (season-nominated per team, plus per-match captain from the scorecard), written
-  with `source='derived'`, read-only. The honour board unions manual + derived;
-  BetterClubManager administers only manual holdings. No hand-entered captaincy.
+**Phase 5 — surface per-match captaincy alongside the manual season-captain holding.**
+- Season/team captains are **manual** holdings (§5), assigned pre-season and
+  editable — not derived, because the appointment exists before any match lineup
+  is posted. Per-match captaincy already lives in the data
+  (`game_appearances.is_captain`, sourced from PlayHQ); surface it next to the
+  season holding as read-only match fact. Derived per-match data **never
+  overwrites** the manual season appointment.
 
 ---
 
-## 5. Captain / playing roles (derived, not administered)
+## 5. Captain / playing roles (manual appointment + separate per-match fact)
 
-PlayHQ owns captaincy: a per-team season nomination that can change through the
-season, plus a per-match captain when the nominated skipper doesn't play. So
-playing-classification holdings are produced by the sync (`source='derived'`),
-never hand-entered, and are read-only in both modules. This keeps a single source
-of truth and stops BetterClubManager duplicating what the feed already has.
+Two distinct things, and neither overrides the other:
+
+- **Season/team captain = a MANUAL holding.** Clubs decide captains at the AGM or
+  before the season starts — *before* any match lineup exists in PlayHQ — so the
+  appointment cannot wait on, or be derived from, match data. It is assigned in
+  BetterCricket like any other appointment (`source='manual'`), is editable, and
+  can change through the season (re-nomination). Captaincy is team-specific
+  (1st XI, 2nd XI, Women's…); pragmatically the team is encoded in the role name
+  ("1st XI Captain"), as BetterStats already does, until formal team-scoping (§8).
+- **Per-match captain = a DERIVED fact from PlayHQ.** Who actually captained a
+  given match already lives in `game_appearances.is_captain`. It is read-only
+  match data, surfaced *alongside* the season holding. When a nominated season
+  captain misses a match and another player captains that game, **both** are true
+  and shown: the manual season appointment (unchanged) and the derived per-match
+  captain for that game. The derived record never rewrites the appointment.
+
+So captaincy is not "derived instead of managed" — the season role is managed
+(manual holding), and the per-match record is derived context on top.
 
 ---
 
@@ -186,3 +201,10 @@ Reporting line; team-scoping of roles (First XI / Women's / Juniors) as a
 person-role-team triple; per-role voting-rights/constitutional workflow. All are
 additive columns/tables on the same structure later — none change the shared
 spine, so deferring them costs nothing in seamlessness.
+
+**Team-scoping is genuinely needed for captains** (and coaches/managers), but the
+interim is pragmatic: encode the team in the role name ("1st XI Captain",
+"Women's Coach"), exactly as BetterStats already does on the honour board. When
+formal team-scoping lands, a `team_id` on the holding replaces the naming
+convention without disturbing the shared structure — and the per-match captain
+fact (§5) is already team-aware via the game it belongs to.
