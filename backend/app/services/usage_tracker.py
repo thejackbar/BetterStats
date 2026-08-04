@@ -39,6 +39,64 @@ _GEO_LOOKUP_TIMEOUT = 3.0
 # (private/loopback markers Cloudflare uses).
 _GEO_SKIP_COUNTRIES = {"XX", "T1"}
 
+# ip_hashes with an ip-api.com lookup in flight right now. A visitor's first
+# few events land within milliseconds of each other — all before the lookup
+# that fills _GEO_CACHE has returned — so without this every one of them fires
+# its own lookup AND its own backfill UPDATE against the same set of rows.
+_GEO_INFLIGHT: set[str] = set()
+
+# How far back the post-lookup backfill reaches. Its job is only to catch the
+# rows that landed while the lookup was in flight (a second or two), so an hour
+# is already generous. It used to be unbounded, which meant re-visiting every
+# row this IP had ever written — most of them rows that had already failed
+# enrichment and would fail again — on every fresh lookup.
+_GEO_BACKFILL_WINDOW = "1 hour"
+
+# Ceiling on how many background tracking writes may hold a DB connection at
+# once. Breadcrumbs are fire-and-forget and unbounded in number (one per
+# request via the middleware, plus a heartbeat per open tab every ~25s), and
+# each one opens its own session. With no ceiling, a burst of traffic drains
+# the SQLAlchemy pool out from under real requests — which is how
+# /club-admin/usage/geo came to fail on "QueuePool limit of size 20 overflow
+# 30 reached" before its handler ever ran (the timeout hit in get_current_user).
+# Tracking is the lowest-value user of a connection, so it gets a small slice.
+_DB_SLOTS = asyncio.Semaphore(6)
+
+# Beyond this many breadcrumbs waiting on a slot we drop rather than queue: a
+# lost breadcrumb is invisible, a backlog that outlives the burst is not.
+_MAX_PENDING = 500
+_pending = 0
+
+# asyncio only holds a weak reference to a task, so a fire-and-forget one can
+# be garbage-collected mid-flight. Keep a strong ref until it finishes.
+_BG_TASKS: set = set()
+
+
+async def _guard(coro) -> None:
+    """Swallow anything that escapes a background tracking coroutine. Without
+    this an escaped error surfaces as asyncio's "Task exception was never
+    retrieved" dump — noise from a subsystem whose whole contract is that it
+    never disturbs the request it fired alongside."""
+    try:
+        await coro
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001
+        logger.debug(f"usage_tracker: background task failed ({e})")
+
+
+def _spawn(coro) -> bool:
+    """Fire a background coroutine, keeping a strong reference. False if
+    there's no running loop (a sync context — nothing to schedule on)."""
+    try:
+        task = asyncio.get_running_loop().create_task(_guard(coro))
+    except RuntimeError:
+        coro.close()
+        return False
+    _BG_TASKS.add(task)
+    task.add_done_callback(_BG_TASKS.discard)
+    return True
+
 
 def hash_ip(ip: Optional[str]) -> Optional[str]:
     if not ip:
@@ -194,7 +252,7 @@ async def record_event(
     ) if event_type == "page_view" else None
 
     try:
-        async with async_session_maker() as session:
+        async with _DB_SLOTS, async_session_maker() as session:
             result = await session.execute(
                 text(
                     """
@@ -259,15 +317,21 @@ async def record_event(
         return
 
     # Schedule a follow-up city/region lookup if we have an IP, haven't
-    # cached it yet, and the country isn't a private marker. Updates the
-    # row we just wrote.
-    if ip and ip_h and row_id and not cached and (country or "").upper() not in _GEO_SKIP_COUNTRIES:
-        try:
-            asyncio.get_running_loop().create_task(
-                _enrich_geo(ip=ip, ip_hash=ip_h, row_id=row_id, country=country)
-            )
-        except RuntimeError:
-            pass
+    # cached it yet, no lookup for this IP is already running, and the country
+    # isn't a private marker. Updates the row we just wrote.
+    #
+    # Re-read the cache here rather than reusing `cached` from the top of the
+    # function: that value was captured before the insert waited on a DB slot,
+    # so by now another event's lookup for this same IP may well have landed.
+    # Trusting the stale read means every burst fires a fresh round of
+    # redundant lookups the moment the in-flight one clears.
+    if (ip and ip_h and row_id
+            and ip_h not in _GEO_CACHE
+            and ip_h not in _GEO_INFLIGHT
+            and (country or "").upper() not in _GEO_SKIP_COUNTRIES):
+        _GEO_INFLIGHT.add(ip_h)
+        if not _spawn(_enrich_geo(ip=ip, ip_hash=ip_h, row_id=row_id, country=country)):
+            _GEO_INFLIGHT.discard(ip_h)
 
     # CRM — event-driven check (no periodic sweep anywhere) for the
     # score-based Target/Contacted -> Engaged rule (crm.py). Skip an
@@ -277,16 +341,16 @@ async def record_event(
     # its site instead); crm.check_web_signal_promotion's own two gates
     # (resolve a club at all, then does it even have an open early-stage
     # deal) filter out virtually everything else before doing any real work.
-    if not (user_id and path and path.split("?", 1)[0].lower().startswith("/admin")):
-        try:
-            from app.services.crm import check_web_signal_promotion
-            asyncio.get_running_loop().create_task(
-                check_web_signal_promotion(
-                    org_id=org_id, utm_id=utm_id, utm_source=utm_source,
-                    path=path, user_id=user_id, event_id=row_id)
-            )
-        except RuntimeError:
-            pass
+    # A heartbeat is skipped too: it's a "still here" ping for a page whose own
+    # page_view already fired this check moments earlier, carrying no
+    # attribution of its own. Running it per heartbeat means a session and a
+    # club resolution every ~25s per open tab for a signal already counted.
+    if event_type != "heartbeat" and not (
+            user_id and path and path.split("?", 1)[0].lower().startswith("/admin")):
+        from app.services.crm import check_web_signal_promotion
+        _spawn(check_web_signal_promotion(
+            org_id=org_id, utm_id=utm_id, utm_source=utm_source,
+            path=path, user_id=user_id, event_id=row_id))
 
 
 async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[str]) -> None:
@@ -296,7 +360,17 @@ async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[s
     non-commercial use. Endpoint: http://ip-api.com/json/{ip}. lat/lon are
     the geolocation database's own city-centroid coordinates — the same
     precision ceiling as regionName/city, never street-level.
+
+    Always clears its own _GEO_INFLIGHT entry, including on the early returns —
+    leaving one set would permanently block re-lookup of that IP.
     """
+    try:
+        await _enrich_geo_inner(ip=ip, ip_hash=ip_hash, row_id=row_id, country=country)
+    finally:
+        _GEO_INFLIGHT.discard(ip_hash)
+
+
+async def _enrich_geo_inner(*, ip: str, ip_hash: str, row_id: int, country: Optional[str]) -> None:
     empty = {"country": country, "region": None, "city": None, "lat": None, "lng": None}
     try:
         async with httpx.AsyncClient(timeout=_GEO_LOOKUP_TIMEOUT) as client:
@@ -337,34 +411,60 @@ async def _enrich_geo(*, ip: str, ip_hash: str, row_id: int, country: Optional[s
     _GEO_CACHE[ip_hash] = {"country": cc, "region": region, "city": city, "lat": lat, "lng": lng}
 
     try:
-        async with async_session_maker() as session:
+        async with _DB_SLOTS, async_session_maker() as session:
             # Backfill this row plus any other rows with the same IP hash
             # that landed before the lookup finished — they all share
             # location.
+            #
+            # Both bounds matter. The created_at window keeps this to the
+            # handful of rows the lookup raced, and rides the (ip_hash,
+            # created_at) index; unbounded, it re-examined every row this IP
+            # had ever written. usage_events is append-only with no retention
+            # job, so on an unindexed column that was a full table scan per
+            # newly-seen IP, holding a connection and row locks for the
+            # duration — the pileup that drained the connection pool. The
+            # id = :row_id arm guarantees the triggering row is always covered
+            # even if the clock or the window ever disagrees.
             await session.execute(
                 text(
-                    """
+                    f"""
                     UPDATE usage_events
                     SET country = COALESCE(:country, country),
                         region  = COALESCE(:region,  region),
                         city    = COALESCE(:city,    city),
                         lat     = COALESCE(:lat,     lat),
                         lng     = COALESCE(:lng,     lng)
-                    WHERE ip_hash = :ip_hash
-                      AND (region IS NULL OR city IS NULL)
+                    WHERE (region IS NULL OR city IS NULL)
+                      AND (
+                        id = :row_id
+                        OR (ip_hash = :ip_hash
+                            AND created_at >= NOW() - INTERVAL '{_GEO_BACKFILL_WINDOW}')
+                      )
                     """
                 ),
-                {"country": cc, "region": region, "city": city, "lat": lat, "lng": lng, "ip_hash": ip_hash},
+                {"country": cc, "region": region, "city": city, "lat": lat,
+                 "lng": lng, "ip_hash": ip_hash, "row_id": row_id},
             )
             await session.commit()
     except Exception as e:  # noqa: BLE001
         logger.debug(f"usage_tracker: geo backfill update failed: {e}")
 
 
-def record_event_bg(**kwargs) -> None:
-    """Schedule record_event without awaiting it."""
+async def _record_event_counted(**kwargs) -> None:
+    global _pending
     try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
+        await record_event(**kwargs)
+    finally:
+        _pending -= 1
+
+
+def record_event_bg(**kwargs) -> None:
+    """Schedule record_event without awaiting it. Drops the breadcrumb rather
+    than queueing it once _MAX_PENDING are already waiting on a DB slot."""
+    global _pending
+    if _pending >= _MAX_PENDING:
+        logger.debug("usage_tracker: breadcrumb dropped, %s already pending", _pending)
         return
-    loop.create_task(record_event(**kwargs))
+    _pending += 1
+    if not _spawn(_record_event_counted(**kwargs)):
+        _pending -= 1
