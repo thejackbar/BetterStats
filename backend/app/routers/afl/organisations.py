@@ -17,10 +17,15 @@ async def get_results(org_id: uuid.UUID,
                       season_id: Optional[uuid.UUID] = None,
                       grade_id: Optional[uuid.UUID] = None,
                       finals_only: bool = False,
+                      include_upcoming: bool = False,
                       limit: int = Query(50, le=200),
                       offset: int = 0,
                       db: AsyncSession = Depends(get_db)):
+    # Results are played games; upcoming fixtures have their own dashboard
+    # section (pass include_upcoming=true to get the whole season list).
     clauses = ["s.organisation_id = :org"]
+    if not include_upcoming:
+        clauses.append("d.status = 'FINAL'")
     params: dict = {"org": str(org_id), "lim": limit, "off": offset}
     if season_id:
         clauses.append("s.id = :season")
