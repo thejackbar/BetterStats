@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="BetterSelect">
+  <defs>
+    <linearGradient id="selectTile" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4f8df7"></stop>
+      <stop offset="1" stop-color="#1d4ed8"></stop>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="15" fill="url(#selectTile)"></rect>
+  <rect x="2.5" y="2.5" width="59" height="59" rx="14.5" fill="none" stroke="#ffffff" stroke-opacity="0.16"></rect>
+  
+  <circle cx="28" cy="23" r="8" fill="#ffffff"></circle>
+  <path d="M14 48 a14 12 0 0 1 28 0 Z" fill="#ffffff"></path>
+  <circle cx="46.5" cy="44.5" r="9" fill="#ffffff" stroke="#1d4ed8" stroke-width="3"></circle>
+  <path d="M42 44.8 l3 3 l5.8 -6.6" fill="none" stroke="#1d4ed8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
