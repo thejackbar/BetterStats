@@ -11,6 +11,9 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
 const DIR_SEGS = ['All', 'Player', 'Volunteer', 'Committee', 'Parent', 'Third party']
+// Stored as full day names, matching what the Volunteers screen has always
+// written and what services/roster.day_index reads back tolerantly.
+const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const CATS = [
   { value: 'volunteer', label: 'Volunteer' },
   { value: 'parent', label: 'Parent' },
@@ -86,7 +89,8 @@ export default function Directory({ st, patch, narrow }) {
     api.qualListMemberQualifications(memberId).catch(() => []),
     api.volunteerListHours(memberId).catch(() => []),
     api.dirMemberOverlays(memberId).catch(() => ({ committee: [], families: [] })),
-  ]).then(([qRes, hRes, oRes]) => {
+    api.volunteerProfile(memberId).catch(() => null),
+  ]).then(([qRes, hRes, oRes, pRes]) => {
     const quals = (Array.isArray(qRes) ? qRes : (qRes?.qualifications || qRes?.items || [])).map(x => ({
       id: x.id, name: x.type_name || x.name || x.qualification_name || 'Qualification',
       expiry: x.expires_at || x.expiry || null,
@@ -99,7 +103,12 @@ export default function Directory({ st, patch, narrow }) {
     })
     const hours = Object.entries(byAct).sort((a, b) => b[1] - a[1])
     const overlays = { committee: oRes?.committee || [], families: oRes?.families || [], shifts_this_week: oRes?.shifts_this_week || 0, diary_open: oRes?.diary_open || 0 }
-    setDetail(d => ({ ...d, [memberId]: { quals, hours, hoursRaw: raw, overlays } }))
+    const profile = {
+      available_days: pRes?.available_days || [],
+      roles_interested: pRes?.roles_interested || [],
+      lives_nearby: !!pRes?.lives_nearby,
+    }
+    setDetail(d => ({ ...d, [memberId]: { quals, hours, hoursRaw: raw, overlays, profile } }))
   })
   useEffect(() => {
     if (!sel || !sel.member_id || detail[sel.member_id]) return
@@ -111,6 +120,7 @@ export default function Directory({ st, patch, narrow }) {
   const hours = det?.hours || []
   const overlays = det?.overlays || { committee: [], families: [], shifts_this_week: 0, diary_open: 0 }
   const hoursRaw = det?.hoursRaw || []
+  const profile = det?.profile || { available_days: [], roles_interested: [], lives_nearby: false }
   // Re-fetch this member's detail directly (not via the select effect, which
   // won't re-run for the same member_id) and refresh the people list.
   const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
@@ -148,6 +158,32 @@ export default function Directory({ st, patch, narrow }) {
       await reload(); patch({ dirSel: memberId })
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
+  // The volunteer profile — when they can help, what they would help with,
+  // whether they live close enough for a short-notice call. Saved a field at a
+  // time; the endpoint leaves anything it is not sent alone.
+  const saveProfile = async (p, patchFields) => {
+    if (!p.member_id) return
+    setBusy(true)
+    try {
+      await api.volunteerUpsertProfile({ member_id: p.member_id, ...patchFields })
+      await refreshMember(p.member_id)
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const toggleDay = (p, day) => {
+    const cur = profile.available_days || []
+    const next = cur.includes(day) ? cur.filter(d => d !== day) : [...cur, day]
+    saveProfile(p, { available_days: DAY_KEYS.filter(d => next.includes(d)) })
+  }
+  const addInterest = (p, text) => {
+    const t = (text || '').trim()
+    if (!t) return
+    const cur = profile.roles_interested || []
+    if (cur.some(x => x.toLowerCase() === t.toLowerCase())) return
+    saveProfile(p, { roles_interested: [...cur, t] })
+  }
+  const removeInterest = (p, text) =>
+    saveProfile(p, { roles_interested: (profile.roles_interested || []).filter(x => x !== text) })
+
   const removeRole = async (p, roleId) => {
     if (!p.member_id) return
     setBusy(true); try { await api.dirRemoveRole(p.member_id, roleId); await reload() } finally { setBusy(false) }
@@ -378,6 +414,64 @@ export default function Directory({ st, patch, narrow }) {
                     )}
                   </>
                 ) : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assign a role first to log hours.</div>}
+              </section>
+
+              {/* Availability lives here rather than on a separate screen: it is
+                  the thing you want to change at the moment you notice it is
+                  wrong, which is while you are looking at the person. Each
+                  control saves on its own — there is no Save button to miss. */}
+              <section>
+                <div style={cap}>AVAILABILITY</div>
+                {!sel.member_id ? (
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>Assign a role first to record availability.</div>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {DAY_KEYS.map(d => {
+                        const on = (profile.available_days || []).includes(d)
+                        return (
+                          <button key={d} disabled={busy} onClick={() => toggleDay(sel, d)}
+                            title={on ? `Available ${d}` : `Not available ${d}`}
+                            style={{ padding: '4px 9px', borderRadius: 999, fontSize: 12, cursor: 'pointer',
+                              border: `1px solid ${on ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`,
+                              background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent',
+                              color: on ? C.accent : C.dim }}>{d.slice(0, 3)}</button>
+                        )
+                      })}
+                    </div>
+                    {(profile.available_days || []).length === 0 && (
+                      <div style={{ fontSize: 12.5, color: C.faint, marginTop: 7 }}>
+                        No days set, so the roster will not offer them for a shift.
+                      </div>
+                    )}
+
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer', fontSize: 13, color: C.dim }}>
+                      <input type="checkbox" disabled={busy} checked={!!profile.lives_nearby}
+                        onChange={e => saveProfile(sel, { lives_nearby: e.target.checked })} />
+                      Lives nearby
+                      <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>· can help at short notice</span>
+                    </label>
+
+                    <div style={{ ...cap, marginTop: 14 }}>WOULD ALSO HELP WITH</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
+                      {(profile.roles_interested || []).map(r => (
+                        <span key={r} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: `1px solid ${C.hair2}`, color: C.dim, borderRadius: 999, padding: '3px 6px 3px 10px', fontSize: 12 }}>
+                          {r}
+                          <span onClick={() => removeInterest(sel, r)} title="Remove" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        </span>
+                      ))}
+                      {(profile.roles_interested || []).length === 0 && (
+                        <span style={{ fontSize: 12.5, color: C.faint }}>Nothing noted.</span>
+                      )}
+                    </div>
+                    <input placeholder="Anything they have offered to do…" disabled={busy}
+                      onKeyDown={e => { if (e.key === 'Enter') { addInterest(sel, e.currentTarget.value); e.currentTarget.value = '' } }}
+                      style={{ ...inp, marginTop: 8 }} />
+                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 5 }}>
+                      Free text, and theirs not yours — what this person said they would do, not what the club needs.
+                    </div>
+                  </>
+                )}
               </section>
 
               <section>

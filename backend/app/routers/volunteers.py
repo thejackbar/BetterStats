@@ -35,9 +35,14 @@ async def directory(_: User = _require, club: Organisation = Depends(get_current
 
 class ProfileUpsert(BaseModel):
     member_id: str
-    roles_interested: List[str] = []
-    available_days: List[str] = []
-    lives_nearby: bool = False
+    # All optional and defaulting to None so a caller can send ONE field and
+    # leave the rest alone. They used to default to empty/false, which meant a
+    # partial save silently wiped whatever it did not mention — safe only while
+    # the single screen that wrote them always sent everything. The Directory
+    # now edits these too, one section at a time.
+    roles_interested: Optional[List[str]] = None
+    available_days: Optional[List[str]] = None
+    lives_nearby: Optional[bool] = None
     notes: Optional[str] = None
     # Assigned ClubRole ids (the volunteer's roles). None = leave unchanged.
     role_ids: Optional[List[str]] = None
@@ -57,6 +62,22 @@ async def upsert_profile(data: ProfileUpsert, _: User = _require, club: Organisa
     out = volunteers_service._profile_dict(p)
     out["role_ids"] = await volunteers_service.member_role_ids(db, club.id, member.id)
     await db.commit()
+    return out
+
+
+@router.get("/members/{member_id}/profile")
+async def get_profile(member_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                      db: AsyncSession = Depends(get_db)):
+    """One member's volunteer profile — availability, what they would help with,
+    whether they live nearby. Returns the empty shape rather than 404ing when a
+    member has no profile yet, so a screen can render the editor either way."""
+    member = await _member_or_404(db, club, member_id)
+    p = await volunteers_service.get_profile(db, club.id, member.id)
+    if p is None:
+        return {"member_id": str(member.id), "roles_interested": [], "available_days": [],
+                "lives_nearby": False, "notes": None, "exists": False}
+    out = volunteers_service._profile_dict(p)
+    out["exists"] = True
     return out
 
 

@@ -436,6 +436,7 @@ export const api = {
   volunteerDirectory: () => request('/club-admin/volunteers/directory'),
   volunteerUpsertProfile: (data) =>
     request('/club-admin/volunteers/profiles', { method: 'POST', body: JSON.stringify(data) }),
+  volunteerProfile: (memberId) => request(`/club-admin/volunteers/members/${memberId}/profile`),
   volunteerListHours: (memberId) => request(`/club-admin/volunteers/members/${memberId}/hours`),
   volunteerLogHours: (data) =>
     request('/club-admin/volunteers/hours', { method: 'POST', body: JSON.stringify(data) }),
