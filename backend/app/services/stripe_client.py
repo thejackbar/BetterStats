@@ -30,6 +30,33 @@ class StripeNotConfigured(RuntimeError):
     Callers should turn this into a clean 400/503, never a raw SDK traceback."""
 
 
+# Stripe caps Coupon.name at 40 characters and rejects the whole create call
+# with a 400 when it's longer ("Invalid string: ...; must be at most 40
+# characters"). Every coupon name below is composed from live values — a
+# dollar amount, a club's own code — so it has to be built to a budget rather
+# than written out and hoped for. Found live: a bundle discount stacked with
+# a club's code produced a 51-character name, so EVERY such checkout 400'd
+# before the Checkout Session was ever created.
+_COUPON_NAME_MAX = 40
+
+
+def _clamp_coupon_name(name: str) -> str:
+    """Last line of defence — the builders below already fit their budget, so
+    this only ever bites on an unusually long club-chosen display name."""
+    return name if len(name) <= _COUPON_NAME_MAX else name[:_COUPON_NAME_MAX].rstrip()
+
+
+def _combined_coupon_name(bundle_dollars: float, coupon_code: str, coupon_dollars: float) -> str:
+    """"Bundle $146.00 + BENSCARBS $149.00" — both components named within the
+    40-character budget. The two dollar figures are the load-bearing part (a
+    club reading its Stripe invoice wants to see what came off and why), so a
+    long code gives up characters first rather than pushing the name over."""
+    prefix = f"Bundle ${bundle_dollars:.2f} + "
+    suffix = f" ${coupon_dollars:.2f}"
+    budget = max(_COUPON_NAME_MAX - len(prefix) - len(suffix), 0)
+    return _clamp_coupon_name(f"{prefix}{coupon_code[:budget]}{suffix}")
+
+
 def _require_configured() -> None:
     if not settings.stripe_configured:
         raise StripeNotConfigured("Stripe is not configured (STRIPE_SECRET_KEY/STRIPE_PUBLISHABLE_KEY unset)")
@@ -121,8 +148,9 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
     amount, which already accounts for that scoping. Since Stripe genuinely
     can't show two separate discount lines within this one-slot limit, the
     combined coupon's ``name`` spells out both components (e.g. "Bundle
-    discount ($48.00) + EARLYBIRD-JUL26 ($162.25 off)") — the best available
-    approximation of itemisation on the Stripe invoice itself.
+    $48.00 + EARLYBIRD $162.25") — the best available approximation of
+    itemisation on the Stripe invoice itself, built to Stripe's 40-character
+    Coupon.name cap by _combined_coupon_name.
     ``extra_coupon_code`` (the human-entered code, not the Stripe id) drives
     that name and is also stamped into metadata as ``coupon_code`` /
     ``coupon_discount_cents`` alongside ``bundle_discount_cents`` when
@@ -422,7 +450,10 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
         amount_off=cents,
         currency=settings.stripe_currency,
         duration="once",
-        name=f"Bundle discount (${discount_dollars:.2f} off first payment)",
+        # Kept inside Stripe's 40-character Coupon.name cap — the old
+        # "(${:.2f} off first payment)" wording ran to 42-43 characters, so
+        # any bundle amount not already cached in stripe_coupons 400'd here.
+        name=_clamp_coupon_name(f"Bundle discount ${discount_dollars:.2f} (first bill)"),
     )
     # Same race-tolerance note as _ensure_product — a concurrent duplicate
     # is harmless Dashboard clutter, not worth locking for.
@@ -451,7 +482,7 @@ async def _ensure_combined_discount_coupon(*, bundle_dollars: float, coupon_code
     the real separate amounts for our own reporting regardless."""
     _require_configured()
     total_cents = round((bundle_dollars + coupon_dollars) * 100)
-    name = f"Bundle discount (${bundle_dollars:.2f}) + {coupon_code} (${coupon_dollars:.2f} off)"
+    name = _combined_coupon_name(bundle_dollars, coupon_code, coupon_dollars)
     coupon = await stripe.Coupon.create_async(
         amount_off=total_cents,
         currency=settings.stripe_currency,
@@ -682,7 +713,9 @@ async def sync_coupon_to_stripe(db: AsyncSession, coupon) -> str:
     _require_configured()
     kwargs: dict = {
         "duration": coupon.duration_mode,
-        "name": coupon.display_name,
+        # Super Admin types the display name, so it can be any length — Stripe
+        # caps its own Coupon.name at 40 and 400s the create outright past it.
+        "name": _clamp_coupon_name(coupon.display_name or coupon.code),
     }
     if coupon.discount_type == "percent":
         kwargs["percent_off"] = float(coupon.discount_value)
