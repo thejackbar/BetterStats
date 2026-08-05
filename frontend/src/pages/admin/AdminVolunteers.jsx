@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { MemberSelect, RoleMultiSelect } from '../../components/admin/clubmanager/pickers'
 
@@ -112,8 +113,8 @@ function VolunteerRow({ v, onChanged, clubRoles, onRoleCreated }) {
             Lives nearby
           </label>
           <button onClick={saveProfile} disabled={saving}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-            {saving ? 'SAVING…' : 'SAVE PROFILE'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+            {saving ? 'Saving…' : 'Save profile'}
           </button>
         </div>
       )}
@@ -158,11 +159,11 @@ function VolunteersTab({ volunteers, load, clubRoles, onRoleCreated, allMembers 
             <MemberSelect members={candidateMembers} value={addingMemberId} onChange={setAddingMemberId} placeholder="Search for a player or member…" />
           </div>
           <button onClick={() => addVolunteer(addingMemberId)} disabled={!addingMemberId}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
             + ADD
           </button>
         </div>
-        <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+        <p className="text-[12.5px] leading-[1.6] text-pb-faint mt-1.5">
           Search any club member. Members already on the volunteer list are hidden.
         </p>
       </div>
@@ -289,8 +290,8 @@ function HoursTab({ volunteers, load, activities, onActivityCreated }) {
                 <input className={`${inp} flex-1`} placeholder="New activity title" value={newActivity} onChange={e => setNewActivity(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); createActivity() } }} />
                 <button onClick={createActivity} disabled={addingActivity || !newActivity.trim()}
-                  className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-                  {addingActivity ? '…' : 'ADD ACTIVITY'}
+                  className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+                  {addingActivity ? '…' : 'Add activity'}
                 </button>
               </div>
             )}
@@ -336,19 +337,14 @@ export default function AdminVolunteers() {
     if (a?.id) setActivities(prev => (prev.some(x => x.id === a.id) ? prev : [...prev, a]))
   }, [])
 
-  if (volunteers === null) return <BetterClubManagerLayout><PbSpinner message="Loading volunteers…" /></BetterClubManagerLayout>
+  if (volunteers === null) return <BetterClubManagerLayout title="Volunteers" caption="The volunteer directory and their hours"><PbSpinner message="Loading volunteers…" /></BetterClubManagerLayout>
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Volunteers" caption="The volunteer directory and their hours">
       <div className="max-w-4xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Volunteers</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Manage your volunteer directory and roles, then record who did what and for how long.
-        </p>
 
-        <div className="flex gap-1 mb-5">
+        <div className="flex flex-wrap gap-1 mb-5">
           {[['volunteers', 'Volunteers'], ['hours', 'Hours']].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+            <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
           ))}
         </div>
 

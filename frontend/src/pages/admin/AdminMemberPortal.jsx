@@ -4,6 +4,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { Note } from '../../components/admin/ui'
 
 export default function AdminMemberPortal() {
   const { user } = useAuth()
@@ -45,16 +46,16 @@ export default function AdminMemberPortal() {
 
   const portalUrl = user?.club_slug ? `${window.location.origin}/portal/${user.club_slug}` : null
 
-  if (status === null) return <BetterClubManagerLayout><PbSpinner message="Loading…" /></BetterClubManagerLayout>
+  if (status === null) return <BetterClubManagerLayout title="Member Portal" caption="Self-service sign-in for members"><PbSpinner message="Loading…" /></BetterClubManagerLayout>
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Member Portal" caption="Self-service sign-in for members">
       <div className="max-w-2xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Member Portal</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Members sign in with an emailed link (no account/password) to see their own fees and qualifications, update
-          their contact details, and pay fees online once Stripe is connected below. This feature is currently in
-          testing — the BetterCricket team controls when it goes live for every club.
-        </p>
+        {/* Kept from the old page description: this one is a caveat a club has
+            to know, not a summary of what the screen already shows. */}
+        <Note toneKey="warn" className="mb-4">
+          Members sign in with an emailed link rather than a password, to see their own fees and qualifications and
+          update their details. This is still in testing, and BetterCricket decides when it goes live for each club.
+        </Note>
 
         {portalUrl && (
           <div className="pb-card p-4 mb-4">
@@ -67,7 +68,7 @@ export default function AdminMemberPortal() {
                 Copy
               </button>
             </div>
-            <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+            <p className="text-[12.5px] leading-[1.6] text-pb-faint mt-1.5">
               Share this with members — they'll enter their registered email to request a sign-in link.
             </p>
           </div>
@@ -82,8 +83,8 @@ export default function AdminMemberPortal() {
                 account — BetterCricket never holds or sees the money.
               </p>
               <button onClick={connect} disabled={busy}
-                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-                {busy ? 'CONNECTING…' : 'CONNECT STRIPE'}
+                className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+                {busy ? 'Connecting…' : 'Connect stripe'}
               </button>
             </>
           ) : (
@@ -101,14 +102,14 @@ export default function AdminMemberPortal() {
                 ))}
               </div>
               {!status.charges_enabled && (
-                <p className="font-mono text-[10px] text-pb-amber mb-3">
+                <p className="text-[12.5px] leading-[1.6] text-pb-amber mb-3">
                   Onboarding isn't finished yet — members can't pay online until charges are enabled.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">
                 {!status.details_submitted && (
                   <button onClick={connect} disabled={busy}
-                    className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+                    className="px-3 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
                     FINISH ONBOARDING
                   </button>
                 )}

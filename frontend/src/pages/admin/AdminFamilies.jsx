@@ -3,6 +3,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import { api } from '../../lib/api'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import Dropdown from '../../components/Dropdown'
 
 const RELATIONSHIP_OPTIONS = [
@@ -152,7 +153,7 @@ function FamilyFinancials({ familyId, orgId, seasonId, seasons }) {
       {loading && <div className="font-mono text-[10px] text-pb-faint">Loading…</div>}
       {data && (
         <>
-          <p className="font-mono text-[10px] text-pb-faintest mb-2 leading-relaxed">
+          <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
             One view for one payment conversation with the family — each member's own BetterFees record, summed. Billing itself
             still happens per member.
           </p>
@@ -385,7 +386,7 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
               <div className="flex gap-2">
                 <button
                   onClick={handleRename}
-                  className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg"
+                  className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg"
                   style={{ background: 'var(--pb-accent)' }}
                 >
                   Save
@@ -485,7 +486,7 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
               <button
                 onClick={handleAddMember}
                 disabled={!pickedPlayer || adding}
-                className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40"
+                className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40"
                 style={{ background: 'var(--pb-accent)' }}
               >
                 {adding ? 'Adding…' : 'Add'}
@@ -512,13 +513,13 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
                 <button
                   onClick={handleAddFeeMember}
                   disabled={!pickedFeeMember || addingFeeMember}
-                  className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
+                  className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
                 >
                   {addingFeeMember ? 'Adding…' : 'Add'}
                 </button>
               </div>
             )}
-            <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
+            <p className="text-[12.5px] leading-[1.6] text-pb-faint mt-1.5">
               Candidates come from BetterFees' non-playing members for the selected season — add the parent there first (Members → + Member) if they're not listed.
             </p>
           </div>
@@ -684,7 +685,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           <button
             onClick={handleCreate}
             disabled={creating || !familyName.trim() || selectedCount === 0}
-            className="w-full py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40"
+            className="w-full py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40"
             style={{ background: 'var(--pb-accent)' }}
           >
             {creating ? 'Creating…' : `Create + add ${selectedCount}`}
@@ -704,7 +705,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           <button
             onClick={handleAddToExisting}
             disabled={adding || !chosenFamilyId || selectedCount === 0}
-            className="w-full py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
+            className="w-full py-1.5 rounded text-[12.5px] font-semibold border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
           >
             {adding ? 'Adding…' : `Add ${selectedCount}`}
           </button>
@@ -791,16 +792,15 @@ export default function AdminFamilies() {
   }
 
   if (!orgId) return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Families" caption="Players grouped into households">
       <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
     </BetterClubManagerLayout>
   )
 
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Families" caption="Players grouped into households">
       <div className="max-w-4xl">
         <div className="flex flex-wrap items-end justify-between gap-3 mb-1">
-          <h1 className="font-display text-2xl font-bold text-pb-text">Families</h1>
           {seasons.length > 0 && (
             <select value={seasonId} onChange={e => setSeasonId(e.target.value)}
               className="bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent">
@@ -808,24 +808,14 @@ export default function AdminFamilies() {
             </select>
           )}
         </div>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
+        <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-5">
           Group related players and non-playing members — parents/guardians included. Once created, families can be used
           as a filter in StatLab; the season picker drives the non-player picker and family financials below.
         </p>
 
-        <div className="flex gap-1 mb-5">
-          <button
-            onClick={() => setTab('families')}
-            className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === 'families' ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
-          >
-            FAMILIES ({families.length})
-          </button>
-          <button
-            onClick={() => setTab('suggestions')}
-            className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === 'suggestions' ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}
-          >
-            SUGGESTIONS ({suggestions.length})
-          </button>
+        <div className="flex flex-wrap gap-1 mb-5">
+          <FilterPill active={tab === 'families'} onClick={() => setTab('families')}>FAMILIES ({families.length})</FilterPill>
+          <FilterPill active={tab === 'suggestions'} onClick={() => setTab('suggestions')}>SUGGESTIONS ({suggestions.length})</FilterPill>
         </div>
 
         {initialLoading && <div className="font-mono text-[11px] text-pb-faint">Loading…</div>}
@@ -853,7 +843,7 @@ export default function AdminFamilies() {
                   <button
                     onClick={handleCreate}
                     disabled={!newName.trim() || creating}
-                    className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40"
+                    className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40"
                     style={{ background: 'var(--pb-accent)' }}
                   >
                     {creating ? 'Creating…' : 'Create family'}
@@ -869,7 +859,7 @@ export default function AdminFamilies() {
             ) : (
               <button
                 onClick={() => setShowCreate(true)}
-                className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 border pb-hairline text-pb-text hover:bg-pb-surface2"
+                className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-text hover:bg-pb-surface2"
               >
                 + New family
               </button>

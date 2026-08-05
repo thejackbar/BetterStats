@@ -42,10 +42,12 @@ export function Caption({ children, tone, style }) {
   )
 }
 
-// The segmented tab control used in every screen header.
+// The segmented tab control used in every screen header. Wraps rather than
+// running off the side of a phone — the Directory's filter chips already wrap,
+// and a control you have to scroll sideways to reach hides its own options.
 export function SegTabs({ tabs, value, onChange }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
+    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
       {tabs.map(t => {
         const active = t.key === value
         return (

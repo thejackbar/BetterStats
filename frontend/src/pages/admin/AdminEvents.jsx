@@ -283,10 +283,10 @@ function EventForm({ event, seedDate, types, members, onSaved, onClose }) {
       </div>
 
       <div className="flex justify-end gap-2 mt-5">
-        <button onClick={onClose} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+        <button onClick={onClose} className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
         <button onClick={submit} disabled={busy || !form.title.trim() || !form.starts_at}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'SAVING…' : isEdit ? 'SAVE CHANGES' : '+ CREATE EVENT'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Saving…' : isEdit ? 'Save changes' : '+ Create event'}
         </button>
       </div>
 
@@ -380,11 +380,11 @@ function TypesPanel({ types, onChanged }) {
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">STARTER SETS</div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => seed(false)} disabled={seeding}
-            className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+            className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
             + STARTER SET (11 TYPES)
           </button>
           <button onClick={() => seed(true)} disabled={seeding}
-            className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+            className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
             + COMMITTEE SET (8 TYPES)
           </button>
         </div>
@@ -400,7 +400,7 @@ function TypesPanel({ types, onChanged }) {
             Committee-only
           </label>
           <button onClick={add} disabled={busy || !draft.name.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
             + ADD
           </button>
         </div>
@@ -550,18 +550,13 @@ export default function AdminEvents() {
     </div>
   )
 
-  if (events === null) return <BetterClubManagerLayout title="Events & Ticketing"><PbSpinner message="Loading events…" /></BetterClubManagerLayout>
+  if (events === null) return <BetterClubManagerLayout title="Events" caption="Events, sign-ups and ticketing"><PbSpinner message="Loading events…" /></BetterClubManagerLayout>
 
   const anyFilter = q || typeFilter || organiserFilter || dateFrom || dateTo
 
   return (
-    <BetterClubManagerLayout title="Events & Ticketing">
+    <BetterClubManagerLayout title="Events" caption="Events, sign-ups and ticketing">
       <div className="max-w-5xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Events & Ticketing</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5 max-w-3xl">
-          Working bees, fundraisers, sponsor functions and committee meetings, all on one calendar, each with a
-          QR-shareable public sign-up link, capacity and registration tracking.
-        </p>
 
         {/* Top bar */}
         <div className="flex items-center justify-between flex-wrap gap-2 mb-4">
@@ -572,7 +567,7 @@ export default function AdminEvents() {
           <div className="flex items-center gap-2">
             <button onClick={() => setScreen('types')} className={pill(screen === 'types')}>Types</button>
             <button onClick={openCreate}
-              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+              className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
               + NEW EVENT
             </button>
           </div>

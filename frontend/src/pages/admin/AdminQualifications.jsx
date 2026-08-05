@@ -2,7 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
+import { Note } from '../../components/admin/ui'
 import { MemberSelect, RoleMultiSelect } from '../../components/admin/clubmanager/pickers'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -50,8 +52,8 @@ function TypeRow({ type, onChanged }) {
         <div className="flex gap-2 justify-end">
           <button onClick={() => setEditing(false)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Cancel</button>
           <button onClick={save} disabled={busy || !form.name.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'SAVING…' : 'SAVE'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -100,8 +102,8 @@ function TypesPanel({ types, onChanged }) {
     <div>
       <div className="flex justify-end mb-3">
         <button onClick={seedStarter} disabled={seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding ? 'ADDING…' : '+ STARTER SET (6 TYPES)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seeding ? 'Adding…' : '+ Starter set (6 types)'}
         </button>
       </div>
       <div className="pb-card p-4 mb-3">
@@ -109,8 +111,8 @@ function TypesPanel({ types, onChanged }) {
           <input className={`${inp} flex-1`} placeholder="Type name (e.g. Chainsaw Ticket)" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           <input type="number" min="0" className={`${inp} w-40`} placeholder="Validity (months)" value={form.validity_months} onChange={e => setForm(f => ({ ...f, validity_months: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.name.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : '+ TYPE'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Adding…' : '+ Type'}
           </button>
         </div>
       </div>
@@ -186,8 +188,8 @@ function MemberQualList({ memberId, roles, onRolesChanged }) {
                       label="Relevant roles" />
                   </div>
                   <button onClick={() => saveRoles(q)} disabled={busy}
-                    className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-                    {busy ? 'SAVING…' : 'SAVE ROLES'}
+                    className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+                    {busy ? 'Saving…' : 'Save roles'}
                   </button>
                 </div>
               ) : (
@@ -251,8 +253,8 @@ function AddQualificationForm({ types, members, roles, onAdded, onRolesChanged }
               label="Relevant roles (optional)" />
           </div>
           <button onClick={submit} disabled={busy}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'SAVING…' : 'RECORD'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Saving…' : 'Record'}
           </button>
         </div>
       </div>
@@ -324,21 +326,18 @@ export default function AdminQualifications() {
     api.feeAllMembers().then(d => setMembers(d.members || [])).catch(() => {})
   }, [loadTypes, loadRoles])
 
-  if (types === null) return <BetterClubManagerLayout><PbSpinner message="Loading qualifications…" /></BetterClubManagerLayout>
+  if (types === null) return <BetterClubManagerLayout title="Qualifications" caption="Accreditation and expiry tracking"><PbSpinner message="Loading qualifications…" /></BetterClubManagerLayout>
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Qualifications" caption="Accreditation and expiry tracking">
       <div className="max-w-4xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Qualifications</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Coach/umpire/scorer accreditation, WWCC, First Aid, RSA — with expiry tracking. No automated reminder emails yet;
-          check this page for what needs renewing.
-        </p>
-        <div className="flex gap-1 mb-5">
+        {/* A real caveat, not scene-setting: nobody is emailed about an expiry,
+            so this page is the only thing that will tell you. */}
+        <Note className="mb-5">
+          Nothing is emailed when a qualification is close to expiring. Check here for what needs renewing.
+        </Note>
+        <div className="flex flex-wrap gap-1 mb-5">
           {[['expiring', 'Expiring / Members'], ['types', 'Types']].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-              {l}
-            </button>
+            <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
           ))}
         </div>
         {tab === 'types' && <TypesPanel types={types} onChanged={loadTypes} />}

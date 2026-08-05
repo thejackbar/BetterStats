@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
@@ -45,12 +46,9 @@ function underBudget(t) {
 function TabBar({ tab, setTab }) {
   const tabs = [['calendar', 'Calendar'], ['plan', 'Season Plan'], ['templates', 'Templates'], ['gantt', 'Gantt']]
   return (
-    <div className="flex gap-1 mb-5">
+    <div className="flex flex-wrap gap-1 mb-5">
       {tabs.map(([k, l]) => (
-        <button key={k} onClick={() => setTab(k)}
-          className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-          {l}
-        </button>
+        <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
       ))}
     </div>
   )
@@ -354,8 +352,8 @@ function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, se
           </select>
         </div>
         <button onClick={onGenerate} disabled={generating}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {generating ? 'GENERATING…' : 'GENERATE THIS SEASON'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {generating ? 'Generating…' : 'Generate this season'}
         </button>
       </div>
       <FilterBar f={f} setF={setF} categories={categories} />
@@ -536,8 +534,8 @@ function NewDefinitionForm({ categories, roles, onCreated, onCreateCategory }) {
       <DefinitionFields form={form} setForm={setForm} categories={categories} roles={roles} onCreateCategory={onCreateCategory} />
       <div className="flex justify-end mt-3">
         <button onClick={submit} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'ADDING…' : '+ TEMPLATE'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Adding…' : '+ Template'}
         </button>
       </div>
     </div>
@@ -568,8 +566,8 @@ function DefinitionEditForm({ def, categories, roles, onSaved, onCancel, onCreat
       <DefinitionFields form={form} setForm={setForm} categories={categories} roles={roles} onCreateCategory={onCreateCategory} />
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'SAVING…' : 'SAVE'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Saving…' : 'Save'}
         </button>
         <button onClick={onCancel} className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Cancel</button>
       </div>
@@ -751,12 +749,12 @@ function TemplatesTab({ definitions, categories, roles, onReload, onCreateCatego
     <div>
       <div className="flex justify-end gap-2 mb-3">
         <button onClick={seedCats} disabled={seedingCats}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seedingCats ? 'ADDING…' : '+ CATEGORIES (8)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seedingCats ? 'Adding…' : '+ Categories (8)'}
         </button>
         <button onClick={seedTasks} disabled={seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding ? 'ADDING…' : '+ STARTER SET (11 TASKS)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seeding ? 'Adding…' : '+ Starter set (11 tasks)'}
         </button>
       </div>
 
@@ -856,13 +854,8 @@ export default function AdminClubDiary() {
   }
 
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Club Diary" caption="The club's annual operating plan">
       <div className="max-w-5xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Club Diary</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          The club's annual operating plan — compliance, maintenance, ground prep, insurance and the rest — with who's
-          responsible, budgets, dependencies and a full history of what happened last time.
-        </p>
         <TabBar tab={tab} setTab={setTab} />
 
         {definitions === null ? (

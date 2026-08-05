@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -21,7 +22,7 @@ function RoleRow({ r, types, editId, edit, setEdit, startEdit, saveEdit, setEdit
             <input type="checkbox" checked={edit.is_committee} onChange={e => setEdit(s => ({ ...s, is_committee: e.target.checked }))} />
             Committee role
           </label>
-          <button onClick={() => saveEdit(r.id)} className="font-mono text-[10px] tracking-wide2 text-pb-accent hover:opacity-80 shrink-0">Save</button>
+          <button onClick={() => saveEdit(r.id)} className="text-[12.5px] font-semibold text-pb-accent hover:opacity-80 shrink-0">Save</button>
           <button onClick={() => setEditId(null)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text shrink-0">Cancel</button>
         </div>
       ) : (
@@ -108,12 +109,12 @@ function RolesPanel({ roles, types, onChanged }) {
     <div>
       <div className="flex flex-wrap justify-end gap-2 mb-3">
         <button onClick={() => seedStarter(true)} disabled={!!seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding === 'committee' ? 'ADDING…' : '+ COMMITTEE ROLES (14)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seeding === 'committee' ? 'Adding…' : '+ Committee roles (14)'}
         </button>
         <button onClick={() => seedStarter(false)} disabled={!!seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding === 'general' ? 'ADDING…' : '+ GENERAL ROLES (10)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seeding === 'general' ? 'Adding…' : '+ General roles (10)'}
         </button>
       </div>
       <div className="pb-card p-4 mb-4">
@@ -130,8 +131,8 @@ function RolesPanel({ roles, types, onChanged }) {
             Committee role
           </label>
           <button onClick={submit} disabled={busy || !form.title.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : '+ ROLE'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Adding…' : '+ Role'}
           </button>
         </div>
       </div>
@@ -209,8 +210,8 @@ function TypesPanel({ types, onChanged }) {
     <div>
       <div className="flex justify-end mb-3">
         <button onClick={seedStarter} disabled={seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-          {seeding ? 'ADDING…' : '+ STARTER SET (5 TYPES)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          {seeding ? 'Adding…' : '+ Starter set (5 types)'}
         </button>
       </div>
       <div className="pb-card p-4 mb-3">
@@ -218,8 +219,8 @@ function TypesPanel({ types, onChanged }) {
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Type name (e.g. Coach)" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.name.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : '+ TYPE'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Adding…' : '+ Type'}
           </button>
         </div>
       </div>
@@ -233,7 +234,7 @@ function TypesPanel({ types, onChanged }) {
                 <div className="flex flex-wrap items-center gap-2">
                   <input className={`${inp} flex-1 min-w-[140px]`} value={edit.name} onChange={e => setEdit(s => ({ ...s, name: e.target.value }))} />
                   <input className={`${inp} flex-1 min-w-[140px]`} placeholder="Description" value={edit.description} onChange={e => setEdit(s => ({ ...s, description: e.target.value }))} />
-                  <button onClick={() => saveEdit(t.id)} className="font-mono text-[10px] tracking-wide2 text-pb-accent hover:opacity-80 shrink-0">Save</button>
+                  <button onClick={() => saveEdit(t.id)} className="text-[12.5px] font-semibold text-pb-accent hover:opacity-80 shrink-0">Save</button>
                   <button onClick={() => setEditId(null)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text shrink-0">Cancel</button>
                 </div>
               ) : (
@@ -272,23 +273,14 @@ export default function AdminRoles() {
   useEffect(() => { loadTypes(); loadRoles() }, [loadTypes, loadRoles])
 
   if (types === null || roles === null) {
-    return <BetterClubManagerLayout><PbSpinner message="Loading roles…" /></BetterClubManagerLayout>
+    return <BetterClubManagerLayout title="Roles" caption="The club role catalogue"><PbSpinner message="Loading roles…" /></BetterClubManagerLayout>
   }
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Roles" caption="The club role catalogue">
       <div className="max-w-4xl">
-        <h1 className="text-2xl md:text-3xl font-display font-bold text-pb-text mb-1">Roles</h1>
-        <p className="text-pb-faint text-sm mb-5">
-          The club's role catalogue, grouped by role type. Committee roles are held as positions in Committee
-          Administration, where you track who fills each one and their term. General roles are the jobs assigned
-          to volunteers elsewhere in BetterClubManager.
-        </p>
-        <div className="flex gap-1 mb-5">
+        <div className="flex flex-wrap gap-1 mb-5">
           {[['roles', 'Roles'], ['types', 'Types']].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-              {l}
-            </button>
+            <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
           ))}
         </div>
         {tab === 'roles' && <RolesPanel roles={roles} types={types} onChanged={() => { loadRoles(); loadTypes() }} />}

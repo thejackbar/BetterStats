@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
 import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, ObjectivesTab, ActionTimeline } from '../../components/admin/clubmanager/governance'
@@ -26,12 +27,9 @@ const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join
 function TabBar({ tab, setTab }) {
   const tabs = [['positions', 'Committee Roles'], ['tasks', 'Actions'], ['objectives', 'Plan'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
   return (
-    <div className="flex gap-1 mb-5">
+    <div className="flex flex-wrap gap-1 mb-5">
       {tabs.map(([k, l]) => (
-        <button key={k} onClick={() => setTab(k)}
-          className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-          {l}
-        </button>
+        <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
       ))}
     </div>
   )
@@ -64,8 +62,8 @@ function StartTermForm({ position, members, onClose, onDone }) {
       </div>
       <input type="date" className={`${inp} sm:w-40`} value={startedAt} onChange={e => setStartedAt(e.target.value)} />
       <button onClick={submit} disabled={busy || !memberId}
-        className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-        {busy ? 'SAVING…' : 'START TERM'}
+        className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+        {busy ? 'Saving…' : 'Start term'}
       </button>
       <button onClick={onClose} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">Cancel</button>
     </div>
@@ -201,8 +199,8 @@ function OfficeBearerAwardsPanel({ onImported }) {
         </p>
       </div>
       <button onClick={adopt} disabled={busy}
-        className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
-        {busy ? 'IMPORTING…' : 'IMPORT AS TERMS'}
+        className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+        {busy ? 'Importing…' : 'Import as terms'}
       </button>
     </div>
   )
@@ -253,12 +251,12 @@ function PositionsTab({ members }) {
   return (
     <div>
       <div className="flex items-start justify-between gap-3 mb-3">
-        <p className="font-mono text-[10px] text-pb-faintest leading-relaxed max-w-xl">
+        <p className="text-[12.5px] leading-[1.6] text-pb-faint leading-relaxed max-w-xl">
           Committee roles are managed under Roles in the left menu. This tab records who holds each role and when they started.
         </p>
         <button onClick={seedStarter} disabled={seeding}
-          className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
-          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (18)'}
+          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+          {seeding ? 'Adding…' : '+ Committee roles (18)'}
         </button>
       </div>
       <OfficeBearerAwardsPanel onImported={load} />
@@ -312,8 +310,8 @@ function NewTaskForm({ onCreated }) {
         </select>
         <input type="date" className={`${inp} sm:w-40`} value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
         <button onClick={submit} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'ADDING…' : '+ TASK'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Adding…' : '+ Task'}
         </button>
       </div>
       <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mt-2">
@@ -399,7 +397,7 @@ function TasksTab({ members }) {
       <div className="flex items-center gap-1 mb-3">
         {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)}
-            className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+            className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
         ))}
       </div>
       {view === 'timeline' ? (
@@ -491,7 +489,7 @@ function DocumentsTab() {
   return (
     <div>
       <div className="pb-card p-4 mb-4">
-        <p className="font-mono text-[10px] text-pb-faintest mb-2 leading-relaxed">
+        <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
           Link-based — paste the Drive/Dropbox/etc. link to where the document already lives.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
@@ -501,8 +499,8 @@ function DocumentsTab() {
           </select>
           <input className={`${inp} flex-1`} placeholder="https://…" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.title.trim() || !form.url.trim()}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : '+ DOCUMENT'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Adding…' : '+ Document'}
           </button>
         </div>
       </div>
@@ -554,7 +552,7 @@ function CalendarTab() {
   if (events === null) return <PbSpinner message="Loading calendar…" />
   return (
     <div>
-      <p className="font-mono text-[10px] text-pb-faintest mb-4 leading-relaxed">
+      <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-4 leading-relaxed">
         These are your club events. The full events calendar with month/week/day views, filters, ticketing and registrations lives under Events in the left menu. This is a quick committee view.
       </p>
       <div className="pb-card p-4 mb-4">
@@ -566,8 +564,8 @@ function CalendarTab() {
           <input type="datetime-local" className={`${inp} sm:w-56`} value={form.starts_at} onChange={e => setForm(f => ({ ...f, starts_at: e.target.value }))} />
           <input className={`${inp} sm:w-40`} placeholder="Location" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.title.trim() || !form.starts_at}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : '+ EVENT'}
+            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            {busy ? 'Adding…' : '+ Event'}
           </button>
         </div>
       </div>
@@ -621,7 +619,7 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
   return (
     <div className="pb-card p-4 mb-4">
       <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">AGENDA TEMPLATES</div>
-      <p className="font-mono text-[10px] text-pb-faintest mb-2 leading-relaxed">
+      <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
         A saved agenda shape — pick one when creating a meeting to copy its items straight onto the new meeting's agenda.
       </p>
       {templates.length > 0 && (
@@ -652,8 +650,8 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }} />
         <button onClick={addItem} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Add item</button>
         <button onClick={submit} disabled={busy || !form.name.trim() || form.items.length === 0}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'SAVING…' : '+ TEMPLATE'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Saving…' : '+ Template'}
         </button>
       </div>
     </div>
@@ -692,8 +690,8 @@ function NewMeetingForm({ templates, onCreated }) {
           {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <button onClick={submit} disabled={busy || !form.title.trim() || !form.scheduled_at}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'CREATING…' : '+ MEETING'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Creating…' : '+ Meeting'}
         </button>
       </div>
     </div>
@@ -794,8 +792,8 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
           {MEETING_STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}
         </select>
         <button onClick={saveMeta} disabled={savingMeta}
-          className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-          {savingMeta ? 'SAVING…' : 'SAVE'}
+          className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+          {savingMeta ? 'Saving…' : 'Save'}
         </button>
         <button onClick={() => window.print()} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-dim hover:text-pb-text ml-auto">
           Print minutes / agenda
@@ -981,7 +979,7 @@ function MeetingsTab() {
   if (meetings === null) return <PbSpinner message="Loading meetings…" />
   return (
     <div>
-      <p className="font-mono text-[10px] text-pb-faintest mb-3 leading-relaxed">
+      <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-3 leading-relaxed">
         Regular committee meetings and the AGM share the same tool — an AGM meeting also gets a Nominations section where
         marking a candidate "elected" starts a real committee term for that position.
       </p>
@@ -1011,13 +1009,8 @@ export default function AdminCommittee() {
   }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Committee" caption="Roles, actions, documents and meetings">
       <div className="max-w-5xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Committee Administration</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Committee roles and succession history, the action register and the plan it serves, a document index,
-          the club calendar, and meetings/AGM with motions, resolutions and votes.
-        </p>
         <TabBar tab={tab} setTab={setTab} />
         {tab === 'positions' && <PositionsTab members={members} />}
         {tab === 'tasks' && <TasksTab members={members} />}

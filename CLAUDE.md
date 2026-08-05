@@ -75,6 +75,40 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## One look across BetterClubhouse: the Directory is the reference (v9.10.1, Aug 2026)
+
+Reported from a phone: the Directory reads well, and the older full editors
+(Committee Administration and friends) clearly did not match it.
+
+- **The difference was never the typeface.** The obvious guess is `font-display`
+  vs the body font, but a club that has not chosen its own typography resolves
+  both to the same face, and measuring the live pages confirmed every heading
+  was already Geist. **Measure the rendered page before theorising about a
+  design inconsistency** — the real causes were heading SIZE (24px in the page
+  body vs 19px in a sticky header), tab rows that could not wrap, mono used as
+  body copy, and mono uppercase buttons.
+- **`ModuleLayout` already renders the Directory header** — 19px title, mono
+  caption, sticky, on `--pb-surface`. The ten editors simply never passed
+  `title`/`caption`, so the bar showed only the module lockup while the page
+  drew its own 24px `<h1>` underneath. Passing the two props and deleting the
+  in-body heading block is the whole fix. **A new Clubhouse screen should pass
+  `title` and `caption` and draw no heading of its own.**
+- **`FilterPill` (components/admin/ui.jsx) is byte-for-byte the Directory's own
+  chip**, so the editors' hand-rolled mono tab buttons became `FilterPill` and
+  matched for free. Prefer it over a local tab button.
+- **Tab rows wrap, they do not scroll sideways.** Two screens overflowed at
+  390px purely because a `flex` row of tabs could not wrap; the Directory's
+  filter chips already wrap onto four lines on a phone, so wrapping is the
+  house answer. `SegTabs` wraps too now.
+- **The repo rule was already right and simply unenforced**: mono is for labels
+  and figures, never buttons, headings or body. Long mono paragraphs moved to
+  the body font and ~56 mono uppercase action buttons became body-font sentence
+  case across the ten editors.
+- **Verified by screenshotting all 17 Clubhouse screens at 390px** and asserting
+  on each one's `<h1>` computed font, size and weight plus
+  `documentElement.scrollWidth > clientWidth`. That check is worth repeating
+  whenever a Clubhouse screen is added.
+
 ## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
 
 - **"Confirm roster" is the name, in the code as well as the UI.** The action was

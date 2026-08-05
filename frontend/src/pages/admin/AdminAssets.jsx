@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import DateTimePicker from '../../components/admin/crm/DateTimePicker'
@@ -35,12 +36,9 @@ const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { day:
 function TabBar({ tab, setTab }) {
   const tabs = [['facilities', 'Facilities'], ['bookings', 'Bookings'], ['assets', 'Assets']]
   return (
-    <div className="flex gap-1 mb-5">
+    <div className="flex flex-wrap gap-1 mb-5">
       {tabs.map(([k, l]) => (
-        <button key={k} onClick={() => setTab(k)}
-          className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-          {l}
-        </button>
+        <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
       ))}
     </div>
   )
@@ -168,8 +166,8 @@ function FacilitiesTab({ onFacilitiesChanged }) {
       <div className="flex items-center justify-between mb-4 gap-2">
         <div className="font-mono text-[11px] text-pb-faint">{facilities.length} {facilities.length === 1 ? 'facility' : 'facilities'}</div>
         <button onClick={() => setShowForm(s => !s)}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {showForm ? 'CLOSE' : '+ ADD NEW FACILITY'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {showForm ? 'Close' : '+ Add new facility'}
         </button>
       </div>
 
@@ -183,8 +181,8 @@ function FacilitiesTab({ onFacilitiesChanged }) {
             </select>
             <input className={`${inp} w-40`} placeholder="Key location" value={form.key_location} onChange={e => setForm(f => ({ ...f, key_location: e.target.value }))} />
             <button onClick={submit} disabled={busy || !form.name.trim()}
-              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-              {busy ? 'ADDING…' : '+ FACILITY'}
+              className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+              {busy ? 'Adding…' : '+ Facility'}
             </button>
           </div>
           <input className={`${inp} mt-2`} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
@@ -298,10 +296,10 @@ function BookingForm({ facilities, members, initial, onCancel, onSaved }) {
       </div>
       <div className="flex gap-2 mt-3">
         <button onClick={submit} disabled={busy || !form.facility_id || !form.title.trim() || !form.starts_at}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'SAVING…' : (initial ? 'SAVE BOOKING' : '+ BOOKING')}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Saving…' : (initial ? 'Save booking' : '+ Booking')}
         </button>
-        <button onClick={onCancel} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+        <button onClick={onCancel} className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
       </div>
     </div>
   )
@@ -386,7 +384,7 @@ function BookingsTab({ facilities, members }) {
           <button onClick={() => setView('list')} className={pill(view === 'list')}>List</button>
         </div>
         <button onClick={openNew}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
           + ADD NEW BOOKING
         </button>
       </div>
@@ -564,10 +562,10 @@ function NewAssetForm({ facilities, onCreated, onCancel }) {
       <input className={`${inp} mt-2`} placeholder="Notes (optional)" value={form.notes} onChange={e => set('notes', e.target.value)} />
       <div className="flex gap-2 mt-3">
         <button onClick={submit} disabled={busy || !form.name.trim()}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'ADDING…' : '+ ASSET'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'Adding…' : '+ Asset'}
         </button>
-        <button onClick={onCancel} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+        <button onClick={onCancel} className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
       </div>
     </div>
   )
@@ -619,8 +617,8 @@ function AssetsTab({ facilities }) {
       <div className="flex items-center justify-between mb-4 gap-2">
         <div className="font-mono text-[11px] text-pb-faint">{assets.length} {assets.length === 1 ? 'asset' : 'assets'}</div>
         <button onClick={() => setShowForm(s => !s)}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-          {showForm ? 'CLOSE' : '+ ADD NEW ASSET'}
+          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          {showForm ? 'Close' : '+ Add new asset'}
         </button>
       </div>
 
@@ -677,12 +675,8 @@ export default function AdminAssets() {
   }, [toast])
 
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Facilities" caption="Grounds, gear, bookings and service history">
       <div className="max-w-4xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Assets & Facilities</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Club property — grounds, clubhouse, equipment — with bookings and a maintenance/service history.
-        </p>
         <TabBar tab={tab} setTab={setTab} />
         {tab === 'facilities' && <FacilitiesTab onFacilitiesChanged={loadFacilities} />}
         {tab === 'bookings' && <BookingsTab facilities={facilities} members={members} />}

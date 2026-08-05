@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { FilterPill } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -226,22 +227,14 @@ export default function AdminActivities() {
   useEffect(() => { loadActivities(); loadTypes() }, [loadActivities, loadTypes])
 
   if (activities === null || types === null) {
-    return <BetterClubManagerLayout><PbSpinner message="Loading activities…" /></BetterClubManagerLayout>
+    return <BetterClubManagerLayout title="Activities" caption="What volunteer hours are spent on"><PbSpinner message="Loading activities…" /></BetterClubManagerLayout>
   }
   return (
-    <BetterClubManagerLayout>
+    <BetterClubManagerLayout title="Activities" caption="What volunteer hours are spent on">
       <div className="max-w-4xl">
-        <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Activities</h1>
-        <p className="font-mono text-[11px] text-pb-faint mb-5">
-          The catalogue of jobs a volunteer's logged hours are spent on — ground work, canteen, coaching, admin. Group them
-          into types so hours can be tallied by category.
-        </p>
-        <div className="flex gap-1 mb-5">
+        <div className="flex flex-wrap gap-1 mb-5">
           {[['activities', 'Activities'], ['types', 'Types']].map(([k, l]) => (
-            <button key={k} onClick={() => setTab(k)}
-              className={`px-4 py-2 rounded font-mono text-[11px] tracking-wide2 ${tab === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>
-              {l}
-            </button>
+            <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
           ))}
         </div>
         {tab === 'activities' && <ActivitiesPanel activities={activities} types={types} onChanged={loadActivities} />}
