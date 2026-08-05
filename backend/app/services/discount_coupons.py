@@ -27,6 +27,7 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from stripe import error as stripe_error
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_SUBSCRIBED, account_plan_status
 from app.models.db import DiscountCoupon, DiscountCouponRedemption, OrgModuleSubscription
@@ -44,8 +45,37 @@ class CouponError(ValueError):
     turn this into a 422, never a raw 500."""
 
 
+class CouponStripeError(RuntimeError):
+    """Stripe refused the call, or isn't configured. Carries Stripe's own
+    message and the status the router should answer with — a Stripe
+    rejection is not the caller's validation error (422) and must not read
+    as one, but it must not read as an unexplained 500 either. Every place
+    that talks to Stripe from this module raises this instead of letting the
+    SDK's exception escape."""
+
+    def __init__(self, message: str, *, status_code: int = 502):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def _stripe(coro):
+    """Runs a Stripe call, re-raising anything it throws as CouponStripeError.
+
+    ``user_message`` on a Stripe error is the sentence Stripe writes for a
+    human ("Coupon name is too long; the maximum length is 40 characters.")
+    — exactly what a Super Admin needs to see to fix the form, so prefer it
+    over the SDK's own repr."""
+    try:
+        return await coro
+    except stripe_client.StripeNotConfigured as e:
+        raise CouponStripeError(str(e), status_code=503) from e
+    except stripe_error.StripeError as e:
+        message = getattr(e, "user_message", None) or str(e) or "Stripe rejected this coupon"
+        raise CouponStripeError(message) from e
 
 
 async def create_coupon(db: AsyncSession, *, created_by, **fields) -> DiscountCoupon:
@@ -57,6 +87,14 @@ async def create_coupon(db: AsyncSession, *, created_by, **fields) -> DiscountCo
         raise CouponError(f"A coupon with code {code} already exists")
     if fields.get("discount_type") not in ("percent", "amount"):
         raise CouponError("discount_type must be 'percent' or 'amount'")
+    # Stripe's own limits on percent_off/amount_off, checked here so an
+    # out-of-range figure comes back as a plain sentence about the form
+    # rather than a round trip to Stripe and a rejection from over there.
+    value = float(fields.get("discount_value") or 0)
+    if fields["discount_type"] == "percent" and not 0 < value <= 100:
+        raise CouponError("A percentage discount has to be above 0 and no more than 100")
+    if fields["discount_type"] == "amount" and value <= 0:
+        raise CouponError("A dollar discount has to be above 0")
     if fields.get("duration_mode") not in ("once", "repeating", "forever"):
         raise CouponError("duration_mode must be 'once', 'repeating', or 'forever'")
     if fields.get("duration_mode") == "repeating" and not fields.get("duration_renewals"):
@@ -67,9 +105,17 @@ async def create_coupon(db: AsyncSession, *, created_by, **fields) -> DiscountCo
         if bad:
             raise CouponError(f"Unknown module(s): {', '.join(bad)}")
     coupon = DiscountCoupon(id=uuid.uuid4(), code=code, created_by=created_by, **fields)
-    coupon.stripe_coupon_id = await stripe_client.sync_coupon_to_stripe(db, coupon)
+    coupon.stripe_coupon_id = await _stripe(stripe_client.sync_coupon_to_stripe(db, coupon))
     db.add(coupon)
-    await db.commit()
+    try:
+        await db.commit()
+    except Exception:
+        # The Stripe coupon already exists at this point, so a failed insert
+        # (a racing duplicate code being the realistic one) would otherwise
+        # strand it in the Dashboard with nothing on our side pointing at it.
+        await db.rollback()
+        await stripe_client.delete_coupon_quietly(coupon.stripe_coupon_id)
+        raise
     await db.refresh(coupon)
     return coupon
 
@@ -256,7 +302,9 @@ async def redeem_for_existing_subscription(db: AsyncSession, code: str, org, use
     coupon = await validate_redemption(
         db, code, org, is_new_signup=False, candidate_module_keys=held_keys, force=force,
     )
-    await stripe_client.attach_discount_to_subscription(org.stripe_subscription_id, coupon.stripe_coupon_id)
+    await _stripe(stripe_client.attach_discount_to_subscription(
+        org.stripe_subscription_id, coupon.stripe_coupon_id,
+    ))
     redemption = DiscountCouponRedemption(
         id=uuid.uuid4(), coupon_id=coupon.id, organisation_id=org.id,
         redeemed_by_user_id=user.id if user else None, applied_via=applied_via, status="active",

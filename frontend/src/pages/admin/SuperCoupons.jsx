@@ -154,6 +154,11 @@ function CouponModal({ coupon, onClose, onSaved }) {
             <label className={LABEL_CLS}>Display name</label>
             <input type="text" value={form.display_name} onChange={(e) => set('display_name', e.target.value)}
               className={INPUT_CLS} placeholder="Launch promo" required />
+            {form.display_name.length > 40 && (
+              <p className="font-mono text-[10px] text-pb-faint mt-1">
+                A club's invoice shows the first 40 characters: "{form.display_name.trim().slice(0, 40)}"
+              </p>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">

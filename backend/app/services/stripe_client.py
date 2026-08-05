@@ -30,6 +30,12 @@ class StripeNotConfigured(RuntimeError):
     Callers should turn this into a clean 400/503, never a raw SDK traceback."""
 
 
+# Stripe's documented maximum for Coupon.name (the label a club sees on its
+# invoice). Anything longer is rejected outright by the API, so every coupon
+# name we send is cut to this length first — see sync_coupon_to_stripe.
+COUPON_NAME_MAX = 40
+
+
 def _require_configured() -> None:
     if not settings.stripe_configured:
         raise StripeNotConfigured("Stripe is not configured (STRIPE_SECRET_KEY/STRIPE_PUBLISHABLE_KEY unset)")
@@ -678,11 +684,17 @@ async def sync_coupon_to_stripe(db: AsyncSession, coupon) -> str:
     modules (None/empty = every module, i.e. no restriction) — reuses the
     SAME Stripe Product per billing_key that _ensure_product already caches
     for the add-on-module flow, so a covered vs non-covered module split on
-    one invoice is handled natively by Stripe, no extra bookkeeping here."""
+    one invoice is handled natively by Stripe, no extra bookkeeping here.
+
+    ``name`` is TRUNCATED to Stripe's own 40-character maximum rather than
+    rejected — display_name is BetterCricket's field, shown in full on the
+    Super Admin coupon list, and it should not be capped by what Stripe
+    happens to allow on an invoice line. Stripe's name is only the label a
+    club sees on its receipt, so the first 40 characters are enough there."""
     _require_configured()
     kwargs: dict = {
         "duration": coupon.duration_mode,
-        "name": coupon.display_name,
+        "name": (coupon.display_name or "").strip()[:COUPON_NAME_MAX],
     }
     if coupon.discount_type == "percent":
         kwargs["percent_off"] = float(coupon.discount_value)
@@ -697,6 +709,22 @@ async def sync_coupon_to_stripe(db: AsyncSession, coupon) -> str:
         kwargs["applies_to"] = {"products": product_ids}
     created = await stripe.Coupon.create_async(**kwargs)
     return created["id"]
+
+
+async def delete_coupon_quietly(coupon_id: str | None) -> None:
+    """Removes a Stripe Coupon we created but then failed to store our own row
+    for — without it, a create that falls over at the database step leaves a
+    coupon sitting in the Stripe Dashboard that BetterCricket has no record
+    of, and no way to reach. Best effort by design: this only ever runs while
+    another error is already on its way up, so a failure here is logged and
+    swallowed rather than replacing the real one."""
+    if not coupon_id:
+        return
+    try:
+        _require_configured()
+        await stripe.Coupon.delete_async(coupon_id)
+    except Exception:
+        logger.warning("Could not remove orphaned Stripe coupon %s", coupon_id, exc_info=True)
 
 
 async def attach_discount_to_subscription(subscription_id: str, coupon_id: str) -> None:

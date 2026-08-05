@@ -105,6 +105,11 @@ async def create_coupon(
         coupon = await discount_coupons.create_coupon(db, created_by=current_user.id, **body.model_dump())
     except discount_coupons.CouponError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except discount_coupons.CouponStripeError as e:
+        # Stripe refused the coupon (or isn't configured). Its own sentence is
+        # what tells a Super Admin which field to fix, so pass it through
+        # rather than letting the SDK's exception surface as a bare 500.
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     return _serialize(coupon)
 
 
@@ -174,7 +179,9 @@ async def force_apply(
         )
     except discount_coupons.CouponError as e:
         raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:  # Stripe errors etc.
+    except discount_coupons.CouponStripeError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except Exception as e:  # anything else that reaches here
         raise HTTPException(status_code=502, detail=str(e) or "Could not apply this code")
     return {"id": str(redemption.id), "status": redemption.status}
 
@@ -205,6 +212,8 @@ async def redeem(
         )
     except discount_coupons.CouponError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except discount_coupons.CouponStripeError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e) or "Could not apply this code")
     return {"id": str(redemption.id), "status": redemption.status}
