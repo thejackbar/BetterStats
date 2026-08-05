@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.7.0',
-  date: '2026-08-05',
-  sortKey: '2026-08-05T23:00:00Z',
+  version: 'v9.7.4',
+  date: '2026-08-06',
+  sortKey: '2026-08-06T21:00:00Z',
   title: 'BetterFootball: goal kicking reads better across the site',
   items: [
     'The club home page leads with Most games on the left and Leading goal kickers on the right. Leading goal kickers now shows games played and a goals-per-game average alongside the goals.',
