@@ -30,7 +30,12 @@ async def compare_players(org_id: uuid.UUID,
     out = []
     for t in totals:
         seasons = await aggregations.season_by_season(db, org_id, t["player_id"])
-        out.append({**t, "seasons": [s for s in seasons if s["grade_id"] is None]})
+        # Under `season_rows`, NOT `seasons` — career_totals already returns
+        # `seasons` as the career season COUNT, which is what every other
+        # reader of this shape (the Players list, the dashboard boards) means
+        # by it. Overwriting it with the row list made Compare render a list
+        # of objects into a table cell, which crashes the page outright.
+        out.append({**t, "season_rows": [s for s in seasons if s["grade_id"] is None]})
     return {"players": out}
 
 
@@ -42,6 +47,7 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     org_id = player.organisation_id
     totals = await aggregations.career_totals(db, org_id, [player_id])
     seasons = await aggregations.season_by_season(db, org_id, player_id)
+    grades = await aggregations.grade_breakdown(db, org_id, player_id)
     games = await aggregations.player_game_log(db, org_id, player_id)
     best_haul = max((g for g in games if g["goals"] is not None),
                     key=lambda g: g["goals"], default=None)
@@ -52,6 +58,7 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "organisation_id": str(org_id),
         "career": totals[0] if totals else None,
         "seasons": seasons,
+        "grade_breakdown": grades,
         "game_log": games,
         "best_haul": {
             "goals": best_haul["goals"],

@@ -100,30 +100,58 @@ export default function Dashboard() {
   // Sub-line under each player mirrors where BetterStats (Core)'s equivalent
   // board shows "AVG · HS" — AFL has no batting-style average, so a career
   // span (debut season – final season) fills the same slot.
-  const board = (title, rows, statKey, statLabel) => (
+  //
+  // `cols` is the numeric columns on the right, so the goal kickers board can
+  // carry games alongside goals and a goals-per-game average without the games
+  // board growing columns it has no use for.
+  const board = (title, rows, cols) => (
     <div className="pb-card p-4">
       <SectionTitle>{title}</SectionTitle>
       {(rows || []).length === 0 && <p className="text-sm text-pb-faint">No data yet.</p>}
+      {(rows || []).length > 0 && (
+        <div className="flex items-center gap-2.5 pb-1.5 mb-2 pb-hairline-b">
+          <span className="w-4 shrink-0" />
+          <span className="w-8 shrink-0" />
+          <span className="flex-1" />
+          {cols.map(c => (
+            <span key={c.key} className="w-11 shrink-0 text-right font-mono text-[9px] uppercase tracking-wide text-pb-faintest">
+              {c.label}
+            </span>
+          ))}
+        </div>
+      )}
       <ol className="space-y-2.5">
         {(rows || []).map((r, i) => (
           <li key={r.player_id} className="flex items-center gap-2.5 text-sm">
-            <span className="font-mono text-pb-faintest w-4">{i + 1}</span>
+            <span className="font-mono text-pb-faintest w-4 shrink-0">{i + 1}</span>
             {r.photo_url
               ? <img src={r.photo_url} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
               : <span className="h-8 w-8 rounded-full bg-pb-surface2 text-[11px] flex items-center justify-center text-pb-faint shrink-0">
                   {(displayName(r) || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
                 </span>}
-            <Link to={`${base}/players/${r.player_id}`} className="min-w-0 hover:text-[var(--pb-accent)]">
+            <Link to={`${base}/players/${r.player_id}`} className="flex-1 min-w-0 hover:text-[var(--pb-accent)]">
               <span className="block truncate">{displayName(r)}</span>
               {seasonSpan(r) && <span className="block font-mono text-[10px] text-pb-faintest">{seasonSpan(r)}</span>}
             </Link>
-            <span className="ml-auto pb-num font-semibold text-right shrink-0">{r[statKey]}</span>
-            <span className="text-[10px] text-pb-faintest font-mono uppercase shrink-0">{statLabel}</span>
+            {cols.map(c => (
+              <span
+                key={c.key}
+                className={`w-11 shrink-0 text-right pb-num ${c.lead ? 'font-bold' : 'text-pb-dim'}`}
+                style={c.lead ? { color: 'var(--pb-accent)' } : undefined}
+              >
+                {c.get(r)}
+              </span>
+            ))}
           </li>
         ))}
       </ol>
     </div>
   )
+
+  // A career goals-per-game rate. Guarded rather than shown as 0.00, since a
+  // player carrying goals with no games recorded (an older import) would
+  // otherwise read as if he never scored.
+  const avgGoals = (r) => (r.games > 0 ? (r.goals / r.games).toFixed(2) : '—')
 
   return (
     <div className="space-y-6">
@@ -150,8 +178,14 @@ export default function Dashboard() {
       )}
 
       <div className="grid md:grid-cols-2 gap-4">
-        {board('Leading goal kickers', data?.top_goal_kickers, 'goals', 'goals')}
-        {board('Most games', data?.most_games, 'games', 'games')}
+        {board('Most games', data?.most_games, [
+          { key: 'games', label: 'Games', lead: true, get: r => r.games },
+        ])}
+        {board('Leading goal kickers', data?.top_goal_kickers, [
+          { key: 'games', label: 'GP', get: r => r.games },
+          { key: 'goals', label: 'Goals', lead: true, get: r => r.goals },
+          { key: 'avg', label: 'Avg', get: avgGoals },
+        ])}
       </div>
 
       {(data?.milestones_in_reach || []).length > 0 && (

@@ -8,7 +8,6 @@ import { SectionTitle, displayName } from '../components/bits'
 const ROWS = [
   { key: 'games', label: 'Games' },
   { key: 'goals', label: 'Goals' },
-  { key: 'behinds', label: 'Behinds' },
   { key: 'bogs', label: 'Best on Ground' },
   { key: 'seasons', label: 'Seasons' },
 ]
@@ -132,18 +131,17 @@ export default function Compare() {
               <table className="w-full text-xs">
                 <thead>
                   <tr>
-                    {['Season', 'GP', 'G', 'B', 'BOG'].map((h, i) => (
+                    {['Season', 'GP', 'G', 'BOG'].map((h, i) => (
                       <th key={h} className={`py-1 font-mono text-[9px] uppercase text-pb-faint ${i ? 'text-right' : 'text-left'}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {(p.seasons || []).map(s => (
+                  {(p.season_rows || []).map(s => (
                     <tr key={s.season_id} className="pb-hairline-b last:border-0">
                       <td className="py-1">{s.season_name}</td>
                       <td className="py-1 text-right pb-num">{s.games}</td>
                       <td className="py-1 text-right pb-num">{s.goals}</td>
-                      <td className="py-1 text-right pb-num">{s.behinds}</td>
                       <td className="py-1 text-right pb-num">{s.bogs}</td>
                     </tr>
                   ))}

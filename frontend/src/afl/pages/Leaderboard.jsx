@@ -13,6 +13,11 @@ const ALL_STATS = [
   { key: 'comp_bf_votes', label: 'Competition B&F votes', flag: 'public_show_comp_bf_leaderboard' },
 ]
 
+// Career goals per game. Guarded rather than shown as 0.00 — a row carrying
+// goals but no games (an older Import Stats upload that recorded totals
+// without a games count) would otherwise read as if the player never scored.
+const avgGoals = (r) => ((r.games ?? 0) > 0 ? (r.goals / r.games).toFixed(2) : '—')
+
 export default function Leaderboard() {
   const { club } = useOutletContext()
   // Games and Goals always show; the rest are each a club's own opt-out
@@ -80,7 +85,7 @@ export default function Leaderboard() {
                   <th className="px-3 py-2 text-left font-mono text-[10px] uppercase text-pb-faint">Player</th>
                   <th className="px-3 py-2 text-right font-mono text-[10px] uppercase text-pb-faint">GP</th>
                   <th className="px-3 py-2 text-right font-mono text-[10px] uppercase text-pb-faint">Goals</th>
-                  <th className="px-3 py-2 text-right font-mono text-[10px] uppercase text-pb-faint">BOG</th>
+                  <th className="px-3 py-2 text-right font-mono text-[10px] uppercase text-pb-faint">Avg goals</th>
                   <th className="px-3 py-2 text-right font-mono text-[10px] uppercase text-[var(--pb-accent)]">{statInfo?.label}</th>
                 </tr>
               </thead>
@@ -91,7 +96,7 @@ export default function Leaderboard() {
                     <td className="px-3 py-2"><PlayerCell id={r.player_id} name={displayName(r)} base={base} photoUrl={r.photo_url} /></td>
                     <td className="px-3 py-2 text-right pb-num">{r.games}</td>
                     <td className="px-3 py-2 text-right pb-num">{r.goals}</td>
-                    <td className="px-3 py-2 text-right pb-num">{r.bogs}</td>
+                    <td className="px-3 py-2 text-right pb-num text-pb-dim">{avgGoals(r)}</td>
                     <td className="px-3 py-2 text-right pb-num font-bold text-[var(--pb-accent)]">{r.value}</td>
                   </tr>
                 ))}
