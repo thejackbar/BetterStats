@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.7.5',
-  date: '2026-08-06',
-  sortKey: '2026-08-06T23:00:00Z',
+  version: 'v9.8.1',
+  date: '2026-08-07',
+  sortKey: '2026-08-07T12:00:00Z',
   title: 'BetterFootball: club colours, a bigger club header, players A to Z',
   items: [
     'Settings has a Branding & theme panel. Set your primary and secondary colours and the page background for both the dark and light themes, with a preview of how they sit together before you save. Picking a dark background works out the cards, panels and borders to match.',
