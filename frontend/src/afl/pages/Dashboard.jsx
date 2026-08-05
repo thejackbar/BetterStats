@@ -4,7 +4,7 @@ import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { thiings, ThiingIcon } from '../../assets/thiings'
 import { aflApi } from '../aflApi'
-import { SectionTitle, Select, GameRow, displayName } from '../components/bits'
+import { SectionTitle, Select, GameRow, ClubCrest, displayName } from '../components/bits'
 
 const MILESTONE_ICON = { games: thiings.calendar, goals: thiings.target }
 
@@ -155,10 +155,23 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Sized to match BetterCricket's PageHeader (lib/presskit.jsx) so the
+          two sports' club pages open the same way: gradient bar, crest,
+          eyebrow, then the club name at 40/56px. */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="flex items-stretch gap-3.5">
+        <div className="flex items-stretch gap-3.5 min-w-0">
           <span className="w-1 rounded-full shrink-0" style={{ background: 'var(--pb-gradient)' }} />
-          <h1 className="font-display text-3xl sm:text-4xl font-bold tracking-tight text-pb-text">{club.name}</h1>
+          <div className="flex items-center gap-4 min-w-0">
+            <ClubCrest club={club} />
+            <div className="min-w-0">
+              <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block">
+                {club.short_name || club.name} · Club dashboard
+              </span>
+              <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5 text-pb-text">
+                {club.name}
+              </h1>
+            </div>
+          </div>
         </div>
         <Select
           value={seasonId}
