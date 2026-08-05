@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast , ManageLink } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Facilities on real data — the availability grid (this week's real bookings,
@@ -52,6 +52,7 @@ export default function Facilities({ st, patch, narrow }) {
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THIS WEEK · EACH COLUMN RUNS 8AM → MIDNIGHT</Caption>
       </div>
       <SegTabs value={tab} onChange={k => patch({ facTab: k })} tabs={[{ key: 'availability', label: 'Availability' }, { key: 'requests', label: 'Requests' }, { key: 'assets', label: 'Assets' }]} />
+      <ManageLink to="/admin/clubhouse/facilities/manage">Manage assets &amp; bookings</ManageLink>
       {children}
     </ScreenHeader>
   )

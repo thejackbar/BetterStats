@@ -4415,6 +4415,104 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_mono_data BYTEA"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS font_mono_mime TEXT"))
 
+    # Migration 217: committee governance — resolutions, per-member votes,
+    # action budgets/dependencies/objectives and threaded notes. Byte-identical
+    # to alembic/versions/217_committee_governance.py.
+    async with engine.begin() as conn:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_objectives (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                title TEXT NOT NULL,
+                description TEXT,
+                plan TEXT,
+                season_year INTEGER,
+                status TEXT NOT NULL DEFAULT 'active',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_club_objectives_org ON club_objectives(organisation_id, status)"))
+        for col, ddl in (
+            ("objective_id", "UUID REFERENCES club_objectives(id) ON DELETE SET NULL"),
+            ("budget_estimate", "NUMERIC(12,2)"),
+            ("actual_expenditure", "NUMERIC(12,2)"),
+            ("percent_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ("start_date", "DATE"),
+            ("closed_by_member_id", "UUID REFERENCES fee_members(id) ON DELETE SET NULL"),
+            ("outcome_notes", "TEXT"),
+            ("meeting_id", "UUID REFERENCES committee_meetings(id) ON DELETE SET NULL"),
+            ("motion_id", "UUID REFERENCES meeting_motions(id) ON DELETE SET NULL"),
+        ):
+            await conn.execute(text(f"ALTER TABLE committee_tasks ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_task_dependencies (
+                task_id UUID NOT NULL REFERENCES committee_tasks(id) ON DELETE CASCADE,
+                depends_on_task_id UUID NOT NULL REFERENCES committee_tasks(id) ON DELETE CASCADE,
+                PRIMARY KEY (task_id, depends_on_task_id)
+            )
+        """))
+        for col, ddl in (
+            ("is_resolution", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("resolution_ref", "TEXT"),
+            ("resolved_at", "TIMESTAMPTZ"),
+        ):
+            await conn.execute(text(f"ALTER TABLE meeting_motions ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS meeting_motion_votes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                motion_id UUID NOT NULL REFERENCES meeting_motions(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                vote TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_motion_vote_per_member UNIQUE (motion_id, member_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_notes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                entity_type TEXT NOT NULL,
+                entity_id UUID NOT NULL,
+                body TEXT NOT NULL,
+                author_member_id UUID REFERENCES fee_members(id) ON DELETE SET NULL,
+                author_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_committee_notes_entity ON committee_notes(organisation_id, entity_type, entity_id)"))
+        await conn.execute(text("ALTER TABLE committee_documents ADD COLUMN IF NOT EXISTS entity_type TEXT"))
+        await conn.execute(text("ALTER TABLE committee_documents ADD COLUMN IF NOT EXISTS entity_id UUID"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_committee_documents_entity ON committee_documents(organisation_id, entity_type, entity_id)"))
+
+        # Migration 218: a committee document can hold the file itself, who may
+        # open an uploaded one, and the link from an Office Bearer award to the
+        # club_roles row it names.
+        for col, ddl in (
+            ("file_data", "BYTEA"),
+            ("file_name", "TEXT"),
+            ("file_mime", "TEXT"),
+            ("file_size", "INTEGER"),
+            ("uploaded_by_user_id", "UUID REFERENCES users(id) ON DELETE SET NULL"),
+        ):
+            await conn.execute(text(f"ALTER TABLE committee_documents ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        # An uploaded document has no external URL; a row now carries one or the other.
+        await conn.execute(text("ALTER TABLE committee_documents ALTER COLUMN url DROP NOT NULL"))
+        await conn.execute(text("""
+            ALTER TABLE organisations
+            ADD COLUMN IF NOT EXISTS committee_docs_office_bearer_only
+            BOOLEAN NOT NULL DEFAULT TRUE
+        """))
+        await conn.execute(text("""
+            ALTER TABLE player_achievements
+            ADD COLUMN IF NOT EXISTS club_role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_player_achievements_club_role
+            ON player_achievements(club_role_id)
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

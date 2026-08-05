@@ -1,3 +1,6 @@
+import logging
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -5,6 +8,9 @@ from pydantic import BaseModel
 from typing import Optional
 
 from app.models.db import get_db
+from app.services import office_bearers
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/award-definitions", tags=["award-definitions"])
 
@@ -330,6 +336,17 @@ async def list_award_definitions(
     org_id: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
+    # Office Bearer definitions and BetterClubhouse's role catalogue are the
+    # same list seen from two screens, so they are reconciled before the read
+    # (see services/office_bearers.py). Additive and idempotent both ways.
+    # Never fatal: a club should still get its awards list if this hiccups.
+    try:
+        await office_bearers.sync_award_definitions(db, uuid.UUID(org_id))
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("Office Bearer definition sync failed for org %s", org_id)
+
     rows = await db.execute(
         text("""
             SELECT id, org_id, category, subcategory, achievement, display_name, sort_order, active

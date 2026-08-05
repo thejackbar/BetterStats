@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, func, exists, or_, text, cast, String, Integer, column
+from sqlalchemy import select, func, exists, or_, text, cast, String, Integer, column, false
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -37,7 +37,13 @@ STAT_FIELDS = {
     "fifties_this_season", "hundreds_this_season", "five_wickets_this_season",
 }
 # availability correlates on the contact's player_id, so it needs no join.
-SPECIAL_FIELDS = {"availability"}
+# `owes_money` also keys on player_id, but its value can't be expressed in SQL:
+# a balance is derived from the rate card, days played and payments, never
+# stored. build_query resolves the owing set in Python first (one call to the
+# same fees calculation the Accounts screen uses) and the rule becomes a plain
+# `player_id IN (...)`, so an audience can never disagree with the balance a
+# treasurer is looking at.
+SPECIAL_FIELDS = {"availability", "owes_money"}
 
 # ─── Directory (BetterCricket outreach) fields ───────────────────────────────
 # These describe a prospect club / its officer rather than a player, so they only
@@ -291,7 +297,7 @@ def _directory_condition(rule: dict, cust, visits=None):
     return None
 
 
-def _condition(rule: dict, stats, club_id):
+def _condition(rule: dict, stats, club_id, owing_ids=None):
     field = (rule or {}).get("field")
     op = (rule or {}).get("op")
     val = (rule or {}).get("value")
@@ -308,6 +314,15 @@ def _condition(rule: dict, stats, club_id):
             return Player.squad_team_id == uuid.UUID(str(val))
         except (ValueError, TypeError):
             return None
+    if field == "owes_money":
+        # owing_ids is None when the club has no season to price against, which
+        # is not the same as "nobody owes" — drop the rule rather than assert an
+        # empty audience.
+        if owing_ids is None:
+            return None
+        wants_owing = _yes(val)
+        clause = CommsContact.player_id.in_(owing_ids) if owing_ids else false()
+        return clause if wants_owing else ~clause
     if field == "availability":
         if val == "available":
             return _avail_exists(club_id, available_only=True)
@@ -325,6 +340,21 @@ def _condition(rule: dict, stats, club_id):
             return col == n
         return col >= n  # default / "gte"
     return None
+
+
+async def _owing_player_ids(session: AsyncSession, org_id):
+    """Players whose member record still owes money in the club's newest
+    season. Returns None when there is no season to price against, so the rule
+    can be dropped rather than resolving to nobody."""
+    from app.services import fees as fees_svc
+
+    season_id = (await session.execute(
+        select(Season.id).where(Season.organisation_id == org_id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc()).limit(1)
+    )).scalar_one_or_none()
+    if not season_id:
+        return None
+    return await fees_svc.owing_player_ids(session, org_id, season_id)
 
 
 async def _current_year(session: AsyncSession, org_id) -> Optional[int]:
@@ -354,6 +384,11 @@ async def build_query(session: AsyncSession, club, definition: dict):
         visits = _visit_stats_subquery()
         q = q.outerjoin(visits, visits.c.cid == cast(MarketingClub.id, String))
 
+    # Who owes, resolved once against the club's newest season.
+    owing_ids = None
+    if any(r["field"] == "owes_money" for r in rules):
+        owing_ids = await _owing_player_ids(session, club.id)
+
     stats = None
     if any(r["field"] in STAT_FIELDS for r in rules):
         year = await _current_year(session, club.id)
@@ -379,7 +414,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
         if rule["field"] in DIRECTORY_FIELDS:
             cond = _directory_condition(rule, cust, visits)
         else:
-            cond = _condition(rule, stats, club.id)
+            cond = _condition(rule, stats, club.id, owing_ids)
         if cond is not None:
             q = q.where(cond)
     return q

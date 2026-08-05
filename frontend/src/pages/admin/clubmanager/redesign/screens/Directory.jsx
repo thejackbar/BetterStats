@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 
@@ -223,6 +224,13 @@ export default function Directory({ st, patch, narrow }) {
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
           <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
           <button onClick={openAdd} style={btnP}>+ Add person</button>
+          {/* The dedicated editors for the three overlays this record shows.
+              The panels below cover the everyday case (add a role, log hours,
+              record a qualification, link a family); these are where the
+              catalogues and bulk work live. */}
+          <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
+          <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
+          <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer hours</Link>
         </div>
       </ScreenHeader>
 

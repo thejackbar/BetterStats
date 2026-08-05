@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout, Toast, Drawer } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout, Toast, Drawer , ManageLink } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Club Diary on real data — the board (one current occurrence per active task
@@ -70,6 +70,7 @@ export default function ClubDiary({ st, patch, narrow }) {
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THE CLUB'S RECURRING OBLIGATIONS, BY SEASON</Caption>
       </div>
       <SegTabs value={tab} onChange={k => patch({ diaryTab: k })} tabs={[{ key: 'plan', label: 'Season plan' }, { key: 'templates', label: 'Template library' }]} />
+      <ManageLink to="/admin/clubhouse/diary/manage">Full diary editor</ManageLink>
       {children}
     </ScreenHeader>
   )

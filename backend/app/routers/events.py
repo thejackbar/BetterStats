@@ -121,6 +121,8 @@ async def list_registrations(event_id: str, _: User = _require, club: Organisati
         "registrations": [events_service._registration_dict(r) for r in rows],
         "registered_count": await events_service.registered_count(db, e.id),
         "capacity": e.capacity,
+        # Income, not profit — an event has no cost side yet.
+        "financials": await events_service.financials(db, e.id),
     }
 
 

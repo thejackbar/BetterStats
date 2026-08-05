@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { C, MONO, ScreenHeader, NavToggle, Toast, initials } from '../ui'
 
@@ -40,13 +41,71 @@ function checkClient(area, shift, cand, shifts, settings) {
   return { blocks, warns }
 }
 
+// "Email everyone rostered" for a day, a week or a month. The recipients are
+// resolved server-side from the shifts themselves and handed to the composer as
+// a ready-made list, so nobody rebuilds the group by hand from the grid they
+// are already looking at.
+function EmailRostered({ weekStart, onToast }) {
+  const navigate = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+
+  async function go(scope) {
+    setBusy(true); setOpen(false)
+    try {
+      const res = await api.rosterContacts(scope, weekStart)
+      if (!res.contact_ids.length) {
+        onToast({ tone: 'warn', title: 'Nobody to email.',
+          body: res.people.length
+            ? `${res.people.length} rostered, but none of them have an email contact on file.`
+            : `Nobody is rostered ${scope === 'day' ? 'that day' : 'in that ' + scope}.` })
+        return
+      }
+      // The audience goes on at creation. The composer reads it back from the
+      // campaign, so nothing has to be threaded through router state.
+      const c = await api.commsCreateCampaign({
+        name: `Rostered · ${res.from}${res.to !== res.from ? ` to ${res.to}` : ''}`,
+        audience: { type: 'list', contact_ids: res.contact_ids },
+      })
+      if (res.unreachable.length) {
+        onToast({ tone: 'warn', title: `${res.contact_ids.length} on the list.`,
+          body: `${res.unreachable.length} rostered ${res.unreachable.length === 1 ? 'person has' : 'people have'} no email contact: ${res.unreachable.slice(0, 3).join(', ')}${res.unreachable.length > 3 ? '…' : ''}` })
+      }
+      navigate(`/admin/comms/${c.id}`, { state: { skipIntro: true } })
+    } catch (e) {
+      onToast({ tone: 'block', title: 'Could not build the list.', body: String(e?.message || e) })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <span style={{ position: 'relative' }}>
+      <button disabled={busy} onClick={() => setOpen(o => !o)}
+        style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+        {busy ? 'Building…' : 'Email rostered'}
+      </button>
+      {open && (
+        <span style={{ position: 'absolute', top: '100%', right: 0, marginTop: 6, zIndex: 60, background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 4, display: 'flex', flexDirection: 'column', minWidth: 132, boxShadow: '0 8px 30px rgba(0,0,0,0.4)' }}>
+          {[['day', 'Rostered today'], ['week', 'This week'], ['month', 'This month']].map(([k, l]) => (
+            <button key={k} onClick={() => go(k)}
+              style={{ padding: '7px 10px', borderRadius: 6, fontSize: 12.5, textAlign: 'left', border: 'none', background: 'transparent', color: C.dim, cursor: 'pointer' }}>{l}</button>
+          ))}
+        </span>
+      )}
+    </span>
+  )
+}
+
 export default function Roster({ st, patch, narrow }) {
   const [data, setData] = useState(null)  // { week, areas, candidates, settings }
   const [shifts, setShifts] = useState([])
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
 
-  const load = () => api.rosterWeek().then(res => { setData(res); setShifts(res.week.shifts || []) }).catch(e => setErr(String(e?.message || e)))
+  // api.js stamps the HTTP status onto the error, which is the difference
+  // between "you lack a capability" (403) and "the server threw" (500).
+  const load = () => api.rosterWeek()
+    .then(res => { setData(res); setShifts(res.week.shifts || []) })
+    .catch(e => setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
   useEffect(() => { load() }, [])
 
   const view = st.view
@@ -63,7 +122,26 @@ export default function Roster({ st, patch, narrow }) {
     </ScreenHeader>
   )
 
-  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load the roster.' : 'Loading the roster…'}</div></div>
+  // A failure here used to read "Could not load the roster." and nothing else,
+  // which is the same message whether the club lacks a capability, the request
+  // timed out, or the server threw. Say which, so it can be acted on.
+  if (!data) return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+      <Header />
+      <div style={{ padding: 24, fontSize: 13, color: C.faint, maxWidth: '46rem' }}>
+        {!err ? 'Loading the roster…' : (
+          <div style={{ background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 9, padding: 18, lineHeight: 1.6 }}>
+            <div style={{ color: C.block, fontWeight: 600, fontSize: 13.5, marginBottom: 6 }}>Could not load the roster.</div>
+            <div style={{ color: C.dim }}>{err}</div>
+            <div style={{ marginTop: 12 }}>
+              <button onClick={() => { setErr(null); load() }}
+                style={{ padding: '7px 13px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#0a0d14', cursor: 'pointer' }}>Try again</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 
   const { areas, candidates, settings } = data
   const areaById = {}; areas.forEach(a => { areaById[a.id] = a })
@@ -203,6 +281,7 @@ export default function Roster({ st, patch, narrow }) {
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
           <button onClick={() => patch(s => ({ panelOpen: !s.panelOpen }))} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(st.panelOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{st.panelOpen ? 'Hide candidates' : 'Candidates'}</button>
           <button disabled={busy} onClick={autoFill} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
+          <EmailRostered weekStart={data.week.week_start} onToast={t => patch({ toast: t })} />
           <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
         </div>

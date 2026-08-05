@@ -1,5 +1,63 @@
 # BetterStats — Claude Session Notes
 
+## BetterClubhouse follow-ups: roster, orphaned editors, governance (v9.4.0, Aug 2026)
+
+- **The roster was blank for any club that opened it before configuring areas.**
+  `get_or_create_week` created the week row on first visit, generated shifts from
+  zero patterns, and every later visit found that empty week and returned it —
+  permanently. It now fills a week that is still genuinely empty (`_has_shifts`
+  guard, so a roster in progress is never touched). Reproduced and fixed against
+  a real Postgres: 0 shifts → 30. **The roster screen also reports the real
+  error + HTTP status now**; it used to say "Could not load the roster." for a
+  403, a 500 and a timeout alike.
+- **~5,300 lines of working CRUD were unrouted** since commit `6ff23c6`, when
+  the redesign screens took `/admin/committee`, `/admin/events`, `/admin/assets`
+  etc. The redesign screens are read-only viewers; the editors
+  (`AdminCommittee` 885 lines, `AdminFamilies` 926, `AdminClubDiary` 890,
+  `AdminAssets` 693, `AdminEvents` 646 with the QR code + ticketing, plus
+  Qualifications/Volunteers/Roles/Activities) had nowhere to be reached from.
+  They now live under `/admin/clubhouse/*/manage` and each viewer carries a
+  `ManageLink` to its editor. **Folding the CRUD into the viewers is still the
+  right end state** — this is the bridge, not the destination.
+- **Migration 217 — committee governance.** `club_objectives` (the business /
+  strategic plan an action serves), `committee_task_dependencies`,
+  `meeting_motion_votes` (named votes; the tallies on `meeting_motions` stay,
+  and are *derived* from names when names exist), `committee_notes`
+  (polymorphic: task | motion | meeting | objective), plus columns on
+  `committee_tasks` (budget_estimate, actual_expenditure, percent_complete,
+  start_date, objective_id, meeting_id, motion_id, outcome_notes,
+  closed_by_member_id) and `meeting_motions` (is_resolution, resolution_ref,
+  resolved_at). `committee_documents` gained `entity_type`/`entity_id` so a
+  quote hangs off the action that asked for it — **still link-based by design**,
+  the club's docs stay in Drive/Dropbox. Only a **carried** motion can become a
+  resolution (422 otherwise). `GET /committee/objectives/progress` reports the
+  plan against the actions serving it. All verified end to end against a real
+  Postgres, not just compiled.
+- **`await db.refresh(obj)` after `commit()` before serialising an ORM object** —
+  the resolution endpoint hit `MissingGreenlet` exactly as the Square-sync note
+  warns. commit() expires the instance and the response then lazy-loads outside
+  the greenlet.
+- **`owes_money` is a club audience field** (`comms_segments.SPECIAL_FIELDS`).
+  A balance is derived, never stored, so it can't be SQL: `build_query`
+  resolves the owing player ids in Python via `services/fees.owing_player_ids`
+  (the same `_financials` the Accounts screen runs) and the rule becomes
+  `player_id IN (...)`. **Don't reimplement the balance in SQL** — that's how
+  the sidebar badge and an audience start disagreeing.
+- **Local verification harness**: a real Postgres + the app is reachable in this
+  environment. `Base.metadata.create_all` gets the ORM tables; the raw-SQL
+  tables only exist because the lifespan creates them, and the lifespan aborts
+  on the first failing statement (it ALTERs tables that later raw-SQL blocks
+  create). Replay the `text(...)` statements from `main.py` skipping failures,
+  and boot with the lifespan stubbed out.
+- **Still not built**: a Gantt view for committee actions (the data — start
+  date, due date, dependencies, percent — is all there now, and `ClubDiary.jsx`
+  already derives a critical path from the same shape, so it is a frontend
+  job); file *upload* against a committee record (links only); emailing everyone
+  rostered for a period; committee ↔ BetterStats Awards "Office Bearer" sync
+  (two unrelated things sharing a name — Clubhouse's is a *role type*, Awards'
+  is an achievement category); and editing UI for the new governance fields
+  beyond the API.
+
 ## BetterAdmin → BetterClubhouse: four sub-modules merged into one (v9.3.0, Aug 2026)
 
 BetterFees, BetterComms, BetterMerch and BetterClubManager shared a codebase but
@@ -52,7 +110,8 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   heading. Items carry `cap` (a capability, or an array meaning any-of),
   `module` (one of the umbrella's paid keys — the whole group disappears for a
   club that doesn't hold it) and `super` (the promoted ClubManager screens —
-  real data, but still `requireRole="super_admin"` in App.jsx). **The four old layouts
+  real data, and open to the club's own admins since v9.6.1 — see the access
+  note below). **The four old layouts
   are thin wrappers over it now**, which is how every existing screen inherited
   the shell without being rewritten. `BetterMerchLayout` still owns the
   storefront flag and passes `storefront` down.
@@ -98,6 +157,191 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   Accounts, Directory and Inventory therefore keep their existing data layers;
   only their shell, language and naming changed. The BetterClubhouse **logo mark
   also does not exist yet** — the lockup currently reuses `betteradmin.svg`.
+
+## BetterClubhouse follow-up: roster fix, committee governance (v9.4.0–v9.5.0, Aug 2026)
+
+The audit that followed the merge found one real bug, a pile of orphaned
+editors, and a set of genuinely-unbuilt committee features. All three are done.
+
+- **The Roster bug was a permanently empty week, not a load failure.** A club
+  that opened the roster BEFORE configuring any operational areas got a
+  `roster_weeks` row created with zero shifts, and nothing ever regenerated it —
+  every later visit found the empty draft week and returned it, so the roster
+  stayed blank forever. `services/roster.py` now regenerates shifts when it
+  finds a `draft` week with none (`_has_shifts` → `_generate_shifts`). Verified
+  against real Postgres: 0 → 30 shifts. The screen's error state also shows the
+  real message and HTTP status now instead of a bare shrug.
+- **~5,300 lines of working CRUD were orphaned since `6ff23c6`** (pre-existing,
+  not caused by the merge): Committee, Events, Facilities, Club Diary,
+  Families, Qualifications and Volunteer hours all had full editors with no
+  route. Routed back and linked from the read-only screen that shows their
+  data. `AdminCommittee` lives at **`/admin/clubhouse/committee/manage`**
+  (open to club admins since v9.6.1), reached from the Clubhouse Committee screen —
+  `/admin/committee` is the Clubhouse screen, not the editor.
+- **Migration 217 — committee governance.** `club_objectives`,
+  `committee_task_dependencies`, `meeting_motion_votes`, `committee_notes`;
+  plus columns on `committee_tasks` (objective_id, budget_estimate,
+  actual_expenditure, percent_complete, start_date, closed_by_member_id,
+  outcome_notes, meeting_id, motion_id), `meeting_motions` (is_resolution,
+  resolution_ref, resolved_at) and `committee_documents` (entity_type,
+  entity_id). Mirrored idempotently in `main.py`'s lifespan as usual.
+  **Only a carried/passed motion can become a resolution** (`make_resolution`
+  raises otherwise). Per-member votes RE-DERIVE the tallies, so a club that
+  just counts hands still only stores a count.
+- **`frontend/src/components/admin/clubmanager/governance.jsx`** is the whole
+  governance UI: `NoteThread`, `AttachedDocuments`, `ActionPlanPanel`,
+  `MotionGovernance` (vote matrix + resolution toggle), `ObjectivesTab` and
+  `ActionTimeline` (the Gantt). The timeline groups rows by objective, derives
+  the critical path from `depends_on` over not-done actions, and lists undated
+  actions underneath. Two things to leave alone: its month ruler shares the
+  rows' `w-[38%]` + `flex-1` geometry rather than guessing offsets
+  arithmetically, and **ticks snap to the 1st of the month** (iterating
+  `min + n months` mislabels a mid-month start and drops the final month).
+  `chain()` carries a `walking` cycle guard — nothing server-side rejects
+  A-waits-on-B-waits-on-A, only self-dependency, so without it a saved cycle
+  hangs the tab.
+- **Pydantic models are the trap when adding a column here.** New fields on
+  `TaskCreate`/`TaskPatch`/`DocumentCreate`/`DocumentPatch` silently never
+  reach the service if you only add them to the migration and the service —
+  that's what made `objective_progress` report 0 actions. Also: after
+  `commit()` the instance is expired, so serialising it lazy-loads outside the
+  greenlet and 500s with `MissingGreenlet` — `await db.refresh(obj)` before
+  returning (the vote and resolution endpoints both need it).
+- **`owes_money` is an audience condition**, resolved server-side from the same
+  `_financials` the Accounts screen runs (`fees.owing_player_ids`), so "email
+  everyone who owes" targets exactly the people that screen lists. It's a
+  `SPECIAL_FIELDS` member in `comms_segments.py` — precomputed once per query,
+  not a per-row join. Verified it partitions exactly (13 owing + 287 settled =
+  300 contacts).
+- **`services/roster.py::rostered_contacts`** derives a shift's date as
+  `w.week_start + s.day_of_week` and backs the roster's "email everyone
+  rostered" for a day/week/month, which hands off to the normal comms composer.
+- **Still open, needs a decision**: file **upload** against a committee record
+  (documents stay link-based by design — governance docs live where the club
+  already keeps them), and any committee ↔ BetterStats Awards "Office Bearer"
+  sync. Those two are unrelated things that share a name: a Clubhouse committee
+  position IS a committee-flagged `club_role` (migration 198), whereas "Office
+  Bearer" in Awards is an achievement category. Don't wire them together
+  without asking.
+
+## Committee document uploads + Office Bearer awards on Clubhouse roles (v9.6.0, migration 218, Aug 2026)
+
+Two asks that both come back to "BetterStats is the core module and may be all a
+club ever buys."
+
+### Uploaded committee documents
+
+- **`committee_documents` can now hold the file** (`file_data`/`file_name`/
+  `file_mime`/`file_size`/`uploaded_by_user_id`), not only a link. `url` went
+  nullable: a row carries a url **or** a file, never both. Bytes live in
+  Postgres for the same reason player photos do (the upload volume is not
+  guaranteed to persist). Cap is `MAX_DOCUMENT_BYTES` = 15MB and
+  `ALLOWED_DOCUMENT_MIMES` is an allowlist, not a blocklist — the file comes
+  back to other members from our own domain, so nothing scriptable gets in.
+- **`organisations.committee_docs_office_bearer_only`** (default **TRUE**)
+  decides who may open an upload. Edited from BetterClubhouse → Settings via the
+  existing `/club-admin/settings` PATCH, gated on `MANAGE_SETTINGS`.
+- **The rule, in `services/committee.can_open_document`**: uploader, current
+  Office Bearer, or the club's **Main Admin** (`club_memberships.role ==
+  'club_admin'`, unconstrained on upload/view/download/delete **per direct
+  instruction**). It **only governs uploads** — a link is a URL we neither host
+  nor can gate, and pretending otherwise would be false assurance. Say that in
+  any UI copy rather than implying a wall that is not there.
+- **Enforcement is `GET /documents/{id}/file`**, which re-checks before serving
+  and sends `Cache-Control: private, no-store`. The list's `can_open` flag is
+  presentation only (it draws the lock). PATCH/DELETE route through
+  `_document_writable_or_403` — being able to destroy a file you may not read is
+  not a lesser permission than reading it.
+- **`file_data` is deferred on the list query** (`options(defer(...))`) and
+  `has_file` reads `file_size`, never the bytes. Touching the deferred column
+  while serialising a listed row is a `MissingGreenlet` waiting to happen, and
+  without the defer a register of twenty uploads pulls every payload into memory
+  to render a list of titles.
+- **There is no `users` → `fee_members` FK.** `committee.member_for_user` joins
+  on lowercased email, which is the only honest link; a member with no email, or
+  one who logs in under a different address, simply does not resolve and is
+  treated as "not an office bearer". Do not invent a stronger claim here.
+- **`is_office_bearer` on a position now derives from the role's TYPE**
+  (`_role_is_office_bearer`), resynced on every `sync_committee_positions`, not
+  set once from the name. It gates document access now, so a role retyped in the
+  Roles catalogue has to move the position with it. The name set is the fallback
+  for a role with no type — dropping it would silently strip access.
+
+### Office Bearer awards ARE BetterClubhouse roles
+
+`services/office_bearers.py` is the whole bridge. Award **category** is fixed
+("Office Bearer"), **subcategory** is a `club_role_types` row, **achievement** is
+a `club_roles` row, and `player_achievements.club_role_id` records which.
+
+- **`sync_award_definitions` runs both ways and is idempotent**, called from
+  `GET /award-definitions` (wrapped in try/rollback — a club must still get its
+  awards list if this hiccups). ADOPT pulls both existing definitions **and
+  recorded achievements** into `club_roles`; PUBLISH pushes committee/captain/
+  coach roles back out as definitions. **Adopting from definitions alone is not
+  enough** — that was the first cut and it left a club's actual history behind,
+  because an imported award never had a definition behind it.
+- **Seeding is gated on having no ROLES, not no definitions.** A club can easily
+  have one hand-typed definition and an empty role catalogue; gating on
+  definitions left exactly that club with nothing.
+- **`SUBCATEGORY_TO_ROLE_TYPE` / `ROLE_TYPE_TO_SUBCATEGORY`** hold the mapping
+  (Executive Committee ↔ Office Bearer, General Committee ↔ Committee Member,
+  Captains ↔ Captain, Coaches ↔ Coach, Other Roles ↔ Other). `PUBLISHED_ROLE_TYPES`
+  keeps ground staff / canteen / officials OUT of the awards dropdown;
+  `COMMITTEE_ROLE_TYPES` decides which become committee positions (a 1st XI
+  Captain is an honour, not a seat).
+- **`ensure_role_for_award` matches on title alone** because `club_roles` is
+  unique per (org, title). An award whose subcategory disagrees with an existing
+  role's type reuses the role and leaves the type alone — the Roles screen owns
+  types, and a stray award must not retype a position the committee set up.
+- **Starter pack grew to 18 committee roles**: the three portfolio Vice
+  Presidents and Operations were added so BetterStats' long-standing Office
+  Bearer options land on real roles. `STARTER_ROLE_TYPES` gained **Captain**.
+  The seed button label is hardcoded — it reads `(18)` now.
+- **`adopt_awards_as_terms`** turns recorded awards into `committee_terms`.
+  Inserts directly rather than through `start_term`, which auto-closes the open
+  term for a position — right for a real handover, wrong when back-filling a
+  decade in arbitrary order. Idempotent on (position, holder, start date). Season
+  → date is Jul 1 of the start year to Jun 30 after the end year; an award with
+  no season is skipped, never guessed. Surfaced as a panel on the Committee
+  Roles tab that only appears when the club actually has such awards.
+- **`_season_year` handles both shapes** `player_achievements.season` has held:
+  a `seasons` UUID (what the UI writes) and a plain label like "2025/26" (what
+  imports write).
+
+### Verification
+
+Two suites against a real Postgres, exercising the shipped functions and the
+route bodies rather than a replay of their logic (64 checks): service-level
+(both sync directions, idempotency, achievement linking, term adoption, the
+access rule across four identities, the deferred-bytes serialisation, role
+retyping) and route-level (upload incl. MIME + size rejection, per-reader
+`can_open`, the download 403, delete gating, and the unrestricted mode). The
+migration was also applied twice to a populated pre-218 schema.
+
+## BetterClubhouse is open to club admins (v9.6.1, Aug 2026)
+
+Most of the module was invisible to the people paying for it. Directory,
+Roster, Committee, Diary, Events, Facilities and the whole Setup catalogue
+carried `requireRole="super_admin"` in `App.jsx` **and** a `super: true` flag in
+`BetterClubhouseLayout`'s nav, so a club admin's sidebar showed only Today,
+Audiences, Integrations, Reports and Settings. That gate came from
+BetterClubManager being unlaunched and long outlived its reason.
+
+- **Both halves are gone.** The routes are plain `<ProtectedRoute>`, and each
+  nav item now carries the **capability its own router already enforces**
+  (Roster → `MANAGE_VOLUNTEERS`, Committee/Events → `MANAGE_COMMITTEE`,
+  Facilities → `MANAGE_ASSETS`, Diary → `MANAGE_CLUB_DIARY`, Directory and
+  Areas & roles → the same any-of sets their routers use).
+- **Safe because the server never relied on the route gate.** Every router
+  behind these screens has `require_cap` / `require_any_cap` (verified across
+  all eleven before removing anything). `club_admin` and `super_admin` imply
+  every capability; a `club_member` gets their explicit allowlist, so the
+  sidebar and the API now agree instead of the UI being the only check.
+- **`/admin/member-portal` stays super-admin-only** — a genuinely unlaunched
+  feature behind its own flag, not part of the merged module's nav.
+- **When adding a Clubhouse screen**, give the nav item the same capability its
+  router enforces. Do not reach for a role gate: role is not how this app
+  expresses permission anywhere else in the module.
 
 ## Multi-sport: the AFL silo (Aug 2026)
 
@@ -235,9 +479,11 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   home `/admin/betterclub` `BetterClubManagerHome`) and every one of its tool
   routes (`/admin/committee`, `/admin/volunteers`, `/admin/families`,
   `/admin/qualifications`, `/admin/member-portal`, `/admin/events`, `/admin/assets`,
-  `/admin/club-diary`) are gated `requireRole="super_admin"` in `App.jsx`. So
-  ordinary club admins currently have **no access** to these tools — deliberate,
-  until BetterClubManager launches. It is therefore NOT in `CORE_TILES` /
+  `/admin/club-diary`) were gated `requireRole="super_admin"` in `App.jsx`, so
+  ordinary club admins had **no access** to these tools until BetterClubManager
+  launched. **Superseded in v9.6.1** — those screens are now open to the club's
+  own admins (see the access note below); the gate had outlived the reason for
+  it and was hiding most of BetterClubhouse from the clubs paying for it. It is therefore NOT in `CORE_TILES` /
   `dashboardTiles()` (off the dashboard, sidebar and module switcher).
 - **The one Core surface tile** (BetterStats) lives in `CORE_TILES` in
   `lib/modules.js` — deliberately OUTSIDE `MODULE_INFO` (which feeds

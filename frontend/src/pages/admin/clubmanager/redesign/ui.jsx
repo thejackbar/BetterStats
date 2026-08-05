@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 // Shared tokens + small primitives for the BetterClubManager redesign.
 //
 // Surfaces and text reference the repo's `--pb-*` theme variables (they hold the
@@ -125,7 +127,7 @@ export function Drawer({ width = 440, zIndex = 90, onClose, children }) {
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex, display: 'flex', justifyContent: 'flex-end', background: 'rgba(0,0,0,0.55)' }} onClick={onClose}>
       <div className="pb-scroll" onClick={e => e.stopPropagation()}
-        style={{ width, maxWidth: '92vw', background: C.surface, borderLeft: `1px solid ${C.hair2}`, overflowY: 'auto', animation: 'bcmRiseIn 180ms ease both', boxShadow: '0 0 40px rgba(0,0,0,0.5)' }}>
+        style={{ width, maxWidth: '92vw', background: C.surface, borderLeft: `1px solid ${C.hair2}`, overflowY: 'auto', animation: 'chRise 180ms ease both', boxShadow: '0 0 40px rgba(0,0,0,0.5)' }}>
         {children}
       </div>
     </div>
@@ -133,3 +135,20 @@ export function Drawer({ width = 440, zIndex = 90, onClose, children }) {
 }
 
 export function initials(name) { return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() }
+
+// The link from a read-only screen to the editor that owns its data.
+//
+// These screens are viewers; the create/edit/delete for meetings, motions,
+// events, bookings and the diary lives in the older full editors, which lost
+// their routes when these screens took the URLs. Rather than leave that CRUD
+// unreachable, every viewer points at its editor until the two are folded
+// together. `margin-left: auto` puts it at the right-hand end of the header.
+export function ManageLink({ to, children = 'Manage' }) {
+  return (
+    <Link to={to} style={{
+      marginLeft: 'auto', flexShrink: 0, padding: '7px 13px', borderRadius: 8,
+      fontSize: 12.5, fontWeight: 600, border: `1px solid ${C.hair2}`,
+      color: C.dim, textDecoration: 'none', whiteSpace: 'nowrap',
+    }}>{children}</Link>
+  )
+}

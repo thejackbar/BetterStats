@@ -4,6 +4,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { PbSpinner } from '../../lib/presskit'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
+import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, ObjectivesTab, ActionTimeline } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -22,7 +23,7 @@ const ATTENDANCE_STATUSES = ['present', 'apology', 'absent']
 const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
 
 function TabBar({ tab, setTab }) {
-  const tabs = [['positions', 'Committee Roles'], ['tasks', 'Tasks'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
+  const tabs = [['positions', 'Committee Roles'], ['tasks', 'Actions'], ['objectives', 'Plan'], ['documents', 'Documents'], ['calendar', 'Calendar'], ['meetings', 'Meetings & AGM']]
   return (
     <div className="flex gap-1 mb-5">
       {tabs.map(([k, l]) => (
@@ -161,6 +162,51 @@ function PositionCard({ position, members, onChanged }) {
   )
 }
 
+// A club that only ever bought BetterStats recorded its office bearers as
+// awards. Those awards already point at real club roles (see
+// services/office_bearers.py), so the committee history can be built from them
+// rather than retyped. Only shown when the club actually has some.
+function OfficeBearerAwardsPanel({ onImported }) {
+  const toast = useToast()
+  const [info, setInfo] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.committeeOfficeBearerAwards().then(setInfo).catch(() => setInfo(null))
+  }, [])
+
+  if (!info || !info.committee_awards) return null
+
+  const adopt = async () => {
+    setBusy(true)
+    try {
+      const r = await api.committeeAdoptOfficeBearerAwards()
+      const bits = [`Added ${r.created} term${r.created === 1 ? '' : 's'}`]
+      if (r.already_there) bits.push(`${r.already_there} already recorded`)
+      if (r.no_season_recorded) bits.push(`${r.no_season_recorded} had no season, so no dates to use`)
+      toast.success(bits.join(' · '))
+      onImported?.()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-4 mb-3 flex items-start justify-between gap-4 flex-wrap">
+      <div className="min-w-0">
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1">FROM BETTERSTATS AWARDS</div>
+        <p className="text-[13px] text-pb-dim leading-relaxed max-w-xl">
+          This club has {info.committee_awards} Office Bearer award{info.committee_awards === 1 ? '' : 's'} naming a
+          committee role. They can be recorded here as terms, so the succession history starts full rather than empty.
+          Awards with no season recorded are left alone, and running this twice adds nothing.
+        </p>
+      </div>
+      <button onClick={adopt} disabled={busy}
+        className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+        {busy ? 'IMPORTING…' : 'IMPORT AS TERMS'}
+      </button>
+    </div>
+  )
+}
+
 function PositionsTab({ members }) {
   const toast = useToast()
   const [data, setData] = useState(null)
@@ -211,9 +257,10 @@ function PositionsTab({ members }) {
         </p>
         <button onClick={seedStarter} disabled={seeding}
           className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
-          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (14)'}
+          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (18)'}
         </button>
       </div>
+      <OfficeBearerAwardsPanel onImported={load} />
       {positions.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee roles above, or create them under Roles.</div>
       ) : (
@@ -276,14 +323,18 @@ function NewTaskForm({ onCreated }) {
   )
 }
 
-function TasksTab() {
+function TasksTab({ members }) {
   const toast = useToast()
   const [tasks, setTasks] = useState(null)
+  const [objectives, setObjectives] = useState([])
+  const [openId, setOpenId] = useState(null)   // the action whose plan is showing
+  const [view, setView] = useState('board')    // board | timeline
 
   const load = useCallback(() => {
     api.committeeListTasks().then(d => setTasks(d.tasks || [])).catch(e => toast.error(e.message))
   }, [toast])
   useEffect(() => { load() }, [load])
+  useEffect(() => { api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => {}) }, [])
 
   async function setStatus(task, status) {
     try { await api.committeeUpdateTask(task.id, { status }); load() } catch (e) { toast.error(e.message) }
@@ -293,10 +344,20 @@ function TasksTab() {
     try { await api.committeeDeleteTask(task.id); load() } catch (e) { toast.error(e.message) }
   }
 
-  if (tasks === null) return <PbSpinner message="Loading tasks…" />
+  if (tasks === null) return <PbSpinner message="Loading actions…" />
   return (
     <div>
       <NewTaskForm onCreated={load} />
+      <div className="flex items-center gap-1 mb-3">
+        {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
+          <button key={k} onClick={() => setView(k)}
+            className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+        ))}
+      </div>
+      {view === 'timeline' ? (
+        <ActionTimeline tasks={tasks} objectives={objectives}
+          onOpen={t => { setView('board'); setOpenId(t.id) }} />
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {STATUSES.map(st => (
           <div key={st}>
@@ -309,20 +370,45 @@ function TasksTab() {
                     <span className="font-mono text-[9px] text-pb-faintest">{label(t.category)}{t.due_date ? ` · ${t.due_date}` : ''}{t.is_recurring ? ' · ↻' : ''}</span>
                     <button onClick={() => remove(t)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">✕</button>
                   </div>
-                  <div className="flex gap-1 mt-1.5">
+                  {/* The planning line, only when there is something to say. */}
+                  {(t.budget_estimate != null || t.percent_complete > 0 || (t.depends_on || []).length > 0) && (
+                    <div className="flex items-center gap-2 mt-1 font-mono text-[9px]">
+                      {t.percent_complete > 0 && <span style={{ color: 'var(--pb-accent-ink)' }}>{t.percent_complete}%</span>}
+                      {t.budget_estimate != null && (
+                        <span className={Number(t.actual_expenditure || 0) > Number(t.budget_estimate) ? 'text-pb-amber' : 'text-pb-faintest'}>
+                          ${Number(t.actual_expenditure || 0).toLocaleString('en-AU')}/${Number(t.budget_estimate).toLocaleString('en-AU')}
+                        </span>
+                      )}
+                      {(t.depends_on || []).length > 0 && <span className="text-pb-faintest">waits on {t.depends_on.length}</span>}
+                    </div>
+                  )}
+                  <div className="flex gap-1 mt-1.5 flex-wrap">
                     {STATUSES.filter(s => s !== st).map(s => (
                       <button key={s} onClick={() => setStatus(t, s)}
                         className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">
                         {STATUS_LABELS[s]}
                       </button>
                     ))}
+                    <button onClick={() => setOpenId(o => o === t.id ? null : t.id)}
+                      className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text ml-auto">
+                      {openId === t.id ? 'Close' : 'Plan'}
+                    </button>
                   </div>
+                  {openId === t.id && (
+                    <div className="mt-2 space-y-2">
+                      <ActionPlanPanel task={t} allTasks={tasks} objectives={objectives} members={members}
+                        onChanged={load} />
+                      <div className="pb-card p-3"><NoteThread entityType="task" entityId={t.id} /></div>
+                      <div className="pb-card p-3"><AttachedDocuments entityType="task" entityId={t.id} /></div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
           </div>
         ))}
       </div>
+      )}
     </div>
   )
 }
@@ -740,6 +826,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
                 ))}
                 <button onClick={() => removeMotion(m)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
               </div>
+              <MotionGovernance meeting={meeting} motion={m} members={members} onChanged={load} />
             </div>
           ))}
         </div>
@@ -868,14 +955,16 @@ export default function AdminCommittee() {
 
   return (
     <BetterClubManagerLayout>
-      <div className="max-w-4xl">
+      <div className="max-w-5xl">
         <h1 className="font-display text-2xl font-bold text-pb-text mb-1">Committee Administration</h1>
         <p className="font-mono text-[11px] text-pb-faint mb-5">
-          Committee roles and succession history, the task register, a document index, the club calendar, and meetings/AGM.
+          Committee roles and succession history, the action register and the plan it serves, a document index,
+          the club calendar, and meetings/AGM with motions, resolutions and votes.
         </p>
         <TabBar tab={tab} setTab={setTab} />
         {tab === 'positions' && <PositionsTab members={members} />}
-        {tab === 'tasks' && <TasksTab />}
+        {tab === 'tasks' && <TasksTab members={members} />}
+        {tab === 'objectives' && <ObjectivesTab />}
         {tab === 'documents' && <DocumentsTab />}
         {tab === 'calendar' && <CalendarTab />}
         {tab === 'meetings' && <MeetingsTab />}

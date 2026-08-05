@@ -325,9 +325,20 @@ export default function App() {
           <Route path="/admin/clubhouse/integrations" element={<ProtectedRoute><ClubhouseIntegrations /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/reports" element={<ProtectedRoute><ClubhouseReports /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/settings" element={<ProtectedRoute><ClubhouseSettings /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/roster" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/roster" element={<ProtectedRoute><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          {/* The full editors behind the read-only Clubhouse screens. They lost
+              their routes when the redesign screens took /admin/committee,
+              /admin/events and friends, which left their CRUD unreachable.
+              Each viewer links here until the two are folded together. */}
+          <Route path="/admin/clubhouse/committee/manage" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/events/manage" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
+          <Route path="/admin/clubhouse/directory/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
           {/* Old entry points, kept so bookmarks and links still land somewhere. */}
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
@@ -342,16 +353,16 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
-          <Route path="/admin/committee" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
-          <Route path="/admin/volunteers" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
-          <Route path="/admin/roles" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
-          <Route path="/admin/activities" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
-          <Route path="/admin/qualifications" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
-          <Route path="/admin/events" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="events" /></ProtectedRoute>} />
-          <Route path="/admin/assets" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="facilities" /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/committee" element={<ProtectedRoute><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
+          <Route path="/admin/volunteers" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/activities" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          <Route path="/admin/qualifications" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/events" element={<ProtectedRoute><ClubManagerApp initialScreen="events" /></ProtectedRoute>} />
+          <Route path="/admin/assets" element={<ProtectedRoute><ClubManagerApp initialScreen="facilities" /></ProtectedRoute>} />
           <Route path="/admin/member-portal" element={<ProtectedRoute requireRole="super_admin"><AdminMemberPortal /></ProtectedRoute>} />
-          <Route path="/admin/club-diary" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="diary" /></ProtectedRoute>} />
+          <Route path="/admin/club-diary" element={<ProtectedRoute><ClubManagerApp initialScreen="diary" /></ProtectedRoute>} />
           <Route path="/admin/grades" element={<ProtectedRoute requireCore><AdminGrades /></ProtectedRoute>} />
           <Route path="/admin/sync" element={<ProtectedRoute requireCore><AdminSync /></ProtectedRoute>} />
           <Route path="/admin/partnerships" element={<ProtectedRoute requireCore><AdminPartnershipRecords /></ProtectedRoute>} />

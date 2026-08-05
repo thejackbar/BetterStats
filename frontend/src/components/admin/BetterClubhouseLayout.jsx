@@ -16,20 +16,23 @@ import ModuleLayout from './ModuleLayout'
 // Each item carries the gate it needs and is dropped when the gate fails:
 //   cap    — a capability (an array means "any of these")
 //   module — one of the umbrella's paid modules the club must hold
-//   super  — the promoted ClubManager screens. They run on real data, but are
-//            still gated to super_admin in App.jsx while their CRUD is
-//            finished, so the nav must hide them the same way.
+// The promoted ClubManager screens used to carry a `super` flag as well, which
+// hid Directory, Roster, Committee, Diary, Events, Facilities and the whole
+// Setup catalogue from anyone who was not a super admin. That dated from
+// BetterClubManager being unlaunched; the screens run on real data now, and
+// every router behind them already enforces its own capability, so the club's
+// own admins get them.
 // A heading whose items all fall away is dropped by ModuleLayout, so a
 // treasurer holding only BetterFees sees Today, Money and nothing else.
 
-function buildNav({ modules, isSuper, counts, storefront }) {
+function buildNav({ modules, counts, storefront }) {
   return [
     { to: '/admin/clubhouse', label: 'Today', icon: 'overview', exact: true, badge: counts.needsYou },
 
     { heading: 'People' },
-    { to: '/admin/clubhouse/directory', label: 'Directory', icon: 'teams', super: true },
-    { to: '/admin/clubhouse/roster', label: 'Roster', icon: 'fixtures', super: true },
-    { to: '/admin/committee', label: 'Committee', icon: 'sheet', super: true },
+    { to: '/admin/clubhouse/directory', label: 'Directory', icon: 'teams', cap: [CAP.MANAGE_MEMBERS, CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_COMMITTEE, CAP.MANAGE_QUALIFICATIONS] },
+    { to: '/admin/clubhouse/roster', label: 'Roster', icon: 'fixtures', cap: CAP.MANAGE_VOLUNTEERS },
+    { to: '/admin/committee', label: 'Committee', icon: 'sheet', cap: CAP.MANAGE_COMMITTEE },
 
     { heading: 'Money' },
     { to: '/admin/fees', label: 'Accounts', icon: 'money', cap: CAP.MANAGE_FEES, module: 'fees', exact: true, badge: counts.owing },
@@ -46,22 +49,21 @@ function buildNav({ modules, isSuper, counts, storefront }) {
     { to: '/admin/clubhouse/audiences', label: 'Audiences', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
 
     { heading: 'Club' },
-    { to: '/admin/club-diary', label: 'Diary', icon: 'ladders', super: true },
-    { to: '/admin/events', label: 'Events', icon: 'timer', super: true },
-    { to: '/admin/assets', label: 'Facilities', icon: 'nets', super: true },
+    { to: '/admin/club-diary', label: 'Diary', icon: 'ladders', cap: CAP.MANAGE_CLUB_DIARY },
+    { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE },
+    { to: '/admin/assets', label: 'Facilities', icon: 'nets', cap: CAP.MANAGE_ASSETS },
 
     { heading: 'Setup' },
     // The catalogue every other screen reads from: roles (a committee-flagged
     // role IS a committee position), activities, qualification types,
     // operational areas. Dropping it from the sidebar left the whole
     // configuration layer unreachable except by typing a URL.
-    { to: '/admin/clubhouse/areas-roles', label: 'Areas & roles', icon: 'settings', super: true },
+    { to: '/admin/clubhouse/areas-roles', label: 'Areas & roles', icon: 'settings', cap: [CAP.MANAGE_VOLUNTEERS, CAP.MANAGE_QUALIFICATIONS] },
     { to: '/admin/clubhouse/integrations', label: 'Integrations', icon: 'share', cap: [CAP.MANAGE_FEES, CAP.MANAGE_MERCH, CAP.MANAGE_COMMS] },
     { to: '/admin/clubhouse/reports', label: 'Reports', icon: 'ladders', cap: [CAP.MANAGE_FEES, CAP.MANAGE_MERCH] },
     { to: '/admin/clubhouse/settings', label: 'Settings', icon: 'settings' },
   ].filter(i => {
     if (i.heading) return true
-    if (i.super && !isSuper) return false
     if (i.module && !modules[i.module]) return false
     return true
   })
@@ -70,10 +72,10 @@ function buildNav({ modules, isSuper, counts, storefront }) {
 export default function BetterClubhouseLayout({
   children, title, caption, onHelp, filters, stats, actions, bare, hideHeader, storefront = false,
 }) {
-  const { user, hasModule } = useAuth()
+  const { hasModule } = useAuth()
   const modules = clubhouseModules(hasModule)
   const { counts } = useClubhouseData(modules)
-  const nav = buildNav({ modules, isSuper: user?.role === 'super_admin', counts, storefront })
+  const nav = buildNav({ modules, counts, storefront })
 
   return (
     <ModuleLayout

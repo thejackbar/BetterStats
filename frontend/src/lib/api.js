@@ -368,6 +368,30 @@ export const api = {
     request(`/club-admin/committee/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteTask: (id) =>
     request(`/club-admin/committee/tasks/${id}`, { method: 'DELETE' }),
+  // Governance (migration 217) — resolutions, named votes, action dependencies,
+  // notes and the strategic objectives actions are measured against.
+  committeeSetTaskDependencies: (taskId, dependsOn) =>
+    request(`/club-admin/committee/tasks/${taskId}/dependencies`, { method: 'PUT', body: JSON.stringify({ depends_on: dependsOn }) }),
+  committeeSetMotionVotes: (meetingId, motionId, votes) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}/votes`, { method: 'PUT', body: JSON.stringify({ votes }) }),
+  committeeSetResolution: (meetingId, motionId, { resolution_ref, on = true } = {}) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/${motionId}/resolution`, { method: 'POST', body: JSON.stringify({ resolution_ref, on }) }),
+  committeeListResolutions: () => request('/club-admin/committee/resolutions'),
+  committeeListNotes: (entityType, entityId) =>
+    request(`/club-admin/committee/notes/${entityType}/${entityId}`),
+  committeeAddNote: (entityType, entityId, body, authorMemberId) =>
+    request(`/club-admin/committee/notes/${entityType}/${entityId}`, { method: 'POST', body: JSON.stringify({ body, author_member_id: authorMemberId || null }) }),
+  committeeDeleteNote: (noteId) =>
+    request(`/club-admin/committee/notes/${noteId}`, { method: 'DELETE' }),
+  committeeListObjectives: (includeArchived) =>
+    request(`/club-admin/committee/objectives${includeArchived ? '?include_archived=true' : ''}`),
+  committeeObjectiveProgress: () => request('/club-admin/committee/objectives/progress'),
+  committeeCreateObjective: (data) =>
+    request('/club-admin/committee/objectives', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdateObjective: (id, data) =>
+    request(`/club-admin/committee/objectives/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeleteObjective: (id) =>
+    request(`/club-admin/committee/objectives/${id}`, { method: 'DELETE' }),
   committeeListDocuments: (category) =>
     request(`/club-admin/committee/documents${category ? `?category=${category}` : ''}`),
   committeeCreateDocument: (data) =>
@@ -376,6 +400,29 @@ export const api = {
     request(`/club-admin/committee/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteDocument: (id) =>
     request(`/club-admin/committee/documents/${id}`, { method: 'DELETE' }),
+  // Uploads go through FormData, not JSON — the file is the payload.
+  committeeUploadDocument: (file, fields = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    Object.entries(fields).forEach(([k, v]) => { if (v) form.append(k, v) })
+    return fetch(`${BASE}/club-admin/committee/documents/upload`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async res => {
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${res.status}`)
+      }
+      return res.json()
+    })
+  },
+  // The bytes come from here, access re-checked server-side on every request.
+  // Returned as a URL rather than fetched, so the browser can open or save it.
+  committeeDocumentFileUrl: (id, { download = false } = {}) =>
+    `${BASE}/club-admin/committee/documents/${id}/file${download ? '?download=1' : ''}`,
+  committeeOfficeBearerAwards: () =>
+    request('/club-admin/committee/office-bearer-awards'),
+  committeeAdoptOfficeBearerAwards: () =>
+    request('/club-admin/committee/office-bearer-awards/adopt', { method: 'POST' }),
   committeeListEvents: (upcomingOnly) =>
     request(`/club-admin/committee/events${upcomingOnly ? '?upcoming_only=true' : ''}`),
   committeeCreateEvent: (data) =>
@@ -434,6 +481,10 @@ export const api = {
   rosterDeletePattern: (id) => request(`/club-admin/roster/patterns/${id}`, { method: 'DELETE' }),
   rosterGetSettings: () => request('/club-admin/roster/settings'),
   rosterSetSettings: (data) => request('/club-admin/roster/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Everyone rostered on for a day / week / month, with the contacts behind
+  // them — what "email everyone rostered this week" resolves to.
+  rosterContacts: (scope = 'week', on) =>
+    request(`/club-admin/roster/contacts?scope=${scope}${on ? `&on=${on}` : ''}`),
   rosterWeek: (weekStart) => request(`/club-admin/roster/week${weekStart ? '?week_start=' + weekStart : ''}`),
   rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),

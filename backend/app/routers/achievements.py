@@ -11,6 +11,7 @@ import csv
 import logging
 
 from app.models.db import get_db
+from app.services import office_bearers
 from app.services.import_ingest import match_players
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,23 @@ class AchievementCreate(BaseModel):
     detail: Optional[str] = None
 
 
+async def _link_office_bearer_role(db, org_id, achievement_id, category, subcategory, achievement):
+    """Attach an Office Bearer award to the club_roles row it names.
+
+    Never fatal. Recording that someone was President is the thing the user
+    asked for; keeping the two catalogues in step is bookkeeping we do on their
+    behalf, and it must not be able to fail their save.
+    """
+    if (category or "").strip().lower() != office_bearers.AWARD_CATEGORY.lower():
+        return None
+    try:
+        return await office_bearers.link_achievement_role(
+            db, uuid.UUID(str(org_id)), achievement_id, subcategory, achievement)
+    except Exception:
+        logger.exception("Could not link achievement %s to a club role", achievement_id)
+        return None
+
+
 @router.post("")
 async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends(get_db)):
     player_id = body.player_id
@@ -227,8 +245,14 @@ async def create_achievement(body: AchievementCreate, db: AsyncSession = Depends
         },
     )
     new_id = result.scalar()
+    # An Office Bearer award names a club role, so record WHICH one. The text
+    # columns stay exactly as they were — this is an extra link, so every
+    # existing reader is untouched — but it means a club adopting
+    # BetterClubhouse later already has the role, not a string to migrate.
+    role_id = await _link_office_bearer_role(db, body.org_id, new_id, body.category,
+                                             body.subcategory, body.achievement)
     await db.commit()
-    return {"id": new_id, "status": "created"}
+    return {"id": new_id, "status": "created", "club_role_id": role_id}
 
 
 # ─── PUT update ────────────────────────────────────────────────
@@ -263,8 +287,27 @@ async def update_achievement(
         text(f"UPDATE player_achievements SET {', '.join(sets)} WHERE id = :id"),
         params,
     )
+    # Re-read rather than trust the patch body: this is a partial update, so a
+    # row can still be an Office Bearer award even when `category` was not sent.
+    row = (await db.execute(
+        text("SELECT org_id, category, subcategory, achievement FROM player_achievements WHERE id = :id"),
+        {"id": achievement_id},
+    )).mappings().first()
+    role_id = None
+    if row:
+        if (row["category"] or "").strip().lower() == office_bearers.AWARD_CATEGORY.lower():
+            role_id = await _link_office_bearer_role(
+                db, row["org_id"], achievement_id, row["category"],
+                row["subcategory"], row["achievement"])
+        else:
+            # Recategorised out of Office Bearer — drop the stale role link so
+            # it cannot claim someone held a position they no longer name.
+            await db.execute(
+                text("UPDATE player_achievements SET club_role_id = NULL WHERE id = :id"),
+                {"id": achievement_id},
+            )
     await db.commit()
-    return {"status": "updated"}
+    return {"status": "updated", "club_role_id": role_id}
 
 
 # ─── DELETE ───────────────────────────────────────────────────────

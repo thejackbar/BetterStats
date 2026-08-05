@@ -25,6 +25,7 @@ from app.models.db import (
 STARTER_ROLE_TYPES = [
     ("Office Bearer", "Executive committee — President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
     ("Committee Member", "General elected/appointed committee positions."),
+    ("Captain", "On-field leadership of a team."),
     ("Official", "Formal match roles on the scorecard — umpires and scorers."),
     ("Ground Staff", "Ground, nets and facility upkeep."),
     ("Coach", "Coaching and player development."),
@@ -50,7 +51,15 @@ STARTER_ROLES = [
 # The executive office bearers among the committee roles — they get the
 # "Office Bearer" role type (still committee-category); the rest get
 # "Committee Member". Matches committee.py's own office-bearer name set.
-_OFFICE_BEARER_TITLES = {"president", "vice president", "treasurer", "secretary"}
+#
+# The portfolio Vice Presidents are here because BetterStats' Awards screen has
+# offered them as Office Bearer achievements for years. They are the same role
+# either way, so the two modules name it once — see services/office_bearers.py.
+_OFFICE_BEARER_TITLES = {
+    "president", "vice president", "treasurer", "secretary",
+    "vice president - men's cricket", "vice president - women's cricket",
+    "vice president - junior cricket", "operations",
+}
 
 # (title, description) — the elected/appointed COMMITTEE roles. These are the
 # same roles the Committee Administration "Positions" tab holds terms against
@@ -59,8 +68,15 @@ _OFFICE_BEARER_TITLES = {"president", "vice president", "treasurer", "secretary"
 STARTER_COMMITTEE_ROLES = [
     ("President", "Overall leadership, chairs meetings, primary club spokesperson."),
     ("Vice President", "Deputises for the President; often leads a portfolio area."),
+    # The three portfolio VPs and Operations mirror what BetterStats' Awards
+    # screen already offers under Office Bearer, so a club recording one there
+    # lands on a real role here instead of minting a parallel vocabulary.
+    ("Vice President - Men's Cricket", "Deputises for the President; leads men's cricket."),
+    ("Vice President - Women's Cricket", "Deputises for the President; leads women's cricket."),
+    ("Vice President - Junior Cricket", "Deputises for the President; leads junior cricket."),
     ("Treasurer", "Club finances, budgets, membership fee oversight, financial reporting."),
     ("Secretary", "Meeting minutes, correspondence, statutory/association paperwork."),
+    ("Operations", "Day-to-day running of the club across portfolios."),
     ("Junior Coordinator", "Junior program — registrations, coaching, grading."),
     ("Senior Coordinator", "Senior teams — registrations, grading, team management."),
     ("Selection Chair", "Chairs the selection panel across grades."),

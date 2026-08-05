@@ -5,14 +5,14 @@ leaderboards (Club/Competition Best & Fairest) are now a club's own call.
 Default true (opt-out), so nothing already-visible disappears until a club
 actively turns one off.
 
-Revision ID: 217
-Revises: 216
+Revision ID: 219
+Revises: 218
 Create Date: 2026-08-05
 """
 from alembic import op
 
-revision = "217"
-down_revision = "216"
+revision = "219"
+down_revision = "218"
 branch_labels = None
 depends_on = None
 
