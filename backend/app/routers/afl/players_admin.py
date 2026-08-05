@@ -11,9 +11,10 @@ Unlike cricket, there is deliberately no DELETE — cricket doesn't offer one
 either (a player can be linked to synced game lines), only create + edit.
 """
 import uuid
+from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -223,3 +224,82 @@ async def patch_player(
         "playhq_id": player.playhq_id, "gender": player.gender,
         "email": player.email, "phone": player.phone, "status": player.status,
     }
+
+
+# ---------------------------------------------------------------------------
+# Player photos
+# ---------------------------------------------------------------------------
+#
+# Bytes go in the players table, not on disk, and are served back by the
+# shared images router (mounted by afl_main) — same as every other image this
+# platform stores, and the upload volume isn't guaranteed to survive a
+# redeploy.
+#
+# photo_url is stored WITHOUT a leading slash or an /api prefix, unlike
+# cricket's, which hardcodes "/api/images/...". Cricket is served from the
+# domain root; the AFL app lives under /afl/, so an absolute /api/... path
+# would 404 on betterat.football. An API-relative value lets the frontend
+# resolve it against whatever base the bundle was built with (aflApi's
+# mediaUrl), and leaves any absolute URL already in the column — a PlayHQ
+# avatar, say — passing through untouched.
+
+PHOTO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+PHOTO_MAX_BYTES = 2 * 1024 * 1024
+_PHOTO_MIME = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+
+
+async def _own_player(db: AsyncSession, club: Organisation, player_id: str) -> Player:
+    try:
+        pid = uuid.UUID(player_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Player not found")
+    player = await db.get(Player, pid)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+    return player
+
+
+@router.post("/players/{player_id}/photo")
+async def upload_player_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _own_player(db, club, player_id)
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in PHOTO_ALLOWED_EXTS:
+        raise HTTPException(status_code=400, detail="Image files only (jpg, png, webp, gif)")
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty file")
+    if len(data) > PHOTO_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Photo must be 2 MB or smaller")
+
+    player.photo_data = data
+    player.photo_mime = _PHOTO_MIME.get(ext, "image/png")
+    # The ?v= is what gets a replacement past the images router's long
+    # cache headers — without it a new photo keeps showing as the old one.
+    player.photo_url = f"images/players/{player.id}/photo?v={uuid.uuid4().hex[:8]}"
+    await db.commit()
+    return {"photo_url": player.photo_url}
+
+
+@router.delete("/players/{player_id}/photo")
+async def delete_player_photo(
+    player_id: str,
+    current_user: User = Depends(require_cap(MANAGE_PLAYERS)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _own_player(db, club, player_id)
+    player.photo_data = None
+    player.photo_mime = None
+    player.photo_url = None
+    await db.commit()
+    return {"status": "cleared"}

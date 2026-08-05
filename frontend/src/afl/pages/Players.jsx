@@ -14,10 +14,13 @@ const COLS = [
 ]
 
 // Games-played bands — the club-milestone brackets a club actually talks in
-// ("the 100-gamers", "the 200 club"), not an even numeric split.
+// ("the 100-gamers", "the 200 club"), not an even numeric split. Under 100 is
+// split at 50 because that band holds most of a long-running club's register:
+// a club with 1,852 players on the books has the great bulk of them there.
 const BANDS = [
   { key: 'all', label: 'All' },
-  { key: '1', label: '1–99', min: 1, max: 99 },
+  { key: '1', label: '1–49', min: 1, max: 49 },
+  { key: '50', label: '50–99', min: 50, max: 99 },
   { key: '100', label: '100–199', min: 100, max: 199 },
   { key: '200', label: '200–299', min: 200, max: 299 },
   { key: '300', label: '300–399', min: 300, max: 399 },

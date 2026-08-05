@@ -55,8 +55,14 @@ async def get_results(org_id: uuid.UUID,
         LIMIT :lim OFFSET :off
     """), params)
     games = [dict(r._mapping) for r in res]
-    summary = await aggregations.club_results_summary(db, org_id, season_id)
-    return {"games": games, "summary": summary}
+    # The same filters the list above was built with, so the headline cards
+    # and the per-team split both describe what's actually on screen.
+    grade_ids = params.get("grade")
+    summary = await aggregations.club_results_summary(
+        db, org_id, season_id, grade_ids=grade_ids, finals_only=finals_only)
+    by_team = await aggregations.team_results_breakdown(
+        db, org_id, season_id, grade_ids=grade_ids, finals_only=finals_only)
+    return {"games": games, "summary": summary, "by_team": by_team}
 
 
 @router.get("/{org_id}/summary")

@@ -5,8 +5,9 @@ import {
 } from 'recharts'
 import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
-import { aflApi } from '../aflApi'
+import { aflApi, mediaUrl } from '../aflApi'
 import { SectionTitle, ResultPill } from '../components/bits'
+import { HonourBoard, HonourPills } from '../components/honours'
 
 // ── Charts — mirrors BetterStats (Core)'s player-profile chart language
 // (pages/PlayerProfile.jsx: recharts, CSS-var colours, a single shared
@@ -210,7 +211,7 @@ export default function PlayerProfile() {
         <span className="w-1 rounded-full shrink-0" style={{ background: 'var(--pb-gradient)' }} />
         <div className="flex items-center gap-4">
           {data.photo_url
-            ? <img src={data.photo_url} alt="" className="h-20 w-20 rounded-full object-cover" />
+            ? <img src={mediaUrl(data.photo_url)} alt="" className="h-20 w-20 rounded-full object-cover" />
             : <span className="h-20 w-20 rounded-full bg-pb-surface2 flex items-center justify-center text-2xl text-pb-faint">
                 {(data.name || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
               </span>}
@@ -220,6 +221,9 @@ export default function PlayerProfile() {
               {c.first_year ? (c.first_year === c.last_year ? c.first_year : `${c.first_year} – ${c.last_year}`) : ''}
               {c.seasons ? ` · ${c.seasons} season${c.seasons > 1 ? 's' : ''}` : ''}
             </p>
+            {/* What the club has recorded them for, biggest first — the same
+                pills, in the same colours, as the Honours board below. */}
+            <HonourPills achievements={data.achievements} />
           </div>
         </div>
       </div>
@@ -250,6 +254,15 @@ export default function PlayerProfile() {
               <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Games by season</p>
               <SeasonBarChart rows={seasonRows} dataKey="games" name="Games" color="var(--pb-chart-2)" />
             </div>
+          </div>
+        </div>
+      )}
+
+      {(data.achievements || []).length > 0 && (
+        <div>
+          <SectionTitle>Honour board</SectionTitle>
+          <div className="pb-card p-5">
+            <HonourBoard achievements={data.achievements} />
           </div>
         </div>
       )}

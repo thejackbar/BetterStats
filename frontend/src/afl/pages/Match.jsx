@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useOutletContext, useParams, Link } from 'react-router-dom'
 import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
-import { aflApi, scoreLine } from '../aflApi'
+import { aflApi, mediaUrl, scoreLine } from '../aflApi'
 import { SectionTitle, PlayerCell } from '../components/bits'
 
 const PERIOD_LABELS = { 1: 'Q1', 2: 'Q2', 3: 'Q3', 4: 'Q4' }
@@ -16,7 +16,7 @@ function Crest({ url, name }) {
       </span>
     )
   }
-  return <img src={url} alt="" className="h-10 w-10 object-contain" onError={() => setErr(true)} />
+  return <img src={mediaUrl(url)} alt="" className="h-10 w-10 object-contain" onError={() => setErr(true)} />
 }
 
 export default function Match() {

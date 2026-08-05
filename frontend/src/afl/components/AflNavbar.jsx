@@ -3,6 +3,7 @@ import { useState } from 'react'
 import clsx from 'clsx'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useAuth } from '../../contexts/AuthContext'
+import { mediaUrl } from '../aflApi'
 
 const LINKS = [
   { to: '', label: 'Dashboard', end: true },
@@ -41,7 +42,7 @@ export default function AflNavbar({ club }) {
       <div className="max-w-6xl mx-auto px-4 flex items-center gap-3 h-14">
         <Link to={base} className="flex items-center gap-2 min-w-0">
           {club.logo_url
-            ? <img src={club.logo_url} alt="" className="h-8 w-8 rounded object-contain" />
+            ? <img src={mediaUrl(club.logo_url)} alt="" className="h-8 w-8 rounded object-contain" />
             : <span className="h-8 w-8 rounded pb-gradient" />}
           <span className="font-bold text-pb-text truncate">{club.short_name || club.name}</span>
         </Link>

@@ -254,12 +254,31 @@ awards register from an AFL club.
   replaced by a link to it, so there's one award-import path rather than two.
   `POST /achievements/import` and its template endpoint still exist and are
   unchanged — nothing in the UI calls them now.
+- **The honour board on the public player profile** (v9.9.1) — an imported
+  award was reaching `player_achievements` and nowhere else, because the AFL
+  profile never read them. `GET /afl-players/{id}` now returns `achievements`
+  and `frontend/src/afl/components/honours.jsx` renders both surfaces Core
+  has: the coloured pills under the player's name and a full Honour board
+  section, grouped honour / award / milestone / role on the same `--pb-cat-*`
+  tokens and the same `styles/honour-badge.css` cards. Three rules worth
+  keeping: **repeated wins of one trophy are ONE entry** carrying every year
+  (a nine-time winner is not nine cards; past three years the pill reads
+  "N× · first–last"); the **display_name rename is resolved in Python, not a
+  join** — a club holding two definitions with the same name would otherwise
+  fan one award row into two; and the **name fallback only applies to a row
+  with no `player_id` at all**, so one of two same-named players' honours can
+  never surface on the other's profile. `afl/components/honours.css` widens
+  the shared 160px card to 196px and allows a third title line, scoped under
+  `.afl-honours` — football trophy names ("3rd Runner Up Best & Fairest") were
+  being clipped mid-name by Core's two-line clamp.
 - **Verified end to end** against a real Postgres (28 checks) with the full
   7,360-row sheet, and driven through the real app in a browser: auto-mapping
   all four columns incl. "PayerID", 1,119 awards written, 39 award types
   created, 25 players created, the shared-name split, a re-upload importing 0,
   a sheet with no id column, a sheet naming its own categories, and undo
-  leaving the award types intact.
+  leaving the award types intact. The honour board has its own 7 checks (the
+  rename, the duplicate-definition fan-out, the name fallback and the
+  same-name guard) and was checked in both light and dark themes.
 
 ## Roster shift CRUD, paid vs volunteer hours, diary year, draft minutes (migration 221, v9.8.0, Aug 2026)
 

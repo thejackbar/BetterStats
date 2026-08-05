@@ -1,12 +1,12 @@
 export default {
   version: 'v9.10.1',
-  date: '2026-08-05',
+  date: '2026-08-08',
   sortKey: '2026-08-08T18:00:00Z',
-  title: 'Every BetterClubhouse screen now looks like the Directory',
+  title: 'BetterFootball: a record per team on the games page',
   items: [
-    'Committee, Volunteers, Families, Qualifications, Roles, Activities, Events, Facilities, the Club Diary and the Member Portal all open with the same header the Directory has: the screen name and a short line saying what it holds, in the bar that stays put as you scroll.',
-    'Tabs on those screens are the same rounded chips the Directory uses to filter people, and they wrap onto a second line on a phone instead of running off the side.',
-    'Buttons read as words rather than shouted code, and the explanatory text under a heading is set in the reading font. The typewriter font is kept for labels and figures, which is what it is for.',
-    'Fixed two screens that scrolled sideways on a phone because a row of tabs could not wrap.',
+    'The games page shows each team\'s own played, won, lost, drawn and win percentage under the club totals, seniors first and juniors below. The rows always add up to the totals above them.',
+    'Those totals now follow the season, grade and finals filters. Filtering to one grade used to leave the cards on the club-wide numbers, reading as though the filter had done nothing.',
+    'The players list splits its under-100 band into 1–49 and 50–99, since at a club with a long register most players sit in that range.',
+    'A grade written as "Under 18s" or "Over 35s" was being classed as senior. The plural was enough to defeat the check, so any age group written the way clubs actually write it landed in the wrong group.',
   ],
 }

@@ -56,6 +56,19 @@ export const aflApi = {
   adminGetPlayer: (id) => request(`/club-admin/players/${id}`),
   adminCreatePlayer: (body) => request('/club-admin/players', { method: 'POST', body: JSON.stringify(body) }),
   adminPatchPlayer: (id, body) => request(`/club-admin/players/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Multipart, so it goes around request() (which sets a JSON content-type —
+  // setting it by hand on a FormData body strips the multipart boundary).
+  adminUploadPlayerPhoto: (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${id}/photo`, {
+      method: 'POST', body: fd, credentials: 'include',
+    }).then(async (res) => {
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Upload failed')
+      return res.json()
+    })
+  },
+  adminDeletePlayerPhoto: (id) => request(`/club-admin/players/${id}/photo`, { method: 'DELETE' }),
 
   // Admin — Import Players (CSV contact importer)
   playerImportTemplateUrl: () => `${BASE}/club-admin/player-import/template.csv`,
@@ -236,6 +249,22 @@ export const aflApi = {
   superSetPrimaryAdmin: (id, userId) => request(`/club-admin/super/clubs/${id}/primary-admin`, {
     method: 'PUT', body: JSON.stringify({ user_id: userId }),
   }),
+}
+
+/**
+ * Resolve a stored image path to something the browser can fetch.
+ *
+ * A player photo uploaded through the admin is stored API-relative
+ * ("images/players/{id}/photo?v=…") rather than as an absolute "/api/…" path,
+ * because the AFL app is served under /afl/ and cricket's absolute form would
+ * 404 here. Anything already absolute — an http(s) URL, or a legacy value
+ * starting with "/" — is handed back untouched, so a PlayHQ club crest and an
+ * uploaded photo can sit in the same column.
+ */
+export const mediaUrl = (path) => {
+  if (!path) return path
+  if (/^(https?:)?\/\//.test(path) || path.startsWith('/') || path.startsWith('data:')) return path
+  return `${BASE}/${path}`
 }
 
 // Score formatting: AFL scores read "14.8 (92)" — goals.behinds (points).

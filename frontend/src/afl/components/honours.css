@@ -1,0 +1,18 @@
+/* BetterFootball-only sizing for the shared honour-badge card.
+ *
+ * A football club's trophy names are long — "3rd Runner Up Best & Fairest",
+ * "Best First Year Player" — and Core's 160px card clamps the title to two
+ * lines, which cuts the award's own name in half. The name is the whole
+ * point of the card, so the AFL board gets a wider card and a third line.
+ * Scoped under .afl-honours so the cricket profile keeps its own geometry.
+ */
+.afl-honours .hb-parent,
+.afl-honours .hb-card {
+  width: 196px;
+  height: 168px;
+}
+
+.afl-honours .hb-title {
+  font-size: 12.5px;
+  -webkit-line-clamp: 3;
+}

@@ -10,7 +10,11 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from . import milestone_rules
+from . import grade_labels, milestone_rules
+
+# Reading order for the per-team results split: the senior program first,
+# juniors last. Anything unclassified sorts after the lot.
+_TEAM_ORDER = {"senior": 0, "womens": 1, "masters": 2, "integrated": 3, "colts": 4}
 
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
@@ -262,8 +266,16 @@ async def matching_grade_ids(db: AsyncSession, org_id: uuid.UUID, grade_id: uuid
 
 
 async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
-                               season_id: Optional[uuid.UUID] = None) -> dict:
+                               season_id: Optional[uuid.UUID] = None,
+                               grade_ids: Optional[list] = None,
+                               finals_only: bool = False) -> dict:
     """Headline W/L/D across the club (optionally one season).
+
+    grade_ids/finals_only default to off, which is the whole-club number the
+    dashboard wants. The results page passes its own filters so the cards
+    describe the list underneath them — without that, filtering to one grade
+    left the totals sitting on the club-wide figures and reading as if the
+    filter had done nothing.
 
     Reads the games/afl_game_details tables only, unlike the goals/games/BOG
     combines elsewhere in this module — a win/loss/draw is a property of one
@@ -276,10 +288,16 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
     real result letter, so they count here the same as a synced game. A bye
     is stored with status 'BYE' and a NULL result, which is what keeps it out
     of both the W/L/D tallies and the played count."""
-    season_clause = "AND s.id = :season" if season_id else ""
+    clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
+        clauses.append("s.id = :season")
         params["season"] = str(season_id)
+    if grade_ids:
+        clauses.append("gr.id = ANY(:grades)")
+        params["grades"] = list(grade_ids)
+    if finals_only:
+        clauses.append("g.is_final")
     res = await db.execute(text(f"""
         SELECT COUNT(*) FILTER (WHERE g.result = 'W') AS wins,
                COUNT(*) FILTER (WHERE g.result = 'L') AS losses,
@@ -289,9 +307,89 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
         LEFT JOIN afl_game_details d ON d.game_id = g.id
-        WHERE s.organisation_id = :org {season_clause}
+        WHERE {" AND ".join(clauses)}
     """), params)
     return dict(res.one()._mapping)
+
+
+async def team_results_breakdown(db: AsyncSession, org_id: uuid.UUID,
+                                 season_id: Optional[uuid.UUID] = None,
+                                 grade_ids: Optional[list] = None,
+                                 finals_only: bool = False) -> list[dict]:
+    """The same W/L/D as club_results_summary, split by the team that played —
+    League, Reserves, Under 19s and so on.
+
+    Every clause matches club_results_summary exactly (including a bye's
+    status='BYE' and NULL result keeping it out of both the tallies and the
+    played count), so these rows always add up to the totals shown above
+    them. Grades are folded by merge group the same way grade_breakdown and
+    the public grade filter fold them, or a club that renamed a competition
+    mid-history gets a row per spelling.
+    """
+    clauses = ["s.organisation_id = :org"]
+    params: dict = {"org": str(org_id)}
+    if season_id:
+        clauses.append("s.id = :season")
+        params["season"] = str(season_id)
+    if grade_ids:
+        clauses.append("gr.id = ANY(:grades)")
+        params["grades"] = list(grade_ids)
+    if finals_only:
+        clauses.append("g.is_final")
+    where = " AND ".join(clauses)
+
+    res = await db.execute(text(f"""
+        SELECT gr.name AS name,
+               MAX(gr.display_name_override) AS display_name_override,
+               MAX(gr.category) AS category,
+               COUNT(*) FILTER (WHERE g.result = 'W') AS wins,
+               COUNT(*) FILTER (WHERE g.result = 'L') AS losses,
+               COUNT(*) FILTER (WHERE g.result = 'D') AS draws,
+               COUNT(*) FILTER (WHERE d.status = 'FINAL') AS played
+        FROM games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN afl_game_details d ON d.game_id = g.id
+        WHERE {where}
+        GROUP BY gr.name
+    """), params)
+    rows = [dict(r._mapping) for r in res]
+    if not rows:
+        return []
+
+    logs = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": str(org_id)})
+    chain = {r.alias_name: r.canonical_name for r in logs}
+
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        canonical = _resolve_canonical_grade(chain, row["name"])
+        slot = buckets.setdefault(canonical, {
+            "team": canonical, "wins": 0, "losses": 0, "draws": 0, "played": 0,
+            "_override": None, "_category": None,
+        })
+        if row["display_name_override"] and (slot["_override"] is None or row["name"] == canonical):
+            slot["_override"] = row["display_name_override"]
+        if slot["_category"] is None:
+            slot["_category"] = (grade_labels.normalise_category(row["category"])
+                                 or grade_labels.suggest_category(row["name"]))
+        for f in ("wins", "losses", "draws", "played"):
+            slot[f] += int(row[f] or 0)
+
+    out = [{
+        "team": b["_override"] or b["team"],
+        "category": b["_category"],
+        "wins": b["wins"], "losses": b["losses"], "draws": b["draws"], "played": b["played"],
+    } for b in buckets.values()]
+    # A team with no completed game yet has nothing to report on.
+    out = [r for r in out if r["played"] or r["wins"] or r["losses"] or r["draws"]]
+    # Seniors first and juniors last, which is the order a club reads its own
+    # results in — busiest-team-first would open on the Under 18s whenever
+    # they happened to play a game more than the League side.
+    out.sort(key=lambda r: (_TEAM_ORDER.get(r["category"], 9), -r["played"],
+                            -r["wins"], r["team"].lower()))
+    return out
 
 
 async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 50) -> list[dict]:

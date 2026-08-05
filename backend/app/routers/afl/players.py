@@ -2,13 +2,54 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Player, get_db
 from app.services.afl import aggregations
 
 router = APIRouter(prefix="/afl-players", tags=["afl-players"])
+
+
+async def _player_achievements(db: AsyncSession, org_id, player_id, name: str) -> list:
+    """This player's honour-board rows, for the profile's Honours section.
+
+    Matched on the player id, and — only for a row that has no id at all —
+    on the name. Awards written by Import Awards always carry an id; a row
+    typed straight into the Awards screen for someone whose name didn't
+    resolve does not, and it would otherwise never reach the person it's
+    about. Never a name match on a row that HAS an id: that would put one
+    of two same-named players' honours on the other.
+    """
+    rows = await db.execute(text("""
+        SELECT id, season, season_end, category, subcategory, achievement, detail
+        FROM player_achievements
+        WHERE org_id = :org
+          AND (player_id = :pid
+               OR (player_id IS NULL AND lower(player_name) = lower(:name)))
+        ORDER BY season DESC NULLS LAST, category, achievement
+    """), {"org": str(org_id), "pid": str(player_id), "name": name or ""})
+    out = [dict(r) for r in rows.mappings().all()]
+    if not out:
+        return out
+
+    # A club that renamed an award on the Award Types screen renamed it for
+    # every recorded win of it, including ones already stored under the old
+    # label. Resolved here rather than in the query so a club holding two
+    # definitions with the same name can't fan one award row out into two.
+    defs = await db.execute(text("""
+        SELECT category, subcategory, achievement, display_name
+        FROM org_award_definitions
+        WHERE org_id = :org AND display_name IS NOT NULL AND display_name <> ''
+    """), {"org": str(org_id)})
+    renamed = {(d["category"], d["subcategory"] or "", d["achievement"]): d["display_name"]
+               for d in defs.mappings().all()}
+    if renamed:
+        for a in out:
+            label = renamed.get((a["category"], a["subcategory"] or "", a["achievement"]))
+            if label:
+                a["achievement"] = label
+    return out
 
 
 @router.get("/by-org/{org_id}")
@@ -60,6 +101,7 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "seasons": seasons,
         "grade_breakdown": grades,
         "game_log": games,
+        "achievements": await _player_achievements(db, org_id, player_id, player.display_name),
         "best_haul": {
             "goals": best_haul["goals"],
             "game_id": str(best_haul["game_id"]),
