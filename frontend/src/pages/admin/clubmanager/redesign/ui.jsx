@@ -1,4 +1,6 @@
+import { useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
+import { useAuth } from '../../../../contexts/AuthContext'
 
 // Shared tokens + small primitives for the BetterClubManager redesign.
 //
@@ -135,6 +137,30 @@ export function Drawer({ width = 440, zIndex = 90, onClose, children }) {
 }
 
 export function initials(name) { return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase() }
+
+// A screen preference that belongs to the PERSON, not the club — how wide they
+// want a column, whether a panel is open. Two people sharing a club admin login
+// is common, so these key on the user id the same way the screen introductions
+// do, and survive the browser being closed.
+//
+// The initial read happens in the state initialiser rather than an effect: read
+// it afterwards and the screen renders once at the default first, which reads
+// as the panel snapping shut a frame after it opened.
+export function usePref(key, fallback) {
+  const { user } = useAuth()
+  const full = `bs_pref_${key}_${user?.id || 'anon'}`
+  const [value, setValue] = useState(() => {
+    try { const v = localStorage.getItem(full); return v == null ? fallback : JSON.parse(v) } catch { return fallback }
+  })
+  const set = useCallback(next => {
+    setValue(prev => {
+      const v = typeof next === 'function' ? next(prev) : next
+      try { localStorage.setItem(full, JSON.stringify(v)) } catch { /* private mode */ }
+      return v
+    })
+  }, [full])
+  return [value, set]
+}
 
 // The link from a read-only screen to the editor that owns its data.
 //

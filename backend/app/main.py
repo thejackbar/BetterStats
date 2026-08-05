@@ -4549,6 +4549,16 @@ async def lifespan(app: FastAPI):
             ADD COLUMN IF NOT EXISTS diary_start_month INTEGER NOT NULL DEFAULT 7
         """))
 
+        # Migration 222: confirming a roster — hours worked, checked and posted
+        # to the volunteer hours ledger.
+        await conn.execute(text("ALTER TABLE roster_shifts ADD COLUMN IF NOT EXISTS worked_hours NUMERIC(5,2)"))
+        await conn.execute(text("ALTER TABLE roster_weeks ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ"))
+        await conn.execute(text("ALTER TABLE roster_weeks ADD COLUMN IF NOT EXISTS confirmed_by_user_id UUID"))
+        await conn.execute(text("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_volunteer_hours_shift
+            ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
