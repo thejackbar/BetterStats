@@ -1,10 +1,11 @@
-// Shared wizard pieces for the two BetterFootball import tools — Import
-// Stats (AflAdminImport.jsx, season totals per player) and Import Results
-// (AflAdminResultsImport.jsx, the matches themselves). Both walk the same
-// road: map the columns, match the sheet's season and team labels to the
-// club's own, then confirm. Extracted from AflAdminImport so the second
-// wizard reuses this rather than growing a second copy that drifts —
-// exactly what produced four divergent UI kits on the cricket side.
+// Shared wizard pieces for the three BetterFootball import tools — Import
+// Stats (AflAdminImport.jsx, season totals per player), Import Results
+// (AflAdminResultsImport.jsx, the matches themselves) and Import Awards
+// (AflAdminAwardsImport.jsx, the honour board). All three walk the same
+// road: map the columns, match the sheet's names and labels to the club's
+// own, then confirm. Extracted from AflAdminImport so the later wizards
+// reuse this rather than growing more copies that drift — exactly what
+// produced four divergent UI kits on the cricket side.
 //
 // Ported originally from BetterStats (Core)'s BetterImport wizard
 // (pages/admin/AdminImport.jsx): same visual language, same "never silently
@@ -15,6 +16,9 @@ import Dropdown from '../../../components/Dropdown'
 
 export const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 export const num = n => Number(n || 0).toLocaleString()
+// Rows per page in the match tables — a 1,900-name honours sheet is a real
+// upload, not a hypothetical.
+const PAGE_SIZE = 50
 
 export function Pct({ score }) {
   if (score == null) return null
@@ -31,6 +35,9 @@ export function StatusBadge({ status }) {
     none: ['NO MATCH', 'text-pb-red/70 border-pb-red/30'],
     ambiguous: ['MERGE FIRST', 'text-pb-red/70 border-pb-red/30'],
     new: ['NEW PLAYER', 'text-[var(--pb-accent)] border-[var(--pb-accent)]/40'],
+    new_award: ['NEW AWARD', 'text-[var(--pb-accent)] border-[var(--pb-accent)]/40'],
+    // Two people in the sheet under one name — the import can't pick for you.
+    clash: ['TWO PEOPLE', 'text-pb-red/70 border-pb-red/30'],
     skip: ['SKIP', 'text-pb-faint border-pb-faint/30'],
     unassigned: ['UNASSIGNED', 'text-[var(--pb-accent)] border-[var(--pb-accent)]/40'],
     prior: ['UNASSIGNED', 'text-[var(--pb-accent)] border-[var(--pb-accent)]/40'],
@@ -42,7 +49,12 @@ export function StatusBadge({ status }) {
 
 // player/season/grade rows key their match-to id differently — grades match
 // on the grade's NAME (free text, no grade table row of its own to point at).
-export function idField(kind) { return kind === 'player' ? 'player_id' : kind === 'season' ? 'season_id' : 'grade_name' }
+export function idField(kind) {
+  if (kind === 'player') return 'player_id'
+  if (kind === 'season') return 'season_id'
+  if (kind === 'award') return 'definition_id'
+  return 'grade_name'
+}
 
 export function candStatLine(p) {
   if (!p) return null
@@ -77,8 +89,8 @@ export function FieldRow({ field, label, required, value, headers, conf, matched
 
 export function valueLabel(value, idName, kind) {
   if (!value) return kind === 'grade' ? '— Unresolved (kept against the whole club) —' : '— Unresolved (will be skipped) —'
-  if (value === '__new__') return '+ Add as new player'
-  if (value === '__skip__') return 'Skip this row'
+  if (value === '__new__') return kind === 'award' ? '+ Add as a new award type' : '+ Add as new player'
+  if (value === '__skip__') return kind === 'award' ? "Don't import this award" : 'Skip this row'
   if (value === '__unassigned__') return '↪ Unassigned (no matching season)'
   if (value === '__own__') return 'Use this label as-is'
   return idName.get(value) || '(selected)'
@@ -182,6 +194,9 @@ export function SearchSelect({ value, idName, candidates, options, onChange, kin
             {kind === 'player' && (
               <button className={item} onClick={() => pick('__new__')}>+ Add as new player</button>
             )}
+            {kind === 'award' && (
+              <button className={item} onClick={() => pick('__new__')}>+ Add as a new award type</button>
+            )}
             {kind === 'season' && (
               <>
                 <button className={item} onClick={() => pick('__unassigned__')}>↪ Unassigned (no matching season)</button>
@@ -198,7 +213,9 @@ export function SearchSelect({ value, idName, candidates, options, onChange, kin
               <button className={item} onClick={() => pick('__own__')}>Use this label as-is</button>
             )}
             {kind !== 'grade' && (
-              <button className={item} onClick={() => pick('__skip__')}>Skip this {kind === 'player' ? 'name' : 'row'}</button>
+              <button className={item} onClick={() => pick('__skip__')}>
+                {kind === 'award' ? "Don't import this award" : `Skip this ${kind === 'player' ? 'name' : 'row'}`}
+              </button>
             )}
             {(candidates || []).length > 0 && <div className="px-2 pt-2 pb-1 font-mono text-[9px] tracking-wide2 text-pb-faint">SUGGESTED</div>}
             {(candidates || []).map(c => (
@@ -212,7 +229,7 @@ export function SearchSelect({ value, idName, candidates, options, onChange, kin
             ))}
             <div className="px-1 pt-2 pb-1 sticky top-0">
               <input autoFocus value={q} onChange={e => setQ(e.target.value)}
-                placeholder={`Search all ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'}…`}
+                placeholder={`Search all ${kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : kind === 'award' ? 'award types' : 'seasons'}…`}
                 className="w-full bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
             </div>
             {filtered.map(o => <button key={o.id} className={item} onClick={() => pick(o.id)}>{o.name}</button>)}
@@ -224,9 +241,215 @@ export function SearchSelect({ value, idName, candidates, options, onChange, kin
   )
 }
 
+// ── player matching, in three passes: confirm matched / review close / no-match.
+// A name with no candidate at all defaults to "add as new player" (never a
+// silent skip) — only a genuinely close/ambiguous name needs a real decision.
+//
+// Shared by Import Stats and Import Awards. Two things are deliberately the
+// caller's to decide: what one line of context to print under each name
+// (`sheetLine` — games and goals for a stats sheet, awards won for an
+// honours sheet), and what identifies a row. A row's identity is `key` where
+// the resolver supplies one and the raw name otherwise: an awards sheet
+// carrying the club's own player ids can hold two different people under one
+// name, so the name alone can't be the override key there.
+export function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBulk, loading,
+                              sheetLine, subtitle, nextLabel, onNext, onBack }) {
+  const keyOf = r => r.key || r.raw_name
+  const [tab, setTab] = useState(null)
+  const [page, setPage] = useState(0)
+
+  const playerStatsById = useMemo(() => {
+    const m = new Map()
+    allPlayers.forEach(p => m.set(p.id, p))
+    return m
+  }, [allPlayers])
+
+  const idName = useMemo(() => {
+    const m = new Map()
+    allPlayers.forEach(o => m.set(o.id, o.name))
+    rows.forEach(r => {
+      (r.candidates || []).forEach(c => m.set(c.player_id, c.name))
+      if (r.matched_name && r.player_id) m.set(r.player_id, r.matched_name)
+    })
+    return m
+  }, [allPlayers, rows])
+
+  const buckets = useMemo(() => {
+    const matched = [], close = [], nomatch = []
+    rows.forEach(r => {
+      const st = r.status
+      if (['exact', 'manual'].includes(st)) matched.push(r)
+      else if (['fuzzy', 'ambiguous', 'clash'].includes(st)) close.push(r)
+      else nomatch.push(r) // none, new, skip
+    })
+    return { matched, close, nomatch }
+  }, [rows])
+
+  // The one rule this whole rebuild exists for: a name with literally no
+  // candidate defaults to becoming a brand-new player, never a silent skip.
+  useEffect(() => {
+    if (!rows.length) return
+    setOverridesBulk(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const r of rows) {
+        if (r.auto_status === 'none' && !(keyOf(r) in next)) { next[keyOf(r)] = '__new__'; changed = true }
+      }
+      return changed ? next : prev
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows])
+
+  useEffect(() => {
+    if (tab === null && rows.length) setTab(buckets.close.length ? 'close' : buckets.nomatch.length ? 'nomatch' : 'matched')
+  }, [rows, buckets, tab])
+  useEffect(() => { setPage(0) }, [tab])
+
+  const active = tab || 'matched'
+  const list = buckets[active] || []
+  const pageCount = Math.max(1, Math.ceil(list.length / PAGE_SIZE))
+  const safe = Math.min(page, pageCount - 1)
+  const pageRows = list.slice(safe * PAGE_SIZE, safe * PAGE_SIZE + PAGE_SIZE)
+  const valueFor = r => { const ov = overrides[keyOf(r)]; if (ov) return ov; if (r.player_id) return r.player_id; return '' }
+
+  // Rows whose only suggestion is a single player are the safe bulk-confirm.
+  const uniqueClose = useMemo(() => buckets.close.filter(r => (r.candidates || []).length === 1), [buckets.close])
+  const multiCount = buckets.close.length - uniqueClose.length
+
+  function confirmUniqueSuggested() {
+    const patch = {}
+    uniqueClose.forEach(r => { patch[keyOf(r)] = r.candidates[0].player_id })
+    setOverridesBulk(o => ({ ...o, ...patch }))
+  }
+  function confirmAllSuggested() {
+    const patch = {}
+    buckets.close.forEach(r => { const c = (r.candidates || [])[0]; if (c) patch[keyOf(r)] = c.player_id })
+    setOverridesBulk(o => ({ ...o, ...patch }))
+  }
+  function bulkNomatch(val) {
+    const patch = {}; buckets.nomatch.forEach(r => { patch[keyOf(r)] = val }); setOverridesBulk(o => ({ ...o, ...patch }))
+  }
+
+  const TABS = [
+    ['matched', '1. Confirm matched', buckets.matched.length],
+    ['close', '2. Review close', buckets.close.length],
+    ['nomatch', '3. Review no-match', buckets.nomatch.length],
+  ]
+
+  return (
+    <>
+      <div className="pb-card p-5 mb-4">
+        <h2 className="font-display font-semibold text-lg text-pb-text mb-1">Match players</h2>
+        <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
+          {subtitle || 'Three quick passes: confirm the exact matches, review the close ones, then anything with no match defaults to a brand-new player — a name in your history is never silently dropped.'}
+        </p>
+        {loading && rows.length === 0 ? (
+          <div className="py-10 text-center"><LoadingSpinner message="Matching players…" /></div>
+        ) : (
+          <>
+            <div className="flex gap-1 mb-4 flex-wrap">
+              {TABS.map(([k, label, n]) => (
+                <button key={k} onClick={() => setTab(k)}
+                  className={`font-mono text-[10px] tracking-wide2 px-3 py-1.5 rounded border ${active === k ? 'text-black border-transparent bg-[var(--pb-accent)]' : 'text-pb-faint pb-hairline hover:text-pb-text'}`}>
+                  {label} ({n})
+                </button>
+              ))}
+            </div>
+
+            {active === 'matched' && (
+              <p className="text-[12px] text-green-300 mb-3">
+                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched your players exactly — nothing to do unless one looks wrong.
+              </p>
+            )}
+            {active === 'close' && buckets.close.length > 0 && (
+              <div className="mb-3">
+                <div className="flex items-center gap-3 mb-2 flex-wrap">
+                  <p className="text-[12px] text-pb-amber">Pick the right player, or leave it to become a new one.</p>
+                  <div className="ml-auto flex items-center gap-2 flex-wrap">
+                    {uniqueClose.length > 0 && (
+                      <button onClick={confirmUniqueSuggested}
+                        title="Confirm every row that has exactly one suggested player. Rows with more than one suggestion are left for you to choose."
+                        className="font-mono text-[10px] tracking-wide2 rounded px-3 py-1.5 font-semibold text-black bg-[var(--pb-accent)]">
+                        CONFIRM {uniqueClose.length} SINGLE MATCH{uniqueClose.length === 1 ? '' : 'ES'}
+                      </button>
+                    )}
+                    <button onClick={confirmAllSuggested}
+                      className="font-mono text-[10px] tracking-wide2 border border-[var(--pb-accent)]/40 text-[var(--pb-accent)] rounded px-3 py-1.5 hover:bg-[var(--pb-accent)]/10">
+                      CONFIRM ALL TOP ({buckets.close.length})
+                    </button>
+                  </div>
+                </div>
+                <p className="text-[11px] text-pb-faint leading-relaxed max-w-3xl">
+                  {uniqueClose.length > 0 && (
+                    <><span className="text-pb-dim">Confirm single matches</span> accepts only the {uniqueClose.length} row{uniqueClose.length === 1 ? '' : 's'} with exactly one suggestion (the safe ones){multiCount > 0 ? `, leaving ${multiCount} with more than one option for you to pick` : ''}. </>
+                  )}
+                  Confirmed players move to <button className="text-[var(--pb-accent)] hover:underline" onClick={() => setTab('matched')}>Confirm matched</button>, where you can still change or skip any.
+                </p>
+              </div>
+            )}
+            {active === 'nomatch' && buckets.nomatch.length > 0 && (
+              <div className="flex items-center gap-3 mb-3 flex-wrap">
+                <p className="text-[12px] text-pb-faint">These default to <span className="text-[var(--pb-accent)]">new players</span>. Change any that already exist, or skip.</p>
+                <button onClick={() => bulkNomatch('__new__')} className="ml-auto font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text">CREATE ALL NEW</button>
+                <button onClick={() => bulkNomatch('__skip__')} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text">SKIP ALL</button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto overflow-y-visible">
+              <table className="w-full text-[12px] min-w-[560px]">
+                <thead>
+                  <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left">
+                    <th className="py-2 pr-2">NAME IN SHEET</th>
+                    <th className="py-2 pr-2 w-28">STATUS</th>
+                    <th className="py-2 pr-2">MATCH TO</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.map((r, i) => {
+                    const candidates = (r.candidates || []).map(c => ({
+                      id: c.player_id, name: c.name, confidence: c.confidence, stats: playerStatsById.get(c.player_id),
+                    }))
+                    const sheet = sheetLine ? sheetLine(r) : null
+                    return (
+                      <tr key={keyOf(r) + i} className="pb-hairline-t align-middle">
+                        <td className="py-2 pr-2 text-pb-text">
+                          {r.raw_name}
+                          {r.ref && <span className="font-mono text-[9px] text-pb-faintest ml-1.5">#{r.ref}</span>}
+                          {sheet && <div className="text-[10px] text-pb-faint mt-0.5">sheet: {sheet}</div>}
+                          {r.note && <div className="text-[10px] text-pb-red/60 mt-0.5">{r.note}</div>}
+                        </td>
+                        <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
+                        <td className="py-2 pr-2">
+                          <SearchSelect value={valueFor(r)} idName={idName} candidates={candidates} options={allPlayers}
+                            onChange={v => setOverride(keyOf(r), v)} kind="player" />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {list.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-pb-dim text-[12px]">Nothing in this pass.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+            {pageCount > 1 && (
+              <div className="flex items-center gap-2 mt-3 font-mono text-[10px] text-pb-faint justify-end">
+                <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safe === 0} className="border pb-hairline rounded px-2 py-0.5 disabled:opacity-40">←</button>
+                {safe + 1} / {pageCount}
+                <button onClick={() => setPage(p => Math.min(pageCount - 1, p + 1))} disabled={safe >= pageCount - 1} className="border pb-hairline rounded px-2 py-0.5 disabled:opacity-40">→</button>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+      <div className="flex items-center gap-3">
+        <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
+        <button onClick={onNext} className="ml-auto px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-black bg-[var(--pb-accent)]">{nextLabel}</button>
+      </div>
+    </>
+  )
+}
+
 // ── shared match table for Seasons + Grades (filter + paginate) ─────────────
 const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
-const PAGE_SIZE = 50
 
 export function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, nextLabel, onNext, onBack, loading, onCreateSeason, onBulkCreateSeasons, bulkCreating, labelHeading }) {
   const [onlyReview, setOnlyReview] = useState(true)

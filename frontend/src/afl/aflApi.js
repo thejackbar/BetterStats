@@ -204,6 +204,25 @@ export const aflApi = {
   resultImportsBatchGames: (batchId) => request(`/club-admin/result-imports/${batchId}/games`),
   resultImportsUndo: (batchId) => request(`/club-admin/result-imports/${batchId}/undo`, { method: 'POST' }),
 
+  // Admin — Import Awards (a club's honour board). Writes the same
+  // player_achievements rows the Awards screen reads, and adds any award the
+  // club's Award Types catalogue doesn't carry yet.
+  awardImportsTemplateUrl: () => `${BASE}/club-admin/award-imports/template.csv`,
+  awardImportsPreview: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/award-imports/preview`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Preview failed')
+        return res.json()
+      })
+  },
+  awardImportsResolve: (body) => request('/club-admin/award-imports/resolve', { method: 'POST', body: JSON.stringify(body) }),
+  awardImportsCommit: (body) => request('/club-admin/award-imports/commit', { method: 'POST', body: JSON.stringify(body) }),
+  awardImportsList: () => request('/club-admin/award-imports'),
+  awardImportsBatchAwards: (batchId) => request(`/club-admin/award-imports/${batchId}/awards`),
+  awardImportsUndo: (batchId) => request(`/club-admin/award-imports/${batchId}/undo`, { method: 'POST' }),
+
   // Admin — Better HQ: All Clubs
   superListClubs: (params) => request(`/club-admin/super/clubs${qs(params)}`),
   superCreateClub: (playhqOrgId, syncNow = true) => request('/club-admin/super/clubs', {
