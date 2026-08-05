@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { aflApi } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
 
@@ -8,8 +9,6 @@ export default function AflAdminAwards() {
   const [form, setForm] = useState({ player_name: '', season: '', category: '', subcategory: '', achievement: '', detail: '' })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
-  const [importResult, setImportResult] = useState(null)
-  const fileRef = useRef(null)
 
   const refresh = () => {
     aflApi.listAchievements().then(setAchievements).catch(() => setAchievements([]))
@@ -45,24 +44,6 @@ export default function AflAdminAwards() {
     }
   }
 
-  const onFile = async (e) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setBusy(true)
-    setError(null)
-    setImportResult(null)
-    try {
-      const res = await aflApi.importAchievements(file)
-      setImportResult(res)
-      refresh()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-      if (fileRef.current) fileRef.current.value = ''
-    }
-  }
-
   const undoImport = async (batchId) => {
     if (!window.confirm('Undo this import? Every award it added will be removed.')) return
     setBusy(true)
@@ -81,27 +62,21 @@ export default function AflAdminAwards() {
   return (
     <div className="space-y-6">
       <SectionTitle>Awards ({achievements.length})</SectionTitle>
-      <p className="text-sm text-pb-dim max-w-2xl">Record who actually won each award. Add one at a time, or import a season's worth from a spreadsheet.</p>
+      <p className="text-sm text-pb-dim max-w-2xl">
+        Record who actually won each award. Add one at a time here, or bring in your whole honour board
+        from a spreadsheet with <Link to="/admin/import-awards" className="text-[var(--pb-accent)] hover:underline">Import Awards</Link>,
+        which matches the names to your players and adds any award type you don't have yet.
+      </p>
 
       {error && <p className="pb-card p-3 text-sm text-[var(--pb-negative)]">{error}</p>}
 
       <div className="pb-card p-4 space-y-3">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <SectionTitle>Add an award</SectionTitle>
-          <div className="flex items-center gap-3">
-            <a href={aflApi.achievementsTemplateUrl()} className="text-sm text-pb-dim underline hover:text-pb-text">Download CSV template</a>
-            <label className="px-3 py-1.5 rounded text-sm border border-pb-hairline text-pb-text hover:bg-pb-surface2 cursor-pointer">
-              Import CSV
-              <input ref={fileRef} type="file" accept=".csv" onChange={onFile} disabled={busy} className="hidden" />
-            </label>
-          </div>
+          <Link to="/admin/import-awards" className="px-3 py-1.5 rounded text-sm border border-pb-hairline text-pb-text hover:bg-pb-surface2">
+            Import a spreadsheet →
+          </Link>
         </div>
-        {importResult && (
-          <p className="text-sm text-[var(--pb-positive)]">
-            Imported {importResult.created} award{importResult.created === 1 ? '' : 's'}, skipped {importResult.skipped}.
-            {importResult.errors?.length > 0 && ` ${importResult.errors.length} row error(s).`}
-          </p>
-        )}
         <div className="grid grid-cols-2 gap-2">
           <input placeholder="Player name" value={form.player_name}
                  onChange={e => setForm(f => ({ ...f, player_name: e.target.value }))}
@@ -162,6 +137,7 @@ export default function AflAdminAwards() {
       {imports && imports.length > 0 && (
         <div className="pb-card p-4">
           <SectionTitle>Import history</SectionTitle>
+          <p className="text-sm text-pb-faint mb-2">Undo removes the awards an upload added. Players and award types it created stay.</p>
           <table className="w-full text-sm">
             <tbody>
               {imports.map(b => (

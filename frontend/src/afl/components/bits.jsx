@@ -1,8 +1,39 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { scoreLine } from '../aflApi'
 
 export const displayName = (row) => row.display_name_override || row.name || 'Unknown'
+
+/**
+ * A club crest that degrades to initials. A club's logo_url can be an upload
+ * we host or a hotlink that 404s, so the <img> has to be able to fail without
+ * leaving a broken-image box in a page header.
+ */
+export function ClubCrest({ club, className = 'h-16 w-16 sm:h-20 sm:w-20' }) {
+  const [failed, setFailed] = useState(false)
+  const name = club?.short_name || club?.name || ''
+  const initials = name.split(/\s+/).filter(Boolean).map(w => w[0]).join('').toUpperCase().slice(0, 3)
+
+  if (!club?.logo_url || failed) {
+    return (
+      <span className={clsx(
+        className,
+        'rounded-full bg-pb-surface2 shrink-0 flex items-center justify-center font-display font-bold text-pb-faint',
+      )}>
+        {initials || '?'}
+      </span>
+    )
+  }
+  return (
+    <img
+      src={club.logo_url}
+      alt={`${club.name || 'Club'} logo`}
+      onError={() => setFailed(true)}
+      className={clsx(className, 'shrink-0 object-contain')}
+    />
+  )
+}
 
 export function SectionTitle({ children, right }) {
   return (

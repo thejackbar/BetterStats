@@ -42,6 +42,7 @@ from datetime import date as _date, datetime as _datetime, timezone as _timezone
 from app.services import playhq_client
 from app.services.name_format import name_sort_key
 from app.services import fonts as font_service
+from app.services import theme_config as theme_config_service
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -753,21 +754,10 @@ class SettingsPatch(BaseModel):
     access_pin: Optional[str] = None
 
 
-# Keys allowed inside theme_config and the sub-keys allowed in light/dark palettes.
-_THEME_COLOR_KEYS = {
-    "accent", "accent2", "positive", "negative",
-    "chart_runs", "chart_wickets", "chart_milestone",
-    "cat_honour", "cat_role", "cat_award", "cat_milestone",
-}
-_THEME_PALETTE_KEYS = {
-    "bg", "surface", "surface2", "hairline", "hairline2",
-    "text", "dim", "faint", "faintest",
-}
-_HEX_RE = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
-
-
-def _valid_hex(value) -> bool:
-    return isinstance(value, str) and bool(_HEX_RE.match(value.strip()))
+# theme_config validation lives in services/theme_config.py — AFL's own
+# settings endpoint validates the same blob, and one allowlist beats two that
+# can drift.
+_sanitize_theme_config = theme_config_service.sanitize_theme_config
 
 
 # Top-level keys the socials_style blob may carry (the post generator's Style
@@ -787,30 +777,6 @@ def _sanitize_socials_style(raw: dict) -> dict | None:
             return None
     except (TypeError, ValueError):
         return None
-    return clean
-
-
-def _sanitize_theme_config(raw: dict) -> dict:
-    """Keep only recognised keys with valid hex colour values."""
-    clean: dict = {}
-    for key in _THEME_COLOR_KEYS:
-        val = raw.get(key)
-        if _valid_hex(val):
-            clean[key] = val.strip()
-    series = raw.get("chart_series")
-    if isinstance(series, list):
-        clean_series = [c.strip() for c in series if _valid_hex(c)]
-        if clean_series:
-            clean["chart_series"] = clean_series[:12]
-    for theme in ("light", "dark"):
-        palette = raw.get(theme)
-        if isinstance(palette, dict):
-            clean_palette = {
-                k: v.strip() for k, v in palette.items()
-                if k in _THEME_PALETTE_KEYS and _valid_hex(v)
-            }
-            if clean_palette:
-                clean[theme] = clean_palette
     return clean
 
 

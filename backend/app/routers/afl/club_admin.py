@@ -18,6 +18,7 @@ from app.models.db import (
     Organisation, SyncRun, User, async_session_maker, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user, require_super_admin
+from app.services import theme_config as theme_config_service
 from app.services.afl import sync as afl_sync
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,11 @@ async def sync_runs(club: Organisation = Depends(get_current_club),
 
 class SettingsPatch(BaseModel):
     short_name: Optional[str] = None
+    # theme_config is what actually themes the public site (the palette
+    # frontend/src/lib/theme.js injects). primary_color/accent_color are the
+    # legacy columns kept for history — writing them themes nothing, which is
+    # the same trap cricket's setup wizard hit.
+    theme_config: Optional[dict] = None
     primary_color: Optional[str] = None
     accent_color: Optional[str] = None
     theme_mode: Optional[str] = None
@@ -131,6 +137,7 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
         "id": str(club.id), "name": club.name, "short_name": club.short_name,
         "slug": club.slug, "playhq_id": club.playhq_id,
         "primary_color": club.primary_color, "accent_color": club.accent_color,
+        "theme_config": club.theme_config or {},
         "theme_mode": club.theme_mode, "is_active": club.is_active,
         "player_name_format": club.player_name_format,
         "logo_url": club.logo_url,
@@ -144,7 +151,15 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
 async def patch_settings(patch: SettingsPatch,
                          club: Organisation = Depends(get_current_club),
                          db: AsyncSession = Depends(get_db)):
-    for field, value in patch.model_dump(exclude_unset=True).items():
+    data = patch.model_dump(exclude_unset=True)
+    # These land in a <style> tag on the public site, so they go through the
+    # same allowlist cricket's settings PATCH uses. An empty result clears
+    # back to the BetterFootball defaults rather than storing {}.
+    if "theme_config" in data:
+        raw = data.pop("theme_config")
+        clean = theme_config_service.sanitize_theme_config(raw or {})
+        club.theme_config = clean or None
+    for field, value in data.items():
         setattr(club, field, value)
     await db.commit()
     return {"status": "ok"}

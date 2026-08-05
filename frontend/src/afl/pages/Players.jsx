@@ -3,6 +3,7 @@ import { useOutletContext } from 'react-router-dom'
 import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
+import { nameSortKey } from '../../lib/nameFormat'
 import { PlayerCell, displayName } from '../components/bits'
 
 const COLS = [
@@ -34,7 +35,10 @@ export default function Players() {
   const [players, setPlayers] = useState(null)
   const [search, setSearch] = useState('')
   const [band, setBand] = useState('all')
-  const [sort, setSort] = useState({ key: 'games', dir: 'desc' })
+  // Surname, A→Z by default. A roster is something you look a name up in, so
+  // alphabetical beats "most games" as the resting state; every stat column
+  // still sorts on a click.
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' })
   const base = `/${club.slug}`
 
   useEffect(() => {
@@ -58,6 +62,12 @@ export default function Players() {
     let out = players.filter(p => inBand(p, active))
     if (q) out = out.filter(p => displayName(p).toLowerCase().includes(q))
     out.sort((a, b) => {
+      if (sort.key === 'name') {
+        // nameSortKey is the shared surname-first key (lib/nameFormat), so a
+        // stored "Last, First" and a plain "First Last" both sort by surname.
+        const cmp = nameSortKey(displayName(a)).localeCompare(nameSortKey(displayName(b)))
+        return sort.dir === 'desc' ? -cmp : cmp
+      }
       const av = a[sort.key] ?? 0, bv = b[sort.key] ?? 0
       return sort.dir === 'desc' ? bv - av : av - bv
     })
@@ -66,16 +76,23 @@ export default function Players() {
 
   if (players === null) return <div className="pt-16 flex justify-center"><LoadingSpinner /></div>
 
+  // A stat column opens on its biggest value, the name column on A→Z, which
+  // is the useful first click for each.
+  const toggle = (key, firstDir) => setSort(s => (
+    s.key === key ? { key, dir: s.dir === 'desc' ? 'asc' : 'desc' } : { key, dir: firstDir }
+  ))
+  const arrow = (key) => (sort.key === key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : '')
+
   const header = (col) => (
     <th
       key={col.key}
-      onClick={() => setSort(s => ({ key: col.key, dir: s.key === col.key && s.dir === 'desc' ? 'asc' : 'desc' }))}
+      onClick={() => toggle(col.key, 'desc')}
       className={clsx(
         'px-3 py-2 text-right font-mono text-[10px] uppercase tracking-wide cursor-pointer select-none',
         sort.key === col.key ? 'text-[var(--pb-accent)]' : 'text-pb-faint',
       )}
     >
-      {col.label}{sort.key === col.key ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}
+      {col.label}{arrow(col.key)}
     </th>
   )
 
@@ -121,7 +138,15 @@ export default function Players() {
         <table className="w-full text-sm">
           <thead className="pb-hairline-b">
             <tr>
-              <th className="px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide text-pb-faint">Player</th>
+              <th
+                onClick={() => toggle('name', 'asc')}
+                className={clsx(
+                  'px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide cursor-pointer select-none',
+                  sort.key === 'name' ? 'text-[var(--pb-accent)]' : 'text-pb-faint',
+                )}
+              >
+                Player{arrow('name')}
+              </th>
               {/* `sm:[display:table-cell]`, not `sm:table-cell`: index.css
                   defines a `.table-cell` component class (px-3 py-2.5
                   text-sm), so the responsive variant of Tailwind's display
