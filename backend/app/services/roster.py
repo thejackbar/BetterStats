@@ -10,11 +10,38 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timedelta
+from typing import Optional
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+# `volunteer_profiles.available_days` is written by two features that never
+# agreed on a vocabulary. The Volunteers screen posts day NAMES (its API types
+# the field `List[str]`), while the roster has always assumed Monday=0 integers
+# — so a single "Monday" in a real club's data crashed the whole roster with
+# `invalid literal for int() with base 10: 'Monday'`.
+#
+# Read-side tolerance rather than a migration: both writers are legitimate, the
+# roster only ever needs the index, and an unrecognised value should cost that
+# one day rather than the page.
+_DAY_INDEX = {}
+for _i, _abbr in enumerate(DOW):
+    _full = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"][_i]
+    _DAY_INDEX[_abbr.lower()] = _i
+    _DAY_INDEX[_full] = _i
+    _DAY_INDEX[str(_i)] = _i
+
+
+def day_index(value) -> Optional[int]:
+    """A stored availability day as a Monday=0 index, or None if unreadable."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value if 0 <= value <= 6 else None
+    return _DAY_INDEX.get(str(value).strip().lower())
+
 DEFAULT_CAP = 3  # per-person weekly cap when a club/person hasn't set one
 
 
@@ -239,7 +266,7 @@ async def candidates(db: AsyncSession, org_id) -> list[dict]:
         mid = str(r["member_id"])
         out.append({
             "member_id": mid, "name": r["full_name"],
-            "available_days": [int(d) for d in (r["available_days"] or [])],
+            "available_days": [d for d in (day_index(x) for x in (r["available_days"] or [])) if d is not None],
             "max_shifts": r["max_shifts_per_week"],
             "player_id": str(r["player_id"]) if r["player_id"] else None,
             "role_ids": roles_by.get(mid, set()), "qual_type_ids": quals_by.get(mid, set()),
