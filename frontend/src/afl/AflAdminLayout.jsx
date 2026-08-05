@@ -17,6 +17,7 @@ const NAV = [
   { heading: 'Data Import' },
   { to: '/admin', label: 'Data Sync', end: true },
   { to: '/admin/import', label: 'Import Stats' },
+  { to: '/admin/import-results', label: 'Import Results' },
   { to: '/admin/seasons', label: 'Seasons' },
   { heading: 'Clean Your Data' },
   { to: '/admin/merge', label: 'Merge Players' },

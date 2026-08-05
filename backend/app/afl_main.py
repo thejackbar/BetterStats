@@ -47,6 +47,7 @@ from app.routers.afl import (
     users_admin as afl_users_admin,
     super_clubs as afl_super_clubs,
     imports as afl_imports,
+    result_imports as afl_result_imports,
     seasons_admin as afl_seasons_admin,
 )
 
@@ -329,6 +330,30 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_afl_imported_stats_batch "
             "ON afl_imported_stats(import_batch_id)"))
+        # Import Results — historical match results from a club's own
+        # spreadsheet (routers/afl/result_imports.py). These land in the
+        # shared games table with an afl_game_details row alongside, so the
+        # columns below are what tells an imported game from a synced one.
+        # create_all won't retrofit them onto a deployed AFL database, hence
+        # the idempotent ALTERs (the same pattern the stats-import columns
+        # above use).
+        for col, ddl in (
+            ("source", "TEXT NOT NULL DEFAULT 'playhq'"),
+            ("import_batch_id", "UUID"),
+            ("import_ref", "TEXT"),
+            ("is_bye", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("is_forfeit", "BOOLEAN NOT NULL DEFAULT FALSE"),
+            ("result_note", "TEXT"),
+        ):
+            await conn.execute(text(
+                f"ALTER TABLE afl_game_details ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        # An imported game has no PlayHQ id at all, so the column can't stay
+        # NOT NULL once this tool exists.
+        await conn.execute(text(
+            "ALTER TABLE afl_game_details ALTER COLUMN playhq_id DROP NOT NULL"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_afl_game_details_import_batch "
+            "ON afl_game_details(import_batch_id)"))
 
     # Mark any sync runs orphaned by a restart, same as the cricket boot does.
     from app.models.db import async_session_maker
@@ -372,6 +397,7 @@ app.include_router(afl_sponsors.router)
 app.include_router(afl_users_admin.router)
 app.include_router(afl_super_clubs.router)
 app.include_router(afl_imports.router)
+app.include_router(afl_result_imports.router)
 app.include_router(afl_seasons_admin.router)
 
 

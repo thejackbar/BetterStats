@@ -191,12 +191,17 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
                                season_id: Optional[uuid.UUID] = None) -> dict:
     """Headline W/L/D across the club (optionally one season).
 
-    Deliberately synced-only, unlike the goals/games/BOG combines elsewhere
-    in this module — a win/loss/draw is a property of one specific MATCH
-    (the games/afl_game_details tables), and a season-total Import Stats
-    upload has no per-match data to draw a result from at all. There's
-    nothing to combine here; the games/grades count will only ever reflect
-    what's actually been synced from PlayHQ."""
+    Reads the games/afl_game_details tables only, unlike the goals/games/BOG
+    combines elsewhere in this module — a win/loss/draw is a property of one
+    specific MATCH, and a season-total Import Stats upload has no per-match
+    data to draw a result from at all, so there's nothing to combine in from
+    afl_imported_stats here.
+
+    Import RESULTS uploads (routers/afl/result_imports.py) are a different
+    story and need no special handling: they write real games rows carrying a
+    real result letter, so they count here the same as a synced game. A bye
+    is stored with status 'BYE' and a NULL result, which is what keeps it out
+    of both the W/L/D tallies and the played count."""
     season_clause = "AND s.id = :season" if season_id else ""
     params: dict = {"org": str(org_id)}
     if season_id:
