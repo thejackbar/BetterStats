@@ -92,6 +92,58 @@ function DocumentAccessPanel() {
   )
 }
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December']
+
+function DiaryYearPanel() {
+  const { hasCapability } = useAuth()
+  const toast = useToast()
+  const canEdit = hasCapability(CAP.MANAGE_SETTINGS)
+  const [month, setMonth] = useState(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    api.adminGetSettings().then(s => setMonth(Number(s.diary_start_month) || 7)).catch(() => setMonth(null))
+  }, [])
+
+  async function choose(next) {
+    const previous = month
+    setMonth(next); setSaving(true)
+    try { await api.adminUpdateSettings({ diary_start_month: next }) }
+    catch (e) { setMonth(previous); toast.error(e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="bg-pb-surface border border-pb-hairline rounded-[10px] p-6 mt-4">
+      <Caption>The club's</Caption>
+      <SectionHeading className="mt-2">When the Club Diary year starts</SectionHeading>
+      <p className="text-[13.5px] text-pb-dim mt-2 leading-[1.65]" style={{ maxWidth: '56ch', textWrap: 'pretty' }}>
+        The diary lays a year out from this month. July suits a club that plans around the
+        cricket season; January suits one that runs to the calendar.
+      </p>
+      <div className="flex items-center gap-2 mt-4 flex-wrap">
+        <select value={month ?? 7} disabled={!canEdit || month === null}
+          onChange={e => choose(Number(e.target.value))}
+          className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm">
+          {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+        </select>
+        {saving && <span className="font-mono text-[10px] text-pb-faintest">saving…</span>}
+      </div>
+      {month && (
+        <div className="text-[12.5px] text-pb-dim mt-3 leading-[1.6]" style={{ maxWidth: '56ch' }}>
+          A diary year runs {MONTHS[month - 1]} to {MONTHS[(month + 10) % 12]}.
+        </div>
+      )}
+      {!canEdit && (
+        <div className="font-mono text-[10px] text-pb-faintest mt-4">
+          Only someone who can manage settings can change this.
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ClubhouseSettings() {
   const { mode, setMode, seenCount, resetSeen } = useIntroSettings()
   const active = INTRO_MODES.find(m => m.key === mode) || INTRO_MODES[1]
@@ -137,6 +189,7 @@ export default function ClubhouseSettings() {
         </div>
 
         <DocumentAccessPanel />
+        <DiaryYearPanel />
       </div>
     </BetterClubhouseLayout>
   )

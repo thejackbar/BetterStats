@@ -504,7 +504,24 @@ export default function MeetingRoom() {
       .map(a => ({ member_id: a.member_id, full_name: a.full_name || nameOf(a.member_id) || 'Unknown' })),
     [attendance, nameOf])
 
+  const minutesRef = useRef(null)
+  const [drafting, setDrafting] = useState(false)
   const saveMinutes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { minutes: v }).catch(e => toast.error(e.message)))
+
+  // Writes into the box rather than saving straight over the record: minutes
+  // are the club's account of what happened, and a machine's first pass is a
+  // starting point, not a decision.
+  async function draft() {
+    if (minutesRef.current?.value?.trim() &&
+        !confirm('Replace what is in the minutes box with a fresh draft?')) return
+    setDrafting(true)
+    try {
+      const r = await api.committeeDraftMinutes(meetingId)
+      if (minutesRef.current) minutesRef.current.value = r.draft
+      await api.committeeUpdateMeeting(meetingId, { minutes: r.draft })
+      toast.success('Draft written. Read it before it becomes the record.')
+    } catch (e) { toast.error(e.message) } finally { setDrafting(false) }
+  }
   const saveNotes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { private_notes: v }).catch(e => toast.error(e.message)))
 
   // One write, not one per person: the endpoint replaces the whole list anyway.
@@ -703,10 +720,19 @@ export default function MeetingRoom() {
             previous={data.previous_attendance} onCarryOver={carryOver} />
 
           <div className="pb-card p-4">
-            <div className={`${cap} mb-1.5`}>MINUTES</div>
-            <textarea className={`${inp} min-h-[120px]`} defaultValue={meeting.minutes || ''}
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <span className={cap}>MINUTES</span>
+              <button onClick={draft} disabled={drafting} className="font-mono text-[9px] text-pb-faint hover:text-pb-text disabled:opacity-40">
+                {drafting ? 'drafting…' : 'draft from the meeting'}
+              </button>
+            </div>
+            <textarea ref={minutesRef} className={`${inp} min-h-[120px]`} defaultValue={meeting.minutes || ''}
               placeholder="The record that gets circulated…" onChange={e => saveMinutes(e.target.value)} />
-            <div className="font-mono text-[9px] text-pb-faintest mt-1">Saves as you type.</div>
+            <div className="font-mono text-[9px] text-pb-faintest mt-1">
+              Saves as you type. A draft is written from the agenda, motions, votes and
+              actions above, and replaces what is in the box for you to correct. It is
+              never the record until you say so.
+            </div>
           </div>
 
           <div className="pb-card p-4">

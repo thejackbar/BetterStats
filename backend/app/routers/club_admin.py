@@ -737,6 +737,8 @@ class SettingsPatch(BaseModel):
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
     committee_docs_office_bearer_only: Optional[bool] = None
+    # 1-12. The month the club's diary year starts (migration 221).
+    diary_start_month: Optional[int] = None
     # BetterSocials post-generator style (palette/font/background choices +
     # saved custom palettes/designs) — persisted per club so the look
     # survives browsers and the Setup Wizard can auto-detect it. See
@@ -867,6 +869,7 @@ async def get_settings(
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
+        "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
         "subscription_status": club.subscription_status,
         "password_protected": bool(club.password_protected),
@@ -923,6 +926,10 @@ async def patch_settings(
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
+    if data.diary_start_month is not None:
+        if not 1 <= data.diary_start_month <= 12:
+            raise HTTPException(status_code=422, detail="Diary start month must be 1-12")
+        club.diary_start_month = data.diary_start_month
     if data.socials_style is not None:
         club.socials_style = _sanitize_socials_style(data.socials_style)
 

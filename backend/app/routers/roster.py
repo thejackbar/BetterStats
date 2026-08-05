@@ -5,8 +5,9 @@ rules engine in services/roster.py. Gated on MANAGE_VOLUNTEERS.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import date, timedelta
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -253,3 +254,95 @@ async def clear_config(_: User = _cap, club: Organisation = Depends(get_current_
     await svc.clear_config(db, club.id)
     await db.commit()
     return {"ok": True}
+
+
+# ─── Shifts as first-class things ────────────────────────────────────────────
+
+class ShiftCreate(BaseModel):
+    week_id: str
+    area_id: str
+    day_of_week: int
+    start_time: float
+    end_time: float
+
+
+class ShiftPatch(BaseModel):
+    area_id: Optional[str] = None
+    day_of_week: Optional[int] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+
+
+def _valid_shift(day_of_week: Optional[int], start: Optional[float], end: Optional[float]):
+    if day_of_week is not None and not 0 <= day_of_week <= 6:
+        raise HTTPException(status_code=422, detail="Day must be Monday (0) to Sunday (6)")
+    if start is not None and end is not None and end <= start:
+        raise HTTPException(status_code=422, detail="A shift has to finish after it starts")
+
+
+@router.post("/shifts")
+async def create_shift(data: ShiftCreate, _: User = _cap, club: Organisation = Depends(get_current_club),
+                       db: AsyncSession = Depends(get_db)):
+    _valid_shift(data.day_of_week, data.start_time, data.end_time)
+    sid = await svc.create_shift(db, club.id, uuid.UUID(data.week_id),
+                                 area_id=uuid.UUID(data.area_id), day_of_week=data.day_of_week,
+                                 start_time=data.start_time, end_time=data.end_time)
+    await db.commit()
+    return {"id": sid}
+
+
+@router.patch("/shifts/{shift_id}")
+async def update_shift(shift_id: str, data: ShiftPatch, _: User = _cap,
+                       club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    fields = data.model_dump(exclude_unset=True)
+    _valid_shift(fields.get("day_of_week"), fields.get("start_time"), fields.get("end_time"))
+    if fields.get("area_id"):
+        fields["area_id"] = uuid.UUID(fields["area_id"])
+    await svc.update_shift(db, club.id, uuid.UUID(shift_id), **fields)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/shifts/{shift_id}")
+async def delete_shift(shift_id: str, _: User = _cap, club: Organisation = Depends(get_current_club),
+                       db: AsyncSession = Depends(get_db)):
+    await svc.delete_shift(db, club.id, uuid.UUID(shift_id))
+    await db.commit()
+    return {"deleted": True}
+
+
+# ─── One volunteer, from the roster ──────────────────────────────────────────
+
+@router.get("/members/{member_id}")
+async def member_detail(member_id: str, _: User = _cap, club: Organisation = Depends(get_current_club),
+                        db: AsyncSession = Depends(get_db)):
+    out = await svc.member_detail(db, club.id, uuid.UUID(member_id))
+    if not out:
+        raise HTTPException(status_code=404, detail="Not found")
+    return out
+
+
+class AvailabilitySet(BaseModel):
+    days: List[int]
+
+
+@router.put("/members/{member_id}/availability")
+async def set_availability(member_id: str, data: AvailabilitySet, _: User = _cap,
+                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    days = await svc.set_member_availability(db, club.id, uuid.UUID(member_id), data.days)
+    await db.commit()
+    return {"available_days": days}
+
+
+# ─── Hours: rostered vs worked, paid vs volunteer ────────────────────────────
+
+@router.get("/hours")
+async def hours(start: str, end: str, _: User = _cap, club: Organisation = Depends(get_current_club),
+                db: AsyncSession = Depends(get_db)):
+    try:
+        s, e = date.fromisoformat(start), date.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start and end must be YYYY-MM-DD")
+    if e < s:
+        raise HTTPException(status_code=422, detail="end must not be before start")
+    return await svc.hours_summary(db, club.id, start=s, end=e)

@@ -302,6 +302,9 @@ class Organisation(Base):
     # member who can reach the register. Link-only documents are unaffected —
     # a URL we do not host cannot be gated by us.
     committee_docs_office_bearer_only = Column(Boolean, nullable=False, server_default="true", default=True)
+    # The month a club's diary year starts, 1-12 (migration 221). 7 = July, the
+    # Australian cricket-season convention and the behaviour before this existed.
+    diary_start_month = Column(Integer, nullable=False, server_default="7", default=7)
     # ─── Better ecosystem entitlements (migration 056) ───────────────────────
     # module_overrides is the explicit list of modules a club holds, and the
     # single source of truth for entitlement (see app/auth/modules.py). Core
@@ -2853,6 +2856,14 @@ class VolunteerHours(Base):
     activity = Column(Text, nullable=True)
     activity_id = Column(UUID(as_uuid=True), ForeignKey("club_activities.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
+    # Whether this was PAID work (migration 221), decided from the role's type
+    # when the hours were logged. Recorded rather than re-derived on read:
+    # retyping a role later must not rewrite last season's wage bill.
+    is_paid = Column(Boolean, nullable=False, server_default="false", default=False)
+    # The shift these came from, when they came from one. No FK by design —
+    # roster_shifts is created by the lifespan's raw SQL, not the ORM, so an
+    # ORM-side constraint would make create_all() order-dependent.
+    roster_shift_id = Column(UUID(as_uuid=True), nullable=True)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

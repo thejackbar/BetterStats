@@ -486,6 +486,16 @@ export const api = {
   rosterContacts: (scope = 'week', on) =>
     request(`/club-admin/roster/contacts?scope=${scope}${on ? `&on=${on}` : ''}`),
   rosterWeek: (weekStart) => request(`/club-admin/roster/week${weekStart ? '?week_start=' + weekStart : ''}`),
+  // Shifts are editable in their own right, not only generated from a pattern.
+  rosterCreateShift: (data) =>
+    request('/club-admin/roster/shifts', { method: 'POST', body: JSON.stringify(data) }),
+  rosterUpdateShift: (id, data) =>
+    request(`/club-admin/roster/shifts/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  rosterDeleteShift: (id) => request(`/club-admin/roster/shifts/${id}`, { method: 'DELETE' }),
+  rosterMember: (id) => request(`/club-admin/roster/members/${id}`),
+  rosterSetAvailability: (id, days) =>
+    request(`/club-admin/roster/members/${id}/availability`, { method: 'PUT', body: JSON.stringify({ days }) }),
+  rosterHours: (start, end) => request(`/club-admin/roster/hours?start=${start}&end=${end}`),
   rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
   rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
@@ -536,6 +546,9 @@ export const api = {
   // One fetch for the live meeting screen: meeting, agenda in order, motions
   // with votes, actions raised, attendance, and who can be marked present.
   committeeMeetingRoom: (id) => request(`/club-admin/committee/meetings/${id}/room`),
+  // Returns a draft; it is not saved. The secretary decides what is true.
+  committeeDraftMinutes: (id) =>
+    request(`/club-admin/committee/meetings/${id}/draft-minutes`, { method: 'POST' }),
   committeeReorderAgenda: (meetingId, ids) =>
     request(`/club-admin/committee/meetings/${meetingId}/agenda-items/reorder`, { method: 'POST', body: JSON.stringify({ ids }) }),
   committeeReorderMotions: (meetingId, ids) =>

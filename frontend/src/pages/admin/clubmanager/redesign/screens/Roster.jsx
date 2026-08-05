@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { C, MONO, ScreenHeader, NavToggle, Toast, initials } from '../ui'
@@ -95,18 +95,234 @@ function EmailRostered({ weekStart, onToast }) {
   )
 }
 
+// Adding a shift that no weekly pattern covers: a final, a night game, an extra
+// hand behind the bar. Editing the pattern would change every week.
+function AddShift({ areas, weekId, onDone, onCancel }) {
+  const [f, setF] = useState({ area_id: areas[0]?.id || '', day_of_week: 5, start_time: '17', end_time: '21' })
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const inp = { padding: '6px 8px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: C.surface2, color: C.text }
+  return (
+    <div style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 8 }}>NEW SHIFT</div>
+      <div style={{ display: 'grid', gap: 6 }}>
+        <select value={f.area_id} onChange={e => setF(v => ({ ...v, area_id: e.target.value }))} style={inp}>
+          {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={f.day_of_week} onChange={e => setF(v => ({ ...v, day_of_week: Number(e.target.value) }))} style={inp}>
+          {DOW.map((d, i) => <option key={i} value={i}>{d}</option>)}
+        </select>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <input type="number" step="0.25" min="0" max="24" value={f.start_time} onChange={e => setF(v => ({ ...v, start_time: e.target.value }))} style={{ ...inp, flex: 1 }} placeholder="From" />
+          <input type="number" step="0.25" min="0" max="24" value={f.end_time} onChange={e => setF(v => ({ ...v, end_time: e.target.value }))} style={{ ...inp, flex: 1 }} placeholder="To" />
+        </div>
+        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>Times are 24-hour, so 17.5 is 5:30pm.</div>
+        {err && <div style={{ fontSize: 11.5, color: C.block }}>{err}</div>}
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button disabled={busy || !f.area_id} onClick={async () => {
+            setBusy(true); setErr(null)
+            try {
+              await api.rosterCreateShift({
+                week_id: weekId, area_id: f.area_id, day_of_week: f.day_of_week,
+                start_time: Number(f.start_time), end_time: Number(f.end_time),
+              })
+              onDone()
+            } catch (e) { setErr(e.message) } finally { setBusy(false) }
+          }} style={{ flex: 1, padding: '6px 10px', borderRadius: 6, fontSize: 12, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>
+            {busy ? 'Adding…' : 'Add shift'}
+          </button>
+          <button onClick={onCancel} style={{ padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// The roster is where you notice someone's availability is wrong, so it should
+// be where you can fix it, rather than sending them to another screen.
+function PersonPanel({ memberId, onClose, onSaved }) {
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let alive = true
+    api.rosterMember(memberId).then(r => { if (alive) setD(r) }).catch(e => alive && setErr(e.message))
+    return () => { alive = false }
+  }, [memberId])
+
+  const toggle = async (day) => {
+    const next = d.available_days.includes(day)
+      ? d.available_days.filter(x => x !== day) : [...d.available_days, day].sort()
+    setD(v => ({ ...v, available_days: next }))   // optimistic
+    setBusy(true)
+    try { await api.rosterSetAvailability(memberId, next); onSaved?.() }
+    catch (e) { setErr(e.message) } finally { setBusy(false) }
+  }
+
+  if (err) return <div style={{ fontSize: 12, color: C.block, marginBottom: 10 }}>{err}</div>
+  if (!d) return <div style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, marginBottom: 10 }}>Loading…</div>
+  return (
+    <div style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 10, marginBottom: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        <span style={{ fontWeight: 600, fontSize: 13.5 }}>{d.full_name}</span>
+        <button onClick={onClose} style={{ fontFamily: MONO, fontSize: 10, background: 'none', border: 'none', color: C.faint, cursor: 'pointer' }}>close</button>
+      </div>
+      {(d.email || d.mobile) && (
+        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>{[d.email, d.mobile].filter(Boolean).join(' · ')}</div>
+      )}
+
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, margin: '10px 0 5px' }}>AVAILABLE</div>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+        {DOW.map((label, i) => {
+          const on = d.available_days.includes(i)
+          return (
+            <button key={i} disabled={busy} onClick={() => toggle(i)}
+              style={{ padding: '4px 8px', borderRadius: 6, fontFamily: MONO, fontSize: 10, cursor: 'pointer',
+                border: `1px solid ${on ? 'transparent' : C.hair2}`,
+                background: on ? C.accent : 'transparent', color: on ? '#fff' : C.faint }}>{label}</button>
+          )
+        })}
+      </div>
+
+      <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, margin: '10px 0 5px' }}>QUALIFICATIONS</div>
+      {d.qualifications.length === 0
+        ? <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>None recorded.</div>
+        : d.qualifications.map(q => (
+          <div key={q.id} style={{ fontSize: 12, color: C.dim }}>
+            {q.name}{q.expires_at && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}> · expires {q.expires_at}</span>}
+          </div>
+        ))}
+
+      {d.roles.length > 0 && (
+        <>
+          <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, margin: '10px 0 5px' }}>ROLES</div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {d.roles.map(r => (
+              <span key={r.id} style={{ fontFamily: MONO, fontSize: 9.5, padding: '2px 6px', borderRadius: 4, border: `1px solid ${C.hair2}`, color: r.is_paid ? C.warn : C.faint }}>
+                {r.title}{r.is_paid ? ' · PAID' : ''}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// Rostered against worked, paid against volunteer.
+//
+// Four numbers per person rather than one total, because they answer different
+// questions. Rostered is what the club committed someone to; worked is what
+// they logged afterwards, and the gap between the two is the thing worth
+// looking at. Paid is split out because a club's wage bill and its volunteer
+// effort are not the same number and should never be added together — one goes
+// to the treasurer, the other to the grant application.
+function HoursView({ weekStart }) {
+  const [span, setSpan] = useState('week')
+  const [d, setD] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const range = useMemo(() => {
+    const start = new Date(weekStart + 'T00:00:00Z')
+    if (span === 'week') {
+      const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6)
+      return [weekStart, end.toISOString().slice(0, 10)]
+    }
+    if (span === 'month') {
+      const s = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
+      const e = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0))
+      return [s.toISOString().slice(0, 10), e.toISOString().slice(0, 10)]
+    }
+    // A season runs Jul-Jun, so anything before July belongs to the year before.
+    const y = start.getUTCMonth() >= 6 ? start.getUTCFullYear() : start.getUTCFullYear() - 1
+    return [`${y}-07-01`, `${y + 1}-06-30`]
+  }, [weekStart, span])
+
+  useEffect(() => {
+    let alive = true
+    setD(null); setErr(null)
+    api.rosterHours(range[0], range[1])
+      .then(r => { if (alive) setD(r) })
+      .catch(e => alive && setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
+    return () => { alive = false }
+  }, [range[0], range[1]])
+
+  const hrs = n => (n || 0) === 0 ? '—' : (Math.round(n * 10) / 10).toString()
+  const T = d?.totals
+
+  return (
+    <div className="pb-scroll" style={{ flex: 1, overflow: 'auto', padding: '18px 22px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3, width: 'fit-content', marginBottom: 16 }}>
+        {[['week', 'This week'], ['month', 'This month'], ['season', 'This season']].map(([k, label]) => (
+          <button key={k} onClick={() => setSpan(k)}
+            style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer',
+              background: span === k ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent',
+              color: span === k ? C.accent : C.faint }}>{label}</button>
+        ))}
+        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, padding: '0 8px' }}>{range[0]} → {range[1]}</span>
+      </div>
+
+      {err && <div style={{ fontSize: 13, color: C.block }}>{err}</div>}
+      {!d && !err && <div style={{ fontFamily: MONO, fontSize: 10, color: C.faintest }}>Loading hours…</div>}
+
+      {d && (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+            {[['Volunteer rostered', T.rostered_volunteer], ['Volunteer worked', T.worked_volunteer],
+              ['Paid rostered', T.rostered_paid], ['Paid worked', T.worked_paid]].map(([label, v], i) => (
+              <div key={label} style={{ background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 10, padding: '12px 16px', minWidth: 150 }}>
+                <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest }}>{label.toUpperCase()}</div>
+                <div style={{ fontSize: 22, fontWeight: 700, marginTop: 4, fontVariantNumeric: 'tabular-nums', color: i >= 2 ? C.warn : C.text }}>
+                  {hrs(v)}<span style={{ fontSize: 12, fontWeight: 500, color: C.faint, marginLeft: 3 }}>hrs</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {d.people.length === 0 ? (
+            <div style={{ fontSize: 13, color: C.faint, maxWidth: '46rem', lineHeight: 1.6 }}>
+              Nobody was rostered or logged hours in this period. Hours appear here once a shift has
+              someone assigned to it, and worked hours once they have been logged against a volunteer.
+            </div>
+          ) : (
+            <div style={{ border: `1px solid ${C.hair}`, borderRadius: 10, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr repeat(4, 126px)', background: C.surface2, borderBottom: `1px solid ${C.hair}` }}>
+                {['PERSON', 'VOL ROSTERED', 'VOL WORKED', 'PAID ROSTERED', 'PAID WORKED'].map((h, i) => (
+                  <div key={h} style={{ padding: '9px 12px', fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.12em', color: C.faintest, textAlign: i ? 'right' : 'left' }}>{h}</div>
+                ))}
+              </div>
+              {d.people.map(p => (
+                <div key={p.member_id} style={{ display: 'grid', gridTemplateColumns: '1fr repeat(4, 126px)', borderBottom: `1px solid ${C.hair}` }}>
+                  <div style={{ padding: '9px 12px', fontSize: 13, fontWeight: 600 }}>{p.full_name}</div>
+                  {['rostered_volunteer', 'worked_volunteer', 'rostered_paid', 'worked_paid'].map((k, i) => (
+                    <div key={k} style={{ padding: '9px 12px', textAlign: 'right', fontFamily: MONO, fontSize: 12, fontVariantNumeric: 'tabular-nums', color: p[k] ? (i >= 2 ? C.warn : C.dim) : C.faintest }}>{hrs(p[k])}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function Roster({ st, patch, narrow }) {
   const [data, setData] = useState(null)  // { week, areas, candidates, settings }
   const [shifts, setShifts] = useState([])
   const [err, setErr] = useState(null)
   const [busy, setBusy] = useState(false)
+  const [addingShift, setAddingShift] = useState(false)
+  const [openPerson, setOpenPerson] = useState(null)
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
-  const load = () => api.rosterWeek()
+  // st.rosterWeek is how another screen hands us a week — Events uses it for
+  // "Roster this event" so you land on the week the event falls in.
+  const load = () => api.rosterWeek(st.rosterWeek)
     .then(res => { setData(res); setShifts(res.week.shifts || []) })
     .catch(e => setErr((e?.status ? `HTTP ${e.status} · ` : '') + String(e?.message || e)))
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [st.rosterWeek])
 
   const view = st.view
   const gridCols = narrow ? '176px repeat(7, minmax(0, 1fr))' : '216px repeat(7, minmax(150px, 1fr))'
@@ -269,11 +485,13 @@ export default function Roster({ st, patch, narrow }) {
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <Header>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
-          {['people', 'areas'].map(v => (
+          {['people', 'areas', 'hours'].map(v => (
             <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', textTransform: 'capitalize', background: view === v ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: view === v ? C.accent : C.faint }}>{v}</button>
           ))}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto', flexWrap: 'wrap' }}>
+        {/* Every one of these acts on the shift grid, so none of them mean
+            anything while the hours tab is showing. */}
+        <div style={{ display: view === 'hours' ? 'none' : 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
             <span style={{ fontWeight: 700, fontSize: 18, color: C.text, fontVariantNumeric: 'tabular-nums' }}>{filled}</span>
             <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
@@ -289,6 +507,9 @@ export default function Roster({ st, patch, narrow }) {
 
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
 
+      {view === 'hours' && <HoursView weekStart={data.week.week_start} />}
+
+      {view !== 'hours' && (
       <div style={{ display: 'flex', flex: 1, minHeight: 0, alignItems: 'stretch' }}>
         <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
           <div style={{ minWidth: narrow ? 0 : 1266 }}>
@@ -429,6 +650,23 @@ export default function Roster({ st, patch, narrow }) {
               </div>
             )}
 
+            {sel && (
+              <button onClick={async () => {
+                if (!confirm('Delete this shift?')) return
+                try { await api.rosterDeleteShift(sel.id); patch({ selected: null }); load() }
+                catch (e) { patch({ toast: e.message }) }
+              }} style={{ width: '100%', padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.block, cursor: 'pointer', marginBottom: 10 }}>
+                Delete this shift
+              </button>
+            )}
+
+            {addingShift
+              ? <AddShift areas={areas} weekId={data.week.id}
+                  onDone={() => { setAddingShift(false); load() }} onCancel={() => setAddingShift(false)} />
+              : <button onClick={() => setAddingShift(true)} style={{ width: '100%', padding: '6px 10px', borderRadius: 6, fontSize: 12, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', marginBottom: 10 }}>+ Add a shift</button>}
+
+            {openPerson && <PersonPanel memberId={openPerson} onClose={() => setOpenPerson(null)} onSaved={load} />}
+
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
               <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest }}>{sel ? 'RANKED CANDIDATES' : 'VOLUNTEER POOL'}</span>
               <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint }}>{candList.length} people</span>
@@ -438,7 +676,7 @@ export default function Roster({ st, patch, narrow }) {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {candList.map(({ c, res, load }) => (
-                <div key={c.member_id} draggable onClick={() => { if (sel) doAssign(sel.id, c.member_id) }} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: c.member_id }) }} onDragEnd={() => patch({ dragPerson: null, overCell: null })}
+                <div key={c.member_id} draggable onClick={() => { if (sel) doAssign(sel.id, c.member_id); else setOpenPerson(c.member_id) }} onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; patch({ dragPerson: c.member_id }) }} onDragEnd={() => patch({ dragPerson: null, overCell: null })}
                   style={{ background: C.surface2, border: `1px solid ${sel && !res.warns.length ? 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' : C.hair}`, borderRadius: 8, padding: '9px 10px', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <span style={{ width: 26, height: 26, borderRadius: '50%', background: C.surface, border: `1.5px solid ${C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 9.5, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(c.name)}</span>
@@ -454,6 +692,7 @@ export default function Roster({ st, patch, narrow }) {
           </aside>
         )}
       </div>
+      )}
     </div>
   )
 }

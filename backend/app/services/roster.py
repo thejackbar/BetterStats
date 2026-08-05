@@ -8,6 +8,7 @@ families router).
 """
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Optional
@@ -522,3 +523,193 @@ async def rostered_contacts(db: AsyncSession, org_id, start: date, end: date) ->
         "contact_ids": [p["contact_id"] for p in people if p["contact_id"]],
         "unreachable": [p["full_name"] for p in people if not p["contact_id"]],
     }
+
+
+# ── Shifts as first-class things ─────────────────────────────────────────────
+#
+# Shifts were only ever generated from an area's weekly patterns, so a one-off
+# — a night game, an extra bar shift for a final — could not be added, and a
+# shift generated in error could not be removed. These make a shift editable in
+# its own right without touching the pattern it came from.
+
+async def create_shift(db: AsyncSession, org_id, week_id, *, area_id, day_of_week,
+                       start_time, end_time) -> str:
+    sid = uuid.uuid4()
+    await db.execute(text("""
+        INSERT INTO roster_shifts (id, roster_week_id, organisation_id, area_id, day_of_week, start_time, end_time)
+        VALUES (:id, :wid, :org, :area, :dow, :st, :et)
+    """), {"id": sid, "wid": week_id, "org": org_id, "area": area_id,
+           "dow": int(day_of_week), "st": start_time, "et": end_time})
+    return str(sid)
+
+
+async def update_shift(db: AsyncSession, org_id, shift_id, **fields) -> None:
+    cols = {"area_id": "area_id", "day_of_week": "day_of_week",
+            "start_time": "start_time", "end_time": "end_time"}
+    sets, params = [], {"id": shift_id, "org": org_id}
+    for k, col in cols.items():
+        if k in fields and fields[k] is not None:
+            sets.append(f"{col} = :{k}")
+            params[k] = fields[k]
+    if not sets:
+        return
+    await db.execute(text(
+        f"UPDATE roster_shifts SET {', '.join(sets)} WHERE id = :id AND organisation_id = :org"
+    ), params)
+
+
+async def delete_shift(db: AsyncSession, org_id, shift_id) -> None:
+    await db.execute(text("DELETE FROM roster_shifts WHERE id = :id AND organisation_id = :org"),
+                     {"id": shift_id, "org": org_id})
+
+
+# ── Paid vs volunteer ────────────────────────────────────────────────────────
+#
+# A club's roster mixes people it employs with people doing it for nothing, and
+# until now it could not tell them apart. The distinction is NOT a new flag: an
+# area already requires a club_role, and a role already has a type whose
+# category can be 'paid'. Deriving it keeps one answer instead of two that can
+# disagree.
+
+PAID_CATEGORY = "paid"
+
+
+async def area_pay_kinds(db: AsyncSession, org_id) -> dict:
+    """area_id -> True when that area's required role is a paid one."""
+    rows = (await db.execute(text("""
+        SELECT a.id, COALESCE(rt.category, '') AS category
+        FROM roster_areas a
+        LEFT JOIN club_roles r ON r.id = a.required_role_id
+        LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
+        WHERE a.organisation_id = :org
+    """), {"org": org_id})).mappings().all()
+    return {str(r["id"]): (r["category"] or "").lower() == PAID_CATEGORY for r in rows}
+
+
+def shift_hours(start_time, end_time) -> float:
+    """A shift's length. Times are stored as decimal hours (17.5 = 5:30pm)."""
+    try:
+        return max(0.0, float(end_time) - float(start_time))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def hours_summary(db: AsyncSession, org_id, *, start: date, end: date) -> dict:
+    """Rostered vs worked hours per person, split paid and volunteer.
+
+    ROSTERED is what the roster committed someone to: the length of every shift
+    they are assigned to in the window. WORKED is what was actually logged
+    afterwards. They are deliberately separate numbers — the gap between them is
+    the thing a club wants to see, and collapsing them would hide it.
+    """
+    paid_by_area = await area_pay_kinds(db, org_id)
+    shifts = (await db.execute(text("""
+        SELECT s.assignee_member_id AS member_id, s.area_id, s.start_time, s.end_time,
+               m.full_name
+        FROM roster_shifts s
+        JOIN roster_weeks w ON w.id = s.roster_week_id
+        JOIN fee_members m ON m.id = s.assignee_member_id
+        WHERE s.organisation_id = :org AND s.assignee_member_id IS NOT NULL
+          AND (w.week_start + s.day_of_week) BETWEEN :start AND :end
+    """), {"org": org_id, "start": start, "end": end})).mappings().all()
+
+    logged = (await db.execute(text("""
+        SELECT h.member_id, m.full_name, h.hours, h.is_paid
+        FROM volunteer_hours h JOIN fee_members m ON m.id = h.member_id
+        WHERE h.organisation_id = :org AND h.logged_date BETWEEN :start AND :end
+    """), {"org": org_id, "start": start, "end": end})).mappings().all()
+
+    people: dict = {}
+
+    def row(mid, name):
+        return people.setdefault(str(mid), {
+            "member_id": str(mid), "full_name": name,
+            "rostered_volunteer": 0.0, "rostered_paid": 0.0,
+            "worked_volunteer": 0.0, "worked_paid": 0.0,
+        })
+
+    for s in shifts:
+        r = row(s["member_id"], s["full_name"])
+        key = "rostered_paid" if paid_by_area.get(str(s["area_id"])) else "rostered_volunteer"
+        r[key] += shift_hours(s["start_time"], s["end_time"])
+    for h in logged:
+        r = row(h["member_id"], h["full_name"])
+        r["worked_paid" if h["is_paid"] else "worked_volunteer"] += float(h["hours"] or 0)
+
+    out = sorted(people.values(), key=lambda p: p["full_name"].lower())
+    totals = {k: round(sum(p[k] for p in out), 2)
+              for k in ("rostered_volunteer", "rostered_paid", "worked_volunteer", "worked_paid")}
+    for p in out:
+        for k in ("rostered_volunteer", "rostered_paid", "worked_volunteer", "worked_paid"):
+            p[k] = round(p[k], 2)
+    return {"people": out, "totals": totals,
+            "start": start.isoformat(), "end": end.isoformat()}
+
+
+async def member_detail(db: AsyncSession, org_id, member_id) -> dict:
+    """One volunteer, as the roster needs them: who they are, when they can do
+    it, and what they are qualified for. The roster is where an admin notices
+    availability is wrong, so it should be where they can fix it."""
+    m = (await db.execute(text("""
+        SELECT m.id, m.full_name, m.email, m.mobile
+        FROM fee_members m WHERE m.id = :id AND m.organisation_id = :org
+    """), {"id": member_id, "org": org_id})).mappings().first()
+    if not m:
+        return {}
+    prof = (await db.execute(text("""
+        SELECT available_days, max_shifts_per_week, lives_nearby
+        FROM volunteer_profiles WHERE organisation_id = :org AND member_id = :id
+    """), {"org": org_id, "id": member_id})).mappings().first()
+    quals = (await db.execute(text("""
+        SELECT q.id, qt.name, q.expires_at
+        FROM member_qualifications q JOIN qualification_types qt ON qt.id = q.qualification_type_id
+        WHERE q.organisation_id = :org AND q.member_id = :id
+        ORDER BY qt.name
+    """), {"org": org_id, "id": member_id})).mappings().all()
+    roles = (await db.execute(text("""
+        SELECT r.id, r.title, COALESCE(rt.category, '') AS category
+        FROM volunteer_roles vr
+        JOIN club_roles r ON r.id = vr.role_id
+        LEFT JOIN club_role_types rt ON rt.id = r.role_type_id
+        WHERE vr.organisation_id = :org AND vr.member_id = :id
+        ORDER BY r.title
+    """), {"org": org_id, "id": member_id})).mappings().all()
+    return {
+        "member_id": str(m["id"]), "full_name": m["full_name"],
+        "email": m["email"], "mobile": m["mobile"],
+        # Normalised through day_index, so a profile saved with day NAMES reads
+        # the same as one saved with indexes (see the note on day_index).
+        "available_days": [d for d in ((day_index(x) for x in ((prof or {}).get("available_days") or []))) if d is not None],
+        "max_shifts_per_week": (prof or {}).get("max_shifts_per_week"),
+        "lives_nearby": (prof or {}).get("lives_nearby"),
+        "qualifications": [{"id": str(q["id"]), "name": q["name"],
+                            "expires_at": q["expires_at"].isoformat() if q["expires_at"] else None}
+                           for q in quals],
+        "roles": [{"id": str(r["id"]), "title": r["title"],
+                   "is_paid": (r["category"] or "").lower() == PAID_CATEGORY} for r in roles],
+    }
+
+
+async def set_member_availability(db: AsyncSession, org_id, member_id, days: list) -> list:
+    """Write availability as INDEXES.
+
+    The Volunteers screen writes day names and the roster reads indexes; that
+    mismatch is what crashed the roster page. Everything written from here is
+    normalised, so the data converges on one vocabulary over time while
+    day_index keeps the old rows readable.
+    """
+    clean = sorted({d for d in (day_index(x) for x in (days or [])) if d is not None})
+    existing = (await db.execute(text(
+        "SELECT 1 FROM volunteer_profiles WHERE organisation_id = :org AND member_id = :id"
+    ), {"org": org_id, "id": member_id})).first()
+    if existing:
+        await db.execute(text("""
+            UPDATE volunteer_profiles SET available_days = CAST(:days AS jsonb)
+            WHERE organisation_id = :org AND member_id = :id
+        """), {"org": org_id, "id": member_id, "days": json.dumps(clean)})
+    else:
+        await db.execute(text("""
+            INSERT INTO volunteer_profiles (id, organisation_id, member_id, available_days)
+            VALUES (gen_random_uuid(), :org, :id, CAST(:days AS jsonb))
+        """), {"org": org_id, "id": member_id, "days": json.dumps(clean)})
+    return clean
