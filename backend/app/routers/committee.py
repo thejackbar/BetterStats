@@ -266,20 +266,30 @@ class TaskCreate(BaseModel):
     outcome_notes: Optional[str] = None
     meeting_id: Optional[str] = None
     motion_id: Optional[str] = None
+    # Migration 220 — raised under an agenda item, and owned by one or more
+    # people. `assignee_member_ids` wins over `assigned_to_member_id` when both
+    # are sent; the single column stays the primary owner.
+    agenda_item_id: Optional[str] = None
+    assignee_member_ids: Optional[List[str]] = None
 
 
 @router.post("/tasks")
 async def create_task(data: TaskCreate, _: User = _require, club: Organisation = Depends(get_current_club),
                       db: AsyncSession = Depends(get_db)):
     fields = data.model_dump()
-    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id"):
+    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id", "agenda_item_id"):
         if key in fields:
             fields[key] = uuid.UUID(fields[key]) if fields.get(key) else None
+    assignees = fields.pop("assignee_member_ids", None)
     try:
         t = await committee_service.create_task(db, club.id, **fields)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    if assignees is not None:
+        await committee_service.set_task_assignees(db, t, [uuid.UUID(a) for a in assignees])
     await db.commit()
+    await db.refresh(t)   # commit expires it; _task_dict would lazy-load outside the greenlet
+    await committee_service.load_task_assignees(db, [t])
     return committee_service._task_dict(t)
 
 
@@ -302,6 +312,11 @@ class TaskPatch(BaseModel):
     outcome_notes: Optional[str] = None
     meeting_id: Optional[str] = None
     motion_id: Optional[str] = None
+    # Migration 220 — raised under an agenda item, and owned by one or more
+    # people. `assignee_member_ids` wins over `assigned_to_member_id` when both
+    # are sent; the single column stays the primary owner.
+    agenda_item_id: Optional[str] = None
+    assignee_member_ids: Optional[List[str]] = None
     closed_by_member_id: Optional[str] = None
 
 
@@ -310,11 +325,16 @@ async def update_task(task_id: str, data: TaskPatch, _: User = _require, club: O
                       db: AsyncSession = Depends(get_db)):
     t = await _task_or_404(db, club, task_id)
     fields = data.model_dump(exclude_unset=True)
-    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id"):
+    for key in ("position_id", "assigned_to_member_id", "objective_id", "meeting_id", "motion_id", "closed_by_member_id", "agenda_item_id"):
         if key in fields:
             fields[key] = uuid.UUID(fields[key]) if fields[key] else None
+    assignees = fields.pop("assignee_member_ids", None)
     await committee_service.update_task(db, t, **fields)
+    if assignees is not None:
+        await committee_service.set_task_assignees(db, t, [uuid.UUID(a) for a in assignees])
     await db.commit()
+    await db.refresh(t)
+    await committee_service.load_task_assignees(db, [t])
     return committee_service._task_dict(t)
 
 
@@ -734,7 +754,43 @@ async def get_meeting(meeting_id: str, _: User = _require, club: Organisation = 
     return {**committee_service._meeting_dict(m), **detail}
 
 
+# ─── The meeting room ────────────────────────────────────────────────────────
+
+@router.get("/meetings/{meeting_id}/room")
+async def meeting_room(meeting_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                       db: AsyncSession = Depends(get_db)):
+    """One fetch for the live screen: the meeting, its agenda in order, motions
+    with their votes, the actions raised, attendance, and who can be marked
+    present. A secretary mid-meeting should not wait on six requests."""
+    m = await _meeting_or_404(db, club, meeting_id)
+    return await committee_service.meeting_room(db, club.id, m)
+
+
+class OrderBody(BaseModel):
+    ids: List[str]
+
+
+@router.post("/meetings/{meeting_id}/agenda-items/reorder")
+async def reorder_agenda(meeting_id: str, data: OrderBody, _: User = _require,
+                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    m = await _meeting_or_404(db, club, meeting_id)
+    await committee_service.reorder_agenda_items(db, m.id, data.ids)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/meetings/{meeting_id}/motions/reorder")
+async def reorder_motions(meeting_id: str, data: OrderBody, _: User = _require,
+                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    m = await _meeting_or_404(db, club, meeting_id)
+    await committee_service.reorder_motions(db, m.id, data.ids)
+    await db.commit()
+    return {"ok": True}
+
+
 class MeetingPatch(BaseModel):
+    # Minutes are circulated; these are the secretary's own (migration 220).
+    private_notes: Optional[str] = None
     title: Optional[str] = None
     meeting_type: Optional[str] = None
     scheduled_at: Optional[datetime] = None

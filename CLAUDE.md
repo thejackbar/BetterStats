@@ -343,6 +343,50 @@ BetterClubManager being unlaunched and long outlived its reason.
   router enforces. Do not reach for a role gate: role is not how this app
   expresses permission anywhere else in the module.
 
+## The meeting room — running a committee meeting (v9.7.0, migration 220, Aug 2026)
+
+The tabbed Committee screen is a set of lists (meetings here, motions there,
+actions elsewhere). That is fine for looking something up afterwards and useless
+at 8pm on a Tuesday. `pages/admin/MeetingRoom.jsx` at
+**`/admin/clubhouse/committee/meeting/:meetingId`** is the screen a secretary
+runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
+
+- **The agenda is the spine.** Click an item to open it; the motions, actions
+  and outcome notes you record attach to that item. Ordering is HTML5 drag on
+  `meeting_agenda_items.position` (which already existed) via
+  `POST .../agenda-items/reorder`. `reorder_agenda_items` **ignores ids that do
+  not belong to the meeting** — the list comes from a browser.
+- **Attendance starts from the committee, not the membership.**
+  `meeting_attendee_pool` returns everyone but flags and sorts current
+  committee-term holders first; the screen shows only those (plus anyone
+  already marked) until you type. A 300-member club was the whole problem.
+- **Only people marked present can vote or be given an action.** `present` is
+  derived on the screen from attendance, so setting attendance first is what
+  makes the rest usable. This is a UI restriction, not a server rule —
+  `set_motion_votes` still accepts any member, because a phone vote is real.
+- **Migration 220** (mirrored in the lifespan): `committee_tasks.agenda_item_id`,
+  `committee_task_assignees` (task ↔ member), `meeting_motions.position`,
+  `committee_meetings.private_notes`. **NOTE the numbering** — AFL shipped its
+  own `219`, and this file was briefly `219` too before being renumbered; two
+  migrations with the same `revision` break Alembic outright.
+- **`assigned_to_member_id` stays the primary owner.** `set_task_assignees`
+  writes the join table AND sets that column to the first id, because the board,
+  the timeline and every existing report read it. Never drop it in favour of the
+  table alone. `load_task_assignees` falls back to it for pre-220 actions.
+- **`GET .../meetings/{id}/room`** is one fetch for the whole screen (meeting,
+  agenda, motions with votes, actions, attendance, attendee pool). A secretary
+  mid-meeting should not wait on six requests.
+- **Everything saves as it happens** — no Save button for the meeting. Free text
+  (minutes, private notes, outcome notes) goes through a 700ms debounce
+  (`useAutosave`); everything else writes on the click that made it.
+- **A completed meeting opens the same screen**, which is how past minutes,
+  motions and actions are read. Nothing is read-only: minutes are usually
+  finished after the room empties.
+- **Not built**: motions cannot yet be dragged (the endpoint and column exist,
+  `POST .../motions/reorder`, and motions already sort by `position` — only the
+  drag handle is missing, since they order themselves under their agenda item in
+  practice). Attendance has no apology-from-last-time carry-over.
+
 ## Multi-sport: the AFL silo (Aug 2026)
 
 **One codebase, per-sport operational silos.** BetterStats now also serves AFL

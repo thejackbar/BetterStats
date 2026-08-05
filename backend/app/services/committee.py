@@ -19,6 +19,7 @@ from app.models.db import (
     CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent,
     AgendaTemplate, CommitteeMeeting, MeetingAttendance, MeetingAgendaItem, MeetingMotion,
     AgmNomination, FeeMember, ClubRole, ClubRoleType, ClubMembership,
+    CommitteeTaskAssignee,
 )
 
 # (name, responsibilities)
@@ -78,6 +79,8 @@ def _task_dict(t: CommitteeTask) -> dict:
         "outcome_notes": t.outcome_notes,
         "meeting_id": str(t.meeting_id) if t.meeting_id else None,
         "motion_id": str(t.motion_id) if t.motion_id else None,
+        "agenda_item_id": str(t.agenda_item_id) if t.agenda_item_id else None,
+        "assignee_member_ids": [str(a) for a in (getattr(t, "_assignees", None) or [])],
         "depends_on": [str(d) for d in (getattr(t, "_depends_on", None) or [])],
     }
 
@@ -132,6 +135,7 @@ def _meeting_dict(m: CommitteeMeeting) -> dict:
         "id": str(m.id), "title": m.title, "meeting_type": m.meeting_type,
         "scheduled_at": m.scheduled_at.isoformat() if m.scheduled_at else None,
         "location": m.location, "status": m.status, "minutes": m.minutes,
+        "private_notes": m.private_notes,
         "agenda_template_id": str(m.agenda_template_id) if m.agenda_template_id else None,
     }
 
@@ -152,6 +156,7 @@ def _motion_dict(m: MeetingMotion) -> dict:
     return {
         "id": str(m.id), "meeting_id": str(m.meeting_id),
         "agenda_item_id": str(m.agenda_item_id) if m.agenda_item_id else None,
+        "position": m.position or 0,
         "motion_type": m.motion_type, "description": m.description,
         "proposed_by_member_id": str(m.proposed_by_member_id) if m.proposed_by_member_id else None,
         "seconded_by_member_id": str(m.seconded_by_member_id) if m.seconded_by_member_id else None,
@@ -702,7 +707,10 @@ async def create_meeting(session: AsyncSession, org_id, **fields) -> CommitteeMe
 
 
 async def update_meeting(session: AsyncSession, m: CommitteeMeeting, **fields) -> CommitteeMeeting:
-    for f in ("title", "meeting_type", "scheduled_at", "location", "status", "minutes", "agenda_template_id"):
+    for f in ("title", "meeting_type", "scheduled_at", "location", "status", "minutes",
+              "private_notes", "agenda_template_id"):
+        # `is not None` rather than presence: a caller clearing minutes sends ""
+        # (which sets), while an untouched field is absent from the patch.
         if f in fields and fields[f] is not None:
             setattr(m, f, fields[f])
     m.updated_at = func.now()
@@ -720,7 +728,8 @@ async def meeting_detail(session: AsyncSession, org_id, meeting_id) -> dict:
         select(MeetingAgendaItem).where(MeetingAgendaItem.meeting_id == meeting_id).order_by(MeetingAgendaItem.position)
     )).scalars().all()
     motions = (await session.execute(
-        select(MeetingMotion).where(MeetingMotion.meeting_id == meeting_id).order_by(MeetingMotion.created_at)
+        select(MeetingMotion).where(MeetingMotion.meeting_id == meeting_id)
+        .order_by(MeetingMotion.position, MeetingMotion.created_at)
     )).scalars().all()
     attendance = (await session.execute(
         select(MeetingAttendance, FeeMember.full_name)
@@ -1093,3 +1102,115 @@ async def objective_progress(session: AsyncSession, org_id) -> list[dict]:
             "spent": float(sum(t.actual_expenditure or 0 for t in tasks)),
         })
     return out
+
+
+# ─── The meeting room ─────────────────────────────────────────────────────────
+#
+# One screen a secretary runs a meeting from: work down the agenda, record who
+# is there, take motions and votes, raise actions, keep minutes. Everything
+# below exists so that screen can be driven from one fetch and a handful of
+# small writes, rather than a dozen round trips per agenda item.
+
+
+async def reorder_agenda_items(session: AsyncSession, meeting_id, item_ids: list) -> None:
+    """Persist a dragged agenda order. Ids not belonging to this meeting are
+    ignored rather than trusted — the list comes from a browser."""
+    rows = (await session.execute(
+        select(MeetingAgendaItem).where(MeetingAgendaItem.meeting_id == meeting_id)
+    )).scalars().all()
+    by_id = {str(r.id): r for r in rows}
+    for i, raw in enumerate(item_ids):
+        row = by_id.get(str(raw))
+        if row is not None:
+            row.position = i
+    await session.flush()
+
+
+async def reorder_motions(session: AsyncSession, meeting_id, motion_ids: list) -> None:
+    rows = (await session.execute(
+        select(MeetingMotion).where(MeetingMotion.meeting_id == meeting_id)
+    )).scalars().all()
+    by_id = {str(r.id): r for r in rows}
+    for i, raw in enumerate(motion_ids):
+        row = by_id.get(str(raw))
+        if row is not None:
+            row.position = i
+    await session.flush()
+
+
+async def set_task_assignees(session: AsyncSession, task: CommitteeTask, member_ids: list) -> list:
+    """Replace who owns an action.
+
+    The first id also becomes ``assigned_to_member_id``. That column predates
+    this table and is what the board, the timeline and every existing report
+    read, so it has to keep meaning "the person this sits with".
+    """
+    await session.execute(
+        delete(CommitteeTaskAssignee).where(CommitteeTaskAssignee.task_id == task.id)
+    )
+    kept = []
+    for mid in dict.fromkeys(member_ids or []):
+        session.add(CommitteeTaskAssignee(task_id=task.id, member_id=mid))
+        kept.append(mid)
+    task.assigned_to_member_id = kept[0] if kept else None
+    await session.flush()
+    return kept
+
+
+async def load_task_assignees(session: AsyncSession, tasks: list) -> None:
+    ids = [t.id for t in tasks]
+    if not ids:
+        return
+    rows = (await session.execute(
+        select(CommitteeTaskAssignee).where(CommitteeTaskAssignee.task_id.in_(ids))
+    )).scalars().all()
+    by_task: dict = {}
+    for r in rows:
+        by_task.setdefault(r.task_id, []).append(r.member_id)
+    for t in tasks:
+        # Fall back to the single owner for an action created before this table,
+        # so an old action still shows someone rather than nobody.
+        t._assignees = by_task.get(t.id) or ([t.assigned_to_member_id] if t.assigned_to_member_id else [])
+
+
+async def meeting_attendee_pool(session: AsyncSession, org_id) -> list[dict]:
+    """Who to offer for attendance and votes.
+
+    Committee members come first and are flagged, because they are who is
+    normally in the room; scrolling a 300-name membership to tick six people is
+    the thing this replaces. Everyone else is still returned so a guest or a
+    late co-opted member can be found by typing, without a second request.
+    """
+    on_committee = set((await session.execute(
+        select(CommitteeTerm.member_id).where(
+            CommitteeTerm.organisation_id == org_id,
+            CommitteeTerm.ended_at.is_(None),
+            CommitteeTerm.member_id.isnot(None),
+        )
+    )).scalars().all())
+    rows = (await session.execute(
+        select(FeeMember.id, FeeMember.full_name)
+        .where(FeeMember.organisation_id == org_id)
+        .order_by(func.lower(FeeMember.full_name))
+    )).all()
+    out = [{"member_id": str(mid), "full_name": name, "on_committee": mid in on_committee}
+           for mid, name in rows]
+    out.sort(key=lambda r: (not r["on_committee"], r["full_name"].lower()))
+    return out
+
+
+async def meeting_room(session: AsyncSession, org_id, meeting: CommitteeMeeting) -> dict:
+    """Everything the live screen needs, in one fetch."""
+    detail = await meeting_detail(session, org_id, meeting.id)
+    tasks = (await session.execute(
+        select(CommitteeTask)
+        .where(CommitteeTask.organisation_id == org_id, CommitteeTask.meeting_id == meeting.id)
+        .order_by(CommitteeTask.created_at)
+    )).scalars().all()
+    await load_task_assignees(session, tasks)
+    return {
+        "meeting": _meeting_dict(meeting),
+        **detail,
+        "actions": [_task_dict(t) for t in tasks],
+        "attendee_pool": await meeting_attendee_pool(session, org_id),
+    }

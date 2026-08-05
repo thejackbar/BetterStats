@@ -533,6 +533,13 @@ export const api = {
   committeeCreateMeeting: (data) =>
     request('/club-admin/committee/meetings', { method: 'POST', body: JSON.stringify(data) }),
   committeeGetMeeting: (id) => request(`/club-admin/committee/meetings/${id}`),
+  // One fetch for the live meeting screen: meeting, agenda in order, motions
+  // with votes, actions raised, attendance, and who can be marked present.
+  committeeMeetingRoom: (id) => request(`/club-admin/committee/meetings/${id}/room`),
+  committeeReorderAgenda: (meetingId, ids) =>
+    request(`/club-admin/committee/meetings/${meetingId}/agenda-items/reorder`, { method: 'POST', body: JSON.stringify({ ids }) }),
+  committeeReorderMotions: (meetingId, ids) =>
+    request(`/club-admin/committee/meetings/${meetingId}/motions/reorder`, { method: 'POST', body: JSON.stringify({ ids }) }),
   committeeUpdateMeeting: (id, data) =>
     request(`/club-admin/committee/meetings/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteMeeting: (id) =>
