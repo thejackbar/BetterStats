@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
@@ -23,7 +23,7 @@ function SeasonBarChart({ rows, dataKey, name, color }) {
   const chartData = (rows || []).filter(r => r.season_id).slice().reverse()
   if (!chartData.length) return null
   return (
-    <ResponsiveContainer width="100%" height={200}>
+    <ResponsiveContainer width="100%" height={240}>
       <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" vertical={false} />
         <XAxis dataKey="season_name" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
@@ -89,7 +89,6 @@ function SeasonTable({ seasonRows, gradeRows }) {
             <th className="px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide text-pb-faint">Season</th>
             <SortTh label="GP" sKey="games" cur={sortKey} dir={sortDir} onSort={request} />
             <SortTh label="Goals" sKey="goals" cur={sortKey} dir={sortDir} onSort={request} />
-            <SortTh label="Behinds" sKey="behinds" cur={sortKey} dir={sortDir} onSort={request} />
             <SortTh label="BOG" sKey="bogs" cur={sortKey} dir={sortDir} onSort={request} />
           </tr>
         </thead>
@@ -114,7 +113,6 @@ function SeasonTable({ seasonRows, gradeRows }) {
                   </td>
                   <td className="px-3 py-2.5 text-right pb-num">{s.games}</td>
                   <td className="px-3 py-2.5 text-right pb-num font-semibold" style={{ color: 'var(--pb-accent)' }}>{s.goals}</td>
-                  <td className="px-3 py-2.5 text-right pb-num">{s.behinds}</td>
                   <td className="px-3 py-2.5 text-right pb-num">{s.bogs}</td>
                 </tr>
                 {hasBreakdown && isOpen && grades.map(g => (
@@ -122,7 +120,6 @@ function SeasonTable({ seasonRows, gradeRows }) {
                     <td className="px-3 py-1.5 pl-8 text-xs">{g.grade_name}</td>
                     <td className="px-3 py-1.5 text-right pb-num text-xs">{g.games}</td>
                     <td className="px-3 py-1.5 text-right pb-num text-xs">{g.goals}</td>
-                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.behinds}</td>
                     <td className="px-3 py-1.5 text-right pb-num text-xs">{g.bogs}</td>
                   </tr>
                 ))}
@@ -130,7 +127,7 @@ function SeasonTable({ seasonRows, gradeRows }) {
             )
           })}
           {sorted.length === 0 && (
-            <tr><td colSpan={5} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
+            <tr><td colSpan={4} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
           )}
         </tbody>
       </table>
@@ -138,25 +135,51 @@ function SeasonTable({ seasonRows, gradeRows }) {
   )
 }
 
-function CumulativeGoalsChart({ rows }) {
-  const seasons = (rows || []).filter(r => r.season_id).slice().reverse()
-  if (!seasons.length) return null
-  let cumulative = 0
-  const chartData = seasons.map(s => {
-    cumulative += (s.goals || 0)
-    return { season: s.season_name, total: cumulative, season_goals: s.goals || 0 }
-  })
+// ── Career split by the grade turned out in (Seniors, Reserves, Colts, …).
+// The rows come from the API already folded across seasons and merge groups;
+// all that's decided here is the leftover card. A season whose grade was
+// never resolved — an Import Stats upload that only named the season —
+// counts toward the career total but sits under no grade, so the difference
+// is shown as its own card rather than quietly leaving the cards adding up
+// to less than the totals directly above them.
+function GradeBreakdown({ rows, career }) {
+  const listed = rows || []
+  if (!listed.length) return null
+
+  const games = listed.reduce((a, r) => a + (r.games || 0), 0)
+  const goals = listed.reduce((a, r) => a + (r.goals || 0), 0)
+  const restGames = Math.max(0, (career.games || 0) - games)
+  const restGoals = Math.max(0, (career.goals || 0) - goals)
+  const cards = restGames > 0 || restGoals > 0
+    ? [...listed, { grade: 'Grade not recorded', games: restGames, goals: restGoals, muted: true }]
+    : listed
+
   return (
-    <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" vertical={false} />
-        <XAxis dataKey="season" tick={{ fill: 'var(--pb-faint)', fontSize: 10 }} interval="preserveStartEnd" />
-        <YAxis tick={{ fill: 'var(--pb-faint)', fontSize: 11 }} allowDecimals={false} width={40} />
-        <Tooltip {...CHART_TOOLTIP} formatter={(v, key) => [Number(v).toLocaleString(), key === 'total' ? 'Career total' : 'Season goals']} />
-        <Bar dataKey="season_goals" name="season_goals" fill="var(--pb-chart-1)" fillOpacity={0.25} radius={[2, 2, 0, 0]} />
-        <Line type="monotone" dataKey="total" name="total" stroke="var(--pb-chart-1)" strokeWidth={2} dot={false} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div>
+      <SectionTitle>By grade</SectionTitle>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {cards.map(c => (
+          <div key={c.grade} className="pb-card p-4">
+            <span
+              className={`font-mono text-[10px] tracking-wide3 uppercase block truncate ${c.muted ? 'text-pb-faintest' : 'text-pb-faint'}`}
+              title={c.grade}
+            >
+              {c.grade}
+            </span>
+            <div className="flex items-baseline gap-5 mt-2.5">
+              <span className="flex flex-col gap-1">
+                <span className="pb-num text-2xl font-bold leading-none text-pb-text">{c.games}</span>
+                <span className="font-mono text-[9px] tracking-wide3 uppercase text-pb-faintest">Games</span>
+              </span>
+              <span className="flex flex-col gap-1">
+                <span className="pb-num text-2xl font-bold leading-none" style={{ color: 'var(--pb-accent)' }}>{c.goals}</span>
+                <span className="font-mono text-[9px] tracking-wide3 uppercase text-pb-faintest">Goals</span>
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -201,10 +224,9 @@ export default function PlayerProfile() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <StatCard label="Games" value={c.games} accent large />
         <StatCard label="Goals" value={c.goals} large />
-        <StatCard label="Behinds" value={c.behinds} large />
         <StatCard label="Best on Ground" value={c.bogs} large />
         <StatCard
           label="Best haul"
@@ -213,6 +235,8 @@ export default function PlayerProfile() {
           large
         />
       </div>
+
+      <GradeBreakdown rows={data.grade_breakdown} career={c} />
 
       {hasChartData && (
         <div>
@@ -226,10 +250,6 @@ export default function PlayerProfile() {
               <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Games by season</p>
               <SeasonBarChart rows={seasonRows} dataKey="games" name="Games" color="var(--pb-chart-2)" />
             </div>
-          </div>
-          <div className="pb-card p-4 mt-4">
-            <p className="font-mono text-[10px] tracking-wide uppercase text-pb-faint mb-2">Cumulative career goals</p>
-            <CumulativeGoalsChart rows={seasonRows} />
           </div>
         </div>
       )}
@@ -247,7 +267,7 @@ export default function PlayerProfile() {
           <table className="w-full text-sm">
             <thead className="pb-hairline-b">
               <tr>
-                {['Date', 'Round', 'Match', 'Goals', 'Behinds', 'BOG', ''].map((h, i) => (
+                {['Date', 'Round', 'Match', 'Goals', 'BOG', ''].map((h, i) => (
                   <th key={h + i} className={`px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-pb-faint ${i >= 3 ? 'text-right' : 'text-left'}`}>{h}</th>
                 ))}
               </tr>
@@ -264,7 +284,6 @@ export default function PlayerProfile() {
                     <span className="block text-[11px] text-pb-faintest">{g.grade_name}</span>
                   </td>
                   <td className="px-3 py-2 text-right pb-num font-semibold">{g.goals}</td>
-                  <td className="px-3 py-2 text-right pb-num">{g.behinds}</td>
                   <td className="px-3 py-2 text-right">
                     {g.bog_ranking != null && (
                       <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-[color-mix(in_srgb,var(--pb-amber)_20%,transparent)] text-[var(--pb-amber)]">
@@ -276,7 +295,7 @@ export default function PlayerProfile() {
                 </tr>
               ))}
               {(data.game_log || []).length === 0 && (
-                <tr><td colSpan={7} className="px-3 py-4 text-center text-pb-faint text-sm">
+                <tr><td colSpan={6} className="px-3 py-4 text-center text-pb-faint text-sm">
                   {(c.games || 0) > 0
                     ? "No individual game records — this player's history comes from an imported season-totals spreadsheet, which doesn't include a game-by-game breakdown."
                     : 'No games recorded yet.'}

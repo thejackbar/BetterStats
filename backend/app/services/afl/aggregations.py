@@ -126,6 +126,80 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
     return rows
 
 
+async def grade_breakdown(db: AsyncSession, org_id: uuid.UUID,
+                          player_id: uuid.UUID) -> list[dict]:
+    """Career games/goals split by the grade turned out in — Seniors,
+    Reserves, Colts, Under 18s and so on.
+
+    Reads the per-grade rows only (grade_id IS NOT NULL), so it never double
+    counts against the whole-season rollup rows sitting beside them, and
+    combines synced with imported under the same sync-wins-per-season rule
+    the rest of this module uses. Rows are folded together by merge group
+    (grade_merge_logs), the same way the public grade filter in
+    routers/afl/clubs.py folds them — otherwise a club that merged "Senior
+    Men's" into "Seniors" gets two cards for one competition.
+
+    A season with no grade resolved at all (an Import Stats upload that never
+    named one) contributes to a player's career totals but to no grade here,
+    so the sum of these rows can legitimately fall short of the career total.
+    The caller shows that gap rather than this function inventing a bucket
+    for it.
+    """
+    res = await db.execute(text("""
+        WITH combined AS (
+            SELECT s.grade_id, s.games, s.goals
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND s.player_id = :pid
+              AND s.grade_id IS NOT NULL
+            UNION ALL
+            SELECT i.grade_id, i.games_played AS games, i.goals
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org AND i.player_id = :pid
+              AND i.grade_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        )
+        SELECT gr.name AS name,
+               MAX(gr.display_name_override) AS display_name_override,
+               COALESCE(SUM(c.games), 0) AS games,
+               COALESCE(SUM(c.goals), 0) AS goals
+        FROM combined c
+        JOIN grades gr ON gr.id = c.grade_id
+        GROUP BY gr.name
+    """), {"org": str(org_id), "pid": str(player_id)})
+    rows = [dict(r._mapping) for r in res]
+    if not rows:
+        return []
+
+    logs = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": str(org_id)})
+    chain = {r.alias_name: r.canonical_name for r in logs}
+
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        canonical = _resolve_canonical_grade(chain, row["name"])
+        slot = buckets.setdefault(canonical, {
+            "grade": canonical, "games": 0, "goals": 0, "_override": None,
+        })
+        # The canonical grade's own rename wins; an alias's only fills a gap.
+        if row["display_name_override"] and (slot["_override"] is None or row["name"] == canonical):
+            slot["_override"] = row["display_name_override"]
+        slot["games"] += int(row["games"] or 0)
+        slot["goals"] += int(row["goals"] or 0)
+
+    out = [{
+        "grade": b["_override"] or b["grade"],
+        "games": b["games"],
+        "goals": b["goals"],
+    } for b in buckets.values()]
+    out.sort(key=lambda r: (-r["games"], -r["goals"], r["grade"].lower()))
+    return out
+
+
 async def player_game_log(db: AsyncSession, org_id: uuid.UUID,
                           player_id: uuid.UUID, limit: int = 200) -> list[dict]:
     res = await db.execute(text("""
