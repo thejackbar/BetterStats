@@ -1,5 +1,80 @@
 # BetterStats — Claude Session Notes
 
+## BetterFootball — Import Results (v9.7.0, Aug 2026)
+
+A club's own results register (one row per match, going back as far as the
+club's records do) imported as **real games**, not a parallel store. Sibling
+of Import Stats (`routers/afl/imports.py`, season totals per player). Built
+against a real 3,044-row 1947–2023 register from an AFL club.
+
+- **`routers/afl/result_imports.py`** (`/club-admin/result-imports/*`, cap
+  `MANAGE_MANUAL_ENTRIES`) — preview → resolve → commit → undo, plus a
+  template. Seasons come from Import Stats' own `/club-admin/imports/seasons`
+  endpoints; there is deliberately no second copy of season listing/creation.
+- **Rows land in the shared `games` table + `afl_game_details`**, so they show
+  on the public results list, the dashboard W/L/D and records exactly like a
+  synced game. Three columns on `afl_game_details` carry the distinction:
+  `source` ('playhq' | 'import'), `import_batch_id`, plus `import_ref`,
+  `is_bye`, `is_forfeit`, `result_note` (what the club actually wrote —
+  "Won on Forfiet"). `playhq_id` went **nullable** (an imported game has no
+  PlayHQ game behind it). All idempotently ALTERed in `afl_main.py`'s
+  lifespan, since `create_all` never retrofits a column.
+- **The game id is `uuid5(org, "import-game:" + season|team|date|opponent|round)`**
+  — so re-uploading a corrected sheet UPDATES the same rows instead of
+  duplicating them. Round is in the key because a re-scheduled fixture carried
+  at its original date is otherwise indistinguishable from its twin.
+- **The already-synced guard must include the TEAM, not just date+opponent.**
+  Found in testing: a club's Seniors and Reserves play the same opposition on
+  the same afternoon, so date+opponent alone read the whole day's card as one
+  already-synced game and silently dropped every other team's result. Matching
+  is (date, opponent, grade name); a game against the same club that day under
+  a *different* grade still imports, with a `check` warning naming the other
+  grade in case the two are the one match under two labels.
+- **Warning kinds mirror the scorecard reader**: `sheet_error` (the sheet's own
+  figures disagree — goals×6+behinds ≠ total, a "Won" against level scores, a
+  margin that doesn't match) vs `check` (a result worked out from the scores
+  because the outcome column was blank, a 0-0 game, a neutral-ground final).
+  Nothing is auto-corrected; the import button reads "IMPORT N, KEEP AS
+  WRITTEN" when errors remain. A row that genuinely can't import (no date, no
+  season) is `blocked` and named, never silently dropped.
+- **Outcome vocabulary is matched on substrings**, since a register hand-kept
+  since 1947 spells things its own way — the reference sheet writes "Forfiet"
+  throughout. Cancelled/unscored rows are always skipped; forfeits import as
+  the W/L they were (toggle); byes are opt-in and stored with
+  `status='BYE'` + NULL result, which is what keeps them out of BOTH the
+  W/L/D tallies and the played count.
+- **Blank home/away is neutral, not an error** — 103 rows of the reference
+  sheet are finals at a third club's ground. Stored with our club as the
+  nominal home side (affects only which column the name prints in) and
+  reported once as a summary warning.
+- **Column auto-mapping is a GLOBAL best-assignment, not per-field.**
+  "HamPoints" and "OppPoints" both score 0.8 against the plain synonym
+  "points", so picking each field's own best header independently is a coin
+  flip; taking the strongest pair in the whole matrix first resolves both.
+  Plus a **content sniff** for a header that says nothing ("Column1" — which
+  is exactly how a real club's result column arrives): a column whose VALUES
+  are ≥60% a known vocabulary is that field. All 18 columns of the reference
+  sheet map with no human input.
+- **`frontend/src/afl/pages/admin/importMatching.jsx`** is the extracted shared
+  wizard kit (`SearchSelect`, `MatchTable`, `FieldRow`, `StatusBadge`,
+  `parseSeasonGuess`, …) now used by BOTH import wizards — `AflAdminImport`
+  was refactored onto it rather than a second copy being written.
+- **Undo deletes the games** (details/periods/lines/events cascade), scoped to
+  `source='import'` so a game the sync has since taken over is never removable
+  by undoing the upload that first created it. Because ids are derived, a
+  re-upload restamps rows with the new batch — undo removes what that batch
+  last wrote, and the older batch's log entry remains.
+- **`GET /resolve` caps per-row detail at `ROW_DETAIL_LIMIT` (5000)**; every
+  count, and the commit itself, always covers the whole sheet.
+- **Verified end to end against a real Postgres** (22 checks): the lifespan's
+  new ALTERs, the full 3,044-row sheet, season/grade creation and reuse, the
+  one genuine sheet error caught, the synced-game guard, re-import
+  idempotency (0 new / 2875 updated), byes on/forfeits off, and undo leaving
+  the synced game intact.
+- **Not built**: no cricket equivalent (Core already has Upload Scorecard and
+  manual games for this), and an imported result carries no player lines —
+  it's the match record, not a scorecard.
+
 ## BetterClubhouse follow-ups: roster, orphaned editors, governance (v9.4.0, Aug 2026)
 
 - **The roster was blank for any club that opened it before configuring areas.**
@@ -342,6 +417,62 @@ BetterClubManager being unlaunched and long outlived its reason.
 - **When adding a Clubhouse screen**, give the nav item the same capability its
   router enforces. Do not reach for a role gate: role is not how this app
   expresses permission anywhere else in the module.
+
+## The meeting room — running a committee meeting (v9.7.0, migration 220, Aug 2026)
+
+The tabbed Committee screen is a set of lists (meetings here, motions there,
+actions elsewhere). That is fine for looking something up afterwards and useless
+at 8pm on a Tuesday. `pages/admin/MeetingRoom.jsx` at
+**`/admin/clubhouse/committee/meeting/:meetingId`** is the screen a secretary
+runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
+
+- **The agenda is the spine.** Click an item to open it; the motions, actions
+  and outcome notes you record attach to that item. Ordering is HTML5 drag on
+  `meeting_agenda_items.position` (which already existed) via
+  `POST .../agenda-items/reorder`. `reorder_agenda_items` **ignores ids that do
+  not belong to the meeting** — the list comes from a browser.
+- **Attendance starts from the committee, not the membership.**
+  `meeting_attendee_pool` returns everyone but flags and sorts current
+  committee-term holders first; the screen shows only those (plus anyone
+  already marked) until you type. A 300-member club was the whole problem.
+- **Only people marked present can vote or be given an action.** `present` is
+  derived on the screen from attendance, so setting attendance first is what
+  makes the rest usable. This is a UI restriction, not a server rule —
+  `set_motion_votes` still accepts any member, because a phone vote is real.
+- **Migration 220** (mirrored in the lifespan): `committee_tasks.agenda_item_id`,
+  `committee_task_assignees` (task ↔ member), `meeting_motions.position`,
+  `committee_meetings.private_notes`. **NOTE the numbering** — AFL shipped its
+  own `219`, and this file was briefly `219` too before being renumbered; two
+  migrations with the same `revision` break Alembic outright.
+- **`assigned_to_member_id` stays the primary owner.** `set_task_assignees`
+  writes the join table AND sets that column to the first id, because the board,
+  the timeline and every existing report read it. Never drop it in favour of the
+  table alone. `load_task_assignees` falls back to it for pre-220 actions.
+- **`GET .../meetings/{id}/room`** is one fetch for the whole screen (meeting,
+  agenda, motions with votes, actions, attendance, attendee pool). A secretary
+  mid-meeting should not wait on six requests.
+- **Everything saves as it happens** — no Save button for the meeting. Free text
+  (minutes, private notes, outcome notes) goes through a 700ms debounce
+  (`useAutosave`); everything else writes on the click that made it.
+- **A completed meeting opens the same screen**, which is how past minutes,
+  motions and actions are read. Nothing is read-only: minutes are usually
+  finished after the room empties.
+- **Motions drag two ways** (v9.7.2). One `drag` ref carries a `kind` of
+  `'item' | 'motion'`, because an agenda row is a drop target for both: drop an
+  item on it to reorder the agenda, drop a motion on it to move that motion
+  under that heading. Dropping a motion on another motion reorders within the
+  item. **Motions are ordered across the whole MEETING but dragged within an
+  item**, so `motionOrderAfter` splices the within-item move back into the
+  meeting-wide sequence before sending it — reordering under one heading would
+  otherwise scramble every other. The motion handle's `onDragStart` calls
+  `stopPropagation`, or grabbing it would drag the whole agenda card.
+- **Attendance carries over** (v9.7.2). `previous_meeting_attendance` walks back
+  up to 10 meetings **of the same type** and returns the first that actually
+  recorded someone present, so a meeting where only apologies were logged is
+  skipped rather than carried as an empty list. Only `present` comes across: an
+  apology is about one evening, and carrying it forward asserts something nobody
+  said. The button only shows while attendance is empty, so it can never
+  overwrite a list someone has started.
 
 ## Multi-sport: the AFL silo (Aug 2026)
 

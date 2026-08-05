@@ -4513,6 +4513,29 @@ async def lifespan(app: FastAPI):
             ON player_achievements(club_role_id)
         """))
 
+        # Migration 220: what running a live meeting needs — an action raised
+        # under an agenda item, several people owning one action, motions
+        # ordered against the agenda, and the secretary's own notes.
+        await conn.execute(text("""
+            ALTER TABLE committee_tasks ADD COLUMN IF NOT EXISTS agenda_item_id UUID
+            REFERENCES meeting_agenda_items(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS committee_task_assignees (
+                task_id UUID NOT NULL REFERENCES committee_tasks(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                PRIMARY KEY (task_id, member_id)
+            )
+        """))
+        await conn.execute(text("""
+            INSERT INTO committee_task_assignees (task_id, member_id)
+            SELECT id, assigned_to_member_id FROM committee_tasks
+            WHERE assigned_to_member_id IS NOT NULL
+            ON CONFLICT DO NOTHING
+        """))
+        await conn.execute(text("ALTER TABLE meeting_motions ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE committee_meetings ADD COLUMN IF NOT EXISTS private_notes TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

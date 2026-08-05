@@ -51,7 +51,9 @@ class AflGameDetails(Base):
     __tablename__ = "afl_game_details"
 
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"), primary_key=True)
-    playhq_id = Column(Text, nullable=False)   # raw PlayHQ game id (the game-centre URL code)
+    # Raw PlayHQ game id (the game-centre URL code). NULL for a game that came
+    # from the Import Results tool — there is no PlayHQ game behind it.
+    playhq_id = Column(Text, nullable=True)
     round_name = Column(Text, nullable=True)          # "Round 16"
     round_abbrev = Column(Text, nullable=True)        # "R16"
     status = Column(Text, nullable=True)               # UPCOMING | FINAL | ...
@@ -76,6 +78,22 @@ class AflGameDetails(Base):
     # stats pull" signal, so it must NOT have a server default (a discovery
     # insert would otherwise read as already-synced and be skipped forever).
     synced_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # ── Import Results (routers/afl/result_imports.py) ────────────────────
+    # 'playhq' (synced) | 'import' (a row from a club's own results
+    # spreadsheet). Everything below is only ever set on an imported game;
+    # source is what keeps the two apart everywhere it matters — the
+    # already-synced guard at import time, and the undo, which must never be
+    # able to delete a game the sync has since taken over.
+    source = Column(Text, nullable=False, default="playhq", server_default="playhq")
+    import_batch_id = Column(UUID(as_uuid=True), nullable=True)
+    import_ref = Column(Text, nullable=True)       # the sheet's own game id, kept for traceability
+    is_bye = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_forfeit = Column(Boolean, nullable=False, default=False, server_default="false")
+    # What the club actually wrote in its results column ("Won on Forfiet",
+    # "Missing Score") — the derived W/L/D lives on games.result, this keeps
+    # the original wording so a club can always see its own record.
+    result_note = Column(Text, nullable=True)
 
 
 class AflGamePeriod(Base):

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
@@ -890,6 +891,12 @@ function MeetingRow({ meeting, members, positions, onChanged }) {
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {/* The live screen. This list is for finding a meeting; running one
+              happens in the meeting room. */}
+          <Link to={`/admin/clubhouse/committee/meeting/${meeting.id}`} onClick={e => e.stopPropagation()}
+            className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-2 py-1 text-pb-faint hover:text-pb-text whitespace-nowrap">
+            OPEN MEETING
+          </Link>
           <span className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-1.5 py-0.5 text-pb-faint">{label(meeting.status)}</span>
           <span onClick={(e) => { e.stopPropagation(); remove() }} className="font-mono text-[10px] text-pb-faintest hover:text-pb-red">✕</span>
           <span className="font-mono text-[9px] text-pb-faintest">{expanded ? '▾' : '▸'}</span>

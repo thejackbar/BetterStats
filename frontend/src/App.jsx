@@ -108,6 +108,7 @@ const AdminFeesSquare = lazy(() => import('./pages/admin/AdminFeesSquare'))
 const AdminFeesXero = lazy(() => import('./pages/admin/AdminFeesXero'))
 const AdminMembershipTypes = lazy(() => import('./pages/admin/AdminMembershipTypes'))
 const AdminCommittee = lazy(() => import('./pages/admin/AdminCommittee'))
+const MeetingRoom = lazy(() => import('./pages/admin/MeetingRoom'))
 const AdminVolunteers = lazy(() => import('./pages/admin/AdminVolunteers'))
 const AdminRoles = lazy(() => import('./pages/admin/AdminRoles'))
 const AdminActivities = lazy(() => import('./pages/admin/AdminActivities'))
@@ -333,6 +334,9 @@ export default function App() {
               /admin/events and friends, which left their CRUD unreachable.
               Each viewer links here until the two are folded together. */}
           <Route path="/admin/clubhouse/committee/manage" element={<ProtectedRoute><AdminCommittee /></ProtectedRoute>} />
+          {/* The live meeting screen — the agenda is the spine and everything
+              raised attaches to the item being discussed. */}
+          <Route path="/admin/clubhouse/committee/meeting/:meetingId" element={<ProtectedRoute><MeetingRoom /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/events/manage" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />

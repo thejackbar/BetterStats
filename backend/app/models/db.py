@@ -2749,6 +2749,9 @@ class CommitteeTask(Base):
     outcome_notes = Column(Text, nullable=True)
     meeting_id = Column(UUID(as_uuid=True), ForeignKey("committee_meetings.id", ondelete="SET NULL"), nullable=True)
     motion_id = Column(UUID(as_uuid=True), ForeignKey("meeting_motions.id", ondelete="SET NULL"), nullable=True)
+    # The agenda item this action was raised under (migration 220), so "we
+    # agreed that under Facilities" survives the meeting.
+    agenda_item_id = Column(UUID(as_uuid=True), ForeignKey("meeting_agenda_items.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -2946,6 +2949,9 @@ class CommitteeMeeting(Base):
     location = Column(Text, nullable=True)
     status = Column(Text, nullable=False, server_default="scheduled", default="scheduled")
     minutes = Column(Text, nullable=True)
+    # Minutes get circulated. These do not (migration 220) — a secretary keeps
+    # working notes that are not part of the record.
+    private_notes = Column(Text, nullable=True)
     agenda_template_id = Column(UUID(as_uuid=True), ForeignKey("agenda_templates.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -2998,7 +3004,23 @@ class MeetingMotion(Base):
     is_resolution = Column(Boolean, nullable=False, server_default="false", default=False)
     resolution_ref = Column(Text, nullable=True)
     resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Motions are ordered so they can sit against the agenda item they relate
+    # to rather than in the order someone happened to type them (migration 220).
+    position = Column(Integer, nullable=False, server_default="0", default=0)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class CommitteeTaskAssignee(Base):
+    """Who is doing an action (migration 220).
+
+    ``committee_tasks.assigned_to_member_id`` stays as the primary owner so
+    every existing reader keeps working; this holds the full set, because "Dave
+    and Priya will get the quotes" is the normal case rather than the exception.
+    """
+    __tablename__ = "committee_task_assignees"
+
+    task_id = Column(UUID(as_uuid=True), ForeignKey("committee_tasks.id", ondelete="CASCADE"), primary_key=True)
+    member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="CASCADE"), primary_key=True)
 
 
 class MeetingMotionVote(Base):

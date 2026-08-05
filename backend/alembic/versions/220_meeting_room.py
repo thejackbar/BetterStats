@@ -13,13 +13,13 @@ them things a secretary does while the meeting is actually happening:
 * minutes are circulated but a secretary also keeps notes that are not, and
   there was only one field.
 
-Revision ID: 219
-Revises: 218
+Revision ID: 220
+Revises: 219
 """
 from alembic import op
 
-revision = "219"
-down_revision = "218"
+revision = "220"
+down_revision = "219"
 branch_labels = None
 depends_on = None
 
