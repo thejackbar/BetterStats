@@ -75,6 +75,52 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## Cross-club member leak: the opposition were enrolled as our members (Aug 2026)
+
+Reported live: a High Wycombe player (and HW club admin) appeared in
+**Applecross's** Clubhouse Directory, under Everyone and Players, carrying his
+real email, phone and photo. Not a display bug — Applecross genuinely held a
+`fee_members` row for him.
+
+- **Cause: `services/fees.py::recompute_fee_match_days`.** It selected the
+  season's games (correctly org-scoped through grades → seasons), then read
+  **every** `game_appearances` row on those games and enrolled the player behind
+  each one as a member, with a comment asserting "only our club's players have
+  rows". **That assertion is false and this file already documents why**: a
+  fixture between two clubs that BOTH sync is a single `games` row, and each
+  club's sync writes its own players' appearances against it. So every opponent
+  from every both-synced club became one of our members. The `select(Player)`
+  that followed had no org filter either, so nothing downstream could catch it.
+- **This is the exact anti-pattern the v8.79.3 note names**: never read a
+  per-game table "for a game in our org's grades" without ALSO scoping
+  `players.organisation_id` when attributing to our side. The fix loads the
+  appearing players org-scoped FIRST, then filters the appearances to them, so
+  member creation and match-day charges both inherit the scope.
+- **`services/directory.py::list_people` amplified it.** Its
+  `LEFT JOIN players p ON p.id = fm.player_id` had no org condition, so a member
+  row pointing at another club's player served that club's **photo, email and
+  phone** into our Directory. Now joined on `AND p.organisation_id =
+  fm.organisation_id`: a stray link degrades to a plain name rather than leaking
+  contact details. **Any read-through from a member to its player needs this.**
+- **`python -m app.scripts.purge_foreign_members [org|all] [--apply] [--delete]`**
+  clears what was already written. Dry run by default; archives (reversible,
+  and enough to clear the Directory) unless `--delete`. A row with anything
+  attached — a payment, role, qualification, committee term, logged hours, a
+  family link, a roster shift — is **reported and left alone**, because the link
+  is wrong but the attached work may not be.
+- **Verified by reproducing it**: two clubs, one shared fixture, both sets of
+  appearances on it. With the fix reverted the suite fails on exactly the
+  reported symptom (the opponent enrolled and listed); with it in place, 14
+  checks pass including that a pre-existing bad link leaks no contact details
+  and a re-sync does not recreate the row.
+- **The three different people counts are NOT all the same bug.** Core's
+  Players screen reads `players` (unfiltered, so it is the true player count),
+  Accounts reads `fee_members` for one season, the Directory reads all
+  `fee_members` ∪ org players, and BetterComms Lists reads `comms_contacts` —
+  a **fourth, separately-populated table** that nothing syncs from the other
+  three. A club will legitimately see four different totals until step 4 of the
+  Clubhouse handoff (joining the data) is done.
+
 ## Roster shift CRUD, paid vs volunteer hours, diary year, draft minutes (migration 221, v9.8.0, Aug 2026)
 
 Six items from the second live feedback batch, plus the paid/volunteer split that

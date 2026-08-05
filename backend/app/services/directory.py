@@ -30,11 +30,16 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     segments (Player / Volunteer / Committee / Parent / Third party / Life
     member), assigned roles, hours and a quals-to-renew count. With
     include_archived, archived people are included too, each flagged `archived`."""
+    # The join to `players` is org-scoped as well as keyed on the link. A member
+    # row can point at a player owned by ANOTHER club (a shared fixture between
+    # two synced clubs used to enrol the opposition here), and without the extra
+    # condition this read-through would serve that club's photo, email and phone
+    # inside our Directory. Scoped, a stray link degrades to a plain name.
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
                fm.is_life_member, fm.archived_at, p.photo_url, p.email AS player_email, p.phone AS player_phone
         FROM fee_members fm
-        LEFT JOIN players p ON p.id = fm.player_id
+        LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
 
