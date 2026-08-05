@@ -34,10 +34,15 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # row can point at a player owned by ANOTHER club (a shared fixture between
     # two synced clubs used to enrol the opposition here), and without the extra
     # condition this read-through would serve that club's photo, email and phone
-    # inside our Directory. Scoped, a stray link degrades to a plain name.
+    # inside our Directory.
+    #
+    # `our_player_id` is what the rest of this function uses, NOT `fm.player_id`:
+    # a link that did not resolve belongs to another club, so that person is not
+    # tagged Player and carries no link to someone else's profile.
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, fm.archived_at, p.photo_url, p.email AS player_email, p.phone AS player_phone
+               fm.is_life_member, fm.archived_at,
+               p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
@@ -91,10 +96,11 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     for m in members:
         mid = str(m["id"])
         cat = m["member_category"]
-        if m["player_id"]:
-            seen_players.add(str(m["player_id"]))
+        our_pid = str(m["our_player_id"]) if m["our_player_id"] else None
+        if our_pid:
+            seen_players.add(our_pid)
         segs = []
-        if m["player_id"]:
+        if our_pid:
             segs.append("Player")
         if mid in vol_profiles or roles_by.get(mid):
             segs.append("Volunteer")
@@ -112,7 +118,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             segs.append("Official")
         q = quals_by.get(mid, {})
         people.append({
-            "key": mid, "member_id": mid, "player_id": str(m["player_id"]) if m["player_id"] else None,
+            "key": mid, "member_id": mid, "player_id": our_pid,
             # Fall back to the linked player's Stats contact when the member row
             # has none, so a player's email/phone show through in ClubManager.
             "name": m["full_name"], "email": m["email"] or m["player_email"] or "",

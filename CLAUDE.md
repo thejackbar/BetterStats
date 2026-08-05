@@ -187,6 +187,19 @@ real email, phone and photo. Not a display bug — Applecross genuinely held a
   attached — a payment, role, qualification, committee term, logged hours, a
   family link, a roster shift — is **reported and left alone**, because the link
   is wrong but the attached work may not be.
+- **The state is now unrepresentable, not just filtered out (migration 223).**
+  A composite foreign key on `fee_members (organisation_id, player_id)` →
+  `players (organisation_id, id)` means Postgres refuses a member row that
+  points outside its own club, whatever code is writing. Added **NOT VALID**:
+  enforced on every new INSERT/UPDATE immediately, while rows the earlier bug
+  wrote are tolerated until `purge_foreign_members` clears them. Run
+  `ALTER TABLE fee_members VALIDATE CONSTRAINT fk_fee_members_player_same_org`
+  once a database is clean to turn on the retrospective check too.
+- **`list_people` reads `our_player_id` (the org-scoped join result), never
+  `fm.player_id`.** A link that does not resolve within the club must not tag
+  the person "Player" and must not carry a `player_id` through to the frontend —
+  otherwise a stray row still reads as one of our players and still links to
+  someone else's profile. Scoping the join alone was not enough.
 - **Verified by reproducing it**: two clubs, one shared fixture, both sets of
   appearances on it. With the fix reverted the suite fails on exactly the
   reported symptom (the opponent enrolled and listed); with it in place, 14

@@ -4559,6 +4559,28 @@ async def lifespan(app: FastAPI):
             ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
         """))
 
+        # Migration 223: a member row may only link to a player of the SAME
+        # club. NOT VALID, so it guards every new write from the moment it
+        # lands without failing on rows an earlier bug already left behind
+        # (those are cleared by app.scripts.purge_foreign_members).
+        await conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE players ADD CONSTRAINT uq_players_org_id UNIQUE (organisation_id, id);
+            EXCEPTION WHEN duplicate_table OR duplicate_object THEN NULL;
+            END $$
+        """))
+        await conn.execute(text("""
+            DO $$ BEGIN
+                ALTER TABLE fee_members
+                  ADD CONSTRAINT fk_fee_members_player_same_org
+                  FOREIGN KEY (organisation_id, player_id)
+                  REFERENCES players (organisation_id, id)
+                  ON DELETE SET NULL
+                  NOT VALID;
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
