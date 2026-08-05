@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs } from '../ui'
 import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
@@ -35,6 +36,17 @@ export default function AreasRoles({ st, patch, narrow }) {
   const [areaKey, setAreaKey] = useState(0)  // bump to remount AreaEditor after a reset
   const [roleTypes, setRoleTypes] = useState([])
   const [actTypes, setActTypes] = useState([])
+
+  // Deep link in from another screen — the Roster's area names land here with
+  // ?tab=areas&area=<id>. Read once into state and strip the query straight
+  // away, so flicking to Roles and back doesn't re-open the same area forever.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [deepLink, setDeepLink] = useState(() => ({ tab: searchParams.get('tab'), area: searchParams.get('area') }))
+  useEffect(() => {
+    if (!deepLink.tab && !deepLink.area) return
+    if (deepLink.tab) patch({ setupTab: deepLink.tab })
+    setSearchParams({}, { replace: true })
+  }, [])
 
   const reloadRoleTypes = () => api.raRoleTypes().then(r => setRoleTypes(r?.types || r || [])).catch(() => {})
   const reloadActTypes = () => api.raActivityTypes().then(r => setActTypes(r?.types || r || [])).catch(() => {})
@@ -149,7 +161,8 @@ export default function AreasRoles({ st, patch, narrow }) {
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Operational areas' }, { key: 'types', label: 'Departments' }]} />
           {sub === 'main' ? (
             <>
-              <AreaEditor key={areaKey} />
+              <AreaEditor key={areaKey} focusAreaId={deepLink.area}
+                onFocused={() => setDeepLink(d => ({ ...d, area: null }))} />
               <div style={{ marginTop: 20, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
                 <button disabled={busy} onClick={async () => { if (!window.confirm('Remove all operational areas, their patterns and every roster week for this club? (Testing reset — only this club; players/members/committee are untouched.)')) return; setBusy(true); await api.rosterClearConfig().catch(() => {}); setAreaKey(k => k + 1); setBusy(false) }}
                   style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Clear all areas (reset)</button>

@@ -457,6 +457,7 @@ function ConfirmRoster({ weekId, onDone, onToast }) {
 }
 
 export default function Roster({ st, patch, narrow }) {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)  // { week, areas, candidates, settings }
   const [shifts, setShifts] = useState([])
   const [err, setErr] = useState(null)
@@ -524,6 +525,12 @@ export default function Roster({ st, patch, narrow }) {
   const { areas, candidates, settings } = data
   const areaById = {}; areas.forEach(a => { areaById[a.id] = a })
   const candById = {}; candidates.forEach(c => { candById[c.member_id] = c })
+
+  // The roster shows an area's shifts; Areas & Roles is where they are created,
+  // re-timed and removed. Clicking the name takes you there with that area
+  // already open, rather than making you find it in the list a second time.
+  const openArea = (a) => navigate(`/admin/clubhouse/areas-roles?tab=areas&area=${a.id}`)
+  const areaLinkStyle = { cursor: 'pointer', textDecoration: 'underline dotted', textDecorationColor: C.faint, textUnderlineOffset: 3 }
 
   // no config yet → offer to seed a starter set (also handy for testing)
   if (areas.length === 0) {
@@ -839,11 +846,13 @@ export default function Roster({ st, patch, narrow }) {
                   return (
                     <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                       <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, alignItems: railMin ? 'center' : 'stretch' })}
-                        title={railMin ? `${a.name} — ${filledN}/${mine.length} filled` : undefined}>
+                        title={railMin ? `${a.name} — ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                          <span style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)' }} />
+                          <span onClick={() => openArea(a)} title={railMin ? undefined : `Edit ${a.name} and its shifts`}
+                            style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
                           {!railMin && <>
-                            <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{a.name}</span>
+                            <span onClick={() => openArea(a)} title={`Edit ${a.name} and its shifts`}
+                              style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0, ...areaLinkStyle }}>{a.name}</span>
                             <span style={{ fontFamily: MONO, fontSize: 9.5, color: filledN === mine.length ? C.ok : C.warn }}>{filledN}/{mine.length}</span>
                           </>}
                         </div>
@@ -901,7 +910,8 @@ export default function Roster({ st, patch, narrow }) {
                 <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 12, marginBottom: 14 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <span style={{ width: 8, height: 8, borderRadius: '50%', background: selArea.color || 'var(--pb-accent)' }} />
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{selArea.name}</span>
+                    <span onClick={() => openArea(selArea)} title={`Edit ${selArea.name} and its shifts`}
+                      style={{ fontWeight: 600, fontSize: 14, ...areaLinkStyle }}>{selArea.name}</span>
                   </div>
                   <div style={{ fontFamily: MONO, fontSize: 11, color: C.dim, marginTop: 4 }}>{DOW[sel.day_of_week]} {fmtHour(sel.start_time)}–{fmtHour(sel.end_time)}</div>
                   <div style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginTop: 4 }}>{[selArea.required_role_name, selArea.required_qualification_name].filter(Boolean).join(' · ') || 'No requirement'}</div>

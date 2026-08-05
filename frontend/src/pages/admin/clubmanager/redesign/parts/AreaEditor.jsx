@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO } from '../ui'
 
@@ -17,7 +17,7 @@ const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadi
 const btnP = { padding: '7px 13px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }
 const btnS = { padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }
 
-export default function AreaEditor() {
+export default function AreaEditor({ focusAreaId = null, onFocused = null }) {
   const [areas, setAreas] = useState(null)
   const [roles, setRoles] = useState([])
   const [quals, setQuals] = useState([])
@@ -40,6 +40,25 @@ export default function AreaEditor() {
     api.qualListTypes().then(r => setQuals(r?.types || r || [])).catch(() => {})
     reloadDepartments()
   }, [])
+
+  // Arriving from a link on another screen (the Roster's area names): open that
+  // area's shift editor, ring it and scroll it into view. It waits for the areas
+  // to load, then fires once — `onFocused` tells the parent to forget the link
+  // so coming back to this tab later doesn't re-open the same area. The ring is
+  // held in local state rather than read from the prop, so clearing the link
+  // doesn't take the highlight away with it.
+  const focused = useRef(false)
+  const rowRefs = useRef({})
+  const [linkedId, setLinkedId] = useState(null)
+  useEffect(() => {
+    if (focused.current || !focusAreaId || !areas) return
+    const hit = areas.find(a => String(a.id) === String(focusAreaId))
+    if (!hit) return
+    focused.current = true
+    setOpenId(hit.id); setLinkedId(hit.id)
+    setTimeout(() => { rowRefs.current[String(hit.id)]?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, 60)
+    if (onFocused) onFocused()
+  }, [areas, focusAreaId])
 
   const blank = { name: '', department: '', color: SWATCHES[0], required_role_id: '', required_qualification_type_id: '' }
   const startAdd = () => { setForm({ ...blank }); setNewDept(false); setAdding(true); setEditId(null) }
@@ -135,11 +154,12 @@ export default function AreaEditor() {
           const slots = (a.patterns || []).reduce((n, p) => n + (p.headcount || 1), 0)
           const isOver = overId === a.id && dragId && dragId !== a.id
           const open = openId === a.id
+          const linked = linkedId === a.id
           return (
-            <div key={a.id}
+            <div key={a.id} ref={el => { rowRefs.current[String(a.id)] = el }}
               onDragOver={e => { if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== a.id) setOverId(a.id) } }}
               onDrop={e => { e.preventDefault(); move(dragId, a.id) }}
-              style={{ background: C.surface, border: `1px solid ${isOver ? C.accent : C.hair}`, borderRadius: 9, padding: '13px 15px', boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : undefined, opacity: dragId === a.id ? 0.5 : 1 }}>
+              style={{ background: C.surface, border: `1px solid ${isOver || linked ? C.accent : C.hair}`, borderRadius: 9, padding: '13px 15px', boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : (linked ? '0 0 0 2px color-mix(in srgb, var(--pb-accent) 25%, transparent)' : undefined), opacity: dragId === a.id ? 0.5 : 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(a.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }} title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: a.color || C.accent, flexShrink: 0 }} />
