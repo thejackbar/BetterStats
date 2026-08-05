@@ -110,7 +110,8 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   heading. Items carry `cap` (a capability, or an array meaning any-of),
   `module` (one of the umbrella's paid keys — the whole group disappears for a
   club that doesn't hold it) and `super` (the promoted ClubManager screens —
-  real data, but still `requireRole="super_admin"` in App.jsx). **The four old layouts
+  real data, and open to the club's own admins since v9.6.1 — see the access
+  note below). **The four old layouts
   are thin wrappers over it now**, which is how every existing screen inherited
   the shell without being rewritten. `BetterMerchLayout` still owns the
   storefront flag and passes `storefront` down.
@@ -175,7 +176,7 @@ editors, and a set of genuinely-unbuilt committee features. All three are done.
   Families, Qualifications and Volunteer hours all had full editors with no
   route. Routed back and linked from the read-only screen that shows their
   data. `AdminCommittee` lives at **`/admin/clubhouse/committee/manage`**
-  (`requireRole="super_admin"`), reached from the Clubhouse Committee screen —
+  (open to club admins since v9.6.1), reached from the Clubhouse Committee screen —
   `/admin/committee` is the Clubhouse screen, not the editor.
 - **Migration 217 — committee governance.** `club_objectives`,
   `committee_task_dependencies`, `meeting_motion_votes`, `committee_notes`;
@@ -317,6 +318,31 @@ retyping) and route-level (upload incl. MIME + size rejection, per-reader
 `can_open`, the download 403, delete gating, and the unrestricted mode). The
 migration was also applied twice to a populated pre-218 schema.
 
+## BetterClubhouse is open to club admins (v9.6.1, Aug 2026)
+
+Most of the module was invisible to the people paying for it. Directory,
+Roster, Committee, Diary, Events, Facilities and the whole Setup catalogue
+carried `requireRole="super_admin"` in `App.jsx` **and** a `super: true` flag in
+`BetterClubhouseLayout`'s nav, so a club admin's sidebar showed only Today,
+Audiences, Integrations, Reports and Settings. That gate came from
+BetterClubManager being unlaunched and long outlived its reason.
+
+- **Both halves are gone.** The routes are plain `<ProtectedRoute>`, and each
+  nav item now carries the **capability its own router already enforces**
+  (Roster → `MANAGE_VOLUNTEERS`, Committee/Events → `MANAGE_COMMITTEE`,
+  Facilities → `MANAGE_ASSETS`, Diary → `MANAGE_CLUB_DIARY`, Directory and
+  Areas & roles → the same any-of sets their routers use).
+- **Safe because the server never relied on the route gate.** Every router
+  behind these screens has `require_cap` / `require_any_cap` (verified across
+  all eleven before removing anything). `club_admin` and `super_admin` imply
+  every capability; a `club_member` gets their explicit allowlist, so the
+  sidebar and the API now agree instead of the UI being the only check.
+- **`/admin/member-portal` stays super-admin-only** — a genuinely unlaunched
+  feature behind its own flag, not part of the merged module's nav.
+- **When adding a Clubhouse screen**, give the nav item the same capability its
+  router enforces. Do not reach for a role gate: role is not how this app
+  expresses permission anywhere else in the module.
+
 ## Multi-sport: the AFL silo (Aug 2026)
 
 **One codebase, per-sport operational silos.** BetterStats now also serves AFL
@@ -453,9 +479,11 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   home `/admin/betterclub` `BetterClubManagerHome`) and every one of its tool
   routes (`/admin/committee`, `/admin/volunteers`, `/admin/families`,
   `/admin/qualifications`, `/admin/member-portal`, `/admin/events`, `/admin/assets`,
-  `/admin/club-diary`) are gated `requireRole="super_admin"` in `App.jsx`. So
-  ordinary club admins currently have **no access** to these tools — deliberate,
-  until BetterClubManager launches. It is therefore NOT in `CORE_TILES` /
+  `/admin/club-diary`) were gated `requireRole="super_admin"` in `App.jsx`, so
+  ordinary club admins had **no access** to these tools until BetterClubManager
+  launched. **Superseded in v9.6.1** — those screens are now open to the club's
+  own admins (see the access note below); the gate had outlived the reason for
+  it and was hiding most of BetterClubhouse from the clubs paying for it. It is therefore NOT in `CORE_TILES` /
   `dashboardTiles()` (off the dashboard, sidebar and module switcher).
 - **The one Core surface tile** (BetterStats) lives in `CORE_TILES` in
   `lib/modules.js` — deliberately OUTSIDE `MODULE_INFO` (which feeds
