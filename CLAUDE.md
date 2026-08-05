@@ -75,6 +75,71 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## Roster shift CRUD, paid vs volunteer hours, diary year, draft minutes (migration 221, v9.8.0, Aug 2026)
+
+Six items from the second live feedback batch, plus the paid/volunteer split that
+underpins one of them.
+
+- **Paid work is derived from the role type, never stored as a second flag.**
+  `club_role_types.category` has accepted `'paid'` since the roles catalogue was
+  built but nothing ever read it, so a club could not tell the bar manager it
+  employs from the parent running the canteen for nothing.
+  `roster.area_pay_kinds` resolves an area → its `required_role_id` → that
+  role's type category, and `PAID_CATEGORY = "paid"` is the only test. **Don't
+  add a per-shift or per-person paid flag** — it would immediately disagree with
+  the role type. `volunteer_hours.is_paid` (migration 221) is the ONE exception
+  and is deliberately a snapshot: it records what the derivation decided AT THE
+  TIME the hours were logged, so retyping a role later cannot silently rewrite
+  last season's wage bill.
+- **`roster.hours_summary(start, end)`** returns four numbers per person plus
+  totals: `rostered_{volunteer,paid}` (the length of every shift they are
+  assigned to in the window, from `roster_shifts`) and `worked_{volunteer,paid}`
+  (what was logged afterwards, from `volunteer_hours`). **Rostered and worked
+  are deliberately separate** — the gap between them is the thing a club wants
+  to see, and a club's wage bill and its volunteer effort must never be summed
+  (one goes to the treasurer, the other to the grant application). Surfaced as a
+  third **Hours** tab beside People/Areas on the Roster (`HoursView` in
+  `screens/Roster.jsx`, week/month/season spans; season is Jul-Jun).
+  `volunteer_hours.roster_shift_id` exists for hours logged against a specific
+  shift and **has no FK on purpose** — `roster_shifts` is one of the raw-SQL
+  lifespan tables, so an ORM-side constraint would make `create_all()`
+  order-dependent on a fresh database.
+- **Shift CRUD** (`roster.create_shift/update_shift/delete_shift`, routed and
+  org-scoped). Weekly patterns still materialise the week; this is for the shift
+  a pattern should not carry (a final, a night game, an extra hand behind the
+  bar) — editing the pattern would change every other week too. The Roster
+  sidebar carries `+ Add a shift` and, with a shift selected, `Delete this shift`.
+- **`PersonPanel`** on the Roster: click anyone in the volunteer pool to read and
+  edit their availability (`roster.member_detail` / `set_member_availability`)
+  and read their qualifications, rather than being sent to Directory → Volunteers.
+  **Availability is stored as Monday=0 indexes but read tolerantly** — the
+  volunteers router types `available_days: List[str]`, so `roster.day_index()`
+  accepts `'Monday'`/`'mon'`/`'0'`/`0` and `set_member_availability` normalises
+  writes back to indexes. That mismatch was the original Roster HTTP 500.
+- **`organisations.diary_start_month`** (1-12, default 7, so no club changes by
+  upgrading) drives the Club Diary's season plan; `ClubDiary.jsx`'s
+  `monthDefs(startIdx, startYear)` uses real calendar day counts rather than the
+  old hardcoded table. Edited from Clubhouse → Settings (`DiaryYearPanel`).
+- **Draft minutes** (`POST /committee/meetings/{id}/draft-minutes`) composes the
+  attendance, agenda, motions/votes and actions the meeting already holds into a
+  prompt (`claude-haiku-4-5`, `strip_em_dashes`, rate-limited to 10/hour/club).
+  **It returns the text and never saves it** — minutes are the club's legal
+  record, so a machine writes the first pass and the secretary decides whether
+  any of it is true. No API key configured gives a clean 503, not a 500.
+- **Action board + timeline share one filter** (search, category, objective,
+  assignee, overdue) in `AdminCommittee.jsx` — one `shown` list feeds both, so
+  they can't disagree about what is in scope.
+- **Fixed an infinite request loop** in `AdminCommittee`: the members effect
+  depended on `toast`, and its own error handler raised a toast, which changed
+  the context value, which re-ran the effect. A club without the fees module hit
+  `/fees/all-members` 60+ times per page load. **Watch for this shape anywhere**
+  a `catch` calls `toast.*` in an effect that lists `toast` as a dependency.
+- **Local harness gotcha**: `player_achievements`, `org_award_definitions` and
+  `audit_logs` are lifespan-created raw-SQL tables, so a stubbed-lifespan boot
+  has to create them by hand. A missing `audit_logs` is especially misleading —
+  `audit_log` catches its own failure and logs a warning, but the aborted
+  transaction then poisons the caller's commit, so an unrelated PATCH 500s.
+
 ## BetterClubhouse follow-ups: roster, orphaned editors, governance (v9.4.0, Aug 2026)
 
 - **The roster was blank for any club that opened it before configuring areas.**

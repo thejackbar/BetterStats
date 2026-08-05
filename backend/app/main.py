@@ -4536,6 +4536,19 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE meeting_motions ADD COLUMN IF NOT EXISTS position INTEGER NOT NULL DEFAULT 0"))
         await conn.execute(text("ALTER TABLE committee_meetings ADD COLUMN IF NOT EXISTS private_notes TEXT"))
 
+        # Migration 221: paid vs volunteer work, hours against a shift, and a
+        # club's own diary year.
+        await conn.execute(text("ALTER TABLE volunteer_hours ADD COLUMN IF NOT EXISTS is_paid BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE volunteer_hours ADD COLUMN IF NOT EXISTS roster_shift_id UUID"))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_volunteer_hours_shift
+            ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
+        """))
+        await conn.execute(text("""
+            ALTER TABLE organisations
+            ADD COLUMN IF NOT EXISTS diary_start_month INTEGER NOT NULL DEFAULT 7
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

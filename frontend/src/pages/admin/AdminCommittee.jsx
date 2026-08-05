@@ -330,6 +330,11 @@ function TasksTab({ members }) {
   const [objectives, setObjectives] = useState([])
   const [openId, setOpenId] = useState(null)   // the action whose plan is showing
   const [view, setView] = useState('board')    // board | timeline
+  const [q, setQ] = useState('')
+  const [cat, setCat] = useState('')
+  const [objId, setObjId] = useState('')
+  const [who, setWho] = useState('')
+  const [overdueOnly, setOverdueOnly] = useState(false)
 
   const load = useCallback(() => {
     api.committeeListTasks().then(d => setTasks(d.tasks || [])).catch(e => toast.error(e.message))
@@ -346,9 +351,51 @@ function TasksTab({ members }) {
   }
 
   if (tasks === null) return <PbSpinner message="Loading actions…" />
+
+  // The board and the timeline read the same filtered set, so switching view
+  // keeps whatever you narrowed to instead of throwing it away.
+  const today = new Date().toISOString().slice(0, 10)
+  const shown = tasks.filter(t => {
+    if (q && !`${t.title} ${t.description || ''} ${t.outcome_notes || ''}`.toLowerCase().includes(q.toLowerCase())) return false
+    if (cat && t.category !== cat) return false
+    if (objId && t.objective_id !== objId) return false
+    if (who && !(t.assignee_member_ids || []).includes(who) && t.assigned_to_member_id !== who) return false
+    if (overdueOnly && !(t.due_date && t.due_date < today && t.status !== 'done')) return false
+    return true
+  })
+  const selInp = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text font-mono text-[10px]'
+
   return (
     <div>
       <NewTaskForm onCreated={load} />
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <input className={`${inp} flex-1 min-w-[12rem]`} placeholder="Search actions…"
+          value={q} onChange={e => setQ(e.target.value)} />
+        <select className={selInp} value={cat} onChange={e => setCat(e.target.value)}>
+          <option value="">Any category</option>
+          {CATEGORIES.map(c => <option key={c} value={c}>{label(c)}</option>)}
+        </select>
+        <select className={selInp} value={objId} onChange={e => setObjId(e.target.value)}>
+          <option value="">Any objective</option>
+          {objectives.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
+        </select>
+        <select className={selInp} value={who} onChange={e => setWho(e.target.value)}>
+          <option value="">Anyone</option>
+          {members.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+        </select>
+        <button onClick={() => setOverdueOnly(v => !v)}
+          className={`px-3 py-1.5 rounded font-mono text-[10px] border ${overdueOnly ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+          style={overdueOnly ? { background: 'var(--pb-accent)' } : undefined}>Overdue</button>
+        {(q || cat || objId || who || overdueOnly) && (
+          <button onClick={() => { setQ(''); setCat(''); setObjId(''); setWho(''); setOverdueOnly(false) }}
+            className="font-mono text-[10px] text-pb-faint hover:text-pb-text">clear</button>
+        )}
+        <span className="font-mono text-[10px] text-pb-faintest ml-auto">
+          {shown.length} of {tasks.length}
+        </span>
+      </div>
+
       <div className="flex items-center gap-1 mb-3">
         {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
           <button key={k} onClick={() => setView(k)}
@@ -356,15 +403,15 @@ function TasksTab({ members }) {
         ))}
       </div>
       {view === 'timeline' ? (
-        <ActionTimeline tasks={tasks} objectives={objectives}
+        <ActionTimeline tasks={shown} objectives={objectives}
           onOpen={t => { setView('board'); setOpenId(t.id) }} />
       ) : (
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {STATUSES.map(st => (
           <div key={st}>
-            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">{STATUS_LABELS[st].toUpperCase()} ({tasks.filter(t => t.status === st).length})</div>
+            <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">{STATUS_LABELS[st].toUpperCase()} ({shown.filter(t => t.status === st).length})</div>
             <div className="space-y-2">
-              {tasks.filter(t => t.status === st).map(t => (
+              {shown.filter(t => t.status === st).map(t => (
                 <div key={t.id} className="pb-card px-3 py-2.5">
                   <div className="text-pb-text text-[13px] mb-1">{t.title}</div>
                   <div className="flex items-center justify-between gap-1">
@@ -956,9 +1003,12 @@ export default function AdminCommittee() {
   const [tab, setTab] = useState('positions')
   const [members, setMembers] = useState([])
 
+  // Deliberately not depending on `toast`: the context value changes whenever a
+  // toast is raised, so a club without the fees module used to fail, raise a
+  // toast, re-run this effect, and fail again forever.
   useEffect(() => {
     api.feeAllMembers().then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
-  }, [toast])
+  }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <BetterClubManagerLayout>

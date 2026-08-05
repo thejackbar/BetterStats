@@ -450,6 +450,98 @@ async def delete_document(doc_id: str, user: User = _require, club: Organisation
     return {"deleted": True}
 
 
+# ─── A first draft of the minutes ────────────────────────────────────────────
+
+def _minutes_prompt(club_name, meeting, attendance_lines, agenda, motions, actions) -> str:
+    return f"""You are the secretary of {club_name}, writing up the minutes of a
+club committee meeting from the notes taken during it.
+
+MEETING: {meeting['title']} on {meeting.get('scheduled_at') or 'an unrecorded date'}
+{('LOCATION: ' + meeting['location']) if meeting.get('location') else ''}
+
+ATTENDANCE
+{attendance_lines or 'Not recorded.'}
+
+AGENDA, IN ORDER, WITH WHAT WAS NOTED AGAINST EACH ITEM
+{agenda or 'No agenda items.'}
+
+MOTIONS
+{motions or 'No motions.'}
+
+ACTIONS AGREED
+{actions or 'No actions.'}
+
+Write the minutes as a club secretary would, in plain Australian English.
+Rules:
+- Use ONLY what is above. Do not invent discussion, names, figures or outcomes.
+  Where a note is thin, keep the entry short rather than padding it.
+- Follow the agenda order, one short section per item, using the item's own title.
+- Record each motion with its wording, its outcome and the vote if there is one.
+- Finish with a list of actions, who has each one and when it is due.
+- No preamble, no sign-off, no headings above the first agenda item.
+- Plain sentences. No em dashes. Nothing promotional."""
+
+
+@router.post("/meetings/{meeting_id}/draft-minutes")
+async def draft_minutes(meeting_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+                        db: AsyncSession = Depends(get_db)):
+    """Draft the minutes from what the meeting already holds.
+
+    Returns the text; it is NOT saved. Minutes are the club's legal record of
+    what happened, so a machine writes the first pass and the secretary decides
+    whether any of it is true before it becomes the record.
+    """
+    from app.config.settings import settings
+    from app.services import rate_limit
+
+    m = await _meeting_or_404(db, club, meeting_id)
+    rate_limit.enforce(f"minutes:{club.id}", limit=10, window_sec=3600,
+                       detail="Draft minutes are limited to 10 an hour. Try again shortly.")
+    if not settings.anthropic_api_key:
+        raise HTTPException(status_code=503, detail="This needs an Anthropic API key configured on the server.")
+    try:
+        import anthropic as anthropic_sdk
+    except ImportError:
+        raise HTTPException(status_code=503, detail="The anthropic package is not installed on the server.")
+
+    room = await committee_service.meeting_room(db, club.id, m)
+    names = {p["member_id"]: p["full_name"] for p in room["attendee_pool"]}
+    by_status: dict = {}
+    for a in room["attendance"]:
+        by_status.setdefault(a["status"], []).append(a.get("full_name") or names.get(a["member_id"], "Unknown"))
+    attendance_lines = "\n".join(
+        f"{k.title()}: {', '.join(sorted(v))}" for k, v in sorted(by_status.items()))
+
+    agenda_lines = []
+    for i, item in enumerate(room["agenda_items"], 1):
+        note = (item.get("outcome_notes") or "").strip()
+        agenda_lines.append(f"{i}. {item['title']} [{item['status']}]" + (f"\n   Notes: {note}" if note else ""))
+
+    motion_lines = []
+    for mo in room["motions"]:
+        votes = ""
+        if mo.get("votes_for") is not None or mo.get("votes_against") is not None:
+            votes = f" (for {mo.get('votes_for') or 0}, against {mo.get('votes_against') or 0}, abstain {mo.get('votes_abstain') or 0})"
+        motion_lines.append(f"- \"{mo['description']}\" — {mo['outcome']}{votes}")
+
+    action_lines = []
+    for t in room["actions"]:
+        who = ", ".join(names.get(a, "Unassigned") for a in (t.get("assignee_member_ids") or [])) or "Unassigned"
+        due = f", due {t['due_date']}" if t.get("due_date") else ""
+        budget = f", budget ${t['budget_estimate']:,.0f}" if t.get("budget_estimate") else ""
+        action_lines.append(f"- {t['title']} ({who}{due}{budget})")
+
+    prompt = _minutes_prompt(club.name, room["meeting"], attendance_lines,
+                             "\n".join(agenda_lines), "\n".join(motion_lines), "\n".join(action_lines))
+    client = anthropic_sdk.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    message = await client.messages.create(
+        model="claude-haiku-4-5", max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    from app.services.llm_text import strip_em_dashes
+    return {"draft": strip_em_dashes(message.content[0].text.strip())}
+
+
 # ─── Office Bearer awards → committee history ────────────────────────────────
 
 @router.get("/office-bearer-awards")

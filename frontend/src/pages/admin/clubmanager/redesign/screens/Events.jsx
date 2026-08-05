@@ -163,7 +163,19 @@ export default function Events({ st, patch, narrow }) {
             )}
 
             <div style={{ display: 'flex', gap: 7, marginTop: 18, flexWrap: 'wrap' }}>
-              <button onClick={() => patch({ screen: 'roster', navOpen: false })} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Roster this event →</button>
+              {/* Land on the week the event actually falls in, not whatever
+                  week the roster happened to be showing. Monday-anchored, the
+                  same rule the roster uses server-side. */}
+              <button onClick={() => {
+                let week
+                if (sel.starts_at) {
+                  const d = new Date(sel.starts_at)
+                  const monday = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+                  monday.setUTCDate(monday.getUTCDate() - ((monday.getUTCDay() + 6) % 7))
+                  week = monday.toISOString().slice(0, 10)
+                }
+                patch({ screen: 'roster', navOpen: false, rosterWeek: week })
+              }} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Roster this event →</button>
               {sel.organiser_name && <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, alignSelf: 'center' }}>Organiser: {sel.organiser_name}</span>}
             </div>
 

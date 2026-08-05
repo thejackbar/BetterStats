@@ -8,7 +8,18 @@ import EntityManager from '../parts/EntityManager'
 // state and the critical path are derived client-side from the definitions'
 // stored dependencies (the backend stores deps but doesn't analyse them).
 
-const MONTH_DEFS = [['JUL', 31], ['AUG', 31], ['SEP', 30], ['OCT', 31], ['NOV', 30], ['DEC', 31], ['JAN', 31], ['FEB', 28], ['MAR', 31], ['APR', 30], ['MAY', 31], ['JUN', 30]]
+const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
+
+// The twelve months of a club's diary year, starting wherever the club starts
+// it. Day counts come from the real calendar so a February in a leap year is 29
+// and the ruler stays aligned with the bars underneath it.
+function monthDefs(startIdx, startYear) {
+  return Array.from({ length: 12 }, (_, n) => {
+    const m = (startIdx + n) % 12
+    const y = startYear + Math.floor((startIdx + n) / 12)
+    return [MONTH_LABELS[m], new Date(Date.UTC(y, m + 1, 0)).getUTCDate()]
+  })
+}
 const CAD_ORDER = ['Annual', 'One-Time', 'Quarterly', 'Monthly', 'Weekly', 'Conditional', 'Other']
 const RECURRING = new Set(['Quarterly', 'Monthly', 'Weekly', 'Conditional'])
 const SEASON_DAYS = 365
@@ -41,11 +52,12 @@ export default function ClubDiary({ st, patch, narrow }) {
     let alive = true
     Promise.all([
       api.diaryBoard().catch(() => []),
+      api.adminGetSettings().catch(() => ({})),
       api.diaryListDefinitions().catch(() => ([])),
       api.diarySeasonYears().catch(() => ([])),
       api.raRoles().catch(() => ({ roles: [] })),
       api.feeAllMembers().catch(() => ({ members: [] })),
-    ]).then(([boardRes, defsRes, yearsRes, rolesRes, membersRes]) => {
+    ]).then(([boardRes, settingsRes, defsRes, yearsRes, rolesRes, membersRes]) => {
       if (!alive) return
       // GET /club-diary/board returns { tasks: [...] }. This read `board`,
       // which is never present, so it silently fell back to an empty list and
@@ -60,7 +72,10 @@ export default function ClubDiary({ st, patch, narrow }) {
       const memberName = {}
       ;(membersRes?.members || membersRes || []).forEach(m => { memberName[m.member_id] = m.full_name })
       const years = (Array.isArray(yearsRes) ? yearsRes : (yearsRes?.years || [])).map(Number).filter(Boolean)
-      setData({ board, depsById, roleName, memberName, defs, years })
+      // 1-12, July unless the club says otherwise. A club running Jan-Dec
+      // administratively should not have its year cut in half.
+      const startMonth = Number(settingsRes?.diary_start_month) || 7
+      setData({ board, depsById, roleName, memberName, defs, years, startMonth })
     }).catch(e => { if (alive) setErr(String(e?.message || e)) })
     return () => { alive = false }
   }, [])
@@ -89,7 +104,9 @@ export default function ClubDiary({ st, patch, narrow }) {
   // newest season that happens to have a generated plan. Conflating the two is
   // what made "Generate" always offer next season even when this one had never
   // been generated.
-  const currentSeasonYear = nowM >= 6 ? nowY : nowY - 1
+  const startMonth = data?.startMonth || 7
+  const startIdx = startMonth - 1                 // JS months are 0-based
+  const currentSeasonYear = nowM >= startIdx ? nowY : nowY - 1
   const seasonYear = years[0] || currentSeasonYear
   // Offer the first season from this one onwards that hasn't been generated
   // yet, so a club with nothing generated is offered THIS season.
@@ -101,7 +118,7 @@ export default function ClubDiary({ st, patch, narrow }) {
   const seasonLabel = y => `${y}/${String((y + 1) % 100).padStart(2, '0')}`
   const genYear = pickedYear ?? nextUngenerated
   const setGenYear = setPickedYear
-  const SEASON_START = Date.UTC(seasonYear, 6, 1)
+  const SEASON_START = Date.UTC(seasonYear, startIdx, 1)
   const TODAY_DAY = Math.round((nowUTC - SEASON_START) / 86400000)
   const dayOf = (iso) => iso ? Math.round((Date.parse(iso) - SEASON_START) / 86400000) : null
 
@@ -169,7 +186,7 @@ export default function ClubDiary({ st, patch, narrow }) {
 
   // day-proportional month headers + matching gridline stops
   let acc = 0; const stops = []
-  const months = MONTH_DEFS.map(([label, days]) => { acc += days; const pct = (acc / SEASON_DAYS) * 100; stops.push(`transparent calc(${pct}% - 1px), ${C.surface2} calc(${pct}% - 1px), ${C.surface2} ${pct}%`); return { label, days } })
+  const months = monthDefs(startIdx, seasonYear).map(([label, days]) => { acc += days; const pct = (acc / SEASON_DAYS) * 100; stops.push(`transparent calc(${pct}% - 1px), ${C.surface2} calc(${pct}% - 1px), ${C.surface2} ${pct}%`); return { label, days } })
   const trackGrid = `linear-gradient(to right, ${stops.join(', ')})`
 
   const pill = (active, tone = 'accent') => {
