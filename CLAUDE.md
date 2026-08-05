@@ -75,6 +75,158 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
+
+- **"Confirm roster" is the name, in the code as well as the UI.** The action was
+  briefly called "closing off a week"; it was renamed everywhere the same day
+  (service functions, routes, the `roster_weeks.status` value, the migration
+  filename) rather than leaving the two languages to drift.
+- **`roster_shifts.worked_hours` is the roster's record of what was worked;
+  `volunteer_hours` is the club's ledger.** The flow is one-way — confirming
+  POSTS to the ledger, nothing reads back. NULL `worked_hours` means "not
+  checked yet" and a checked **0** means "rostered but did not turn up"; both
+  have to be expressible, which is why it is nullable rather than defaulted.
+- **Confirming RECONCILES, it never appends.** `uq_volunteer_hours_shift` (a
+  partial unique on `roster_shift_id`) makes the insert an upsert, and a shift
+  that has since been unassigned or checked down to zero has its posted row
+  DELETED. Without that, correcting a mistake would leave the original behind
+  and the ledger could only ever grow. `is_paid` is stamped from the role type
+  at the moment of confirming and never revisited (migration 221's snapshot rule).
+- **Unconfirming deliberately leaves the posted hours alone.** They were worked;
+  deleting them because someone wants to fix a typo would take the club's ledger
+  down with the correction. Confirming again reconciles.
+- **The frozen first column is `position: sticky` on the GRID ITEM.** A grid
+  item's containing block is its grid area, which suggests this cannot work —
+  it does, verified in an isolated page and then in the app (9 cells holding at
+  x=232 through a 694px scroll). **The trap is the background**: the rail's
+  opaque `background` must not be overridden by a row tint, or the columns
+  scrolling underneath show straight through it. The open-shifts row layers its
+  amber over the top via `backgroundImage` instead.
+- **`usePref(key, fallback)`** in `redesign/ui.jsx` is the per-user, per-browser
+  screen preference (keyed on user id, like the screen introductions). Reads in
+  the state initialiser, not an effect, or the panel renders open for one frame
+  before snapping shut. Used for the minimised rail and the volunteer pool.
+- **The People view's drags were half-wired.** `cellDrop` only ever read
+  `st.dragId` (a shift) and `slotDrop` (a person) was attached in the AREAS view
+  only, so dragging a volunteer from the pool onto an open shift in People did
+  nothing and said nothing. Open chips are drop targets now.
+- **A shift can only be dropped in its own day column.** It carries its own day,
+  so accepting it anywhere else silently left it where it was — which reads as
+  the roster ignoring you. Other days don't `preventDefault`, so the cursor says
+  no before the mouse is released; a person who would be blocked still accepts
+  the drop, so the refusal comes back from the server as a sentence.
+- **Testing HTML5 drag-and-drop**: Playwright's real mouse cannot steer
+  Chromium's native drag loop — it hangs. Dispatch `DragEvent`s instead, and put
+  the `dragstart` and the `drop` in SEPARATE `evaluate` calls, or React has not
+  re-rendered with the drag in flight and every drop reads as refused.
+
+## Cross-club member leak: the opposition were enrolled as our members (Aug 2026)
+
+Reported live: a High Wycombe player (and HW club admin) appeared in
+**Applecross's** Clubhouse Directory, under Everyone and Players, carrying his
+real email, phone and photo. Not a display bug — Applecross genuinely held a
+`fee_members` row for him.
+
+- **Cause: `services/fees.py::recompute_fee_match_days`.** It selected the
+  season's games (correctly org-scoped through grades → seasons), then read
+  **every** `game_appearances` row on those games and enrolled the player behind
+  each one as a member, with a comment asserting "only our club's players have
+  rows". **That assertion is false and this file already documents why**: a
+  fixture between two clubs that BOTH sync is a single `games` row, and each
+  club's sync writes its own players' appearances against it. So every opponent
+  from every both-synced club became one of our members. The `select(Player)`
+  that followed had no org filter either, so nothing downstream could catch it.
+- **This is the exact anti-pattern the v8.79.3 note names**: never read a
+  per-game table "for a game in our org's grades" without ALSO scoping
+  `players.organisation_id` when attributing to our side. The fix loads the
+  appearing players org-scoped FIRST, then filters the appearances to them, so
+  member creation and match-day charges both inherit the scope.
+- **`services/directory.py::list_people` amplified it.** Its
+  `LEFT JOIN players p ON p.id = fm.player_id` had no org condition, so a member
+  row pointing at another club's player served that club's **photo, email and
+  phone** into our Directory. Now joined on `AND p.organisation_id =
+  fm.organisation_id`: a stray link degrades to a plain name rather than leaking
+  contact details. **Any read-through from a member to its player needs this.**
+- **`python -m app.scripts.purge_foreign_members [org|all] [--apply] [--delete]`**
+  clears what was already written. Dry run by default; archives (reversible,
+  and enough to clear the Directory) unless `--delete`. A row with anything
+  attached — a payment, role, qualification, committee term, logged hours, a
+  family link, a roster shift — is **reported and left alone**, because the link
+  is wrong but the attached work may not be.
+- **Verified by reproducing it**: two clubs, one shared fixture, both sets of
+  appearances on it. With the fix reverted the suite fails on exactly the
+  reported symptom (the opponent enrolled and listed); with it in place, 14
+  checks pass including that a pre-existing bad link leaks no contact details
+  and a re-sync does not recreate the row.
+- **The three different people counts are NOT all the same bug.** Core's
+  Players screen reads `players` (unfiltered, so it is the true player count),
+  Accounts reads `fee_members` for one season, the Directory reads all
+  `fee_members` ∪ org players, and BetterComms Lists reads `comms_contacts` —
+  a **fourth, separately-populated table** that nothing syncs from the other
+  three. A club will legitimately see four different totals until step 4 of the
+  Clubhouse handoff (joining the data) is done.
+## BetterFootball — Import Awards (v9.9.0, Aug 2026)
+
+A club's honour board imported as real `player_achievements` rows. Third
+sibling of Import Stats (`routers/afl/imports.py`) and Import Results
+(`routers/afl/result_imports.py`), built against a real 7,360-row 1959–2026
+awards register from an AFL club.
+
+- **`routers/afl/award_imports.py`** (`/club-admin/award-imports/*`, cap
+  `MANAGE_AWARDS`) — preview → resolve → commit → undo, plus a template.
+  **No schema change**: it writes the existing `player_achievements` +
+  `org_award_definitions` + `achievement_import_batches` tables, so an
+  imported award is indistinguishable from one typed into the Awards screen.
+- **An award the catalogue doesn't carry is CREATED** (`org_award_definitions`),
+  which is what stops a historical trophy existing on player rows and nowhere
+  in the club's own award list. A label already there is reused and **keeps its
+  own category** — the Award Types screen owns filing, and an upload retyping
+  a category the club set up by hand is the wrong way round. Only an award
+  being created has its category/subcategory editable on the wizard.
+- **`_award_key` collapses case AND "&"/"and"**, which is why 43 raw trophy
+  spellings in the reference sheet resolve to 39 awards ("Runner up Best &
+  Fairest" / "Runner Up Best & Fairest" are one trophy). A near-miss offers a
+  suggestion at ≥0.80 but still DEFAULTS to creating the label — "Best
+  Clubman" and "Best Clubperson" are two real trophies at plenty of clubs.
+- **Identity is the sheet's own player id where one is mapped**, not the name.
+  A register spells one person several ways, and — the dangerous half — holds
+  two different people under one name (two Jack Reeds). But **one id does not
+  always mean one person either**: nine ids in the reference sheet cover two
+  genuinely different names each (an id reused after someone left), so
+  `_build_identities` only lets an id unify rows whose names agree once case
+  is set aside, and splits it per name otherwise. A NAME covering more than
+  one identity is never auto-matched — it comes back `clash` with the roster
+  player offered as a candidate for each.
+- **A row naming no award is skipped, not invented into a nameless one** —
+  6,241 of the reference sheet's 7,360 rows are the club's record of who
+  turned out, not honours. Counted and reported, never silently dropped.
+- **Re-upload is safe**: a row already on the honour board for that person,
+  season and award reads as `exists`. Matched on the player id when there is
+  one and on the name ONLY for someone about to be created — checking both
+  would read one Jack Reed's honour as already recorded because the other
+  has it.
+- **`players_unresolved` counts only people who actually won something.** An
+  unmatched name with no trophy against it has nothing riding on the decision,
+  and counting it sends an admin hunting for a problem that isn't there.
+- **Undo removes the awards only.** Players and award types the import created
+  are left — a player record is a person, and a catalogue entry may already be
+  in use elsewhere. Same call Import Stats makes.
+- **`PlayerMatch` was extracted from `AflAdminImport.jsx` into
+  `importMatching.jsx`** and is now shared by Import Stats and Import Awards
+  (`sheetLine` prop for the per-name context line, `key`-based overrides so an
+  id-carrying sheet can hold two people under one name). `SearchSelect` gained
+  an `award` kind. New page `AflAdminAwardsImport.jsx` at
+  `/admin/import-awards`; the Awards screen's old one-shot CSV uploader was
+  replaced by a link to it, so there's one award-import path rather than two.
+  `POST /achievements/import` and its template endpoint still exist and are
+  unchanged — nothing in the UI calls them now.
+- **Verified end to end** against a real Postgres (28 checks) with the full
+  7,360-row sheet, and driven through the real app in a browser: auto-mapping
+  all four columns incl. "PayerID", 1,119 awards written, 39 award types
+  created, 25 players created, the shared-name split, a re-upload importing 0,
+  a sheet with no id column, a sheet naming its own categories, and undo
+  leaving the award types intact.
+
 ## Roster shift CRUD, paid vs volunteer hours, diary year, draft minutes (migration 221, v9.8.0, Aug 2026)
 
 Six items from the second live feedback batch, plus the paid/volunteer split that

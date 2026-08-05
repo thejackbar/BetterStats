@@ -500,6 +500,13 @@ export const api = {
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
   rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
   rosterReset: (weekId) => request(`/club-admin/roster/week/${weekId}/reset`, { method: 'POST' }),
+  // Confirming the roster: check what was worked, then post it to the hours ledger.
+  rosterConfirmReview: (weekId) => request(`/club-admin/roster/week/${weekId}/confirm-review`),
+  rosterSaveWorkedHours: (weekId, entries) =>
+    request(`/club-admin/roster/week/${weekId}/worked-hours`, { method: 'PUT', body: JSON.stringify({ entries }) }),
+  rosterConfirm: (weekId, entries) =>
+    request(`/club-admin/roster/week/${weekId}/confirm`, { method: 'POST', body: JSON.stringify({ entries }) }),
+  rosterUnconfirm: (weekId) => request(`/club-admin/roster/week/${weekId}/unconfirm`, { method: 'POST' }),
   rosterClearConfig: () => request('/club-admin/roster/clear-config', { method: 'POST' }),
   facilityRequests: () => request('/club-admin/facility-requests'),
   facilityRequestCreate: (data) => request('/club-admin/facility-requests', { method: 'POST', body: JSON.stringify(data) }),

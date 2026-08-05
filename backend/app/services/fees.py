@@ -370,24 +370,44 @@ async def recompute_fee_match_days(organisation_id: str, season_id: str | None =
 
         game_ids = list(game_meta.keys())
 
-        # Appearances across those games (only our club's players have rows).
+        # Appearances across those games.
+        #
+        # These games are ours only in the sense that they sit under our grades.
+        # A fixture between two clubs that BOTH sync is a single `games` row, and
+        # each club's sync writes its own players' appearances against it — so
+        # this list contains the opposition's players too whenever we play
+        # another BetterCricket club. It used to be filtered by nothing at all,
+        # which quietly enrolled every such opponent as a member of OUR club:
+        # they appeared in the Directory, carried a player link, and through that
+        # link exposed the other club's photo, email and phone.
+        #
+        # The org filter therefore belongs on the PLAYER, not the game. Loading
+        # the players first and keeping only ours is what makes the rest of this
+        # function (member creation, match-day charges) safe.
         appearances = (
             await session.execute(
                 select(GameAppearance).where(GameAppearance.game_id.in_(game_ids))
             )
         ).scalars().all()
 
-        player_ids = {a.player_id for a in appearances}
+        appearing_ids = {a.player_id for a in appearances}
+        players = {
+            p.id: p for p in (
+                await session.execute(
+                    select(Player).where(
+                        Player.id.in_(appearing_ids),
+                        Player.organisation_id == org_id,
+                    )
+                )
+            ).scalars().all()
+        } if appearing_ids else {}
+        player_ids = set(players.keys())
+        appearances = [a for a in appearances if a.player_id in player_ids]
+
         if not player_ids:
             await _delete_stale_auto_entries(session, sid, valid_keys=set())
             await session.commit()
             return {"season_id": str(sid), "members_created": 0, "entries_upserted": 0, "entries_deleted": 0}
-
-        players = {
-            p.id: p for p in (
-                await session.execute(select(Player).where(Player.id.in_(player_ids)))
-            ).scalars().all()
-        }
 
         # Schedule names → id for carry-forward tier defaulting.
         schedule_by_name = {

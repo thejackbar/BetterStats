@@ -48,6 +48,7 @@ from app.routers.afl import (
     super_clubs as afl_super_clubs,
     imports as afl_imports,
     result_imports as afl_result_imports,
+    award_imports as afl_award_imports,
     seasons_admin as afl_seasons_admin,
 )
 
@@ -398,6 +399,7 @@ app.include_router(afl_users_admin.router)
 app.include_router(afl_super_clubs.router)
 app.include_router(afl_imports.router)
 app.include_router(afl_result_imports.router)
+app.include_router(afl_award_imports.router)
 app.include_router(afl_seasons_admin.router)
 
 
