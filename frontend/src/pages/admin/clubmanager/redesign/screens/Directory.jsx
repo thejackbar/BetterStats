@@ -343,7 +343,6 @@ export default function Directory({ st, patch, narrow }) {
                 </div>
                 {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assigning a role adds this player to the member directory.</div>}
               </section>
-
               <section>
                 <div style={cap}>QUALIFICATIONS</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
@@ -372,48 +371,45 @@ export default function Directory({ st, patch, narrow }) {
                   </div>
                 )}
               </section>
-
               <section>
-                <div style={cap}>HOURS BY ACTIVITY</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {hours.map(([activity, h], i) => (
-                    <div key={i}>
-                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ fontSize: 12.5, color: C.dim }}>{activity}</span>
-                        <span style={{ fontFamily: MONO, fontSize: 11, color: C.text }}>{h}h</span>
-                      </div>
-                      <div style={{ height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden', marginTop: 4 }}>
-                        <div style={{ height: '100%', width: Math.round((h / Math.max(...hours.map(x => x[1]))) * 100) + '%', background: C.accent }} />
-                      </div>
-                    </div>
-                  ))}
-                  {(!det || hours.length === 0) && <div style={{ fontSize: 13, color: C.faint }}>No hours logged yet.</div>}
-                </div>
-                {sel.member_id ? (
+                <div style={cap}>COMMITTEE</div>
+                {!sel.member_id ? (
+                  <div style={{ fontSize: 13, color: C.faint }}>Assign a role first, then committee positions can be recorded.</div>
+                ) : (
                   <>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <input type="number" min="0" step="0.5" value={logForm.hours} placeholder="Hrs" onChange={e => setLogForm(f => ({ ...f, hours: e.target.value }))} style={{ ...inp, width: 64 }} />
-                      <select value={logForm.activity_id} onChange={e => setLogForm(f => ({ ...f, activity_id: e.target.value }))} style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }}>
-                        <option value="">Activity (optional)…</option>
-                        {activities.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
-                      </select>
-                      <input type="date" value={logForm.logged_date} onChange={e => setLogForm(f => ({ ...f, logged_date: e.target.value }))} style={{ ...inp, width: 'auto' }} />
-                      <button onClick={logHours} disabled={busy || !Number(logForm.hours)} style={{ ...btnS, opacity: (busy || !Number(logForm.hours)) ? 0.6 : 1 }}>Log</button>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {overlays.committee.map(c => (
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        </span>
+                      ))}
+                      {overlays.committee.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No committee position.</span>}
                     </div>
-                    {hoursRaw.length > 0 && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8 }}>
-                        {hoursRaw.slice(0, 6).map(h => (
-                          <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: MONO, fontSize: 10, color: C.faint }}>
-                            <span style={{ width: 74, flexShrink: 0 }}>{h.logged_date || ''}</span>
-                            <span style={{ color: C.dim, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.activity || 'Other'}</span>
-                            <span style={{ color: C.text }}>{Number(h.hours)}h</span>
-                            <span onClick={() => removeHours(h.id)} title="Remove" style={{ cursor: 'pointer', fontSize: 12 }}>×</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    <div style={{ marginTop: 8 }}>
+                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 260, opacity: busy ? 0.6 : 1 }}>
+                        <option value="">{positions.length ? '+ Assign a position…' : 'No positions set up'}</option>
+                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.is_office_bearer ? ' (office bearer)' : ''}</option>)}
+                      </select>
+                    </div>
+                    <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {overlays.families.map(f => (
+                        <span key={f.family_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                          {f.name}{f.is_guardian ? ' · guardian' : ''}<span onClick={() => removeFromFamily(f.family_id)} title="Remove from family" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
+                        </span>
+                      ))}
+                      {overlays.families.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No family linked.</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <select value="" onChange={e => addToFamily(e.target.value)} disabled={busy} style={{ ...inp, width: 'auto', maxWidth: 180, opacity: busy ? 0.6 : 1 }}>
+                        <option value="">+ Add to family…</option>
+                        {families.filter(f => !overlays.families.some(x => x.family_id === f.id)).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                      </select>
+                      <input value={newFamily} onChange={e => setNewFamily(e.target.value)} placeholder="New family name" style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }} />
+                      <button onClick={createAndAddFamily} disabled={busy || !newFamily.trim()} style={{ ...btnS, opacity: (busy || !newFamily.trim()) ? 0.6 : 1 }}>Create</button>
+                    </div>
                   </>
-                ) : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assign a role first to log hours.</div>}
+                )}
               </section>
 
               {/* Availability lives here rather than on a separate screen: it is
@@ -473,46 +469,47 @@ export default function Directory({ st, patch, narrow }) {
                   </>
                 )}
               </section>
-
               <section>
-                <div style={cap}>COMMITTEE</div>
-                {!sel.member_id ? (
-                  <div style={{ fontSize: 13, color: C.faint }}>Assign a role first, then committee positions can be recorded.</div>
-                ) : (
+                <div style={cap}>HOURS BY ACTIVITY</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {hours.map(([activity, h], i) => (
+                    <div key={i}>
+                      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontSize: 12.5, color: C.dim }}>{activity}</span>
+                        <span style={{ fontFamily: MONO, fontSize: 11, color: C.text }}>{h}h</span>
+                      </div>
+                      <div style={{ height: 4, borderRadius: 2, background: C.surface2, overflow: 'hidden', marginTop: 4 }}>
+                        <div style={{ height: '100%', width: Math.round((h / Math.max(...hours.map(x => x[1]))) * 100) + '%', background: C.accent }} />
+                      </div>
+                    </div>
+                  ))}
+                  {(!det || hours.length === 0) && <div style={{ fontSize: 13, color: C.faint }}>No hours logged yet.</div>}
+                </div>
+                {sel.member_id ? (
                   <>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {overlays.committee.map(c => (
-                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
-                          {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
-                        </span>
-                      ))}
-                      {overlays.committee.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No committee position.</span>}
-                    </div>
-                    <div style={{ marginTop: 8 }}>
-                      <select value="" onChange={e => assignCommittee(e.target.value)} disabled={busy || positions.length === 0} style={{ ...inp, width: 'auto', maxWidth: 260, opacity: busy ? 0.6 : 1 }}>
-                        <option value="">{positions.length ? '+ Assign a position…' : 'No positions set up'}</option>
-                        {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.is_office_bearer ? ' (office bearer)' : ''}</option>)}
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="number" min="0" step="0.5" value={logForm.hours} placeholder="Hrs" onChange={e => setLogForm(f => ({ ...f, hours: e.target.value }))} style={{ ...inp, width: 64 }} />
+                      <select value={logForm.activity_id} onChange={e => setLogForm(f => ({ ...f, activity_id: e.target.value }))} style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }}>
+                        <option value="">Activity (optional)…</option>
+                        {activities.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
                       </select>
+                      <input type="date" value={logForm.logged_date} onChange={e => setLogForm(f => ({ ...f, logged_date: e.target.value }))} style={{ ...inp, width: 'auto' }} />
+                      <button onClick={logHours} disabled={busy || !Number(logForm.hours)} style={{ ...btnS, opacity: (busy || !Number(logForm.hours)) ? 0.6 : 1 }}>Log</button>
                     </div>
-                    <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-                      {overlays.families.map(f => (
-                        <span key={f.family_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
-                          {f.name}{f.is_guardian ? ' · guardian' : ''}<span onClick={() => removeFromFamily(f.family_id)} title="Remove from family" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
-                        </span>
-                      ))}
-                      {overlays.families.length === 0 && <span style={{ fontSize: 13, color: C.faint }}>No family linked.</span>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, marginTop: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <select value="" onChange={e => addToFamily(e.target.value)} disabled={busy} style={{ ...inp, width: 'auto', maxWidth: 180, opacity: busy ? 0.6 : 1 }}>
-                        <option value="">+ Add to family…</option>
-                        {families.filter(f => !overlays.families.some(x => x.family_id === f.id)).map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-                      </select>
-                      <input value={newFamily} onChange={e => setNewFamily(e.target.value)} placeholder="New family name" style={{ ...inp, width: 'auto', flex: 1, minWidth: 120 }} />
-                      <button onClick={createAndAddFamily} disabled={busy || !newFamily.trim()} style={{ ...btnS, opacity: (busy || !newFamily.trim()) ? 0.6 : 1 }}>Create</button>
-                    </div>
+                    {hoursRaw.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 8 }}>
+                        {hoursRaw.slice(0, 6).map(h => (
+                          <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontFamily: MONO, fontSize: 10, color: C.faint }}>
+                            <span style={{ width: 74, flexShrink: 0 }}>{h.logged_date || ''}</span>
+                            <span style={{ color: C.dim, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.activity || 'Other'}</span>
+                            <span style={{ color: C.text }}>{Number(h.hours)}h</span>
+                            <span onClick={() => removeHours(h.id)} title="Remove" style={{ cursor: 'pointer', fontSize: 12 }}>×</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </>
-                )}
+                ) : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assign a role first to log hours.</div>}
               </section>
             </div>
 

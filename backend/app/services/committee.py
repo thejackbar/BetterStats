@@ -739,10 +739,17 @@ async def meeting_detail(session: AsyncSession, org_id, meeting_id) -> dict:
     nominations = (await session.execute(
         select(AgmNomination).where(AgmNomination.meeting_id == meeting_id).order_by(AgmNomination.created_at)
     )).scalars().all()
+    # The actions the meeting raised. They hang off an agenda item, so a viewer
+    # can show what each item produced without a second request per item.
+    tasks = (await session.execute(
+        select(CommitteeTask).where(CommitteeTask.meeting_id == meeting_id)
+        .order_by(CommitteeTask.created_at)
+    )).scalars().all()
     await load_motion_votes(session, motions)
     return {
         "agenda_items": [_agenda_item_dict(i) for i in agenda],
         "motions": [_motion_dict(mo) for mo in motions],
+        "actions": [_task_dict(t) for t in tasks],
         "attendance": [{**_attendance_dict(a), "full_name": name} for a, name in attendance],
         "nominations": [_nomination_dict(n) for n in nominations],
     }

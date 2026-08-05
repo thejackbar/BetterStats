@@ -32,12 +32,110 @@ function motionOutcome(o) {
   return { label: (o || 'RECORDED').toUpperCase(), fg: lost ? '#ef5b5b' : '#16c784' }
 }
 
+
+// An agenda item, with what it produced folded away underneath it.
+//
+// Collapsed, the summary answers "did anything come of this?" without a click:
+// how many motions and how they went, how many actions and how many are still
+// open, and whether anything was minuted against it. Expanded, it shows the
+// actual motions, actions and note. Items that produced nothing stay a plain
+// row with nothing to open, because a disclosure arrow that reveals "nothing"
+// is a small lie.
+function AgendaRow({ item, idx, name, motions, actions, open, onToggle }) {
+  const carried = motions.filter(m => (m.outcome || '').toLowerCase() === 'carried').length
+  const openActions = actions.filter(t => !['done', 'completed', 'cancelled'].includes((t.status || '').toLowerCase())).length
+  const note = (item.outcome_notes || '').trim()
+  const bits = []
+  if (motions.length) bits.push(`${motions.length} motion${motions.length === 1 ? '' : 's'}${carried ? ` · ${carried} carried` : ''}`)
+  if (actions.length) bits.push(`${actions.length} action${actions.length === 1 ? '' : 's'}${openActions ? ` · ${openActions} open` : ''}`)
+  if (note) bits.push('minuted')
+  const has = motions.length > 0 || actions.length > 0 || !!note
+
+  const sub = item.proposed_by_member_id ? name(item.proposed_by_member_id) : item.description
+
+  return (
+    <div style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8 }}>
+      <div onClick={has ? onToggle : undefined}
+        style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '10px 13px', cursor: has ? 'pointer' : 'default' }}>
+        <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, flexShrink: 0, width: 12 }}>{item.position ?? idx + 1}</span>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 13.5, color: C.text }}>{item.title}</div>
+          {(sub || bits.length > 0) && (
+            <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>
+              {[sub, ...bits].filter(Boolean).join(' · ')}
+            </div>
+          )}
+        </div>
+        {has && (
+          <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
+        )}
+      </div>
+
+      {has && open && (
+        <div style={{ borderTop: `1px solid ${C.hair}`, padding: '10px 13px 12px 36px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {motions.length > 0 && (
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest, marginBottom: 5 }}>MOTIONS</div>
+              {motions.map(mo => (
+                <div key={mo.id} style={{ fontSize: 12.5, color: C.dim, marginBottom: 4 }}>
+                  {mo.description}
+                  <span style={{ fontFamily: MONO, fontSize: 9.5, marginLeft: 7, color: outcomeTone(mo.outcome) }}>
+                    {(mo.outcome || 'pending').toUpperCase()}
+                  </span>
+                  {(mo.votes_for != null || mo.votes_against != null) && (
+                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>
+                      {mo.votes_for || 0} for · {mo.votes_against || 0} against{mo.votes_abstain ? ` · ${mo.votes_abstain} abstain` : ''}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+          {actions.length > 0 && (
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest, marginBottom: 5 }}>ACTIONS</div>
+              {actions.map(t => (
+                <div key={t.id} style={{ fontSize: 12.5, color: C.dim, marginBottom: 4 }}>
+                  {t.title}
+                  <span style={{ fontFamily: MONO, fontSize: 9.5, marginLeft: 7, color: outcomeTone(t.status) }}>
+                    {(t.status || 'todo').replace('_', ' ').toUpperCase()}
+                  </span>
+                  {t.due_date && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>due {t.due_date}</span>}
+                  {t.assigned_to_member_id && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginLeft: 6 }}>{name(t.assigned_to_member_id)}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+          {note && (
+            <div>
+              <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.14em', color: C.faintest, marginBottom: 5 }}>NOTES</div>
+              <div style={{ fontSize: 12.5, color: C.dim, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{note}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Carried and done read green, lost and blocked red, everything mid-flight amber.
+function outcomeTone(v) {
+  const k = (v || '').toLowerCase()
+  if (['carried', 'done', 'completed'].includes(k)) return 'var(--pb-positive-ink)'
+  if (['lost', 'blocked', 'withdrawn'].includes(k)) return 'var(--pb-red-ink)'
+  return C.warn
+}
+
+
 export default function Committee({ st, patch, narrow }) {
   const tab = st.cteTab || 'meetings'
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [dragId, setDragId] = useState(null)
   const [overId, setOverId] = useState(null)
+  // Which agenda items are open. Keyed by item id and kept per meeting view, so
+  // opening one item does not collapse the rest.
+  const [expanded, setExpanded] = useState({})
 
   // Reorder a position before another and persist the new sequence.
   const movePosition = (fromId, toId) => {
@@ -154,13 +252,11 @@ export default function Committee({ st, patch, narrow }) {
               <div style={cap}>AGENDA</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 24 }}>
                 {(sel.agenda_items || []).map((i, idx) => (
-                  <div key={i.id} style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '10px 13px' }}>
-                    <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, flexShrink: 0, width: 12 }}>{i.position ?? idx + 1}</span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ fontSize: 13.5, color: C.text }}>{i.title}</div>
-                      {(i.proposed_by_member_id || i.description) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>{i.proposed_by_member_id ? name(i.proposed_by_member_id) : i.description}</div>}
-                    </div>
-                  </div>
+                  <AgendaRow key={i.id} item={i} idx={idx} name={name}
+                    motions={(sel.motions || []).filter(mo => mo.agenda_item_id === i.id)}
+                    actions={(sel.actions || []).filter(t => t.agenda_item_id === i.id)}
+                    open={!!expanded[i.id]}
+                    onToggle={() => setExpanded(e => ({ ...e, [i.id]: !e[i.id] }))} />
                 ))}
                 {(sel.agenda_items || []).length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No agenda items.</div>}
               </div>
