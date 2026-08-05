@@ -223,6 +223,100 @@ editors, and a set of genuinely-unbuilt committee features. All three are done.
   Bearer" in Awards is an achievement category. Don't wire them together
   without asking.
 
+## Committee document uploads + Office Bearer awards on Clubhouse roles (v9.6.0, migration 218, Aug 2026)
+
+Two asks that both come back to "BetterStats is the core module and may be all a
+club ever buys."
+
+### Uploaded committee documents
+
+- **`committee_documents` can now hold the file** (`file_data`/`file_name`/
+  `file_mime`/`file_size`/`uploaded_by_user_id`), not only a link. `url` went
+  nullable: a row carries a url **or** a file, never both. Bytes live in
+  Postgres for the same reason player photos do (the upload volume is not
+  guaranteed to persist). Cap is `MAX_DOCUMENT_BYTES` = 15MB and
+  `ALLOWED_DOCUMENT_MIMES` is an allowlist, not a blocklist — the file comes
+  back to other members from our own domain, so nothing scriptable gets in.
+- **`organisations.committee_docs_office_bearer_only`** (default **TRUE**)
+  decides who may open an upload. Edited from BetterClubhouse → Settings via the
+  existing `/club-admin/settings` PATCH, gated on `MANAGE_SETTINGS`.
+- **The rule, in `services/committee.can_open_document`**: uploader, current
+  Office Bearer, or the club's **Main Admin** (`club_memberships.role ==
+  'club_admin'`, unconstrained on upload/view/download/delete **per direct
+  instruction**). It **only governs uploads** — a link is a URL we neither host
+  nor can gate, and pretending otherwise would be false assurance. Say that in
+  any UI copy rather than implying a wall that is not there.
+- **Enforcement is `GET /documents/{id}/file`**, which re-checks before serving
+  and sends `Cache-Control: private, no-store`. The list's `can_open` flag is
+  presentation only (it draws the lock). PATCH/DELETE route through
+  `_document_writable_or_403` — being able to destroy a file you may not read is
+  not a lesser permission than reading it.
+- **`file_data` is deferred on the list query** (`options(defer(...))`) and
+  `has_file` reads `file_size`, never the bytes. Touching the deferred column
+  while serialising a listed row is a `MissingGreenlet` waiting to happen, and
+  without the defer a register of twenty uploads pulls every payload into memory
+  to render a list of titles.
+- **There is no `users` → `fee_members` FK.** `committee.member_for_user` joins
+  on lowercased email, which is the only honest link; a member with no email, or
+  one who logs in under a different address, simply does not resolve and is
+  treated as "not an office bearer". Do not invent a stronger claim here.
+- **`is_office_bearer` on a position now derives from the role's TYPE**
+  (`_role_is_office_bearer`), resynced on every `sync_committee_positions`, not
+  set once from the name. It gates document access now, so a role retyped in the
+  Roles catalogue has to move the position with it. The name set is the fallback
+  for a role with no type — dropping it would silently strip access.
+
+### Office Bearer awards ARE BetterClubhouse roles
+
+`services/office_bearers.py` is the whole bridge. Award **category** is fixed
+("Office Bearer"), **subcategory** is a `club_role_types` row, **achievement** is
+a `club_roles` row, and `player_achievements.club_role_id` records which.
+
+- **`sync_award_definitions` runs both ways and is idempotent**, called from
+  `GET /award-definitions` (wrapped in try/rollback — a club must still get its
+  awards list if this hiccups). ADOPT pulls both existing definitions **and
+  recorded achievements** into `club_roles`; PUBLISH pushes committee/captain/
+  coach roles back out as definitions. **Adopting from definitions alone is not
+  enough** — that was the first cut and it left a club's actual history behind,
+  because an imported award never had a definition behind it.
+- **Seeding is gated on having no ROLES, not no definitions.** A club can easily
+  have one hand-typed definition and an empty role catalogue; gating on
+  definitions left exactly that club with nothing.
+- **`SUBCATEGORY_TO_ROLE_TYPE` / `ROLE_TYPE_TO_SUBCATEGORY`** hold the mapping
+  (Executive Committee ↔ Office Bearer, General Committee ↔ Committee Member,
+  Captains ↔ Captain, Coaches ↔ Coach, Other Roles ↔ Other). `PUBLISHED_ROLE_TYPES`
+  keeps ground staff / canteen / officials OUT of the awards dropdown;
+  `COMMITTEE_ROLE_TYPES` decides which become committee positions (a 1st XI
+  Captain is an honour, not a seat).
+- **`ensure_role_for_award` matches on title alone** because `club_roles` is
+  unique per (org, title). An award whose subcategory disagrees with an existing
+  role's type reuses the role and leaves the type alone — the Roles screen owns
+  types, and a stray award must not retype a position the committee set up.
+- **Starter pack grew to 18 committee roles**: the three portfolio Vice
+  Presidents and Operations were added so BetterStats' long-standing Office
+  Bearer options land on real roles. `STARTER_ROLE_TYPES` gained **Captain**.
+  The seed button label is hardcoded — it reads `(18)` now.
+- **`adopt_awards_as_terms`** turns recorded awards into `committee_terms`.
+  Inserts directly rather than through `start_term`, which auto-closes the open
+  term for a position — right for a real handover, wrong when back-filling a
+  decade in arbitrary order. Idempotent on (position, holder, start date). Season
+  → date is Jul 1 of the start year to Jun 30 after the end year; an award with
+  no season is skipped, never guessed. Surfaced as a panel on the Committee
+  Roles tab that only appears when the club actually has such awards.
+- **`_season_year` handles both shapes** `player_achievements.season` has held:
+  a `seasons` UUID (what the UI writes) and a plain label like "2025/26" (what
+  imports write).
+
+### Verification
+
+Two suites against a real Postgres, exercising the shipped functions and the
+route bodies rather than a replay of their logic (64 checks): service-level
+(both sync directions, idempotency, achievement linking, term adoption, the
+access rule across four identities, the deferred-bytes serialisation, role
+retyping) and route-level (upload incl. MIME + size rejection, per-reader
+`can_open`, the download 403, delete gating, and the unrestricted mode). The
+migration was also applied twice to a populated pre-218 schema.
+
 ## Multi-sport: the AFL silo (Aug 2026)
 
 **One codebase, per-sport operational silos.** BetterStats now also serves AFL

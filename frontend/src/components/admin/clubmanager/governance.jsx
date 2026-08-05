@@ -80,14 +80,33 @@ export function NoteThread({ entityType, entityId, compact = false }) {
 // live in Drive or Dropbox, and copying them here would make this the second
 // place to look. What changed is that a link can now belong to the action that
 // asked for it rather than a general list.
+const fileSize = n => {
+  if (!n && n !== 0) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+// Documents against a record — either a link to where the club already keeps
+// the file, or the file itself.
+//
+// The two are deliberately not equivalent. A link is a URL we neither host nor
+// can gate, so it opens for anyone who can see the register. An upload is
+// served by us and obeys the club's setting, so a row the reader may not open
+// shows as locked rather than as a link that 403s when clicked.
 export function AttachedDocuments({ entityType, entityId }) {
   const toast = useToast()
   const [docs, setDocs] = useState(null)
+  const [restricted, setRestricted] = useState(false)
   const [form, setForm] = useState({ title: '', url: '' })
+  const [uploading, setUploading] = useState(false)
 
   const load = useCallback(() => {
     api.committeeListDocuments()
-      .then(d => setDocs((d.documents || []).filter(x => x.entity_type === entityType && x.entity_id === entityId)))
+      .then(d => {
+        setDocs((d.documents || []).filter(x => x.entity_type === entityType && x.entity_id === entityId))
+        setRestricted(!!d.office_bearer_only)
+      })
       .catch(() => setDocs([]))
   }, [entityType, entityId])
   useEffect(() => { load() }, [load])
@@ -100,24 +119,75 @@ export function AttachedDocuments({ entityType, entityId }) {
     } catch (e) { toast.error(e.message) }
   }
 
+  async function upload(file) {
+    if (!file) return
+    setUploading(true)
+    try {
+      // The typed title is used when there is one, so an upload can be called
+      // "Netpro quote" rather than "scan_0043.pdf".
+      await api.committeeUploadDocument(file, {
+        title: form.title.trim(), entity_type: entityType, entity_id: entityId,
+      })
+      setForm({ title: '', url: '' }); load()
+    } catch (e) { toast.error(e.message) } finally { setUploading(false) }
+  }
+
   return (
     <div>
       <div className={`${cap} mb-1.5`}>DOCUMENTS</div>
       <div className="space-y-1 mb-2">
         {docs?.length === 0 && <div className="font-mono text-[10px] text-pb-faintest">Nothing attached.</div>}
-        {docs?.map(d => (
-          <a key={d.id} href={d.url} target="_blank" rel="noreferrer"
-            className="block text-[12.5px] underline truncate" style={{ color: 'var(--pb-accent)' }}>{d.title}</a>
-        ))}
+        {docs?.map(d => {
+          if (!d.has_file) {
+            return (
+              <a key={d.id} href={d.url} target="_blank" rel="noreferrer"
+                className="block text-[12.5px] underline truncate" style={{ color: 'var(--pb-accent)' }}>{d.title}</a>
+            )
+          }
+          if (!d.can_open) {
+            return (
+              <div key={d.id} className="flex items-center gap-2 text-[12.5px] text-pb-faint">
+                <span aria-hidden>🔒</span>
+                <span className="truncate">{d.title}</span>
+                <span className="font-mono text-[10px] text-pb-faintest shrink-0">office bearers only</span>
+              </div>
+            )
+          }
+          return (
+            <div key={d.id} className="flex items-center gap-2 text-[12.5px]">
+              <a href={api.committeeDocumentFileUrl(d.id)} target="_blank" rel="noreferrer"
+                className="underline truncate" style={{ color: 'var(--pb-accent)' }}>{d.title}</a>
+              <span className="font-mono text-[10px] text-pb-faintest shrink-0">{fileSize(d.file_size)}</span>
+              <a href={api.committeeDocumentFileUrl(d.id, { download: true })}
+                className="font-mono text-[10px] text-pb-faint hover:text-pb-text shrink-0">download</a>
+            </div>
+          )
+        })}
       </div>
-      <div className="flex gap-2">
-        <input className={`${inp} flex-1`} placeholder="e.g. Netpro quote" value={form.title}
+      {/* Wraps rather than squeezing: this panel sits inside a ~230px kanban
+          column on the Actions board, where a single flex row crushed both
+          inputs to a few pixels wide. */}
+      <div className="flex flex-wrap gap-2">
+        <input className={`${inp} flex-1 min-w-[9rem]`} placeholder="e.g. Netpro quote" value={form.title}
           onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-        <input className={`${inp} flex-1`} placeholder="https://…" value={form.url}
+        <input className={`${inp} flex-1 min-w-[9rem]`} placeholder="https://… (or upload below)" value={form.url}
           onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
-        <button onClick={add} disabled={!form.title.trim() || !form.url.trim()}
-          className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap">+ Link</button>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={add} disabled={!form.title.trim() || !form.url.trim()}
+            className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap">+ Link</button>
+          <label className={`px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline whitespace-nowrap cursor-pointer
+            ${uploading ? 'opacity-40' : 'text-pb-faint hover:text-pb-text'}`}>
+            {uploading ? 'Uploading…' : '↑ Upload'}
+            <input type="file" className="hidden" disabled={uploading}
+              onChange={e => { upload(e.target.files?.[0]); e.target.value = '' }} />
+          </label>
+        </div>
       </div>
+      {restricted && (
+        <div className="font-mono text-[10px] text-pb-faintest mt-1.5">
+          Uploads open only to office bearers, whoever uploaded them, and the main admin. Links stay open to the committee.
+        </div>
+      )}
     </div>
   )
 }

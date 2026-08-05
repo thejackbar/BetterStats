@@ -162,6 +162,51 @@ function PositionCard({ position, members, onChanged }) {
   )
 }
 
+// A club that only ever bought BetterStats recorded its office bearers as
+// awards. Those awards already point at real club roles (see
+// services/office_bearers.py), so the committee history can be built from them
+// rather than retyped. Only shown when the club actually has some.
+function OfficeBearerAwardsPanel({ onImported }) {
+  const toast = useToast()
+  const [info, setInfo] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    api.committeeOfficeBearerAwards().then(setInfo).catch(() => setInfo(null))
+  }, [])
+
+  if (!info || !info.committee_awards) return null
+
+  const adopt = async () => {
+    setBusy(true)
+    try {
+      const r = await api.committeeAdoptOfficeBearerAwards()
+      const bits = [`Added ${r.created} term${r.created === 1 ? '' : 's'}`]
+      if (r.already_there) bits.push(`${r.already_there} already recorded`)
+      if (r.no_season_recorded) bits.push(`${r.no_season_recorded} had no season, so no dates to use`)
+      toast.success(bits.join(' · '))
+      onImported?.()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-4 mb-3 flex items-start justify-between gap-4 flex-wrap">
+      <div className="min-w-0">
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1">FROM BETTERSTATS AWARDS</div>
+        <p className="text-[13px] text-pb-dim leading-relaxed max-w-xl">
+          This club has {info.committee_awards} Office Bearer award{info.committee_awards === 1 ? '' : 's'} naming a
+          committee role. They can be recorded here as terms, so the succession history starts full rather than empty.
+          Awards with no season recorded are left alone, and running this twice adds nothing.
+        </p>
+      </div>
+      <button onClick={adopt} disabled={busy}
+        className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+        {busy ? 'IMPORTING…' : 'IMPORT AS TERMS'}
+      </button>
+    </div>
+  )
+}
+
 function PositionsTab({ members }) {
   const toast = useToast()
   const [data, setData] = useState(null)
@@ -212,9 +257,10 @@ function PositionsTab({ members }) {
         </p>
         <button onClick={seedStarter} disabled={seeding}
           className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
-          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (14)'}
+          {seeding ? 'ADDING…' : '+ COMMITTEE ROLES (18)'}
         </button>
       </div>
+      <OfficeBearerAwardsPanel onImported={load} />
       {positions.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee roles above, or create them under Roles.</div>
       ) : (

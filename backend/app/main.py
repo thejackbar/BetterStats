@@ -4486,6 +4486,33 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE committee_documents ADD COLUMN IF NOT EXISTS entity_id UUID"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_committee_documents_entity ON committee_documents(organisation_id, entity_type, entity_id)"))
 
+        # Migration 218: a committee document can hold the file itself, who may
+        # open an uploaded one, and the link from an Office Bearer award to the
+        # club_roles row it names.
+        for col, ddl in (
+            ("file_data", "BYTEA"),
+            ("file_name", "TEXT"),
+            ("file_mime", "TEXT"),
+            ("file_size", "INTEGER"),
+            ("uploaded_by_user_id", "UUID REFERENCES users(id) ON DELETE SET NULL"),
+        ):
+            await conn.execute(text(f"ALTER TABLE committee_documents ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        # An uploaded document has no external URL; a row now carries one or the other.
+        await conn.execute(text("ALTER TABLE committee_documents ALTER COLUMN url DROP NOT NULL"))
+        await conn.execute(text("""
+            ALTER TABLE organisations
+            ADD COLUMN IF NOT EXISTS committee_docs_office_bearer_only
+            BOOLEAN NOT NULL DEFAULT TRUE
+        """))
+        await conn.execute(text("""
+            ALTER TABLE player_achievements
+            ADD COLUMN IF NOT EXISTS club_role_id UUID REFERENCES club_roles(id) ON DELETE SET NULL
+        """))
+        await conn.execute(text("""
+            CREATE INDEX IF NOT EXISTS ix_player_achievements_club_role
+            ON player_achievements(club_role_id)
+        """))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

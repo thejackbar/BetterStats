@@ -733,6 +733,10 @@ class SettingsPatch(BaseModel):
     public_show_opening: Optional[bool] = None
     public_show_gender: Optional[bool] = None
     include_fill_ins_in_stats: Optional[bool] = None
+    # Who may open a committee document the club uploaded (migration 218).
+    # True = the uploader, current Office Bearers and the Main Admin only.
+    # False = any committee member who can reach the register.
+    committee_docs_office_bearer_only: Optional[bool] = None
     # BetterSocials post-generator style (palette/font/background choices +
     # saved custom palettes/designs) — persisted per club so the look
     # survives browsers and the Setup Wizard can auto-detect it. See
@@ -862,6 +866,7 @@ async def get_settings(
         "public_show_opening": bool(club.public_show_opening),
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
+        "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "socials_style": club.socials_style,
         "subscription_status": club.subscription_status,
         "password_protected": bool(club.password_protected),
@@ -916,6 +921,8 @@ async def patch_settings(
         club.public_show_gender = bool(data.public_show_gender)
     if data.include_fill_ins_in_stats is not None:
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
+    if data.committee_docs_office_bearer_only is not None:
+        club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.socials_style is not None:
         club.socials_style = _sanitize_socials_style(data.socials_style)
 

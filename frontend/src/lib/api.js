@@ -400,6 +400,29 @@ export const api = {
     request(`/club-admin/committee/documents/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteDocument: (id) =>
     request(`/club-admin/committee/documents/${id}`, { method: 'DELETE' }),
+  // Uploads go through FormData, not JSON — the file is the payload.
+  committeeUploadDocument: (file, fields = {}) => {
+    const form = new FormData()
+    form.append('file', file)
+    Object.entries(fields).forEach(([k, v]) => { if (v) form.append(k, v) })
+    return fetch(`${BASE}/club-admin/committee/documents/upload`, {
+      method: 'POST', body: form, credentials: 'include',
+    }).then(async res => {
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${res.status}`)
+      }
+      return res.json()
+    })
+  },
+  // The bytes come from here, access re-checked server-side on every request.
+  // Returned as a URL rather than fetched, so the browser can open or save it.
+  committeeDocumentFileUrl: (id, { download = false } = {}) =>
+    `${BASE}/club-admin/committee/documents/${id}/file${download ? '?download=1' : ''}`,
+  committeeOfficeBearerAwards: () =>
+    request('/club-admin/committee/office-bearer-awards'),
+  committeeAdoptOfficeBearerAwards: () =>
+    request('/club-admin/committee/office-bearer-awards/adopt', { method: 'POST' }),
   committeeListEvents: (upcomingOnly) =>
     request(`/club-admin/committee/events${upcomingOnly ? '?upcoming_only=true' : ''}`),
   committeeCreateEvent: (data) =>

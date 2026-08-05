@@ -12,12 +12,13 @@ from datetime import date
 from typing import Optional
 
 from sqlalchemy import select, func, delete
+from sqlalchemy.orm import defer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
     CommitteePosition, CommitteeTerm, CommitteeTask, CommitteeDocument, ClubEvent,
     AgendaTemplate, CommitteeMeeting, MeetingAttendance, MeetingAgendaItem, MeetingMotion,
-    AgmNomination, FeeMember, ClubRole,
+    AgmNomination, FeeMember, ClubRole, ClubRoleType, ClubMembership,
 )
 
 # (name, responsibilities)
@@ -81,11 +82,28 @@ def _task_dict(t: CommitteeTask) -> dict:
     }
 
 
-def _document_dict(d: CommitteeDocument) -> dict:
+def has_file(d: CommitteeDocument) -> bool:
+    """Whether this row is an upload rather than a link.
+
+    Reads file_size, never file_data — the bytes are deferred on the list query
+    and touching them there would fire a lazy load outside the async greenlet.
+    Both are written together by the upload path, so size is a faithful stand-in.
+    """
+    return d.file_size is not None
+
+
+def _document_dict(d: CommitteeDocument, *, can_open: bool = True) -> dict:
+    # `file_data` is never serialised — the bytes come from the download route,
+    # which re-checks access. `can_open` is what the caller resolved for THIS
+    # reader, so the register can show a locked row rather than a dead link.
     return {
         "id": str(d.id), "title": d.title, "category": d.category, "url": d.url,
         "position_id": str(d.position_id) if d.position_id else None, "notes": d.notes,
         "entity_type": d.entity_type, "entity_id": str(d.entity_id) if d.entity_id else None,
+        "has_file": has_file(d), "file_name": d.file_name,
+        "file_mime": d.file_mime, "file_size": d.file_size,
+        "uploaded_by_user_id": str(d.uploaded_by_user_id) if d.uploaded_by_user_id else None,
+        "can_open": can_open,
     }
 
 
@@ -160,12 +178,27 @@ def _nomination_dict(n: AgmNomination) -> dict:
 
 # ─── Positions ────────────────────────────────────────────────────────────────
 
-# The executive/legal office bearers, matched by position name on first seed.
+# The executive/legal office bearers, matched by position name. Only used for a
+# role that carries no type — the role's TYPE is the real signal (see below).
 _OFFICE_BEARER_NAMES = {"president", "vice president", "vice-president", "treasurer", "secretary"}
 
 
 def _is_office_bearer_name(name: str) -> bool:
     return (name or "").strip().lower() in _OFFICE_BEARER_NAMES
+
+
+def _role_is_office_bearer(title: str, role_type_name: Optional[str]) -> bool:
+    """Whether a committee role carries legal/fiduciary responsibility.
+
+    The role's TYPE decides it, so a club that renames President to Chairperson
+    keeps the responsibility and a club that invents its own office-bearer
+    position gets it. Falling back to the name matters only for a role with no
+    type set — without that fallback, retyping would silently strip access from
+    documents restricted to office bearers.
+    """
+    if role_type_name:
+        return role_type_name.strip().lower() == OFFICE_BEARER_ROLE_TYPE.lower()
+    return _is_office_bearer_name(title)
 
 
 async def sync_committee_positions(session: AsyncSession, org_id) -> None:
@@ -174,10 +207,16 @@ async def sync_committee_positions(session: AsyncSession, org_id) -> None:
     committee role (the term/task/doc/AGM FK anchor) in sync with it. Called
     before any positions read/seed. Positions whose role is archived/removed
     are deactivated but keep their term history."""
-    roles = (await session.execute(
-        select(ClubRole).where(ClubRole.organisation_id == org_id,
-                               ClubRole.is_committee.is_(True), ClubRole.is_active.is_(True))
-    )).scalars().all()
+    role_rows = (await session.execute(
+        select(ClubRole, ClubRoleType.name)
+        .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+        .where(ClubRole.organisation_id == org_id,
+               ClubRole.is_committee.is_(True), ClubRole.is_active.is_(True))
+    )).all()
+    roles = [r for r, _ in role_rows]
+    office_bearer_by_role = {
+        r.id: _role_is_office_bearer(r.title, type_name) for r, type_name in role_rows
+    }
     positions = (await session.execute(
         select(CommitteePosition).where(CommitteePosition.organisation_id == org_id)
     )).scalars().all()
@@ -188,10 +227,11 @@ async def sync_committee_positions(session: AsyncSession, org_id) -> None:
     for role in roles:
         live_role_ids.add(role.id)
         pos = by_role.get(role.id) or by_name.get(role.title.lower())
+        is_ob = office_bearer_by_role.get(role.id, False)
         if pos is None:
             pos = CommitteePosition(organisation_id=org_id, name=role.title[:120],
                                     responsibilities=role.description, role_id=role.id, sort_order=role.sort_order,
-                                    is_office_bearer=_is_office_bearer_name(role.title))
+                                    is_office_bearer=is_ob)
             session.add(pos)
             changed = True
             continue
@@ -204,6 +244,12 @@ async def sync_committee_positions(session: AsyncSession, org_id) -> None:
             pos.responsibilities = role.description; changed = True
         if pos.sort_order != role.sort_order:
             pos.sort_order = role.sort_order; changed = True
+        # Office-bearer status is resynced, not just set on first create. It now
+        # gates who can open a restricted document, so a role retyped in the
+        # Roles catalogue has to move the position with it — otherwise the two
+        # answers drift and access follows a stale name match.
+        if pos.is_office_bearer != is_ob:
+            pos.is_office_bearer = is_ob; changed = True
         if not pos.is_active:
             pos.is_active = True; changed = True
     # Deactivate positions whose committee role no longer exists/active.
@@ -392,7 +438,13 @@ async def delete_task(session: AsyncSession, t: CommitteeTask) -> None:
 # ─── Documents ────────────────────────────────────────────────────────────────
 
 async def list_documents(session: AsyncSession, org_id, *, category: Optional[str] = None) -> list[CommitteeDocument]:
-    stmt = select(CommitteeDocument).where(CommitteeDocument.organisation_id == org_id)
+    # file_data is deferred: a register of twenty uploads would otherwise pull
+    # every one of their payloads into memory just to render a list of titles.
+    # Nothing on the list path reads the bytes — `has_file` comes from
+    # file_size, and the download route loads the row again in full.
+    stmt = (select(CommitteeDocument)
+            .where(CommitteeDocument.organisation_id == org_id)
+            .options(defer(CommitteeDocument.file_data)))
     if category:
         stmt = stmt.where(CommitteeDocument.category == category)
     stmt = stmt.order_by(CommitteeDocument.category, func.lower(CommitteeDocument.title))
@@ -402,12 +454,20 @@ async def list_documents(session: AsyncSession, org_id, *, category: Optional[st
 async def create_document(session: AsyncSession, org_id, **fields) -> CommitteeDocument:
     title = (fields.get("title") or "").strip()
     url = (fields.get("url") or "").strip()
-    if not title or not url:
-        raise ValueError("Title and URL are required")
-    d = CommitteeDocument(organisation_id=org_id, title=title[:300], url=url[:2000],
+    file_data = fields.get("file_data")
+    if not title:
+        raise ValueError("A title is required")
+    # A row is either a link to a document or the document itself (migration
+    # 218). One of the two has to be there or the entry points at nothing.
+    if not url and not file_data:
+        raise ValueError("Add a link or upload a file")
+    d = CommitteeDocument(organisation_id=org_id, title=title[:300], url=url[:2000] or None,
                           category=fields.get("category") or "governance",
                           position_id=fields.get("position_id"), notes=fields.get("notes"),
-                          entity_type=fields.get("entity_type"), entity_id=fields.get("entity_id"))
+                          entity_type=fields.get("entity_type"), entity_id=fields.get("entity_id"),
+                          file_data=file_data, file_name=fields.get("file_name"),
+                          file_mime=fields.get("file_mime"), file_size=fields.get("file_size"),
+                          uploaded_by_user_id=fields.get("uploaded_by_user_id"))
     session.add(d)
     await session.flush()
     return d
@@ -422,6 +482,102 @@ async def update_document(session: AsyncSession, d: CommitteeDocument, **fields)
 
 async def delete_document(session: AsyncSession, d: CommitteeDocument) -> None:
     await session.delete(d)
+
+
+# ─── Who may open an uploaded document ───────────────────────────────────────
+#
+# Reaching this router at all already requires MANAGE_COMMITTEE. The rule below
+# is a second, narrower gate over UPLOADED FILES only, because a club asked to
+# be able to put a legal letter somewhere without every committee member seeing
+# it. It does not — and cannot — apply to a link: the URL is right there in the
+# register and it points at someone else's Drive.
+
+# The role type carrying legal/fiduciary responsibility. Named to match
+# roles_activities.STARTER_ROLE_TYPES, which is the catalogue clubs seed from.
+OFFICE_BEARER_ROLE_TYPE = "Office Bearer"
+
+
+async def member_for_user(session: AsyncSession, org_id, user) -> Optional[FeeMember]:
+    """The club member a login belongs to, matched on email.
+
+    There is no users -> fee_members foreign key: a member is a person the club
+    records, a user is someone who can sign in, and most members never get a
+    login. Email is the only honest join, so a member with no email recorded, or
+    one recorded under a different address from the one they log in with, simply
+    does not resolve — which the callers below treat as "not an office bearer"
+    rather than as an error.
+    """
+    email = (getattr(user, "email", "") or "").strip().lower()
+    if not email:
+        return None
+    return (await session.execute(
+        select(FeeMember).where(
+            FeeMember.organisation_id == org_id,
+            func.lower(FeeMember.email) == email,
+        ).limit(1)
+    )).scalars().first()
+
+
+async def is_office_bearer(session: AsyncSession, org_id, user) -> bool:
+    """Does this login currently hold an Office Bearer position?
+
+    Current means a term with no end date. The role TYPE is what decides it,
+    not the position's name — a club that renames "President" to "Chairperson"
+    keeps the responsibility, and a club that invents its own office-bearer
+    position gets it too. ``committee_positions.is_office_bearer`` is accepted
+    as well, for positions created before roles carried a type.
+    """
+    member = await member_for_user(session, org_id, user)
+    if member is None:
+        return False
+    rows = (await session.execute(
+        select(CommitteePosition.is_office_bearer, ClubRoleType.name)
+        .select_from(CommitteeTerm)
+        .join(CommitteePosition, CommitteePosition.id == CommitteeTerm.position_id)
+        .outerjoin(ClubRole, ClubRole.id == CommitteePosition.role_id)
+        .outerjoin(ClubRoleType, ClubRoleType.id == ClubRole.role_type_id)
+        .where(
+            CommitteeTerm.organisation_id == org_id,
+            CommitteeTerm.member_id == member.id,
+            CommitteeTerm.ended_at.is_(None),
+        )
+    )).all()
+    return any(
+        flag or (name or "").strip().lower() == OFFICE_BEARER_ROLE_TYPE.lower()
+        for flag, name in rows
+    )
+
+
+async def is_club_admin(session: AsyncSession, org_id, user) -> bool:
+    role = (await session.execute(
+        select(ClubMembership.role).where(
+            ClubMembership.user_id == user.id, ClubMembership.club_id == org_id,
+        )
+    )).scalars().first()
+    return role == "club_admin"
+
+
+async def can_open_document(session: AsyncSession, club, user, doc: CommitteeDocument) -> bool:
+    """Whether this login may read an uploaded document's bytes.
+
+    A link-only row is always openable — see the note above. For an uploaded
+    file with the club's restricted setting on, three people get in: whoever
+    uploaded it, a current Office Bearer, and the club's Main Admin.
+
+    The Main Admin is on that list deliberately. They own the club's data and
+    they are the one who can flip this setting, so excluding them would look
+    like a guarantee while being one click from untrue. Better to say plainly
+    who can read a document than to imply a wall that is not there.
+    """
+    if not has_file(doc):
+        return True
+    if not getattr(club, "committee_docs_office_bearer_only", True):
+        return True
+    if doc.uploaded_by_user_id and doc.uploaded_by_user_id == user.id:
+        return True
+    if await is_office_bearer(session, club.id, user):
+        return True
+    return await is_club_admin(session, club.id, user)
 
 
 # ─── Club calendar (events) ──────────────────────────────────────────────────

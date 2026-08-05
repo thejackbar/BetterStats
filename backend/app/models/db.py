@@ -287,6 +287,12 @@ class Organisation(Base):
     # all-time club records — those are already scoped to a `players` join
     # that a NULL player_id naturally never matches.
     include_fill_ins_in_stats = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Who may open a committee document the club UPLOADED (migration 218). True
+    # (the default) = whoever uploaded it, plus committee members holding an
+    # Office Bearer role, plus the club's Main Admin. False = any committee
+    # member who can reach the register. Link-only documents are unaffected —
+    # a URL we do not host cannot be gated by us.
+    committee_docs_office_bearer_only = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── Better ecosystem entitlements (migration 056) ───────────────────────
     # module_overrides is the explicit list of modules a club holds, and the
     # single source of truth for entitlement (see app/auth/modules.py). Core
@@ -2739,15 +2745,24 @@ class CommitteeTask(Base):
 
 
 class CommitteeDocument(Base):
-    """A link-based document registry — governance/policy docs live wherever
-    the club already keeps them (Drive, Dropbox); this just indexes them."""
+    """The club's document registry. Link-first — governance/policy docs live
+    wherever the club already keeps them (Drive, Dropbox) and this indexes them
+    — but a row can instead hold the file itself (migration 218), for the quote
+    or letter that has nowhere else to live. A row carries a ``url`` or a
+    ``file_data``, not both.
+
+    Access differs between the two, and the difference is real rather than an
+    oversight. A link is a URL we neither host nor can gate, so anyone who can
+    read the registry can follow it. An uploaded file is served by us, so
+    ``organisations.committee_docs_office_bearer_only`` decides who may open it
+    — see ``services/committee.can_open_document``."""
     __tablename__ = "committee_documents"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     title = Column(Text, nullable=False)
     category = Column(Text, nullable=False, server_default="governance", default="governance")
-    url = Column(Text, nullable=False)
+    url = Column(Text, nullable=True)
     position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     notes = Column(Text, nullable=True)
     # Migration 217 — what this document belongs to, so a quote the committee
@@ -2755,6 +2770,15 @@ class CommitteeDocument(Base):
     # 'task' | 'motion' | 'meeting' | 'objective'; both null = a club-wide doc.
     entity_type = Column(Text, nullable=True)
     entity_id = Column(UUID(as_uuid=True), nullable=True)
+    # The uploaded file, when this row is one (migration 218). Bytes live in
+    # Postgres for the same reason player photos do — the container's upload
+    # volume is not guaranteed to survive recreation.
+    file_data = Column(LargeBinary, nullable=True)
+    file_name = Column(Text, nullable=True)
+    file_mime = Column(Text, nullable=True)
+    file_size = Column(Integer, nullable=True)
+    # Who uploaded it — one of the two people the restricted rule always lets in.
+    uploaded_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

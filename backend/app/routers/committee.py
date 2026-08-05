@@ -8,9 +8,10 @@ import uuid
 from datetime import date, datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -20,6 +21,7 @@ from app.models.db import (
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_COMMITTEE
 from app.services import committee as committee_service
+from app.services import office_bearers
 
 router = APIRouter(prefix="/club-admin/committee", tags=["club-admin-committee"])
 _require = Depends(require_cap(MANAGE_COMMITTEE))
@@ -328,10 +330,31 @@ async def delete_task(task_id: str, _: User = _require, club: Organisation = Dep
 # ─── Documents ────────────────────────────────────────────────────────────────
 
 @router.get("/documents")
-async def list_documents(category: Optional[str] = None, _: User = _require,
+async def list_documents(category: Optional[str] = None, user: User = _require,
                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     rows = await committee_service.list_documents(db, club.id, category=category)
-    return {"documents": [committee_service._document_dict(d) for d in rows]}
+    # Resolve "may this reader open an upload" ONCE for the whole list rather
+    # than per row — the office-bearer answer is the same for every document,
+    # and it costs two queries.
+    privileged = (
+        not club.committee_docs_office_bearer_only
+        or await committee_service.is_office_bearer(db, club.id, user)
+        or await committee_service.is_club_admin(db, club.id, user)
+    )
+    return {
+        "documents": [
+            committee_service._document_dict(
+                d,
+                can_open=(not committee_service.has_file(d)
+                          or privileged
+                          or d.uploaded_by_user_id == user.id),
+            )
+            for d in rows
+        ],
+        # So the register can explain why a row is locked without the client
+        # having to infer the club's rule from the rows themselves.
+        "office_bearer_only": bool(club.committee_docs_office_bearer_only),
+    }
 
 
 class DocumentCreate(BaseModel):
@@ -373,10 +396,23 @@ class DocumentPatch(BaseModel):
     entity_id: Optional[str] = None
 
 
-@router.patch("/documents/{doc_id}")
-async def update_document(doc_id: str, data: DocumentPatch, _: User = _require, club: Organisation = Depends(get_current_club),
-                          db: AsyncSession = Depends(get_db)):
+async def _document_writable_or_403(db: AsyncSession, club: Organisation, user: User, doc_id: str):
+    """Editing or deleting an uploaded document needs the same access reading it
+    does. Being able to destroy a file you are not allowed to open is not a
+    lesser permission than being able to read it."""
     d = await _document_or_404(db, club, doc_id)
+    if not await committee_service.can_open_document(db, club, user, d):
+        raise HTTPException(
+            status_code=403,
+            detail="This club restricts uploaded documents to office bearers and whoever uploaded them.",
+        )
+    return d
+
+
+@router.patch("/documents/{doc_id}")
+async def update_document(doc_id: str, data: DocumentPatch, user: User = _require, club: Organisation = Depends(get_current_club),
+                          db: AsyncSession = Depends(get_db)):
+    d = await _document_writable_or_403(db, club, user, doc_id)
     fields = data.model_dump(exclude_unset=True)
     if "position_id" in fields:
         fields["position_id"] = uuid.UUID(fields["position_id"]) if fields["position_id"] else None
@@ -386,12 +422,159 @@ async def update_document(doc_id: str, data: DocumentPatch, _: User = _require, 
 
 
 @router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str, _: User = _require, club: Organisation = Depends(get_current_club),
+async def delete_document(doc_id: str, user: User = _require, club: Organisation = Depends(get_current_club),
                           db: AsyncSession = Depends(get_db)):
-    d = await _document_or_404(db, club, doc_id)
+    d = await _document_writable_or_403(db, club, user, doc_id)
     await committee_service.delete_document(db, d)
     await db.commit()
     return {"deleted": True}
+
+
+# ─── Office Bearer awards → committee history ────────────────────────────────
+
+@router.get("/office-bearer-awards")
+async def office_bearer_award_summary(_: User = _require, club: Organisation = Depends(get_current_club),
+                                      db: AsyncSession = Depends(get_db)):
+    """What a club would get from adopting its BetterStats Office Bearer awards.
+
+    Read-only, so the Committee screen can offer the import only to clubs that
+    actually have something to import, and say how much.
+    """
+    linked = await office_bearers.backfill_achievement_roles(db, club.id)
+    await db.commit()
+    row = (await db.execute(text("""
+        SELECT COUNT(*) AS total,
+               COUNT(*) FILTER (WHERE cr.is_committee) AS committee
+        FROM player_achievements pa
+        LEFT JOIN club_roles cr ON cr.id = pa.club_role_id
+        WHERE pa.org_id = :org AND pa.category = :cat
+    """), {"org": str(club.id), "cat": office_bearers.AWARD_CATEGORY})).mappings().first()
+    return {"awards": row["total"] or 0, "committee_awards": row["committee"] or 0,
+            "newly_linked": linked}
+
+
+@router.post("/office-bearer-awards/adopt")
+async def adopt_office_bearer_awards(_: User = _require, club: Organisation = Depends(get_current_club),
+                                     db: AsyncSession = Depends(get_db)):
+    """Create committee terms from recorded Office Bearer awards. Idempotent."""
+    await office_bearers.backfill_achievement_roles(db, club.id)
+    result = await office_bearers.adopt_awards_as_terms(db, club.id)
+    await db.commit()
+    return result
+
+
+# ─── Uploaded documents ──────────────────────────────────────────────────────
+
+# Postgres will hold whatever we give it, but a committee document is a quote,
+# a letter or a policy — a cap keeps one accidental video out of the row cache
+# and out of every backup from here on.
+MAX_DOCUMENT_BYTES = 15 * 1024 * 1024
+
+# Deliberately not a blanket allow. These are the formats a club actually
+# attaches to a committee record; anything executable or scriptable stays out,
+# since the file comes back to other members from our own domain.
+ALLOWED_DOCUMENT_MIMES = {
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/rtf",
+    "text/plain",
+    "text/csv",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/heic",
+}
+
+
+@router.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    category: str = Form("governance"),
+    notes: Optional[str] = Form(None),
+    position_id: Optional[str] = Form(None),
+    entity_type: Optional[str] = Form(None),
+    entity_id: Optional[str] = Form(None),
+    user: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Store a file as a committee document.
+
+    The uploader is recorded because they are one of the two people the
+    club's restricted setting always lets back in.
+    """
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=422, detail="That file is empty")
+    if len(data) > MAX_DOCUMENT_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Files are limited to {MAX_DOCUMENT_BYTES // (1024 * 1024)}MB. "
+                   "Link to it instead if it is larger.",
+        )
+    mime = (file.content_type or "").split(";")[0].strip().lower()
+    if mime not in ALLOWED_DOCUMENT_MIMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{mime or 'That file type'} can't be uploaded. Use a PDF, "
+                   "an Office document, a plain text file or an image, or link to it instead.",
+        )
+    try:
+        d = await committee_service.create_document(
+            db, club.id,
+            title=(title or "").strip() or (file.filename or "Document"),
+            category=category, notes=notes,
+            position_id=uuid.UUID(position_id) if position_id else None,
+            entity_type=entity_type or None,
+            entity_id=uuid.UUID(entity_id) if entity_id else None,
+            file_data=data, file_name=(file.filename or "document")[:300],
+            file_mime=mime, file_size=len(data),
+            uploaded_by_user_id=user.id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    await db.refresh(d)
+    return committee_service._document_dict(d, can_open=True)
+
+
+@router.get("/documents/{doc_id}/file")
+async def download_document(
+    doc_id: str, download: int = 0, user: User = _require,
+    club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db),
+):
+    """Serve an uploaded document's bytes, access re-checked here.
+
+    This is the enforcement point, not the list's ``can_open`` flag — that one
+    only decides whether the UI draws a lock. Nothing here is cached: the
+    club's rule can change between two requests for the same URL, and a
+    document someone may no longer open must not be sitting in a shared proxy.
+    """
+    d = await _document_or_404(db, club, doc_id)
+    if not committee_service.has_file(d):
+        raise HTTPException(status_code=404, detail="That document is a link, not a file")
+    if not await committee_service.can_open_document(db, club, user, d):
+        raise HTTPException(
+            status_code=403,
+            detail="This club restricts uploaded documents to office bearers and whoever uploaded them.",
+        )
+    name = (d.file_name or "document").replace('"', "")
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=d.file_data,
+        media_type=d.file_mime or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'{disposition}; filename="{name}"',
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 # ─── Club calendar ────────────────────────────────────────────────────────────
