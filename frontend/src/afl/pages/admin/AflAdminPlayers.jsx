@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { aflApi, mediaUrl } from '../../aflApi'
 import { SectionTitle } from '../../components/bits'
+import ImageEditorModal from '../../../components/ImageEditorModal'
+import { validateImageFile } from '../../../lib/validation'
 
 /** Photo, or the player's initials while there isn't one. */
 function Avatar({ player, size = 'h-9 w-9', text = 'text-[11px]' }) {
@@ -18,10 +20,16 @@ function Avatar({ player, size = 'h-9 w-9', text = 'text-[11px]' }) {
 }
 
 /**
- * Upload / replace / remove one player's photo.
+ * Upload / edit / remove one player's photo.
  *
- * Saves immediately on choosing a file rather than joining the drawer's Save
- * button: the photo is a separate multipart endpoint, so tying it to the
+ * Every picked file goes through the shared ImageEditorModal first (crop,
+ * rotate, background removal) — the same component and the same settings
+ * cricket's player photos use, so a headshot comes out square on both sports.
+ * Edit reopens the stored photo in the editor, so a crop can be redone
+ * without finding the original file again.
+ *
+ * Saves immediately once the editor applies rather than joining the drawer's
+ * Save button: the photo is a separate multipart endpoint, so tying it to the
  * form's own save would mean one of the two silently landing without the
  * other whenever a request failed.
  */
@@ -30,18 +38,30 @@ function PhotoField({ player, onChanged }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [photoUrl, setPhotoUrl] = useState(player.photo_url || null)
+  const [editorSource, setEditorSource] = useState(null)
 
-  const pick = async (e) => {
+  const pick = (e) => {
     const file = e.target.files?.[0]
     e.target.value = ''            // so re-picking the same file fires again
     if (!file) return
+    // Fail on the client for the things the server would 400 on anyway,
+    // before an oversized file is carried through a crop.
+    const problem = validateImageFile(file)
+    if (problem) { setError(problem); return }
+    setError(null)
+    setEditorSource(file)
+  }
+
+  const upload = async (file) => {
     setBusy(true); setError(null)
     try {
       const res = await aflApi.adminUploadPlayerPhoto(player.id, file)
       setPhotoUrl(res.photo_url)
       onChanged?.(res.photo_url)
+      setEditorSource(null)
     } catch (err) {
       setError(err.message)
+      setEditorSource(null)
     } finally { setBusy(false) }
   }
 
@@ -65,13 +85,19 @@ function PhotoField({ player, onChanged }) {
           <div className="flex gap-2">
             <button type="button" disabled={busy} onClick={() => fileRef.current?.click()}
               className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-50">
-              {busy ? 'Uploading…' : photoUrl ? 'Replace' : 'Upload photo'}
+              {busy ? 'Saving…' : photoUrl ? 'Replace' : 'Upload photo'}
             </button>
             {photoUrl && (
-              <button type="button" disabled={busy} onClick={remove}
-                className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-[var(--pb-negative)] disabled:opacity-50">
-                Remove
-              </button>
+              <>
+                <button type="button" disabled={busy} onClick={() => setEditorSource(mediaUrl(photoUrl))}
+                  className="px-3 py-1.5 rounded text-xs border border-pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-50">
+                  Edit
+                </button>
+                <button type="button" disabled={busy} onClick={remove}
+                  className="px-3 py-1.5 rounded text-xs text-pb-dim hover:text-[var(--pb-negative)] disabled:opacity-50">
+                  Remove
+                </button>
+              </>
             )}
           </div>
           <span className="text-[11px] text-pb-faintest">JPG, PNG, WEBP or GIF, up to 2 MB.</span>
@@ -80,6 +106,22 @@ function PhotoField({ player, onChanged }) {
       <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
              className="hidden" onChange={pick} />
       {error && <p className="text-xs text-[var(--pb-negative)] mt-1.5">{error}</p>}
+      <ImageEditorModal
+        open={!!editorSource}
+        source={editorSource}
+        title="Edit player photo"
+        aspect={1}
+        // PNG, not JPEG, because the background-removal tools are the point of
+        // the editor and transparency has to survive the export. 800px keeps
+        // the result comfortably inside the 2 MB the endpoint accepts — the
+        // component's 1600 default can push a detailed photo past it once
+        // it's re-encoded as a lossless PNG.
+        outputType="image/png"
+        outputName={`player-${player.id}.png`}
+        maxOutputSize={800}
+        onCancel={() => setEditorSource(null)}
+        onApply={upload}
+      />
     </div>
   )
 }
