@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.8.2',
-  date: '2026-08-07',
-  sortKey: '2026-08-07T15:00:00Z',
+  version: 'v9.10.1',
+  date: '2026-08-08',
+  sortKey: '2026-08-08T18:00:00Z',
   title: 'BetterFootball: a record per team on the games page',
   items: [
     'The games page shows each team\'s own played, won, lost, drawn and win percentage under the club totals, seniors first and juniors below. The rows always add up to the totals above them.',
