@@ -3,7 +3,7 @@ import { Link, useOutletContext } from 'react-router-dom'
 import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { thiings, ThiingIcon } from '../../assets/thiings'
-import { aflApi } from '../aflApi'
+import { aflApi, mediaUrl } from '../aflApi'
 import { SectionTitle, Select, GameRow, ClubCrest, displayName } from '../components/bits'
 
 const MILESTONE_ICON = { games: thiings.calendar, goals: thiings.target }
@@ -125,7 +125,7 @@ export default function Dashboard() {
           <li key={r.player_id} className="flex items-center gap-2.5 text-sm">
             <span className="font-mono text-pb-faintest w-4 shrink-0">{i + 1}</span>
             {r.photo_url
-              ? <img src={r.photo_url} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
+              ? <img src={mediaUrl(r.photo_url)} alt="" className="h-8 w-8 rounded-full object-cover shrink-0" />
               : <span className="h-8 w-8 rounded-full bg-pb-surface2 text-[11px] flex items-center justify-center text-pb-faint shrink-0">
                   {(displayName(r) || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
                 </span>}

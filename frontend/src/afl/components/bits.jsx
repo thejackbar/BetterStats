@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
-import { scoreLine } from '../aflApi'
+import { mediaUrl, scoreLine } from '../aflApi'
 
 export const displayName = (row) => row.display_name_override || row.name || 'Unknown'
 
@@ -27,7 +27,7 @@ export function ClubCrest({ club, className = 'h-16 w-16 sm:h-20 sm:w-20' }) {
   }
   return (
     <img
-      src={club.logo_url}
+      src={mediaUrl(club.logo_url)}
       alt={`${club.name || 'Club'} logo`}
       onError={() => setFailed(true)}
       className={clsx(className, 'shrink-0 object-contain')}
@@ -106,7 +106,7 @@ export function PlayerCell({ id, name, base, photoUrl }) {
   const body = (
     <span className="flex items-center gap-2 min-w-0">
       {photoUrl
-        ? <img src={photoUrl} alt="" className="h-6 w-6 rounded-full object-cover" />
+        ? <img src={mediaUrl(photoUrl)} alt="" className="h-6 w-6 rounded-full object-cover" />
         : <span className="h-6 w-6 rounded-full bg-pb-surface2 text-[10px] flex items-center justify-center text-pb-faint">
             {(name || '?').split(' ').map(w => w[0]).slice(0, 2).join('')}
           </span>}

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import LoadingSpinner from '../components/LoadingSpinner'
-import { aflApi } from './aflApi'
+import { aflApi, mediaUrl } from './aflApi'
 import ClubSwitcher from './components/ClubSwitcher'
 
 // Self-contained AFL admin shell — deliberately NOT built on cricket's
@@ -91,7 +91,7 @@ export default function AflAdminLayout() {
     <div className="px-4 py-4 pb-hairline-b">
       <div className="flex items-center gap-2.5">
         {settings?.logo_url
-          ? <img src={settings.logo_url} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
+          ? <img src={mediaUrl(settings.logo_url)} alt="" className="w-8 h-8 rounded object-contain bg-pb-surface2 shrink-0" />
           : <span className="w-8 h-8 rounded pb-gradient shrink-0" />}
         <div className="min-w-0">
           <div className="font-bold text-sm leading-tight truncate">{settings?.name || 'BetterFootball'}</div>
