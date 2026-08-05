@@ -343,7 +343,10 @@ export default function App() {
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub/roster" element={<Navigate to="/admin/clubhouse/roster" replace />} />
-          <Route path="/admin/comms/segments" element={<Navigate to="/admin/clubhouse/audiences" replace />} />
+          {/* The segment editor lives at the URL its menu item names.
+              /admin/clubhouse/audiences stays live because Today deep-links to
+              it with a preset. */}
+          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />

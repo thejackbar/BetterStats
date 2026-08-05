@@ -46,7 +46,14 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, module: 'comms', exact: true, badge: counts.drafts },
-    { to: '/admin/clubhouse/audiences', label: 'Audiences', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    // An audience is not a place you go — it is the list or segment picked
+    // while writing an email. What a club maintains is the pieces an email is
+    // built from, so those get the items and the segment editor is named for
+    // what it edits.
+    { to: '/admin/comms/lists', label: 'Lists', icon: 'teams', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    { to: '/admin/comms/segments', label: 'Segments', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings', cap: CAP.MANAGE_COMMS, module: 'comms' },
 
     { heading: 'Club' },
     { to: '/admin/club-diary', label: 'Diary', icon: 'ladders', cap: CAP.MANAGE_CLUB_DIARY },

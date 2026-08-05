@@ -107,7 +107,7 @@ export default function ModuleLayout({
   const pageName = title || activeNav?.label
   const bookmarkLabel = `Better${moduleName}` + (pageName ? ` · ${pageName}` : '')
 
-  const NavItems = () => (
+  const renderNavItems = () => (
     <>
       {items.map((item, idx) => {
         if (item.heading) {
@@ -135,7 +135,7 @@ export default function ModuleLayout({
 
   // Club identity + module lockup. The `← Back to admin` link the older layouts
   // carried is gone — the switcher in the footer replaces it.
-  const Brand = () => (
+  const renderBrand = () => (
     <div className="p-4 border-b pb-hairline shrink-0">
       <div className="flex items-center gap-2.5">
         {club?.logo_url
@@ -159,7 +159,7 @@ export default function ModuleLayout({
   )
 
   // The platform chrome the per-module sidebars used to leave to the header.
-  const SidebarFooter = () => (
+  const renderSidebarFooter = () => (
     <div className="border-t pb-hairline px-3 py-[11px] shrink-0">
       <div className="font-mono text-[9px] tracking-[0.12em] uppercase text-pb-faintest mb-1.5">Switch module</div>
       <ModuleSwitcher wrap compact className="flex gap-1" />
@@ -182,11 +182,11 @@ export default function ModuleLayout({
     </div>
   )
 
-  const Sidebar = () => (
+  const renderSidebar = () => (
     <>
-      <Brand />
-      <nav className="flex-1 overflow-y-auto py-2 pb-scroll"><NavItems /></nav>
-      <SidebarFooter />
+      {renderBrand()}
+      <nav className="flex-1 overflow-y-auto py-2 pb-scroll">{renderNavItems()}</nav>
+      {renderSidebarFooter()}
     </>
   )
 
@@ -203,14 +203,14 @@ export default function ModuleLayout({
       {/* Sidebar — one breakpoint for the whole module: a column at ≥1024px,
           a drawer behind ☰ below it. */}
       <aside className="w-[232px] flex-none border-r pb-hairline bg-pb-surface hidden lg:flex flex-col sticky top-0 h-screen">
-        <Sidebar />
+        {renderSidebar()}
       </aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-[232px] bg-pb-surface border-r pb-hairline flex flex-col ch-rise">
-            <Sidebar />
+            {renderSidebar()}
           </aside>
         </div>
       )}

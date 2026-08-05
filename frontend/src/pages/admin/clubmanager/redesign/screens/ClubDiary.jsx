@@ -47,7 +47,11 @@ export default function ClubDiary({ st, patch, narrow }) {
       api.feeAllMembers().catch(() => ({ members: [] })),
     ]).then(([boardRes, defsRes, yearsRes, rolesRes, membersRes]) => {
       if (!alive) return
-      const board = Array.isArray(boardRes) ? boardRes : (boardRes?.board || [])
+      // GET /club-diary/board returns { tasks: [...] }. This read `board`,
+      // which is never present, so it silently fell back to an empty list and
+      // the season plan claimed there were no tasks while the full editor
+      // showed a season's worth.
+      const board = Array.isArray(boardRes) ? boardRes : (boardRes?.tasks || boardRes?.board || [])
       const defs = Array.isArray(defsRes) ? defsRes : (defsRes?.definitions || [])
       const depsById = {}
       defs.forEach(d => { depsById[d.id] = d.depends_on || [] })
