@@ -75,6 +75,68 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## BetterFootball — Import Awards (v9.9.0, Aug 2026)
+
+A club's honour board imported as real `player_achievements` rows. Third
+sibling of Import Stats (`routers/afl/imports.py`) and Import Results
+(`routers/afl/result_imports.py`), built against a real 7,360-row 1959–2026
+awards register from an AFL club.
+
+- **`routers/afl/award_imports.py`** (`/club-admin/award-imports/*`, cap
+  `MANAGE_AWARDS`) — preview → resolve → commit → undo, plus a template.
+  **No schema change**: it writes the existing `player_achievements` +
+  `org_award_definitions` + `achievement_import_batches` tables, so an
+  imported award is indistinguishable from one typed into the Awards screen.
+- **An award the catalogue doesn't carry is CREATED** (`org_award_definitions`),
+  which is what stops a historical trophy existing on player rows and nowhere
+  in the club's own award list. A label already there is reused and **keeps its
+  own category** — the Award Types screen owns filing, and an upload retyping
+  a category the club set up by hand is the wrong way round. Only an award
+  being created has its category/subcategory editable on the wizard.
+- **`_award_key` collapses case AND "&"/"and"**, which is why 43 raw trophy
+  spellings in the reference sheet resolve to 39 awards ("Runner up Best &
+  Fairest" / "Runner Up Best & Fairest" are one trophy). A near-miss offers a
+  suggestion at ≥0.80 but still DEFAULTS to creating the label — "Best
+  Clubman" and "Best Clubperson" are two real trophies at plenty of clubs.
+- **Identity is the sheet's own player id where one is mapped**, not the name.
+  A register spells one person several ways, and — the dangerous half — holds
+  two different people under one name (two Jack Reeds). But **one id does not
+  always mean one person either**: nine ids in the reference sheet cover two
+  genuinely different names each (an id reused after someone left), so
+  `_build_identities` only lets an id unify rows whose names agree once case
+  is set aside, and splits it per name otherwise. A NAME covering more than
+  one identity is never auto-matched — it comes back `clash` with the roster
+  player offered as a candidate for each.
+- **A row naming no award is skipped, not invented into a nameless one** —
+  6,241 of the reference sheet's 7,360 rows are the club's record of who
+  turned out, not honours. Counted and reported, never silently dropped.
+- **Re-upload is safe**: a row already on the honour board for that person,
+  season and award reads as `exists`. Matched on the player id when there is
+  one and on the name ONLY for someone about to be created — checking both
+  would read one Jack Reed's honour as already recorded because the other
+  has it.
+- **`players_unresolved` counts only people who actually won something.** An
+  unmatched name with no trophy against it has nothing riding on the decision,
+  and counting it sends an admin hunting for a problem that isn't there.
+- **Undo removes the awards only.** Players and award types the import created
+  are left — a player record is a person, and a catalogue entry may already be
+  in use elsewhere. Same call Import Stats makes.
+- **`PlayerMatch` was extracted from `AflAdminImport.jsx` into
+  `importMatching.jsx`** and is now shared by Import Stats and Import Awards
+  (`sheetLine` prop for the per-name context line, `key`-based overrides so an
+  id-carrying sheet can hold two people under one name). `SearchSelect` gained
+  an `award` kind. New page `AflAdminAwardsImport.jsx` at
+  `/admin/import-awards`; the Awards screen's old one-shot CSV uploader was
+  replaced by a link to it, so there's one award-import path rather than two.
+  `POST /achievements/import` and its template endpoint still exist and are
+  unchanged — nothing in the UI calls them now.
+- **Verified end to end** against a real Postgres (28 checks) with the full
+  7,360-row sheet, and driven through the real app in a browser: auto-mapping
+  all four columns incl. "PayerID", 1,119 awards written, 39 award types
+  created, 25 players created, the shared-name split, a re-upload importing 0,
+  a sheet with no id column, a sheet naming its own categories, and undo
+  leaving the award types intact.
+
 ## Roster shift CRUD, paid vs volunteer hours, diary year, draft minutes (migration 221, v9.8.0, Aug 2026)
 
 Six items from the second live feedback batch, plus the paid/volunteer split that
