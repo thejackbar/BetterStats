@@ -469,7 +469,11 @@ export default function Directory({ st, patch, narrow }) {
                   </>
                 )}
               </section>
-              <section>
+              {/* Pinned to the right-hand column. Five sections flowing row by
+                  row would drop the fifth back onto the left, and this one
+                  belongs under availability — the two together are the answer
+                  to "when can they help, and how much have they already". */}
+              <section style={{ gridColumn: 2 }}>
                 <div style={cap}>HOURS BY ACTIVITY</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {hours.map(([activity, h], i) => (
