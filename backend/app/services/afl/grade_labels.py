@@ -26,12 +26,16 @@ CATEGORY_LABELS = {
 # Colts wins over women's when both markers are present, so a youth
 # competition (e.g. "Girls U16") lands in Colts — the age-group split a club
 # reaches for first, same precedence cricket's own junior/women's check uses.
+# The `s?` after each age number is load-bearing: clubs write "Under 18s" and
+# "U16s" far more often than the singular, and \b can't match between the
+# digit and a trailing "s", so without it every plural age group fell through
+# to 'senior'.
 _COLTS = re.compile(
-    r"\b(?:colts?|under[\s-]?\d+|u\d+|youth|junior[s]?|year[\s-]?\d+|yr[\s-]?\d+|auskick)\b",
+    r"\b(?:colts?|under[\s-]?\d+s?|u\d+s?|youth|junior[s]?|year[\s-]?\d+s?|yr[\s-]?\d+s?|auskick)\b",
     re.I,
 )
 _WOMENS = re.compile(r"\b(?:women'?s?|woman|ladies|lady|girls?|female)\b", re.I)
-_MASTERS = re.compile(r"\b(?:masters?|veterans?|vets?|over[\s-]?\d+|superules?)\b", re.I)
+_MASTERS = re.compile(r"\b(?:masters?|veterans?|vets?|over[\s-]?\d+s?|superules?)\b", re.I)
 _INTEGRATED = re.compile(
     r"\b(?:integrated|inclusion|inclusive|all[\s-]?abilities|special needs?|disability)\b",
     re.I,
