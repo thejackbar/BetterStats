@@ -46,7 +46,7 @@ function useAutosave(save, delay = 700) {
 
 /* ── Attendance ─────────────────────────────────────────────────────────── */
 
-function Attendance({ pool, attendance, onChange }) {
+function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
   const [query, setQuery] = useState('')
   const [showAll, setShowAll] = useState(false)
   const byId = useMemo(() => {
@@ -73,6 +73,15 @@ function Attendance({ pool, attendance, onChange }) {
           {present} present · {attendance.filter(a => a.status === 'apology').length} apologies
         </div>
       </div>
+      {/* Committee attendance is largely the same people every month. Offered
+          only while nothing is recorded yet, so it can never quietly overwrite
+          a list someone has started. */}
+      {previous && attendance.length === 0 && (
+        <button onClick={() => onCarryOver(previous.present_member_ids)}
+          className={`${btn} w-full mb-2`}>
+          Same as {previous.title} ({previous.present_member_ids.length} present)
+        </button>
+      )}
       <input className={`${inp} mb-2`} placeholder="Search anyone in the club…"
         value={query} onChange={e => setQuery(e.target.value)} />
       <div className="space-y-1 max-h-[260px] overflow-y-auto pb-scroll">
@@ -195,7 +204,8 @@ function ActionRow({ action, nameOf, onChange, onDelete }) {
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
-function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAction, actions, onActionChange, onActionDelete }) {
+function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAction, actions,
+                 onActionChange, onActionDelete, dragProps, isOver }) {
   const [showVotes, setShowVotes] = useState(false)
   const [adding, setAdding] = useState(false)
   const votes = useMemo(() => {
@@ -212,9 +222,14 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
   }
 
   return (
-    <div className="border pb-hairline rounded p-2.5 bg-pb-surface2/30">
+    <div className={`border pb-hairline rounded p-2.5 bg-pb-surface2/30 ${isOver ? 'ring-1 ring-pb-accent/60' : ''}`}
+      {...(dragProps?.zone || {})}>
       <div className="flex items-start justify-between gap-2">
-        <div className="text-[12.5px] text-pb-text min-w-0">{motion.description}</div>
+        {/* Drag to reorder within this item, or onto another agenda item's row
+            to move the motion there. */}
+        <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5 shrink-0"
+          title="Drag to reorder, or onto another agenda item" {...(dragProps?.handle || {})}>⠿</span>
+        <div className="text-[12.5px] text-pb-text min-w-0 flex-1">{motion.description}</div>
         <div className="flex items-center gap-1 shrink-0">
           <select value={motion.outcome} onChange={e => onChange({ outcome: e.target.value })}
             className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px] text-pb-text">
@@ -285,6 +300,7 @@ function AgendaItem({
   motions, actions, onItemChange, onItemDelete,
   onAddMotion, onMotionChange, onMotionDelete, onMotionVotes,
   onAddAction, onActionChange, onActionDelete,
+  motionDrag,
 }) {
   const [addingMotion, setAddingMotion] = useState('')
   const [addingAction, setAddingAction] = useState(false)
@@ -332,12 +348,14 @@ function AgendaItem({
           <div>
             <div className={`${cap} mb-1`}>MOTIONS</div>
             <div className="space-y-2">
-              {motions.map(mo => (
+              {motions.map((mo, mi) => (
                 <Motion key={mo.id} motion={mo} present={present} nameOf={nameOf}
                   actions={actions.filter(a => a.motion_id === mo.id)}
                   onChange={p => onMotionChange(mo.id, p)} onDelete={() => onMotionDelete(mo.id)}
                   onVotes={v => onMotionVotes(mo.id, v)} onAddAction={onAddAction}
-                  onActionChange={onActionChange} onActionDelete={onActionDelete} />
+                  onActionChange={onActionChange} onActionDelete={onActionDelete}
+                  isOver={motionDrag?.overId === mo.id}
+                  dragProps={motionDrag?.propsFor(mo, mi)} />
               ))}
             </div>
             <div className="flex gap-2 mt-2">
@@ -385,8 +403,12 @@ export default function MeetingRoom() {
   const [err, setErr] = useState(null)
   const [currentId, setCurrentId] = useState(null)
   const [newItem, setNewItem] = useState('')
-  const dragIndex = useRef(null)
+  // One drag controller for both kinds. An agenda row is a drop target for
+  // BOTH — drop an item on it to reorder the agenda, or drop a motion on it to
+  // move that motion under it — so the ref has to say which is in flight.
+  const drag = useRef({ kind: null, index: null, motionId: null })
   const [dragOver, setDragOver] = useState(null)
+  const [motionOver, setMotionOver] = useState(null)
 
   const load = useCallback(() => {
     api.committeeMeetingRoom(meetingId)
@@ -416,22 +438,86 @@ export default function MeetingRoom() {
   const saveMinutes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { minutes: v }).catch(e => toast.error(e.message)))
   const saveNotes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { private_notes: v }).catch(e => toast.error(e.message)))
 
+  // One write, not one per person: the endpoint replaces the whole list anyway.
+  const carryOver = wrap(async ids => {
+    await api.committeeSetAttendance(meetingId, ids.map(member_id => ({ member_id, status: 'present' })))
+  })
+
   const setAttendance = wrap(async (memberId, status) => {
     const next = attendance.filter(a => a.member_id !== memberId).map(a => ({ member_id: a.member_id, status: a.status }))
     if (status) next.push({ member_id: memberId, status })
     await api.committeeSetAttendance(meetingId, next)
   })
 
+  // Motions are ordered across the whole meeting, but dragged within an item.
+  // So a within-item reorder is spliced back into the meeting-wide sequence
+  // before it is sent, otherwise moving a motion under one heading would
+  // scramble the order under every other.
+  const motionOrderAfter = (movedId, targetId) => {
+    const all = [...motions]
+    const from = all.findIndex(m => m.id === movedId)
+    const to = all.findIndex(m => m.id === targetId)
+    if (from < 0 || to < 0 || from === to) return null
+    const [moved] = all.splice(from, 1)
+    all.splice(to, 0, moved)
+    return all
+  }
+
+  const dropOnMotion = wrap(async targetMotion => {
+    const { kind, motionId } = drag.current
+    drag.current = { kind: null, index: null, motionId: null }
+    setMotionOver(null)
+    if (kind !== 'motion' || !motionId || motionId === targetMotion.id) return
+    const next = motionOrderAfter(motionId, targetMotion.id)
+    if (!next) return
+    setData(d => ({ ...d, motions: next }))
+    await api.committeeReorderMotions(meetingId, next.map(m => m.id))
+  })
+
   const onDrop = wrap(async toIdx => {
-    const from = dragIndex.current
-    dragIndex.current = null; setDragOver(null)
-    if (from === null || from === toIdx) return
+    const { kind, index: from, motionId } = drag.current
+    drag.current = { kind: null, index: null, motionId: null }
+    setDragOver(null)
+
+    // A motion dropped on an agenda row moves under that heading.
+    if (kind === 'motion' && motionId) {
+      const target = items[toIdx]
+      const mo = motions.find(m => m.id === motionId)
+      if (!target || !mo || mo.agenda_item_id === target.id) return
+      await api.committeeUpdateMotion(meetingId, motionId, { agenda_item_id: target.id })
+      return
+    }
+
+    if (kind !== 'item' || from === null || from === toIdx) return
     const next = [...items]
     const [moved] = next.splice(from, 1)
     next.splice(toIdx, 0, moved)
     setData(d => ({ ...d, agenda_items: next }))   // optimistic, so the drag feels instant
     await api.committeeReorderAgenda(meetingId, next.map(i => i.id))
   })
+
+  const motionDrag = {
+    overId: motionOver,
+    propsFor: (mo) => ({
+      handle: {
+        draggable: true,
+        onDragStart: e => {
+          e.stopPropagation()
+          drag.current = { kind: 'motion', index: null, motionId: mo.id }
+        },
+        onDragEnd: () => { drag.current = { kind: null, index: null, motionId: null }; setMotionOver(null) },
+      },
+      zone: {
+        onDragOver: e => {
+          if (drag.current.kind !== 'motion') return
+          e.preventDefault(); e.stopPropagation()
+          if (motionOver !== mo.id) setMotionOver(mo.id)
+        },
+        onDragLeave: () => setMotionOver(o => (o === mo.id ? null : o)),
+        onDrop: e => { e.stopPropagation(); dropOnMotion(mo) },
+      },
+    }),
+  }
 
   if (err) {
     return (
@@ -491,9 +577,10 @@ export default function MeetingRoom() {
                 onOpen={() => setCurrentId(c => (c === item.id ? null : item.id))}
                 dragProps={{
                   draggable: true,
-                  onDragStart: () => { dragIndex.current = idx },
-                  onDragEnd: () => { dragIndex.current = null; setDragOver(null) },
+                  onDragStart: () => { drag.current = { kind: 'item', index: idx, motionId: null } },
+                  onDragEnd: () => { drag.current = { kind: null, index: null, motionId: null }; setDragOver(null) },
                 }}
+                motionDrag={motionDrag}
                 present={present} nameOf={nameOf}
                 motions={motions.filter(m => m.agenda_item_id === item.id)}
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
@@ -543,7 +630,8 @@ export default function MeetingRoom() {
         </div>
 
         <div className="space-y-3 xl:sticky xl:top-6">
-          <Attendance pool={pool} attendance={attendance} onChange={setAttendance} />
+          <Attendance pool={pool} attendance={attendance} onChange={setAttendance}
+            previous={data.previous_attendance} onCarryOver={carryOver} />
 
           <div className="pb-card p-4">
             <div className={`${cap} mb-1.5`}>MINUTES</div>

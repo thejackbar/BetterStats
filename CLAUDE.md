@@ -457,10 +457,22 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
 - **A completed meeting opens the same screen**, which is how past minutes,
   motions and actions are read. Nothing is read-only: minutes are usually
   finished after the room empties.
-- **Not built**: motions cannot yet be dragged (the endpoint and column exist,
-  `POST .../motions/reorder`, and motions already sort by `position` — only the
-  drag handle is missing, since they order themselves under their agenda item in
-  practice). Attendance has no apology-from-last-time carry-over.
+- **Motions drag two ways** (v9.7.2). One `drag` ref carries a `kind` of
+  `'item' | 'motion'`, because an agenda row is a drop target for both: drop an
+  item on it to reorder the agenda, drop a motion on it to move that motion
+  under that heading. Dropping a motion on another motion reorders within the
+  item. **Motions are ordered across the whole MEETING but dragged within an
+  item**, so `motionOrderAfter` splices the within-item move back into the
+  meeting-wide sequence before sending it — reordering under one heading would
+  otherwise scramble every other. The motion handle's `onDragStart` calls
+  `stopPropagation`, or grabbing it would drag the whole agenda card.
+- **Attendance carries over** (v9.7.2). `previous_meeting_attendance` walks back
+  up to 10 meetings **of the same type** and returns the first that actually
+  recorded someone present, so a meeting where only apologies were logged is
+  skipped rather than carried as an empty list. Only `present` comes across: an
+  apology is about one evening, and carrying it forward asserts something nobody
+  said. The button only shows while attendance is empty, so it can never
+  overwrite a list someone has started.
 
 ## Multi-sport: the AFL silo (Aug 2026)
 

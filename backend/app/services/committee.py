@@ -1199,6 +1199,42 @@ async def meeting_attendee_pool(session: AsyncSession, org_id) -> list[dict]:
     return out
 
 
+async def previous_meeting_attendance(session: AsyncSession, org_id, meeting: CommitteeMeeting) -> Optional[dict]:
+    """Who was present at the last meeting of this kind.
+
+    Committee attendance is largely the same people every month, so retyping it
+    is the sort of chore that gets skipped and then the record is wrong. This
+    finds the most recent EARLIER meeting of the same type that actually
+    recorded someone present, and hands back that list for the screen to offer.
+
+    Only the people marked present come back. An apology is about one evening —
+    carrying it forward would assert something nobody said.
+    """
+    prior = (await session.execute(
+        select(CommitteeMeeting)
+        .where(
+            CommitteeMeeting.organisation_id == org_id,
+            CommitteeMeeting.meeting_type == meeting.meeting_type,
+            CommitteeMeeting.id != meeting.id,
+            CommitteeMeeting.scheduled_at < meeting.scheduled_at,
+        )
+        .order_by(CommitteeMeeting.scheduled_at.desc())
+        .limit(10)
+    )).scalars().all()
+    for p in prior:
+        rows = (await session.execute(
+            select(MeetingAttendance.member_id)
+            .where(MeetingAttendance.meeting_id == p.id, MeetingAttendance.status == "present")
+        )).scalars().all()
+        if rows:
+            return {
+                "meeting_id": str(p.id), "title": p.title,
+                "scheduled_at": p.scheduled_at.isoformat() if p.scheduled_at else None,
+                "present_member_ids": [str(m) for m in rows],
+            }
+    return None
+
+
 async def meeting_room(session: AsyncSession, org_id, meeting: CommitteeMeeting) -> dict:
     """Everything the live screen needs, in one fetch."""
     detail = await meeting_detail(session, org_id, meeting.id)
@@ -1213,4 +1249,5 @@ async def meeting_room(session: AsyncSession, org_id, meeting: CommitteeMeeting)
         **detail,
         "actions": [_task_dict(t) for t in tasks],
         "attendee_pool": await meeting_attendee_pool(session, org_id),
+        "previous_attendance": await previous_meeting_attendance(session, org_id, meeting),
     }
