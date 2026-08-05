@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.config.logging_config import configure_logging
 from app.config.settings import settings
 from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
@@ -21,10 +22,7 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
+configure_logging()
 logger = logging.getLogger(__name__)
 
 

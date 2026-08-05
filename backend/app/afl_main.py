@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect as sa_inspect, text
 from sqlalchemy.schema import CreateColumn
 
+from app.config.logging_config import configure_logging
 from app.config.settings import settings
 from app.models.db import Base, engine
 import app.models.afl  # noqa: F401 — register the AFL tables on the shared Base
@@ -52,6 +53,7 @@ from app.routers.afl import (
     seasons_admin as afl_seasons_admin,
 )
 
+configure_logging()
 logger = logging.getLogger(__name__)
 
 # A mis-wired deployment (AFL entrypoint + cricket env/database) must fail
