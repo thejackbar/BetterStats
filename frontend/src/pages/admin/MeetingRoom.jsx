@@ -27,7 +27,26 @@ const btnAccent = 'px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text
 
 const AGENDA_STATUSES = ['proposed', 'discussed', 'carried', 'deferred', 'withdrawn']
 const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
-const ATTEND = [['present', 'Present'], ['apology', 'Apology'], ['absent', 'Absent']]
+// Chair is a kind of present — someone has to run the meeting, and recording it
+// matters when the President is away. It sorts first so the chair is obvious.
+const ATTEND = [['chair', 'Chair'], ['present', 'Present'], ['apology', 'Apology'], ['absent', 'Absent']]
+const IN_ROOM = new Set(['chair', 'present'])
+
+// An outcome should be readable without reading. These are the existing theme
+// tokens, not new colours: green carried, red lost, amber pending/deferred,
+// grey for anything withdrawn or not yet reached.
+const TONE = {
+  carried: 'var(--pb-positive-ink)',
+  lost: 'var(--pb-red-ink)',
+  deferred: 'var(--pb-accent-ink)',
+  pending: 'var(--pb-accent-ink)',
+  discussed: 'var(--pb-accent-ink)',
+  proposed: 'var(--pb-faint)',
+  withdrawn: 'var(--pb-faint)',
+}
+const toneOf = v => TONE[v] || 'var(--pb-faint)'
+// A tinted left edge, so a glance down the agenda reads as a set of outcomes.
+const edge = v => ({ borderLeft: `2px solid ${toneOf(v)}` })
 const VOTES = [['for', 'For'], ['against', 'Against'], ['abstain', 'Abstain']]
 const titleCase = s => (s || '').split('_').map(w => w[0]?.toUpperCase() + w.slice(1)).join(' ')
 
@@ -63,7 +82,8 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
     if (showAll) return true
     return p.on_committee || byId[p.member_id]
   })
-  const present = attendance.filter(a => a.status === 'present').length
+  const present = attendance.filter(a => IN_ROOM.has(a.status)).length
+  const chair = pool.find(p => byId[p.member_id] === 'chair')
 
   return (
     <div className="pb-card p-4">
@@ -72,6 +92,9 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
         <div className="font-mono text-[10px] text-pb-faint">
           {present} present · {attendance.filter(a => a.status === 'apology').length} apologies
         </div>
+      </div>
+      <div className="font-mono text-[10px] mb-2" style={{ color: chair ? 'var(--pb-accent-ink)' : 'var(--pb-faintest)' }}>
+        {chair ? `Chaired by ${chair.full_name}` : 'No chair recorded'}
       </div>
       {/* Committee attendance is largely the same people every month. Offered
           only while nothing is recorded yet, so it can never quietly overwrite
@@ -88,19 +111,24 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
         {shown.length === 0 && (
           <div className="font-mono text-[10px] text-pb-faintest py-2">No one matches that.</div>
         )}
+        {/* Two lines per person, not one: a fourth button (Chair) left the name
+            column so narrow that "Ali Nunn" truncated and the position under it
+            never showed at all. */}
         {shown.map(p => (
-          <div key={p.member_id} className="flex items-center justify-between gap-2">
-            <span className="text-[12.5px] text-pb-text truncate">
-              {p.full_name}
-              {p.on_committee && <span className="font-mono text-[9px] text-pb-faintest ml-1.5">COMMITTEE</span>}
-            </span>
-            <div className="flex gap-1 shrink-0">
-              {ATTEND.map(([v, l]) => (
-                <button key={v} onClick={() => onChange(p.member_id, byId[p.member_id] === v ? null : v)}
-                  className={`px-2 py-1 rounded font-mono text-[9px] border ${byId[p.member_id] === v
-                    ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+          <div key={p.member_id} className="py-0.5">
+            <div className="text-[12.5px] text-pb-text truncate leading-tight">{p.full_name}</div>
+            <div className="flex items-center justify-between gap-2 mt-0.5">
+              <span className="font-mono text-[9px] text-pb-faintest truncate">
+                {p.position ? p.position.toUpperCase() : ''}
+              </span>
+              <div className="flex gap-1 shrink-0">
+                {ATTEND.map(([v, l]) => (
+                  <button key={v} onClick={() => onChange(p.member_id, byId[p.member_id] === v ? null : v)}
+                    className={`px-2 py-1 rounded font-mono text-[9px] border ${byId[p.member_id] === v
+                      ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
                   style={byId[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         ))}
@@ -116,12 +144,21 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
 
 /* ── Actions raised in the meeting ──────────────────────────────────────── */
 
-function ActionForm({ agendaItemId, motionId, present, onSave, onCancel }) {
+function ActionForm({ agendaItemId, motionId, present, pool, onSave, onCancel }) {
   const [form, setForm] = useState({ title: '', due_date: '', budget_estimate: '' })
   const [owners, setOwners] = useState([])
   const [busy, setBusy] = useState(false)
+  const [who, setWho] = useState('')
 
   const toggle = id => setOwners(o => o.includes(id) ? o.filter(x => x !== id) : [...o, id])
+  // People in the room are the quick picks, but plenty of work goes to someone
+  // who is not at the meeting — an absent committee member, a club member, a
+  // contractor. Typing searches everyone.
+  const q = who.trim().toLowerCase()
+  const chosen = (pool || []).filter(p => owners.includes(p.member_id))
+  const options = q
+    ? (pool || []).filter(p => p.full_name.toLowerCase().includes(q)).slice(0, 8)
+    : [...present, ...chosen.filter(c => !present.some(p => p.member_id === c.member_id))]
 
   async function submit() {
     if (!form.title.trim()) return
@@ -156,20 +193,23 @@ function ActionForm({ agendaItemId, motionId, present, onSave, onCancel }) {
         </label>
       </div>
       <div className={`${cap} mb-1`}>WHO IS DOING IT</div>
-      {present.length === 0 ? (
-        <div className="font-mono text-[10px] text-pb-faintest mb-2">Mark someone present first.</div>
-      ) : (
-        <div className="flex flex-wrap gap-1 mb-2">
-          {present.map(p => (
-            <button key={p.member_id} onClick={() => toggle(p.member_id)}
-              className={`px-2 py-1 rounded font-mono text-[9px] border ${owners.includes(p.member_id)
-                ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
-              style={owners.includes(p.member_id) ? { background: 'var(--pb-accent)' } : undefined}>
-              {p.full_name}
-            </button>
-          ))}
-        </div>
-      )}
+      <input className={`${inp} mb-1.5`} placeholder="Anyone in the club — type to search…"
+        value={who} onChange={e => setWho(e.target.value)} />
+      <div className="flex flex-wrap gap-1 mb-2">
+        {options.length === 0 && (
+          <span className="font-mono text-[10px] text-pb-faintest">
+            {q ? 'Nobody matches that.' : 'Mark someone present, or search above.'}
+          </span>
+        )}
+        {options.map(p => (
+          <button key={p.member_id} onClick={() => toggle(p.member_id)}
+            className={`px-2 py-1 rounded font-mono text-[9px] border ${owners.includes(p.member_id)
+              ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+            style={owners.includes(p.member_id) ? { background: 'var(--pb-accent)' } : undefined}>
+            {p.full_name}
+          </button>
+        ))}
+      </div>
       <div className="flex gap-2">
         <button onClick={submit} disabled={busy || !form.title.trim()} className={btnAccent}
           style={{ background: 'var(--pb-accent)' }}>{busy ? 'SAVING…' : '+ ACTION'}</button>
@@ -182,7 +222,8 @@ function ActionForm({ agendaItemId, motionId, present, onSave, onCancel }) {
 function ActionRow({ action, nameOf, onChange, onDelete }) {
   const owners = (action.assignee_member_ids || []).map(nameOf).filter(Boolean)
   return (
-    <div className="flex items-start justify-between gap-2 border pb-hairline rounded px-2.5 py-2 bg-pb-surface2/30">
+    <div className="flex items-start justify-between gap-2 border pb-hairline rounded px-2.5 py-2 bg-pb-surface2/30"
+      style={edge(action.status === 'done' ? 'carried' : action.status === 'blocked' ? 'lost' : 'deferred')}>
       <div className="min-w-0">
         <div className="text-[12.5px] text-pb-text">{action.title}</div>
         <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
@@ -204,7 +245,7 @@ function ActionRow({ action, nameOf, onChange, onDelete }) {
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
-function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAction, actions,
+function Motion({ motion, present, pool, nameOf, onChange, onDelete, onVotes, onAddAction, actions,
                  onActionChange, onActionDelete, dragProps, isOver }) {
   const [showVotes, setShowVotes] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -223,7 +264,7 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
 
   return (
     <div className={`border pb-hairline rounded p-2.5 bg-pb-surface2/30 ${isOver ? 'ring-1 ring-pb-accent/60' : ''}`}
-      {...(dragProps?.zone || {})}>
+      style={edge(motion.outcome)} {...(dragProps?.zone || {})}>
       <div className="flex items-start justify-between gap-2">
         {/* Drag to reorder within this item, or onto another agenda item's row
             to move the motion there. */}
@@ -232,7 +273,8 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
         <div className="text-[12.5px] text-pb-text min-w-0 flex-1">{motion.description}</div>
         <div className="flex items-center gap-1 shrink-0">
           <select value={motion.outcome} onChange={e => onChange({ outcome: e.target.value })}
-            className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px] text-pb-text">
+            style={{ color: toneOf(motion.outcome) }}
+            className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px]">
             {MOTION_OUTCOMES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
           </select>
           <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">✕</button>
@@ -242,8 +284,11 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
         <button onClick={() => setShowVotes(v => !v)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">
           {showVotes ? 'Hide votes' : 'Record votes'}
         </button>
-        <span className="font-mono text-[9px] text-pb-faintest">
-          {motion.votes_for ?? 0} for · {motion.votes_against ?? 0} against · {motion.votes_abstain ?? 0} abstain
+        <span className="font-mono text-[9px]">
+          <span style={{ color: TONE.carried }}>{motion.votes_for ?? 0} for</span>
+          <span className="text-pb-faintest"> · </span>
+          <span style={{ color: TONE.lost }}>{motion.votes_against ?? 0} against</span>
+          <span className="text-pb-faintest"> · {motion.votes_abstain ?? 0} abstain</span>
         </span>
         <button onClick={() => setAdding(a => !a)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">+ Action</button>
       </div>
@@ -278,7 +323,7 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
       )}
 
       {adding && (
-        <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present}
+        <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present} pool={pool}
           onSave={async d => { await onAddAction(d); setAdding(false) }} onCancel={() => setAdding(false)} />
       )}
       {actions.length > 0 && (
@@ -296,7 +341,7 @@ function Motion({ motion, present, nameOf, onChange, onDelete, onVotes, onAddAct
 /* ── One agenda item ────────────────────────────────────────────────────── */
 
 function AgendaItem({
-  item, index, isCurrent, onOpen, dragProps, present, nameOf,
+  item, index, isCurrent, onOpen, dragProps, present, pool, nameOf,
   motions, actions, onItemChange, onItemDelete,
   onAddMotion, onMotionChange, onMotionDelete, onMotionVotes,
   onAddAction, onActionChange, onActionDelete,
@@ -310,7 +355,8 @@ function AgendaItem({
 
   return (
     <div className={`pb-card p-3 ${isCurrent ? 'ring-1' : ''}`}
-      style={isCurrent ? { boxShadow: '0 0 0 1px var(--pb-accent)' } : undefined} {...dragProps}>
+      style={{ ...edge(item.status), ...(isCurrent ? { boxShadow: '0 0 0 1px var(--pb-accent)' } : {}) }}
+      {...dragProps}>
       <div className="flex items-start gap-2">
         <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5" title="Drag to reorder">⠿</span>
         <div className="flex-1 min-w-0">
@@ -324,11 +370,33 @@ function AgendaItem({
             <button onClick={onOpen} className="text-left w-full">
               <span className="font-mono text-[10px] text-pb-faintest mr-2">{index + 1}</span>
               <span className="text-[13.5px] text-pb-text">{item.title}</span>
+              {/* What is attached, without having to open it. */}
+              <div className="font-mono text-[9.5px] mt-0.5 flex flex-wrap gap-x-2">
+                <span style={{ color: toneOf(item.status) }}>{titleCase(item.status)}</span>
+                {motions.length > 0 && (
+                  <span className="text-pb-faintest">
+                    {motions.length} motion{motions.length === 1 ? '' : 's'}
+                    {motions.some(m => m.outcome === 'carried') &&
+                      <span style={{ color: TONE.carried }}> · {motions.filter(m => m.outcome === 'carried').length} carried</span>}
+                    {motions.some(m => m.outcome === 'lost') &&
+                      <span style={{ color: TONE.lost }}> · {motions.filter(m => m.outcome === 'lost').length} lost</span>}
+                  </span>
+                )}
+                {actions.length > 0 && (
+                  <span className="text-pb-faintest">
+                    {actions.length} action{actions.length === 1 ? '' : 's'}
+                    {actions.some(a => a.status !== 'done') &&
+                      <span style={{ color: TONE.deferred }}> · {actions.filter(a => a.status !== 'done').length} open</span>}
+                  </span>
+                )}
+                {item.outcome_notes && <span className="text-pb-faintest">minuted</span>}
+              </div>
             </button>
           )}
         </div>
         <select value={item.status} onChange={e => onItemChange({ status: e.target.value })}
-          className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px] text-pb-text shrink-0">
+          style={{ color: toneOf(item.status) }}
+          className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px] shrink-0">
           {AGENDA_STATUSES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
         </select>
         <button onClick={() => { setDraft(item.title); setEditing(true) }}
@@ -349,7 +417,7 @@ function AgendaItem({
             <div className={`${cap} mb-1`}>MOTIONS</div>
             <div className="space-y-2">
               {motions.map((mo, mi) => (
-                <Motion key={mo.id} motion={mo} present={present} nameOf={nameOf}
+                <Motion key={mo.id} motion={mo} present={present} pool={pool} nameOf={nameOf}
                   actions={actions.filter(a => a.motion_id === mo.id)}
                   onChange={p => onMotionChange(mo.id, p)} onDelete={() => onMotionDelete(mo.id)}
                   onVotes={v => onMotionVotes(mo.id, v)} onAddAction={onAddAction}
@@ -380,7 +448,7 @@ function AgendaItem({
               ))}
             </div>
             {addingAction ? (
-              <ActionForm agendaItemId={item.id} present={present}
+              <ActionForm agendaItemId={item.id} present={present} pool={pool}
                 onSave={async d => { await onAddAction(d); setAddingAction(false) }}
                 onCancel={() => setAddingAction(false)} />
             ) : (
@@ -430,8 +498,9 @@ export default function MeetingRoom() {
 
   const nameOf = useCallback(id => pool.find(p => p.member_id === id)?.full_name, [pool])
   // Only people actually in the room can vote or be given an action.
+  // Who is in the room, for voting. The chair is present too.
   const present = useMemo(
-    () => attendance.filter(a => a.status === 'present')
+    () => attendance.filter(a => IN_ROOM.has(a.status))
       .map(a => ({ member_id: a.member_id, full_name: a.full_name || nameOf(a.member_id) || 'Unknown' })),
     [attendance, nameOf])
 
@@ -581,7 +650,7 @@ export default function MeetingRoom() {
                   onDragEnd: () => { drag.current = { kind: null, index: null, motionId: null }; setDragOver(null) },
                 }}
                 motionDrag={motionDrag}
-                present={present} nameOf={nameOf}
+                present={present} pool={pool} nameOf={nameOf}
                 motions={motions.filter(m => m.agenda_item_id === item.id)}
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
                 onItemChange={wrap(p => api.committeeUpdateAgendaItem(meetingId, item.id, p))}

@@ -1181,20 +1181,34 @@ async def meeting_attendee_pool(session: AsyncSession, org_id) -> list[dict]:
     the thing this replaces. Everyone else is still returned so a guest or a
     late co-opted member can be found by typing, without a second request.
     """
-    on_committee = set((await session.execute(
-        select(CommitteeTerm.member_id).where(
+    # The position each current committee member holds, so the screen can show
+    # "President" beside a name and default the chair to whoever that is.
+    held = (await session.execute(
+        select(CommitteeTerm.member_id, CommitteePosition.name, CommitteePosition.is_office_bearer)
+        .join(CommitteePosition, CommitteePosition.id == CommitteeTerm.position_id)
+        .where(
             CommitteeTerm.organisation_id == org_id,
             CommitteeTerm.ended_at.is_(None),
             CommitteeTerm.member_id.isnot(None),
         )
-    )).scalars().all())
+    )).all()
+    position_by = {}
+    for _mid, _name, _is_ob in held:
+        # An office-bearer title wins when someone holds more than one seat:
+        # "President" is what belongs next to their name, not "Bar Manager".
+        if _mid not in position_by or (_is_ob and not position_by[_mid][1]):
+            position_by[_mid] = (_name, bool(_is_ob))
+    on_committee = set(position_by)
     rows = (await session.execute(
         select(FeeMember.id, FeeMember.full_name)
         .where(FeeMember.organisation_id == org_id)
         .order_by(func.lower(FeeMember.full_name))
     )).all()
-    out = [{"member_id": str(mid), "full_name": name, "on_committee": mid in on_committee}
-           for mid, name in rows]
+    out = [{
+        "member_id": str(mid), "full_name": name,
+        "on_committee": mid in on_committee,
+        "position": position_by.get(mid, (None, False))[0],
+    } for mid, name in rows]
     out.sort(key=lambda r: (not r["on_committee"], r["full_name"].lower()))
     return out
 
