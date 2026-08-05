@@ -17,6 +17,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+# The long form, because that is what volunteer_profiles.available_days stores
+# and what a caller has to send back to filter on a day.
+DOW_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 # `volunteer_profiles.available_days` is written by two features that never
 # agreed on a vocabulary. The Volunteers screen posts day NAMES (its API types
@@ -743,6 +746,105 @@ async def unconfirm_roster(db: AsyncSession, org_id, week_id) -> dict:
         WHERE id=:id AND organisation_id=:org
     """), {"id": week_id, "org": org_id})
     return {"ok": True, "status": "published"}
+
+
+async def role_shortages(db: AsyncSession, org_id, *, weeks: int = 4) -> dict:
+    """Which roles the club is short of, read from the shifts nobody has filled.
+
+    Demand is the unfilled shifts in the weeks ahead, resolved through their
+    operational area to the role that area asks for. Supply is the people who
+    hold that role AND are free on the day the shift falls.
+
+    The day matters, and it is the whole point of the function. Six people hold
+    the Scorer role is a comforting number that means nothing if all six are
+    Sunday-only and every open Scorer shift is a Saturday — so the count that
+    drives this is per (role, day), and a role reads as short when a day it is
+    needed on has fewer free holders than open shifts.
+
+    An area with no required role is reported separately rather than silently
+    dropped: those shifts are open too, and "we need people, for nothing in
+    particular" is a different conversation from "we need two more scorers".
+    """
+    today = date.today()
+    horizon = today + timedelta(weeks=max(1, min(weeks, 26)))
+
+    # Demand. Only shifts that are actually in the future — an unfilled shift
+    # from last Tuesday is a fact about the past, not something to recruit for.
+    open_rows = (await db.execute(text("""
+        SELECT s.day_of_week, s.start_time, s.end_time,
+               a.id AS area_id, a.name AS area_name, a.color,
+               a.required_role_id, r.title AS role_title,
+               (w.week_start + s.day_of_week) AS shift_date
+        FROM roster_shifts s
+        JOIN roster_weeks w ON w.id = s.roster_week_id
+        JOIN roster_areas a ON a.id = s.area_id
+        LEFT JOIN club_roles r ON r.id = a.required_role_id
+        WHERE s.organisation_id = :org AND s.assignee_member_id IS NULL
+          AND (w.week_start + s.day_of_week) BETWEEN :today AND :horizon
+        ORDER BY (w.week_start + s.day_of_week), s.start_time
+    """), {"org": org_id, "today": today, "horizon": horizon})).mappings().all()
+
+    # Supply, per role, per day of the week.
+    cands = await candidates(db, org_id)
+    holders: dict = {}          # role_id -> [candidate]
+    for c in cands:
+        for rid in c["role_ids"]:
+            holders.setdefault(rid, []).append(c)
+
+    by_role: dict = {}
+    unassigned_area: dict = {}
+    for row in open_rows:
+        rid = str(row["required_role_id"]) if row["required_role_id"] else None
+        dow = int(row["day_of_week"])
+        if rid is None:
+            slot = unassigned_area.setdefault(str(row["area_id"]), {
+                "area_id": str(row["area_id"]), "area_name": row["area_name"],
+                "color": row["color"], "open_shifts": 0, "days": {},
+            })
+            slot["open_shifts"] += 1
+            slot["days"][dow] = slot["days"].get(dow, 0) + 1
+            continue
+        slot = by_role.setdefault(rid, {
+            "role_id": rid, "role_title": row["role_title"] or "Unnamed role",
+            "open_shifts": 0, "areas": {}, "days": {},
+        })
+        slot["open_shifts"] += 1
+        slot["days"][dow] = slot["days"].get(dow, 0) + 1
+        slot["areas"][row["area_name"]] = slot["areas"].get(row["area_name"], 0) + 1
+
+    out = []
+    for rid, slot in by_role.items():
+        people = holders.get(rid, [])
+        day_rows, worst = [], 0
+        for dow, needed in sorted(slot["days"].items()):
+            free = [c for c in people if dow in c["available_days"]]
+            short = max(0, needed - len(free))
+            worst = max(worst, short)
+            day_rows.append({
+                "day_of_week": dow, "day": DOW[dow], "day_full": DOW_FULL[dow], "open_shifts": needed,
+                "available": len(free), "short_by": short,
+                "who": [c["name"] for c in free[:6]],
+            })
+        out.append({
+            **{k: v for k, v in slot.items() if k != "days"},
+            "areas": [{"name": n, "open_shifts": c} for n, c in
+                      sorted(slot["areas"].items(), key=lambda kv: -kv[1])],
+            "holders": len(people),
+            "holders_with_no_days": sum(1 for c in people if not c["available_days"]),
+            "days": day_rows,
+            "short_by": worst,
+        })
+
+    # Worst shortage first, then the biggest hole, then by name so the order is
+    # stable when two roles are equally short.
+    out.sort(key=lambda r: (-r["short_by"], -r["open_shifts"], r["role_title"].lower()))
+    return {
+        "from": today.isoformat(), "to": horizon.isoformat(), "weeks": weeks,
+        "roles": out,
+        "no_role_required": sorted(unassigned_area.values(), key=lambda a: -a["open_shifts"]),
+        "total_open": len(open_rows),
+        "short_roles": sum(1 for r in out if r["short_by"] > 0),
+    }
 
 
 async def hours_summary(db: AsyncSession, org_id, *, start: date, end: date) -> dict:

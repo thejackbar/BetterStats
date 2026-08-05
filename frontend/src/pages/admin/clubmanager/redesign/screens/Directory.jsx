@@ -266,7 +266,7 @@ export default function Directory({ st, patch, narrow }) {
               catalogues and bulk work live. */}
           <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
           <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
-          <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer hours</Link>
+          <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
         </div>
       </ScreenHeader>
 

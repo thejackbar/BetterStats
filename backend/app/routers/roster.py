@@ -348,6 +348,14 @@ async def hours(start: str, end: str, _: User = _cap, club: Organisation = Depen
     return await svc.hours_summary(db, club.id, start=s, end=e)
 
 
+@router.get("/shortages")
+async def shortages(weeks: int = Query(4, ge=1, le=26), _: User = _cap,
+                    club: Organisation = Depends(get_current_club),
+                    db: AsyncSession = Depends(get_db)):
+    """Which roles the club is short of, from the shifts nobody has filled."""
+    return await svc.role_shortages(db, club.id, weeks=weeks)
+
+
 # ─── Confirming the roster ───────────────────────────────────────────────────
 
 class WorkedEntry(BaseModel):

@@ -500,6 +500,8 @@ export const api = {
   rosterAssign: (weekId, shiftId, memberId) => request(`/club-admin/roster/week/${weekId}/assign`, { method: 'POST', body: JSON.stringify({ shift_id: shiftId, member_id: memberId }) }),
   rosterAutofill: (weekId) => request(`/club-admin/roster/week/${weekId}/autofill`, { method: 'POST' }),
   rosterPublish: (weekId) => request(`/club-admin/roster/week/${weekId}/publish`, { method: 'POST' }),
+  // Which roles the club is short of, from the shifts nobody has filled.
+  rosterShortages: (weeks = 4) => request(`/club-admin/roster/shortages?weeks=${weeks}`),
   rosterReset: (weekId) => request(`/club-admin/roster/week/${weekId}/reset`, { method: 'POST' }),
   // Confirming the roster: check what was worked, then post it to the hours ledger.
   rosterConfirmReview: (weekId) => request(`/club-admin/roster/week/${weekId}/confirm-review`),

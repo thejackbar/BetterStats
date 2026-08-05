@@ -122,19 +122,127 @@ function VolunteerRow({ v, onChanged, clubRoles, onRoleCreated }) {
   )
 }
 
+
+// What the club is actually short of, read from the shifts nobody has filled.
+//
+// The number that matters is per DAY, not per role: six scorers is a
+// comforting figure that means nothing if all six are Sunday-only and every
+// open scoring shift is a Saturday. Clicking a shortage filters the list below
+// to that role on that day, which is the next thing you want to do.
+function ShortagesPanel({ onPick }) {
+  const [data, setData] = useState(null)
+  const [weeks, setWeeks] = useState(4)
+  useEffect(() => { api.rosterShortages(weeks).then(setData).catch(() => setData(null)) }, [weeks])
+  if (!data) return null
+
+  const short = (data.roles || []).filter(r => r.short_by > 0)
+  const covered = (data.roles || []).length - short.length
+
+  return (
+    <div className="pb-card p-4 mb-4">
+      <div className="flex items-center gap-2 flex-wrap mb-2">
+        <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest">WHAT WE ARE SHORT OF</div>
+        <span className="ml-auto flex items-center gap-1.5">
+          {[2, 4, 8].map(w => (
+            <FilterPill key={w} active={weeks === w} onClick={() => setWeeks(w)}>{w} weeks</FilterPill>
+          ))}
+        </span>
+      </div>
+
+      {data.total_open === 0 ? (
+        <div className="text-[12.5px] text-pb-dim">
+          Every shift in the next {weeks} weeks has someone against it.
+        </div>
+      ) : short.length === 0 ? (
+        <div className="text-[12.5px] text-pb-dim">
+          {data.total_open} shift{data.total_open === 1 ? '' : 's'} still open, but there are enough people
+          free on the day for each one. Nobody new needed, just the roster filling in.
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {short.map(r => (
+            <div key={r.role_id}>
+              <div className="flex items-baseline gap-2 flex-wrap">
+                <span className="text-pb-text font-semibold text-[13.5px]">{r.role_title}</span>
+                <span className="font-mono text-[10px] text-pb-faint">
+                  {r.open_shifts} open · {r.holders} hold the role
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {r.days.filter(d => d.short_by > 0).map(d => (
+                  <button key={d.day_of_week} onClick={() => onPick(r.role_title, d.day_full)}
+                    title={`Show ${r.role_title} free on ${d.day}`}
+                    className="px-2.5 py-1 rounded-full text-[12px] border transition-colors"
+                    style={{ borderColor: 'rgba(245,181,66,0.45)', background: 'rgba(245,181,66,0.12)', color: '#f5b542' }}>
+                    {d.day}: need {d.short_by} more
+                  </button>
+                ))}
+                {r.days.filter(d => d.short_by === 0 && d.open_shifts > 0).map(d => (
+                  <button key={d.day_of_week} onClick={() => onPick(r.role_title, d.day_full)}
+                    title={`Show ${r.role_title} free on ${d.day}`}
+                    className="px-2.5 py-1 rounded-full text-[12px] border border-pb-hairline2 bg-transparent text-pb-dim hover:text-pb-text">
+                    {d.day}: {d.available} free
+                  </button>
+                ))}
+              </div>
+              {r.holders_with_no_days > 0 && (
+                <div className="text-[12px] text-pb-faint mt-1">
+                  {r.holders_with_no_days} {r.holders_with_no_days === 1 ? 'person holds' : 'people hold'} this role
+                  with no days recorded, so the roster cannot offer it to them.
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {(data.no_role_required || []).length > 0 && (
+        <div className="text-[12.5px] text-pb-dim mt-3 pt-3 border-t pb-hairline-t">
+          {data.no_role_required.reduce((n, a) => n + a.open_shifts, 0)} open shift(s) in areas that ask for no
+          particular role ({data.no_role_required.map(a => a.area_name).join(', ')}) — anyone can take those.
+        </div>
+      )}
+      {covered > 0 && short.length > 0 && (
+        <div className="font-mono text-[10px] text-pb-faintest mt-3">
+          {covered} other role{covered === 1 ? '' : 's'} with open shifts already have enough people free.
+        </div>
+      )}
+    </div>
+  )
+}
+
 function VolunteersTab({ volunteers, load, clubRoles, onRoleCreated, allMembers }) {
   const toast = useToast()
   const [addingMemberId, setAddingMemberId] = useState(null)
   const [roleFilter, setRoleFilter] = useState('')
-  const [dayFilter, setDayFilter] = useState('')
+  const [days, setDays] = useState([])          // several days, not one
+  const [groupByRole, setGroupByRole] = useState(false)
 
+  // Picking Sat AND Sun means "free on either", which is the question you are
+  // actually asking when you are trying to cover a weekend.
   const filtered = useMemo(() => {
     return (volunteers || []).filter(v => {
       const roleNames = [...(v.roles || []).map(r => r.title), ...(v.roles_interested || [])]
+      const avail = v.available_days || []
       return (!roleFilter || roleNames.some(r => r.toLowerCase().includes(roleFilter.toLowerCase())))
-        && (!dayFilter || (v.available_days || []).includes(dayFilter))
+        && (days.length === 0 || days.some(d => avail.includes(d)))
+    }).sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''))
+  }, [volunteers, roleFilter, days])
+
+  // Grouped by role, each group alphabetical. Someone holding two roles appears
+  // under both, because that is the point — you are looking for anyone who can
+  // cover a role, not for a tidy partition of people.
+  const grouped = useMemo(() => {
+    if (!groupByRole) return null
+    const by = new Map()
+    filtered.forEach(v => {
+      const titles = (v.roles || []).map(r => r.title)
+      if (titles.length === 0) titles.push('No role assigned')
+      titles.forEach(t => { if (!by.has(t)) by.set(t, []); by.get(t).push(v) })
     })
-  }, [volunteers, roleFilter, dayFilter])
+    return [...by.entries()].sort((a, b) =>
+      a[0] === 'No role assigned' ? 1 : b[0] === 'No role assigned' ? -1 : a[0].localeCompare(b[0]))
+  }, [filtered, groupByRole])
 
   const candidateMembers = useMemo(() => {
     const existing = new Set((volunteers || []).map(v => v.member_id))
@@ -152,6 +260,8 @@ function VolunteersTab({ volunteers, load, clubRoles, onRoleCreated, allMembers 
 
   return (
     <div>
+      <ShortagesPanel onPick={(role, day) => { setRoleFilter(role); setDays([day]); setGroupByRole(false) }} />
+
       <div className="pb-card p-4 mb-4">
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">ADD A VOLUNTEER</div>
         <div className="flex gap-2">
@@ -170,14 +280,47 @@ function VolunteersTab({ volunteers, load, clubRoles, onRoleCreated, allMembers 
 
       <div className="flex flex-wrap gap-2 mb-3">
         <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Filter by role (e.g. Scorer)…" value={roleFilter} onChange={e => setRoleFilter(e.target.value)} />
-        <select className={`${inp} w-40`} value={dayFilter} onChange={e => setDayFilter(e.target.value)}>
-          <option value="">Any day</option>
-          {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-        </select>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {DAYS.map(d => (
+          <FilterPill key={d} active={days.includes(d)}
+            onClick={() => setDays(cur => cur.includes(d) ? cur.filter(x => x !== d) : [...cur, d])}>
+            {d.slice(0, 3)}
+          </FilterPill>
+        ))}
+        {days.length > 0 && (
+          <button onClick={() => setDays([])} className="text-[12px] text-pb-faint hover:text-pb-text">Clear days</button>
+        )}
+        <span className="ml-auto flex items-center gap-2">
+          <FilterPill active={!groupByRole} onClick={() => setGroupByRole(false)}>By name</FilterPill>
+          <FilterPill active={groupByRole} onClick={() => setGroupByRole(true)}>By role</FilterPill>
+        </span>
+      </div>
+
+      <div className="text-[12.5px] text-pb-faint mb-3">
+        {days.length === 0
+          ? `${filtered.length} volunteer${filtered.length === 1 ? '' : 's'}.`
+          : `${filtered.length} free on ${days.length === 1 ? days[0] : days.map(d => d.slice(0, 3)).join(', ')}.`}
       </div>
 
       {filtered.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">No volunteers match.</div>
+      ) : grouped ? (
+        <div className="space-y-5">
+          {grouped.map(([title, list]) => (
+            <div key={title}>
+              <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">
+                {title.toUpperCase()} · {list.length}
+              </div>
+              <div className="space-y-2">
+                {list.map(v => (
+                  <VolunteerRow key={title + v.member_id} v={v} onChanged={load} clubRoles={clubRoles} onRoleCreated={onRoleCreated} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="space-y-2">
           {filtered.map(v => (
@@ -337,9 +480,9 @@ export default function AdminVolunteers() {
     if (a?.id) setActivities(prev => (prev.some(x => x.id === a.id) ? prev : [...prev, a]))
   }, [])
 
-  if (volunteers === null) return <BetterClubManagerLayout title="Volunteers" caption="The volunteer directory and their hours"><PbSpinner message="Loading volunteers…" /></BetterClubManagerLayout>
+  if (volunteers === null) return <BetterClubManagerLayout title="Volunteer bulk entry" caption="Who is free, and logging hours for several people"><PbSpinner message="Loading volunteers…" /></BetterClubManagerLayout>
   return (
-    <BetterClubManagerLayout title="Volunteers" caption="The volunteer directory and their hours">
+    <BetterClubManagerLayout title="Volunteer bulk entry" caption="Who is free, and logging hours for several people">
       <div className="max-w-4xl">
 
         <div className="flex flex-wrap gap-1 mb-5">
