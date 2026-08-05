@@ -185,6 +185,25 @@ export const aflApi = {
   importsBatchPlayers: (batchId) => request(`/club-admin/imports/${batchId}/players`),
   importsUndo: (batchId) => request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
 
+  // Admin — Import Results (a club's own results register, one row per
+  // match). Seasons come from the Import Stats endpoints above — same club
+  // seasons, same create path, deliberately not duplicated.
+  resultImportsTemplateUrl: () => `${BASE}/club-admin/result-imports/template.csv`,
+  resultImportsPreview: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/result-imports/preview`, { method: 'POST', body: fd, credentials: 'include' })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).detail || 'Preview failed')
+        return res.json()
+      })
+  },
+  resultImportsResolve: (body) => request('/club-admin/result-imports/resolve', { method: 'POST', body: JSON.stringify(body) }),
+  resultImportsCommit: (body) => request('/club-admin/result-imports/commit', { method: 'POST', body: JSON.stringify(body) }),
+  resultImportsList: () => request('/club-admin/result-imports'),
+  resultImportsBatchGames: (batchId) => request(`/club-admin/result-imports/${batchId}/games`),
+  resultImportsUndo: (batchId) => request(`/club-admin/result-imports/${batchId}/undo`, { method: 'POST' }),
+
   // Admin — Better HQ: All Clubs
   superListClubs: (params) => request(`/club-admin/super/clubs${qs(params)}`),
   superCreateClub: (playhqOrgId, syncNow = true) => request('/club-admin/super/clubs', {

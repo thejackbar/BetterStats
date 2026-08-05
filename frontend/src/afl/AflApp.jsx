@@ -19,6 +19,7 @@ import AflAdminSync from './pages/admin/AflAdminSync'
 import AflAdminPlayers from './pages/admin/AflAdminPlayers'
 import AflAdminPlayerImport from './pages/admin/AflAdminPlayerImport'
 import AflAdminImport from './pages/admin/AflAdminImport'
+import AflAdminResultsImport from './pages/admin/AflAdminResultsImport'
 import AflAdminSeasons from './pages/admin/AflAdminSeasons'
 import AflAdminMergePlayers from './pages/admin/AflAdminMergePlayers'
 import AflAdminMergeGrades from './pages/admin/AflAdminMergeGrades'
@@ -51,6 +52,7 @@ export default function AflApp() {
                   <Route path="players" element={<AflAdminPlayers />} />
                   <Route path="players/import" element={<AflAdminPlayerImport />} />
                   <Route path="import" element={<AflAdminImport />} />
+                  <Route path="import-results" element={<AflAdminResultsImport />} />
                   <Route path="seasons" element={<AflAdminSeasons />} />
                   <Route path="merge" element={<AflAdminMergePlayers />} />
                   <Route path="merge-grades" element={<AflAdminMergeGrades />} />
