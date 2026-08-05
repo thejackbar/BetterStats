@@ -194,8 +194,13 @@ export default function AdminImport() {
     })
   }, [resolved?.players])
 
-  // Seasons we couldn't match to a club season default to the "Career summary"
-  // bucket (the adjustment residual) — a single place to dump unmatched history.
+  // An unmatched season that reads like a real, datable summer ("1972/1973")
+  // defaults to being created — a club importing decades of pre-sync history
+  // wants those seasons to exist, not to have every one of them collapsed into
+  // a single career bucket. Anything we can't put a year to (a catch-all like
+  // "Prior Seasons & Adjustments", or a label that isn't a season at all) still
+  // defaults to the residual, because a season we can't name is a season nobody
+  // could find again.
   useEffect(() => {
     const ss = resolved?.seasons
     if (!ss) return
@@ -203,11 +208,33 @@ export default function AdminImport() {
       let changed = false
       const next = { ...prev }
       for (const s of ss) {
-        if (s.auto_status === 'none' && !(s.raw_label in next)) { next[s.raw_label] = '__prior__'; changed = true }
+        if (s.auto_status !== 'none' || (s.raw_label in next)) continue
+        next[s.raw_label] = s.can_create ? '__create__' : '__prior__'
+        changed = true
       }
       return changed ? next : prev
     })
   }, [resolved?.seasons])
+
+  // Grades are deliberately NOT auto-created for a club that already syncs:
+  // an imported grade the reconciler can't match online reads as "nothing
+  // synced here", and the sheet gets stacked on top of data already held. For a
+  // club with no synced grades at all there's nothing to double-count, so
+  // creating them is the sensible default.
+  useEffect(() => {
+    const gs = resolved?.grades
+    if (!gs || resolved?.has_synced_grades !== false) return
+    setGradeOverrides(prev => {
+      let changed = false
+      const next = { ...prev }
+      for (const g of gs) {
+        if (g.auto_status !== 'none' || (g.raw_label in next)) continue
+        next[g.raw_label] = '__create__'
+        changed = true
+      }
+      return changed ? next : prev
+    })
+  }, [resolved?.grades, resolved?.has_synced_grades])
 
   async function runParse() {
     if (!file) return
@@ -461,7 +488,7 @@ export default function AdminImport() {
         {/* ── Step: Match seasons ── */}
         {step === 'seasons' && (
           <MatchTable
-            title="Match seasons" subtitle="Match each season label to one of your seasons. Anything we can't match (and catch-all rows like “Prior Seasons & Adjustments”) defaults to Career summary (no season) — a single adjustment bucket that fills in everything online data doesn't already hold."
+            title="Match seasons" subtitle="Match each season label to one of your seasons. A label that reads like a real season you don't have yet is set to be created — nothing is written until you import. Catch-all rows like “Prior Seasons & Adjustments”, and anything we can't put a year to, go to Career summary (no season): a single adjustment bucket that fills in everything online data doesn't already hold."
             rows={(resolved?.seasons) || []} kind="season" allOptions={allSeasons.map(s => ({ id: s.id, name: formatSeason(s) }))}
             loading={resolving}
             valueFor={(r) => {
@@ -473,6 +500,9 @@ export default function AdminImport() {
             }}
             onChange={(r, v) => setSOverride(r.raw_label, v)}
             cell={cell} onCreateSeason={createSeason}
+            onBulkCreate={rs => setSeasonOverrides(o => ({
+              ...o, ...Object.fromEntries(rs.map(r => [r.raw_label, '__create__'])),
+            }))}
             nextLabel={hasGradeCol ? 'NEXT: GRADES →' : 'NEXT: REVIEW →'}
             onNext={() => setStep(hasGradeCol ? 'grades' : 'review')} onBack={() => setStep('players')}
           />
@@ -482,7 +512,7 @@ export default function AdminImport() {
         {step === 'grades' && (
           <MatchTable
             title="Match grades / teams"
-            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If a grade genuinely predates online records, confirm “no online equivalent” so it's kept as its own historical figure."
+            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If a grade genuinely predates online records, create it: it becomes a real grade you can filter and merge, kept as its own historical figure."
             rows={(resolved?.grades) || []} kind="grade"
             allOptions={(resolved?.grade_options || []).map(g => ({ id: g.name, name: g.name, games: g.games, players: g.players, runs: g.runs }))}
             loading={resolving}
@@ -494,6 +524,9 @@ export default function AdminImport() {
             }}
             onChange={(r, v) => setGOverride(r.raw_label, v)}
             cell={cell}
+            onBulkCreate={rs => setGradeOverrides(o => ({
+              ...o, ...Object.fromEntries(rs.map(r => [r.raw_label, '__create__'])),
+            }))}
             nextLabel="NEXT: REVIEW →" onNext={() => setStep('review')}
             onBack={() => setStep(granularity === 'season' ? 'seasons' : 'players')}
           />
@@ -575,7 +608,9 @@ export default function AdminImport() {
 
 // ── searchable picker — renders only a handful of options at a time, so it
 //    scales to thousands of players without freezing the page ─────────────────
-const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
+// 'create' counts as resolved: the admin has decided what happens to the label,
+// even though the season/grade itself isn't written until commit.
+const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own', 'create']
 const PAGE_SIZE = 50
 
 function valueLabel(value, idName, kind) {
@@ -584,10 +619,12 @@ function valueLabel(value, idName, kind) {
   if (value === '__skip__') return 'Skip'
   if (value === '__prior__') return '↪ Career summary (no season)'
   if (value === '__none__') return '↪ No online equivalent (its own historical grade)'
+  if (value === '__create__') return kind === 'grade' ? '+ Create this grade' : '+ Create this season'
   return idName.get(value) || '(selected)'
 }
 
-function SearchSelect({ value, idName, candidates, options, onChange, kind, cell, onCreateSeason }) {
+function SearchSelect({ value, idName, candidates, options, onChange, kind, cell, onCreateSeason,
+                        canCreate = false, proposedName = null }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [creating, setCreating] = useState(false)
@@ -662,8 +699,18 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
                 {kind === 'player' ? '+ Create new player' : '↪ Career summary (no season)'}
               </button>
             )}
+            {/* "Create this X" defers to the import itself — nothing is written
+                until commit, so backing out leaves no empty seasons or grades
+                behind. The season form below is the other path: name it
+                yourself, and it's created immediately. */}
+            {canCreate && (
+              <button className={item} onClick={() => pick('__create__')}>
+                + Create {kind === 'grade' ? 'this grade' : 'this season'}
+                {proposedName ? ` — “${proposedName}”` : ''}
+              </button>
+            )}
             {kind === 'season' && (
-              <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
+              <button className={item} onClick={() => setCreating(true)}>+ Create a season with a different name…</button>
             )}
             {kind === 'grade' && (
               <button className={item} onClick={() => pick('__none__')}>↪ No online equivalent (its own historical grade)</button>
@@ -702,7 +749,7 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
 }
 
 // ── shared match table for players + seasons (filter + paginate for scale) ────
-function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading, onCreateSeason }) {
+function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading, onCreateSeason, onBulkCreate }) {
   const [onlyReview, setOnlyReview] = useState(true)
   const [page, setPage] = useState(0)
 
@@ -727,6 +774,12 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
     () => onlyReview ? rows.filter(r => !RESOLVED_STATUSES.includes(r.status)) : rows,
     [rows, onlyReview],
   )
+  // Rows that could be created but currently aren't set to be.
+  const creatable = useMemo(
+    () => (onBulkCreate ? rows.filter(r => r.can_create && r.status !== 'create'
+                                           && !RESOLVED_STATUSES.includes(r.status)) : []),
+    [rows, onBulkCreate],
+  )
   const pageCount = Math.max(1, Math.ceil(shown.length / PAGE_SIZE))
   const safePage = Math.min(page, pageCount - 1)
   const pageRows = shown.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE)
@@ -746,6 +799,15 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
               className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-2.5 py-1 text-pb-faint hover:text-pb-text">
               {onlyReview ? `SHOW ALL ${counts.total}` : 'NEEDS REVIEW ONLY'}
             </button>
+            {/* A club importing 50 years of history has 50 unmatched seasons.
+                Clicking through them one at a time is the whole reason this
+                step got skipped and everything ended up in the career bucket. */}
+            {creatable.length > 0 && (
+              <button onClick={() => onBulkCreate(creatable)}
+                className="font-mono text-[10px] tracking-wide2 border border-pb-accent/40 rounded px-2.5 py-1 text-pb-accent hover:bg-pb-accent/10">
+                + CREATE ALL {creatable.length} MISSING {kind === 'grade' ? 'GRADES' : 'SEASONS'}
+              </button>
+            )}
             {pageCount > 1 && (
               <span className="ml-auto flex items-center gap-2 font-mono text-[10px] text-pb-faint">
                 <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0} className="border pb-hairline rounded px-2 py-0.5 disabled:opacity-40">←</button>
@@ -782,7 +844,8 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
                       <SearchSelect value={value} idName={idName} candidates={candidates} options={allOptions}
-                        onChange={v => onChange(r, v)} kind={kind} cell={cell} onCreateSeason={onCreateSeason} />
+                        onChange={v => onChange(r, v)} kind={kind} cell={cell} onCreateSeason={onCreateSeason}
+                        canCreate={!!r.can_create} proposedName={r.proposed?.name || null} />
                     </td>
                   </tr>
                 )
@@ -988,6 +1051,8 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
         <div className="font-mono text-[10px] tracking-wide2 text-green-300 mb-2">IMPORT COMPLETE</div>
         <h2 className="font-display font-bold text-xl text-pb-text mb-3">
           {committed.players_imported} players imported{committed.players_created ? `, ${committed.players_created} created` : ''}
+          {committed.seasons_created ? `, ${committed.seasons_created} season${committed.seasons_created === 1 ? '' : 's'} created` : ''}
+          {committed.grades_created ? `, ${committed.grades_created} grade${committed.grades_created === 1 ? '' : 's'} created` : ''}
         </h2>
         <p className="text-pb-faint text-sm mb-4 leading-relaxed max-w-2xl">
           {committed.rows_written} rows written; the reconciler added {committed.deltas_written} adjustment rows for the part

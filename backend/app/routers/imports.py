@@ -34,16 +34,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import (
-    ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
+    Grade, ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.routers.manual_entries import _log_edit, _recompute_milestones
 from app.services import import_ingest as ingest
 from app.services import import_reconcile as recon
+from app.services.grade_labels import suggest_category
 
 router = APIRouter(prefix="/club-admin/imports", tags=["imports"])
 
 MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+# Override sentinel meaning "this doesn't exist yet — make it". Deliberately
+# resolved at COMMIT rather than when the admin picks it, so backing out of the
+# wizard leaves no half-built seasons or grades behind.
+CREATE = "__create__"
 
 
 # ── request bodies ────────────────────────────────────────────────────────────
@@ -53,8 +59,8 @@ class ResolveRequest(BaseModel):
     mapping: dict = {}                  # field -> column header (or {"column": ...})
     granularity: str = "career"         # career | season
     player_overrides: dict = {}         # raw_name -> player_id | "__new__" | "__skip__"
-    season_overrides: dict = {}         # raw_label -> season_id | "__prior__"
-    grade_overrides: dict = {}          # raw_label -> grade_name | "__none__"
+    season_overrides: dict = {}         # raw_label -> season_id | "__prior__" | "__create__"
+    grade_overrides: dict = {}          # raw_label -> grade_name | "__none__" | "__create__"
 
 
 class CommitRequest(ResolveRequest):
@@ -169,6 +175,13 @@ def _apply_season_overrides(matches: dict, overrides: dict) -> None:
             matches[label] = {"candidates": []}
         if choice == "__prior__":
             matches[label].update(season_id=None, is_prior=True, status="prior")
+        elif choice == CREATE:
+            # Mint it at commit, not now — an abandoned wizard must not leave a
+            # trail of empty seasons behind it. season_id stays None until then.
+            proposal = ingest.season_proposal(label)
+            if proposal:
+                matches[label].update(season_id=None, is_prior=False,
+                                      status="create", proposed=proposal)
         elif choice:
             matches[label].update(season_id=str(choice), is_prior=False, status="manual")
 
@@ -181,8 +194,75 @@ def _apply_grade_overrides(matches: dict, overrides: dict) -> None:
             # Explicit confirm: no matching online grade — group under the
             # sheet's own literal label (the pre-fix behaviour), now opt-in.
             matches[label].update(grade_name=label, status="own")
+        elif choice == CREATE:
+            # Same label as "__none__" groups under, but this one also becomes a
+            # real grades row at commit so it shows up in the grade filter and
+            # Merge Grades instead of living only as text on imported_stats.
+            matches[label].update(grade_name=label, status="create")
         elif choice:
             matches[label].update(grade_name=str(choice), status="manual")
+
+
+async def _org_has_synced_grades(db: AsyncSession, org_id) -> bool:
+    """Does this club hold any grade that came from a sync?
+
+    Drives whether the wizard offers to create grades by default. A club with
+    nothing synced (importing its whole history from a spreadsheet) has no
+    online coverage for an imported grade to be double-counted against, so
+    creating grades is free of the hazard match_grades warns about. A club that
+    IS synced has to say so explicitly, per grade.
+    """
+    row = await db.execute(text("""
+        SELECT 1 FROM grades gr
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org_id AND gr.grassroots_id IS NOT NULL
+        LIMIT 1
+    """), {"org_id": str(org_id)})
+    return row.first() is not None
+
+
+async def _materialise_seasons(db: AsyncSession, org_id, season_overrides: dict) -> tuple[dict, int]:
+    """Turn every ``__create__`` season choice into a real Season row.
+
+    Returns the overrides with each ``__create__`` replaced by the resulting
+    season id, so the rest of the resolve pass treats it as an ordinary manual
+    match. Called from commit() only, inside its transaction — if the import
+    then fails, the seasons roll back with it.
+
+    An existing season of the same name is REUSED rather than duplicated, which
+    is what makes re-importing a corrected sheet safe: the second run matches
+    the season the first run created instead of minting "1972/1973" twice.
+    """
+    out = dict(season_overrides or {})
+    to_create = [lb for lb, choice in out.items() if choice == CREATE]
+    if not to_create:
+        return out, 0
+
+    existing = {
+        (s.name or "").strip().lower(): s.id
+        for s in (await db.execute(
+            select(Season).where(Season.organisation_id == org_id))).scalars().all()
+    }
+    created = 0
+    for label in to_create:
+        proposal = ingest.season_proposal(label)
+        if not proposal:
+            # Not a datable label after all — leave it to the residual bucket
+            # rather than inventing a season nobody could find again.
+            out.pop(label, None)
+            continue
+        key = proposal["name"].lower()
+        sid = existing.get(key)
+        if sid is None:
+            season = Season(id=uuid.uuid4(), organisation_id=org_id, grassroots_id=None,
+                            name=proposal["name"], year=proposal["year"])
+            db.add(season)
+            await db.flush()
+            sid = season.id
+            existing[key] = sid
+            created += 1
+        out[label] = str(sid)
+    return out, created
 
 
 def _resolved_grade_label(raw_label: Optional[str], gmatch: dict) -> Optional[str]:
@@ -233,6 +313,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     _apply_season_overrides(smatch, req.season_overrides)
     gmatch = ingest.match_grades(raw_grade_labels, [g["name"] for g in grade_options]) if grade_col else {}
     _apply_grade_overrides(gmatch, req.grade_overrides)
+    has_synced_grades = await _org_has_synced_grades(db, org_id) if grade_col else False
 
     # Columns + names we'll summarise straight from the sheet, so the close-review
     # can show "this is what your sheet holds for this name" next to each
@@ -417,6 +498,11 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         "seasons": [{"raw_label": lb, **m} for lb, m in smatch.items()],
         "grades": [{"raw_label": lb, **m} for lb, m in gmatch.items()],
         "grade_options": grade_options,
+        # A club with nothing synced can create grades freely — there is no
+        # online coverage for an imported grade to be double-counted against.
+        # The wizard uses this to decide whether "create" is a safe default or
+        # a per-grade decision the admin has to make.
+        "has_synced_grades": has_synced_grades,
         "preview": preview,
         "rounding_notes": sorted(rounding)[:50],
         "warnings": warnings,
@@ -490,6 +576,13 @@ async def commit(
     """Persist the club's uploaded truth, then run the reconciler. Re-importing a
     player replaces that player's prior imported truth (latest upload wins);
     other players are untouched. Audit-logged + reversible via /undo."""
+    # Mint any seasons the admin asked for BEFORE resolving, so the resolve pass
+    # sees them as ordinary existing seasons and every row keyed to that label
+    # lands on the new id. Same transaction as the import itself.
+    season_overrides, created_seasons = await _materialise_seasons(
+        db, club.id, req.season_overrides)
+    req = req.model_copy(update={"season_overrides": season_overrides})
+
     resolved = await _resolve(db, club.id, req)
     items_by_player = resolved["_items_by_player"]
     new_names = set(resolved["_new_names"])
@@ -556,14 +649,48 @@ async def commit(
             ImportedStat.organisation_id == club.id, ImportedStat.player_id.in_(pids))
     )
 
+    # Promote a (season, grade label) pair the admin chose to create into a real
+    # Grade row. Without this an imported grade only ever existed as free text on
+    # imported_stats.grade_label — invisible to the grade filter, Merge Grades
+    # and everything else reading the grades table. A grade hangs off a season
+    # (grades.season_id is required), so a row whose season is still unresolved
+    # keeps its label as text and nothing is created. Cached per commit so one
+    # pair repeated across hundreds of rows is looked up once.
+    create_labels = {lb for lb, m in (gmatch or {}).items() if m.get("status") == "create"}
+    grade_cache: dict = {}
+    created_grades = 0
+
+    async def _resolve_grade_id(season_id, label):
+        nonlocal created_grades
+        if not season_id or not label or label not in create_labels:
+            return None
+        key = (str(season_id), label.strip().lower())
+        if key in grade_cache:
+            return grade_cache[key]
+        found = (await db.execute(select(Grade).where(
+            Grade.season_id == season_id,
+            func.lower(Grade.name) == label.strip().lower(),
+        ))).scalar_one_or_none()
+        if found is None:
+            found = Grade(id=uuid.uuid4(), season_id=season_id, grassroots_id=None,
+                          name=label.strip(), category=suggest_category(label))
+            db.add(found)
+            await db.flush()
+            created_grades += 1
+        grade_cache[key] = found.id
+        return found.id
+
     inserted = 0
     for pid_str, items in items_by_player.items():
         for it in items:
+            grade_id = await _resolve_grade_id(it["season_id"], it.get("raw_grade_label")
+                                               or it.get("grade_label"))
             db.add(ImportedStat(
                 organisation_id=club.id, import_batch_id=batch.id,
                 player_id=uuid.UUID(pid_str), scope=it["scope"],
                 season_id=it["season_id"], season_label=it.get("season_label"),
-                grade_label=it.get("grade_label"), is_prior_bucket=it["is_prior_bucket"],
+                grade_label=it.get("grade_label"), grade_id=grade_id,
+                is_prior_bucket=it["is_prior_bucket"],
                 **it["truth"],
             ))
             inserted += 1
@@ -574,9 +701,11 @@ async def commit(
         target_table="imported_stats",
         target_id=f"batch:{batch.id}",
         summary=f"BetterImport — {len(items_by_player)} players, {inserted} rows "
-                f"({created_players} new players created)",
+                f"({created_players} new players, {created_seasons} new seasons, "
+                f"{created_grades} new grades created)",
         before=None,
-        after={"batch_id": str(batch.id), "players": len(items_by_player), "rows": inserted},
+        after={"batch_id": str(batch.id), "players": len(items_by_player), "rows": inserted,
+               "seasons_created": created_seasons, "grades_created": created_grades},
     )
     await db.commit()
 
@@ -588,6 +717,8 @@ async def commit(
         "players_imported": len(items_by_player),
         "rows_written": inserted,
         "players_created": created_players,
+        "seasons_created": created_seasons,
+        "grades_created": created_grades,
         "deltas_written": written,
         "rows_skipped": resolved["totals"]["rows_skipped"],
         "preview": resolved["preview"][:50],

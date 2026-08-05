@@ -4559,6 +4559,24 @@ async def lifespan(app: FastAPI):
             ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
         """))
 
+        # Migration 223 — Import Stats can now create a grade that doesn't exist
+        # yet, so an imported row needs somewhere to record which one it made.
+        await conn.execute(text("ALTER TABLE imported_stats ADD COLUMN IF NOT EXISTS grade_id UUID"))
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'imported_stats_grade_id_fkey'
+                ) THEN
+                    ALTER TABLE imported_stats
+                        ADD CONSTRAINT imported_stats_grade_id_fkey
+                        FOREIGN KEY (grade_id) REFERENCES grades (id) ON DELETE SET NULL;
+                END IF;
+            END $$;
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_imported_stats_grade_id ON imported_stats (grade_id)"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

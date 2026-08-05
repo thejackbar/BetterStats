@@ -2099,6 +2099,10 @@ class ImportedStat(Base):
     season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="SET NULL"), nullable=True)
     season_label = Column(Text, nullable=True)
     grade_label = Column(Text, nullable=True)
+    # The real grade this row belongs to, once one exists (migration 223). Stays
+    # NULL when the row's season is unresolved — a grade hangs off a season, so
+    # there is nothing to attach to and the label above remains the only record.
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
     is_prior_bucket = Column(Boolean, server_default="false", nullable=False)
     games_played = Column(Integer, server_default="0", nullable=False)
     batting_innings = Column(Integer, server_default="0", nullable=False)

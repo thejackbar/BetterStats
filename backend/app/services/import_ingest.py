@@ -497,6 +497,24 @@ def _norm_season(s: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9/]+", " ", str(s or "").lower())).strip()
 
 
+def season_proposal(label: str) -> Optional[dict]:
+    """What a season named ``label`` would be created as, or None if we can't
+    tell. Only a label carrying a real year can be minted: "1972/1973" is a
+    season, "2nd XI" or "Totals" is not, and inventing a season from a label we
+    can't date would put a club's stats somewhere nobody could find them again.
+
+    ``year`` is the season's OPENING year, matching how Season.year is stored
+    for a synced summer ("Summer 2010/11" -> 2010).
+    """
+    name = str(label or "").strip()
+    if not name or _PRIOR_RE.search(name):
+        return None
+    yrs = _season_years(name)
+    if not yrs:
+        return None
+    return {"name": name, "year": min(yrs)}
+
+
 def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
     """labels → match info. ``seasons`` = list of (id, name, year).
 
@@ -533,7 +551,13 @@ def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
                           "status": "matched", "auto_status": "matched", "is_prior": False,
                           "confidence": round(top[0][0], 2), "candidates": cands}
         else:
-            out[label] = {"season_id": None, "status": "none", "auto_status": "none", "is_prior": False, "candidates": cands}
+            # No confident match. If the label reads like a datable season the
+            # club simply doesn't have yet (a pre-sync era), offer to create it
+            # rather than folding a whole decade into the career bucket.
+            proposal = season_proposal(label)
+            out[label] = {"season_id": None, "status": "none", "auto_status": "none",
+                          "is_prior": False, "candidates": cands,
+                          "can_create": proposal is not None, "proposed": proposal}
     return out
 
 
@@ -579,6 +603,12 @@ def match_grades(labels: list, grade_names: list, threshold: float = 0.72) -> di
         top = scored[0][0] if scored else 0.0
         cands = [{"grade_name": nm, "name": nm, "confidence": round(sc, 2)} for sc, nm in scored[:5] if sc >= 0.4]
         status = "fuzzy" if top >= threshold else "none"
+        # A grade label can always be minted — unlike a season it needs no year,
+        # only the season it hangs off. Whether that is SAFE is a separate
+        # question the caller answers per season (see imports.py::_grade_create_
+        # safe): creating a grade under a season that already has synced games
+        # risks the double-count this function's docstring warns about.
         out[label] = {"grade_name": None, "status": status, "auto_status": status,
-                      "confidence": round(top, 2), "candidates": cands}
+                      "confidence": round(top, 2), "candidates": cands,
+                      "can_create": True, "proposed": {"name": str(label).strip()}}
     return out
