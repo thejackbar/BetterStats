@@ -93,15 +93,19 @@ async def get_summary(org_id: uuid.UUID,
     # upload) the same way the leaderboard/admin Players list do — without
     # this, a club whose whole history came from an upload had real numbers
     # nowhere on the public dashboard's "leading players" panels.
+    # first_year/last_year (debut/final season, joined off the same combined
+    # season_id) mirror where BetterStats (Core)'s equivalent board shows
+    # each player's AVG/HS sub-line — AFL has no batting average, so a
+    # career span reads better here than a rate stat would.
     async def _top(order: str):
         col = _TOP_COLS[order]
         res = await db.execute(text(f"""
             WITH combined AS (
-                SELECT s.player_id, s.games, s.goals, s.bog_count
+                SELECT s.player_id, s.season_id, s.games, s.goals, s.bog_count
                 FROM afl_player_season_stats s
                 WHERE s.organisation_id = :org AND s.grade_id IS NULL {season_clause_s}
                 UNION ALL
-                SELECT i.player_id, i.games_played AS games, i.goals, i.bog_count
+                SELECT i.player_id, i.season_id, i.games_played AS games, i.goals, i.bog_count
                 FROM afl_imported_stats i
                 WHERE i.organisation_id = :org {season_clause_i}
                   AND NOT EXISTS (
@@ -113,9 +117,12 @@ async def get_summary(org_id: uuid.UUID,
             SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
                    COALESCE(SUM(c.games),0) AS games,
                    COALESCE(SUM(c.goals),0) AS goals,
-                   COALESCE(SUM(c.bog_count),0) AS bogs
+                   COALESCE(SUM(c.bog_count),0) AS bogs,
+                   MIN(sn.year) AS first_year,
+                   MAX(sn.year) AS last_year
             FROM combined c
             JOIN players p ON p.id = c.player_id
+            LEFT JOIN seasons sn ON sn.id = c.season_id
             GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
             HAVING COALESCE(SUM(c.{col}),0) > 0
             ORDER BY COALESCE(SUM(c.{col}),0) DESC, games DESC
@@ -158,4 +165,7 @@ async def get_summary(org_id: uuid.UUID,
         "most_games": await _top("games"),
         "recent_games": [dict(r._mapping) for r in recent],
         "upcoming_games": [dict(r._mapping) for r in upcoming],
+        # Career-wide (never season-scoped — a milestone is a lifetime tally,
+        # so it's computed once regardless of the dashboard's season filter).
+        "milestones_in_reach": await aggregations.upcoming_milestones(db, org_id),
     }

@@ -35,6 +35,109 @@ function SeasonBarChart({ rows, dataKey, name, color }) {
   )
 }
 
+// ── Sortable season table — mirrors BetterStats (Core)'s SEASON BY SEASON
+// card (click a header to sort, hairline-top rows, hover highlight) rather
+// than a bold-header-row-plus-always-expanded-sub-rows list, which reads as
+// much denser for a player with 20+ seasons across several grades. The
+// per-grade breakdown collapses behind a caret instead — only shown for a
+// season actually split across more than one grade.
+function useSortable(rows, defaultKey, defaultDir = 'desc') {
+  const [sortKey, setSortKey] = useState(defaultKey)
+  const [sortDir, setSortDir] = useState(defaultDir)
+  const sorted = [...(rows || [])].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey]
+    if (av == null && bv == null) return 0
+    if (av == null) return 1
+    if (bv == null) return -1
+    if (av < bv) return sortDir === 'asc' ? -1 : 1
+    if (av > bv) return sortDir === 'asc' ? 1 : -1
+    return 0
+  })
+  const request = (key, dDir = 'desc') => {
+    if (sortKey === key) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortKey(key); setSortDir(dDir) }
+  }
+  return { sorted, sortKey, sortDir, request }
+}
+
+function SortTh({ label, sKey, cur, dir, onSort, dDir = 'desc' }) {
+  const active = cur === sKey
+  return (
+    <th
+      className={`px-3 py-2 text-right font-mono text-[10px] uppercase tracking-wide cursor-pointer select-none whitespace-nowrap ${active ? 'text-pb-text' : 'text-pb-faint hover:text-pb-dim'}`}
+      onClick={() => onSort(sKey, dDir)}
+    >
+      {label}{active ? (dir === 'asc' ? ' ▲' : ' ▼') : ''}
+    </th>
+  )
+}
+
+function SeasonTable({ seasonRows, gradeRows }) {
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonRows, 'year', 'desc')
+  const [expanded, setExpanded] = useState(() => new Set())
+  const toggle = (sid) => setExpanded(prev => {
+    const next = new Set(prev)
+    if (next.has(sid)) next.delete(sid); else next.add(sid)
+    return next
+  })
+
+  return (
+    <div className="pb-card overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="pb-hairline-b">
+          <tr>
+            <th className="px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide text-pb-faint">Season</th>
+            <SortTh label="GP" sKey="games" cur={sortKey} dir={sortDir} onSort={request} />
+            <SortTh label="Goals" sKey="goals" cur={sortKey} dir={sortDir} onSort={request} />
+            <SortTh label="Behinds" sKey="behinds" cur={sortKey} dir={sortDir} onSort={request} />
+            <SortTh label="BOG" sKey="bogs" cur={sortKey} dir={sortDir} onSort={request} />
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((s, i) => {
+            const grades = (gradeRows || []).filter(g => g.season_id === s.season_id)
+            const hasBreakdown = grades.length > 1
+            const isOpen = expanded.has(s.season_id)
+            return (
+              <Fragment key={s.season_id || i}>
+                <tr
+                  className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2/50 ${hasBreakdown ? 'cursor-pointer' : ''}`}
+                  onClick={() => hasBreakdown && toggle(s.season_id)}
+                >
+                  <td className="px-3 py-2.5 font-medium">
+                    <span className="flex items-center gap-1.5">
+                      {hasBreakdown && (
+                        <span className="text-pb-faint text-[9px] w-3 inline-block">{isOpen ? '▾' : '▸'}</span>
+                      )}
+                      {s.season_name}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2.5 text-right pb-num">{s.games}</td>
+                  <td className="px-3 py-2.5 text-right pb-num font-semibold" style={{ color: 'var(--pb-accent)' }}>{s.goals}</td>
+                  <td className="px-3 py-2.5 text-right pb-num">{s.behinds}</td>
+                  <td className="px-3 py-2.5 text-right pb-num">{s.bogs}</td>
+                </tr>
+                {hasBreakdown && isOpen && grades.map(g => (
+                  <tr key={`${s.season_id}-${g.grade_id}`} className="text-pb-dim bg-pb-surface2/30">
+                    <td className="px-3 py-1.5 pl-8 text-xs">{g.grade_name}</td>
+                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.games}</td>
+                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.goals}</td>
+                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.behinds}</td>
+                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.bogs}</td>
+                  </tr>
+                ))}
+              </Fragment>
+            )
+          })}
+          {sorted.length === 0 && (
+            <tr><td colSpan={5} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function CumulativeGoalsChart({ rows }) {
   const seasons = (rows || []).filter(r => r.season_id).slice().reverse()
   if (!seasons.length) return null
@@ -132,43 +235,10 @@ export default function PlayerProfile() {
       )}
 
       <div>
-        <SectionTitle>Season by season</SectionTitle>
-        <div className="pb-card overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="pb-hairline-b">
-              <tr>
-                {['Season', 'GP', 'Goals', 'Behinds', 'BOG'].map((h, i) => (
-                  <th key={h} className={`px-3 py-2 font-mono text-[10px] uppercase tracking-wide text-pb-faint ${i ? 'text-right' : 'text-left'}`}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {seasonRows.map(s => (
-                <Fragment key={s.season_id}>
-                  <tr className="pb-hairline-b hover:bg-pb-surface2/50">
-                    <td className="px-3 py-2 font-medium">{s.season_name}</td>
-                    <td className="px-3 py-2 text-right pb-num">{s.games}</td>
-                    <td className="px-3 py-2 text-right pb-num">{s.goals}</td>
-                    <td className="px-3 py-2 text-right pb-num">{s.behinds}</td>
-                    <td className="px-3 py-2 text-right pb-num">{s.bogs}</td>
-                  </tr>
-                  {gradeRows.filter(g => g.season_id === s.season_id).map(g => (
-                    <tr key={`${s.season_id}-${g.grade_id}`} className="pb-hairline-b text-pb-dim">
-                      <td className="px-3 py-1.5 pl-8 text-xs">{g.grade_name}</td>
-                      <td className="px-3 py-1.5 text-right pb-num text-xs">{g.games}</td>
-                      <td className="px-3 py-1.5 text-right pb-num text-xs">{g.goals}</td>
-                      <td className="px-3 py-1.5 text-right pb-num text-xs">{g.behinds}</td>
-                      <td className="px-3 py-1.5 text-right pb-num text-xs">{g.bogs}</td>
-                    </tr>
-                  ))}
-                </Fragment>
-              ))}
-              {seasonRows.length === 0 && (
-                <tr><td colSpan={5} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <SectionTitle right={<span className="hidden sm:inline text-[10px] text-pb-faintest font-mono normal-case tracking-normal">Click a season with a grade split to expand it</span>}>
+          Season by season
+        </SectionTitle>
+        <SeasonTable seasonRows={seasonRows} gradeRows={gradeRows} />
       </div>
 
       <div>

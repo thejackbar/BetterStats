@@ -10,6 +10,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from . import milestone_rules
+
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
                         player_ids: Optional[list[uuid.UUID]] = None) -> list[dict]:
@@ -211,3 +213,78 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
         WHERE s.organisation_id = :org {season_clause}
     """), params)
     return dict(res.one()._mapping)
+
+
+async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 50) -> list[dict]:
+    """Live-computed "in reach" milestones — no stored milestones table, same
+    approach as Core's get_upcoming_milestones_for_org. Scoped to players
+    active in the club's 3 most recent seasons (synced or imported) so a
+    decades-retired player's long-crossed totals don't clutter the list —
+    career-wide totals, not season-scoped, since a milestone is a lifetime
+    tally regardless of which season the dashboard filter has picked."""
+    res = await db.execute(text("""
+        WITH combined AS (
+            SELECT s.player_id, s.season_id, s.games, s.goals
+            FROM afl_player_season_stats s
+            WHERE s.organisation_id = :org AND s.grade_id IS NULL
+            UNION ALL
+            SELECT i.player_id, i.season_id, i.games_played AS games, i.goals
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+        ),
+        recent_seasons AS (
+            SELECT s.id
+            FROM seasons s
+            JOIN combined c ON c.season_id = s.id
+            WHERE s.organisation_id = :org
+            GROUP BY s.id, s.year, s.name
+            ORDER BY s.year DESC NULLS LAST, s.name DESC
+            LIMIT 3
+        ),
+        active_players AS (
+            SELECT DISTINCT c.player_id
+            FROM combined c
+            WHERE c.season_id IN (SELECT id FROM recent_seasons)
+        )
+        SELECT p.id AS player_id,
+               COALESCE(p.display_name_override, p.name) AS name,
+               COALESCE(SUM(c.games), 0) AS career_games,
+               COALESCE(SUM(c.goals), 0) AS career_goals
+        FROM players p
+        JOIN combined c ON c.player_id = p.id
+        WHERE p.organisation_id = :org AND p.id IN (SELECT player_id FROM active_players)
+        GROUP BY p.id, p.name, p.display_name_override
+        HAVING COALESCE(SUM(c.games), 0) > 0 OR COALESCE(SUM(c.goals), 0) > 0
+    """), {"org": str(org_id)})
+    rows = [dict(r._mapping) for r in res]
+
+    def importance_score(target, needed):
+        return (target ** 2) / (needed + 1)
+
+    upcoming = []
+    for row in rows:
+        totals = {"games": int(row["career_games"] or 0), "goals": int(row["career_goals"] or 0)}
+        for stat, current in totals.items():
+            target = milestone_rules.next_threshold(stat, current)
+            if target is None:
+                continue
+            needed = target - current
+            if needed > milestone_rules.reach_window(stat, target):
+                continue
+            upcoming.append({
+                "player_id": str(row["player_id"]),
+                "name": row["name"],
+                "type": stat,
+                "current": current,
+                "target": target,
+                "needed": needed,
+                "score": importance_score(target, needed),
+            })
+
+    upcoming.sort(key=lambda x: x["score"], reverse=True)
+    return upcoming[:limit]
