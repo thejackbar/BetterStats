@@ -7,6 +7,7 @@ import StatCard from '../../components/StatCard'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
 import { SectionTitle, ResultPill } from '../components/bits'
+import { HonourBoard, HonourPills } from '../components/honours'
 
 // ── Charts — mirrors BetterStats (Core)'s player-profile chart language
 // (pages/PlayerProfile.jsx: recharts, CSS-var colours, a single shared
@@ -220,6 +221,9 @@ export default function PlayerProfile() {
               {c.first_year ? (c.first_year === c.last_year ? c.first_year : `${c.first_year} – ${c.last_year}`) : ''}
               {c.seasons ? ` · ${c.seasons} season${c.seasons > 1 ? 's' : ''}` : ''}
             </p>
+            {/* What the club has recorded them for, biggest first — the same
+                pills, in the same colours, as the Honours board below. */}
+            <HonourPills achievements={data.achievements} />
           </div>
         </div>
       </div>
@@ -235,6 +239,15 @@ export default function PlayerProfile() {
           large
         />
       </div>
+
+      {(data.achievements || []).length > 0 && (
+        <div>
+          <SectionTitle>Honour board</SectionTitle>
+          <div className="pb-card p-5">
+            <HonourBoard achievements={data.achievements} />
+          </div>
+        </div>
+      )}
 
       <GradeBreakdown rows={data.grade_breakdown} career={c} />
 
