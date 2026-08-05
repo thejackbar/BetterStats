@@ -75,6 +75,96 @@ against a real 3,044-row 1947–2023 register from an AFL club.
   manual games for this), and an imported result carries no player lines —
   it's the match record, not a scorecard.
 
+## Confirming the roster, a frozen first column, and the drags that never worked (migration 222, v9.10.0, Aug 2026)
+
+- **"Confirm roster" is the name, in the code as well as the UI.** The action was
+  briefly called "closing off a week"; it was renamed everywhere the same day
+  (service functions, routes, the `roster_weeks.status` value, the migration
+  filename) rather than leaving the two languages to drift.
+- **`roster_shifts.worked_hours` is the roster's record of what was worked;
+  `volunteer_hours` is the club's ledger.** The flow is one-way — confirming
+  POSTS to the ledger, nothing reads back. NULL `worked_hours` means "not
+  checked yet" and a checked **0** means "rostered but did not turn up"; both
+  have to be expressible, which is why it is nullable rather than defaulted.
+- **Confirming RECONCILES, it never appends.** `uq_volunteer_hours_shift` (a
+  partial unique on `roster_shift_id`) makes the insert an upsert, and a shift
+  that has since been unassigned or checked down to zero has its posted row
+  DELETED. Without that, correcting a mistake would leave the original behind
+  and the ledger could only ever grow. `is_paid` is stamped from the role type
+  at the moment of confirming and never revisited (migration 221's snapshot rule).
+- **Unconfirming deliberately leaves the posted hours alone.** They were worked;
+  deleting them because someone wants to fix a typo would take the club's ledger
+  down with the correction. Confirming again reconciles.
+- **The frozen first column is `position: sticky` on the GRID ITEM.** A grid
+  item's containing block is its grid area, which suggests this cannot work —
+  it does, verified in an isolated page and then in the app (9 cells holding at
+  x=232 through a 694px scroll). **The trap is the background**: the rail's
+  opaque `background` must not be overridden by a row tint, or the columns
+  scrolling underneath show straight through it. The open-shifts row layers its
+  amber over the top via `backgroundImage` instead.
+- **`usePref(key, fallback)`** in `redesign/ui.jsx` is the per-user, per-browser
+  screen preference (keyed on user id, like the screen introductions). Reads in
+  the state initialiser, not an effect, or the panel renders open for one frame
+  before snapping shut. Used for the minimised rail and the volunteer pool.
+- **The People view's drags were half-wired.** `cellDrop` only ever read
+  `st.dragId` (a shift) and `slotDrop` (a person) was attached in the AREAS view
+  only, so dragging a volunteer from the pool onto an open shift in People did
+  nothing and said nothing. Open chips are drop targets now.
+- **A shift can only be dropped in its own day column.** It carries its own day,
+  so accepting it anywhere else silently left it where it was — which reads as
+  the roster ignoring you. Other days don't `preventDefault`, so the cursor says
+  no before the mouse is released; a person who would be blocked still accepts
+  the drop, so the refusal comes back from the server as a sentence.
+- **Testing HTML5 drag-and-drop**: Playwright's real mouse cannot steer
+  Chromium's native drag loop — it hangs. Dispatch `DragEvent`s instead, and put
+  the `dragstart` and the `drop` in SEPARATE `evaluate` calls, or React has not
+  re-rendered with the drag in flight and every drop reads as refused.
+
+## Cross-club member leak: the opposition were enrolled as our members (Aug 2026)
+
+Reported live: a High Wycombe player (and HW club admin) appeared in
+**Applecross's** Clubhouse Directory, under Everyone and Players, carrying his
+real email, phone and photo. Not a display bug — Applecross genuinely held a
+`fee_members` row for him.
+
+- **Cause: `services/fees.py::recompute_fee_match_days`.** It selected the
+  season's games (correctly org-scoped through grades → seasons), then read
+  **every** `game_appearances` row on those games and enrolled the player behind
+  each one as a member, with a comment asserting "only our club's players have
+  rows". **That assertion is false and this file already documents why**: a
+  fixture between two clubs that BOTH sync is a single `games` row, and each
+  club's sync writes its own players' appearances against it. So every opponent
+  from every both-synced club became one of our members. The `select(Player)`
+  that followed had no org filter either, so nothing downstream could catch it.
+- **This is the exact anti-pattern the v8.79.3 note names**: never read a
+  per-game table "for a game in our org's grades" without ALSO scoping
+  `players.organisation_id` when attributing to our side. The fix loads the
+  appearing players org-scoped FIRST, then filters the appearances to them, so
+  member creation and match-day charges both inherit the scope.
+- **`services/directory.py::list_people` amplified it.** Its
+  `LEFT JOIN players p ON p.id = fm.player_id` had no org condition, so a member
+  row pointing at another club's player served that club's **photo, email and
+  phone** into our Directory. Now joined on `AND p.organisation_id =
+  fm.organisation_id`: a stray link degrades to a plain name rather than leaking
+  contact details. **Any read-through from a member to its player needs this.**
+- **`python -m app.scripts.purge_foreign_members [org|all] [--apply] [--delete]`**
+  clears what was already written. Dry run by default; archives (reversible,
+  and enough to clear the Directory) unless `--delete`. A row with anything
+  attached — a payment, role, qualification, committee term, logged hours, a
+  family link, a roster shift — is **reported and left alone**, because the link
+  is wrong but the attached work may not be.
+- **Verified by reproducing it**: two clubs, one shared fixture, both sets of
+  appearances on it. With the fix reverted the suite fails on exactly the
+  reported symptom (the opponent enrolled and listed); with it in place, 14
+  checks pass including that a pre-existing bad link leaks no contact details
+  and a re-sync does not recreate the row.
+- **The three different people counts are NOT all the same bug.** Core's
+  Players screen reads `players` (unfiltered, so it is the true player count),
+  Accounts reads `fee_members` for one season, the Directory reads all
+  `fee_members` ∪ org players, and BetterComms Lists reads `comms_contacts` —
+  a **fourth, separately-populated table** that nothing syncs from the other
+  three. A club will legitimately see four different totals until step 4 of the
+  Clubhouse handoff (joining the data) is done.
 ## BetterFootball — Import Awards (v9.9.0, Aug 2026)
 
 A club's honour board imported as real `player_achievements` rows. Third

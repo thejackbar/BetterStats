@@ -346,3 +346,56 @@ async def hours(start: str, end: str, _: User = _cap, club: Organisation = Depen
     if e < s:
         raise HTTPException(status_code=422, detail="end must not be before start")
     return await svc.hours_summary(db, club.id, start=s, end=e)
+
+
+# ─── Confirming the roster ───────────────────────────────────────────────────
+
+class WorkedEntry(BaseModel):
+    shift_id: str
+    hours: float
+
+
+class ConfirmBody(BaseModel):
+    entries: Optional[List[WorkedEntry]] = None
+
+
+@router.get("/week/{week_id}/confirm-review")
+async def confirm_review(week_id: str, _: User = _cap, club: Organisation = Depends(get_current_club),
+                         db: AsyncSession = Depends(get_db)):
+    """Every filled shift in the week, for checking before the roster is confirmed."""
+    res = await svc.confirm_review(db, club.id, week_id)
+    if not res["week"]:
+        raise HTTPException(status_code=404, detail="Week not found")
+    return res
+
+
+@router.put("/week/{week_id}/worked-hours")
+async def save_worked_hours(week_id: str, body: ConfirmBody, _: User = _cap,
+                            club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    """Save adjustments without confirming the roster."""
+    n = await svc.set_worked_hours(db, club.id, week_id, [e.model_dump() for e in (body.entries or [])])
+    await db.commit()
+    return {"ok": True, "updated": n}
+
+
+@router.post("/week/{week_id}/confirm")
+async def confirm_roster(week_id: str, body: ConfirmBody, user: User = _cap,
+                         club: Organisation = Depends(get_current_club),
+                         db: AsyncSession = Depends(get_db)):
+    """Confirm the roster and post its hours to the volunteer hours ledger."""
+    res = await svc.confirm_roster(db, club.id, week_id, user_id=user.id,
+                                   entries=[e.model_dump() for e in (body.entries or [])])
+    if not res.get("ok"):
+        raise HTTPException(status_code=404, detail=res.get("error") or "Week not found")
+    await db.commit()
+    return res
+
+
+@router.post("/week/{week_id}/unconfirm")
+async def unconfirm_roster(week_id: str, _: User = _cap, club: Organisation = Depends(get_current_club),
+                           db: AsyncSession = Depends(get_db)):
+    """Reopen a confirmed roster for editing. Posted hours are left in place."""
+    res = await svc.unconfirm_roster(db, club.id, week_id)
+    await db.commit()
+    return res

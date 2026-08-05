@@ -594,6 +594,157 @@ def shift_hours(start_time, end_time) -> float:
         return 0.0
 
 
+async def confirm_review(db: AsyncSession, org_id, week_id) -> dict:
+    """Every filled shift in the week, ready to be checked and confirmed.
+
+    ``worked_hours`` on the shift is what the reviewer has adjusted it to;
+    until they touch it, the rostered length is what will be posted. Whether
+    the hours are paid comes from the area's role type, decided now rather than
+    read from an earlier posting, so retyping a role before confirming is picked
+    up. ``posted`` says the ledger already carries this shift, which is what
+    makes confirming a corrected week a correction and not a second copy.
+    """
+    week = (await db.execute(text("""
+        SELECT id, week_start, status, confirmed_at FROM roster_weeks
+        WHERE id = :id AND organisation_id = :org
+    """), {"id": week_id, "org": org_id})).mappings().first()
+    if not week:
+        return {"week": None, "rows": [], "totals": {}}
+
+    paid_by_area = await area_pay_kinds(db, org_id)
+    rows = (await db.execute(text("""
+        SELECT s.id, s.area_id, s.day_of_week, s.start_time, s.end_time, s.worked_hours,
+               s.assignee_member_id, m.full_name, a.name AS area_name, a.color,
+               (h.id IS NOT NULL) AS posted
+        FROM roster_shifts s
+        JOIN fee_members m ON m.id = s.assignee_member_id
+        JOIN roster_areas a ON a.id = s.area_id
+        LEFT JOIN volunteer_hours h ON h.roster_shift_id = s.id
+        WHERE s.roster_week_id = :wid AND s.organisation_id = :org
+        ORDER BY s.day_of_week, s.start_time, a.name
+    """), {"wid": week_id, "org": org_id})).mappings().all()
+
+    out, totals = [], {"rostered": 0.0, "worked": 0.0, "worked_paid": 0.0, "worked_volunteer": 0.0}
+    for r in rows:
+        rostered = shift_hours(r["start_time"], r["end_time"])
+        reviewed = r["worked_hours"] is not None
+        worked = float(r["worked_hours"]) if reviewed else rostered
+        is_paid = paid_by_area.get(str(r["area_id"]), False)
+        out.append({
+            "shift_id": str(r["id"]), "member_id": str(r["assignee_member_id"]),
+            "full_name": r["full_name"], "area_name": r["area_name"], "color": r["color"],
+            "day_of_week": r["day_of_week"], "start_time": _f(r["start_time"]), "end_time": _f(r["end_time"]),
+            "rostered_hours": round(rostered, 2), "worked_hours": round(worked, 2),
+            "reviewed": reviewed, "is_paid": is_paid, "posted": bool(r["posted"]),
+        })
+        totals["rostered"] += rostered
+        totals["worked"] += worked
+        totals["worked_paid" if is_paid else "worked_volunteer"] += worked
+
+    return {
+        "week": {"id": str(week["id"]), "week_start": week["week_start"].isoformat(),
+                 "status": week["status"],
+                 "confirmed_at": week["confirmed_at"].isoformat() if week["confirmed_at"] else None},
+        "rows": out,
+        "totals": {k: round(v, 2) for k, v in totals.items()},
+        "open_shifts": (await db.execute(text("""
+            SELECT COUNT(*) FROM roster_shifts
+            WHERE roster_week_id = :wid AND assignee_member_id IS NULL
+        """), {"wid": week_id})).scalar() or 0,
+    }
+
+
+async def set_worked_hours(db: AsyncSession, org_id, week_id, entries: list) -> int:
+    """Record the checker's adjustments without confirming the roster.
+
+    Saved separately from confirming so a half-finished check survives someone
+    walking away from it. Scoped to the week AND the club, since the shift ids
+    come from a browser.
+    """
+    n = 0
+    for e in entries or []:
+        hours = e.get("hours")
+        if hours is None:
+            continue
+        res = await db.execute(text("""
+            UPDATE roster_shifts SET worked_hours = :h
+            WHERE id = :id AND roster_week_id = :wid AND organisation_id = :org
+        """), {"h": max(0.0, min(24.0, float(hours))), "id": e["shift_id"], "wid": week_id, "org": org_id})
+        n += res.rowcount or 0
+    return n
+
+
+async def confirm_roster(db: AsyncSession, org_id, week_id, *, user_id=None, entries=None) -> dict:
+    """Confirm the roster: post every filled shift's hours to the ledger.
+
+    Reconciles rather than appends. A shift that has since been unassigned, or
+    reviewed down to zero hours, has its posted row REMOVED — otherwise
+    correcting a mistake would leave the original behind and the ledger would
+    only ever grow. ``is_paid`` is stamped from the role type as it stands at
+    confirmation, and never revisited afterwards (migration 221's note).
+    """
+    if entries:
+        await set_worked_hours(db, org_id, week_id, entries)
+
+    review = await confirm_review(db, org_id, week_id)
+    if not review["week"]:
+        return {"ok": False, "error": "Week not found"}
+
+    week_start = date.fromisoformat(review["week"]["week_start"])
+    keep, posted, removed = set(), 0, 0
+    for r in review["rows"]:
+        if r["worked_hours"] <= 0:
+            continue        # rostered but did not work: nothing to post
+        keep.add(r["shift_id"])
+        logged = week_start + timedelta(days=int(r["day_of_week"]))
+        await db.execute(text("""
+            INSERT INTO volunteer_hours
+                (id, organisation_id, member_id, logged_date, hours, activity, is_paid, roster_shift_id, created_by_user_id)
+            VALUES (:id, :org, :member, :logged, :hours, :activity, :paid, :shift, :user)
+            ON CONFLICT (roster_shift_id) WHERE roster_shift_id IS NOT NULL
+            DO UPDATE SET hours = EXCLUDED.hours, is_paid = EXCLUDED.is_paid,
+                          member_id = EXCLUDED.member_id, logged_date = EXCLUDED.logged_date,
+                          activity = EXCLUDED.activity
+        """), {"id": uuid.uuid4(), "org": org_id, "member": r["member_id"], "logged": logged,
+               "hours": r["worked_hours"], "activity": r["area_name"], "paid": r["is_paid"],
+               "shift": r["shift_id"], "user": user_id})
+        posted += 1
+
+    # Anything this week previously posted that no longer earns hours: a shift
+    # since unassigned, or reviewed down to zero. Resolved in Python rather than
+    # binding an id array, so an empty keep set behaves like any other.
+    stale = [str(r["id"]) for r in (await db.execute(text("""
+        SELECT h.id, h.roster_shift_id FROM volunteer_hours h
+        JOIN roster_shifts s ON s.id = h.roster_shift_id
+        WHERE s.roster_week_id = :wid AND h.organisation_id = :org
+    """), {"wid": week_id, "org": org_id})).mappings().all()
+        if str(r["roster_shift_id"]) not in keep]
+    for hid in stale:
+        await db.execute(text("DELETE FROM volunteer_hours WHERE id = :id"), {"id": hid})
+    removed = len(stale)
+
+    await db.execute(text("""
+        UPDATE roster_weeks SET status='confirmed', confirmed_at=NOW(), confirmed_by_user_id=:user
+        WHERE id=:id AND organisation_id=:org
+    """), {"id": week_id, "org": org_id, "user": user_id})
+    return {"ok": True, "posted": posted, "removed": removed,
+            "totals": review["totals"], "status": "confirmed"}
+
+
+async def unconfirm_roster(db: AsyncSession, org_id, week_id) -> dict:
+    """Let a confirmed roster be edited again.
+
+    Deliberately leaves the posted hours alone: they were worked, and deleting
+    them because someone wants to fix a typo would take the club's ledger down
+    with the correction. Confirming again reconciles.
+    """
+    await db.execute(text("""
+        UPDATE roster_weeks SET status='published', confirmed_at=NULL, confirmed_by_user_id=NULL
+        WHERE id=:id AND organisation_id=:org
+    """), {"id": week_id, "org": org_id})
+    return {"ok": True, "status": "published"}
+
+
 async def hours_summary(db: AsyncSession, org_id, *, start: date, end: date) -> dict:
     """Rostered vs worked hours per person, split paid and volunteer.
 
