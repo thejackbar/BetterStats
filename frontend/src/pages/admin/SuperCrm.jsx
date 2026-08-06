@@ -1060,17 +1060,27 @@ export default function SuperCrm() {
   // opts.silent — used by the background live-refresh below, so a transient
   // network blip mid-poll never pops an error toast (a user-initiated load
   // still surfaces the error).
+  // Always fetches EVERY non-archived deal, whatever the List view's status
+  // chips are set to. This used to send `status` (defaulting to 'open'), which
+  // meant dropping a card on Won or Lost/Dormant made it vanish from the whole
+  // board on the very next refresh — move_stage flips deal.status alongside the
+  // stage, so the card fell straight out of the fetch, and the status chips
+  // only render on the List view, so there was no way to reach it again from
+  // the board. The status filter is applied client-side now (listDeals below),
+  // to the List view alone. The Dashboard reads the same list and wants every
+  // status too — its trial conversion rate counts won and lost deals, which
+  // were always zero while this fetch was open-only.
   const load = useCallback((opts) => {
     const silent = opts?.silent === true
     if (!loadedOnce.current) setLoading(true)
     return Promise.all([
       api.superCrmStages(),
-      api.superCrmListDeals({ status: status || undefined }),
+      api.superCrmListDeals(),
     ])
       .then(([s, d]) => { setStages(s.stages || []); setDeals(d.deals || []) })
       .catch(e => { if (!silent) toast.error(e.message || 'Could not load the sales pipeline') })
       .finally(() => { setLoading(false); loadedOnce.current = true })
-  }, [status, toast])
+  }, [toast])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { api.superCrmOwners().then(r => setOwners(r.owners || [])).catch(() => {}) }, [])
@@ -1288,6 +1298,19 @@ export default function SuperCrm() {
 
   const board = useMemo(() => buildBoard(stages, sortedDeals), [stages, sortedDeals])
 
+  // The Open/Won/Lost/All chips belong to the List view only — the board shows
+  // every card in its own stage column, closed ones included (PipelineBoard
+  // dims a non-open card and tags it Won/Lost), so a deal is never invisible
+  // just because it has been closed. Totals stay open-only: buildBoard already
+  // counts value, weighted value and the open count from open deals alone.
+  const listDeals = useMemo(
+    () => (status ? sortedDeals.filter(d => d.status === status) : sortedDeals),
+    [sortedDeals, status])
+
+  // What the current view actually shows — feeds the filter bar's result count
+  // and the "Create List" modal, so both describe what is on screen.
+  const shownDeals = view === 'list' ? listDeals : sortedDeals
+
   // A List column-header click toggles the SAME sort state the pills use, so
   // clicking "Value" in the table and the "Dollar value" pill stay in sync
   // (and the pill lights up to match a header the user clicked, and vice versa).
@@ -1329,7 +1352,7 @@ export default function SuperCrm() {
       ) : (
         <>
           <FilterBar filters={filters} setFilters={setFilters} owners={owners} stages={stages} stateOptions={stateOptions}
-            associationOptions={associationOptions} resultCount={filteredDeals.length}
+            associationOptions={associationOptions} resultCount={shownDeals.length}
             sortBy={sortBy} sortDir={sortDir} onSortChange={(key, dir) => { setSortBy(key); setSortDir(dir) }} />
 
           {view === 'board' && (
@@ -1362,12 +1385,12 @@ export default function SuperCrm() {
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedDeals.length === 0 && (
+                    {listDeals.length === 0 && (
                       <tr><td colSpan={9} className="px-3 py-6 text-center text-pb-faintest">
                         {deals.length === 0 ? 'No deals yet.' : 'No deals match these filters.'}
                       </td></tr>
                     )}
-                    {sortedDeals.map(d => (
+                    {listDeals.map(d => (
                       <tr key={d.id} onClick={() => setOpenDealId(d.id)}
                         className={`border-b border-pb-hairline last:border-0 hover:bg-pb-surface2 cursor-pointer ${
                           d.is_customer ? 'border-l-2 border-l-emerald-500/70' : ''}`}>
@@ -1411,8 +1434,11 @@ export default function SuperCrm() {
         </>
       )}
 
-      <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={filteredDeals}
-        filterSummary={buildFilterSummary(filters, { owners, stages, status })} />
+      {/* Both the rows and the summary describe the view that is on screen —
+          the status chips narrow the List only, so the Board's list must not
+          claim a Status filter it never applied. */}
+      <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={shownDeals}
+        filterSummary={buildFilterSummary(filters, { owners, stages, status: view === 'list' ? status : '' })} />
       <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)}
         onManageStages={() => { setShowSettings(false); setShowStages(true) }} />
