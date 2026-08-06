@@ -16,6 +16,15 @@
   --pb-font-body:    'Geist','Inter',system-ui,sans-serif;
   --pb-font-mono:    'JetBrains Mono','Fira Code',monospace;
 
+  /* Weight per typography role. A club can lighten these from Typography
+     settings, which matters for a font that ships one weight only: asked for a
+     bold it does not have, the browser smears the outlines and the result reads
+     muddy. buildThemeCss overrides these and also turns synthesis off. Consumed
+     through .pb-heading / .pb-figure below. */
+  --pb-weight-display: 700;
+  --pb-weight-body:    400;
+  --pb-weight-mono:    600;
+
   /* Brand + semantic colours (shared across light and dark) */
   --pb-accent:          #16c784;
   /* Secondary club accent + the primary→secondary gradient built from it.
@@ -47,6 +56,13 @@
   --pb-chart-6: #06b6d4;
   --pb-chart-7: #84cc16;
   --pb-chart-8: #f97316;
+
+  /* Text sitting ON an accent fill (primary buttons, filled pills). Overridden
+     per club by buildThemeCss, which picks white or near-black by whichever has
+     more contrast against that club's accent — a navy or maroon accent needs
+     white lettering where the default green needs dark. Never hardcode a hex
+     for text on --pb-accent; use this. */
+  --pb-on-accent:     #08110b;
 
   /* Honour / achievement category colours */
   --pb-cat-honour:    #f5b542;
@@ -149,6 +165,12 @@
 .ch-rise { animation: chRise 180ms ease both; }
 
 .pb-num { font-variant-numeric: tabular-nums; }
+
+/* Typography weight, per role. Use these on public headings and stat figures
+   instead of a hardcoded font-bold, so a club whose font has no bold cut can
+   dial them back rather than being served a synthesised one. */
+.pb-heading { font-weight: var(--pb-weight-display); }
+.pb-figure  { font-weight: var(--pb-weight-mono); }
 
 .pb-scroll::-webkit-scrollbar              { width: 8px; height: 8px; }
 .pb-scroll::-webkit-scrollbar-thumb        { background: var(--pb-hairline2); border-radius: 8px; }

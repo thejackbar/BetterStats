@@ -264,7 +264,7 @@ class Organisation(Base):
     font_mono_mime = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
     # The club's own history, shown under its name on the public dashboard
-    # (migration 226). `established_year` is a plain year — a club writes
+    # (migration 227). `established_year` is a plain year — a club writes
     # "Est. 1889" and rarely holds the founding day. `previous_names` is an
     # ordered list of {"name", "from_year", "to_year"}, oldest first, with
     # both years optional: a club often knows it used to be called something
@@ -295,6 +295,11 @@ class Organisation(Base):
     # all-time club records — those are already scoped to a `players` join
     # that a NULL player_id naturally never matches.
     include_fill_ins_in_stats = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Show the club crest beside the club name in public page headers
+    # (migration 226). Opt-in: a club that has uploaded a logo used to see it
+    # only in the menu bar, and turning this on for everyone would change every
+    # existing club's public site without anyone asking for it.
+    public_header_logo = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
@@ -1102,7 +1107,7 @@ class Grade(Base):
     # (e.g. their whole junior programme) out of public grade surfaces.
     is_public = Column(Boolean, nullable=False, server_default="true", default=True)
     # The order a club reads its own teams in — Seniors 1, Reserves 2, Under
-    # 19s 3 (migration 226). NULL = unordered, and sorts AFTER every ordered
+    # 19s 3 (migration 227). NULL = unordered, and sorts AFTER every ordered
     # grade, so a club that has ordered three of its ten grades gets those
     # three first and the rest in their previous alphabetical order rather
     # than a scramble. Set across a whole grade name at once by the admin,

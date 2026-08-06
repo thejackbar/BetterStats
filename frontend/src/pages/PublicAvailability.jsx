@@ -42,7 +42,7 @@ function ClubHeader({ club }) {
     <div className="flex flex-col items-center text-center gap-3 mb-6">
       {club?.logo_url
         ? <img src={club.logo_url} alt="" className="w-16 h-16 rounded-xl object-contain bg-pb-surface2 p-1" />
-        : <span className="w-16 h-16 rounded-xl flex items-center justify-center font-display font-bold text-xl text-pb-bg" style={{ background: 'var(--pb-accent)' }}>{initials}</span>}
+        : <span className="w-16 h-16 rounded-xl flex items-center justify-center font-display font-bold text-xl" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>{initials}</span>}
       <div>
         <div className="font-display font-bold text-xl leading-tight">{club?.name || 'Set your availability'}</div>
         <div className="font-mono text-[11px] tracking-wide2 text-pb-faint mt-1">SET YOUR AVAILABILITY</div>

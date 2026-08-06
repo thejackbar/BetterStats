@@ -86,8 +86,8 @@ export default function Players() {
           actions={
             <Link
               to={`/${clubSlug}/compare`}
-              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition text-pb-bg"
-              style={{ background: 'var(--pb-accent)' }}
+              className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold transition"
+              style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}
             >
               COMPARE
             </Link>

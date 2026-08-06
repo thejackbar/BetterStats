@@ -1,5 +1,5 @@
 """A club's founding year and its former names — validation for the two
-``organisations`` columns migration 226 added.
+``organisations`` columns migration 227 added.
 
 Kept out of the router so the public read and the admin write agree on what a
 stored value looks like, and so a second sport can adopt the same shape without

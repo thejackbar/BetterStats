@@ -25,13 +25,13 @@ Three columns, all nullable, all "unset means behave exactly as before":
     whole grade name at once, the same way display_name_override and category
     already attach club-wide.
 
-Revision ID: 226
-Revises: 225
+Revision ID: 227
+Revises: 226
 """
 from alembic import op
 
-revision = "226"
-down_revision = "225"
+revision = "227"
+down_revision = "226"
 branch_labels = None
 depends_on = None
 

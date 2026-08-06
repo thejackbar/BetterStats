@@ -1,5 +1,64 @@
 # BetterStats — Claude Session Notes
 
+## A club font with no bold, and ink on a dark accent (migration 226, v9.14.0, Aug 2026)
+
+Reported by Leeming Spartan: their uploaded font looked "too dark" as an H1 and
+on the win rate / total runs figures, and the accent button's text was
+unreadable. Both are one-line symptoms of two systemic gaps.
+
+- **The bold was never real. It was SYNTHESISED.** Their file is Patua One,
+  `usWeightClass 400`, no `fvar`, no italic - a single-weight slab serif. Asked
+  for `font-weight: 700` the browser fakes one by smearing the outlines, which
+  on an already-heavy face reads as mud. **A font FILE holds exactly one weight
+  unless it is a variable font**, so this is the normal case for an upload, not
+  an edge case. `services/fonts.describe_font` reads the file at upload time
+  (sfnt directly, `.woff` per-table zlib, `.woff2` tag directory only since
+  there is no brotli dependency - enough to spot an `fvar`) and stores
+  `metrics` on the `font_config` role entry; `buildThemeCss` emits
+  **`font-synthesis: none`** when any role cannot really bold. Safe page-wide:
+  every app default and multi-weight preset carries a real bold, so nothing
+  that COULD bold properly loses it. A file uploaded before this shipped has no
+  `metrics` and is treated as single weight, which is right almost always and
+  self-corrects on re-upload.
+- **Five of our own presets have the same problem** (`oneWeight: true` on anton,
+  bebas, archivo_black, abril, bungee). Either the family has no bold cut or
+  index.html requests it with no weight axis. **Keep those flags in step with
+  the Google Fonts `<link>`** - adding a family there without a weight range
+  means adding the flag here.
+- **`--pb-weight-display` / `-body` / `-mono`** are the per-role weight, set
+  from Typography settings. Consumed through `.pb-heading` / `.pb-figure`
+  (styles/theme.css), which is what `PageHeader`'s `<h1>` and `Kpi`'s figure use
+  instead of `font-bold`. For everything else `buildWeightCss` emits
+  `.font-display.font-bold {…}` style rules - **two classes, so they beat a
+  Tailwind utility on specificity** and a club's choice wins over the ~590
+  `font-bold`s written into components without editing any of them. Scoped to
+  elements that opted into the club's display or mono font, so ordinary bold
+  body text is untouched.
+- **`--pb-on-accent` is the ONE answer for text on an accent fill** (default
+  `#08110b` in theme.css, per-club in `buildThemeCss`). `onAccentInk` picks
+  white or near-black by WCAG contrast, so the BetterStats green keeps its dark
+  ink and navy/maroon/black get white. **Never hardcode a hex or `text-pb-bg`
+  on a `var(--pb-accent)` fill again** - that is what made a navy club's primary
+  button near-black on near-black. Swept across the public pages; the admin
+  app still uses its own `ON_ACCENT` (`components/admin/ui.jsx`), which is
+  correct there because that surface is BetterCricket amber, not club colour.
+- **`organisations.public_header_logo`** (migration 226, mirrored in the
+  lifespan) puts the crest beside the club name in `PageHeader`. Beside, not
+  instead of: the page keeps a real `<h1>` for search and screen readers.
+  Opt-in, so no existing club's public site changes on upgrade. **Read it off
+  the `/clubs/{slug}` payload, not `/organisations/{id}`** - the Dashboard has
+  both in scope and only the former carries it.
+- **Deliberately not built**: an italic toggle. Patua One has no italic either,
+  so it would hand back faux-slanted glyphs, the same class of problem. A club
+  wanting a real bold or italic should upload that file for the role.
+- **Verified against the club's real live site** (dev server with
+  `VITE_PROXY_TARGET=https://betterat.cricket/api`, screenshotted in Chromium):
+  `font-synthesis` computes to `none` on their H1, the Leaderboard button
+  computes `rgb(255,255,255)` on their navy, an explicit weight choice moves the
+  H1 to 400, and the crest sits beside the name at 1280px and 390px with no
+  horizontal overflow. The parser was checked against their actual .ttf plus a
+  known Bold file (reads 700) and a woff2 (table directory walks clean).
+
 ## Super Admin New Club = the self-serve registration (migration 225, v9.13.0, Aug 2026)
 
 Reported: a club a super admin creates from All Clubs → NEW CLUB got none of

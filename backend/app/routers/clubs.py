@@ -85,6 +85,7 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         "contact_email": org.contact_email,
         "player_name_format": org.player_name_format or "last_first",
         "website_enabled": bool(org.website_enabled),
+        "public_header_logo": bool(org.public_header_logo),
     }
 
 
