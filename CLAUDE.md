@@ -54,6 +54,42 @@ it. **Frontend only: no endpoint, payload, capability or route changed.**
   segment, typing a name, opening a sent email and a draft, and Send enabling
   once subject, message and audience are all present.
 
+## The meeting room runs inside the Committee screen (v9.17.1, Aug 2026)
+
+OPEN, a second pill on every meeting card in Clubhouse → Committee, puts the
+meeting room (`pages/admin/MeetingRoom.jsx`) in the pane beside the list instead
+of on a page of its own. **Frontend only, and no endpoint changed.**
+
+- **`MeetingRoomPanel` is the whole room with no chrome**, and the default export
+  is now a thin route wrapper around it. So there is ONE meeting room, mounted
+  twice, and `/admin/clubhouse/committee/meeting/:meetingId` is byte-for-byte the
+  page it always was — which matters, because OPEN MEETING on the manage screen
+  and any bookmark still go there.
+- **The header is the awkward part and `onMeta` is the answer.** The full-page
+  version draws the title, the status select and "All meetings" in the MODULE
+  header, which is outside the panel; the panel therefore hands `{ meeting,
+  setStatus, reload }` up on every load and the route renders the header from
+  that. Embedded, `inlineHeader` draws the same three things inside the pane with
+  Close in place of the link. Do not be tempted to move the header into the panel
+  permanently — that would change the standalone page.
+- **The room is only ever open on the SELECTED meeting** (`room = st.cteRoom ===
+  sel.id ? sel.id : null`), so the highlighted card and the pane can never
+  disagree, and clicking any card exits the room back to its summary.
+- **`onMeta` also keeps the card's status pill live** (a cheap merge of the
+  meeting-level fields), and `refreshMeeting` re-reads the one meeting on the way
+  OUT so the summary shows what was just minuted. One fetch on exit, not one per
+  edit — the room already reloads itself after every change.
+- **`chip(C.accent)` does not work in that screen.** `chip` builds its edge as
+  `${fg}66`, and `C.accent` is `var(--pb-accent)` — `var(--pb-accent)66` is not a
+  colour, so the border silently disappears. `openChip` uses `color-mix` for the
+  edge and `--pb-accent-ink` for the text, which is also what keeps it legible on
+  a light theme.
+- **Verified in a real browser** against the running app with the API stubbed:
+  OPEN on each card, the agenda and its items, a motion and its votes, minutes
+  autosaving (the PATCH and the attendance PUT were both observed on the wire),
+  the status select, Close returning to a refreshed summary, no overflow at
+  390px, both themes, and the standalone route still rendering its own header.
+
 ## A club font with no bold, and ink on a dark accent (migration 226, v9.14.0, Aug 2026)
 
 Reported by Leeming Spartan: their uploaded font looked "too dark" as an H1 and

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubhouseLayout from '../../components/admin/BetterClubhouseLayout'
@@ -19,6 +19,17 @@ import { PbSpinner } from '../../lib/presskit'
 //
 // Everything saves as you go — there is no Save button for the meeting as a
 // whole, since a secretary should never lose twenty minutes to a closed laptop.
+//
+// TWO PLACES, ONE ROOM. `MeetingRoomPanel` is the whole screen minus its
+// chrome, so it also runs inside the Committee screen's right-hand pane when
+// OPEN is pressed on a meeting card — the club's other meetings stay in view
+// beside the one being minuted. The route below is unchanged and still the
+// full-page version, so /admin/clubhouse/committee/meeting/:meetingId and every
+// link to it work exactly as before.
+//   · standalone — the layout header carries the title, the status select and
+//     "All meetings"; the panel reports what it needs through `onMeta`.
+//   · embedded   — `inlineHeader` draws the same three things inside the pane,
+//     with Close in place of the link, since the list is already beside it.
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const cap = 'font-mono text-[10px] tracking-wide3 text-pb-faintest'
@@ -461,11 +472,17 @@ function AgendaItem({
   )
 }
 
-/* ── The screen ─────────────────────────────────────────────────────────── */
+/* ── The room itself ────────────────────────────────────────────────────── */
 
-export default function MeetingRoom() {
-  const { meetingId } = useParams()
-  const navigate = useNavigate()
+// Everything the meeting room does, with no page chrome of its own.
+//
+//   meetingId    — which meeting to run.
+//   onMeta       — called on every load with { meeting, setStatus, reload }, so
+//                  a host that draws the header elsewhere (the full-page route)
+//                  can show the title, the status select and stay in step.
+//   inlineHeader — draw that header inside the pane instead (the embedded case).
+//   onExit       — offered as Close beside the inline header.
+export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onExit }) {
   const toast = useToast()
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
@@ -484,6 +501,21 @@ export default function MeetingRoom() {
       .catch(e => setErr(`${e.message}${e.status ? ` (HTTP ${e.status})` : ''}`))
   }, [meetingId])
   useEffect(() => { load() }, [load])
+
+  // The one thing about the meeting itself this screen changes.
+  const setStatus = useCallback(v => {
+    api.committeeUpdateMeeting(meetingId, { status: v })
+      .then(load)
+      .catch(e => toast.error(e.message))
+  }, [meetingId, load, toast])
+
+  // Hand the host what it needs to draw the header where it draws headers.
+  // Depends on `data` alone: the callback is a setState from the host and the
+  // two functions here are only read, never compared.
+  useEffect(() => {
+    if (!onMeta) return
+    onMeta(data ? { meeting: data.meeting, setStatus, reload: load } : null)
+  }, [data])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const wrap = fn => async (...args) => {
     try { await fn(...args); load() } catch (e) { toast.error(e.message) }
@@ -607,35 +639,39 @@ export default function MeetingRoom() {
 
   if (err) {
     return (
-      <BetterClubhouseLayout title="Meeting">
-        <div className="pb-card p-6">
-          <div className="text-pb-text text-sm mb-1">Could not open this meeting.</div>
-          <div className="font-mono text-[11px] text-pb-red mb-3">{err}</div>
-          <button onClick={load} className={btn}>Try again</button>
-        </div>
-      </BetterClubhouseLayout>
+      <div className="pb-card p-6">
+        <div className="text-pb-text text-sm mb-1">Could not open this meeting.</div>
+        <div className="font-mono text-[11px] text-pb-red mb-3">{err}</div>
+        <button onClick={load} className={btn}>Try again</button>
+      </div>
     )
   }
-  if (!data) return <BetterClubhouseLayout title="Meeting"><PbSpinner message="Opening the meeting…" /></BetterClubhouseLayout>
+  if (!data) return <PbSpinner message="Opening the meeting…" />
 
   const when = meeting.scheduled_at ? new Date(meeting.scheduled_at).toLocaleString() : ''
   const isClosed = meeting.status === 'completed' || meeting.status === 'cancelled'
 
   return (
-    <BetterClubhouseLayout
-      title={meeting.title}
-      caption={`${when}${meeting.location ? ` · ${meeting.location}` : ''}`}
-      actions={
-        <div className="flex items-center gap-2">
-          <select value={meeting.status}
-            onChange={e => { api.committeeUpdateMeeting(meetingId, { status: e.target.value }).then(load).catch(err2 => toast.error(err2.message)) }}
-            className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 font-mono text-[10px] text-pb-text">
-            {['scheduled', 'in_progress', 'completed', 'cancelled'].map(s => <option key={s} value={s}>{titleCase(s)}</option>)}
-          </select>
-          <Link to="/admin/clubhouse/committee/manage" className={btn}>All meetings</Link>
+    <>
+      {inlineHeader && (
+        <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
+          <div className="min-w-0">
+            <h2 className="font-display font-bold text-[21px] text-pb-text leading-tight tracking-[-0.01em] m-0">
+              {meeting.title}
+            </h2>
+            <div className="font-mono text-[11px] text-pb-faint mt-1">
+              {when}{meeting.location ? ` · ${meeting.location}` : ''}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <select value={meeting.status} onChange={e => setStatus(e.target.value)}
+              className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 font-mono text-[10px] text-pb-text">
+              {['scheduled', 'in_progress', 'completed', 'cancelled'].map(s => <option key={s} value={s}>{titleCase(s)}</option>)}
+            </select>
+            {onExit && <button onClick={onExit} className={btn}>Close</button>}
+          </div>
         </div>
-      }
-    >
+      )}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5 items-start">
         <div className="space-y-2">
           {isClosed && (
@@ -745,6 +781,35 @@ export default function MeetingRoom() {
           </div>
         </div>
       </div>
+    </>
+  )
+}
+
+/* ── The full-page route ────────────────────────────────────────────────── */
+
+// /admin/clubhouse/committee/meeting/:meetingId — unchanged. The header is
+// still the module's own, fed by whatever the panel last loaded.
+export default function MeetingRoom() {
+  const { meetingId } = useParams()
+  const [meta, setMeta] = useState(null)
+  const meeting = meta?.meeting
+  const when = meeting?.scheduled_at ? new Date(meeting.scheduled_at).toLocaleString() : ''
+
+  return (
+    <BetterClubhouseLayout
+      title={meeting?.title || 'Meeting'}
+      caption={meeting ? `${when}${meeting.location ? ` · ${meeting.location}` : ''}` : undefined}
+      actions={meeting && (
+        <div className="flex items-center gap-2">
+          <select value={meeting.status} onChange={e => meta.setStatus(e.target.value)}
+            className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 font-mono text-[10px] text-pb-text">
+            {['scheduled', 'in_progress', 'completed', 'cancelled'].map(s => <option key={s} value={s}>{titleCase(s)}</option>)}
+          </select>
+          <Link to="/admin/clubhouse/committee/manage" className={btn}>All meetings</Link>
+        </div>
+      )}
+    >
+      <MeetingRoomPanel meetingId={meetingId} onMeta={setMeta} />
     </BetterClubhouseLayout>
   )
 }
