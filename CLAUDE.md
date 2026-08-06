@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## Junior stats split off career stats (migration 228, v9.16.0, Aug 2026)
+## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
 An Under-14 season was landing inside a senior career average. `grades.category`
 (migration 123, Senior/Junior/Women's/Masters/Mixed) had existed since v8.x and
@@ -73,6 +73,95 @@ visibility only.
   and a client-side "Seniors only" preset already), StatLab, Yearbooks, and the
   AFL silo (`services/afl/grade_labels.py` has its own category set —
   senior/colts/womens/masters/integrated — and would need its own pass).
+## One CRUD shape for Emails, Lists, Segments and Templates (v9.17.0, Aug 2026)
+
+The four Comms records are the same kind of thing — a club has several, picks
+one, works on it, saves or deletes it — and had four different answers to that.
+Segments had the best one, so it is now the pattern and the other three sit on
+it. **Frontend only: no endpoint, payload, capability or route changed.**
+
+- **`pages/admin/clubhouse/crudShell.jsx` is the pattern**, and a new Comms-style
+  screen should be built from it rather than inventing a fifth layout:
+  `CrudPanes` (the two panes), `RecordListPane` (the left rail — flat `items`, or
+  labelled `groups` for records that come from more than one place),
+  `DetailPane`, `RecordTitleRow` (the name edited where it is read, actions
+  beside it), `CountBar`, `SaveRow`, plus `reachability`, which moved here from
+  `segmentEngine` because three screens now report reach the same way.
+  `segmentEngine`'s `SegmentListPane`/`SegmentTitleRow` are thin wrappers over
+  it and `CountBar`/`reachability` are re-exported, so both segment screens'
+  imports are untouched.
+- **Emails is ONE screen on two URLs.** `/admin/comms` and `/admin/comms/:id`
+  both render `CommsCampaigns`; `CommsCompose` exports `EmailDetail`, which
+  draws no layout of its own and lives in the right pane. The URL did not
+  change, so every "Email these N now", the Roster's link and any bookmark
+  still land on the right email. The composer is `lazy()` inside the shell, so
+  glancing at the list does not pull in the HTML editor. **Deleting a SENT
+  email moved from the list row to the email itself** — it was the one thing
+  the old compose page could not do, and dropping it would have lost a real
+  capability.
+- **The subject is the email's title row**, not a field in the body: it is the
+  email's identity the way a name is a segment's. Name and description stay as
+  their own fields, since they label it for the club's own records. This is why
+  **`TextInput` forwards its ref** now — the Insert bar places a merge variable
+  at the cursor in the subject, so it needs the real input.
+- **Lists kept every filter, bulk action and modal** it had; only the shell
+  changed. Rename is the name field, "Manage" is simply what the right pane
+  always shows, and Export CSV / "Email these N now" appear once, on the record.
+  Enter in the name field still creates a list (`RecordTitleRow`'s optional
+  `onSubmit`), which is what the old create box did.
+- **A draft is only ever LOADED, never cleared, by the selection effect** — the
+  trap `useSegments` already documents. Clearing on "nothing selected" is
+  exactly the state "New list" / "New template" puts the screen in, and would
+  wipe the fresh draft in the same commit.
+- **`EmailEditorTabs` seeds its design iframe once on mount**, so Templates
+  bumps an `editorKey` whenever the HTML is replaced wholesale (a different
+  template picked, a file imported) — same reason Compose already did.
+- **Emails, Lists and Templates now get screen introductions** (`INTROS.emails`
+  was written and unused; `lists` and `templates` are new). Emails passes a
+  `null` key when a `:id` is present, so a deep link to one email never opens an
+  introduction first.
+- **Verified in a real browser** (Chromium, the app on the dev server with the
+  API stubbed at the network layer): all six screens render with data, no page
+  errors, no horizontal overflow at 390px, and the state transitions a
+  screenshot cannot reach — switching records, New list / New template / New
+  segment, typing a name, opening a sent email and a draft, and Send enabling
+  once subject, message and audience are all present.
+
+## The meeting room runs inside the Committee screen (v9.17.1, Aug 2026)
+
+OPEN, a second pill on every meeting card in Clubhouse → Committee, puts the
+meeting room (`pages/admin/MeetingRoom.jsx`) in the pane beside the list instead
+of on a page of its own. **Frontend only, and no endpoint changed.**
+
+- **`MeetingRoomPanel` is the whole room with no chrome**, and the default export
+  is now a thin route wrapper around it. So there is ONE meeting room, mounted
+  twice, and `/admin/clubhouse/committee/meeting/:meetingId` is byte-for-byte the
+  page it always was — which matters, because OPEN MEETING on the manage screen
+  and any bookmark still go there.
+- **The header is the awkward part and `onMeta` is the answer.** The full-page
+  version draws the title, the status select and "All meetings" in the MODULE
+  header, which is outside the panel; the panel therefore hands `{ meeting,
+  setStatus, reload }` up on every load and the route renders the header from
+  that. Embedded, `inlineHeader` draws the same three things inside the pane with
+  Close in place of the link. Do not be tempted to move the header into the panel
+  permanently — that would change the standalone page.
+- **The room is only ever open on the SELECTED meeting** (`room = st.cteRoom ===
+  sel.id ? sel.id : null`), so the highlighted card and the pane can never
+  disagree, and clicking any card exits the room back to its summary.
+- **`onMeta` also keeps the card's status pill live** (a cheap merge of the
+  meeting-level fields), and `refreshMeeting` re-reads the one meeting on the way
+  OUT so the summary shows what was just minuted. One fetch on exit, not one per
+  edit — the room already reloads itself after every change.
+- **`chip(C.accent)` does not work in that screen.** `chip` builds its edge as
+  `${fg}66`, and `C.accent` is `var(--pb-accent)` — `var(--pb-accent)66` is not a
+  colour, so the border silently disappears. `openChip` uses `color-mix` for the
+  edge and `--pb-accent-ink` for the text, which is also what keeps it legible on
+  a light theme.
+- **Verified in a real browser** against the running app with the API stubbed:
+  OPEN on each card, the agenda and its items, a motion and its votes, minutes
+  autosaving (the PATCH and the attendance PUT were both observed on the wire),
+  the status select, Close returning to a refreshed summary, no overflow at
+  390px, both themes, and the standalone route still rendering its own header.
 
 ## A club font with no bold, and ink on a dark accent (migration 226, v9.14.0, Aug 2026)
 
@@ -815,11 +904,30 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   against the Clubs Directory. **Never expose the Super Admin fields, context
   bar or copy in a club build** — not behind a dropdown, not greyed out, not
   listed and disabled. Enforced structurally: `segmentFields.jsx` exports
-  `CLUB_FIELD_DEFS` (imported by Audiences) and `DIRECTORY_FIELD_DEFS` (imported
-  ONLY by `SuperDirectoryAudiences`, `/admin/super/directory-audiences`), with
-  no runtime context switch to get it wrong; `CommsContextBar` no longer renders
-  in the club layout. Apply the same rule to any future module that gains a
-  platform-side mode.
+  `CLUB_FIELD_DEFS` (imported ONLY by `clubhouse/ClubhouseSegments.jsx`) and
+  `DIRECTORY_FIELD_DEFS` (imported ONLY by `clubhouse/InternalSegments.jsx`),
+  with no runtime context switch to get it wrong; `CommsContextBar` no longer
+  renders in the club layout. Apply the same rule to any future module that
+  gains a platform-side mode.
+- **Both segment builders are Clubhouse screens on one URL** (`/admin/comms/
+  segments`), and `clubhouse/SegmentsRoute.jsx` is the single place the two are
+  chosen between — on `is_marketing_org`, once, lazily, so a club session never
+  fetches the directory chunk. The internal one used to be a separate page
+  outside the module (`SuperDirectoryAudiences`, on the plain `AdminLayout`
+  chrome), so picking Segments in internal mode threw you out of BetterClubhouse
+  mid-task; that page is gone and its URL redirects. **No backend change was
+  needed** — `/segments/*` already resolves against whichever org you are acting
+  as (`get_current_club`), and `/segments/options` already returns
+  `context: "directory"` for the outreach org.
+- **`clubhouse/segmentEngine.jsx` is the shared builder**: `useSegments` (load,
+  live sizes, draft, resolve-as-you-type, save/duplicate/delete, "Email these N
+  now") plus `RuleBuilder` / `SegmentListPane` / `SegmentTitleRow` / `CountBar`.
+  It imports NEITHER field set — `defs` is a required argument, and each screen
+  passes the one constant it imports. **`defs` is required because `newRule`
+  reads the first field's first operator**, so an empty vocabulary is a
+  TypeError, which is what a saved segment carrying zero rules would hit.
+  Adding an `isInternal` flag in here is the wrong move; a third mount is a
+  third screen.
 - **Not done, and it's the real work**: step 4 of the handoff's sequencing —
   joining the data. The Directory is still not the one person list (Fees
   members, Comms contacts and the ClubManager directory remain three), and a

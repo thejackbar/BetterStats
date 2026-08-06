@@ -141,15 +141,37 @@ export const INTROS = {
     ],
     history: 'Stock charges land here now. Kit used to be owed in the merch ledger, which never met the fee ledger, so nobody could answer "what does this person owe us".',
   },
+  // Keyed 'audiences' on purpose — the key is what marks the introduction as
+  // seen, per person, so renaming it would show this again to everyone who has
+  // already dismissed it. The screen it belongs to is Segments.
   audiences: {
-    title: 'Audiences',
-    lede: 'One way to describe a group of people, and it resolves when you send.',
+    title: 'Segments',
+    lede: 'A group of people described by a rule, worked out again every time you send.',
     points: [
-      'An audience is a set of conditions, not a frozen copy — someone who joins tomorrow is in it tomorrow.',
-      'A hand-picked list is just an audience whose rule is "these people". There is no second mechanism to learn.',
-      'Every audience reports how many people it matches and how many can actually be reached by email.',
+      'A segment is a set of conditions, not a frozen copy — someone who joins tomorrow is in it tomorrow.',
+      'For people picked by hand, use a list instead. A segment is the rule; a list is the roll call.',
+      'When you write an email you choose its audience, and that audience is one of your segments or one of your lists.',
+      'Every segment reports how many people it matches and how many can actually be reached by email.',
     ],
-    history: 'This replaced Contacts, Lists and Segments — three answers to one question, each with its own screen and its own idea of who a person was.',
+  },
+  lists: {
+    title: 'Lists',
+    lede: 'A fixed set of people you picked by hand, and it stays as picked.',
+    points: [
+      'Use a list for a group that will not change on its own — the committee, the sponsors, one team.',
+      'For a group better described by a rule, use a segment instead. A list is the roll call; a segment is the rule.',
+      'When you write an email you choose its audience, and that audience is one of your lists or one of your segments.',
+      'Lists other BetterCricket tools built for you sit in their own section and behave like any other list.',
+    ],
+  },
+  templates: {
+    title: 'Templates',
+    lede: 'The club\'s email layouts, written once and reused.',
+    points: [
+      'Pick a template while writing an email and it fills in the message for you to edit.',
+      'Design mode edits the layout as you see it; the HTML tab is there when you want the code.',
+      'Preview renders a template exactly as a send would, unsubscribe footer and all.',
+    ],
   },
   inventory: {
     title: 'Inventory',

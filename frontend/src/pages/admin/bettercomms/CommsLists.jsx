@@ -1,12 +1,59 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Badge, Caption, SectionHeading, Note, Empty, Toast, INPUT_CLS } from '../../../components/admin/ui'
+import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow, reachability } from '../clubhouse/crudShell'
+import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
   emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
   matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle } from './audience'
+
+// Lists — a set of people picked by hand, and it stays as picked.
+//
+// The other half of the audience vocabulary: a segment is a rule resolved at
+// send time, a list is a roll call. Both are things an email can be addressed
+// to, and both are now CRUDed the same way — the saved ones in a rail on the
+// left, the one you are working on beside it, its name edited where it is read,
+// its reach counted live, and Save and Delete in the same place as everywhere
+// else in the module. See clubhouse/crudShell.jsx.
+//
+// What that replaced: a create box at the top of the page, a stack of cards
+// each carrying five buttons and an inline rename with its own Save/Cancel, and
+// a separate editor card that appeared underneath the whole stack once you
+// pressed Manage. Nothing has been dropped — rename is the name field, Manage
+// is simply what the right pane always shows, and Export CSV and "Email these N
+// now" moved to the record's own actions.
+
+const noFilters = () => ({ club: [], association: [], country: [], utm_code: [], state: [] })
+
+// Start an email already addressed to a list.
+//
+// The same move Segments makes with "Email these N now": create the draft with
+// the audience already set and open it, rather than sending the officer to the
+// Emails list to pick again the list they were just looking at. `saved_list` is
+// the audience type the composer's own dropdown writes for a list, so the draft
+// opens with it already chosen and counted.
+export function useEmailList() {
+  const navigate = useNavigate()
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
+  const emailList = useCallback(async (list) => {
+    if (!list?.id) return
+    setBusyId(list.id); setError('')
+    try {
+      const c = await api.commsCreateCampaign({
+        subject: '', body_html: '',
+        audience: { type: 'saved_list', list_id: list.id },
+      })
+      navigate(`/admin/comms/${c.id}`, { state: { skipIntro: true } })
+    } catch (e) { setError(e.message); setBusyId(null) }
+  }, [navigate])
+  return { emailList, busyId, error }
+}
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -23,17 +70,14 @@ function CopyToLists({ lists, currentId, onCopy }) {
   const go = async () => { await onCopy(picked); setPicked([]); setOpen(false) }
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen(o => !o)}
-        className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent">
-        Copy to lists ▾
-      </button>
+      <Button size="sm" onClick={() => setOpen(o => !o)}>Copy to lists ▾</Button>
       {open && (
-        <div className="absolute z-30 mt-1 right-0 w-64 max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+        <div className="absolute z-30 mt-1 right-0 w-64 max-h-80 overflow-auto rounded-lg border border-pb-hairline2 bg-pb-surface2 shadow-lg p-2">
           {targets.length === 0 ? (
             <div className="text-xs text-pb-faint px-1 py-2">No other lists. Create one first.</div>
           ) : (
             <>
-              <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 px-1 mb-1">Copy selected into</div>
+              <Caption className="px-1 mb-1">Copy selected into</Caption>
               {targets.map(l => (
                 <label key={l.id} className="flex items-center gap-2 px-1 py-1 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
                   <input type="checkbox" className="accent-pb-accent" checked={picked.includes(l.id)} onChange={() => toggle(l.id)} />
@@ -41,11 +85,9 @@ function CopyToLists({ lists, currentId, onCopy }) {
                   <span className="text-pb-faintest">{l.count}</span>
                 </label>
               ))}
-              <button type="button" onClick={go} disabled={!picked.length}
-                className="mt-2 w-full px-2.5 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40"
-                style={{ background: 'var(--pb-accent)' }}>
+              <Button size="sm" variant="primary" onClick={go} disabled={!picked.length} className="mt-2 w-full">
                 Copy to {picked.length || ''} list{picked.length === 1 ? '' : 's'}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -65,8 +107,12 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
           <span className="text-pb-faintest text-[11px] ml-2 truncate">{[c.club, c.state].filter(Boolean).join(' · ')}</span>
         )}
       </button>
-      {c.subscribed === false && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint border border-pb-faint/30 rounded px-1.5 py-0.5 shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}>unsubscribed</span>}
-      {c.suppressed && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5 shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded">supp</span>}
+      {c.subscribed === false && (
+        <span className="shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}><Badge>Unsubscribed</Badge></span>
+      )}
+      {c.suppressed && (
+        <span className="shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded"><Badge toneKey="block">Supp</Badge></span>
+      )}
       {action}
     </div>
   )
@@ -75,13 +121,13 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
 // Prominent section header that reads in both light and dark themes.
 function SectionHeader({ title, count, allChecked, onToggleAll, hasRows }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-pb-surface2 border pb-hairline mb-2">
+    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-pb-surface2 border border-pb-hairline mb-2">
       <div className="flex items-center gap-2.5 min-w-0">
         {hasRows && (
           <input type="checkbox" className="accent-pb-accent shrink-0" checked={allChecked} onChange={onToggleAll}
             title="Select all shown in this section" />
         )}
-        <span className="text-pb-text text-sm font-semibold uppercase tracking-wide2 truncate">
+        <span className="font-display text-pb-text text-[13.5px] font-semibold truncate">
           {title} <span className="text-pb-faint font-normal">({count})</span>
         </span>
       </div>
@@ -89,11 +135,18 @@ function SectionHeader({ title, count, allChecked, onToggleAll, hasRows }) {
   )
 }
 
-function ListDetail({ list, lists, onChanged }) {
-  const [memberIds, setMemberIds] = useState(null)
+// Who is in this list, and everything you can do about it.
+//
+// Unchanged in substance from the old "Manage" card: the same search, the same
+// directory and engagement filters, the same bulk add / remove / copy, the same
+// per-row actions and contact detail modal. It reports its members up
+// (`onMembers`) so the count bar above it can say how many of them are actually
+// reachable by email — the same readout a segment gives.
+function ListMembership({ list, lists, onChanged, onMembers }) {
+  const [memberRows, setMemberRows] = useState(null)
   const [contacts, setContacts] = useState(null)
   const [query, setQuery] = useState('')
-  const [filters, setFilters] = useState({ club: [], association: [], country: [], utm_code: [], state: [] })
+  const [filters, setFilters] = useState(noFilters)
   const [modes, setModes] = useState(emptyModes)
   const [engagement, setEngagement] = useState(emptyEngagementFilter)
   const [supp, setSupp] = useState('all')
@@ -105,8 +158,8 @@ function ListDetail({ list, lists, onChanged }) {
 
   const loadMembers = useCallback(() => {
     api.commsListMembers(list.id)
-      .then(rows => setMemberIds(new Set(rows.map(r => r.id))))
-      .catch(() => setMemberIds(new Set()))
+      .then(rows => setMemberRows(rows || []))
+      .catch(() => setMemberRows([]))
   }, [list.id])
   const loadContacts = useCallback(() => {
     api.commsListContacts({}).then(r => setContacts(r.contacts || [])).catch(() => setContacts([]))
@@ -114,8 +167,10 @@ function ListDetail({ list, lists, onChanged }) {
   useEffect(() => { loadMembers() }, [loadMembers])
   useEffect(() => { loadContacts() }, [loadContacts])
   // A fresh list resets the working selection.
-  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }, [list.id])
+  useEffect(() => { setSelected(new Set()); setQuery(''); setFilters(noFilters()); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()); setNote('') }, [list.id])
+  useEffect(() => { onMembers?.(memberRows) }, [memberRows])   // eslint-disable-line react-hooks/exhaustive-deps
 
+  const memberIds = useMemo(() => (memberRows == null ? null : new Set(memberRows.map(r => r.id))), [memberRows])
   const facetOptions = useMemo(() => facetOptionsFrom(contacts), [contacts])
   // Directory include/exclude chips only make sense when contacts carry club data
   // (BetterCricket outreach contacts) — a normal club's own members don't.
@@ -180,23 +235,16 @@ function ListDetail({ list, lists, onChanged }) {
 
   const selectAllFiltered = () => setMany(visible.map(c => c.id), true)
   const clearSelection = () => setSelected(new Set())
-  const clearAll = () => { setQuery(''); setFilters({ club: [], association: [], country: [], utm_code: [], state: [] }); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }
+  const clearAll = () => { setQuery(''); setFilters(noFilters()); setModes(emptyModes()); setSupp('all'); setUnsub('all'); setEngagement(emptyEngagementFilter()) }
   const activeFilters = FACETS.some(f => filters[f.key].length) || anyMode(modes) || !!q || supp !== 'all' || unsub !== 'all'
     || engagement.gte || engagement.lte || engagement.topN
 
   return (
-    <div className="pb-card p-4">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="text-sm text-pb-text font-medium">{list.name}</div>
-        <a href={api.commsListExportCsvUrl(list.id)}
-          className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent shrink-0"
-          title="Export this list to CSV">Export CSV</a>
-      </div>
-
+    <div>
       {/* Search + filters */}
       <input value={query} onChange={e => setQuery(e.target.value)}
         placeholder={searchHint(showDirChips)}
-        className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
+        className={`${INPUT_CLS} mb-2`} />
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
           <MultiSelect key={f.key} label={f.label} options={facetOptions[f.key]}
@@ -212,44 +260,41 @@ function ListDetail({ list, lists, onChanged }) {
       </div>
       {showDirChips && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Directory</span>
+          <Caption className="mr-1">Directory</Caption>
           <DirectoryFilterChips modes={modes} onChange={setModes} />
           <span className="text-pb-faintest text-[10px] ml-1">tap once to exclude, twice to include</span>
         </div>
       )}
       {showDirChips && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Engagement</span>
+          <Caption className="mr-1">Engagement</Caption>
           <EngagementFilterControls value={engagement} onChange={setEngagement} hasDirectory={showDirChips} />
         </div>
       )}
 
       {/* Selection action bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 pb-hairline-b">
-        <button onClick={selectAllFiltered} disabled={!visible.length}
-          className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-40">
+        <Button size="sm" onClick={selectAllFiltered} disabled={!visible.length}>
           Select all filtered ({visible.length})
-        </button>
+        </Button>
         {selected.size > 0 ? (
           <>
-            <span className="text-pb-text text-xs font-medium">{selected.size} selected</span>
-            <button onClick={() => doAdd(selCandidateIds)} disabled={busy || !selCandidateIds.length}
-              className="px-2.5 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
+            <span className="text-pb-text text-[12.5px] font-semibold">{selected.size} selected</span>
+            <Button size="sm" variant="primary" onClick={() => doAdd(selCandidateIds)} disabled={busy || !selCandidateIds.length}>
               Add to list ({selCandidateIds.length})
-            </button>
-            <button onClick={() => doRemove(selMemberIds)} disabled={busy || !selMemberIds.length}
-              className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:text-pb-red hover:border-pb-red disabled:opacity-40">
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => doRemove(selMemberIds)} disabled={busy || !selMemberIds.length}>
               Remove from list ({selMemberIds.length})
-            </button>
+            </Button>
             <CopyToLists lists={lists} currentId={list.id} onCopy={doCopy} />
-            <button onClick={clearSelection} className="text-xs text-pb-faint hover:text-pb-text">Clear selection</button>
+            <Button size="sm" variant="quiet" onClick={clearSelection}>Clear selection</Button>
           </>
         ) : (
-          <span className="text-pb-faintest text-xs">Tick contacts to add, remove or copy them in bulk.</span>
+          <span className="text-pb-faintest text-[12.5px]">Tick contacts to add, remove or copy them in bulk.</span>
         )}
       </div>
 
-      {note && <div className="text-pb-accent text-xs mb-3">{note}</div>}
+      {note && <Note className="mb-3">{note}</Note>}
 
       {/* IN THIS LIST */}
       <SectionHeader title="In this list" count={shownMembers.length}
@@ -264,7 +309,7 @@ function ListDetail({ list, lists, onChanged }) {
           {shownMembers.map((m, i) => (
             <ContactRow key={m.id} c={m} last={i === 0} onDetails={setDetailId}
               checked={isChecked(m.id)} onCheck={() => toggleOne(m.id)}
-              action={<button onClick={() => doRemove([m.id])} disabled={busy} className="text-pb-faint hover:text-pb-red text-xs px-1 shrink-0 disabled:opacity-50">Remove</button>} />
+              action={<Button size="sm" variant="danger" onClick={() => doRemove([m.id])} disabled={busy}>Remove</Button>} />
           ))}
         </div>
       )}
@@ -282,7 +327,7 @@ function ListDetail({ list, lists, onChanged }) {
           {candidates.map((c, i) => (
             <ContactRow key={c.id} c={c} last={i === 0} onDetails={setDetailId}
               checked={isChecked(c.id)} onCheck={() => toggleOne(c.id)}
-              action={<button onClick={() => doAdd([c.id])} disabled={busy} className="px-2.5 py-1 rounded text-xs font-medium text-white disabled:opacity-50 shrink-0" style={{ background: 'var(--pb-accent)' }}>Add</button>} />
+              action={<Button size="sm" variant="primary" onClick={() => doAdd([c.id])} disabled={busy}>Add</Button>} />
           ))}
         </div>
       )}
@@ -292,150 +337,198 @@ function ListDetail({ list, lists, onChanged }) {
   )
 }
 
-function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
-  const [editing, setEditing] = useState(false)
-  const [name, setName] = useState(l.name)
-  const [err, setErr] = useState('')
-  const save = async () => {
-    const v = name.trim()
-    if (!v || v === l.name) { setEditing(false); setName(l.name); return }
-    try { await onRenamed(l, v); setEditing(false); setErr('') }
-    catch (e) { setErr(e.message) }
-  }
-  return (
-    <div className={`flex items-center justify-between gap-3 px-5 py-3 ${first ? '' : 'pb-hairline-t'}`}>
-      {editing ? (
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <input autoFocus value={name} onChange={e => setName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setEditing(false); setName(l.name) } }}
-              className="flex-1 px-2 py-1 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-            <button onClick={save} className="text-xs font-medium px-2 py-1 rounded text-white" style={{ background: 'var(--pb-accent)' }}>Save</button>
-            <button onClick={() => { setEditing(false); setName(l.name) }} className="text-pb-faint text-xs hover:text-pb-text">Cancel</button>
-          </div>
-          {err && <div className="text-pb-red text-xs mt-1">{err}</div>}
-        </div>
-      ) : (
-        <button onClick={() => onToggle(l)} className="text-left min-w-0 flex-1">
-          <div className="text-pb-text text-sm truncate">{l.name}</div>
-          <div className="text-pb-faintest text-xs mt-0.5">{l.count} contact{l.count === 1 ? '' : 's'}</div>
-        </button>
-      )}
-      {!editing && (
-        <div className="flex items-center gap-3 shrink-0">
-          <button onClick={() => setEditing(true)} className="text-pb-faint text-xs hover:text-pb-text">Rename</button>
-          <a href={api.commsListExportCsvUrl(l.id)} className="text-pb-faint text-xs hover:text-pb-text" title="Export this list to CSV">Export CSV</a>
-          <button onClick={() => onToggle(l)} className="text-pb-faint text-xs hover:text-pb-text">{selected ? 'Close' : 'Manage'}</button>
-          <button onClick={() => onDelete(l)} className="text-pb-faint text-xs hover:text-pb-red">Delete</button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// One card of list rows. Extracted so the manually-created and auto-generated
-// sections render identically.
-function ListsCard({ rows, selected, onToggle, onDelete, onRenamed }) {
-  return (
-    <div className="pb-card overflow-hidden mb-4">
-      {rows.map((l, i) => (
-        <ListRow key={l.id} l={l} first={i === 0} selected={selected?.id === l.id}
-          onToggle={onToggle} onDelete={onDelete} onRenamed={onRenamed} />
-      ))}
-    </div>
-  )
-}
-
 export default function CommsLists() {
   const { user } = useAuth()
+  const intro = useScreenIntro('lists')
+  const { emailList, busyId: emailing, error: emailError } = useEmailList()
   const [lists, setLists] = useState(null)
-  const [selected, setSelected] = useState(null)
-  const [newName, setNewName] = useState('')
+  const [selId, setSelId] = useState(null)
+  const [draft, setDraft] = useState(null)          // { id, name }
+  const [members, setMembers] = useState(null)      // the selected list's contacts
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [toast, setToast] = useState(null)
 
-  const load = useCallback(() => {
-    api.commsListLists().then(setLists).catch(e => { setError(e.message); setLists([]) })
+  const load = useCallback(async () => {
+    try {
+      const rows = await api.commsListLists()
+      setLists(rows)
+      setSelId(cur => cur || rows[0]?.id || null)
+      return rows
+    } catch (e) { setError(e.message); setLists([]); return [] }
   }, [])
   useEffect(() => { load() }, [load])
 
-  const create = async () => {
-    if (!newName.trim()) return
-    setError('')
+  const selected = useMemo(() => (lists || []).find(l => l.id === selId) || null, [lists, selId])
+
+  // Editing works on a draft, so a half-typed name never reaches the server.
+  // Like the segment builder this only ever LOADS a draft and never clears one:
+  // clearing on "nothing selected" is exactly the state "New list" puts the
+  // screen in, and would wipe the fresh draft in the same commit.
+  useEffect(() => {
+    if (!selected) return
+    setDraft({ id: selected.id, name: selected.name })
+    setMembers(null)
+  }, [selected?.id])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startNew = () => { setSelId(null); setDraft({ id: null, name: '' }); setMembers(null); setError('') }
+
+  const save = async () => {
+    const name = (draft?.name || '').trim()
+    if (!name) { setError('Give the list a name.'); return }
+    setBusy(true); setError('')
     try {
-      const l = await api.commsCreateList(newName.trim())
-      setNewName('')
-      load()
-      setSelected(l)
-    } catch (e) { setError(e.message) }
+      const saved = draft.id
+        ? await api.commsRenameList(draft.id, name)
+        : await api.commsCreateList(name)
+      setToast({
+        title: draft.id ? 'List saved' : 'List created',
+        body: draft.id ? `Renamed to ${name}.` : `${name} is ready — pick who belongs in it below.`,
+      })
+      await load()
+      setSelId(saved.id)
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  const del = async (l) => {
-    if (!window.confirm(`Delete the list "${l.name}"? The contacts themselves are not deleted.`)) return
-    await api.commsDeleteList(l.id)
-    if (selected?.id === l.id) setSelected(null)
-    load()
+  const remove = async () => {
+    if (!draft?.id) return
+    if (!window.confirm(`Delete the list "${draft.name}"? The contacts themselves are not deleted.`)) return
+    setBusy(true); setError('')
+    try {
+      await api.commsDeleteList(draft.id)
+      setSelId(null); setDraft(null); setMembers(null)
+      await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
-
-  const rename = async (l, name) => {
-    const updated = await api.commsRenameList(l.id, name)
-    if (selected?.id === l.id) setSelected(s => ({ ...s, name: updated.name }))
-    load()
-  }
-
-  const toggle = (l) => setSelected(selected?.id === l.id ? null : l)
 
   const manualLists = useMemo(() => (lists || []).filter(l => l.source !== 'auto'), [lists])
   const autoLists = useMemo(() => (lists || []).filter(l => l.source === 'auto'), [lists])
-  // Split into two labelled sections for super admins, or whenever an
-  // auto-generated list exists (an ordinary club admin only ever has manual
-  // lists, so their page keeps the single flat list it always had).
+  // Two labelled sections for super admins, or whenever an auto-generated list
+  // exists (an ordinary club admin only ever has manual lists, so their rail
+  // keeps the single flat list it always had).
   const showSections = !!user?.can_switch_clubs || autoLists.length > 0
 
+  const rowFor = (l) => ({
+    id: l.id,
+    name: l.name,
+    sub: l.source === 'auto' ? `Auto-generated${l.origin ? ` · ${l.origin}` : ''}` : 'Picked by hand',
+    figure: l.count,
+  })
+  const groups = showSections ? [
+    { key: 'manual', heading: 'Your lists', items: manualLists.map(rowFor), emptyText: "No lists you've created by hand yet." },
+    { key: 'auto', heading: 'Auto-generated lists', items: autoLists.map(rowFor), emptyText: 'Nothing here yet.' },
+  ] : null
+
+  const count = selected?.count ?? 0
+  const reachable = members == null ? 0 : members.filter(c => reachability(c).key === 'email').length
+  const otherRoute = members == null ? 0 : members.filter(c => reachability(c).key === 'guardian').length
+
+  if (intro.showing) {
+    return (
+      <BetterCommsLayout title="Lists" actions={<Button onClick={intro.dismiss}>Skip</Button>}>
+        <ScreenIntro intro={INTROS.lists} onContinue={intro.dismiss} onTurnOff={intro.turnOff} />
+      </BetterCommsLayout>
+    )
+  }
+
   return (
-    <BetterCommsLayout title="Lists">
-      {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
-      <div className="text-pb-faintest text-sm mb-4 max-w-2xl">
-        A list is a fixed set of contacts you pick by hand (committee, sponsors, a team), the counterpart to a
-        segment. Use a list when the membership won't change on its own.
-      </div>
+    <BetterCommsLayout
+      title="Lists"
+      caption={`Picked by hand · ${lists?.length ?? 0} saved`}
+      onHelp={intro.reopen}
+      actions={<Button variant="primary" onClick={startNew}>New list</Button>}
+      bare
+    >
+      <CrudPanes>
+        <RecordListPane
+          items={showSections ? undefined : manualLists.map(rowFor)}
+          groups={groups}
+          loading={lists == null} selId={selId} onSelect={setSelId}
+          emptyText="No lists yet. Start one and pick who belongs in it."
+        >
+          <Note toneKey="calm">
+            A list is people picked by hand. For a group better described by a rule, use a{' '}
+            <Link to="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>segment</Link>
+            {' '}— both can be chosen as the audience when you write an email:{' '}
+            <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
+          </Note>
+          {showSections && (
+            <Note title="Auto-generated lists" toneKey="calm">
+              Lists built for you by other BetterCricket tools. Rename, manage, email or delete them like any
+              other list.
+            </Note>
+          )}
+        </RecordListPane>
 
-      <div className="pb-card p-3 mb-4 flex items-center gap-2 max-w-xl">
-        <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()}
-          placeholder="New list name (e.g. Committee)"
-          className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-        <button onClick={create} className="px-3 py-2 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-          Create
-        </button>
-      </div>
-
-      {lists == null ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
-      ) : lists.length === 0 ? (
-        <div className="text-pb-faintest text-sm">No lists yet.</div>
-      ) : !showSections ? (
-        <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
-      ) : (
-        <>
-          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mb-2">Your lists</div>
-          {manualLists.length === 0 ? (
-            <div className="text-pb-faintest text-sm mb-4">No lists you've created by hand yet.</div>
-          ) : (
-            <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+        <DetailPane>
+          {/* A record's own error sits beside Save, the way it does on a
+              segment. This is for the two that cannot: the lists themselves
+              failing to load, and a failure while opening an email addressed
+              to one. */}
+          {(emailError || (!draft && error)) && (
+            <Note toneKey="block" className="mb-4">{emailError || error}</Note>
           )}
 
-          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mt-6 mb-1">Auto-generated lists</div>
-          <div className="text-pb-faintest text-xs mb-2 max-w-2xl">
-            Lists built for you by other BetterCricket tools. Rename, manage or delete them like any other list.
-          </div>
-          {autoLists.length === 0 ? (
-            <div className="text-pb-faintest text-sm mb-4">Nothing here yet.</div>
+          {!draft ? (
+            <Empty>Pick a list, or start a new one.</Empty>
           ) : (
-            <ListsCard rows={autoLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
-          )}
-        </>
-      )}
+            <>
+              <RecordTitleRow
+                name={draft.name} onName={v => setDraft(d => ({ ...d, name: v }))}
+                onSubmit={save}
+                placeholder="Name this list"
+                blurb="A fixed set of contacts you pick by hand. It stays exactly as picked until you change it."
+                actions={<>
+                  {draft.id && (
+                    <Button size="sm" as="a" href={api.commsListExportCsvUrl(draft.id)}
+                      title="Download this list's contacts">Export CSV</Button>
+                  )}
+                  <Button size="sm" variant="primary" onClick={() => emailList(selected)}
+                    disabled={!draft.id || !count || !!emailing}
+                    title={!draft.id ? 'Save the list first' : count ? '' : 'This list has nobody in it yet'}>
+                    {emailing === draft.id ? 'Opening…' : `Email these ${count} now`}
+                  </Button>
+                </>}
+              />
 
-      {selected && <ListDetail list={selected} lists={lists || []} onChanged={load} />}
+              {/* The same live readout a segment gives, phrased for a roll
+                  call rather than a rule: this many are in it, this many of
+                  them can actually be reached. */}
+              {draft.id && (
+                <CountBar>
+                  {members == null ? <span className="text-pb-dim">Counting who is in this list…</span> : (
+                    <span className="text-pb-dim">
+                      <b style={{ color: 'var(--pb-accent-ink)' }}>{count}</b>
+                      {count === 1 ? ' contact in this list' : ' contacts in this list'}
+                      {' · '}<b style={{ color: 'var(--pb-positive-ink)' }}>{reachable}</b> reachable by email
+                      {otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{otherRoute}</b> need another route</>}
+                    </span>
+                  )}
+                </CountBar>
+              )}
+
+              <SaveRow
+                onSave={save} busy={busy} error={error}
+                saveLabel={busy ? 'Saving…' : draft.id ? 'Save changes' : 'Create list'}
+                onDelete={draft.id ? remove : null}
+              />
+
+              <SectionHeading className="mt-8 mb-2.5">Who this is, right now</SectionHeading>
+              {!draft.id ? (
+                <Note toneKey="calm">
+                  Give the list a name and create it, then pick who belongs in it here.
+                </Note>
+              ) : (
+                <ListMembership
+                  key={draft.id} list={selected || draft} lists={lists || []}
+                  onChanged={load} onMembers={setMembers}
+                />
+              )}
+            </>
+          )}
+        </DetailPane>
+      </CrudPanes>
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </BetterCommsLayout>
   )
 }

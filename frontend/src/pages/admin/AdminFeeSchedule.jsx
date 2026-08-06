@@ -3,6 +3,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import { Link } from 'react-router-dom'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
+import { Button, Select, Caption, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -57,33 +58,29 @@ function ScheduleRow({ row, onSaved, onDeleted }) {
     catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
-  const cell = 'bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
   return (
     <tr className="pb-hairline-t align-middle hover:bg-pb-surface2/40">
       <td className="py-2 pl-5 pr-2">
-        <input className={`${cell} w-full`} value={draft.name}
+        <input className={INPUT_CLS} value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} />
       </td>
       <td className="py-2 px-2">
-        <select className={`${cell} w-full`} value={draft.payment_type}
+        <select className={`${INPUT_CLS} cursor-pointer`} value={draft.payment_type}
           onChange={e => setDraft(d => ({ ...d, payment_type: e.target.value }))}>
           {PAYMENT_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
         </select>
       </td>
       <td className="py-2 px-2 text-right">
-        <input type="number" min="0" step="1" className={`${cell} w-24 text-right`} value={draft.membership_amount}
+        <input type="number" min="0" step="1" className={`${INPUT_CLS} !w-24 text-right pb-num`} value={draft.membership_amount}
           onChange={e => setDraft(d => ({ ...d, membership_amount: e.target.value }))} />
       </td>
       <td className="py-2 px-2 text-right">
-        <input type="number" min="0" step="1" className={`${cell} w-20 text-right`} value={draft.match_day_rate}
+        <input type="number" min="0" step="1" className={`${INPUT_CLS} !w-20 text-right pb-num`} value={draft.match_day_rate}
           onChange={e => setDraft(d => ({ ...d, match_day_rate: e.target.value }))} />
       </td>
       <td className="py-2 pr-5 pl-2 text-right whitespace-nowrap">
-        <button onClick={save} disabled={!dirty || busy}
-          className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-30"
-          style={{ background: 'var(--pb-accent)' }}>SAVE</button>
-        <button onClick={del} disabled={busy}
-          className="ml-2 font-mono text-[10px] border pb-hairline rounded px-3 py-1.5 text-pb-red/60 hover:text-pb-red transition-colors disabled:opacity-50">DEL</button>
+        <Button size="sm" variant="primary" onClick={save} disabled={!dirty || busy}>Save</Button>
+        <Button size="sm" variant="danger" onClick={del} disabled={busy} className="ml-2">Delete</Button>
       </td>
     </tr>
   )
@@ -94,7 +91,6 @@ function AddTierRow({ seasonId, onAdded }) {
   const blank = { name: '', payment_type: 'standard', membership_amount: '', match_day_rate: '' }
   const [draft, setDraft] = useState(blank)
   const [busy, setBusy] = useState(false)
-  const cell = 'bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
   async function add() {
     if (!draft.name.trim()) { toast.error('Name is required'); return }
     setBusy(true)
@@ -109,27 +105,26 @@ function AddTierRow({ seasonId, onAdded }) {
   return (
     <tr className="pb-hairline-t bg-pb-surface2/20 align-middle">
       <td className="py-2 pl-5 pr-2">
-        <input className={`${cell} w-full`} placeholder="New tier name…" value={draft.name}
+        <input className={INPUT_CLS} placeholder="New tier name…" value={draft.name}
           onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
           onKeyDown={e => e.key === 'Enter' && add()} />
       </td>
       <td className="py-2 px-2">
-        <select className={`${cell} w-full`} value={draft.payment_type}
+        <select className={`${INPUT_CLS} cursor-pointer`} value={draft.payment_type}
           onChange={e => setDraft(d => ({ ...d, payment_type: e.target.value }))}>
           {PAYMENT_TYPES.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
         </select>
       </td>
       <td className="py-2 px-2 text-right">
-        <input type="number" min="0" className={`${cell} w-24 text-right`} placeholder="0" value={draft.membership_amount}
+        <input type="number" min="0" className={`${INPUT_CLS} !w-24 text-right pb-num`} placeholder="0" value={draft.membership_amount}
           onChange={e => setDraft(d => ({ ...d, membership_amount: e.target.value }))} />
       </td>
       <td className="py-2 px-2 text-right">
-        <input type="number" min="0" className={`${cell} w-20 text-right`} placeholder="0" value={draft.match_day_rate}
+        <input type="number" min="0" className={`${INPUT_CLS} !w-20 text-right pb-num`} placeholder="0" value={draft.match_day_rate}
           onChange={e => setDraft(d => ({ ...d, match_day_rate: e.target.value }))} />
       </td>
       <td className="py-2 pr-5 pl-2 text-right">
-        <button onClick={add} disabled={busy}
-          className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-50">ADD</button>
+        <Button size="sm" onClick={add} disabled={busy}>Add tier</Button>
       </td>
     </tr>
   )
@@ -168,7 +163,7 @@ function GradeFormatList({ seasonId }) {
           <select
             value={g.fee_format || ''}
             onChange={e => setFormat(g, e.target.value)}
-            className={`bg-pb-surface2 border rounded px-2.5 py-1.5 text-sm focus:outline-none ${g.fee_format ? 'text-pb-text border-pb-accent/50' : 'text-pb-dim pb-hairline'}`}
+            className={`${INPUT_CLS} cursor-pointer ${g.fee_format ? '!border-pb-accent/50' : ''}`}
           >
             {FORMAT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
@@ -219,12 +214,7 @@ export default function AdminFeeSchedule() {
     <BetterFeesLayout
       title="Rate card"
       caption="What each kind of member pays"
-      actions={
-        <Link to="/admin/fees/membership-types"
-          className="px-3 py-2 rounded-lg text-[13px] border border-pb-hairline2 text-pb-dim hover:text-pb-text whitespace-nowrap">
-          Membership types
-        </Link>
-      }
+      actions={<Button as={Link} to="/admin/fees/membership-types">Membership types</Button>}
     >
       <div className="max-w-4xl">
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
@@ -232,15 +222,13 @@ export default function AdminFeeSchedule() {
           (set match fee to 0 for Upfront tiers who prepay). Match fee owed = days played × the tier's per-day rate.
         </p>
 
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <select value={seasonId} onChange={e => setSeasonId(e.target.value)}
-            className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+        <div className="flex flex-wrap items-center gap-2.5 mb-6">
+          <Select value={seasonId} onChange={e => setSeasonId(e.target.value)} className="!w-auto max-w-[220px]">
             {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
-          </select>
-          <button onClick={recompute} disabled={recomputing || !seasonId}
-            className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
-            {recomputing ? 'RECOMPUTING…' : 'RECOMPUTE MATCH DAYS'}
-          </button>
+          </Select>
+          <Button onClick={recompute} disabled={recomputing || !seasonId}>
+            {recomputing ? 'Recomputing…' : 'Recompute match days'}
+          </Button>
         </div>
 
         {schedule === null ? (
@@ -270,20 +258,16 @@ export default function AdminFeeSchedule() {
             {schedule.length === 0 && (
               <div className="pb-card p-5 mb-8 flex flex-wrap items-center gap-3">
                 <span className="text-pb-dim text-sm flex-1 min-w-[200px]">No tiers yet. Seed the default Applecross rate card, or copy from another season.</span>
-                <button onClick={seed}
-                  className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg" style={{ background: 'var(--pb-accent)' }}>
-                  SEED DEFAULTS
-                </button>
-                <select defaultValue="" onChange={e => copyFrom(e.target.value)}
-                  className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-dim text-sm focus:outline-none">
+                <Button variant="primary" onClick={seed}>Seed defaults</Button>
+                <Select defaultValue="" onChange={e => copyFrom(e.target.value)} className="!w-auto max-w-[220px]">
                   <option value="">Copy from season…</option>
                   {seasons.filter(s => s.id !== seasonId).map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
-                </select>
+                </Select>
               </div>
             )}
 
             <div className="mt-10">
-              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">Grade Formats</p>
+              <Caption screen className="mb-2">Grade formats</Caption>
               <p className="text-pb-dim text-sm mb-4 leading-relaxed">
                 How each grade counts towards match days. Leave on <span className="text-pb-text">Auto</span> to use the synced
                 grade type; tag women's (PSWL) grades as <span className="text-pb-text">Women's</span> since they arrive as plain

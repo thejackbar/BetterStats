@@ -70,7 +70,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
 const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
 const ClubManagerApp = lazy(() => import('./pages/admin/clubmanager/redesign/ClubManagerApp'))
 const ClubhouseToday = lazy(() => import('./pages/admin/clubhouse/ClubhouseToday'))
-const ClubhouseAudiences = lazy(() => import('./pages/admin/clubhouse/AudiencesRoute'))
+const ClubhouseSegments = lazy(() => import('./pages/admin/clubhouse/SegmentsRoute'))
 const ClubhouseIntegrations = lazy(() => import('./pages/admin/clubhouse/ClubhouseIntegrations'))
 const ClubhouseReports = lazy(() => import('./pages/admin/clubhouse/ClubhouseReports'))
 const ClubhouseSettings = lazy(() => import('./pages/admin/clubhouse/ClubhouseSettings'))
@@ -153,7 +153,6 @@ const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts')
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
 const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
-const SuperDirectoryAudiences = lazy(() => import('./pages/admin/SuperDirectoryAudiences'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
@@ -190,8 +189,9 @@ const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues')
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
 // BetterSocials umbrella (Website + Post Designer)
 const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
+// Emails is one master-detail screen on two URLs: the list, and the list with
+// one email open beside it. /admin/comms/:id is unchanged as a deep link.
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
-const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
 const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
@@ -322,7 +322,9 @@ export default function App() {
               every other tool kept the URL it already had (see
               components/admin/BetterClubhouseLayout.jsx for the merged nav). */}
           <Route path="/admin/clubhouse" element={<ProtectedRoute><ClubhouseToday /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/audiences" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
+          {/* The segment editor's own URL is /admin/comms/segments, below. This
+              one is kept live only so an existing bookmark still lands. */}
+          <Route path="/admin/clubhouse/audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/clubhouse/integrations" element={<ProtectedRoute><ClubhouseIntegrations /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/reports" element={<ProtectedRoute><ClubhouseReports /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/settings" element={<ProtectedRoute><ClubhouseSettings /></ProtectedRoute>} />
@@ -352,10 +354,9 @@ export default function App() {
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub/roster" element={<Navigate to="/admin/clubhouse/roster" replace />} />
-          {/* The segment editor lives at the URL its menu item names.
-              /admin/clubhouse/audiences stays live because Today deep-links to
-              it with a preset. */}
-          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
+          {/* The segment editor lives at the URL its menu item names. Today
+              deep-links here too, carrying a preset in router state. */}
+          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><ClubhouseSegments /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -445,7 +446,10 @@ export default function App() {
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
           <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
           <Route path="/admin/super/marketing" element={<ProtectedRoute requireRole="super_admin"><SuperMarketing /></ProtectedRoute>} />
-          <Route path="/admin/super/directory-audiences" element={<ProtectedRoute requireRole="super_admin"><SuperDirectoryAudiences /></ProtectedRoute>} />
+          {/* The directory segment builder is a BetterClubhouse screen now —
+              /admin/comms/segments mounts it while acting as the outreach org.
+              Kept live so an existing bookmark still lands. */}
+          <Route path="/admin/super/directory-audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 
@@ -484,15 +488,15 @@ export default function App() {
           <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
           {/* BetterComms (bulk email) — the Comms section of BetterClubhouse.
-              Segments and Lists redirect to Audiences, which replaced them;
-              Contacts stays reachable but is off the sidebar, since the person
-              spine is the Directory. */}
+              Segments and Lists are both on the sidebar and are the two things
+              an email's audience can be. Contacts stays reachable but is off
+              the sidebar, since the person spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
           <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
-          <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />
+          <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />

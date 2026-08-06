@@ -1,8 +1,19 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Note, Empty, Toast, SectionHeading } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
+import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow } from '../clubhouse/crudShell'
+import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
+
+// Templates — the club's reusable email layouts.
+//
+// Same CRUD shape as Segments and Lists: the saved ones in the rail on the
+// left, the one in hand beside it, its name edited where it is read, Save and
+// Delete in the same place. It used to swap the entire page for an editor, so
+// the only way back to the other templates was Cancel, and there was no way to
+// see what else the club had while working on one.
 
 const STARTER = `<!doctype html>
 <html>
@@ -35,7 +46,8 @@ function rtfToText(rtf) {
   s = s.replace(/\{\\colortbl[^{}]*\}/gi, '')
   s = s.replace(/\{\\\*[^{}]*\}/g, '')
   // Protect the three literal escapes before stripping control words.
-  s = s.replace(/\\\\/g, '').replace(/\\\{/g, '').replace(/\\\}/g, '')
+  // (Private-use code points, so they cannot collide with the file's own text.)
+  s = s.replace(/\\\\/g, '\uE000').replace(/\\\{/g, '\uE001').replace(/\\\}/g, '\uE002')
   // Hex (\'xx) and unicode (\uN) escapes → the character they stand for.
   s = s.replace(/\\'([0-9a-fA-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
   s = s.replace(/\\u(-?\d+)\s?\??/g, (_, n) => {
@@ -52,24 +64,65 @@ function rtfToText(rtf) {
   // Remaining braces are RTF group delimiters (literal braces were protected).
   s = s.replace(/[{}]/g, '')
   // Restore the protected literals.
-  s = s.replace(//g, '\\').replace(//g, '{').replace(//g, '}')
+  s = s.replace(/\uE000/g, '\\').replace(/\uE001/g, '{').replace(/\uE002/g, '}')
   return s.trim()
 }
 
-function Editor({ initial, onSaved, onCancel, onDeleted }) {
-  const [name, setName] = useState(initial?.name || '')
-  const [html, setHtml] = useState(initial?.html ?? STARTER)
+export default function CommsTemplates() {
+  const intro = useScreenIntro('templates')
+  const location = useLocation()
+  const [templates, setTemplates] = useState(null)
+  const [selId, setSelId] = useState(null)
+  const [draft, setDraft] = useState(null)      // { id, name, html }
+  const [loadingDraft, setLoadingDraft] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
+  const [duplicatingId, setDuplicatingId] = useState(null)
+  const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
+  const [toast, setToast] = useState(null)
+  // Bumped whenever the HTML is replaced wholesale (a different template
+  // selected, a file imported). EmailEditorTabs seeds its design iframe once on
+  // mount, so a new body only lands if the editor remounts.
+  const [editorKey, setEditorKey] = useState(0)
   const fileRef = useRef(null)
   const editorRef = useRef(null)
 
-  // Rendered exactly as a send would (footer injected) — fetched when the
-  // Preview tab is opened rather than on every keystroke.
-  const onEnterPreview = async ({ html: currentHtml }) => {
-    const r = await api.commsPreviewTemplate(currentHtml)
-    return { html: r.html || '', total: 1, index: 0 }
+  const load = useCallback(async () => {
+    try {
+      const rows = await api.commsListTemplates()
+      setTemplates(rows)
+      setSelId(cur => cur || rows[0]?.id || null)
+      return rows
+    } catch (e) { setError(e.message); setTemplates([]); return [] }
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  // Clicking "Templates" in the sidebar while already here pushes a new history
+  // entry (location.key changes) without remounting, so anything half-edited
+  // used to sit there looking like the click did nothing. Treat a fresh
+  // navigation to this route as "back to the top of the list".
+  useEffect(() => { setSelId(null); setDraft(null); setError(''); setNotice('') }, [location.key])
+
+  // The list rows carry no HTML, so open the full record when one is picked.
+  // Like the segment builder this only ever LOADS a draft, never clears one —
+  // clearing on "nothing selected" is the state "New template" puts the screen
+  // in, and would wipe the fresh draft in the same commit.
+  useEffect(() => {
+    if (!selId) return
+    let live = true
+    setLoadingDraft(true); setError(''); setNotice('')
+    api.commsGetTemplate(selId)
+      .then(t => { if (!live) return; setDraft({ id: t.id, name: t.name || '', html: t.html ?? '' }); setEditorKey(k => k + 1) })
+      .catch(e => { if (live) setError(e.message) })
+      .finally(() => { if (live) setLoadingDraft(false) })
+    return () => { live = false }
+  }, [selId])
+
+  const startNew = () => {
+    setSelId(null)
+    setDraft({ id: null, name: '', html: STARTER })
+    setEditorKey(k => k + 1)
+    setError(''); setNotice('')
   }
 
   const importFile = (e) => {
@@ -78,145 +131,151 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
     const reader = new FileReader()
     reader.onload = () => {
       let content = String(reader.result || '')
-      setErr(''); setNotice('')
+      setError(''); setNotice('')
       if (looksLikeRtf(content)) {
         const recovered = rtfToText(content)
         if (/<html|<!doctype|<body|<table|<div/i.test(recovered)) {
           content = recovered
           setNotice('That file was Rich Text (RTF), not HTML — TextEdit does this even when the file ends in .html. I recovered the HTML; check the preview. To avoid it, in TextEdit pick Format → Make Plain Text before saving, or save from a code editor.')
         } else {
-          setErr('That file is Rich Text (RTF), not HTML, and I could not recover usable HTML from it. In TextEdit choose Format → Make Plain Text and save again, or use a plain-text / code editor.')
+          setError('That file is Rich Text (RTF), not HTML, and I could not recover usable HTML from it. In TextEdit choose Format → Make Plain Text and save again, or use a plain-text / code editor.')
           return
         }
       }
-      setHtml(content)
+      setDraft(d => ({ ...d, html: content }))
+      setEditorKey(k => k + 1)
     }
     reader.readAsText(f)
     e.target.value = '' // allow re-importing the same file
   }
 
   const save = async () => {
-    if (!name.trim()) { setErr('Give the template a name.'); return }
-    setBusy(true); setErr('')
+    const name = (draft?.name || '').trim()
+    if (!name) { setError('Give the template a name.'); return }
+    setBusy(true); setError('')
     try {
-      const finalHtml = editorRef.current?.flush() ?? html
-      const saved = initial?.id
-        ? await api.commsUpdateTemplate(initial.id, name.trim(), finalHtml)
-        : await api.commsCreateTemplate(name.trim(), finalHtml)
-      onSaved(saved)
-    } catch (e) { setErr(e.message) } finally { setBusy(false) }
+      const finalHtml = editorRef.current?.flush() ?? draft.html
+      const saved = draft.id
+        ? await api.commsUpdateTemplate(draft.id, name, finalHtml)
+        : await api.commsCreateTemplate(name, finalHtml)
+      setToast({ title: draft.id ? 'Template saved' : 'Template created', body: `${name} is ready to use on an email.` })
+      await load()
+      setSelId(saved.id)
+      // Selecting the id it already had won't re-run the loader, so keep the
+      // draft in step with what was just written.
+      setDraft({ id: saved.id, name, html: finalHtml })
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
   const remove = async () => {
-    if (!initial?.id || !window.confirm('Delete this template?')) return
-    setBusy(true)
-    try { await api.commsDeleteTemplate(initial.id); onDeleted(initial.id) }
-    catch (e) { setErr(e.message); setBusy(false) }
+    if (!draft?.id) return
+    if (!window.confirm(`Delete the template "${draft.name}"? Emails already sent using it are unaffected.`)) return
+    setBusy(true); setError('')
+    try {
+      await api.commsDeleteTemplate(draft.id)
+      setSelId(null); setDraft(null)
+      await load()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  return (
-    <div>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name"
-          className="flex-1 min-w-[200px] px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-        <input ref={fileRef} type="file" accept=".html,.htm,.rtf,text/html,text/rtf" onChange={importFile} className="hidden" />
-        <button onClick={() => fileRef.current?.click()} className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2">Import .html</button>
-        {initial?.id && <button onClick={remove} disabled={busy} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-red">Delete</button>}
-        <button onClick={onCancel} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-text">Cancel</button>
-        <button onClick={save} disabled={busy}
-          className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'Saving…' : 'Save template'}
-        </button>
-      </div>
-      {err && <div className="text-pb-red text-xs mb-2">{err}</div>}
-      {notice && <div className="text-pb-amber text-xs mb-2">{notice}</div>}
-
-      <div className="text-pb-faintest text-xs mb-1">
-        Paste your own HTML, or import a file. Click a variable above to insert it wherever your cursor is. Preview
-        adds the unsubscribe footer, exactly as a send would.
-      </div>
-      <EmailEditorTabs ref={editorRef} html={html} onChange={setHtml} onEnterPreview={onEnterPreview} height={680} />
-    </div>
-  )
-}
-
-export default function CommsTemplates() {
-  const [templates, setTemplates] = useState(null)
-  const [editing, setEditing] = useState(null) // {} new, object existing, null list
-  const [error, setError] = useState('')
-  const location = useLocation()
-
-  const load = useCallback(() => {
-    api.commsListTemplates().then(setTemplates).catch(e => { setError(e.message); setTemplates([]) })
-  }, [])
-  useEffect(() => { load() }, [load])
-
-  // Clicking "Templates" in the sidebar while already on this page (e.g. mid-edit)
-  // pushes a new history entry (location.key changes) but React Router doesn't
-  // remount this component, so `editing` used to sit unchanged and nothing
-  // appeared to happen. Treat any fresh navigation to this route as "back to
-  // the list". Harmless on the very first mount, since editing is already null.
-  useEffect(() => { setEditing(null) }, [location.key])
-
-  const [duplicatingId, setDuplicatingId] = useState(null)
-
-  const openExisting = async (t) => {
-    try { setEditing(await api.commsGetTemplate(t.id)) }
-    catch (e) { setError(e.message) }
+  const duplicate = async () => {
+    if (!draft?.id) return
+    setError(''); setDuplicatingId(draft.id)
+    try {
+      const copy = await api.commsDuplicateTemplate(draft.id)
+      await load()
+      if (copy?.id) setSelId(copy.id)
+    } catch (e) { setError(e.message) } finally { setDuplicatingId(null) }
   }
-  const duplicate = async (t) => {
-    setError(''); setDuplicatingId(t.id)
-    try { await api.commsDuplicateTemplate(t.id); load() }
-    catch (e) { setError(e.message) }
-    finally { setDuplicatingId(null) }
+
+  // Rendered exactly as a send would (footer injected) — fetched when the
+  // Preview tab is opened rather than on every keystroke.
+  const onEnterPreview = async ({ html: currentHtml }) => {
+    const r = await api.commsPreviewTemplate(currentHtml)
+    return { html: r.html || '', total: 1, index: 0 }
   }
-  const onSaved = () => { setEditing(null); load() }
-  const onDeleted = () => { setEditing(null); load() }
+
+  const items = useMemo(() => (templates || []).map(t => ({
+    id: t.id, name: t.name, sub: 'Email layout',
+  })), [templates])
+
+  if (intro.showing) {
+    return (
+      <BetterCommsLayout title="Templates" actions={<Button onClick={intro.dismiss}>Skip</Button>}>
+        <ScreenIntro intro={INTROS.templates} onContinue={intro.dismiss} onTurnOff={intro.turnOff} />
+      </BetterCommsLayout>
+    )
+  }
 
   return (
     <BetterCommsLayout
       title="Templates"
-      actions={!editing && (
-        <button onClick={() => setEditing({})}
-          className="px-3 py-1.5 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-          + New template
-        </button>
-      )}
+      caption={`Reusable email layouts · ${templates?.length ?? 0} saved`}
+      onHelp={intro.reopen}
+      actions={<Button variant="primary" onClick={startNew}>New template</Button>}
+      bare
     >
-      {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
+      <CrudPanes>
+        <RecordListPane
+          items={items} loading={templates == null} selId={selId} onSelect={setSelId}
+          emptyText="No templates yet. Start from scratch, paste HTML, or import a .html file."
+        >
+          <Note toneKey="calm">
+            A template is a layout, not a message. Pick one while writing an email and it fills in the
+            message for you to edit — the email keeps its own copy, so changing a template later never
+            rewrites something already sent.
+          </Note>
+        </RecordListPane>
 
-      {editing ? (
-        <Editor initial={editing.id ? editing : null} onSaved={onSaved} onCancel={() => setEditing(null)} onDeleted={onDeleted} />
-      ) : templates == null ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
-      ) : templates.length === 0 ? (
-        <div className="pb-card p-8 text-center">
-          <div className="text-pb-text font-medium mb-1">No templates yet</div>
-          <div className="text-pb-faint text-sm mb-4">Start from scratch, paste HTML, or import a .html file.</div>
-          <button onClick={() => setEditing({})}
-            className="px-4 py-2 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-            + New template
-          </button>
-        </div>
-      ) : (
-        <div className="pb-card overflow-hidden">
-          {templates.map((t, i) => (
-            <div key={t.id}
-              className={`flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <button onClick={() => openExisting(t)} className="flex-1 text-left min-w-0">
-                <div className="text-pb-text text-sm truncate">{t.name}</div>
-              </button>
-              <div className="flex items-center gap-4 shrink-0">
-                <button onClick={() => duplicate(t)} disabled={duplicatingId === t.id}
-                  className="text-pb-faint text-xs hover:text-pb-text disabled:opacity-60">
-                  {duplicatingId === t.id ? 'Duplicating…' : 'Duplicate'}
-                </button>
-                <button onClick={() => openExisting(t)} className="text-pb-faint text-xs hover:text-pb-text">Edit →</button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+        <DetailPane>
+          {!draft && error && <Note toneKey="block" className="mb-4">{error}</Note>}
+
+          {!draft ? (
+            loadingDraft ? <Empty>Loading…</Empty> : <Empty>Pick a template, or start a new one.</Empty>
+          ) : (
+            <>
+              <RecordTitleRow
+                name={draft.name} onName={v => setDraft(d => ({ ...d, name: v }))}
+                placeholder="Name this template"
+                blurb="Reusable HTML the club's emails are built from. Preview renders it exactly as a send would."
+                actions={<>
+                  <input ref={fileRef} type="file" accept=".html,.htm,.rtf,text/html,text/rtf"
+                    onChange={importFile} className="hidden" />
+                  <Button size="sm" onClick={() => fileRef.current?.click()}>Import .html</Button>
+                  {draft.id && (
+                    <Button size="sm" onClick={duplicate} disabled={busy || duplicatingId === draft.id}>
+                      {duplicatingId === draft.id ? 'Duplicating…' : 'Duplicate'}
+                    </Button>
+                  )}
+                </>}
+              />
+
+              <CountBar>
+                <span className="text-pb-dim">
+                  Paste your own HTML or import a file. Click a variable above the editor to insert it where
+                  your cursor is, and Preview adds the unsubscribe footer exactly as a send would.
+                </span>
+              </CountBar>
+
+              <SaveRow
+                onSave={save} busy={busy} error={error}
+                saveLabel={busy ? 'Saving…' : draft.id ? 'Save changes' : 'Save template'}
+                onDelete={draft.id ? remove : null}
+              />
+
+              {notice && <Note toneKey="warn" className="mt-3">{notice}</Note>}
+
+              <SectionHeading className="mt-8 mb-2.5">The layout itself</SectionHeading>
+              <EmailEditorTabs
+                key={editorKey} ref={editorRef} html={draft.html}
+                onChange={v => setDraft(d => ({ ...d, html: v }))}
+                onEnterPreview={onEnterPreview} height={680}
+              />
+            </>
+          )}
+        </DetailPane>
+      </CrudPanes>
+      <Toast toast={toast} onClose={() => setToast(null)} />
     </BetterCommsLayout>
   )
 }

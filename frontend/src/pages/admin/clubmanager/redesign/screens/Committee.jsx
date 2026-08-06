@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout , ManageLink } from '../ui'
+import { MeetingRoomPanel } from '../../../MeetingRoom'
 
 // Committee — positions, meetings (agenda / attendance / motions) and the
 // club's committee tasks (the closest thing to action items), all on real data.
@@ -180,8 +181,43 @@ export default function Committee({ st, patch, narrow }) {
     return () => { alive = false }
   }, [])
 
+  // Coming out of the meeting room, pull that one meeting's record again so the
+  // summary beside the list shows what was just minuted. One fetch, on the way
+  // out — the room reloads itself after every edit while it is open.
+  const refreshMeeting = useCallback(async (id) => {
+    try {
+      const fresh = await api.committeeGetMeeting(id)
+      setData(d => (d ? { ...d, meetings: d.meetings.map(m => (m.id === id ? { ...m, ...fresh } : m)) } : d))
+    } catch { /* the room reports its own failures */ }
+  }, [])
+
+  // While the room is open it hands back the meeting record on every load, so
+  // the card's status pill follows a change made in the room straight away.
+  const onRoomMeta = useCallback((meta) => {
+    const m = meta?.meeting
+    if (!m) return
+    setData(d => (d ? {
+      ...d,
+      meetings: d.meetings.map(x => (x.id === m.id
+        ? { ...x, title: m.title, status: m.status, scheduled_at: m.scheduled_at, location: m.location }
+        : x)),
+    } : d))
+  }, [])
+
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
   const chip = (fg, fs = 8.5) => ({ fontFamily: MONO, fontSize: fs, letterSpacing: '0.08em', padding: '2px 6px', borderRadius: 4, border: `1px solid ${fg}66`, color: fg, flexShrink: 0 })
+  // The OPEN pill is a button, and its colour is the club's accent rather than
+  // a hex — so it can't take `chip`'s `${fg}66` edge (a var() with 66 stuck on
+  // the end is not a colour and the border silently vanishes). color-mix is how
+  // the rest of this screen tints the accent, and --pb-accent-ink is the accent
+  // as text, which stays legible on a light theme.
+  const openChip = (active, fs = 8.5) => ({
+    ...chip(C.accent, fs),
+    color: 'var(--pb-accent-ink)',
+    border: `1px solid color-mix(in srgb, var(--pb-accent) ${active ? 55 : 38}%, transparent)`,
+    background: active ? 'color-mix(in srgb, var(--pb-accent) 18%, transparent)' : 'transparent',
+    cursor: 'pointer',
+  })
 
   const Header = ({ children }) => (
     <ScreenHeader>
@@ -208,6 +244,11 @@ export default function Committee({ st, patch, narrow }) {
   meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({ ...mo, from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at) })))
 
   const sel = meetings.find(m => m.id === st.cteMeeting) || meetings[0] || null
+  // The room is only ever open on the meeting that is selected, so the card the
+  // list highlights and the pane beside it can never disagree.
+  const room = sel && st.cteRoom === sel.id ? sel.id : null
+  const openRoom = (id) => patch({ cteMeeting: id, cteRoom: id })
+  const closeRoom = () => { if (room) refreshMeeting(room); patch({ cteRoom: null }) }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
@@ -227,13 +268,26 @@ export default function Committee({ st, patch, narrow }) {
               {meetings.map(m => {
                 const s = meetingStatus(m)
                 return (
-                  <div key={m.id} onClick={() => patch({ cteMeeting: m.id })}
+                  <div key={m.id} onClick={() => patch({ cteMeeting: m.id, cteRoom: null })}
                     style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: sel && m.id === sel.id ? '1px solid color-mix(in srgb, var(--pb-accent) 40%, transparent)' : `1px solid ${C.hair}`, background: sel && m.id === sel.id ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : C.surface }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{m.title}</span>
+                    {/* The title gets the full width of a 290px rail; the two
+                        pills sit on the meta line under it rather than
+                        squeezing it into three wrapped lines. */}
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{m.title}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, flex: 1, minWidth: 0 }}>
+                        {(m.meeting_type || 'Meeting')} · {fmtDate(m.scheduled_at)}
+                      </span>
+                      {/* Opens the meeting room in the pane beside the list, so
+                          the night is minuted here rather than on a page of its
+                          own with the other meetings out of sight. */}
+                      <button onClick={e => { e.stopPropagation(); openRoom(m.id) }}
+                        title="Open the meeting room and record this meeting"
+                        style={openChip(room === m.id)}>
+                        OPEN
+                      </button>
                       <span style={chip(s.fg)}>{s.label}</span>
                     </div>
-                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{(m.meeting_type || 'Meeting')} · {fmtDate(m.scheduled_at)}</div>
                   </div>
                 )
               })}
@@ -241,11 +295,25 @@ export default function Committee({ st, patch, narrow }) {
             </div>
           </div>
 
-          {sel && (
+          {sel && room && (
+            <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 24px' }}>
+              {/* Keyed on the meeting, so switching rooms starts a clean one
+                  rather than showing the last one's agenda while it loads. */}
+              <MeetingRoomPanel key={room} meetingId={room} inlineHeader
+                onMeta={onRoomMeta} onExit={closeRoom} />
+            </div>
+          )}
+
+          {sel && !room && (
             <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 24px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <h2 style={{ fontWeight: 700, fontSize: 21, margin: 0, letterSpacing: '-0.01em' }}>{sel.title}</h2>
                 <span style={{ ...chip(meetingStatus(sel).fg, 9), padding: '3px 7px' }}>{meetingStatus(sel).label}</span>
+                <button onClick={() => openRoom(sel.id)}
+                  title="Open the meeting room and record this meeting"
+                  style={{ ...openChip(false, 9), padding: '3px 7px' }}>
+                  OPEN
+                </button>
               </div>
               <div style={{ fontFamily: MONO, fontSize: 11, color: C.faint, margin: '5px 0 22px' }}>{(sel.meeting_type || 'Meeting')} · {fmtDate(sel.scheduled_at)}{sel.location ? ' · ' + sel.location : ''}</div>
 

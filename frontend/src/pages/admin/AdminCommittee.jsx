@@ -3,14 +3,16 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
-import { FilterPill } from '../../components/admin/ui'
+import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
 import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, ObjectivesTab, ActionTimeline } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
-const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+// One input look for the whole module — the same class the shared kit's
+// TextInput/Select wear, so a hand-built control here matches a kit one.
+const inp = INPUT_CLS
 const CATEGORIES = ['operational', 'maintenance', 'compliance', 'finance', 'other']
 const STATUSES = ['todo', 'in_progress', 'done', 'blocked']
 const STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done', blocked: 'Blocked' }
@@ -62,10 +64,10 @@ function StartTermForm({ position, members, onClose, onDone }) {
       </div>
       <input type="date" className={`${inp} sm:w-40`} value={startedAt} onChange={e => setStartedAt(e.target.value)} />
       <button onClick={submit} disabled={busy || !memberId}
-        className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+        className="pb-btn pb-btn-sm pb-btn-primary">
         {busy ? 'Saving…' : 'Start term'}
       </button>
-      <button onClick={onClose} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">Cancel</button>
+      <button onClick={onClose} className="pb-btn pb-btn-sm pb-btn-secondary">Cancel</button>
     </div>
   )
 }
@@ -107,7 +109,7 @@ function PositionCard({ position, members, onChanged }) {
           <div className="text-pb-text font-semibold text-sm">{position.name}</div>
           {position.responsibilities && <div className="text-pb-faint text-[12px] mt-0.5">{position.responsibilities}</div>}
         </div>
-        <button onClick={loadHistory} className="font-mono text-[10px] text-pb-faint hover:text-pb-text whitespace-nowrap">History</button>
+        <button onClick={loadHistory} className="pb-btn pb-btn-sm pb-btn-quiet">History</button>
       </div>
       <div className="mt-2">
         {term ? (
@@ -135,7 +137,7 @@ function PositionCard({ position, members, onChanged }) {
                 <button onClick={() => setEndingId(null)} className="font-mono text-[10px] text-pb-faint">Cancel</button>
               </div>
             ) : (
-              <button onClick={() => setEndingId(term.id)} className="font-mono text-[10px] text-pb-faint hover:text-pb-red whitespace-nowrap">End term</button>
+              <button onClick={() => setEndingId(term.id)} className="pb-btn pb-btn-sm pb-btn-danger">End term</button>
             )}
           </div>
         ) : (
@@ -199,7 +201,7 @@ function OfficeBearerAwardsPanel({ onImported }) {
         </p>
       </div>
       <button onClick={adopt} disabled={busy}
-        className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+        className="pb-btn pb-btn-secondary">
         {busy ? 'Importing…' : 'Import as terms'}
       </button>
     </div>
@@ -255,7 +257,7 @@ function PositionsTab({ members }) {
           Committee roles are managed under Roles in the left menu. This tab records who holds each role and when they started.
         </p>
         <button onClick={seedStarter} disabled={seeding}
-          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50 whitespace-nowrap shrink-0">
+          className="pb-btn pb-btn-secondary">
           {seeding ? 'Adding…' : '+ Committee roles (18)'}
         </button>
       </div>
@@ -310,7 +312,7 @@ function NewTaskForm({ onCreated }) {
         </select>
         <input type="date" className={`${inp} sm:w-40`} value={form.due_date} onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
         <button onClick={submit} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Adding…' : '+ Task'}
         </button>
       </div>
@@ -361,7 +363,9 @@ function TasksTab({ members }) {
     if (overdueOnly && !(t.due_date && t.due_date < today && t.status !== 'done')) return false
     return true
   })
-  const selInp = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-pb-text font-mono text-[10px]'
+  // The filter row's own selects. Body font, not mono — mono is for labels and
+  // figures, and these carry a club's real category and objective names.
+  const selInp = `${INPUT_CLS} cursor-pointer !w-auto max-w-[190px]`
 
   return (
     <div>
@@ -382,12 +386,10 @@ function TasksTab({ members }) {
           <option value="">Anyone</option>
           {members.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
         </select>
-        <button onClick={() => setOverdueOnly(v => !v)}
-          className={`px-3 py-1.5 rounded font-mono text-[10px] border ${overdueOnly ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
-          style={overdueOnly ? { background: 'var(--pb-accent)' } : undefined}>Overdue</button>
+        <FilterPill warn active={overdueOnly} onClick={() => setOverdueOnly(v => !v)}>Overdue</FilterPill>
         {(q || cat || objId || who || overdueOnly) && (
           <button onClick={() => { setQ(''); setCat(''); setObjId(''); setWho(''); setOverdueOnly(false) }}
-            className="font-mono text-[10px] text-pb-faint hover:text-pb-text">clear</button>
+            className="pb-btn pb-btn-sm pb-btn-quiet">Clear</button>
         )}
         <span className="font-mono text-[10px] text-pb-faintest ml-auto">
           {shown.length} of {tasks.length}
@@ -431,12 +433,12 @@ function TasksTab({ members }) {
                   <div className="flex gap-1 mt-1.5 flex-wrap">
                     {STATUSES.filter(s => s !== st).map(s => (
                       <button key={s} onClick={() => setStatus(t, s)}
-                        className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">
+                        className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text">
                         {STATUS_LABELS[s]}
                       </button>
                     ))}
                     <button onClick={() => setOpenId(o => o === t.id ? null : t.id)}
-                      className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text ml-auto">
+                      className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text ml-auto">
                       {openId === t.id ? 'Close' : 'Plan'}
                     </button>
                   </div>
@@ -499,7 +501,7 @@ function DocumentsTab() {
           </select>
           <input className={`${inp} flex-1`} placeholder="https://…" value={form.url} onChange={e => setForm(f => ({ ...f, url: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.title.trim() || !form.url.trim()}
-            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            className="pb-btn pb-btn-primary">
             {busy ? 'Adding…' : '+ Document'}
           </button>
         </div>
@@ -514,7 +516,7 @@ function DocumentsTab() {
                 <a href={d.url} target="_blank" rel="noreferrer" className="text-pb-text text-sm hover:text-pb-accent truncate block">{d.title}</a>
                 <span className="font-mono text-[9px] text-pb-faintest">{label(d.category)}</span>
               </div>
-              <button onClick={() => remove(d)} className="font-mono text-[10px] text-pb-faint hover:text-pb-red shrink-0">Remove</button>
+              <button onClick={() => remove(d)} className="pb-btn pb-btn-sm pb-btn-danger shrink-0">Remove</button>
             </div>
           ))}
         </div>
@@ -564,7 +566,7 @@ function CalendarTab() {
           <input type="datetime-local" className={`${inp} sm:w-56`} value={form.starts_at} onChange={e => setForm(f => ({ ...f, starts_at: e.target.value }))} />
           <input className={`${inp} sm:w-40`} placeholder="Location" value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} />
           <button onClick={submit} disabled={busy || !form.title.trim() || !form.starts_at}
-            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            className="pb-btn pb-btn-primary">
             {busy ? 'Adding…' : '+ Event'}
           </button>
         </div>
@@ -581,7 +583,7 @@ function CalendarTab() {
                   {new Date(e.starts_at).toLocaleString()} · {label(e.event_type)}{e.location ? ` · ${e.location}` : ''}
                 </div>
               </div>
-              <button onClick={() => remove(e)} className="font-mono text-[10px] text-pb-faint hover:text-pb-red shrink-0">Remove</button>
+              <button onClick={() => remove(e)} className="pb-btn pb-btn-sm pb-btn-danger shrink-0">Remove</button>
             </div>
           ))}
         </div>
@@ -630,7 +632,7 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
                 <span className="text-pb-text text-sm">{t.name}</span>
                 <span className="font-mono text-[10px] text-pb-faint ml-2">{t.items.length} item{t.items.length === 1 ? '' : 's'}</span>
               </div>
-              <button onClick={() => remove(t)} className="font-mono text-[10px] text-pb-faint hover:text-pb-red shrink-0">Remove</button>
+              <button onClick={() => remove(t)} className="pb-btn pb-btn-sm pb-btn-danger shrink-0">Remove</button>
             </div>
           ))}
         </div>
@@ -648,9 +650,9 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
       <div className="flex gap-2">
         <input className={`${inp} flex-1`} placeholder="Agenda item title, press Enter" value={itemDraft} onChange={e => setItemDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addItem() } }} />
-        <button onClick={addItem} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Add item</button>
+        <button onClick={addItem} className="pb-btn pb-btn-sm pb-btn-secondary">Add item</button>
         <button onClick={submit} disabled={busy || !form.name.trim() || form.items.length === 0}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Saving…' : '+ Template'}
         </button>
       </div>
@@ -690,7 +692,7 @@ function NewMeetingForm({ templates, onCreated }) {
           {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
         <button onClick={submit} disabled={busy || !form.title.trim() || !form.scheduled_at}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Creating…' : '+ Meeting'}
         </button>
       </div>
@@ -792,10 +794,10 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
           {MEETING_STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}
         </select>
         <button onClick={saveMeta} disabled={savingMeta}
-          className="px-3 py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-sm pb-btn-primary">
           {savingMeta ? 'Saving…' : 'Save'}
         </button>
-        <button onClick={() => window.print()} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-dim hover:text-pb-text ml-auto">
+        <button onClick={() => window.print()} className="pb-btn pb-btn-sm pb-btn-secondary ml-auto">
           Print minutes / agenda
         </button>
       </div>
@@ -827,7 +829,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
             </label>
           ))}
         </div>
-        <button onClick={saveAttendance} className="font-mono text-[10px] text-pb-faint hover:text-pb-text mb-3 no-print">Save attendance</button>
+        <button onClick={saveAttendance} className="pb-btn pb-btn-sm pb-btn-quiet mb-3 no-print">Save attendance</button>
         <div className="hidden print:block text-[12px] text-pb-text mb-3">
           {(detail.attendance || []).length === 0 ? 'No attendance recorded.' :
             detail.attendance.map(a => `${a.full_name} (${label(a.status)})`).join(', ')}
@@ -845,7 +847,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
               {item.description && <div className="text-pb-faint text-[11px] mt-0.5">{item.description}</div>}
               <div className="flex gap-1 mt-1 no-print">
                 {AGENDA_ITEM_STATUSES.filter(s => s !== item.status).map(s => (
-                  <button key={s} onClick={() => setItemStatus(item, s)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(s)}</button>
+                  <button key={s} onClick={() => setItemStatus(item, s)} className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text">{label(s)}</button>
                 ))}
                 <button onClick={() => removeItem(item)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
               </div>
@@ -854,7 +856,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
         </div>
         <div className="flex gap-2 mb-3 no-print">
           <input className={`${inp} flex-1`} placeholder="New agenda item" value={newItem.title} onChange={e => setNewItem(f => ({ ...f, title: e.target.value }))} />
-          <button onClick={addAgendaItem} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Item</button>
+          <button onClick={addAgendaItem} className="pb-btn pb-btn-sm pb-btn-secondary">+ Item</button>
         </div>
 
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5 mt-3">MOTIONS</div>
@@ -868,7 +870,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
               </div>
               <div className="flex gap-1 mt-1 no-print">
                 {MOTION_OUTCOMES.filter(o => o !== m.outcome).map(o => (
-                  <button key={o} onClick={() => setMotionOutcome(m, o)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(o)}</button>
+                  <button key={o} onClick={() => setMotionOutcome(m, o)} className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text">{label(o)}</button>
                 ))}
                 <button onClick={() => removeMotion(m)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
               </div>
@@ -878,7 +880,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
         </div>
         <div className="flex gap-2 mb-3 no-print">
           <input className={`${inp} flex-1`} placeholder="New motion wording" value={newMotion.description} onChange={e => setNewMotion(f => ({ ...f, description: e.target.value }))} />
-          <button onClick={addMotion} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Motion</button>
+          <button onClick={addMotion} className="pb-btn pb-btn-sm pb-btn-secondary">+ Motion</button>
         </div>
 
         {meeting.meeting_type === 'agm' && (
@@ -894,7 +896,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
                   </div>
                   <div className="flex gap-1 mt-1 no-print">
                     {NOMINATION_STATUSES.filter(s => s !== n.status).map(s => (
-                      <button key={s} onClick={() => setNominationStatus(n, s)} className="font-mono text-[8px] tracking-wide2 border pb-hairline rounded px-1 py-px text-pb-faint hover:text-pb-text">{label(s)}</button>
+                      <button key={s} onClick={() => setNominationStatus(n, s)} className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text">{label(s)}</button>
                     ))}
                     <button onClick={() => removeNomination(n)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
                   </div>
@@ -910,7 +912,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
                 <option value="">Candidate…</option>
                 {members.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
               </select>
-              <button onClick={addNomination} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ Nominate</button>
+              <button onClick={addNomination} className="pb-btn pb-btn-sm pb-btn-secondary">+ Nominate</button>
             </div>
           </>
         )}
@@ -939,7 +941,7 @@ function MeetingRow({ meeting, members, positions, onChanged }) {
           {/* The live screen. This list is for finding a meeting; running one
               happens in the meeting room. */}
           <Link to={`/admin/clubhouse/committee/meeting/${meeting.id}`} onClick={e => e.stopPropagation()}
-            className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-2 py-1 text-pb-faint hover:text-pb-text whitespace-nowrap">
+            className="pb-btn pb-btn-sm pb-btn-secondary">
             OPEN MEETING
           </Link>
           <span className="font-mono text-[9px] tracking-wide2 border pb-hairline rounded px-1.5 py-0.5 text-pb-faint">{label(meeting.status)}</span>
