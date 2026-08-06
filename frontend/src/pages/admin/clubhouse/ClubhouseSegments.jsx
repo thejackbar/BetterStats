@@ -10,13 +10,16 @@ import { CLUB_FIELD_DEFS, RuleRow, newRule } from '../bettercomms/segmentFields'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
 import { money } from './data'
 
-// Audiences — one way to describe a group of people.
+// Segments — a group of people described by a rule, not by a roll call.
 //
-// This replaces Contacts, Lists and Segments: three answers to one question,
-// each with its own screen and its own idea of who a person was. An audience is
-// a set of conditions that resolves at send time and is never frozen, and a
-// hand-picked list is simply an audience whose rule is "these people" — there
-// is deliberately no second mechanism for it.
+// A segment is a set of conditions that resolves at send time and is never
+// frozen: someone who joins tomorrow is in it tomorrow. That is the whole
+// difference from a List, which is people picked by hand and stays as picked.
+//
+// Both are things an email can be addressed to. The composer calls that slot
+// the AUDIENCE, and its dropdown offers the club's segments and its lists as
+// the two kinds of thing an audience can be. So: an email has one audience;
+// that audience is a segment or a list.
 //
 // ⚠ Club scope only. This imports CLUB_FIELD_DEFS and nothing else. The Clubs
 // Directory prospect fields (is_trialing, engagement_score, …) are BetterCricket
@@ -26,7 +29,7 @@ import { money } from './data'
 const COLS = 'minmax(180px,1fr) 160px 110px 120px'
 const MIN_W = 700
 
-// The audiences Today can ask for by name when an officer follows an action.
+// The segments Today can ask for by name when an officer follows an action.
 const PRESETS = {
   owing: { name: 'Owes money', rules: [{ field: 'owes_money', op: 'eq', value: 'yes' }] },
 }
@@ -38,7 +41,7 @@ function reachability(c) {
   return { key: 'none', label: 'No address', tone: 'block' }
 }
 
-function AudienceRules({ rules, setRules, opts }) {
+function SegmentRules({ rules, setRules, opts }) {
   // The rule row builds its own controls, so it takes the class rather than the
   // component. `!w-auto` because a condition is a row of three controls sized to
   // their content, not one full-width field.
@@ -62,13 +65,16 @@ function AudienceRules({ rules, setRules, opts }) {
   )
 }
 
-export default function ClubhouseAudiences() {
+export default function ClubhouseSegments() {
   const location = useLocation()
   const navigate = useNavigate()
+  // The stored key stays 'audiences' on purpose: it is what marks this screen's
+  // introduction as seen, per person, and renaming it would re-show the
+  // introduction to everyone who has already dismissed it.
   const intro = useScreenIntro('audiences')
 
-  const [audiences, setAudiences] = useState(null)
-  const [sizes, setSizes] = useState({})     // audience id → how many it matches today
+  const [segments, setSegments] = useState(null)
+  const [sizes, setSizes] = useState({})     // segment id → how many it matches today
   const [opts, setOpts] = useState({ roles: [], genders: [], teams: [] })
   const [selId, setSelId] = useState(null)
   const [draft, setDraft] = useState(null)      // { id, name, rules }
@@ -81,47 +87,50 @@ export default function ClubhouseAudiences() {
   const load = useCallback(async () => {
     try {
       const list = await api.commsListSegments()
-      setAudiences(list)
+      setSegments(list)
       setSelId(cur => cur || list[0]?.id || null)
-      // An audience's size is a fact about today, not something stored, so ask
+      // A segment's size is a fact about today, not something stored, so ask
       // for each one rather than showing a number that would slowly go stale.
       list.forEach(a => {
         api.commsPreviewSegment(a.definition || { match: 'all', rules: [] })
           .then(r => setSizes(s => ({ ...s, [a.id]: r.count })))
           .catch(() => {})
       })
-    } catch (e) { setError(e.message); setAudiences([]) }
+    } catch (e) { setError(e.message); setSegments([]) }
   }, [])
 
   useEffect(() => { load(); api.commsSegmentOptions().then(setOpts).catch(() => {}) }, [load])
 
-  // Today's "Email these N" arrives asking for a kind of audience. Select a
+  // Today's "Email these N" arrives asking for a kind of segment. Select a
   // saved one that already describes it, or open an unsaved draft carrying the
   // rule — the officer pressed a button about people who owe money, so landing
   // on an empty builder would make them describe it again.
-  const wanted = location.state?.audience
+  //
+  // `audience` is still read as a fallback so a Today page served from a cached
+  // bundle, which still sends the old key, keeps working.
+  const wanted = location.state?.segment || location.state?.audience
   const seeded = useRef(false)
   useEffect(() => {
-    if (!wanted || audiences == null || seeded.current) return
+    if (!wanted || segments == null || seeded.current) return
     seeded.current = true
-    const hit = audiences.find(a =>
+    const hit = segments.find(a =>
       (a.definition?.rules || []).some(r => r.field === PRESETS[wanted]?.rules[0].field) ||
       a.name.toLowerCase().includes(wanted))
     if (hit) { setSelId(hit.id); return }
     const preset = PRESETS[wanted]
     if (preset) { setSelId(null); setDraft({ id: null, name: preset.name, rules: preset.rules }) }
-  }, [wanted, audiences])
+  }, [wanted, segments])
 
-  const selected = useMemo(() => audiences?.find(a => a.id === selId) || null, [audiences, selId])
+  const selected = useMemo(() => segments?.find(a => a.id === selId) || null, [segments, selId])
 
-  // Editing a saved audience works on a draft, so a half-built rule never
+  // Editing a saved segment works on a draft, so a half-built rule never
   // reaches the server.
   //
   // It only ever LOADS a draft, and never clears one. It used to null the draft
-  // whenever nothing was selected, which is exactly the state "New audience"
+  // whenever nothing was selected, which is exactly the state "New segment"
   // puts the screen in — so pressing it set a fresh draft, this effect then ran
   // because `selected` had just gone null, and wiped it in the same commit. The
-  // button read as doing nothing at all, and a club with no saved audiences yet
+  // button read as doing nothing at all, and a club with no saved segments yet
   // could never build its first one. Clearing is now the caller's job (delete
   // does it explicitly), which is the only place it is actually wanted.
   useEffect(() => {
@@ -139,7 +148,7 @@ export default function ClubhouseAudiences() {
   )
   const defKey = JSON.stringify(definition)
 
-  // An audience reports what it matches TODAY, so resolve it live rather than
+  // A segment reports what it matches TODAY, so resolve it live rather than
   // storing a count that would slowly become a lie.
   useEffect(() => {
     if (!draft) { setResolved(null); return }
@@ -159,13 +168,13 @@ export default function ClubhouseAudiences() {
   const otherRoute = contacts.filter(c => reachability(c).key === 'guardian').length
 
   async function save() {
-    if (!draft?.name.trim()) { setError('Give the audience a name.'); return }
+    if (!draft?.name.trim()) { setError('Give the segment a name.'); return }
     setBusy(true); setError('')
     try {
       const saved = draft.id
         ? await api.commsUpdateSegment(draft.id, draft.name.trim(), definition)
         : await api.commsCreateSegment(draft.name.trim(), definition)
-      setToast({ title: 'Audience saved', body: `${draft.name.trim()} matches ${total} ${total === 1 ? 'person' : 'people'} right now.` })
+      setToast({ title: 'Segment saved', body: `${draft.name.trim()} matches ${total} ${total === 1 ? 'person' : 'people'} right now.` })
       await load()
       setSelId(saved.id)
     } catch (e) { setError(e.message) } finally { setBusy(false) }
@@ -193,13 +202,14 @@ export default function ClubhouseAudiences() {
     setError('')
   }
 
-  // Start an email already addressed to this audience.
+  // Start an email already addressed to this segment.
   //
   // This used to navigate to the Emails list carrying an `audienceId` in router
   // state that nothing on the other side ever read, so it dropped the officer on
   // a list of every email with the audience silently lost. It now creates the
-  // draft the same way "+ New email" does — with the audience already set — and
-  // opens it, which is what the button has always claimed to do.
+  // draft the same way "+ New email" does — with the audience already set to
+  // this segment — and opens it, which is what the button has always claimed to
+  // do. Lists carries the same button, pointing at itself the same way.
   const emailThese = async () => {
     if (!draft?.id) return
     setBusy(true); setError('')
@@ -214,7 +224,7 @@ export default function ClubhouseAudiences() {
 
   if (intro.showing) {
     return (
-      <BetterClubhouseLayout title="Audiences"
+      <BetterClubhouseLayout title="Segments"
         actions={<Button onClick={intro.dismiss}>Skip</Button>}>
         <ScreenIntro intro={INTROS.audiences} onContinue={intro.dismiss} onTurnOff={intro.turnOff} />
       </BetterClubhouseLayout>
@@ -223,18 +233,18 @@ export default function ClubhouseAudiences() {
 
   return (
     <BetterClubhouseLayout
-      title="Audiences"
-      caption={`Resolved when you send · ${audiences?.length || 0} saved`}
+      title="Segments"
+      caption={`Resolved when you send · ${segments?.length || 0} saved`}
       onHelp={intro.reopen}
-      actions={<Button variant="primary" onClick={startNew}>New audience</Button>}
+      actions={<Button variant="primary" onClick={startNew}>New segment</Button>}
       bare
     >
       <div className="flex flex-wrap items-stretch min-h-0 flex-1">
         {/* List pane */}
         <div className="ch-listpane bg-pb-surface overflow-y-auto p-2.5 pb-scroll">
-          {audiences == null ? <Empty>Loading…</Empty> : audiences.length === 0 ? (
-            <Empty>No audiences yet. Start one and it counts as you build it.</Empty>
-          ) : audiences.map(a => {
+          {segments == null ? <Empty>Loading…</Empty> : segments.length === 0 ? (
+            <Empty>No segments yet. Start one and it counts as you build it.</Empty>
+          ) : segments.map(a => {
             const n = (a.definition?.rules || []).length
             return (
               <ListRow
@@ -249,12 +259,11 @@ export default function ClubhouseAudiences() {
 
           <div className="mt-4 space-y-2.5 px-1">
             <Note toneKey="calm">
-              This replaced Segments. Contacts and hand-picked lists are still their own screens until an
-              audience can carry a "these people" rule:{' '}
+              A segment is a rule. For people picked by hand, use a list — both can be chosen as the audience
+              when you write an email:{' '}
               <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
               {' · '}
               <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
-              {'. '}Both can still be picked as the audience when you compose.
             </Note>
             <Note title="Club scope only" toneKey="calm">
               These conditions read your own club's people — the directory, accounts, roster and email activity.
@@ -266,7 +275,7 @@ export default function ClubhouseAudiences() {
         {/* Detail pane */}
         <div className="flex-1 min-w-[380px] overflow-y-auto px-6 py-[22px] pb-scroll" style={{ flexBasis: 390 }}>
           {!draft ? (
-            <Empty>Pick an audience, or start a new one.</Empty>
+            <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
             <>
               <div className="flex items-start gap-3.5 flex-wrap">
@@ -274,7 +283,7 @@ export default function ClubhouseAudiences() {
                   <TextInput
                     value={draft.name}
                     onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-                    placeholder="Name this audience"
+                    placeholder="Name this segment"
                     className="!text-[22px] !font-bold !bg-transparent !border-transparent !px-0 !py-0 focus:!border-transparent"
                   />
                   <div className="text-[12.5px] text-pb-dim mt-1 leading-[1.6]">
@@ -283,13 +292,14 @@ export default function ClubhouseAudiences() {
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   {draft.id && <Button size="sm" onClick={duplicate} disabled={busy}>Duplicate</Button>}
-                  <Button size="sm" variant="primary" onClick={emailThese} disabled={!draft.id || !total}>
-                    Email these {total}
+                  <Button size="sm" variant="primary" onClick={emailThese} disabled={!draft.id || !total}
+                    title={draft.id ? '' : 'Save the segment first'}>
+                    Email these {total} now
                   </Button>
                 </div>
               </div>
 
-              <div className="mt-6"><AudienceRules rules={draft.rules} setRules={fn => setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} opts={opts} /></div>
+              <div className="mt-6"><SegmentRules rules={draft.rules} setRules={fn => setDraft(d => ({ ...d, rules: typeof fn === 'function' ? fn(d.rules) : fn }))} opts={opts} /></div>
 
               <div
                 className="mt-5 rounded-lg px-3.5 py-3 text-[13px]"
@@ -305,7 +315,7 @@ export default function ClubhouseAudiences() {
               </div>
 
               <div className="flex items-center gap-2 mt-4 flex-wrap">
-                <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : draft.id ? 'Save changes' : 'Save audience'}</Button>
+                <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : draft.id ? 'Save changes' : 'Save segment'}</Button>
                 {draft.id && <Button variant="danger" size="sm" onClick={remove} disabled={busy}>Delete</Button>}
                 {error && <span className="text-[12.5px] text-pb-red">{error}</span>}
               </div>

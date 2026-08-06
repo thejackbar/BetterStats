@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
@@ -12,8 +12,8 @@ import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, ma
 
 // Start an email already addressed to a list.
 //
-// The same move Audiences makes with "Email these N": create the draft with the
-// audience already set and open it, rather than sending the officer to the
+// The same move Segments makes with "Email these N now": create the draft with
+// the audience already set and open it, rather than sending the officer to the
 // Emails list to pick again the list they were just looking at. `saved_list` is
 // the audience type the composer's own dropdown writes for a list, so the draft
 // opens with it already chosen and counted.
@@ -29,7 +29,7 @@ export function useEmailList() {
         subject: '', body_html: '',
         audience: { type: 'saved_list', list_id: list.id },
       })
-      navigate(`/admin/comms/${c.id}`)
+      navigate(`/admin/comms/${c.id}`, { state: { skipIntro: true } })
     } catch (e) { setError(e.message); setBusyId(null) }
   }, [navigate])
   return { emailList, busyId, error }
@@ -216,9 +216,9 @@ function ListDetail({ list, lists, onChanged, onEmail, emailing }) {
         <SectionHeading>{list.name}</SectionHeading>
         <div className="flex items-center gap-2 shrink-0">
           <Button size="sm" variant="primary" onClick={() => onEmail?.(list)}
-            disabled={!shownMembers.length && !list.count || !!emailing}
+            disabled={!list.count || !!emailing}
             title={list.count ? '' : 'This list has nobody in it yet'}>
-            {emailing === list.id ? 'Opening…' : `Email these ${list.count ?? 0}`}
+            {emailing === list.id ? 'Opening…' : `Email these ${list.count ?? 0} now`}
           </Button>
           <Button size="sm" as="a" href={api.commsListExportCsvUrl(list.id)} title="Export this list to CSV">Export CSV</Button>
         </div>
@@ -353,12 +353,12 @@ function ListRow({ l, selected, onToggle, onDelete, onRenamed, onEmail, emailing
         <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
           <Button size="sm" variant="primary" onClick={() => onEmail(l)} disabled={!l.count || !!emailing}
             title={l.count ? '' : 'This list has nobody in it yet'}>
-            {emailing === l.id ? 'Opening…' : `Email these ${l.count}`}
+            {emailing === l.id ? 'Opening…' : `Email these ${l.count} now`}
           </Button>
           <Button size="sm" variant="quiet" onClick={() => setEditing(true)}>Rename</Button>
           <Button size="sm" variant="quiet" as="a" href={api.commsListExportCsvUrl(l.id)} title="Export this list to CSV">Export CSV</Button>
           <Button size="sm" variant="quiet" onClick={() => onToggle(l)}>{selected ? 'Close' : 'Manage'}</Button>
-          <Button size="sm" variant="danger" onClick={() => onDelete(l)}>Delete</Button>
+          <Button size="sm" variant="quiet-danger" onClick={() => onDelete(l)}>Delete</Button>
         </div>
       )}
     </div>
@@ -436,8 +436,10 @@ export default function CommsLists() {
         <Note toneKey="block" className="mb-4 max-w-2xl">{error || emailError}</Note>
       )}
       <p className="text-[13px] text-pb-dim mb-4 max-w-2xl leading-relaxed">
-        A list is a fixed set of contacts you pick by hand — the committee, sponsors, one team — and the counterpart
-        to an audience. Use a list when the membership won't change on its own.
+        A list is a fixed set of contacts you pick by hand — the committee, sponsors, one team. Use one when the
+        membership won't change on its own; use a{' '}
+        <Link to="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>segment</Link>
+        {' '}when you'd rather describe the group by a rule. Either can be the audience on an email.
       </p>
 
       <div className="pb-card p-3 mb-4 flex items-center gap-2 max-w-xl">

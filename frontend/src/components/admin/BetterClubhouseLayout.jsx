@@ -47,13 +47,12 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, module: 'comms', exact: true, badge: counts.drafts },
-    // What a club maintains is the pieces an email is built from, so those get
-    // the items. The saved-conditions editor is called Audiences here because
-    // that is what the screen it opens is called and what its own button makes
-    // — the item used to say "Segments" and land on a page titled "Audiences",
-    // which read as two different things.
+    // An audience is not a place you go. It is the slot on an email, and what
+    // fills it is a segment or a list — so those two get the items, named for
+    // what they are. Both carry an "Email these N now" button that opens a
+    // draft already addressed to them.
     { to: '/admin/comms/lists', label: 'Lists', icon: 'teams', cap: CAP.MANAGE_COMMS, module: 'comms' },
-    { to: '/admin/comms/segments', label: 'Audiences', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    { to: '/admin/comms/segments', label: 'Segments', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings', cap: CAP.MANAGE_COMMS, module: 'comms' },
 
@@ -86,7 +85,7 @@ function buildNav({ modules, counts, storefront }) {
 // platform surface is actually for.
 //
 // Segments points at the super-admin Directory Audiences screen rather than the
-// club Audiences screen. That is the whole scope rule in one line: the two field
+// club Segments screen. That is the whole scope rule in one line: the two field
 // sets live in two components, and which one you get is a route, not a runtime
 // flag inside one screen.
 function buildInternalNav({ counts }) {

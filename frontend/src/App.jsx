@@ -70,7 +70,7 @@ const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'))
 const BetterStatsHome = lazy(() => import('./pages/admin/BetterStatsHome'))
 const ClubManagerApp = lazy(() => import('./pages/admin/clubmanager/redesign/ClubManagerApp'))
 const ClubhouseToday = lazy(() => import('./pages/admin/clubhouse/ClubhouseToday'))
-const ClubhouseAudiences = lazy(() => import('./pages/admin/clubhouse/AudiencesRoute'))
+const ClubhouseSegments = lazy(() => import('./pages/admin/clubhouse/SegmentsRoute'))
 const ClubhouseIntegrations = lazy(() => import('./pages/admin/clubhouse/ClubhouseIntegrations'))
 const ClubhouseReports = lazy(() => import('./pages/admin/clubhouse/ClubhouseReports'))
 const ClubhouseSettings = lazy(() => import('./pages/admin/clubhouse/ClubhouseSettings'))
@@ -322,7 +322,9 @@ export default function App() {
               every other tool kept the URL it already had (see
               components/admin/BetterClubhouseLayout.jsx for the merged nav). */}
           <Route path="/admin/clubhouse" element={<ProtectedRoute><ClubhouseToday /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/audiences" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
+          {/* The segment editor's own URL is /admin/comms/segments, below. This
+              one is kept live only so an existing bookmark still lands. */}
+          <Route path="/admin/clubhouse/audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/clubhouse/integrations" element={<ProtectedRoute><ClubhouseIntegrations /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/reports" element={<ProtectedRoute><ClubhouseReports /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/settings" element={<ProtectedRoute><ClubhouseSettings /></ProtectedRoute>} />
@@ -352,10 +354,9 @@ export default function App() {
           <Route path="/admin/betteradmin" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub" element={<Navigate to="/admin/clubhouse" replace />} />
           <Route path="/admin/betterclub/roster" element={<Navigate to="/admin/clubhouse/roster" replace />} />
-          {/* The segment editor lives at the URL its menu item names.
-              /admin/clubhouse/audiences stays live because Today deep-links to
-              it with a preset. */}
-          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><ClubhouseAudiences /></ProtectedRoute>} />
+          {/* The segment editor lives at the URL its menu item names. Today
+              deep-links here too, carrying a preset in router state. */}
+          <Route path="/admin/comms/segments" element={<ProtectedRoute requireModule="comms"><ClubhouseSegments /></ProtectedRoute>} />
           <Route path="/admin/setup" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/setup/:stepKey" element={<ProtectedRoute requireActivePlan><SetupWizard /></ProtectedRoute>} />
           <Route path="/admin/players" element={<ProtectedRoute requireCore><AdminPlayers /></ProtectedRoute>} />
@@ -484,9 +485,9 @@ export default function App() {
           <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
           {/* BetterComms (bulk email) — the Comms section of BetterClubhouse.
-              Segments and Lists redirect to Audiences, which replaced them;
-              Contacts stays reachable but is off the sidebar, since the person
-              spine is the Directory. */}
+              Segments and Lists are both on the sidebar and are the two things
+              an email's audience can be. Contacts stays reachable but is off
+              the sidebar, since the person spine is the Directory. */}
           <Route path="/admin/comms" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
           <Route path="/admin/comms/contacts" element={<ProtectedRoute requireModule="comms"><CommsContacts /></ProtectedRoute>} />
           <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />

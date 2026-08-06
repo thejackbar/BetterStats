@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 // BetterComms serves two audiences from one engine and they stay strictly
 // separated:
 //   · Club scope — a club officer emailing their own people. CLUB_FIELD_DEFS,
-//     and nothing else. This is what BetterClubhouse's Audiences screen imports.
+//     and nothing else. This is what BetterClubhouse's Segments screen imports.
 //   · Super Admin scope — BetterCricket's own marketing against the Clubs
 //     Directory. DIRECTORY_FIELD_DEFS is that field set and it must never be
 //     reachable from a club build: not behind a dropdown, not greyed out, not

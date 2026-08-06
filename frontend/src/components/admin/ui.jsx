@@ -107,6 +107,10 @@ export function Button({
     soft: 'border border-pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-hairline2',
     danger: 'border border-pb-red/40 bg-transparent text-pb-red hover:bg-pb-red/10',
     quiet: 'border border-transparent bg-transparent text-pb-faint hover:text-pb-text',
+    // A destructive action sitting in a row of quiet ones. Same weight as its
+    // neighbours until you reach for it — a bordered Delete among three
+    // borderless actions reads as the important one, which it is not.
+    'quiet-danger': 'border border-transparent bg-transparent text-pb-faint hover:text-pb-red',
   }
   const accentStyle = variant === 'primary' ? { background: 'var(--pb-accent)', color: ON_ACCENT } : undefined
   return (

@@ -395,6 +395,9 @@ export default function CommsCompose() {
             )}
 
             <div className="pb-card p-4 mb-4">
+              {/* One slot, filled by one of the club's segments or lists. That
+                  is the whole vocabulary: an email has an audience; the
+                  audience is a segment or a list. */}
               <SectionHeading className="mb-2">Audience</SectionHeading>
               <select
                 value={audience.type === 'segment' ? `segment:${audience.segment_id}`
@@ -427,7 +430,7 @@ export default function CommsCompose() {
                   : audienceCount != null
                     ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
                     : 'Counting…'}{' '}
-                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Audiences</a>
+                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Segments</a>
                 {' · '}
                 <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</a>
               </div>
