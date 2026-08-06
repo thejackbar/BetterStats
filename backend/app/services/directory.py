@@ -28,8 +28,18 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     """One row per person: every active fee_members row, unioned with the club's
     players that don't yet have a member row. Each person carries its computed
     segments (Player / Volunteer / Committee / Parent / Third party / Life
-    member), assigned roles, hours and a quals-to-renew count. With
-    include_archived, archived people are included too, each flagged `archived`."""
+    member), assigned roles, hours and a quals-to-renew count.
+
+    A person's KIND is three separate things, and all three are returned rather
+    than flattened into one: `membership_type` (the club's own cross-season
+    catalogue — Senior Player, Social Member, Sponsor Contact…, set in
+    BetterFees or here), `category` (what this module tags a non-player as) and
+    `player_status` ('active' | 'inactive' from Stats, NULL for a non-player).
+    A club may use any, all or none of them, so the Directory reads whichever
+    are populated instead of assuming one is authoritative.
+
+    With include_archived, archived people are included too, each flagged
+    `archived`."""
     # The join to `players` is org-scoped as well as keyed on the link. A member
     # row can point at a player owned by ANOTHER club (a shared fixture between
     # two synced clubs used to enrol the opposition here), and without the extra
@@ -39,12 +49,20 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # `our_player_id` is what the rest of this function uses, NOT `fm.player_id`:
     # a link that did not resolve belongs to another club, so that person is not
     # tagged Player and carries no link to someone else's profile.
+    # `membership_types` is the club's cross-season catalogue (Senior Player,
+    # Social Member, Sponsor Contact…) — a different axis from member_category
+    # (what this module tags a non-player as) and from players.status (whether
+    # they are currently playing). All three are carried per person so the
+    # Directory can say which kind of member someone is, not just "Player".
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, fm.archived_at,
-               p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone
+               fm.is_life_member, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
+               mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
+               p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
+               p.status AS player_status
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
+        LEFT JOIN membership_types mt ON mt.id = fm.membership_type_id AND mt.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
 
@@ -116,7 +134,12 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             segs.append("Life member")
         if cat == "official":
             segs.append("Official")
+        if m["is_honorary"]:
+            segs.append("Honorary")
         q = quals_by.get(mid, {})
+        # NULL only when nobody's linked player — a linked player always carries
+        # a status, so None here reads as "not a player" rather than "unknown".
+        pstatus = (m["player_status"] or "active") if our_pid else None
         people.append({
             "key": mid, "member_id": mid, "player_id": our_pid,
             # Fall back to the linked player's Stats contact when the member row
@@ -124,6 +147,13 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "name": m["full_name"], "email": m["email"] or m["player_email"] or "",
             "phone": m["mobile"] or m["player_phone"] or "",
             "photo": m["photo_url"], "category": cat, "archived": m["archived_at"] is not None,
+            "player_status": pstatus,
+            "membership_type_id": str(m["membership_type_id"]) if m["membership_type_id"] else None,
+            "membership_type": m["membership_type_name"],
+            "membership_type_playing": m["membership_type_playing"],
+            "is_life_member": bool(m["is_life_member"]),
+            "is_honorary": bool(m["is_honorary"]),
+            "honorary_expires_at": m["honorary_expires_at"].isoformat() if m["honorary_expires_at"] else None,
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
@@ -132,7 +162,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
 
     # Players with no member row still appear (read-through from Stats/Core).
     extra = (await db.execute(text("""
-        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone
+        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone, p.status
         FROM players p
         WHERE p.organisation_id = :org
           AND NOT EXISTS (SELECT 1 FROM fee_members fm WHERE fm.player_id = p.id AND fm.organisation_id = :org)
@@ -144,6 +174,9 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
             "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
+            "player_status": p["status"] or "active",
+            "membership_type_id": None, "membership_type": None, "membership_type_playing": None,
+            "is_life_member": False, "is_honorary": False, "honorary_expires_at": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
         })
 
