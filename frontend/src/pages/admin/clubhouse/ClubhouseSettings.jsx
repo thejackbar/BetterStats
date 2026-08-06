@@ -46,7 +46,7 @@ function DocumentAccessPanel() {
     const previous = value
     setValue(next); setSaving(true)
     try {
-      await api.adminUpdateSettings({ committee_docs_office_bearer_only: next })
+      await api.adminPatchSettings({ committee_docs_office_bearer_only: next })
     } catch (e) {
       setValue(previous)   // put the control back where it was, not where the click left it
       toast.error(e.message)
@@ -109,7 +109,7 @@ function DiaryYearPanel() {
   async function choose(next) {
     const previous = month
     setMonth(next); setSaving(true)
-    try { await api.adminUpdateSettings({ diary_start_month: next }) }
+    try { await api.adminPatchSettings({ diary_start_month: next }) }
     catch (e) { setMonth(previous); toast.error(e.message) }
     finally { setSaving(false) }
   }

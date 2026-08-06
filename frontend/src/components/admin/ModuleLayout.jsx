@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
@@ -48,6 +48,19 @@ function loadClubBranding() {
   }
   return _clubPromise
 }
+
+// How far the sidebar nav is scrolled, kept outside the component on purpose.
+//
+// Following a nav item reset the list to the top or left it where it was,
+// depending on nothing the person could see: routes whose pages are different
+// components unmount ModuleLayout, so the <nav> is a brand new DOM node with
+// scrollTop 0, while routes that happen to share a page component (the several
+// that all render ClubManagerApp) reuse the instance and keep it. Holding the
+// position out here survives the remount, so it never jumps to the top.
+//
+// Module scope, not per-instance: exactly one sidebar is on screen at a time,
+// and the value has to outlive the unmount, which is the whole point.
+let _navScroll = 0
 
 // "2026/27" from today — the season line under the club name. Australian
 // season rolls in July, matching services/votes.py's season_year_for.
@@ -106,6 +119,17 @@ export default function ModuleLayout({
   const activeNav = items.find(i => i.to && (i.exact ? location.pathname === i.to : location.pathname.startsWith(i.to)))
   const pageName = title || activeNav?.label
   const bookmarkLabel = `Better${moduleName}` + (pageName ? ` · ${pageName}` : '')
+
+  // Restore on attach, record on scroll. The ref callback is memoised so React
+  // only calls it when the node mounts or unmounts; an inline arrow would re-run
+  // on every render and fight the person mid-scroll. The visibility check keeps
+  // the off-canvas copy — which renders alongside the desktop one and can't
+  // scroll while it is hidden — from recording a 0 over a real position.
+  const attachNav = useCallback((el) => { if (el) el.scrollTop = _navScroll }, [])
+  const onNavScroll = useCallback((e) => {
+    const el = e.currentTarget
+    if (el.offsetParent !== null) _navScroll = el.scrollTop
+  }, [])
 
   const renderNavItems = () => (
     <>
@@ -195,7 +219,7 @@ export default function ModuleLayout({
   const renderSidebar = () => (
     <>
       {renderBrand()}
-      <nav className="flex-1 overflow-y-auto py-2 pb-scroll">{renderNavItems()}</nav>
+      <nav ref={attachNav} onScroll={onNavScroll} className="flex-1 overflow-y-auto py-2 pb-scroll">{renderNavItems()}</nav>
       {renderSidebarFooter()}
     </>
   )
