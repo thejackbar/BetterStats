@@ -41,7 +41,7 @@ from app.auth.capabilities import require_cap, MANAGE_COMMS
 from app.auth.modules import MODULE_COMMS, STATUS_TRIAL
 from app.config.settings import settings
 from app.models.db import (
-    User, Organisation, Player, FeeMember, ClubMembership, Team,
+    User, Organisation, Player, ClubMembership, Team,
     CommsContact, CommsCampaign, CommsRecipient, CommsSegment, CommsTemplate,
     CommsList, CommsListMember, EmailSuppression, EmailEvent, CommsLimitRequest,
     MarketingClub, MarketingClubContact,
@@ -686,10 +686,68 @@ async def _campaign_or_404(db: AsyncSession, club: Organisation, cid: str) -> Co
     return c
 
 
+async def reconcile_contacts_from_directory(db: AsyncSession, club: Organisation) -> int:
+    """Bring contacts up to date with the live Clubhouse Directory.
+
+    There is no sync step in Comms and no button to press. Comms works on the
+    Directory, which is itself a live read (every BetterStats player, plus
+    anyone imported or added by hand in Clubhouse), so anyone the club can see
+    there is reachable here as soon as they have an email address. Filling that
+    address in is the club's job, on the Directory, which is why the Directory
+    is where the No-email filter lives.
+
+    `comms_contacts` still exists, because a row is what carries the things the
+    Directory has no opinion about: an unsubscribe, a bounce, a complaint, list
+    membership and send history. This reconciles that spine against the
+    Directory rather than asking an admin to remember to.
+
+    Only MISSING addresses are written. Steady state is two reads and no write,
+    which is what makes it safe to call on the read path. A person whose email
+    changed gains a contact at the new address and keeps the old one, since the
+    old address may carry a suppression or a send history worth keeping.
+
+    `_upsert_contact` is what stops this resurrecting anyone who opted out.
+    """
+    if org_is_outreach(club):
+        return 0   # BetterCricket's own outreach list is not a club directory
+    people = await directory.list_people(db, club.id)
+    wanted: dict[str, dict] = {}
+    for p in people:
+        email = _norm_email(p.get("email") or "")
+        if email and email not in wanted:
+            wanted[email] = p
+    if not wanted:
+        return 0
+    existing = set((await db.execute(select(CommsContact.email).where(
+        CommsContact.organisation_id == club.id,
+        CommsContact.email.in_(list(wanted)),
+    ))).scalars().all())
+    missing = [e for e in wanted if e not in existing]
+    if not missing:
+        return 0
+
+    def _u(v):
+        return uuid.UUID(v) if isinstance(v, str) and v else (v or None)
+
+    for email in missing:
+        p = wanted[email]
+        await _upsert_contact(
+            db, club, email, p.get("name"),
+            "player" if p.get("player_id") else "member",
+            player_id=_u(p.get("player_id")), member_id=_u(p.get("member_id")),
+        )
+    await db.commit()
+    return len(missing)
+
+
 async def _resolve_audience(db: AsyncSession, club: Organisation, audience: dict) -> list[CommsContact]:
     """Sendable contacts matching the chosen audience: subscribed, not bounced /
     complained / excluded per club, and not on the global suppression list (a
-    hard bounce or complaint blocks the address across every club)."""
+    hard bounce or complaint blocks the address across every club).
+
+    Reconciles against the Directory first, so someone added to the club this
+    morning is a valid target this afternoon with nothing to press."""
+    await reconcile_contacts_from_directory(db, club)
     atype = (audience or {}).get("type", "all")
     if atype == "segment":
         seg_id = (audience or {}).get("segment_id")
@@ -768,6 +826,9 @@ async def list_contacts(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    # No sync button: reading the club's people reconciles them first, so this
+    # screen and the Lists picker always show the live Directory.
+    await reconcile_contacts_from_directory(db, club)
     stmt = select(CommsContact).where(CommsContact.organisation_id == club.id)
     if query.strip():
         like = f"%{query.strip().lower()}%"
@@ -1058,47 +1119,6 @@ def _parse_import_line(line: str) -> tuple[Optional[str], Optional[str]]:
     if _EMAIL_RE.match(parts[0].lower()):
         return (parts[1] or None), parts[0]
     return (parts[0] or None), parts[1]
-
-
-@router.post("/contacts/sync-from-club")
-async def sync_from_club(
-    _: User = _require,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    """Pull every email already on file (players + fee members) into contacts.
-    Idempotent; never resurrects an unsubscribed address.
-
-    Deliberately NOT limited to active players. Contacts is the club's address
-    book, not its send list: holding someone here does not email them, since a
-    list or segment still decides every audience and suppression still applies.
-    The old `status == 'active'` filter made a whole category of people — last
-    season's players, anyone lapsed — permanently unreachable, so a club could
-    not invite past members to a reunion or tell them registration had opened.
-    At one real club it hid 280 of the 408 people whose address we hold."""
-    added = updated = 0
-    players = (await db.execute(select(Player).where(
-        Player.organisation_id == club.id, Player.email.isnot(None),
-    ))).scalars().all()
-    for p in players:
-        email = _norm_email(p.email)
-        if not email:
-            continue
-        res = await _upsert_contact(db, club, email, p.display_name, "player", player_id=p.id)
-        added += res == "added"
-        updated += res == "updated"
-    members = (await db.execute(select(FeeMember).where(
-        FeeMember.organisation_id == club.id, FeeMember.email.isnot(None),
-    ))).scalars().all()
-    for m in members:
-        email = _norm_email(m.email)
-        if not email:
-            continue
-        res = await _upsert_contact(db, club, email, m.full_name, "member", member_id=m.id)
-        added += res == "added"
-        updated += res == "updated"
-    await db.commit()
-    return {"added": added, "updated": updated}
 
 
 class FirstNameFindReplaceIn(BaseModel):
@@ -2358,6 +2378,7 @@ async def preview_segment(
     db: AsyncSession = Depends(get_db),
 ):
     """Live count for an unsaved definition (powers the segment builder)."""
+    await reconcile_contacts_from_directory(db, club)
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
     return {
         "count": len(contacts),
@@ -2375,6 +2396,7 @@ async def resolve_segment(
     """The full matching audience for a definition, enriched with each contact's
     Clubs Directory fields — powers the searchable/filterable audience preview and
     its CSV export. Capped for safety; the count is exact."""
+    await reconcile_contacts_from_directory(db, club)
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)

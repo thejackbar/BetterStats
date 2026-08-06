@@ -4243,3 +4243,51 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 **Open follow-ups worth investigating**:
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
+
+## Comms has no sync step: it reads the live Directory (v9.12.0, Aug 2026)
+
+Reported from a club with 1,576 players: the Directory showed 1,578 people,
+Comms could reach 128. Two separate causes, and the second is the structural one.
+
+- **`sync_from_club` filtered on `Player.status == "active"`**, so last season's
+  players and anyone lapsed were permanently unreachable. At Applecross that hid
+  **280 of the 408 people whose email the club holds**. Active-only was the wrong
+  place to decide an audience — `comms_contacts` is the address book, and the
+  list or segment picked at send time is what chooses recipients. Suppression is
+  unaffected either way, so an unsubscribe or bounce still skips the address
+  however it was targeted.
+- **The whole sync CONCEPT is gone** — endpoint, button, api method. Comms works
+  on the Directory, which is itself a live read (every BetterStats player, plus
+  anyone imported or hand-added in Clubhouse), so there is nothing to sync FROM.
+  Filling in an email address is the club's job on the Directory, which is why
+  the No-email filter lives there.
+- **`comms.reconcile_contacts_from_directory(db, club)`** replaces it. A
+  `comms_contacts` row still has to exist, because it carries what the Directory
+  has no opinion about: unsubscribe, bounce, complaint, list membership, send
+  history. This reconciles that spine on the READ path instead of asking an admin
+  to remember. **Only missing addresses are written** — steady state is two reads
+  and no write, which is what makes it safe to call on a GET. Hooked at
+  `GET /contacts` (covers the Contacts screen AND the Lists picker, which calls
+  the same endpoint), `_resolve_audience` (the single funnel for every preview,
+  recipient list and send) and the three segment endpoints (which is what makes
+  the merged Clubhouse Audiences screen live too).
+- **A changed email gains a contact at the new address and keeps the old one** —
+  the old address may carry a suppression or send history worth keeping. Names on
+  existing contacts are not refreshed, a deliberate cost of the delta approach.
+  Contacts are never deleted by the reconcile.
+- **Skipped for the outreach org** (`org_is_outreach`) — BetterCricket's own
+  marketing list is not a club directory, and reconciling would pollute it.
+- **`POST /club-admin/comms/lists/from-directory`** turns a filtered Directory
+  selection into an auto list (`source='auto'`, `origin='Clubhouse Directory'`),
+  landing in the same "Auto-generated lists" section the CRM export uses. **The
+  browser sends person KEYS, never emails** — the server re-reads the Directory
+  and takes addresses from its own data, so a stale or tampered payload cannot
+  introduce a recipient the club does not hold. Contacts go through
+  `_upsert_contact`, which is what stops list-building resurrecting an opt-out.
+- **`directory.list_people` returns `player_status`**, NULL exactly when there is
+  no player behind the person — that is what separates the Directory's
+  Non-player filter from its Inactive-player one.
+- **When adding a Comms surface that lists people**, call
+  `reconcile_contacts_from_directory` first rather than reintroducing a sync
+  button. Do not add a `status` filter to who becomes a contact — targeting is a
+  list/segment decision, not an address-book one.

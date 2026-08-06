@@ -79,9 +79,6 @@ export default function CommsContacts() {
     finally { setBusy('') }
   }
 
-  const syncFromClub = () => run('sync', () => api.commsSyncFromClub(),
-    r => `Synced from club — ${r.added} added, ${r.updated} updated.`)
-
   const doImport = () => run('import', async () => {
     const r = await api.commsImportContacts(importText)
     setImportText(''); setShowImport(false)
@@ -145,12 +142,6 @@ export default function CommsContacts() {
   return (
     <BetterCommsLayout
       title="Contacts"
-      actions={
-        <button onClick={syncFromClub} disabled={busy === 'sync'}
-          className="px-3 py-1.5 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
-          {busy === 'sync' ? 'Syncing…' : 'Sync from club'}
-        </button>
-      }
     >
       {msg && <div className={`pb-card p-3 mb-4 text-sm ${msg.kind === 'error' ? 'text-pb-red' : 'text-green-500'}`}>{msg.text}</div>}
 
@@ -295,7 +286,7 @@ export default function CommsContacts() {
         <div className="text-pb-faint text-sm">Loading…</div>
       ) : data.contacts.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
-          No contacts yet. Use <strong className="text-pb-text">Sync from club</strong> to pull emails already on file, or add/import above.
+          Nobody in your club has an email address on file yet. Add them in <strong className="text-pb-text">Clubhouse → Directory</strong>, or add and import addresses above.
         </div>
       ) : visible.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">No contacts match your search.</div>

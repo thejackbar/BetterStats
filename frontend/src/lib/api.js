@@ -2755,8 +2755,6 @@ export const api = {
     request('/club-admin/comms/contacts/remove-from-all-lists', { method: 'POST', body: JSON.stringify({ contact_ids: contactIds }) }),
   commsImportContacts: (text) =>
     request('/club-admin/comms/contacts/import', { method: 'POST', body: JSON.stringify({ text }) }),
-  commsSyncFromClub: () =>
-    request('/club-admin/comms/contacts/sync-from-club', { method: 'POST' }),
   commsFirstNameFindReplace: (find, replace) =>
     request('/club-admin/comms/contacts/first-name-find-replace', { method: 'POST', body: JSON.stringify({ find, replace }) }),
   commsAudiencePreview: (audience) =>
