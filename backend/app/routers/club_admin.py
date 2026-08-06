@@ -19,6 +19,7 @@ from app.models.db import (
     ModuleActionRequest, CommsLimitRequest, MarketingClub, SyncRun, OnboardingWizardState, get_db
 )
 from sqlalchemy import text as _text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload, aliased as _orm_aliased
 import asyncio
 import logging as _logging
@@ -29,7 +30,7 @@ from app.auth.capabilities import (
 )
 from app.auth.modules import (
     ALL_MODULES, MANAGED_MODULES, ALL_STATUSES, ALL_BILLING_CYCLES, org_entitled_modules,
-    STATUS_TRIAL, STATUS_ACTIVE, org_default_trial_days,
+    STATUS_TRIAL, STATUS_ACTIVE, org_default_trial_days, MODULE_CORE,
     BILLABLE_MODULES, BILLABLE_MODULE_NAMES, billing_key_for, STATUS_PRIORITY,
 )
 from app.services import module_subscriptions as mod_subs
@@ -1593,6 +1594,21 @@ class ClubCreate(BaseModel):
     contact_email: Optional[str] = None
     primary_color: str = "#16c784"
     accent_color: str = "#243352"
+    # ─── Primary Club Admin (mandatory) ──────────────────────────────────────
+    # A club with no admin account is a club nobody can log into, and it also
+    # leaves the trial-engagement score and the setup wizard with nobody to
+    # attribute anything to. No password field: the admin sets their own via
+    # the emailed invite link, exactly as the "Invite admin" flow already
+    # works (see create_club and routers/auth.py::accept_invite).
+    admin_first_name: str = ""
+    admin_last_name: str = ""
+    admin_display_name: str = ""
+    admin_username: str = ""
+    admin_email: str = ""
+    # Optional here, unlike self-serve registration — a super admin creating a
+    # club on someone's behalf often doesn't have their mobile yet. Format-
+    # checked when given.
+    admin_mobile_number: str = ""
 
 
 @router.get("/super/overview")
@@ -2323,9 +2339,44 @@ async def patch_general_settings(
 @router.post("/super/clubs", status_code=201)
 async def create_club(
     data: ClubCreate,
-    _: User = Depends(require_super_admin),
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
+    """Super Admin → All Clubs → New Club. Does everything a self-serve trial
+    registration does (routers/self_serve_trial.py::submit), with the one
+    honest difference that a staff member is filling the form in rather than
+    the club itself:
+
+      * creates the club through the SAME ``_onboard_club_core`` the self-serve
+        and authenticated-onboard flows use, so its first full historical sync
+        (and its yearbook backfill) starts immediately rather than waiting for
+        someone to press Sync Now;
+      * requires a Primary Club Admin and creates that account — no password is
+        set here, the admin sets their own from an emailed invite link, the same
+        machinery the "Invite admin" flow uses (see create_club_user below and
+        routers/auth.py::accept_invite). A super admin can't receive a code sent
+        to someone else's inbox, so the self-serve flow's 4-digit email PIN has
+        no equivalent here; the invite link proves the same thing (only whoever
+        holds that inbox can activate the account) without a live round trip;
+      * starts a trial of EVERY module on the club's own default trial length,
+        matching what a self-serve registrant gets — Core included, so the whole
+        plan reads as one trial rather than Core being live while the rest count
+        down;
+      * stamps ``onboarding_method='super_admin_trial'`` on the club, which is
+        what the setup wizard's auto-open and the trial-engagement score read;
+      * pushes the club to Twenty and creates the local CRM deal marked
+        'Super Admin Trial' immediately, so the engagement score is computed at
+        creation rather than at the next nightly refresh.
+
+    Sequenced to match the self-serve flow's own atomicity caveat: the User is
+    created flush-only FIRST (so a username/email race surfaces before anything
+    else exists), then ``_onboard_club_core`` — which commits internally, and
+    therefore commits that user too — then the membership + trials.
+    """
+    from app.services import admin_identity
+    from app.services import platform_settings as ps
+
     # The org id IS the sync key — it must be the real Cricket Australia club
     # GUID (picked from search), otherwise sync resolves to nothing.
     try:
@@ -2345,30 +2396,167 @@ async def create_club(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Slug already in use")
 
-    org = Organisation(
-        id=org_uuid,
-        name=data.name.strip(),
-        slug=slug,
-        short_name=data.short_name,
-        contact_email=data.contact_email,
-        primary_color=data.primary_color,
-        accent_color=data.accent_color,
-        is_active=False,
+    # Self-serve asks the registrant for their own preferred display name;
+    # a super admin filling this in on their behalf shouldn't have to invent
+    # one, so first + last is the default when it's left blank.
+    admin_display_name = (
+        data.admin_display_name.strip()
+        or f"{data.admin_first_name.strip()} {data.admin_last_name.strip()}".strip()
     )
-    db.add(org)
-    # Append the Core subscription while `org` is still pending: accessing the
-    # collection now initialises it empty (no SQL). Doing it after a flush would
-    # lazy-load the unloaded collection on a now-persistent row, which raises
-    # MissingGreenlet on the async session (the 500 on club create). `org.id` is
-    # set explicitly above, so the subscription's FK is valid; the cascade inserts
-    # both rows on commit.
-    mod_subs.ensure_core_subscription(org)  # Core tracked from day one
-    await db.commit()
+    admin_errors = await admin_identity.validate_admin_fields(
+        db,
+        first_name=data.admin_first_name, last_name=data.admin_last_name,
+        display_name=admin_display_name, username=data.admin_username,
+        email=data.admin_email, mobile_number=data.admin_mobile_number,
+        require_mobile=False,
+    )
+    if admin_errors:
+        raise HTTPException(status_code=422, detail={"errors": list(admin_errors.values())})
+
+    # Read before anything is written, so the only work inside the try below
+    # is writes — a settings-read hiccup shouldn't land in the half-created
+    # state that error path is there to report.
+    default_days = await ps.get_default_trial_days(db)
+
+    admin_username = data.admin_username.strip().lower()
+    admin_email = data.admin_email.strip().lower()
+    invite_token = _secrets.token_urlsafe(32)
+    admin = User(
+        username=admin_username,
+        email=admin_email,
+        # No password: the invite link is how this account is activated.
+        password_hash=None,
+        display_name=admin_display_name,
+        first_name=data.admin_first_name.strip(),
+        last_name=data.admin_last_name.strip(),
+        mobile_number=data.admin_mobile_number.strip() or None,
+        invite_token=invite_token,
+        invite_token_expires_at=_datetime.now(_timezone.utc) + _timedelta(days=_INVITE_TOKEN_TTL_DAYS),
+    )
+    db.add(admin)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="That username was just taken — try again.")
+
+    # Club creation + first full sync + Marketing Directory link, through the
+    # shared helper rather than a hand-built Organisation row — that's what
+    # was missing here, and it's why a super-admin-created club used to sit
+    # empty until someone remembered to sync it. Commits internally (and so
+    # commits the admin account created just above).
+    from app.routers.organisations import _onboard_club_core
+    org, run_id, name = await _onboard_club_core(
+        db, background_tasks, str(org_uuid), data.name, auto_yearbooks=True,
+    )
+    # That internal commit leaves module_subscriptions unloaded on the now-
+    # persistent org; touching the collection without this raises
+    # MissingGreenlet on the async session (same idiom as patch_club).
+    await db.refresh(org, attribute_names=["module_subscriptions"])
+
+    try:
+        # upsert_organisation never sets these — they're this form's own
+        # fields, applied on top of what the CA record gave us.
+        org.slug = slug
+        if data.short_name:
+            org.short_name = data.short_name
+        if data.contact_email:
+            org.contact_email = data.contact_email
+        org.primary_color = data.primary_color
+        org.accent_color = data.accent_color
+        # A trial club's public page goes live immediately, same call the
+        # self-serve flow makes — an inactive club would show its own admin a
+        # dead public site for the whole trial. Toggle it off from the club's
+        # edit panel if a club genuinely shouldn't be public yet.
+        org.is_active = True
+        org.onboarding_method = "super_admin_trial"
+
+        db.add(ClubMembership(club_id=org.id, user_id=admin.id, role="club_admin"))
+        await db.flush()
+        from app.services.memberships import ensure_primary_admin
+        await ensure_primary_admin(db, org.id)
+
+        # Every module on trial, Core included — the same "every club gets
+        # every module on trial, nothing to choose" deal the self-serve wizard
+        # offers, on the club's own configured default trial length.
+        trial_modules = [MODULE_CORE, *(k for k in BILLABLE_MODULES if k != MODULE_CORE)]
+        for module_key in trial_modules:
+            mod_subs.start_trial_billing(org, module_key, days=default_days)
+
+        from app.services.audit_log import log_activity
+        await log_activity(
+            db, org_id=org.id, user_id=current_user.id,
+            action="create_club", target_type="organisation", target_id=str(org.id),
+            details={
+                "name": name, "slug": slug, "onboarding_method": "super_admin_trial",
+                "primary_admin": admin_username, "primary_admin_email": admin_email,
+                "trial_modules": trial_modules, "trial_days": default_days,
+            },
+        )
+        await db.commit()
+    except Exception:
+        _logging.getLogger(__name__).error(
+            "super admin club creation: club %s / admin %s were created but "
+            "membership/module-trial linking failed — finish it by hand "
+            "(assign the primary admin and start the trials from the club's "
+            "edit panel); do not re-run New Club for this club",
+            org.id, admin.id, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The club and admin account were created, but finishing setup "
+                f"failed. Reference {org.id}/{admin.id} — don't retry, this "
+                "needs finishing by hand."
+            ),
+        )
+
     # Provision the club's SES tenant in the background (best-effort, no-op when
     # tenant provisioning isn't configured). Never blocks club creation.
     from app.services import ses_tenants
     asyncio.create_task(ses_tenants.ensure_tenant_bg(org.id))
-    return {"id": str(org.id), "slug": org.slug, "name": org.name}
+
+    # The admin's own way in. Best-effort delivery (send_invite_email logs and
+    # swallows) — the account exists either way, and the link can be resent
+    # from Club Users if it doesn't land.
+    from app.config.settings import settings as _settings
+    from app.services.user_invite import send_invite_email
+    background_tasks.add_task(
+        send_invite_email, email=admin_email,
+        display_name=admin_display_name or admin_username,
+        club_name=name, link=f"{_settings.public_base_url}/login?invite={invite_token}",
+    )
+
+    # Twenty + our own pipeline, immediately rather than at the next nightly
+    # refresh: creating a club and putting it on a trial is exactly the signal
+    # both are meant to reflect. Two separate background tasks on purpose —
+    # the Twenty push no-ops entirely when Twenty isn't configured, and the
+    # local deal must not inherit that gate.
+    from app.services import twenty_sync
+    from app.services import crm as crm_service
+    background_tasks.add_task(
+        twenty_sync.push_self_serve_registration,
+        org_id=org.id, org_name=name, contact_name=admin_display_name,
+        email=admin_email, phone=admin.mobile_number,
+        modules=[k for k in trial_modules if k != MODULE_CORE],
+        source="super_admin_trial", lead_lifecycle=None, opportunity_stage=None,
+    )
+    background_tasks.add_task(
+        crm_service.sync_super_admin_trial_registration,
+        org_id=org.id, org_name=name, contact_name=admin_display_name,
+        email=admin_email, phone=admin.mobile_number,
+    )
+
+    return {
+        "id": str(org.id), "slug": org.slug, "name": name,
+        "run_id": str(run_id),
+        "primary_admin": {
+            "id": str(admin.id), "username": admin_username,
+            "email": admin_email, "invited": True,
+        },
+        "trial_modules": trial_modules,
+        "trial_days": default_days,
+    }
 
 
 class ClubUpdate(BaseModel):

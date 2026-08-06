@@ -576,9 +576,25 @@ async def get_state(club: Organisation = Depends(get_current_club), db: AsyncSes
     # into setup on their next login. The Setup Wizard menu item is the
     # any-time entry point; auto-open is only for genuine onboarding.
     engaged = bool(completed or skipped or na)
+    # (c) A club onboarded onto a trial — self-serve, or by a super admin from
+    # All Clubs → New Club — whose admin has never opened the wizard at all.
+    # (a) covers the self-serve case only because that admin is logged straight
+    # in while their first sync is still running; a super admin creating the
+    # club days before its Primary Club Admin accepts their invite means that
+    # admin's first-ever login lands AFTER sync_ready, with no stored progress,
+    # so neither (a) nor (b) fires and they never see setup. Keyed on
+    # onboarding_method being set (migration 225), which no club onboarded
+    # before this existed carries — so this can never yank a long-established
+    # club's admin into setup, the exact failure (a) and (b) are guarding against.
+    never_opened_trial_club = (
+        state.first_opened_at is None
+        and state.dismissed_at is None
+        and bool(getattr(club, "onboarding_method", None))
+    )
     should_auto_open = (not all_addressed) and (
         (not sync_ready and state.dismissed_at is None)
         or (sync_ready and state.sync_steps_shown_at is None and engaged)
+        or never_opened_trial_club
     )
     return {
         "done": done_n, "addressed": addressed, "total": len(keys), "all_done": all_addressed,

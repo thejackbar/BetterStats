@@ -1,5 +1,76 @@
 # BetterStats — Claude Session Notes
 
+## Super Admin New Club = the self-serve registration (migration 225, v9.13.0, Aug 2026)
+
+Reported: a club a super admin creates from All Clubs → NEW CLUB got none of
+what a self-serve trial registration sets up. `create_club` built a bare
+`Organisation` row plus a Core subscription and stopped — no trial, no admin
+account, no sync, nothing in the CRM. It now runs the same steps
+`self_serve_trial.submit` does, sequenced the same way.
+
+- **It goes through `_onboard_club_core`** (organisations.py) rather than
+  hand-building an `Organisation`, which is what gets the first full sync +
+  `auto_yearbooks=True` + the Marketing Directory link for free. The form's own
+  fields (slug, short name, contact email, colours) are applied AFTER, since
+  `upsert_organisation` never sets them. Same atomicity caveat as self-serve:
+  the User is created **flush-only first** (so a username race surfaces before
+  anything exists), then `_onboard_club_core`'s internal commit commits it too,
+  then membership + trials in a try whose failure path says "don't retry".
+- **A Primary Club Admin is mandatory, and staff never choose their password.**
+  The account is created with `password_hash=NULL` + an `invite_token`, and
+  `user_invite.send_invite_email` sends the `/login?invite=` link — the existing
+  Club Users → Invite admin machinery, unchanged. **The self-serve 4-digit email
+  PIN has no equivalent here and shouldn't be bolted on**: that flow is
+  synchronous and the person entering the code must hold the inbox, which the
+  super admin filling this form does not. The invite link proves the same thing
+  (only whoever holds that inbox can activate the account) asynchronously.
+- **`services/admin_identity.py` is now the ONE set of primary-admin field
+  rules** (username/email/display-name/mobile), shared by self-serve and this
+  flow; `self_serve_trial._validate_admin_fields` is a thin wrapper over it.
+  Only difference: `require_mobile` — mandatory when the club's own admin is
+  filling it in, optional when staff are.
+- **Every module trials, Core included** (`BILLABLE_MODULES` via
+  `start_trial_billing`, so `admin` correctly expands to fees/comms/merch/crm),
+  on `platform_settings.get_default_trial_days`. `is_active=True` too — an
+  inactive club would show its own admin a dead public site for the whole trial.
+- **`organisations.onboarding_method`** (migration 225, mirrored in the lifespan)
+  — `'self_serve_trial' | 'super_admin_trial' | 'direct_subscriber' | 'none'`,
+  the same vocabulary the CRM deal carries. NULL for every club onboarded before
+  it existed. **This exists because two inferences broke the moment New Club
+  started creating a real primary admin:**
+  - `trial_engagement.trial_depth_score` scored the registration milestone from
+    "does this club have a primary admin" as a proxy for staff-vs-club. Sound
+    only while New Club left a club with no admin at all. It reads the column
+    now, falling back to the proxy for pre-225 clubs.
+  - `onboarding_wizard.get_state`'s auto-open fired on (a) not-yet-synced or (b)
+    reopen-after-sync-with-stored-progress. A super-admin-created club's admin
+    typically accepts their invite days later, after sync finished and with no
+    progress — neither fired. New branch (c): `first_opened_at IS NULL` and not
+    dismissed and `onboarding_method` set, which by construction can never catch
+    a long-established club.
+- **CRM**: `crm.sync_super_admin_trial_deal` stamps `onboarding_method =
+  'super_admin_trial'` and fires on the **`trial_started`** rule, not
+  `self_serve_signup` — that IS what happened, and a club that didn't sign
+  itself up must not trip the self-serve rule. No `lead_source`: staff typing a
+  club in have no first-touch attribution, and guessing one puts a fabricated
+  channel on the card. Both it and its self-serve sibling share
+  `_sync_trial_registration_deal` / `_sync_trial_registration`.
+- **Twenty**: reuses `push_self_serve_registration` with `source=
+  'super_admin_trial'` and **both stage overrides set to None** — "Self-Serve
+  Trial" would be a false claim, and Twenty's enum has no super-admin member to
+  name instead, so the Lead opens at its computed lifecycle. The distinction
+  lives in our own deal's `onboarding_method`.
+- **Confirmed while here**: self-serve DOES already create a deal marked
+  Self-Serve Trial (Trial stage, $399 Stats base, lead source derived from ad
+  attribution, registering admin as point of contact) — verified, not assumed.
+- **Verified against a real Postgres**: 52 checks on the new flow (every module
+  trialling, the invite-not-password account, primary-admin flag, sync run,
+  audit row, the queued background work and its arguments, the deal card, the
+  staff-discounted score with self-serve and pre-225 controls, wizard auto-open
+  plus a long-established-club control, and six validation guards) and 16 on
+  the untouched self-serve flow. Migration applied twice to a populated
+  pre-225 table.
+
 ## What kind of member is this? The Directory's three type axes (v9.11.1, Aug 2026)
 
 Reported: BetterStats → Players marks a player Inactive, but the Clubhouse

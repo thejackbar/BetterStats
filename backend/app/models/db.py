@@ -373,6 +373,14 @@ class Organisation(Base):
     # routers/meta_ads.py. NULL for every org onboarded any other way.
     signup_source = Column(Text, nullable=True)
     signup_attribution = Column(JSONB, nullable=True)
+    # ─── How this club was onboarded (migration 225) ─────────────────────────
+    # 'self_serve_trial' (the club registered itself, public or the internal
+    # super-admin testing copy of that wizard) | 'super_admin_trial' (a super
+    # admin created it from All Clubs → New Club) | 'direct_subscriber' |
+    # 'none'. Same vocabulary the CRM deal's own onboarding_method uses, and
+    # the deal is stamped from this. NULL for every club onboarded before this
+    # column existed — absent means unknown, not "neither".
+    onboarding_method = Column(Text, nullable=True)
     # ─── BetterSocials: post-generator style (migration 162) ─────────────────
     # The social post generator's Style choices (palette key, dark/light,
     # font, background texture + colour overrides, saved custom palettes and

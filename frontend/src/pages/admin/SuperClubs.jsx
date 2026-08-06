@@ -60,7 +60,15 @@ const _pad = (n) => String(n).padStart(2, '0')
 const toLocalInput = (d) => `${d.getFullYear()}-${_pad(d.getMonth() + 1)}-${_pad(d.getDate())}T${_pad(d.getHours())}:${_pad(d.getMinutes())}`
 const isoToLocalInput = (iso) => (iso ? toLocalInput(new Date(iso)) : '')
 
-const EMPTY_FORM = { org_id: '', name: '', slug: '', short_name: '', contact_email: '' }
+const EMPTY_FORM = {
+  org_id: '', name: '', slug: '', short_name: '', contact_email: '',
+  // Primary Club Admin — mandatory. No password field: the backend creates the
+  // account with no password and emails a set-your-password invite link, so a
+  // staff member never picks (or handles) the club admin's password. Same
+  // machinery as Club Users → Invite admin.
+  admin_first_name: '', admin_last_name: '', admin_display_name: '',
+  admin_username: '', admin_email: '', admin_mobile_number: '',
+}
 
 // Pause Sync / Cancel Sync / Continue Sync (migration 160) response status -> toast text.
 const SYNC_CONTROL_MSG = {
@@ -339,8 +347,20 @@ export default function SuperClubs() {
     setSaving(true)
     setMsg('')
     try {
-      await api.superCreateClub(form)
-      setMsg('Club created')
+      const res = await api.superCreateClub({
+        ...form,
+        // A preferred display name is required server-side; first + last is
+        // the obvious default rather than making staff retype it.
+        admin_display_name:
+          form.admin_display_name.trim()
+          || `${form.admin_first_name} ${form.admin_last_name}`.trim(),
+      })
+      const admin = res?.primary_admin
+      setMsg(
+        `${res?.name || 'Club'} created on a ${res?.trial_days || ''}-day trial of every module. `
+        + `Its first full sync has started, and ${admin?.email || 'the primary admin'} has been `
+        + 'emailed a link to set their password.',
+      )
       setShowCreate(false)
       resetCreate()
       load()
@@ -1031,6 +1051,69 @@ export default function SuperClubs() {
                   className={INPUT_CLS} />
               </div>
             </div>
+
+            <div className="pt-3 border-t pb-hairline space-y-3">
+              <div>
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Primary Club Admin</p>
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  Required. The account is created without a password — this person is emailed a
+                  link to set their own, the same way Club Users → Invite admin works.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">First name *</label>
+                  <input required type="text" value={form.admin_first_name}
+                    onChange={e => setForm(f => ({ ...f, admin_first_name: e.target.value }))}
+                    className={INPUT_CLS} />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Last name *</label>
+                  <input required type="text" value={form.admin_last_name}
+                    onChange={e => setForm(f => ({ ...f, admin_last_name: e.target.value }))}
+                    className={INPUT_CLS} />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Display name</label>
+                  <input type="text" value={form.admin_display_name}
+                    onChange={e => setForm(f => ({ ...f, admin_display_name: e.target.value }))}
+                    placeholder={`${form.admin_first_name} ${form.admin_last_name}`.trim() || 'First Last'}
+                    className={INPUT_CLS} />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Username *</label>
+                  <input required type="text" value={form.admin_username}
+                    onChange={e => setForm(f => ({ ...f, admin_username: e.target.value.toLowerCase().trim() }))}
+                    placeholder="3-32 characters"
+                    className={INPUT_CLS + ' font-mono'} />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Email *</label>
+                  <input required type="email" value={form.admin_email}
+                    onChange={e => setForm(f => ({ ...f, admin_email: e.target.value }))}
+                    placeholder="Where the invite link is sent"
+                    className={INPUT_CLS} />
+                </div>
+                <div>
+                  <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile</label>
+                  <input type="tel" value={form.admin_mobile_number}
+                    onChange={e => setForm(f => ({ ...f, admin_mobile_number: e.target.value }))}
+                    placeholder="Optional"
+                    className={INPUT_CLS} />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-3 border-t pb-hairline">
+              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">On creation</p>
+              <ul className="font-mono text-[10px] text-pb-faintest mt-1.5 space-y-1">
+                <li>· Free trial started on every module: {MODULE_TOGGLES.map(m => m.label).join(', ')}</li>
+                <li>· First full historical sync starts straight away</li>
+                <li>· Public page switched on, and the setup wizard opens on the admin's first login</li>
+                <li>· Added to the Sales Pipeline as a Super Admin Trial deal, and scored</li>
+              </ul>
+            </div>
+
             <button
               type="submit"
               disabled={saving || !form.org_id}

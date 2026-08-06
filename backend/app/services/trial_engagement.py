@@ -16,11 +16,15 @@ Actor resolution has two layers:
      (``club_memberships.role='club_admin'`` + ``is_primary_admin``)? If not,
      EVERY action on this org scores as if a Super Admin performed it,
      regardless of what any specific audit trail says — there's no genuine
-     club-side owner to attribute organic interest to. This is also what
-     resolves the registration milestone itself: the authenticated `/onboard`
-     route never attaches a ClubMembership when the caller is a Super Admin
-     (see organisations.py::onboard_organisation), so "no primary admin"
-     already identifies a staff-run registration with no new instrumentation.
+     club-side owner to attribute organic interest to.
+
+     The REGISTRATION milestone itself is resolved separately, from
+     ``organisations.onboarding_method`` (migration 225). It used to lean on
+     the same "no primary admin" proxy, which worked only while Super Admin →
+     New Club left a club with no admin account at all; that flow now creates
+     a real Primary Club Admin, so the proxy would have quietly started
+     scoring every staff-created club as if it had registered itself. Clubs
+     onboarded before that column existed still fall back to the proxy.
   2. Per-action, only where an actual actor is on file: a merge
      (``audit_logs`` action merge_players/merge_grades — routers/admin.py)
      and the "Import historical stats" wizard step (``audit_logs`` action
@@ -122,7 +126,18 @@ async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
             return SUPER_ADMIN_ACTOR_FRACTION
         return 1.0
 
-    registration = REGISTRATION_CLUB_ADMIN if has_primary else REGISTRATION_SUPER_ADMIN
+    # Who actually performed the registration. ``organisations.onboarding_method``
+    # (migration 225) is the direct answer whenever it's set, and it's the ONLY
+    # reliable one now that Super Admin → New Club creates a real primary club
+    # admin too: before that, "no primary admin" was a sound proxy for a
+    # staff-run registration, and it silently stopped being one. Falls back to
+    # that proxy for every club onboarded before the column existed.
+    staff_registered = (
+        (org.onboarding_method or "") == "super_admin_trial"
+        if getattr(org, "onboarding_method", None)
+        else not has_primary
+    )
+    registration = REGISTRATION_SUPER_ADMIN if staff_registered else REGISTRATION_CLUB_ADMIN
 
     state = await session.get(OnboardingWizardState, org.id)
     completed = set(state.completed_steps or []) if state else set()
@@ -153,6 +168,7 @@ async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
     return {
         "score": total,
         "hasPrimaryAdmin": has_primary,
+        "_staffRegistered": staff_registered,
         "_registrationPts": registration,
         "_mergePts": merge_pts,
         "_importStatsPts": import_pts,

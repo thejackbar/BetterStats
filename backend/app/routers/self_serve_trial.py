@@ -27,6 +27,7 @@ from app.models.db import (
 )
 from app.routers.auth import require_super_admin
 from app.services import module_subscriptions as mod_subs
+from app.services import admin_identity
 from app.services import password_policy
 from app.services import platform_settings as ps
 from app.services import playhq_client
@@ -286,19 +287,10 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
 # final submission (a later phase) so a plaintext password spends less time
 # sitting in client state across email verification and acknowledgements.
 
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-# AU mobile: 04xxxxxxxx, +614xxxxxxxx or 614xxxxxxxx, spaces/dashes ignored.
-_AU_MOBILE_RE = re.compile(r"^(\+?61|0)4\d{8}$")
-# Generic international fallback: a leading + and 8-15 digits — the codebase
-# has no phone-validation library anywhere (Player.phone is stored as free text,
-# see routers/availability.py's phone_last4), so this is a light sanity check,
-# not a claim of full E.164 validation.
-_INTL_MOBILE_RE = re.compile(r"^\+\d{8,15}$")
-
-
-def _mobile_valid(raw: str) -> bool:
-    compact = re.sub(r"[\s-]", "", raw or "")
-    return bool(_AU_MOBILE_RE.match(compact) or _INTL_MOBILE_RE.match(compact))
+# The field rules themselves live in services/admin_identity.py — shared with
+# Super Admin → All Clubs → New Club, which creates the same kind of account
+# (a club's Primary Club Admin) and must judge it by the same rules.
+_EMAIL_RE = admin_identity.EMAIL_RE
 
 
 class ValidateAdminRequest(BaseModel):
@@ -313,57 +305,18 @@ class ValidateAdminRequest(BaseModel):
 async def _validate_admin_fields(db: AsyncSession, data: ValidateAdminRequest) -> dict:
     """The admin-details field checks, shared by the as-you-type validator
     below and the final /submit revalidation (Phase 8) — one set of rules,
-    not two copies that could drift. Reuses the exact username rules
-    (lowercase, 3-32 chars, uniqueness) the existing POST /super/users already
-    enforces.
-
-    Email: format-checked, then checked against existing users and BLOCKED if
-    already taken (Phase 5, see docs/self-serve-trial-onboarding-plan.md Decision
-    14). The source document wanted this to link an existing admin to a second
-    club instead — but club_memberships.uq_membership_one_per_user (a user can
-    have at most one membership, ever) and the global uniqueness of users.email
-    make that a schema change, not a form feature. Building it properly needs a
-    club-switcher for ordinary club admins (mirroring the super-admin-only
-    active_club_id pattern) and a re-audit of every route that assumes one
-    membership per user — explicitly out of scope here. This blocks rather than
-    silently allowing a broken multi-club state, and does not reveal which
-    club(s) the existing account holds (no verification has happened yet)."""
-    errors = {}
-
-    if not (data.first_name or "").strip():
-        errors["first_name"] = "First name is required"
-    if not (data.last_name or "").strip():
-        errors["last_name"] = "Last name is required"
-    if not (data.display_name or "").strip():
-        errors["display_name"] = "Preferred display name is required"
-
-    username = (data.username or "").strip().lower()
-    if not username or len(username) < 3 or len(username) > 32:
-        errors["username"] = "Username must be 3-32 characters"
-    else:
-        existing = await db.execute(select(User).where(User.username == username))
-        if existing.scalar_one_or_none():
-            errors["username"] = "Username already taken"
-
-    email = (data.email or "").strip().lower()
-    if not email or not _EMAIL_RE.match(email):
-        errors["email"] = "Enter a valid email address"
-    else:
-        # users.email is no longer DB-unique (migration 145 — club-user emails
-        # are format-validated only), so this can't assume at most one match.
-        existing_user = await db.execute(select(User).where(User.email == email))
-        if existing_user.scalars().first():
-            errors["email"] = (
-                "This email already belongs to a BetterCricket account. Self-serve "
-                "registration doesn't yet support adding an existing admin to a "
-                "second club — email support@bettersports.com.au for help."
-            )
-
-    mobile = (data.mobile_number or "").strip()
-    if not mobile or not _mobile_valid(mobile):
-        errors["mobile_number"] = "Enter a valid Australian mobile number, or an international number starting with +"
-
-    return errors
+    not two copies that could drift. The rules live in
+    services/admin_identity.py so Super Admin → New Club (which creates the
+    same kind of account) applies exactly the same ones; a mobile number is
+    mandatory on this flow, since the registrant is the club's own admin and
+    is being asked for their own number."""
+    return await admin_identity.validate_admin_fields(
+        db,
+        first_name=data.first_name, last_name=data.last_name,
+        display_name=data.display_name, username=data.username,
+        email=data.email, mobile_number=data.mobile_number,
+        require_mobile=True,
+    )
 
 
 @router.post("/validate-admin")
@@ -699,6 +652,12 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         # that's a deliberate call for THIS flow specifically, not something
         # to silently change for the shared onboard path's existing behaviour.
         org.is_active = True
+        # How this club came to exist, on the club row itself (migration 225) —
+        # the CRM deal is stamped from it below, and both trial_engagement's
+        # staff-vs-club scoring and the setup wizard's auto-open read it. Set
+        # here rather than inferred later, since nothing else can tell a club
+        # that registered itself apart from one a super admin created for it.
+        org.onboarding_method = "self_serve_trial"
         if not org.slug:
             org.slug = await _unique_slug(db, _slugify(name))
         # Real street address, for the Stripe Customer this club's first
