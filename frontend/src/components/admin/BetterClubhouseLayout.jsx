@@ -2,6 +2,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { CAP } from '../../lib/capabilities'
 import { useClubhouseData, clubhouseModules } from '../../pages/admin/clubhouse/data'
 import ModuleLayout from './ModuleLayout'
+import ClubhouseContextControl from './ClubhouseContextControl'
 
 // BetterClubhouse — the club's back office as ONE module.
 //
@@ -76,19 +77,53 @@ function buildNav({ modules, counts, storefront }) {
   })
 }
 
+// The nav while a super admin is working on BetterCricket's own outreach org.
+//
+// BetterCricket is not a cricket club: it has no members to charge, no stock,
+// no roster and no committee, so those groups would read empty and — worse —
+// make it easy to forget you had switched. What is left is the two things the
+// platform surface is actually for.
+//
+// Segments points at the super-admin Directory Audiences screen rather than the
+// club Audiences screen. That is the whole scope rule in one line: the two field
+// sets live in two components, and which one you get is a route, not a runtime
+// flag inside one screen.
+function buildInternalNav({ counts }) {
+  return [
+    { to: '/admin/clubhouse', label: 'Today', icon: 'overview', exact: true },
+
+    { heading: 'BetterCricket' },
+    { to: '/admin/clubhouse/internal/directory', label: 'Directory', icon: 'teams' },
+
+    { heading: 'Comms' },
+    { to: '/admin/comms', label: 'Emails', icon: 'list', exact: true, badge: counts.drafts },
+    { to: '/admin/comms/lists', label: 'Lists', icon: 'teams' },
+    { to: '/admin/super/directory-audiences', label: 'Segments', icon: 'filter' },
+    { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet' },
+    { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings' },
+  ]
+}
+
 export default function BetterClubhouseLayout({
   children, title, caption, onHelp, filters, stats, actions, bare, hideHeader, storefront = false,
 }) {
-  const { hasModule } = useAuth()
+  const { user, hasModule } = useAuth()
   const modules = clubhouseModules(hasModule)
   const { counts } = useClubhouseData(modules)
-  const nav = buildNav({ modules, counts, storefront })
+  // `is_marketing_org` rides on /auth/me, so the shell knows which mode it is in
+  // synchronously. Deriving it from a fetch would flash the club nav first, and
+  // the one thing this must never be is ambiguous. The `can_switch_clubs` half
+  // means an ordinary club admin can never land in this branch, even if someone
+  // mis-designates a real club as the outreach org.
+  const internal = !!(user?.can_switch_clubs && user?.is_marketing_org)
+  const nav = internal ? buildInternalNav({ counts }) : buildNav({ modules, counts, storefront })
 
   return (
     <ModuleLayout
       moduleName="Clubhouse" nav={nav}
       title={title} caption={caption} onHelp={onHelp}
       filters={filters} stats={stats} actions={actions} bare={bare} hideHeader={hideHeader}
+      sidebarFooterTop={<ClubhouseContextControl />}
     >
       {children}
     </ModuleLayout>

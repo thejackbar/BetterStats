@@ -8,6 +8,7 @@ import ClubDiary from './screens/ClubDiary'
 import Facilities from './screens/Facilities'
 import Events from './screens/Events'
 import AreasRoles from './screens/AreasRoles'
+import InternalDirectory from './screens/InternalDirectory'
 
 // The People and Club screens of BetterClubhouse.
 //
@@ -26,6 +27,10 @@ import AreasRoles from './screens/AreasRoles'
 const SCREENS = {
   overview: Today, roster: Roster, directory: Directory, committee: Committee,
   diary: ClubDiary, facilities: Facilities, events: Events, setup: AreasRoles,
+  // BetterCricket's own directory, reached only while acting as the outreach
+  // org. A separate screen from `directory`, not a mode inside it — see the
+  // scope rule in its own file header.
+  internal_directory: InternalDirectory,
 }
 
 export default function ClubManagerApp({ initialScreen = 'overview' }) {

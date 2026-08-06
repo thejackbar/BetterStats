@@ -329,6 +329,11 @@ export default function App() {
           <Route path="/admin/clubhouse/directory" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/roster" element={<ProtectedRoute><ClubManagerApp initialScreen="roster" /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/areas-roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />
+          {/* BetterCricket's own directory, shown in place of the club Directory
+              while a super admin is acting as the outreach org. requireRole is
+              the real gate — the nav item only appears in internal mode, but a
+              typed URL must be refused too. */}
+          <Route path="/admin/clubhouse/internal/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="internal_directory" /></ProtectedRoute>} />
           {/* The full editors behind the read-only Clubhouse screens. They lost
               their routes when the redesign screens took /admin/committee,
               /admin/events and friends, which left their CRUD unreachable.
