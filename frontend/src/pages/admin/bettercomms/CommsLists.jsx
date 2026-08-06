@@ -425,11 +425,10 @@ export default function CommsLists() {
 
           <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mt-6 mb-1">Auto-generated lists</div>
           <div className="text-pb-faintest text-xs mb-2 max-w-2xl">
-            Lists built for you by other BetterCricket tools (for example the CRM Sales Pipeline "Create List"
-            action). Rename, manage or delete them like any other list.
+            Lists built for you by other BetterCricket tools. Rename, manage or delete them like any other list.
           </div>
           {autoLists.length === 0 ? (
-            <div className="text-pb-faintest text-sm mb-4">Nothing here yet. Use a tool like the CRM Sales Pipeline to create one.</div>
+            <div className="text-pb-faintest text-sm mb-4">Nothing here yet.</div>
           ) : (
             <ListsCard rows={autoLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
           )}
