@@ -469,6 +469,11 @@ export default function Roster({ st, patch, narrow }) {
   // column narrow; one with three does not.
   const [railMin, setRailMin] = usePref('roster_rail_min', false)
   const [poolOpen, setPoolOpen] = usePref('roster_pool_open', true)
+  // Pool search / role filter / sort. Deliberately NOT a saved preference —
+  // a filter you left on last week hiding half the club is worse than retyping.
+  const [poolQuery, setPoolQuery] = useState('')
+  const [poolRole, setPoolRole] = useState('')
+  const [poolSort, setPoolSort] = useState('fit')   // 'fit' | 'name'
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
@@ -690,7 +695,23 @@ export default function Roster({ st, patch, narrow }) {
   const ranked = sel ? candidates.map(c => ({ c, res: checkClient(selArea, sel, c, shifts, settings), load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
     .filter(x => x.res.blocks.length === 0).sort((a, b) => (a.res.warns.length * 10 + a.load) - (b.res.warns.length * 10 + b.load))
     : candidates.map(c => ({ c, res: { warns: [] }, load: shifts.filter(s => s.assignee_member_id === c.member_id).length }))
-  const candList = ranked.slice(0, 14)
+
+  // Every role anyone in the pool has put their hand up for, for the filter.
+  // Built from the names the candidates carry rather than a second fetch of the
+  // roles catalogue — a role nobody volunteers for is not worth filtering by.
+  const poolRoles = [...new Set(candidates.flatMap(c => c.role_names || []))].sort((a, b) => a.localeCompare(b))
+  const q = poolQuery.trim().toLowerCase()
+  const filtered = ranked.filter(({ c }) => {
+    if (poolRole && !(c.role_names || []).includes(poolRole)) return false
+    if (!q) return true
+    return c.name.toLowerCase().includes(q) || (c.role_names || []).some(r => r.toLowerCase().includes(q))
+  })
+  // Best fit is only a real ordering when a shift is selected — with nothing
+  // selected `ranked` carries no verdicts, so it falls back to name either way.
+  const byName = poolSort === 'name' || !sel
+  const sorted = byName ? [...filtered].sort((a, b) => a.c.name.localeCompare(b.c.name)) : filtered
+  const POOL_CAP = 25
+  const candList = sorted.slice(0, POOL_CAP)
 
   const openCells = DOW.map((_, d) => {
     const groups = []
@@ -942,12 +963,39 @@ export default function Roster({ st, patch, narrow }) {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 8 }}>
               <span style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest }}>{sel ? 'RANKED CANDIDATES' : 'VOLUNTEER POOL'}</span>
-              <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginLeft: 'auto' }}>{candList.length} people</span>
+              <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, marginLeft: 'auto' }}>
+                {sorted.length === candidates.length ? `${sorted.length} people` : `${sorted.length} of ${candidates.length}`}
+              </span>
               <button onClick={() => setPoolOpen(false)} title="Minimise the volunteer pool"
                 style={{ background: 'transparent', border: `1px solid ${C.hair2}`, borderRadius: 5, color: C.faint, cursor: 'pointer', fontSize: 11, lineHeight: 1, padding: '3px 5px', flexShrink: 0 }}>»</button>
             </div>
             <div style={{ fontSize: 11.5, color: C.faint, lineHeight: 1.45, marginBottom: 10 }}>{view === 'areas' ? 'Drag a volunteer onto a shift, or select a shift to rank them.' : 'Drag a volunteer onto an open shift, or a shift onto someone else on the same day.'}</div>
             {candidates.length === 0 && <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>No volunteers yet. Add volunteer profiles (with availability) in the Directory/Volunteers so they can be rostered.</div>}
+
+            {candidates.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 }}>
+                <div style={{ position: 'relative' }}>
+                  <input value={poolQuery} onChange={e => setPoolQuery(e.target.value)} placeholder="Search name or role…"
+                    style={{ width: '100%', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '6px 24px 6px 9px', color: C.text, fontSize: 12.5, outline: 'none' }} />
+                  {poolQuery && (
+                    <button onClick={() => setPoolQuery('')} title="Clear the search"
+                      style={{ position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: C.faint, cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '2px 4px' }}>×</button>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <select value={poolRole} onChange={e => setPoolRole(e.target.value)} title="Filter by the role a volunteer put their hand up for"
+                    style={{ flex: 1, minWidth: 0, background: C.surface2, border: `1px solid ${poolRole ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 7, padding: '6px 8px', color: poolRole ? C.text : C.dim, fontSize: 12, outline: 'none' }}>
+                    <option value="">All roles</option>
+                    {poolRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                  <select value={byName ? 'name' : 'fit'} onChange={e => setPoolSort(e.target.value)} title={sel ? 'Order the candidates' : 'Best fit needs a shift selected'} disabled={!sel}
+                    style={{ width: 104, flexShrink: 0, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '6px 8px', color: sel ? C.dim : C.faintest, fontSize: 12, outline: 'none', cursor: sel ? 'pointer' : 'default' }}>
+                    <option value="name">By name</option>
+                    <option value="fit">Best fit</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {candList.map(({ c, res, load }) => (
@@ -961,8 +1009,35 @@ export default function Roster({ st, patch, narrow }) {
                     </div>
                     {sel && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 5px', borderRadius: 4, flexShrink: 0, ...(res.warns.length ? { background: 'rgba(245,181,66,0.15)', color: C.warn } : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent }) }}>{res.warns.length ? 'WARN' : 'FIT'}</span>}
                   </div>
+                  {/* What they volunteered for and when they can do it — the two
+                      things you need to know before dragging someone onto a shift. */}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 7 }}>
+                    {(c.role_names || []).length
+                      ? c.role_names.map(r => (
+                        <span key={r} style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', padding: '2px 5px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 28%, transparent)', color: C.accent, whiteSpace: 'nowrap' }}>{r.toUpperCase()}</span>
+                      ))
+                      : <span style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.06em', color: C.faintest }}>NO ROLE SET</span>}
+                  </div>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 5 }}>
+                    {c.available_days.length
+                      ? <>AVAIL {DOW.map((d, i) => (
+                        <span key={i} style={{ marginRight: 3, color: c.available_days.includes(i) ? (sel && sel.day_of_week === i ? C.accent : C.dim) : C.faintest, fontWeight: c.available_days.includes(i) ? 600 : 400 }}>{d}</span>
+                      ))}</>
+                      : 'NO AVAILABILITY SET'}
+                  </div>
                 </div>
               ))}
+              {candidates.length > 0 && sorted.length === 0 && (
+                <div style={{ fontSize: 12.5, color: C.faint, lineHeight: 1.5 }}>
+                  Nobody matches{poolRole ? ` the ${poolRole} role` : ''}{q ? ` "${poolQuery.trim()}"` : ''}
+                  {sel ? '. Ranked candidates already exclude anyone the rules block for this shift.' : '.'}
+                </div>
+              )}
+              {sorted.length > POOL_CAP && (
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, textAlign: 'center', padding: '4px 0' }}>
+                  SHOWING {POOL_CAP} OF {sorted.length} — SEARCH TO NARROW
+                </div>
+              )}
             </div>
           </aside>
         )}

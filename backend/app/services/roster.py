@@ -254,14 +254,23 @@ async def candidates(db: AsyncSession, org_id) -> list[dict]:
         WHERE vp.organisation_id = :org
         ORDER BY lower(fm.full_name)
     """), {"org": org_id})).mappings().all()
-    role_rows = (await db.execute(text("SELECT member_id, role_id FROM volunteer_roles WHERE organisation_id=:org"), {"org": org_id})).mappings().all()
+    role_rows = (await db.execute(text("""
+        SELECT vr.member_id, vr.role_id, cr.title
+        FROM volunteer_roles vr LEFT JOIN club_roles cr ON cr.id = vr.role_id
+        WHERE vr.organisation_id = :org
+    """), {"org": org_id})).mappings().all()
     qual_rows = (await db.execute(text("""
         SELECT member_id, qualification_type_id FROM member_qualifications
         WHERE organisation_id=:org AND (expires_at IS NULL OR expires_at >= CURRENT_DATE)
     """), {"org": org_id})).mappings().all()
-    roles_by = {}
+    roles_by, role_names_by = {}, {}
     for r in role_rows:
-        roles_by.setdefault(str(r["member_id"]), set()).add(str(r["role_id"]))
+        mid = str(r["member_id"])
+        roles_by.setdefault(mid, set()).add(str(r["role_id"]))
+        # The pool lists the roles a person put their hand up for, so it needs
+        # the titles as well as the ids the rules engine matches on.
+        if r["title"]:
+            role_names_by.setdefault(mid, set()).add(r["title"])
     quals_by = {}
     for q in qual_rows:
         quals_by.setdefault(str(q["member_id"]), set()).add(str(q["qualification_type_id"]))
@@ -274,6 +283,7 @@ async def candidates(db: AsyncSession, org_id) -> list[dict]:
             "max_shifts": r["max_shifts_per_week"],
             "player_id": str(r["player_id"]) if r["player_id"] else None,
             "role_ids": roles_by.get(mid, set()), "qual_type_ids": quals_by.get(mid, set()),
+            "role_names": sorted(role_names_by.get(mid, set()), key=str.lower),
         })
     return out
 
