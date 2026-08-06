@@ -334,38 +334,57 @@ export default function Directory({ st, patch, narrow }) {
         </div>
         <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {DIR_SEGS.map(s => <button key={s.seg} onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>)}
-          {/* Playing status is the Stats active/inactive flag, so a club can
-              tell this season's players from the ones who have stopped without
-              losing either from the directory. */}
-          <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
-          <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
-          {memberTypes.length > 0 && (
-            <select value={typeFilter} onChange={e => patch({ dirType: e.target.value })}
-              title="Filter by membership type"
-              style={{ background: C.surface2, border: `1px solid ${typeFilter ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 999, padding: '5px 11px', color: typeFilter ? C.accent : C.dim, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
-              <option value="">Any membership type</option>
-              {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              <option value={NO_TYPE}>No type set</option>
-            </select>
-          )}
-          <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
-          <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
-          <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
-          <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
-          {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
-          <button onClick={openMakeList} disabled={!emailable} title={emailable ? '' : 'Nobody in this filter has an email address'}
-            style={{ ...btnS, opacity: emailable ? 1 : 0.5, cursor: emailable ? 'pointer' : 'not-allowed' }}>Create list ({emailable})</button>
-          <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
-          <button onClick={openAdd} style={btnP}>+ Add person</button>
-          {/* The dedicated editors for the three overlays this record shows.
-              The panels below cover the everyday case (add a role, log hours,
-              record a qualification, link a family); these are where the
-              catalogues and bulk work live. */}
-          <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
-          <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
-          <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
+        {/* Two groups on one full-width row: what you're LOOKING AT on the
+            left (the filter pills, plus the links out to the three editors),
+            and what you can DO on the right, ending in the one primary
+            action. + Add person sits hard against the right edge rather than
+            buried mid-row among the pills. Both groups wrap internally, so a
+            narrow screen never scrolls sideways. */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', flex: '1 1 100%' }}>
+          {/* flex-basis 0, not auto: with a max-content basis this group
+              claims the whole line and shoves the actions onto one of their
+              own, leaving a wide empty gap beside them. At basis 0 the two
+              share the line, the filters wrap within their own column, and
+              the actions stay pinned top-right. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: '1 1 0', minWidth: 0 }}>
+            {DIR_SEGS.map(s => <button key={s.seg} onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>)}
+            {/* Playing status is the Stats active/inactive flag, so a club can
+                tell this season's players from the ones who have stopped without
+                losing either from the directory. */}
+            <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
+            <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
+            {memberTypes.length > 0 && (
+              <select value={typeFilter} onChange={e => patch({ dirType: e.target.value })}
+                title="Filter by membership type"
+                style={{ background: C.surface2, border: `1px solid ${typeFilter ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 999, padding: '5px 11px', color: typeFilter ? C.accent : C.dim, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+                <option value="">Any membership type</option>
+                {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <option value={NO_TYPE}>No type set</option>
+              </select>
+            )}
+            <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
+            <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
+            <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
+            {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
+            {/* The dedicated editors for the three overlays this record shows.
+                The panels below cover the everyday case (add a role, log hours,
+                record a qualification, link a family); these are where the
+                catalogues and bulk work live. */}
+            <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
+            <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
+            <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
+          </div>
+          {/* No flexShrink:0 here on purpose — pinning this group at its
+              max-content width stops its own flexWrap from ever firing, and a
+              phone then scrolls sideways. Letting it shrink is what makes the
+              four buttons stack instead. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>
+            <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
+            <button onClick={openMakeList} disabled={!emailable} title={emailable ? '' : 'Nobody in this filter has an email address'}
+              style={{ ...btnS, opacity: emailable ? 1 : 0.5, cursor: emailable ? 'pointer' : 'not-allowed' }}>Create list ({emailable})</button>
+            <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
+            <button onClick={openAdd} style={btnP}>+ Add person</button>
+          </div>
         </div>
       </ScreenHeader>
 
