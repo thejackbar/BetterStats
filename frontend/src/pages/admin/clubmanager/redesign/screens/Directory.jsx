@@ -10,7 +10,20 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // player gets a member row lazily the first time ClubManager assigns them a
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
-const DIR_SEGS = ['All', 'Player', 'Volunteer', 'Committee', 'Parent', 'Third party']
+// The segments list_people computes, each as a filter. Life member / Official /
+// Honorary were already worked out per person and simply had nowhere to be
+// filtered on, so a club could not pull up its life members.
+const DIR_SEGS = [
+  { seg: 'All', label: 'Everyone' },
+  { seg: 'Player', label: 'Players' },
+  { seg: 'Volunteer', label: 'Volunteers' },
+  { seg: 'Committee', label: 'Committees' },
+  { seg: 'Parent', label: 'Parents' },
+  { seg: 'Third party', label: 'Third parties' },
+  { seg: 'Official', label: 'Officials' },
+  { seg: 'Life member', label: 'Life members' },
+  { seg: 'Honorary', label: 'Honorary' },
+]
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -19,10 +32,26 @@ const CATS = [
   { value: 'parent', label: 'Parent' },
   { value: 'committee', label: 'Committee' },
   { value: 'third_party', label: 'Third party' },
-  { value: 'official', label: 'Official (umpire, scorer…)' },
+  { value: 'official', label: 'Official (umpire, scorer…)', short: 'Official' },
   { value: 'life_member', label: 'Life member' },
   { value: 'other', label: 'Other' },
 ]
+const CAT_SHORT = Object.fromEntries(CATS.map(c => [c.value, c.short || c.label]))
+// Filter value for "nobody has said what kind of member this is" — the gap a
+// club works through when it first fills the catalogue in.
+const NO_TYPE = '__none__'
+
+// One line answering "what kind of member is this?". A club may keep the
+// membership-type catalogue (Senior Player, Social Member, Sponsor Contact…),
+// or just the category this module tags a non-player with, or neither and only
+// play cricket — so this reads whichever they actually keep rather than
+// insisting on one.
+function typeLabel(p) {
+  if (p.membership_type) return p.membership_type
+  if (p.category) return CAT_SHORT[p.category] || p.category
+  if (p.player_id) return p.player_status === 'inactive' ? 'Former player' : 'Player'
+  return 'Member'
+}
 
 function qualStatus(expiryISO) {
   if (!expiryISO) return { key: 'current', label: 'NO EXPIRY', fg: C.ok }
@@ -39,6 +68,7 @@ function fmtExpiry(iso) {
 
 export default function Directory({ st, patch, narrow }) {
   const [people, setPeople] = useState(null)   // null = loading
+  const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
   const [err, setErr] = useState(null)
   const [roleCatalogue, setRoleCatalogue] = useState([])   // general (non-committee) club roles
   const [qualTypes, setQualTypes] = useState([])
@@ -53,7 +83,10 @@ export default function Directory({ st, patch, narrow }) {
   const [activities, setActivities] = useState([])
   const [logForm, setLogForm] = useState({ hours: '', activity_id: '', logged_date: new Date().toISOString().slice(0, 10) })
 
-  const reload = () => api.dirPeople(st.dirShowArchived).then(res => setPeople(res?.people || [])).catch(e => setErr(String(e?.message || e)))
+  const reload = () => api.dirPeople(st.dirShowArchived).then(res => {
+    setPeople(res?.people || [])
+    setMemberTypes(res?.membership_types || [])
+  }).catch(e => setErr(String(e?.message || e)))
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
   useEffect(() => { reload() }, [st.dirShowArchived]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -68,13 +101,22 @@ export default function Directory({ st, patch, narrow }) {
   const seg = st.dirSeg || 'All'
   const roleFilter = st.dirRole || null
   const expiringOnly = !!st.dirExpiring
+  const typeFilter = st.dirType || ''          // '' = any membership type
+  const playing = st.dirPlaying || 'all'       // all | active | inactive
 
   const roleTitles = (p) => (p.roles || []).map(r => r.title)
   const list = (people || []).filter(p => {
     if (seg !== 'All' && !p.segs.includes(seg)) return false
+    if (typeFilter === NO_TYPE && p.membership_type_id) return false
+    if (typeFilter && typeFilter !== NO_TYPE && p.membership_type_id !== typeFilter) return false
+    // Playing status comes from Stats and only means something for someone with
+    // a player record, so both filters exclude non-players rather than lumping
+    // them in with the inactive.
+    if (playing === 'active' && !(p.player_id && p.player_status !== 'inactive')) return false
+    if (playing === 'inactive' && !(p.player_id && p.player_status === 'inactive')) return false
     if (roleFilter && !roleTitles(p).includes(roleFilter)) return false
     if (expiringOnly && !p.flagged) return false
-    if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q))) return false
+    if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q) || typeLabel(p).toLowerCase().includes(q))) return false
     return true
   })
 
@@ -126,8 +168,8 @@ export default function Directory({ st, patch, narrow }) {
   const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
-  const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', notes: '' } })
-  const openEdit = (p) => setModal({ editId: p.member_id, form: { full_name: p.name, email: p.email, mobile: p.phone, member_category: p.category || 'other', notes: '' } })
+  const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', membership_type_id: '', notes: '' } })
+  const openEdit = (p) => setModal({ editId: p.member_id, form: { full_name: p.name, email: p.email, mobile: p.phone, member_category: p.category || 'other', membership_type_id: p.membership_type_id || '', notes: '' } })
   const setForm = (k, v) => setModal(m => ({ ...m, form: { ...m.form, [k]: v } }))
   const saveMember = async () => {
     const f = modal.form
@@ -254,7 +296,21 @@ export default function Directory({ st, patch, narrow }) {
         <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
+          {DIR_SEGS.map(s => <button key={s.seg} onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>)}
+          {/* Playing status is the Stats active/inactive flag, so a club can
+              tell this season's players from the ones who have stopped without
+              losing either from the directory. */}
+          <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
+          <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
+          {memberTypes.length > 0 && (
+            <select value={typeFilter} onChange={e => patch({ dirType: e.target.value })}
+              title="Filter by membership type"
+              style={{ background: C.surface2, border: `1px solid ${typeFilter ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 999, padding: '5px 11px', color: typeFilter ? C.accent : C.dim, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
+              <option value="">Any membership type</option>
+              {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              <option value={NO_TYPE}>No type set</option>
+            </select>
+          )}
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
           <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
@@ -280,7 +336,15 @@ export default function Directory({ st, patch, narrow }) {
                 <Avatar p={p} size={30} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13.5, fontWeight: 600, color: p.archived ? C.faint : C.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}{p.archived ? <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em', color: C.warn, border: `1px solid ${C.warn}66`, borderRadius: 3, padding: '1px 4px', marginLeft: 6 }}>ARCHIVED</span> : null}</div>
-                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{roleTitles(p).join(' · ') || (p.segs[0] || 'Member')}</div>
+                  {/* What kind of member they are first, then what they do —
+                      the roles used to be the only line, so a person with no
+                      role read as a blank "Member" whatever they actually are. */}
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <span style={{ color: C.dim }}>{typeLabel(p)}</span>
+                    {p.player_status === 'inactive' && <span style={{ color: C.faintest }}> · inactive</span>}
+                    {p.is_life_member && <span style={{ color: C.accent }}> · life</span>}
+                    {roleTitles(p).length > 0 && ' · ' + roleTitles(p).join(' · ')}
+                  </div>
                 </div>
                 {p.flagged > 0 && <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.warn, flexShrink: 0 }} />}
                 {p.total_hours > 0 && <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, flexShrink: 0 }}>{p.total_hours}h</span>}
@@ -298,6 +362,11 @@ export default function Directory({ st, patch, narrow }) {
                 <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: '-0.01em' }}>{sel.name}</div>
                 <div style={{ fontSize: 12.5, color: C.faint, marginTop: 3 }}>{[sel.email, sel.phone].filter(Boolean).join('  ·  ') || 'No contact details recorded'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
+                  {/* The membership type leads, accented, because it is the
+                      club's own answer for this person; the segments after it
+                      are what the rest of the module worked out about them. */}
+                  <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent }}>{typeLabel(sel)}</span>
+                  {sel.player_status === 'inactive' && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.warn}66`, color: C.warn }}>NOT PLAYING</span>}
                   {sel.segs.map(s => <span key={s} style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.dim }}>{s}</span>)}
                 </div>
               </div>
@@ -536,6 +605,16 @@ export default function Directory({ st, patch, narrow }) {
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MOBILE<input value={modal.form.mobile} onChange={e => setForm('mobile', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
               </div>
               <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>TYPE<select value={modal.form.member_category} onChange={e => setForm('member_category', e.target.value)} style={{ ...inp, marginTop: 4 }}>{CATS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+              {/* The club's own catalogue, shared with BetterFees — only offered
+                  when they keep one, since nothing seeds it automatically. */}
+              {memberTypes.length > 0 && (
+                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MEMBERSHIP TYPE
+                  <select value={modal.form.membership_type_id} onChange={e => setForm('membership_type_id', e.target.value)} style={{ ...inp, marginTop: 4 }}>
+                    <option value="">— none —</option>
+                    {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </label>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
               <button onClick={() => setModal(null)} style={btnS}>Cancel</button>
