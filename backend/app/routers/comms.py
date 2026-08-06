@@ -52,6 +52,7 @@ from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
 from app.services import comms_lists
+from app.services import directory
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import ses_tenants
@@ -1065,11 +1066,19 @@ async def sync_from_club(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pull emails already on file (active players + fee members) into contacts.
-    Idempotent; never resurrects an unsubscribed address."""
+    """Pull every email already on file (players + fee members) into contacts.
+    Idempotent; never resurrects an unsubscribed address.
+
+    Deliberately NOT limited to active players. Contacts is the club's address
+    book, not its send list: holding someone here does not email them, since a
+    list or segment still decides every audience and suppression still applies.
+    The old `status == 'active'` filter made a whole category of people — last
+    season's players, anyone lapsed — permanently unreachable, so a club could
+    not invite past members to a reunion or tell them registration had opened.
+    At one real club it hid 280 of the 408 people whose address we hold."""
     added = updated = 0
     players = (await db.execute(select(Player).where(
-        Player.organisation_id == club.id, Player.email.isnot(None), Player.status == "active",
+        Player.organisation_id == club.id, Player.email.isnot(None),
     ))).scalars().all()
     for p in players:
         email = _norm_email(p.email)
@@ -2514,6 +2523,108 @@ async def create_list(
         raise HTTPException(status_code=409, detail="A list with that name already exists")
     await db.refresh(lst)
     return {"id": str(lst.id), "name": lst.name, "count": 0, "source": "manual", "origin": None}
+
+
+DIRECTORY_ORIGIN = "Clubhouse Directory"
+
+
+async def _unique_list_name(db: AsyncSession, org_id, base: str) -> str:
+    """`comms_lists` is unique on (org, name), and an auto-generated name is
+    derived from a filter so two runs collide easily. Suffix rather than 409:
+    the admin asked for a list, not a lecture about naming."""
+    base = (base or "").strip() or "Directory list"
+    taken = set((await db.execute(
+        select(CommsList.name).where(CommsList.organisation_id == org_id))).scalars().all())
+    if base not in taken:
+        return base
+    for n in range(2, 1000):
+        cand = f"{base} ({n})"
+        if cand not in taken:
+            return cand
+    return f"{base} ({uuid.uuid4().hex[:6]})"
+
+
+class ListFromDirectoryIn(BaseModel):
+    name: str
+    keys: List[str]          # the Directory's own person keys, not emails
+
+
+@router.post("/lists/from-directory")
+async def create_list_from_directory(
+    data: ListFromDirectoryIn,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Turn a filtered Directory selection into an auto list (source='auto',
+    origin='Clubhouse Directory'), so any grouping an admin can see on the
+    Directory can become an email audience.
+
+    The browser sends person KEYS, never emails: the server re-reads the
+    Directory itself and takes the address from its own data, so a tampered or
+    stale payload can't inject a recipient the club doesn't actually hold.
+
+    Contacts are upserted through `_upsert_contact`, which is what keeps an
+    unsubscribe or a bounce intact — building a list around someone who opted
+    out must never quietly resurrect them. People with no email are skipped and
+    counted, since that number is the whole point of the No-email filter.
+    """
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A list name is required")
+    wanted = set(data.keys or [])
+    if not wanted:
+        raise HTTPException(status_code=422, detail="Pick at least one person")
+
+    people = [p for p in await directory.list_people(db, club.id) if p["key"] in wanted]
+    no_email = [p for p in people if not _norm_email(p.get("email") or "")]
+
+    emails: list[str] = []
+    for p in people:
+        email = _norm_email(p.get("email") or "")
+        if not email:
+            continue
+        # list_people serialises ids as strings for the browser; these are going
+        # into UUID columns, so coerce rather than relying on the driver.
+        def _u(v):
+            return uuid.UUID(v) if isinstance(v, str) and v else (v or None)
+        await _upsert_contact(
+            db, club, email, p.get("name"),
+            "player" if p.get("player_id") else "member",
+            player_id=_u(p.get("player_id")), member_id=_u(p.get("member_id")),
+        )
+        emails.append(email)
+
+    if not emails:
+        raise HTTPException(
+            status_code=422,
+            detail="None of those people have an email address, so there is nobody to email.",
+        )
+
+    # Read the ids back rather than tracking them through the upsert: it returns
+    # a status string, and a person already on file resolves to their existing
+    # row (the (org, email) unique) rather than a new one.
+    await db.flush()
+    contact_ids = list((await db.execute(select(CommsContact.id).where(
+        CommsContact.organisation_id == club.id, CommsContact.email.in_(set(emails))
+    ))).scalars().all())
+
+    final_name = await _unique_list_name(db, club.id, name)
+    lst = CommsList(organisation_id=club.id, name=final_name,
+                    source="auto", origin=DIRECTORY_ORIGIN)
+    db.add(lst)
+    await db.flush()
+    for cid in contact_ids:
+        db.add(CommsListMember(list_id=lst.id, contact_id=cid))
+    await db.commit()
+    await db.refresh(lst)
+    return {
+        "id": str(lst.id), "name": lst.name, "source": "auto", "origin": DIRECTORY_ORIGIN,
+        "count": len(contact_ids),
+        "selected": len(people),
+        "skipped_no_email": len(no_email),
+        "skipped_names": [p["name"] for p in no_email[:20]],
+    }
 
 
 @router.put("/lists/{list_id}")

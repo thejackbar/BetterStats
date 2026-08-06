@@ -42,7 +42,8 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
                fm.is_life_member, fm.archived_at,
-               p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone
+               p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
+               p.status AS player_status
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
@@ -127,12 +128,17 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "roles": roles_by.get(mid, []),
             "total_hours": hours_by.get(mid, 0.0),
             "quals_total": q.get("total", 0), "flagged": q.get("expiring", 0),
+            # Only meaningful when the member resolves to one of our players.
+            # A non-playing member has no status, which is what tells the
+            # Directory's Non-player filter apart from its Inactive one.
+            "player_status": (m["player_status"] if our_pid else None),
             "segs": segs,
         })
 
     # Players with no member row still appear (read-through from Stats/Core).
     extra = (await db.execute(text("""
-        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone
+        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone,
+               p.status AS player_status
         FROM players p
         WHERE p.organisation_id = :org
           AND NOT EXISTS (SELECT 1 FROM fee_members fm WHERE fm.player_id = p.id AND fm.organisation_id = :org)
@@ -144,7 +150,8 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
             "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
-            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
+            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0,
+            "player_status": p["player_status"], "segs": ["Player"],
         })
 
     people.sort(key=lambda x: (x["name"] or "").lower())

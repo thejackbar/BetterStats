@@ -2816,6 +2816,11 @@ export const api = {
   // Static lists (Phase 2): curated sets of contacts.
   commsListLists: () => request('/club-admin/comms/lists'),
   commsCreateList: (name) => request('/club-admin/comms/lists', { method: 'POST', body: JSON.stringify({ name }) }),
+  // Turn a filtered Clubhouse Directory selection into an auto-generated list.
+  // Sends person keys, never emails — the server reads the addresses from its
+  // own Directory data.
+  commsCreateListFromDirectory: ({ name, keys }) =>
+    request('/club-admin/comms/lists/from-directory', { method: 'POST', body: JSON.stringify({ name, keys }) }),
   commsRenameList: (id, name) => request(`/club-admin/comms/lists/${id}`, { method: 'PUT', body: JSON.stringify({ name }) }),
   commsDeleteList: (id) => request(`/club-admin/comms/lists/${id}`, { method: 'DELETE' }),
   commsListMembers: (id) => request(`/club-admin/comms/lists/${id}/members`),

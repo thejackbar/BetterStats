@@ -10,7 +10,26 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // player gets a member row lazily the first time ClubManager assigns them a
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
-const DIR_SEGS = ['All', 'Player', 'Volunteer', 'Committee', 'Parent', 'Third party']
+// 'Non-player' and 'Inactive player' are derived here rather than being segments
+// the server computes: one means "no linked player record at all", the other
+// "a linked player who is no longer active". Both read off `player_status`,
+// which is NULL exactly when there is no player behind the person.
+const DIR_SEGS = ['All', 'Player', 'Inactive player', 'Non-player', 'Volunteer', 'Committee', 'Parent', 'Third party']
+
+const SEG_LABEL = {
+  All: 'Everyone',
+  'Third party': 'Third parties',
+  'Inactive player': 'Inactive players',
+  'Non-player': 'Non-players',
+}
+
+const matchesSeg = (p, seg) => {
+  if (seg === 'All') return true
+  if (seg === 'Non-player') return !p.player_id
+  if (seg === 'Inactive player') return !!p.player_id && p.player_status && p.player_status !== 'active'
+  if (seg === 'Player') return p.segs.includes('Player')
+  return p.segs.includes(seg)
+}
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -48,6 +67,7 @@ export default function Directory({ st, patch, narrow }) {
   const [busy, setBusy] = useState(false)
   const [modal, setModal] = useState(null)     // null | { editId, form }
   const [imp, setImp] = useState(null)         // null | { text, preview, result }
+  const [mkList, setMkList] = useState(null)   // null | { name, result, error }
   const [qualForm, setQualForm] = useState({ type_id: '', obtained_at: '' })
   const [newFamily, setNewFamily] = useState('')
   const [activities, setActivities] = useState([])
@@ -70,13 +90,20 @@ export default function Directory({ st, patch, narrow }) {
   const expiringOnly = !!st.dirExpiring
 
   const roleTitles = (p) => (p.roles || []).map(r => r.title)
+  const emailFilter = st.dirEmail || null   // null | 'has' | 'none'
+  const hasEmail = (p) => !!(p.email || '').trim()
   const list = (people || []).filter(p => {
-    if (seg !== 'All' && !p.segs.includes(seg)) return false
+    if (!matchesSeg(p, seg)) return false
     if (roleFilter && !roleTitles(p).includes(roleFilter)) return false
     if (expiringOnly && !p.flagged) return false
+    if (emailFilter === 'has' && !hasEmail(p)) return false
+    if (emailFilter === 'none' && hasEmail(p)) return false
     if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q))) return false
     return true
   })
+  // How much of the current filter is actually reachable. Shown on the header
+  // and used to talk the admin through what a list will and will not contain.
+  const emailable = list.filter(hasEmail).length
 
   const selId = st.dirSel && (people || []).some(p => p.key === st.dirSel) ? st.dirSel : (list[0] ? list[0].key : null)
   const sel = (people || []).find(p => p.key === selId) || null
@@ -240,6 +267,30 @@ export default function Directory({ st, patch, narrow }) {
     ? <img src={p.photo} alt="" style={{ ...avatar(size, fs), objectFit: 'cover' }} />
     : <span style={avatar(size, fs)}>{initials(p.name)}</span>
 
+  // A name the admin will recognise a week later, built from whatever the
+  // filters are actually set to rather than a generic "Directory list".
+  const filterName = () => {
+    const bits = []
+    bits.push(seg === 'All' ? 'Everyone' : (SEG_LABEL[seg] || seg + 's'))
+    if (roleFilter) bits.push(roleFilter)
+    if (expiringOnly) bits.push('quals to renew')
+    if (q) bits.push(`matching “${st.dirQuery.trim()}”`)
+    return bits.join(' · ')
+  }
+  const openMakeList = () => setMkList({ name: filterName(), result: null, error: null })
+  const createList = async () => {
+    setBusy(true)
+    try {
+      const r = await api.commsCreateListFromDirectory({
+        name: (mkList.name || '').trim(),
+        keys: list.filter(hasEmail).map(p => p.key),
+      })
+      setMkList(m => ({ ...m, result: r, error: null }))
+    } catch (e) {
+      setMkList(m => ({ ...m, error: e?.detail || e?.message || 'Could not create the list.' }))
+    } finally { setBusy(false) }
+  }
+
   const assignedIds = new Set((sel?.roles || []).map(r => r.id))
   const unassignedRoles = roleCatalogue.filter(r => !assignedIds.has(r.id))
 
@@ -249,15 +300,22 @@ export default function Directory({ st, patch, narrow }) {
         <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
         <div>
           <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Directory</h1>
-          <Caption tone={C.faint} style={{ marginTop: 2 }}>One record per person · {list.length}{people ? ' of ' + people.length : ''} shown</Caption>
+          <Caption tone={C.faint} style={{ marginTop: 2 }}>
+            One record per person · {list.length}{people ? ' of ' + people.length : ''} shown
+            {list.length > 0 && emailable < list.length && ` · ${list.length - emailable} with no email`}
+          </Caption>
         </div>
         <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{s === 'All' ? 'Everyone' : (s === 'Third party' ? 'Third parties' : s + 's')}</button>)}
+          {DIR_SEGS.map(s => <button key={s} onClick={() => patch({ dirSeg: s })} style={pill(seg === s)}>{SEG_LABEL[s] || s + 's'}</button>)}
+          <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
+          <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
           <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
           <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
           {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
+          <button onClick={openMakeList} disabled={!emailable} title={emailable ? '' : 'Nobody in this filter has an email address'}
+            style={{ ...btnS, opacity: emailable ? 1 : 0.5, cursor: emailable ? 'pointer' : 'not-allowed' }}>Create list ({emailable})</button>
           <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
           <button onClick={openAdd} style={btnP}>+ Add person</button>
           {/* The dedicated editors for the three overlays this record shows.
@@ -541,6 +599,47 @@ export default function Directory({ st, patch, narrow }) {
               <button onClick={() => setModal(null)} style={btnS}>Cancel</button>
               <button onClick={saveMember} disabled={busy || !(modal.form.full_name || '').trim()} style={{ ...btnP, opacity: (busy || !(modal.form.full_name || '').trim()) ? 0.6 : 1 }}>{modal.editId ? 'Save' : 'Add person'}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {mkList && (
+        <div onClick={() => setMkList(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px, 100%)', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
+            {!mkList.result ? (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Create a list</div>
+                <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>
+                  This makes a list in BetterClubhouse → Comms → Lists, under “Auto-generated lists”, so you can use it as an audience on an email.
+                </div>
+                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>LIST NAME *
+                  <input value={mkList.name} onChange={e => setMkList(m => ({ ...m, name: e.target.value }))} style={{ ...inp, marginTop: 4 }} />
+                </label>
+                <div style={{ fontSize: 12.5, color: C.faint, marginTop: 14, lineHeight: 1.5 }}>
+                  <strong style={{ color: C.text }}>{emailable}</strong> {emailable === 1 ? 'person goes' : 'people go'} on the list.
+                  {list.length > emailable && <> The other {list.length - emailable} in this filter have no email address, so they are left off. Use the <strong style={{ color: C.text }}>No email</strong> filter to see who they are.</>}
+                  <div style={{ marginTop: 8 }}>Anyone who has unsubscribed or bounced stays suppressed and will not be emailed, even from this list.</div>
+                </div>
+                {mkList.error && <div style={{ fontSize: 12.5, color: C.block, marginTop: 12 }}>{mkList.error}</div>}
+                <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setMkList(null)} style={btnS}>Cancel</button>
+                  <button onClick={createList} disabled={busy || !(mkList.name || '').trim()} style={{ ...btnP, opacity: (busy || !(mkList.name || '').trim()) ? 0.6 : 1 }}>{busy ? 'Creating…' : 'Create list'}</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>List created</div>
+                <div style={{ fontSize: 13, color: C.faint, marginTop: 8, lineHeight: 1.55 }}>
+                  <strong style={{ color: C.text }}>{mkList.result.name}</strong> has {mkList.result.count} {mkList.result.count === 1 ? 'contact' : 'contacts'}.
+                  {mkList.result.name !== (mkList.name || '').trim() && <> A list of that name already existed, so this one was numbered.</>}
+                  <div style={{ marginTop: 8 }}>Find it in Comms → Lists under “Auto-generated lists”.</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setMkList(null)} style={btnS}>Close</button>
+                  <Link to="/admin/comms/lists" style={btnP}>Go to Lists</Link>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
