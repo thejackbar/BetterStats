@@ -1,10 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
-import {
-  Button, Caption, ListRow, Empty, TextInput, TINT, INPUT_CLS,
-} from '../../../components/admin/ui'
+import { Button, Caption, INPUT_CLS } from '../../../components/admin/ui'
+import { RecordListPane, RecordTitleRow, CountBar, reachability } from './crudShell'
 import { RuleRow, newRule } from '../bettercomms/segmentFields'
+
+// The count bar and the reachability rule are shared furniture now — Lists and
+// Emails report their own reach the same way. Re-exported so the two segment
+// screens' imports are unchanged.
+export { CountBar, reachability }
 
 // The segment builder's engine and its field-agnostic furniture.
 //
@@ -24,13 +28,6 @@ import { RuleRow, newRule } from '../bettercomms/segmentFields'
 // path in which a club screen can be talked into offering the directory fields.
 // Keep it that way. If you ever find yourself adding an `isInternal` prop here,
 // the thing you actually want is a third screen.
-
-// How reachable a person is, from what the contact record actually holds.
-export function reachability(c) {
-  if (c.email) return { key: 'email', label: 'Email', tone: 'ok' }
-  if (c.guardian_email || c.parent_email) return { key: 'guardian', label: 'Via guardian', tone: 'warn' }
-  return { key: 'none', label: 'No address', tone: 'block' }
-}
 
 // The rule rows. `defs` is required — see the scope note above.
 export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people where all of these are true' }) {
@@ -58,66 +55,42 @@ export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people
 }
 
 // The saved-segment list, with whatever notes the screen wants underneath it.
+// A segment's own row: its name, how many conditions it carries, and how many
+// people it matches today.
 export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, children }) {
+  const items = (segments || []).map(s => {
+    const n = (s.definition?.rules || []).length
+    return {
+      id: s.id,
+      name: s.name,
+      sub: `${n} condition${n === 1 ? '' : 's'} · live`,
+      figure: sizes[s.id] == null ? '—' : sizes[s.id],
+    }
+  })
   return (
-    <div className="ch-listpane bg-pb-surface overflow-y-auto p-2.5 pb-scroll">
-      {segments == null ? <Empty>Loading…</Empty> : segments.length === 0 ? (
-        <Empty>{emptyText}</Empty>
-      ) : segments.map(s => {
-        const n = (s.definition?.rules || []).length
-        return (
-          <ListRow
-            key={s.id} name={s.name} avatar={false}
-            sub={`${n} condition${n === 1 ? '' : 's'} · live`}
-            figure={sizes[s.id] == null ? '—' : sizes[s.id]}
-            selected={s.id === selId}
-            onClick={() => onSelect(s.id)}
-          />
-        )
-      })}
-      {children && <div className="mt-4 space-y-2.5 px-1">{children}</div>}
-    </div>
+    <RecordListPane
+      items={items} loading={segments == null} selId={selId} onSelect={onSelect} emptyText={emptyText}
+    >
+      {children}
+    </RecordListPane>
   )
 }
 
 // The name field and the actions that sit beside it.
 export function SegmentTitleRow({ draft, setDraft, placeholder, blurb, busy, onDuplicate, onEmail, total, actions }) {
   return (
-    <div className="flex items-start gap-3.5 flex-wrap">
-      <div className="flex-1 min-w-[220px]">
-        <TextInput
-          value={draft.name}
-          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
-          placeholder={placeholder}
-          className="!text-[22px] !font-bold !bg-transparent !border-transparent !px-0 !py-0 focus:!border-transparent"
-        />
-        <div className="text-[12.5px] text-pb-dim mt-1 leading-[1.6]">{blurb}</div>
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
+    <RecordTitleRow
+      name={draft.name} onName={v => setDraft(d => ({ ...d, name: v }))}
+      placeholder={placeholder} blurb={blurb}
+      actions={<>
         {actions}
         {draft.id && <Button size="sm" onClick={onDuplicate} disabled={busy}>Duplicate</Button>}
         <Button size="sm" variant="primary" onClick={onEmail} disabled={!draft.id || !total}
           title={draft.id ? '' : 'Save the segment first'}>
           Email these {total} now
         </Button>
-      </div>
-    </div>
-  )
-}
-
-// The live "who this is" readout under the rules.
-export function CountBar({ counting, total, reachable, otherRoute, noun = 'person', nounPlural = 'people' }) {
-  return (
-    <div className="mt-5 rounded-lg px-3.5 py-3 text-[13px]"
-      style={{ background: TINT.panel, border: `1px solid ${TINT.border}` }}>
-      {counting ? <span className="text-pb-dim">Working out who matches…</span> : (
-        <span className="text-pb-dim">
-          <b style={{ color: 'var(--pb-accent-ink)' }}>{total}</b> {total === 1 ? `${noun} matches` : `${nounPlural} match`}
-          {' · '}<b style={{ color: 'var(--pb-positive-ink)' }}>{reachable}</b> reachable by email
-          {otherRoute > 0 && <> · <b style={{ color: '#f5b542' }}>{otherRoute}</b> need another route</>}
-        </span>
-      )}
-    </div>
+      </>}
+    />
   )
 }
 

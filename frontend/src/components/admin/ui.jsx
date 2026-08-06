@@ -12,7 +12,7 @@
 //   1. Mono is for labels and figures. Never a button, heading or body copy.
 //   2. Text on an amber fill is ON_ACCENT — one answer everywhere.
 
-import { useEffect } from 'react'
+import { useEffect, forwardRef } from 'react'
 import { Icon } from '../../pages/admin/betterselect/ui'
 
 // The single ink colour for text sitting on an accent fill. Deliberately the
@@ -170,9 +170,12 @@ export function FilterPill({ active, onClick, children, warn = false, count, cla
 export const INPUT_CLS =
   'w-full bg-pb-surface2 border border-pb-hairline2 rounded-lg px-3 py-2 text-[13.5px] text-pb-text outline-none transition-colors placeholder:text-pb-faintest focus:border-pb-accent'
 
-export function TextInput({ className = '', ...rest }) {
-  return <input className={`${INPUT_CLS} ${className}`} {...rest} />
-}
+// Forwards its ref, so a caller that needs the real element can have it — the
+// email composer's Insert bar places a merge variable at the cursor in the
+// subject field, which needs selectionStart/focus on the input itself.
+export const TextInput = forwardRef(function TextInput({ className = '', ...rest }, ref) {
+  return <input ref={ref} className={`${INPUT_CLS} ${className}`} {...rest} />
+})
 
 export function Select({ className = '', children, ...rest }) {
   return <select className={`${INPUT_CLS} cursor-pointer ${className}`} {...rest}>{children}</select>

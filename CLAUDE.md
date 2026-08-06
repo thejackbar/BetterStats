@@ -1,5 +1,59 @@
 # BetterStats — Claude Session Notes
 
+## One CRUD shape for Emails, Lists, Segments and Templates (v9.17.0, Aug 2026)
+
+The four Comms records are the same kind of thing — a club has several, picks
+one, works on it, saves or deletes it — and had four different answers to that.
+Segments had the best one, so it is now the pattern and the other three sit on
+it. **Frontend only: no endpoint, payload, capability or route changed.**
+
+- **`pages/admin/clubhouse/crudShell.jsx` is the pattern**, and a new Comms-style
+  screen should be built from it rather than inventing a fifth layout:
+  `CrudPanes` (the two panes), `RecordListPane` (the left rail — flat `items`, or
+  labelled `groups` for records that come from more than one place),
+  `DetailPane`, `RecordTitleRow` (the name edited where it is read, actions
+  beside it), `CountBar`, `SaveRow`, plus `reachability`, which moved here from
+  `segmentEngine` because three screens now report reach the same way.
+  `segmentEngine`'s `SegmentListPane`/`SegmentTitleRow` are thin wrappers over
+  it and `CountBar`/`reachability` are re-exported, so both segment screens'
+  imports are untouched.
+- **Emails is ONE screen on two URLs.** `/admin/comms` and `/admin/comms/:id`
+  both render `CommsCampaigns`; `CommsCompose` exports `EmailDetail`, which
+  draws no layout of its own and lives in the right pane. The URL did not
+  change, so every "Email these N now", the Roster's link and any bookmark
+  still land on the right email. The composer is `lazy()` inside the shell, so
+  glancing at the list does not pull in the HTML editor. **Deleting a SENT
+  email moved from the list row to the email itself** — it was the one thing
+  the old compose page could not do, and dropping it would have lost a real
+  capability.
+- **The subject is the email's title row**, not a field in the body: it is the
+  email's identity the way a name is a segment's. Name and description stay as
+  their own fields, since they label it for the club's own records. This is why
+  **`TextInput` forwards its ref** now — the Insert bar places a merge variable
+  at the cursor in the subject, so it needs the real input.
+- **Lists kept every filter, bulk action and modal** it had; only the shell
+  changed. Rename is the name field, "Manage" is simply what the right pane
+  always shows, and Export CSV / "Email these N now" appear once, on the record.
+  Enter in the name field still creates a list (`RecordTitleRow`'s optional
+  `onSubmit`), which is what the old create box did.
+- **A draft is only ever LOADED, never cleared, by the selection effect** — the
+  trap `useSegments` already documents. Clearing on "nothing selected" is
+  exactly the state "New list" / "New template" puts the screen in, and would
+  wipe the fresh draft in the same commit.
+- **`EmailEditorTabs` seeds its design iframe once on mount**, so Templates
+  bumps an `editorKey` whenever the HTML is replaced wholesale (a different
+  template picked, a file imported) — same reason Compose already did.
+- **Emails, Lists and Templates now get screen introductions** (`INTROS.emails`
+  was written and unused; `lists` and `templates` are new). Emails passes a
+  `null` key when a `:id` is present, so a deep link to one email never opens an
+  introduction first.
+- **Verified in a real browser** (Chromium, the app on the dev server with the
+  API stubbed at the network layer): all six screens render with data, no page
+  errors, no horizontal overflow at 390px, and the state transitions a
+  screenshot cannot reach — switching records, New list / New template / New
+  segment, typing a name, opening a sent email and a draft, and Send enabling
+  once subject, message and audience are all present.
+
 ## A club font with no bold, and ink on a dark accent (migration 226, v9.14.0, Aug 2026)
 
 Reported by Leeming Spartan: their uploaded font looked "too dark" as an H1 and

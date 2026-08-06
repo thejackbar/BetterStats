@@ -5,6 +5,7 @@ import {
   TableWrap, TableHead, TableRow, Cell,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
+import { CrudPanes, DetailPane, SaveRow } from './crudShell'
 import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, reachability } from './segmentEngine'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
 import { money } from './data'
@@ -62,7 +63,7 @@ export default function ClubhouseSegments() {
       actions={<Button variant="primary" onClick={() => s.startNew()}>New segment</Button>}
       bare
     >
-      <div className="flex flex-wrap items-stretch min-h-0 flex-1">
+      <CrudPanes>
         <SegmentListPane
           segments={s.segments} sizes={s.sizes} selId={s.selId} onSelect={s.setSelId}
           emptyText="No segments yet. Start one and it counts as you build it."
@@ -80,7 +81,7 @@ export default function ClubhouseSegments() {
           </Note>
         </SegmentListPane>
 
-        <div className="flex-1 min-w-[380px] overflow-y-auto px-6 py-[22px] pb-scroll" style={{ flexBasis: 390 }}>
+        <DetailPane>
           {!s.draft ? (
             <Empty>Pick a segment, or start a new one.</Empty>
           ) : (
@@ -99,18 +100,13 @@ export default function ClubhouseSegments() {
 
               <CountBar counting={s.counting} total={s.total} reachable={s.reachable} otherRoute={s.otherRoute} />
 
-              <div className="flex items-center gap-2 mt-4 flex-wrap">
-                <Button variant="primary" onClick={() => s.save('Segment')} disabled={s.busy}>
-                  {s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
-                </Button>
-                {s.draft.id && (
-                  <Button variant="danger" size="sm" disabled={s.busy}
-                    onClick={() => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)}>
-                    Delete
-                  </Button>
-                )}
-                {s.error && <span className="text-[12.5px] text-pb-red">{s.error}</span>}
-              </div>
+              <SaveRow
+                onSave={() => s.save('Segment')} busy={s.busy} error={s.error}
+                saveLabel={s.busy ? 'Saving…' : s.draft.id ? 'Save changes' : 'Save segment'}
+                onDelete={s.draft.id
+                  ? () => s.remove(`Delete "${s.draft.name}"? Emails already sent to it are unaffected.`)
+                  : null}
+              />
 
               <SectionHeading className="mt-8 mb-2.5">Who this is, right now</SectionHeading>
               <TableWrap>
@@ -146,8 +142,8 @@ export default function ClubhouseSegments() {
               )}
             </>
           )}
-        </div>
-      </div>
+        </DetailPane>
+      </CrudPanes>
       <Toast toast={s.toast} onClose={() => s.setToast(null)} />
     </BetterClubhouseLayout>
   )

@@ -189,8 +189,9 @@ const FantasyLeagues = lazy(() => import('./pages/admin/fantasy/FantasyLeagues')
 // BetterAdmin umbrella (BetterFees + BetterComms + future BetterMerch)
 // BetterSocials umbrella (Website + Post Designer)
 const BetterSocialsHome = lazy(() => import('./pages/admin/BetterSocialsHome'))
+// Emails is one master-detail screen on two URLs: the list, and the list with
+// one email open beside it. /admin/comms/:id is unchanged as a deep link.
 const CommsCampaigns = lazy(() => import('./pages/admin/bettercomms/CommsCampaigns'))
-const CommsCompose = lazy(() => import('./pages/admin/bettercomms/CommsCompose'))
 const CommsContacts = lazy(() => import('./pages/admin/bettercomms/CommsContacts'))
 const CommsLists = lazy(() => import('./pages/admin/bettercomms/CommsLists'))
 const CommsTemplates = lazy(() => import('./pages/admin/bettercomms/CommsTemplates'))
@@ -495,7 +496,7 @@ export default function App() {
           <Route path="/admin/comms/lists" element={<ProtectedRoute requireModule="comms"><CommsLists /></ProtectedRoute>} />
           <Route path="/admin/comms/templates" element={<ProtectedRoute requireModule="comms"><CommsTemplates /></ProtectedRoute>} />
           <Route path="/admin/comms/settings" element={<ProtectedRoute requireModule="comms"><CommsSettings /></ProtectedRoute>} />
-          <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCompose /></ProtectedRoute>} />
+          <Route path="/admin/comms/:id" element={<ProtectedRoute requireModule="comms"><CommsCampaigns /></ProtectedRoute>} />
 
           {/* Game-level pages */}
           <Route path="/games/:gameId" element={<MatchScorecard />} />

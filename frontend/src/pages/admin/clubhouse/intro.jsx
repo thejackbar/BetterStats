@@ -154,6 +154,25 @@ export const INTROS = {
       'Every segment reports how many people it matches and how many can actually be reached by email.',
     ],
   },
+  lists: {
+    title: 'Lists',
+    lede: 'A fixed set of people you picked by hand, and it stays as picked.',
+    points: [
+      'Use a list for a group that will not change on its own — the committee, the sponsors, one team.',
+      'For a group better described by a rule, use a segment instead. A list is the roll call; a segment is the rule.',
+      'When you write an email you choose its audience, and that audience is one of your lists or one of your segments.',
+      'Lists other BetterCricket tools built for you sit in their own section and behave like any other list.',
+    ],
+  },
+  templates: {
+    title: 'Templates',
+    lede: 'The club\'s email layouts, written once and reused.',
+    points: [
+      'Pick a template while writing an email and it fills in the message for you to edit.',
+      'Design mode edits the layout as you see it; the HTML tab is there when you want the code.',
+      'Preview renders a template exactly as a send would, unsubscribe footer and all.',
+    ],
+  },
   inventory: {
     title: 'Inventory',
     lede: 'What the club holds, and what happens to the money when it moves.',
