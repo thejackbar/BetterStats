@@ -90,6 +90,56 @@ function GradeList({ grades, onChanged }) {
   const [applyingAll, setApplyingAll] = useState(false)
   const [error, setError] = useState(null)
   const [editingName, setEditingName] = useState(null) // { grade_name, value }
+  // Reordering is a local draft saved on a button. The arrows move a row
+  // between neighbours, which is enough for a list of a dozen teams and — per
+  // the note in CLAUDE.md about Chromium's native drag loop — is far easier to
+  // verify than HTML5 drag-and-drop.
+  const [draft, setDraft] = useState(null) // string[] of grade_name, or null when clean
+  const [savingOrder, setSavingOrder] = useState(false)
+
+  // The list the table renders: the local draft while one is in flight, else
+  // whatever order the server sent (which is already the club's own).
+  const shown = draft
+    ? draft.map(n => grades.find(g => g.grade_name === n)).filter(Boolean)
+    : grades
+
+  const move = (index, delta) => {
+    const names = shown.map(g => g.grade_name)
+    const target = index + delta
+    if (target < 0 || target >= names.length) return
+    const next = [...names]
+    ;[next[index], next[target]] = [next[target], next[index]]
+    setDraft(next)
+  }
+
+  const saveOrder = async () => {
+    if (!draft) return
+    setSavingOrder(true)
+    setError(null)
+    try {
+      await aflApi.reorderGrades(draft)
+      setDraft(null)
+      onChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  const clearOrder = async () => {
+    setSavingOrder(true)
+    setError(null)
+    try {
+      await aflApi.clearGradeOrder()
+      setDraft(null)
+      onChanged?.()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSavingOrder(false)
+    }
+  }
 
   const save = async (gradeName, patch) => {
     setSavingName(gradeName)
@@ -110,11 +160,11 @@ function GradeList({ grades, onChanged }) {
     setEditingName(null)
   }
 
-  const applyAll = async () => {
+  const applyAll = async (force = false) => {
     setApplyingAll(true)
     setError(null)
     try {
-      await aflApi.applyGradeSuggestions()
+      await aflApi.applyGradeSuggestions(force)
       onChanged?.()
     } catch (e) {
       setError(e.message)
@@ -136,18 +186,58 @@ function GradeList({ grades, onChanged }) {
         Hover a grade's name to rename it — useful for keeping merged or sponsor-suffixed names
         uniform (e.g. "A Grade (XYZ Finance)" → "A Grade").
       </p>
-      {anyUnconfirmed && (
-        <button onClick={applyAll} disabled={applyingAll}
-                className="mb-3 font-mono text-[10px] tracking-wide2 border border-pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
-          {applyingAll ? 'Applying…' : 'Confirm all suggestions'}
+      <p className="text-pb-dim text-sm mb-3 leading-relaxed">
+        The order here is the order your teams appear in everywhere on the public site — grade
+        filters, the results split by team, and a player's by-grade cards. Move a grade with the
+        arrows, then save. Anything you haven't ordered sits below the ones you have.
+      </p>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {anyUnconfirmed && (
+          <button onClick={() => applyAll(false)} disabled={applyingAll}
+                  className="font-mono text-[10px] tracking-wide2 border border-pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
+            {applyingAll ? 'Applying…' : 'Confirm all suggestions'}
+          </button>
+        )}
+        {/* A category stored before the age-group classifier was fixed can
+            never be corrected by the button above, which only fills blanks —
+            so a club whose whole junior programme reads "Senior" needs this. */}
+        <button
+          onClick={() => {
+            if (window.confirm('Re-file every grade by its name, replacing categories you set by hand. Continue?')) {
+              applyAll(true)
+            }
+          }}
+          disabled={applyingAll}
+          className="font-mono text-[10px] tracking-wide2 border border-pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50">
+          Re-detect all categories
         </button>
-      )}
+        {draft && (
+          <button onClick={saveOrder} disabled={savingOrder}
+                  className="font-mono text-[10px] tracking-wide2 rounded px-3 py-1.5 text-black disabled:opacity-50"
+                  style={{ background: 'var(--pb-accent)' }}>
+            {savingOrder ? 'Saving…' : 'Save order'}
+          </button>
+        )}
+        {draft && (
+          <button onClick={() => setDraft(null)} disabled={savingOrder}
+                  className="font-mono text-[10px] tracking-wide2 border border-pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-text disabled:opacity-50">
+            Discard
+          </button>
+        )}
+        {!draft && grades.some(g => g.display_order != null) && (
+          <button onClick={clearOrder} disabled={savingOrder}
+                  className="font-mono text-[10px] tracking-wide2 border border-pb-hairline rounded px-3 py-1.5 text-pb-faint hover:text-pb-red disabled:opacity-50">
+            Clear order
+          </button>
+        )}
+      </div>
       {error && <p className="mb-3 text-sm text-[var(--pb-negative)]">{error}</p>}
       <div className="pb-card overflow-hidden">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
-              <th className="font-medium py-2.5 pl-4">Grade</th>
+              <th className="font-medium py-2.5 pl-4 w-20">Order</th>
+              <th className="font-medium py-2.5">Grade</th>
               <th className="font-medium py-2.5">Category</th>
               <th className="font-medium py-2.5 text-center">Public</th>
               <th className="font-medium py-2.5 text-right">Games</th>
@@ -155,11 +245,29 @@ function GradeList({ grades, onChanged }) {
             </tr>
           </thead>
           <tbody>
-            {grades.map((g, i) => {
+            {shown.map((g, i) => {
               const busy = savingName === g.grade_name
               return (
                 <tr key={g.grade_name} className={`${i ? 'pb-hairline-t' : ''} align-top hover:bg-pb-surface2 ${g.is_public ? '' : 'opacity-60'}`}>
                   <td className="py-2.5 pl-4">
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono text-[11px] text-pb-faint w-5 pb-num">
+                        {/* The position it WILL hold once saved — the server
+                            numbers 1..N from this order, so showing the stored
+                            number instead would disagree with a pending move. */}
+                        {i + 1}
+                      </span>
+                      <div className="flex flex-col">
+                        <button onClick={() => move(i, -1)} disabled={i === 0 || savingOrder}
+                                aria-label={`Move ${g.display_name} up`}
+                                className="font-mono text-[9px] leading-none px-1 py-0.5 text-pb-faint hover:text-pb-text disabled:opacity-25">▲</button>
+                        <button onClick={() => move(i, 1)} disabled={i === shown.length - 1 || savingOrder}
+                                aria-label={`Move ${g.display_name} down`}
+                                className="font-mono text-[9px] leading-none px-1 py-0.5 text-pb-faint hover:text-pb-text disabled:opacity-25">▼</button>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-2.5">
                     {editingName?.grade_name === g.grade_name ? (
                       <div className="flex items-center gap-1.5">
                         <input

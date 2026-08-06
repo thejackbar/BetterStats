@@ -10,7 +10,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, get_db
-from app.services.afl.aggregations import _resolve_canonical_grade
+from app.services.afl.aggregations import _resolve_canonical_grade, grade_sort_key
+from app.services.club_history import previous_names_for_display
 
 router = APIRouter(prefix="/clubs", tags=["afl-clubs"])
 
@@ -44,7 +45,8 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         ORDER BY s.year DESC NULLS LAST, s.name DESC
     """), {"org": str(org.id)})
     raw_grades = await db.execute(text("""
-        SELECT gr.id, gr.name, gr.display_name_override, gr.season_id, gr.category
+        SELECT gr.id, gr.name, gr.display_name_override, gr.season_id, gr.category,
+               gr.display_order
         FROM grades gr
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org AND gr.is_public
@@ -69,15 +71,21 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         canonical = _resolve_canonical_grade(alias_to_canonical, row["name"])
         slot = bucket.setdefault(canonical, {
             "id": row["id"], "name": canonical, "display_name_override": None,
-            "category": None, "season_ids": [],
+            "category": None, "season_ids": [], "display_order": None,
         })
         if row["display_name_override"] and not slot["display_name_override"]:
             slot["display_name_override"] = row["display_name_override"]
         if row["category"] and not slot["category"]:
             slot["category"] = row["category"]
+        # The lowest order any row in the merge group carries wins — a grade
+        # ordered under one of its spellings shouldn't fall to the bottom just
+        # because the alias rows were never ordered.
+        if row["display_order"] is not None and (
+                slot["display_order"] is None or row["display_order"] < slot["display_order"]):
+            slot["display_order"] = row["display_order"]
         if row["season_id"] not in slot["season_ids"]:
             slot["season_ids"].append(row["season_id"])
-    grades = sorted(bucket.values(), key=lambda g: (g["display_name_override"] or g["name"]).lower())
+    grades = sorted(bucket.values(), key=grade_sort_key)
 
     return {
         "id": str(org.id),
@@ -90,6 +98,9 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         "theme_mode": org.theme_mode,
         "theme_config": org.theme_config,
         "player_name_format": org.player_name_format,
+        # The club's own history, shown under its name on the dashboard.
+        "established_year": org.established_year,
+        "previous_names": previous_names_for_display(org.previous_names),
         "sport": "afl",
         "seasons": [dict(r._mapping) for r in seasons],
         "grades": grades,

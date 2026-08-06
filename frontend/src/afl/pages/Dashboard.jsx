@@ -8,6 +8,45 @@ import { SectionTitle, Select, GameRow, ClubCrest, displayName } from '../compon
 
 const MILESTONE_ICON = { games: thiings.calendar, goals: thiings.target }
 
+// "Hampton Football Club (1889–1975)" — the years are dropped when a club
+// recorded the name without them, which is common and shouldn't leave an empty
+// bracket hanging off the end.
+function previousNameLabel(p) {
+  const span = p.from_year && p.to_year && p.from_year !== p.to_year
+    ? `${p.from_year}–${p.to_year}`
+    : (p.to_year || p.from_year || null)
+  return span ? `${p.name} (${span})` : p.name
+}
+
+/**
+ * The club's own history, under its name on the dashboard: the founding year,
+ * and any name it went by before this one.
+ *
+ * Renders nothing at all when a club has filled in neither, rather than
+ * leaving a labelled empty row on every club page that hasn't got round to it.
+ */
+function ClubHistory({ club }) {
+  const previous = club.previous_names || []
+  if (!club.established_year && !previous.length) return null
+  return (
+    <div className="mt-2 flex flex-col gap-1">
+      {club.established_year && (
+        <span className="font-mono text-[11px] tracking-wide2 text-pb-dim">
+          Est. <span className="text-pb-text font-semibold">{club.established_year}</span>
+        </span>
+      )}
+      {previous.length > 0 && (
+        <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">
+          Previously{' '}
+          <span className="text-pb-dim">
+            {previous.map(previousNameLabel).join(' · ')}
+          </span>
+        </span>
+      )}
+    </div>
+  )
+}
+
 function seasonSpan(r) {
   if (!r.first_year) return null
   return r.first_year === r.last_year ? String(r.first_year) : `${r.first_year}–${r.last_year}`
@@ -104,8 +143,12 @@ export default function Dashboard() {
   // `cols` is the numeric columns on the right, so the goal kickers board can
   // carry games alongside goals and a goals-per-game average without the games
   // board growing columns it has no use for.
+  // `min-w-0` on the card, not just on the name column inside it: a grid item
+  // defaults to `min-width: auto`, so the card refuses to shrink below its own
+  // min-content and pushes 2px past the viewport on a 390px phone — the name
+  // column's own min-w-0 never gets the chance to absorb it.
   const board = (title, rows, cols) => (
-    <div className="pb-card p-4">
+    <div className="pb-card p-4 min-w-0">
       <SectionTitle>{title}</SectionTitle>
       {(rows || []).length === 0 && <p className="text-sm text-pb-faint">No data yet.</p>}
       {(rows || []).length > 0 && (
@@ -170,6 +213,7 @@ export default function Dashboard() {
               <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5 text-pb-text">
                 {club.name}
               </h1>
+              <ClubHistory club={club} />
             </div>
           </div>
         </div>
@@ -190,15 +234,22 @@ export default function Dashboard() {
         </div>
       )}
 
-      <div className="grid md:grid-cols-2 gap-4">
-        {board('Most games', data?.most_games, [
-          { key: 'games', label: 'Games', lead: true, get: r => r.games },
-        ])}
-        {board('Leading goal kickers', data?.top_goal_kickers, [
-          { key: 'games', label: 'GP', get: r => r.games },
-          { key: 'goals', label: 'Goals', lead: true, get: r => r.goals },
-          { key: 'avg', label: 'Avg', get: avgGoals },
-        ])}
+      <div>
+        <SectionTitle right={
+          <Link to={`${base}/leaderboard`} className="text-xs text-[var(--pb-accent)]">Full leaderboard →</Link>
+        }>
+          Top 10s
+        </SectionTitle>
+        <div className="grid md:grid-cols-2 gap-4">
+          {board('Most games', data?.most_games, [
+            { key: 'games', label: 'Games', lead: true, get: r => r.games },
+          ])}
+          {board('Leading goal kickers', data?.top_goal_kickers, [
+            { key: 'games', label: 'GP', get: r => r.games },
+            { key: 'goals', label: 'Goals', lead: true, get: r => r.goals },
+            { key: 'avg', label: 'Avg', get: avgGoals },
+          ])}
+        </div>
       </div>
 
       {(data?.milestones_in_reach || []).length > 0 && (

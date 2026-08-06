@@ -18,7 +18,7 @@ from app.models.db import (
     Organisation, SyncRun, User, async_session_maker, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user, require_super_admin
-from app.services import theme_config as theme_config_service
+from app.services import club_history, theme_config as theme_config_service
 from app.services.afl import sync as afl_sync
 
 logger = logging.getLogger(__name__)
@@ -126,6 +126,12 @@ class SettingsPatch(BaseModel):
     theme_mode: Optional[str] = None
     player_name_format: Optional[str] = None
     is_active: Optional[bool] = None
+    # Club history, shown under the club name on the public dashboard. Both go
+    # through services/club_history.py rather than straight onto the column —
+    # previous_names is free-shaped JSON coming off a form, and a year typo
+    # should read as "not recorded" rather than blocking the whole save.
+    established_year: Optional[int] = None
+    previous_names: Optional[list] = None
     public_show_bog_leaderboard: Optional[bool] = None
     public_show_club_bf_leaderboard: Optional[bool] = None
     public_show_comp_bf_leaderboard: Optional[bool] = None
@@ -141,6 +147,8 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
         "theme_mode": club.theme_mode, "is_active": club.is_active,
         "player_name_format": club.player_name_format,
         "logo_url": club.logo_url,
+        "established_year": club.established_year,
+        "previous_names": club_history.previous_names_for_display(club.previous_names),
         "public_show_bog_leaderboard": club.public_show_bog_leaderboard,
         "public_show_club_bf_leaderboard": club.public_show_club_bf_leaderboard,
         "public_show_comp_bf_leaderboard": club.public_show_comp_bf_leaderboard,
@@ -159,6 +167,12 @@ async def patch_settings(patch: SettingsPatch,
         raw = data.pop("theme_config")
         clean = theme_config_service.sanitize_theme_config(raw or {})
         club.theme_config = clean or None
+    # An implausible year and an emptied list both store NULL, so "cleared"
+    # and "never filled in" stay one state rather than two that mean the same.
+    if "established_year" in data:
+        club.established_year = club_history.clean_year(data.pop("established_year"))
+    if "previous_names" in data:
+        club.previous_names = club_history.clean_previous_names(data.pop("previous_names"))
     for field, value in data.items():
         setattr(club, field, value)
     await db.commit()

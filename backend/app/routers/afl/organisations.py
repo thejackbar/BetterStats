@@ -22,6 +22,15 @@ async def get_results(org_id: uuid.UUID,
                       limit: int = Query(50, le=200),
                       offset: int = 0,
                       db: AsyncSession = Depends(get_db)):
+    """One page of a club's results, plus the summary + per-team split for the
+    WHOLE filtered set (not just this page).
+
+    ``total`` is what makes the page after this one reachable: the results
+    screen used to ask for 100 rows and stop, which for a club with 3,000
+    games meant its history silently ended in the mid-1970s with nothing on
+    screen saying so. The count is the same filters as the list, so "showing
+    100 of 3,021" is always true.
+    """
     # Results are played games; upcoming fixtures have their own dashboard
     # section (pass include_upcoming=true to get the whole season list).
     clauses = ["s.organisation_id = :org"]
@@ -55,6 +64,21 @@ async def get_results(org_id: uuid.UUID,
         LIMIT :lim OFFSET :off
     """), params)
     games = [dict(r._mapping) for r in res]
+
+    # How many games match these filters in total — the same WHERE, without
+    # the page window, so the screen can say what it isn't showing and offer
+    # the rest.
+    count_params = {k: v for k, v in params.items() if k not in ("lim", "off")}
+    total_res = await db.execute(text(f"""
+        SELECT COUNT(*)
+        FROM games g
+        JOIN grades gr ON gr.id = g.grade_id
+        JOIN seasons s ON s.id = gr.season_id
+        LEFT JOIN afl_game_details d ON d.game_id = g.id
+        WHERE {where}
+    """), count_params)
+    total = int(total_res.scalar() or 0)
+
     # The same filters the list above was built with, so the headline cards
     # and the per-team split both describe what's actually on screen.
     grade_ids = params.get("grade")
@@ -62,7 +86,8 @@ async def get_results(org_id: uuid.UUID,
         db, org_id, season_id, grade_ids=grade_ids, finals_only=finals_only)
     by_team = await aggregations.team_results_breakdown(
         db, org_id, season_id, grade_ids=grade_ids, finals_only=finals_only)
-    return {"games": games, "summary": summary, "by_team": by_team}
+    return {"games": games, "summary": summary, "by_team": by_team,
+            "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/{org_id}/summary")
@@ -103,6 +128,10 @@ async def get_summary(org_id: uuid.UUID,
     # season_id) mirror where BetterStats (Core)'s equivalent board shows
     # each player's AVG/HS sub-line — AFL has no batting average, so a
     # career span reads better here than a rate stat would.
+    #
+    # Ten rows, which is what the dashboard's "Top 10s" panels show. The full
+    # ordered list lives on the Leaderboard page, so this is a headline, not a
+    # register — 10 is as far as it goes deliberately.
     async def _top(order: str):
         col = _TOP_COLS[order]
         res = await db.execute(text(f"""
@@ -132,7 +161,7 @@ async def get_summary(org_id: uuid.UUID,
             GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
             HAVING COALESCE(SUM(c.{col}),0) > 0
             ORDER BY COALESCE(SUM(c.{col}),0) DESC, games DESC
-            LIMIT 5
+            LIMIT 10
         """), params)
         return [dict(r._mapping) for r in res]
 

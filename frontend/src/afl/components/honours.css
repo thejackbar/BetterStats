@@ -5,14 +5,53 @@
  * lines, which cuts the award's own name in half. The name is the whole
  * point of the card, so the AFL board gets a wider card and a third line.
  * Scoped under .afl-honours so the cricket profile keeps its own geometry.
+ *
+ * Everything on the card is a step up from Core's sizes: at Core's 7.5px
+ * category / 9px sub / 8px season the card reads as fine print on a page whose
+ * body copy is 13-14px, and an honour board is the part of a profile a club
+ * most wants read. The card grew with the type rather than the type being
+ * squeezed into the old box, so the same three title lines still fit.
  */
 .afl-honours .hb-parent,
 .afl-honours .hb-card {
-  width: 196px;
-  height: 168px;
+  width: 232px;
+  height: 190px;
+}
+
+.afl-honours .hb-content {
+  /* The icon and the season strip both grew, so the text box has to clear
+     more on the right and below than Core's 48px/28px. */
+  top: 14px;
+  left: 14px;
+  right: 56px;
+  bottom: 34px;
+  gap: 5px;
+}
+
+.afl-honours .hb-category {
+  font-size: 9.5px;
+  letter-spacing: 0.09em;
 }
 
 .afl-honours .hb-title {
-  font-size: 12.5px;
+  font-size: 16px;
+  line-height: 1.22;
   -webkit-line-clamp: 3;
+}
+
+.afl-honours .hb-sub {
+  font-size: 11.5px;
+}
+
+.afl-honours .hb-icon {
+  width: 34px;
+  height: 34px;
+  top: 13px;
+  right: 13px;
+}
+
+.afl-honours .hb-season {
+  height: 32px;
+  padding: 0 14px;
+  font-size: 10.5px;
 }

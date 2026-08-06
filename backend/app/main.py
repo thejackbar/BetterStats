@@ -3102,6 +3102,14 @@ async def lifespan(app: FastAPI):
         # lower) and routers/onboarding_wizard.py (auto-open the setup wizard
         # for a genuinely new trial club, never a long-established one).
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS onboarding_method TEXT"))
+        # The club's own history (migration 226) — the founding year and any
+        # former names, shown under the club name on the public dashboard.
+        # Both nullable: a club that has never filled them in shows neither.
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS established_year INTEGER"))
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS previous_names JSONB"))
+        # The order a club reads its own teams in (migration 226). NULL sorts
+        # last, so an unordered grade keeps its previous alphabetical place.
+        await conn.execute(text("ALTER TABLE grades ADD COLUMN IF NOT EXISTS display_order INTEGER"))
         # Stripe Product id cache for add-on subscription items (migration
         # 152) — see services/stripe_client.py::_ensure_product.
         await conn.execute(text("""

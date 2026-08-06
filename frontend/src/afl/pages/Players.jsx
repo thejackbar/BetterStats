@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useOutletContext } from 'react-router-dom'
+import { Link, useOutletContext } from 'react-router-dom'
 import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
@@ -13,31 +13,14 @@ const COLS = [
   { key: 'seasons', label: 'Seasons' },
 ]
 
-// Games-played bands — the club-milestone brackets a club actually talks in
-// ("the 100-gamers", "the 200 club"), not an even numeric split. Under 100 is
-// split at 50 because that band holds most of a long-running club's register:
-// a club with 1,852 players on the books has the great bulk of them there.
-const BANDS = [
-  { key: 'all', label: 'All' },
-  { key: '1', label: '1–49', min: 1, max: 49 },
-  { key: '50', label: '50–99', min: 50, max: 99 },
-  { key: '100', label: '100–199', min: 100, max: 199 },
-  { key: '200', label: '200–299', min: 200, max: 299 },
-  { key: '300', label: '300–399', min: 300, max: 399 },
-  { key: '400', label: '400+', min: 400 },
-]
-
-const inBand = (p, band) => {
-  if (band.min == null) return true
-  const g = p.games ?? 0
-  return g >= band.min && (band.max == null || g <= band.max)
-}
-
+// The games-played band buttons that used to sit here now live on their own
+// Leaderboard board ("All Time Games", components/AllTimeGames.jsx), where a
+// games-ranked list belongs — this page is the club register, something you
+// look a name up in.
 export default function Players() {
   const { club } = useOutletContext()
   const [players, setPlayers] = useState(null)
   const [search, setSearch] = useState('')
-  const [band, setBand] = useState('all')
   // Surname, A→Z by default. A roster is something you look a name up in, so
   // alphabetical beats "most games" as the resting state; every stat column
   // still sorts on a click.
@@ -48,21 +31,10 @@ export default function Players() {
     aflApi.listPlayers(club.id).then(d => setPlayers(d.players))
   }, [club.id])
 
-  // Counts come off the unfiltered roster so the buttons keep saying how many
-  // players are in each band regardless of what's currently selected — and a
-  // band nobody has reached can be shown as unreachable rather than as a
-  // button that empties the table.
-  const bandCounts = useMemo(() => {
-    const counts = {}
-    for (const b of BANDS) counts[b.key] = (players || []).filter(p => inBand(p, b)).length
-    return counts
-  }, [players])
-
   const rows = useMemo(() => {
     if (!players) return []
     const q = search.trim().toLowerCase()
-    const active = BANDS.find(b => b.key === band) || BANDS[0]
-    let out = players.filter(p => inBand(p, active))
+    let out = [...players]
     if (q) out = out.filter(p => displayName(p).toLowerCase().includes(q))
     out.sort((a, b) => {
       if (sort.key === 'name') {
@@ -75,7 +47,7 @@ export default function Players() {
       return sort.dir === 'desc' ? bv - av : av - bv
     })
     return out
-  }, [players, search, band, sort])
+  }, [players, search, sort])
 
   if (players === null) return <div className="pt-16 flex justify-center"><LoadingSpinner /></div>
 
@@ -104,6 +76,10 @@ export default function Players() {
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">Players</h1>
         <span className="text-sm text-pb-faint">{rows.length} of {players.length}</span>
+        {/* Where the games-played bands went. */}
+        <Link to={`${base}/leaderboard`} className="text-xs text-[var(--pb-accent)]">
+          All Time Games →
+        </Link>
         <input
           value={search}
           onChange={e => setSearch(e.target.value)}
@@ -112,31 +88,6 @@ export default function Players() {
         />
       </div>
 
-      <div className="flex flex-wrap gap-1.5">
-        {BANDS.map(b => {
-          const count = bandCounts[b.key] || 0
-          const empty = count === 0 && b.key !== 'all'
-          return (
-            <button
-              key={b.key}
-              onClick={() => setBand(b.key)}
-              disabled={empty}
-              className={clsx(
-                'px-3 py-1.5 rounded text-sm font-medium',
-                band === b.key
-                  ? 'bg-[var(--pb-accent)] text-black'
-                  : 'bg-pb-surface2 text-pb-dim hover:text-pb-text',
-                empty && 'opacity-40 cursor-not-allowed hover:text-pb-dim',
-              )}
-            >
-              {b.label}
-              <span className={clsx('ml-1.5 font-mono text-[10px]', band === b.key ? 'opacity-70' : 'text-pb-faintest')}>
-                {count}
-              </span>
-            </button>
-          )
-        })}
-      </div>
       <div className="pb-card overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="pb-hairline-b">

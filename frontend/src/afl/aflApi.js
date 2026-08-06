@@ -95,10 +95,18 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
   listGradesWithStats: () => request('/club-admin/grades-with-stats'),
-  classifyGrade: (gradeName, { category, is_public, display_name } = {}) => request('/club-admin/grades/classify', {
-    method: 'PATCH', body: JSON.stringify({ grade_name: gradeName, category, is_public, display_name }),
+  classifyGrade: (gradeName, { category, is_public, display_name, display_order } = {}) => request('/club-admin/grades/classify', {
+    method: 'PATCH',
+    body: JSON.stringify({ grade_name: gradeName, category, is_public, display_name, display_order }),
   }),
-  applyGradeSuggestions: () => request('/club-admin/grades/apply-suggestions', { method: 'POST' }),
+  applyGradeSuggestions: (force = false) => request(
+    `/club-admin/grades/apply-suggestions${force ? '?force=true' : ''}`, { method: 'POST' }),
+  // The whole reading order in one write — the server numbers 1..N from the
+  // submitted order, so the browser never sends the numbers themselves.
+  reorderGrades: (gradeNames) => request('/club-admin/grades/reorder', {
+    method: 'POST', body: JSON.stringify({ grade_names: gradeNames }),
+  }),
+  clearGradeOrder: () => request('/club-admin/grades/clear-order', { method: 'POST' }),
 
   // Admin — Award Definitions (catalog)
   listAwardDefinitions: () => request('/award-definitions'),

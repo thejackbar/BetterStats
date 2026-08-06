@@ -263,6 +263,14 @@ class Organisation(Base):
     font_mono_data = Column(LargeBinary, nullable=True)
     font_mono_mime = Column(Text, nullable=True)
     contact_email = Column(Text, nullable=True)
+    # The club's own history, shown under its name on the public dashboard
+    # (migration 226). `established_year` is a plain year — a club writes
+    # "Est. 1889" and rarely holds the founding day. `previous_names` is an
+    # ordered list of {"name", "from_year", "to_year"}, oldest first, with
+    # both years optional: a club often knows it used to be called something
+    # else without knowing when that stopped.
+    established_year = Column(Integer, nullable=True)
+    previous_names = Column(JSONB, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
     # BetterSelect: a player is "dormant" (hidden from default selection) if they
     # haven't appeared within this many months. Also bounds team squad
@@ -1093,6 +1101,13 @@ class Grade(Base):
     # Defaults true so nothing is hidden until a club explicitly opts a grade
     # (e.g. their whole junior programme) out of public grade surfaces.
     is_public = Column(Boolean, nullable=False, server_default="true", default=True)
+    # The order a club reads its own teams in — Seniors 1, Reserves 2, Under
+    # 19s 3 (migration 226). NULL = unordered, and sorts AFTER every ordered
+    # grade, so a club that has ordered three of its ten grades gets those
+    # three first and the rest in their previous alphabetical order rather
+    # than a scramble. Set across a whole grade name at once by the admin,
+    # like display_name_override and category.
+    display_order = Column(Integer, nullable=True)
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")

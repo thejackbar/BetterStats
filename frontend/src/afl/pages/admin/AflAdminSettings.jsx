@@ -47,6 +47,120 @@ function Toggle({ label, hint, checked, onChange, disabled }) {
   )
 }
 
+/**
+ * Founding year + former names, shown under the club name on the public
+ * dashboard.
+ *
+ * Edited as a draft and saved on a button rather than autosaved per keystroke,
+ * the same call the branding panel above it makes: a half-typed year ("18")
+ * is a valid integer the backend would happily discard as implausible, so a
+ * save has to be something the admin asks for once they've finished typing.
+ */
+function ClubHistoryPanel({ settings, onSaved }) {
+  const toast = useToast()
+  const [year, setYear] = useState(settings.established_year ?? '')
+  const [names, setNames] = useState(() => settings.previous_names || [])
+  const [dirty, setDirty] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const edit = (fn) => { fn(); setDirty(true) }
+  const setName = (i, field, value) => edit(() => setNames(list =>
+    list.map((n, j) => (j === i ? { ...n, [field]: value } : n))))
+
+  async function save() {
+    setSaving(true)
+    try {
+      await aflApi.patchAdminSettings({
+        // '' clears the year; the backend stores NULL for anything it can't
+        // read as a plausible year, so a cleared field and a typo agree.
+        established_year: year === '' ? null : Number(year),
+        previous_names: names
+          .filter(n => (n.name || '').trim())
+          .map(n => ({
+            name: n.name.trim(),
+            from_year: n.from_year === '' || n.from_year == null ? null : Number(n.from_year),
+            to_year: n.to_year === '' || n.to_year == null ? null : Number(n.to_year),
+          })),
+      })
+      toast.success('Club history saved.')
+      setDirty(false)
+      await onSaved()
+    } catch (e) {
+      toast.error(e.message)
+    } finally { setSaving(false) }
+  }
+
+  const numField = (value, onChange, placeholder, width) => (
+    <input
+      type="number" inputMode="numeric" value={value ?? ''} placeholder={placeholder}
+      onChange={e => onChange(e.target.value)}
+      className={`bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm font-mono ${width}`}
+    />
+  )
+
+  return (
+    <div className="pb-card p-5">
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Club history</p>
+      <p className="text-sm text-pb-dim mb-4 leading-relaxed">
+        Shown under your club's name on the public dashboard. Leave anything you don't
+        know blank — a former name with no dates against it still shows.
+      </p>
+
+      <div className="mb-5">
+        <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1">
+          Established
+        </label>
+        {numField(year, v => edit(() => setYear(v)), 'e.g. 1889', 'w-28')}
+        <p className="text-[11px] text-pb-faintest mt-1">The year the club was founded.</p>
+      </div>
+
+      <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-2">
+        Previous names
+      </label>
+      <div className="flex flex-col gap-2">
+        {names.map((n, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <input
+              value={n.name || ''} placeholder="Former club name"
+              onChange={e => setName(i, 'name', e.target.value)}
+              className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm flex-1 min-w-[180px]"
+            />
+            {numField(n.from_year, v => setName(i, 'from_year', v), 'From', 'w-20')}
+            {numField(n.to_year, v => setName(i, 'to_year', v), 'To', 'w-20')}
+            <button
+              type="button"
+              onClick={() => edit(() => setNames(list => list.filter((_, j) => j !== i)))}
+              className="text-pb-faint hover:text-pb-red px-2 py-1 text-sm"
+              aria-label="Remove this name"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {names.length === 0 && (
+          <p className="text-sm text-pb-faintest">No former names recorded.</p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => edit(() => setNames(list => [...list, { name: '', from_year: '', to_year: '' }]))}
+        className="mt-2 font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-[var(--pb-accent)]"
+      >
+        + Add a former name
+      </button>
+
+      <div className="mt-4">
+        <button
+          type="button" onClick={save} disabled={!dirty || saving}
+          className="px-4 py-2 rounded text-sm font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {saving ? 'Saving…' : dirty ? 'Save club history' : 'Saved'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function AflAdminSettings() {
   const toast = useToast()
   const [settings, setSettings] = useState(null)
@@ -206,6 +320,14 @@ export default function AflAdminSettings() {
           {savingTheme ? 'Saving…' : themeDirty ? 'Save branding' : 'Saved'}
         </button>
       </div>
+
+      {/* Keyed on what's loaded, so the draft state inside re-seeds after a
+          save (or a reload) instead of holding the values it mounted with. */}
+      <ClubHistoryPanel
+        key={`${settings.established_year ?? ''}|${(settings.previous_names || []).length}`}
+        settings={settings}
+        onSaved={load}
+      />
 
       <div className="pb-card p-5">
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Public leaderboard</p>

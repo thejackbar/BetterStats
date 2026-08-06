@@ -4,10 +4,15 @@ import clsx from 'clsx'
 import LoadingSpinner from '../../components/LoadingSpinner'
 import { aflApi } from '../aflApi'
 import { Select, PlayerCell, displayName } from '../components/bits'
+import AllTimeGames from '../components/AllTimeGames'
 
+// `career: true` marks a board that is career-wide by definition and so takes
+// no season or grade filter — the filters are hidden for it rather than shown
+// doing nothing.
 const ALL_STATS = [
   { key: 'games', label: 'Games' },
   { key: 'goals', label: 'Goals' },
+  { key: 'all_time_games', label: 'All Time Games', career: true },
   { key: 'bogs', label: 'Best on Ground', flag: 'public_show_bog_leaderboard' },
   { key: 'club_bf_votes', label: 'Club B&F votes', flag: 'public_show_club_bf_leaderboard' },
   { key: 'comp_bf_votes', label: 'Competition B&F votes', flag: 'public_show_comp_bf_leaderboard' },
@@ -39,15 +44,19 @@ export default function Leaderboard() {
   }, [club.id])
 
   const statInfo = STATS.find(s => s.key === stat) || STATS[0]
+  const isCareerBoard = !!statInfo?.career
 
   useEffect(() => { setGradeId(null) }, [seasonId])
 
   useEffect(() => {
+    // A career-wide board owns its own fetch (see AllTimeGames) — the
+    // leaderboard endpoint has no stat for it and would 422 on the name.
+    if (isCareerBoard) return
     setLoading(true)
     aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, limit: 50 })
       .then(setData)
       .finally(() => setLoading(false))
-  }, [club.id, stat, seasonId, gradeId])
+  }, [club.id, stat, seasonId, gradeId, isCareerBoard])
 
   const gradeOptions = (club.grades || [])
     .filter(g => !seasonId || (g.season_ids || []).includes(seasonId))
@@ -57,14 +66,18 @@ export default function Leaderboard() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-bold">Leaderboard</h1>
-        <div className="ml-auto flex flex-wrap gap-2">
-          <Select value={seasonId} onChange={setSeasonId} placeholder="All seasons"
-                  options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))} />
-          <Select value={gradeId} onChange={setGradeId} placeholder="All grades" options={gradeOptions} />
-        </div>
+        {isCareerBoard
+          ? <span className="ml-auto text-sm text-pb-faint">Every season, every grade</span>
+          : (
+            <div className="ml-auto flex flex-wrap gap-2">
+              <Select value={seasonId} onChange={setSeasonId} placeholder="All seasons"
+                      options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))} />
+              <Select value={gradeId} onChange={setGradeId} placeholder="All grades" options={gradeOptions} />
+            </div>
+          )}
       </div>
 
-      <div className="flex gap-1">
+      <div className="flex flex-wrap gap-1">
         {STATS.map(s => (
           <button key={s.key} onClick={() => setStat(s.key)}
                   className={clsx('px-3 py-1.5 rounded text-sm font-medium',
@@ -74,7 +87,7 @@ export default function Leaderboard() {
         ))}
       </div>
 
-      {loading && !data
+      {isCareerBoard ? <AllTimeGames club={club} base={base} /> : loading && !data
         ? <div className="pt-8 flex justify-center"><LoadingSpinner /></div>
         : (
           <div className="pb-card overflow-x-auto">

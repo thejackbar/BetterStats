@@ -111,7 +111,7 @@ export function HonourPills({ achievements, limit = 6 }) {
         const c = `var(--pb-cat-${honourType(g)})`
         const years = seasonsLabel(g)
         return (
-          <span key={i} className="font-mono text-[11px] tracking-wide2 px-2.5 py-1 rounded-sm border"
+          <span key={i} className="font-mono text-[12.5px] tracking-wide2 px-3 py-1.5 rounded-sm border"
             style={{
               borderColor: `color-mix(in srgb, ${c} 40%, transparent)`,
               color: c,
@@ -132,8 +132,10 @@ function HonourCard({ g, type }) {
     <div className="hb-parent" style={catVars(type)}>
       <div className="hb-card">
         <div className="hb-icon">
+          {/* Sized against .afl-honours' own 34px icon circle (honours.css),
+              not Core's 28px one — this card is only ever rendered inside it. */}
           <img src={CATEGORY_ICON[g.category] || thiings.trophy} alt=""
-            style={{ width: 18, height: 18, objectFit: 'contain' }} />
+            style={{ width: 22, height: 22, objectFit: 'contain' }} />
         </div>
         <div className="hb-content">
           <span className="hb-category">{g.category}</span>
@@ -169,7 +171,7 @@ export function HonourBoard({ achievements }) {
         if (!rows.length) return null
         return (
           <div key={type}>
-            <h3 className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3">{label}</h3>
+            <h3 className="font-mono text-xs uppercase tracking-wide3 text-pb-faint mb-3">{label}</h3>
             <div className="flex flex-wrap gap-4">
               {rows.map((g, i) => <HonourCard key={i} g={g} type={type} />)}
             </div>

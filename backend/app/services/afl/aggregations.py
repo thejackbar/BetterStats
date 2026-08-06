@@ -12,9 +12,40 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import grade_labels, milestone_rules
 
-# Reading order for the per-team results split: the senior program first,
-# juniors last. Anything unclassified sorts after the lot.
+# Reading order for the per-team results split when the club has NOT set its
+# own: the senior program first, juniors last. Anything unclassified sorts
+# after the lot. A club-set display_order always wins over this — see
+# grade_sort_key.
 _TEAM_ORDER = {"senior": 0, "womens": 1, "masters": 2, "integrated": 3, "colts": 4}
+
+
+def grade_sort_key(row: dict):
+    """The one reading order for a club's own grades, used by every surface
+    that lists them (the public grade filters, the results-by-team split, a
+    player's by-grade cards, the admin grade list).
+
+    A club's own ``display_order`` comes first — Seniors 1, Reserves 2, Under
+    19s 3 is an ordering only the club can know, and no amount of category
+    guessing reproduces it. A grade with no order set sorts AFTER every
+    ordered one (not interleaved at position 0, which is what a plain
+    ``COALESCE(display_order, 0)`` would do and would put the club's careful
+    ordering underneath the grades it never touched), falling back to the
+    category order and then the name.
+
+    Takes the row's already-resolved display label under whichever key the
+    caller uses, so the same function serves rows shaped as ``team`` (results
+    breakdown), ``grade`` (player breakdown) or ``name``/``display_name``
+    (grade lists).
+    """
+    order = row.get("display_order")
+    label = (row.get("display_name") or row.get("display_name_override")
+             or row.get("team") or row.get("grade") or row.get("name") or "")
+    return (
+        order is None,            # ordered grades first
+        order if order is not None else 0,
+        _TEAM_ORDER.get(row.get("category"), 9),
+        str(label).lower(),
+    )
 
 
 async def career_totals(db: AsyncSession, org_id: uuid.UUID,
@@ -105,6 +136,31 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
     """), {"org": str(org_id), "pid": str(player_id)})
     rows = [dict(r._mapping) for r in res]
 
+    # Fold the per-grade rows by merge group and stamp each with the club's
+    # own label + reading order, so two spellings of one competition are one
+    # row (and one column, on the profile's season table) rather than two.
+    gmap = await grade_display_map(db, org_id)
+    folded: dict[tuple, dict] = {}
+    passthrough: list[dict] = []
+    for r in rows:
+        info = gmap.get(r["grade_name"]) if r["grade_name"] else None
+        if r["grade_id"] is None or info is None:
+            r["grade_key"] = None
+            r["grade_order"] = None
+            passthrough.append(r)
+            continue
+        key = (r["season_id"], info["key"])
+        slot = folded.get(key)
+        if slot is None:
+            folded[key] = {**r,
+                           "grade_name": info["label"],
+                           "grade_key": info["key"],
+                           "grade_order": info["display_order"]}
+            continue
+        for f in ("games", "goals", "behinds", "bogs", "captain_games"):
+            slot[f] = (slot[f] or 0) + (r[f] or 0)
+    rows = passthrough + list(folded.values())
+
     have_total = {r["season_id"] for r in rows if r["grade_id"] is None and r["season_id"] is not None}
     synthesised: dict = {}
     for r in rows:
@@ -114,16 +170,23 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
         t = synthesised.setdefault(sid, {
             "season_id": sid, "season_name": r["season_name"], "year": r["year"],
             "grade_id": None, "grade_name": None,
+            "grade_key": None, "grade_order": None,
             "games": 0, "goals": 0, "behinds": 0, "bogs": 0, "captain_games": 0,
         })
         for f in ("games", "goals", "behinds", "bogs", "captain_games"):
             t[f] += r[f] or 0
     rows.extend(synthesised.values())
 
-    # Three stable sorts, least-significant first (Python's sort is stable,
-    # so each later pass only breaks ties the previous pass left standing) —
+    # Four stable sorts, least-significant first (Python's sort is stable, so
+    # each later pass only breaks ties the previous pass left standing) —
     # mirrors the original "year DESC NULLS LAST, name DESC, grade_id NULLS
-    # FIRST" ordering (whole-season row before its own per-grade breakdown).
+    # FIRST" ordering (whole-season row before its own per-grade breakdown),
+    # with the club's own grade order deciding the per-grade rows within a
+    # season. NULL order sorts after every ordered grade, same rule as
+    # grade_sort_key.
+    rows.sort(key=lambda r: (r["grade_order"] is None,
+                             r["grade_order"] if r["grade_order"] is not None else 0,
+                             (r["grade_name"] or "").lower()))
     rows.sort(key=lambda r: r["grade_id"] is not None)
     rows.sort(key=lambda r: r["season_name"] or "", reverse=True)
     rows.sort(key=lambda r: (r["year"] is None, -(r["year"] or 0)))
@@ -168,6 +231,8 @@ async def grade_breakdown(db: AsyncSession, org_id: uuid.UUID,
         )
         SELECT gr.name AS name,
                MAX(gr.display_name_override) AS display_name_override,
+               MAX(gr.category) AS category,
+               MIN(gr.display_order) AS display_order,
                COALESCE(SUM(c.games), 0) AS games,
                COALESCE(SUM(c.goals), 0) AS goals
         FROM combined c
@@ -188,19 +253,31 @@ async def grade_breakdown(db: AsyncSession, org_id: uuid.UUID,
         canonical = _resolve_canonical_grade(chain, row["name"])
         slot = buckets.setdefault(canonical, {
             "grade": canonical, "games": 0, "goals": 0, "_override": None,
+            "_order": None, "_category": None,
         })
         # The canonical grade's own rename wins; an alias's only fills a gap.
         if row["display_name_override"] and (slot["_override"] is None or row["name"] == canonical):
             slot["_override"] = row["display_name_override"]
+        if row["display_order"] is not None and (
+                slot["_order"] is None or row["display_order"] < slot["_order"]):
+            slot["_order"] = row["display_order"]
+        if slot["_category"] is None:
+            slot["_category"] = (grade_labels.normalise_category(row["category"])
+                                 or grade_labels.suggest_category(row["name"]))
         slot["games"] += int(row["games"] or 0)
         slot["goals"] += int(row["goals"] or 0)
 
     out = [{
         "grade": b["_override"] or b["grade"],
+        "grade_key": b["grade"],  # the canonical RAW name — a stable join key
+        "category": b["_category"],
+        "display_order": b["_order"],
         "games": b["games"],
         "goals": b["goals"],
     } for b in buckets.values()]
-    out.sort(key=lambda r: (-r["games"], -r["goals"], r["grade"].lower()))
+    # The club's own reading order, so a player's Seniors card sits where the
+    # club puts Seniors rather than wherever he happened to play most games.
+    out.sort(key=grade_sort_key)
     return out
 
 
@@ -235,6 +312,54 @@ def _resolve_canonical_grade(chain: dict[str, str], name: str, _seen: Optional[s
     if nxt is None:
         return name
     return _resolve_canonical_grade(chain, nxt, seen)
+
+
+async def grade_display_map(db: AsyncSession, org_id: uuid.UUID) -> dict[str, dict]:
+    """Every grade RAW name in the club mapped to how it should be shown:
+    ``{"key": canonical raw name, "label": what to print, "display_order":
+    the club's own order, "category": ...}``.
+
+    One place that resolves the three things a grade name goes through — the
+    merge group it belongs to, the club's rename of it, and the club's reading
+    order — so a surface that lists grades folded by name (a player's season
+    breakdown) agrees with one that lists them folded by merge group (the
+    grade filter, the results split). Without it a merged grade shows as two
+    columns on one screen and one card on the next.
+    """
+    rows = await db.execute(text("""
+        SELECT gr.name,
+               MAX(gr.display_name_override) AS display_name_override,
+               MAX(gr.category) AS category,
+               MIN(gr.display_order) AS display_order
+        FROM grades gr
+        JOIN seasons s ON s.id = gr.season_id
+        WHERE s.organisation_id = :org
+        GROUP BY gr.name
+    """), {"org": str(org_id)})
+    per_name = {r["name"]: dict(r) for r in rows.mappings().all()}
+
+    logs = await db.execute(text(
+        "SELECT alias_name, canonical_name FROM grade_merge_logs WHERE org_id = :org AND undone_at IS NULL"
+    ), {"org": str(org_id)})
+    chain = {r.alias_name: r.canonical_name for r in logs}
+
+    out: dict[str, dict] = {}
+    for name, row in per_name.items():
+        canonical = _resolve_canonical_grade(chain, name)
+        head = per_name.get(canonical, row)
+        # The canonical grade's own rename/order wins; an alias's only fills a
+        # gap it left, same precedence grade_breakdown applies.
+        order = head.get("display_order")
+        if order is None:
+            order = row.get("display_order")
+        out[name] = {
+            "key": canonical,
+            "label": head.get("display_name_override") or canonical,
+            "display_order": order,
+            "category": (grade_labels.normalise_category(head.get("category"))
+                         or grade_labels.suggest_category(canonical)),
+        }
+    return out
 
 
 async def matching_grade_ids(db: AsyncSession, org_id: uuid.UUID, grade_id: uuid.UUID) -> list[uuid.UUID]:
@@ -287,7 +412,16 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
     story and need no special handling: they write real games rows carrying a
     real result letter, so they count here the same as a synced game. A bye
     is stored with status 'BYE' and a NULL result, which is what keeps it out
-    of both the W/L/D tallies and the played count."""
+    of both the W/L/D tallies and the played count.
+
+    ``no_result`` is the count of games that WERE played (status 'FINAL') but
+    carry no result letter, which is why wins+losses+draws can legitimately
+    fall short of ``played``. It is a real state, not a bug: plenty of junior
+    competitions publish a completed fixture with no score at all, so PlayHQ
+    hands us a finished game with nothing to derive a result from. Reported
+    rather than hidden — a club looking at "Played 9, W4 L2" and finding the
+    other three nowhere has no way to tell a missing score from a missing
+    game."""
     clauses = ["s.organisation_id = :org"]
     params: dict = {"org": str(org_id)}
     if season_id:
@@ -302,7 +436,8 @@ async def club_results_summary(db: AsyncSession, org_id: uuid.UUID,
         SELECT COUNT(*) FILTER (WHERE g.result = 'W') AS wins,
                COUNT(*) FILTER (WHERE g.result = 'L') AS losses,
                COUNT(*) FILTER (WHERE g.result = 'D') AS draws,
-               COUNT(*) FILTER (WHERE d.status = 'FINAL') AS played
+               COUNT(*) FILTER (WHERE d.status = 'FINAL') AS played,
+               COUNT(*) FILTER (WHERE d.status = 'FINAL' AND g.result IS NULL) AS no_result
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -342,10 +477,12 @@ async def team_results_breakdown(db: AsyncSession, org_id: uuid.UUID,
         SELECT gr.name AS name,
                MAX(gr.display_name_override) AS display_name_override,
                MAX(gr.category) AS category,
+               MIN(gr.display_order) AS display_order,
                COUNT(*) FILTER (WHERE g.result = 'W') AS wins,
                COUNT(*) FILTER (WHERE g.result = 'L') AS losses,
                COUNT(*) FILTER (WHERE g.result = 'D') AS draws,
-               COUNT(*) FILTER (WHERE d.status = 'FINAL') AS played
+               COUNT(*) FILTER (WHERE d.status = 'FINAL') AS played,
+               COUNT(*) FILTER (WHERE d.status = 'FINAL' AND g.result IS NULL) AS no_result
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
         JOIN seasons s ON s.id = gr.season_id
@@ -367,28 +504,35 @@ async def team_results_breakdown(db: AsyncSession, org_id: uuid.UUID,
         canonical = _resolve_canonical_grade(chain, row["name"])
         slot = buckets.setdefault(canonical, {
             "team": canonical, "wins": 0, "losses": 0, "draws": 0, "played": 0,
-            "_override": None, "_category": None,
+            "no_result": 0, "_override": None, "_category": None, "_order": None,
         })
         if row["display_name_override"] and (slot["_override"] is None or row["name"] == canonical):
             slot["_override"] = row["display_name_override"]
         if slot["_category"] is None:
             slot["_category"] = (grade_labels.normalise_category(row["category"])
                                  or grade_labels.suggest_category(row["name"]))
-        for f in ("wins", "losses", "draws", "played"):
+        # The lowest order in the merge group wins, so a grade ordered under
+        # one of its spellings doesn't fall to the bottom because the alias
+        # rows were never ordered.
+        if row["display_order"] is not None and (
+                slot["_order"] is None or row["display_order"] < slot["_order"]):
+            slot["_order"] = row["display_order"]
+        for f in ("wins", "losses", "draws", "played", "no_result"):
             slot[f] += int(row[f] or 0)
 
     out = [{
         "team": b["_override"] or b["team"],
         "category": b["_category"],
-        "wins": b["wins"], "losses": b["losses"], "draws": b["draws"], "played": b["played"],
+        "display_order": b["_order"],
+        "wins": b["wins"], "losses": b["losses"], "draws": b["draws"],
+        "played": b["played"], "no_result": b["no_result"],
     } for b in buckets.values()]
     # A team with no completed game yet has nothing to report on.
     out = [r for r in out if r["played"] or r["wins"] or r["losses"] or r["draws"]]
-    # Seniors first and juniors last, which is the order a club reads its own
-    # results in — busiest-team-first would open on the Under 18s whenever
-    # they happened to play a game more than the League side.
-    out.sort(key=lambda r: (_TEAM_ORDER.get(r["category"], 9), -r["played"],
-                            -r["wins"], r["team"].lower()))
+    # The club's own reading order where it has set one, else seniors first
+    # and juniors last — busiest-team-first would open on the Under 18s
+    # whenever they happened to play a game more than the League side.
+    out.sort(key=grade_sort_key)
     return out
 
 

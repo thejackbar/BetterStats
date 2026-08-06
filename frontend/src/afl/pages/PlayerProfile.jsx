@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useOutletContext, useParams } from 'react-router-dom'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -73,65 +73,177 @@ function SortTh({ label, sKey, cur, dir, onSort, dDir = 'desc' }) {
   )
 }
 
-function SeasonTable({ seasonRows, gradeRows }) {
+// ── Season by season, as a grade GRID rather than a list with expandable
+// sub-rows. One column per grade the player ever turned out in — Seniors,
+// Reserves, Under 19s — and a Total column at the end of every row.
+//
+// The old shape hid the interesting comparison behind a caret: a career spent
+// mostly in the Reserves with three seasons of Seniors read as twenty
+// identical rows, and finding those three meant opening twenty carets. Laid
+// out as columns, the shape of a career is the shape of the table.
+//
+// Column order comes from the API (the club's own grade order — see
+// aggregations.grade_sort_key), so the Seniors column sits where the club puts
+// Seniors rather than wherever the player happened to play most.
+const STAT_TABS = [
+  { key: 'games', label: 'Games' },
+  { key: 'goals', label: 'Goals' },
+  { key: 'bogs', label: 'BOG' },
+]
+
+function SeasonGradeTable({ seasonRows, gradeRows }) {
   const { sorted, sortKey, sortDir, request } = useSortable(seasonRows, 'year', 'desc')
-  const [expanded, setExpanded] = useState(() => new Set())
-  const toggle = (sid) => setExpanded(prev => {
-    const next = new Set(prev)
-    if (next.has(sid)) next.delete(sid); else next.add(sid)
-    return next
-  })
+  // One measure at a time. Three columns per grade would be unreadable across
+  // six teams on a phone, and a club reads games, goals and BOG separately
+  // anyway.
+  const [stat, setStat] = useState('games')
+
+  // One column per grade this player actually turned out in, in the CLUB's own
+  // reading order (grade_order, set on the admin Grades screen). Sorted
+  // explicitly rather than taken in the order the rows arrive: the rows are
+  // ordered by season first, so first-appearance order is really "whichever
+  // grades the player's most recent season happened to use", which is not an
+  // order at all. An unordered grade sorts after every ordered one, matching
+  // the same rule the backend applies everywhere else.
+  const columns = useMemo(() => {
+    const seen = new Map()
+    for (const g of gradeRows || []) {
+      const key = g.grade_key || g.grade_name
+      if (key && !seen.has(key)) {
+        seen.set(key, { key, label: g.grade_name || key, order: g.grade_order })
+      }
+    }
+    return [...seen.values()].sort((a, b) =>
+      (a.order == null) - (b.order == null)
+      || (a.order ?? 0) - (b.order ?? 0)
+      || a.label.localeCompare(b.label))
+  }, [gradeRows])
+
+  // (season, grade) → the row, so a cell is a lookup rather than a scan.
+  const cells = useMemo(() => {
+    const map = new Map()
+    for (const g of gradeRows || []) {
+      map.set(`${g.season_id}|${g.grade_key || g.grade_name}`, g)
+    }
+    return map
+  }, [gradeRows])
+
+  const columnTotals = useMemo(() => {
+    const totals = {}
+    for (const g of gradeRows || []) {
+      const key = g.grade_key || g.grade_name
+      totals[key] = (totals[key] || 0) + (g[stat] || 0)
+    }
+    return totals
+  }, [gradeRows, stat])
+
+  const grandTotal = (seasonRows || []).reduce((a, s) => a + (s[stat] || 0), 0)
+
+  // With no per-grade rows at all — a career that came in as season totals
+  // from an Import Stats upload — there is nothing to spread across columns,
+  // so the table falls back to the three plain stat columns.
+  const asGrid = columns.length > 0
 
   return (
-    <div className="pb-card overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="pb-hairline-b">
-          <tr>
-            <th className="px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide text-pb-faint">Season</th>
-            <SortTh label="GP" sKey="games" cur={sortKey} dir={sortDir} onSort={request} />
-            <SortTh label="Goals" sKey="goals" cur={sortKey} dir={sortDir} onSort={request} />
-            <SortTh label="BOG" sKey="bogs" cur={sortKey} dir={sortDir} onSort={request} />
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((s, i) => {
-            const grades = (gradeRows || []).filter(g => g.season_id === s.season_id)
-            const hasBreakdown = grades.length > 1
-            const isOpen = expanded.has(s.season_id)
-            return (
-              <Fragment key={s.season_id || i}>
-                <tr
-                  className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2/50 ${hasBreakdown ? 'cursor-pointer' : ''}`}
-                  onClick={() => hasBreakdown && toggle(s.season_id)}
-                >
-                  <td className="px-3 py-2.5 font-medium">
-                    <span className="flex items-center gap-1.5">
-                      {hasBreakdown && (
-                        <span className="text-pb-faint text-[9px] w-3 inline-block">{isOpen ? '▾' : '▸'}</span>
-                      )}
-                      {s.season_name}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2.5 text-right pb-num">{s.games}</td>
-                  <td className="px-3 py-2.5 text-right pb-num font-semibold" style={{ color: 'var(--pb-accent)' }}>{s.goals}</td>
-                  <td className="px-3 py-2.5 text-right pb-num">{s.bogs}</td>
-                </tr>
-                {hasBreakdown && isOpen && grades.map(g => (
-                  <tr key={`${s.season_id}-${g.grade_id}`} className="text-pb-dim bg-pb-surface2/30">
-                    <td className="px-3 py-1.5 pl-8 text-xs">{g.grade_name}</td>
-                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.games}</td>
-                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.goals}</td>
-                    <td className="px-3 py-1.5 text-right pb-num text-xs">{g.bogs}</td>
-                  </tr>
+    <div className="space-y-2">
+      {asGrid && (
+        <div className="flex flex-wrap gap-1">
+          {STAT_TABS.map(t => (
+            <button
+              key={t.key} onClick={() => setStat(t.key)}
+              className={`px-2.5 py-1 rounded text-xs font-medium ${
+                stat === t.key ? 'bg-[var(--pb-accent)] text-black' : 'bg-pb-surface2 text-pb-dim hover:text-pb-text'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="pb-card overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="pb-hairline-b">
+            <tr>
+              <th className="px-3 py-2 text-left font-mono text-[10px] uppercase tracking-wide text-pb-faint">Season</th>
+              {asGrid ? (
+                <>
+                  {columns.map(c => (
+                    <th key={c.key}
+                        className="px-3 py-2 text-right font-mono text-[10px] uppercase tracking-wide text-pb-faint whitespace-nowrap">
+                      {c.label}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 text-right font-mono text-[10px] uppercase tracking-wide text-pb-text whitespace-nowrap">
+                    Total
+                  </th>
+                </>
+              ) : (
+                <>
+                  <SortTh label="GP" sKey="games" cur={sortKey} dir={sortDir} onSort={request} />
+                  <SortTh label="Goals" sKey="goals" cur={sortKey} dir={sortDir} onSort={request} />
+                  <SortTh label="BOG" sKey="bogs" cur={sortKey} dir={sortDir} onSort={request} />
+                </>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((s, i) => (
+              <tr key={s.season_id || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2/50`}>
+                <td className="px-3 py-2.5 font-medium whitespace-nowrap">{s.season_name}</td>
+                {asGrid ? (
+                  <>
+                    {columns.map(c => {
+                      const cell = cells.get(`${s.season_id}|${c.key}`)
+                      const v = cell?.[stat]
+                      // A grade the player didn't turn out in that season is a
+                      // dash, not a 0 — "didn't play there" and "played and
+                      // didn't score" are different facts.
+                      return (
+                        <td key={c.key} className="px-3 py-2.5 text-right pb-num">
+                          {v == null ? <span className="text-pb-faintest">—</span> : v}
+                        </td>
+                      )
+                    })}
+                    {/* The season's own total, NOT the sum of the cells: a
+                        season whose grade was never resolved contributes to
+                        the total with no column to sit in, and re-adding the
+                        cells would quietly lose it. */}
+                    <td className="px-3 py-2.5 text-right pb-num font-bold" style={{ color: 'var(--pb-accent)' }}>
+                      {s[stat] ?? 0}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-3 py-2.5 text-right pb-num">{s.games}</td>
+                    <td className="px-3 py-2.5 text-right pb-num font-semibold" style={{ color: 'var(--pb-accent)' }}>{s.goals}</td>
+                    <td className="px-3 py-2.5 text-right pb-num">{s.bogs}</td>
+                  </>
+                )}
+              </tr>
+            ))}
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={asGrid ? columns.length + 2 : 4} className="px-3 py-4 text-center text-pb-faint text-sm">
+                  No seasons recorded yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+          {asGrid && sorted.length > 0 && (
+            <tfoot className="pb-hairline-t">
+              <tr>
+                <td className="px-3 py-2.5 font-mono text-[10px] uppercase tracking-wide text-pb-faint">Career</td>
+                {columns.map(c => (
+                  <td key={c.key} className="px-3 py-2.5 text-right pb-num text-pb-dim">{columnTotals[c.key] || 0}</td>
                 ))}
-              </Fragment>
-            )
-          })}
-          {sorted.length === 0 && (
-            <tr><td colSpan={4} className="px-3 py-4 text-center text-pb-faint text-sm">No seasons recorded yet.</td></tr>
+                <td className="px-3 py-2.5 text-right pb-num font-bold" style={{ color: 'var(--pb-accent)' }}>
+                  {grandTotal}
+                </td>
+              </tr>
+            </tfoot>
           )}
-        </tbody>
-      </table>
+        </table>
+      </div>
     </div>
   )
 }
@@ -268,10 +380,10 @@ export default function PlayerProfile() {
       )}
 
       <div>
-        <SectionTitle right={<span className="hidden sm:inline text-[10px] text-pb-faintest font-mono normal-case tracking-normal">Click a season with a grade split to expand it</span>}>
+        <SectionTitle right={<span className="hidden sm:inline text-[10px] text-pb-faintest font-mono normal-case tracking-normal">One column per grade, with each season's total at the end</span>}>
           Season by season
         </SectionTitle>
-        <SeasonTable seasonRows={seasonRows} gradeRows={gradeRows} />
+        <SeasonGradeTable seasonRows={seasonRows} gradeRows={gradeRows} />
       </div>
 
       <div>
