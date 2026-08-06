@@ -60,7 +60,7 @@ export const SUPER_SECTIONS = [
     items: [
       { to: '/admin/super/clubs', label: 'All Clubs', blurb: 'Onboard clubs, edit plans and subscriptions, sync or remove them.' },
       { to: '/admin/super/marketing', label: 'Club Directory', blurb: 'Prospect clubs, outreach lists and Twenty CRM sync.' },
-      { to: '/admin/super/directory-audiences', label: 'Directory Audiences', blurb: 'Outreach audiences built from prospect activity. Never visible to a club.' },
+      { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
       { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
       { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },
       { to: '/admin/super/crm/targets', label: 'Sales Targets', blurb: 'Revenue and signup goals.' },

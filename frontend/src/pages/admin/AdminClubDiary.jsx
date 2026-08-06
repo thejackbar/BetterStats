@@ -2,13 +2,15 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
-import { FilterPill } from '../../components/admin/ui'
+import { FilterPill, INPUT_CLS, Modal as UiModal } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
 import DiaryGantt from '../../components/admin/clubmanager/DiaryGantt'
 
-const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+// One input look for the whole module — the same class the shared kit's
+// TextInput/Select wear, so a hand-built control here matches a kit one.
+const inp = INPUT_CLS
 const FREQUENCIES = ['annual', 'quarterly', 'monthly', 'once']
 const STATUSES = ['pending', 'in_progress', 'done', 'not_applicable']
 const STATUS_LABELS = { pending: 'Pending', in_progress: 'In Progress', done: 'Done', not_applicable: 'N/A' }
@@ -85,7 +87,7 @@ function FilterBar({ f, setF, categories }) {
       </div>
       {(f.search || f.category || f.frequency || f.month || f.monthFrom || f.monthTo) && (
         <button onClick={() => setF({ search: '', category: '', frequency: '', month: '', monthFrom: '', monthTo: '' })}
-          className="font-mono text-[10px] text-pb-faint hover:text-pb-text">clear</button>
+          className="pb-btn pb-btn-sm pb-btn-quiet">clear</button>
       )}
     </div>
   )
@@ -262,17 +264,13 @@ function TaskPlanCard({ task, members, roles, onPatch, defaultOpen = false }) {
 }
 
 // ── Modal (Calendar item click) ──────────────────────────────────────────────
+// The house dialog, kept behind this screen's original prop shape so every call
+// site below is unchanged.
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center p-4 overflow-y-auto bg-black/50" onClick={onClose}>
-      <div className="pb-card bg-pb-surface w-full max-w-lg mt-16 p-5" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display font-bold text-pb-text text-lg">{title}</h3>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text text-lg">×</button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <UiModal onClose={onClose} title={title} width={520}>
+      <div className="pb-4">{children}</div>
+    </UiModal>
   )
 }
 
@@ -352,7 +350,7 @@ function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, se
           </select>
         </div>
         <button onClick={onGenerate} disabled={generating}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {generating ? 'Generating…' : 'Generate this season'}
         </button>
       </div>
@@ -411,7 +409,7 @@ function GanttTab({ plan, members, roles, categories, year }) {
         </label>
         {(search || frequency || memberId || thirdParty) && (
           <button onClick={() => { setSearch(''); setFrequency(''); setMemberId(''); setThirdParty('') }}
-            className="font-mono text-[10px] text-pb-faint hover:text-pb-text pb-2">clear</button>
+            className="pb-btn pb-btn-sm pb-btn-quiet">clear</button>
         )}
       </div>
       <DiaryGantt tasks={tasks} categories={categories} roles={roles} members={members} year={year} />
@@ -471,7 +469,7 @@ function DefinitionFields({ form, setForm, categories, roles, onCreateCategory }
         <input className={`${inp} w-44`} placeholder="+ new category" value={newCategory} onChange={e => setNewCategory(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat() } }} />
         <button type="button" onClick={addCat} disabled={addingCat || !newCategory.trim()}
-          className="px-2.5 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40">{addingCat ? '…' : 'Add category'}</button>
+          className="pb-btn pb-btn-sm pb-btn-secondary">{addingCat ? '…' : 'Add category'}</button>
       </div>
       <div className="flex flex-wrap gap-2">
         <select className={`${inp} w-36`} value={form.frequency} onChange={e => setForm(f => ({ ...f, frequency: e.target.value }))}>
@@ -534,7 +532,7 @@ function NewDefinitionForm({ categories, roles, onCreated, onCreateCategory }) {
       <DefinitionFields form={form} setForm={setForm} categories={categories} roles={roles} onCreateCategory={onCreateCategory} />
       <div className="flex justify-end mt-3">
         <button onClick={submit} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Adding…' : '+ Template'}
         </button>
       </div>
@@ -566,10 +564,10 @@ function DefinitionEditForm({ def, categories, roles, onSaved, onCancel, onCreat
       <DefinitionFields form={form} setForm={setForm} categories={categories} roles={roles} onCreateCategory={onCreateCategory} />
       <div className="flex gap-2 mt-3">
         <button onClick={save} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Saving…' : 'Save'}
         </button>
-        <button onClick={onCancel} className="px-4 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Cancel</button>
+        <button onClick={onCancel} className="pb-btn pb-btn-secondary">Cancel</button>
       </div>
     </div>
   )
@@ -636,7 +634,7 @@ function DependencyEditor({ def, definitions, onChanged }) {
           {options.map(d => <option key={d.id} value={d.id}>{d.title}</option>)}
         </select>
         <button onClick={add} disabled={busy || !addId}
-          className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap">
+          className="pb-btn pb-btn-sm pb-btn-secondary">
           {busy ? '…' : 'Add'}
         </button>
       </div>
@@ -673,10 +671,10 @@ function DefinitionRow({ def, definitions, categories, roles, onChanged, onCreat
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={() => setExpanded(x => !x)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">{expanded ? 'Less' : 'Deps'}</button>
-          <button onClick={() => setEditing(true)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Edit</button>
-          <button onClick={() => setShowHistory(x => !x)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">History</button>
-          <button onClick={archive} className="font-mono text-[10px] text-pb-faint hover:text-pb-red">Archive</button>
+          <button onClick={() => setExpanded(x => !x)} className="pb-btn pb-btn-sm pb-btn-quiet">{expanded ? 'Less' : 'Deps'}</button>
+          <button onClick={() => setEditing(true)} className="pb-btn pb-btn-sm pb-btn-quiet">Edit</button>
+          <button onClick={() => setShowHistory(x => !x)} className="pb-btn pb-btn-sm pb-btn-quiet">History</button>
+          <button onClick={archive} className="pb-btn pb-btn-sm pb-btn-danger">Archive</button>
         </div>
       </div>
       {expanded && <DependencyEditor def={def} definitions={definitions} onChanged={onChanged} />}
@@ -714,8 +712,8 @@ function CategoryManager({ categories, onChanged }) {
             <input type="color" className="w-8 h-8 rounded bg-transparent border pb-hairline cursor-pointer shrink-0"
               value={r.color} onChange={e => setRows(m => ({ ...m, [c.id]: { ...r, color: e.target.value } }))} />
             <input className={`${inp} flex-1`} value={r.name} onChange={e => setRows(m => ({ ...m, [c.id]: { ...r, name: e.target.value } }))} />
-            <button onClick={() => save(c)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">Save</button>
-            <button onClick={() => del(c)} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-red">Delete</button>
+            <button onClick={() => save(c)} className="pb-btn pb-btn-sm pb-btn-secondary">Save</button>
+            <button onClick={() => del(c)} className="pb-btn pb-btn-sm pb-btn-danger">Delete</button>
           </div>
         )
       })}
@@ -749,11 +747,11 @@ function TemplatesTab({ definitions, categories, roles, onReload, onCreateCatego
     <div>
       <div className="flex justify-end gap-2 mb-3">
         <button onClick={seedCats} disabled={seedingCats}
-          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          className="pb-btn pb-btn-secondary">
           {seedingCats ? 'Adding…' : '+ Categories (8)'}
         </button>
         <button onClick={seedTasks} disabled={seeding}
-          className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+          className="pb-btn pb-btn-secondary">
           {seeding ? 'Adding…' : '+ Starter set (11 tasks)'}
         </button>
       </div>

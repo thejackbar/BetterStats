@@ -47,10 +47,10 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, module: 'comms', exact: true, badge: counts.drafts },
-    // An audience is not a place you go — it is the list or segment picked
-    // while writing an email. What a club maintains is the pieces an email is
-    // built from, so those get the items and the segment editor is named for
-    // what it edits.
+    // An audience is not a place you go. It is the slot on an email, and what
+    // fills it is a segment or a list — so those two get the items, named for
+    // what they are. Both carry an "Email these N now" button that opens a
+    // draft already addressed to them.
     { to: '/admin/comms/lists', label: 'Lists', icon: 'teams', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/segments', label: 'Segments', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet', cap: CAP.MANAGE_COMMS, module: 'comms' },
@@ -84,10 +84,13 @@ function buildNav({ modules, counts, storefront }) {
 // make it easy to forget you had switched. What is left is the two things the
 // platform surface is actually for.
 //
-// Segments points at the super-admin Directory Audiences screen rather than the
-// club Audiences screen. That is the whole scope rule in one line: the two field
-// sets live in two components, and which one you get is a route, not a runtime
-// flag inside one screen.
+// Segments is the same URL as a club's, /admin/comms/segments — SegmentsRoute
+// mounts the directory builder instead of the club one while acting as the
+// outreach org. That is the whole scope rule in one line: the two field sets
+// live in two components, and which one you get is a route, not a runtime flag
+// inside one screen. The item used to point out of the module entirely, at
+// /admin/super/directory-audiences, which dropped you on the plain admin chrome
+// halfway through a Clubhouse task.
 function buildInternalNav({ counts }) {
   return [
     { to: '/admin/clubhouse', label: 'Today', icon: 'overview', exact: true },
@@ -98,7 +101,7 @@ function buildInternalNav({ counts }) {
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', exact: true, badge: counts.drafts },
     { to: '/admin/comms/lists', label: 'Lists', icon: 'teams' },
-    { to: '/admin/super/directory-audiences', label: 'Segments', icon: 'filter' },
+    { to: '/admin/comms/segments', label: 'Segments', icon: 'filter' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet' },
     { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings' },
   ]

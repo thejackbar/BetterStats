@@ -1,12 +1,39 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Badge, Caption, SectionHeading, Note, Empty, INPUT_CLS } from '../../../components/admin/ui'
 import { ContactDetailModal } from './CommsContacts'
 import { FACETS, matchesQuery, matchesFilters, facetOptionsFrom, MultiSelect, matchesSuppressed, SuppressedToggle,
   emptyModes, matchesModes, anyMode, DirectoryFilterChips, searchHint,
   emptyEngagementFilter, matchesEngagementScore, topClubIds, matchesTopClubs, EngagementFilterControls,
   matchesUnsubscribed, UnsubscribedToggle, unsubscribedTitle } from './audience'
+
+// Start an email already addressed to a list.
+//
+// The same move Segments makes with "Email these N now": create the draft with
+// the audience already set and open it, rather than sending the officer to the
+// Emails list to pick again the list they were just looking at. `saved_list` is
+// the audience type the composer's own dropdown writes for a list, so the draft
+// opens with it already chosen and counted.
+export function useEmailList() {
+  const navigate = useNavigate()
+  const [busyId, setBusyId] = useState(null)
+  const [error, setError] = useState('')
+  const emailList = useCallback(async (list) => {
+    if (!list?.id) return
+    setBusyId(list.id); setError('')
+    try {
+      const c = await api.commsCreateCampaign({
+        subject: '', body_html: '',
+        audience: { type: 'saved_list', list_id: list.id },
+      })
+      navigate(`/admin/comms/${c.id}`, { state: { skipIntro: true } })
+    } catch (e) { setError(e.message); setBusyId(null) }
+  }, [navigate])
+  return { emailList, busyId, error }
+}
 
 // Dropdown for choosing one or more target lists to copy the selection into.
 function CopyToLists({ lists, currentId, onCopy }) {
@@ -23,17 +50,14 @@ function CopyToLists({ lists, currentId, onCopy }) {
   const go = async () => { await onCopy(picked); setPicked([]); setOpen(false) }
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen(o => !o)}
-        className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent">
-        Copy to lists ▾
-      </button>
+      <Button size="sm" onClick={() => setOpen(o => !o)}>Copy to lists ▾</Button>
       {open && (
-        <div className="absolute z-30 mt-1 right-0 w-64 max-h-80 overflow-auto rounded-lg border pb-hairline bg-pb-surface2 shadow-lg p-2">
+        <div className="absolute z-30 mt-1 right-0 w-64 max-h-80 overflow-auto rounded-lg border border-pb-hairline2 bg-pb-surface2 shadow-lg p-2">
           {targets.length === 0 ? (
             <div className="text-xs text-pb-faint px-1 py-2">No other lists. Create one first.</div>
           ) : (
             <>
-              <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 px-1 mb-1">Copy selected into</div>
+              <Caption className="px-1 mb-1">Copy selected into</Caption>
               {targets.map(l => (
                 <label key={l.id} className="flex items-center gap-2 px-1 py-1 text-xs text-pb-text hover:bg-pb-surface rounded cursor-pointer">
                   <input type="checkbox" className="accent-pb-accent" checked={picked.includes(l.id)} onChange={() => toggle(l.id)} />
@@ -41,11 +65,9 @@ function CopyToLists({ lists, currentId, onCopy }) {
                   <span className="text-pb-faintest">{l.count}</span>
                 </label>
               ))}
-              <button type="button" onClick={go} disabled={!picked.length}
-                className="mt-2 w-full px-2.5 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40"
-                style={{ background: 'var(--pb-accent)' }}>
+              <Button size="sm" variant="primary" onClick={go} disabled={!picked.length} className="mt-2 w-full">
                 Copy to {picked.length || ''} list{picked.length === 1 ? '' : 's'}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -65,8 +87,12 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
           <span className="text-pb-faintest text-[11px] ml-2 truncate">{[c.club, c.state].filter(Boolean).join(' · ')}</span>
         )}
       </button>
-      {c.subscribed === false && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint border border-pb-faint/30 rounded px-1.5 py-0.5 shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}>unsubscribed</span>}
-      {c.suppressed && <span className="font-mono text-[9px] uppercase text-pb-red border border-pb-red/40 rounded px-1.5 py-0.5 shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded">supp</span>}
+      {c.subscribed === false && (
+        <span className="shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}><Badge>Unsubscribed</Badge></span>
+      )}
+      {c.suppressed && (
+        <span className="shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded"><Badge toneKey="block">Supp</Badge></span>
+      )}
       {action}
     </div>
   )
@@ -75,13 +101,13 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
 // Prominent section header that reads in both light and dark themes.
 function SectionHeader({ title, count, allChecked, onToggleAll, hasRows }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-md bg-pb-surface2 border pb-hairline mb-2">
+    <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-pb-surface2 border border-pb-hairline mb-2">
       <div className="flex items-center gap-2.5 min-w-0">
         {hasRows && (
           <input type="checkbox" className="accent-pb-accent shrink-0" checked={allChecked} onChange={onToggleAll}
             title="Select all shown in this section" />
         )}
-        <span className="text-pb-text text-sm font-semibold uppercase tracking-wide2 truncate">
+        <span className="font-display text-pb-text text-[13.5px] font-semibold truncate">
           {title} <span className="text-pb-faint font-normal">({count})</span>
         </span>
       </div>
@@ -89,7 +115,7 @@ function SectionHeader({ title, count, allChecked, onToggleAll, hasRows }) {
   )
 }
 
-function ListDetail({ list, lists, onChanged }) {
+function ListDetail({ list, lists, onChanged, onEmail, emailing }) {
   const [memberIds, setMemberIds] = useState(null)
   const [contacts, setContacts] = useState(null)
   const [query, setQuery] = useState('')
@@ -186,17 +212,22 @@ function ListDetail({ list, lists, onChanged }) {
 
   return (
     <div className="pb-card p-4">
-      <div className="flex items-center justify-between gap-3 mb-3">
-        <div className="text-sm text-pb-text font-medium">{list.name}</div>
-        <a href={api.commsListExportCsvUrl(list.id)}
-          className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent shrink-0"
-          title="Export this list to CSV">Export CSV</a>
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <SectionHeading>{list.name}</SectionHeading>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button size="sm" variant="primary" onClick={() => onEmail?.(list)}
+            disabled={!list.count || !!emailing}
+            title={list.count ? '' : 'This list has nobody in it yet'}>
+            {emailing === list.id ? 'Opening…' : `Email these ${list.count ?? 0} now`}
+          </Button>
+          <Button size="sm" as="a" href={api.commsListExportCsvUrl(list.id)} title="Export this list to CSV">Export CSV</Button>
+        </div>
       </div>
 
       {/* Search + filters */}
       <input value={query} onChange={e => setQuery(e.target.value)}
         placeholder={searchHint(showDirChips)}
-        className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
+        className={`${INPUT_CLS} mb-2`} />
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {FACETS.filter(f => facetOptions[f.key].length > 0).map(f => (
           <MultiSelect key={f.key} label={f.label} options={facetOptions[f.key]}
@@ -212,44 +243,41 @@ function ListDetail({ list, lists, onChanged }) {
       </div>
       {showDirChips && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Directory</span>
+          <Caption className="mr-1">Directory</Caption>
           <DirectoryFilterChips modes={modes} onChange={setModes} />
           <span className="text-pb-faintest text-[10px] ml-1">tap once to exclude, twice to include</span>
         </div>
       )}
       {showDirChips && (
         <div className="flex flex-wrap items-center gap-1.5 mb-3">
-          <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Engagement</span>
+          <Caption className="mr-1">Engagement</Caption>
           <EngagementFilterControls value={engagement} onChange={setEngagement} hasDirectory={showDirChips} />
         </div>
       )}
 
       {/* Selection action bar */}
       <div className="flex flex-wrap items-center gap-2 mb-3 pb-3 pb-hairline-b">
-        <button onClick={selectAllFiltered} disabled={!visible.length}
-          className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-40">
+        <Button size="sm" onClick={selectAllFiltered} disabled={!visible.length}>
           Select all filtered ({visible.length})
-        </button>
+        </Button>
         {selected.size > 0 ? (
           <>
-            <span className="text-pb-text text-xs font-medium">{selected.size} selected</span>
-            <button onClick={() => doAdd(selCandidateIds)} disabled={busy || !selCandidateIds.length}
-              className="px-2.5 py-1.5 rounded text-xs font-medium text-white disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
+            <span className="text-pb-text text-[12.5px] font-semibold">{selected.size} selected</span>
+            <Button size="sm" variant="primary" onClick={() => doAdd(selCandidateIds)} disabled={busy || !selCandidateIds.length}>
               Add to list ({selCandidateIds.length})
-            </button>
-            <button onClick={() => doRemove(selMemberIds)} disabled={busy || !selMemberIds.length}
-              className="px-2.5 py-1.5 rounded text-xs font-medium border pb-hairline text-pb-text hover:text-pb-red hover:border-pb-red disabled:opacity-40">
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => doRemove(selMemberIds)} disabled={busy || !selMemberIds.length}>
               Remove from list ({selMemberIds.length})
-            </button>
+            </Button>
             <CopyToLists lists={lists} currentId={list.id} onCopy={doCopy} />
-            <button onClick={clearSelection} className="text-xs text-pb-faint hover:text-pb-text">Clear selection</button>
+            <Button size="sm" variant="quiet" onClick={clearSelection}>Clear selection</Button>
           </>
         ) : (
-          <span className="text-pb-faintest text-xs">Tick contacts to add, remove or copy them in bulk.</span>
+          <span className="text-pb-faintest text-[12.5px]">Tick contacts to add, remove or copy them in bulk.</span>
         )}
       </div>
 
-      {note && <div className="text-pb-accent text-xs mb-3">{note}</div>}
+      {note && <Note className="mb-3">{note}</Note>}
 
       {/* IN THIS LIST */}
       <SectionHeader title="In this list" count={shownMembers.length}
@@ -264,7 +292,7 @@ function ListDetail({ list, lists, onChanged }) {
           {shownMembers.map((m, i) => (
             <ContactRow key={m.id} c={m} last={i === 0} onDetails={setDetailId}
               checked={isChecked(m.id)} onCheck={() => toggleOne(m.id)}
-              action={<button onClick={() => doRemove([m.id])} disabled={busy} className="text-pb-faint hover:text-pb-red text-xs px-1 shrink-0 disabled:opacity-50">Remove</button>} />
+              action={<Button size="sm" variant="danger" onClick={() => doRemove([m.id])} disabled={busy}>Remove</Button>} />
           ))}
         </div>
       )}
@@ -282,7 +310,7 @@ function ListDetail({ list, lists, onChanged }) {
           {candidates.map((c, i) => (
             <ContactRow key={c.id} c={c} last={i === 0} onDetails={setDetailId}
               checked={isChecked(c.id)} onCheck={() => toggleOne(c.id)}
-              action={<button onClick={() => doAdd([c.id])} disabled={busy} className="px-2.5 py-1 rounded text-xs font-medium text-white disabled:opacity-50 shrink-0" style={{ background: 'var(--pb-accent)' }}>Add</button>} />
+              action={<Button size="sm" variant="primary" onClick={() => doAdd([c.id])} disabled={busy}>Add</Button>} />
           ))}
         </div>
       )}
@@ -292,7 +320,7 @@ function ListDetail({ list, lists, onChanged }) {
   )
 }
 
-function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
+function ListRow({ l, selected, onToggle, onDelete, onRenamed, onEmail, emailing, first }) {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(l.name)
   const [err, setErr] = useState('')
@@ -309,24 +337,28 @@ function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
           <div className="flex items-center gap-2">
             <input autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setEditing(false); setName(l.name) } }}
-              className="flex-1 px-2 py-1 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-            <button onClick={save} className="text-xs font-medium px-2 py-1 rounded text-white" style={{ background: 'var(--pb-accent)' }}>Save</button>
-            <button onClick={() => { setEditing(false); setName(l.name) }} className="text-pb-faint text-xs hover:text-pb-text">Cancel</button>
+              className={INPUT_CLS} />
+            <Button size="sm" variant="primary" onClick={save}>Save</Button>
+            <Button size="sm" variant="quiet" onClick={() => { setEditing(false); setName(l.name) }}>Cancel</Button>
           </div>
-          {err && <div className="text-pb-red text-xs mt-1">{err}</div>}
+          {err && <div className="text-pb-red text-[12px] mt-1">{err}</div>}
         </div>
       ) : (
         <button onClick={() => onToggle(l)} className="text-left min-w-0 flex-1">
-          <div className="text-pb-text text-sm truncate">{l.name}</div>
-          <div className="text-pb-faintest text-xs mt-0.5">{l.count} contact{l.count === 1 ? '' : 's'}</div>
+          <div className="text-pb-text text-[13.5px] font-semibold truncate">{l.name}</div>
+          <div className="font-mono text-[9.5px] uppercase text-pb-faint mt-0.5">{l.count} contact{l.count === 1 ? '' : 's'}</div>
         </button>
       )}
       {!editing && (
-        <div className="flex items-center gap-3 shrink-0">
-          <button onClick={() => setEditing(true)} className="text-pb-faint text-xs hover:text-pb-text">Rename</button>
-          <a href={api.commsListExportCsvUrl(l.id)} className="text-pb-faint text-xs hover:text-pb-text" title="Export this list to CSV">Export CSV</a>
-          <button onClick={() => onToggle(l)} className="text-pb-faint text-xs hover:text-pb-text">{selected ? 'Close' : 'Manage'}</button>
-          <button onClick={() => onDelete(l)} className="text-pb-faint text-xs hover:text-pb-red">Delete</button>
+        <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
+          <Button size="sm" variant="primary" onClick={() => onEmail(l)} disabled={!l.count || !!emailing}
+            title={l.count ? '' : 'This list has nobody in it yet'}>
+            {emailing === l.id ? 'Opening…' : `Email these ${l.count} now`}
+          </Button>
+          <Button size="sm" variant="quiet" onClick={() => setEditing(true)}>Rename</Button>
+          <Button size="sm" variant="quiet" as="a" href={api.commsListExportCsvUrl(l.id)} title="Export this list to CSV">Export CSV</Button>
+          <Button size="sm" variant="quiet" onClick={() => onToggle(l)}>{selected ? 'Close' : 'Manage'}</Button>
+          <Button size="sm" variant="quiet-danger" onClick={() => onDelete(l)}>Delete</Button>
         </div>
       )}
     </div>
@@ -335,12 +367,13 @@ function ListRow({ l, selected, onToggle, onDelete, onRenamed, first }) {
 
 // One card of list rows. Extracted so the manually-created and auto-generated
 // sections render identically.
-function ListsCard({ rows, selected, onToggle, onDelete, onRenamed }) {
+function ListsCard({ rows, selected, onToggle, onDelete, onRenamed, onEmail, emailing }) {
   return (
     <div className="pb-card overflow-hidden mb-4">
       {rows.map((l, i) => (
         <ListRow key={l.id} l={l} first={i === 0} selected={selected?.id === l.id}
-          onToggle={onToggle} onDelete={onDelete} onRenamed={onRenamed} />
+          onToggle={onToggle} onDelete={onDelete} onRenamed={onRenamed}
+          onEmail={onEmail} emailing={emailing} />
       ))}
     </div>
   )
@@ -348,6 +381,7 @@ function ListsCard({ rows, selected, onToggle, onDelete, onRenamed }) {
 
 export default function CommsLists() {
   const { user } = useAuth()
+  const { emailList, busyId: emailing, error: emailError } = useEmailList()
   const [lists, setLists] = useState(null)
   const [selected, setSelected] = useState(null)
   const [newName, setNewName] = useState('')
@@ -391,51 +425,61 @@ export default function CommsLists() {
   // lists, so their page keeps the single flat list it always had).
   const showSections = !!user?.can_switch_clubs || autoLists.length > 0
 
+  const cardProps = { selected, onToggle: toggle, onDelete: del, onRenamed: rename, onEmail: emailList, emailing }
+
   return (
-    <BetterCommsLayout title="Lists">
-      {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
-      <div className="text-pb-faintest text-sm mb-4 max-w-2xl">
-        A list is a fixed set of contacts you pick by hand (committee, sponsors, a team), the counterpart to a
-        segment. Use a list when the membership won't change on its own.
-      </div>
+    <BetterCommsLayout
+      title="Lists"
+      caption={`Picked by hand · ${lists?.length ?? 0} saved`}
+    >
+      {(error || emailError) && (
+        <Note toneKey="block" className="mb-4 max-w-2xl">{error || emailError}</Note>
+      )}
+      <p className="text-[13px] text-pb-dim mb-4 max-w-2xl leading-relaxed">
+        A list is a fixed set of contacts you pick by hand — the committee, sponsors, one team. Use one when the
+        membership won't change on its own; use a{' '}
+        <Link to="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>segment</Link>
+        {' '}when you'd rather describe the group by a rule. Either can be the audience on an email.
+      </p>
 
       <div className="pb-card p-3 mb-4 flex items-center gap-2 max-w-xl">
         <input value={newName} onChange={e => setNewName(e.target.value)} onKeyDown={e => e.key === 'Enter' && create()}
           placeholder="New list name (e.g. Committee)"
-          className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-        <button onClick={create} className="px-3 py-2 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-          Create
-        </button>
+          className={INPUT_CLS} />
+        <Button variant="primary" onClick={create} disabled={!newName.trim()}>Create</Button>
       </div>
 
       {lists == null ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
+        <Empty>Loading…</Empty>
       ) : lists.length === 0 ? (
-        <div className="text-pb-faintest text-sm">No lists yet.</div>
+        <Empty>No lists yet.</Empty>
       ) : !showSections ? (
-        <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+        <ListsCard rows={manualLists} {...cardProps} />
       ) : (
         <>
-          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mb-2">Your lists</div>
+          <SectionHeading className="mb-2">Your lists</SectionHeading>
           {manualLists.length === 0 ? (
-            <div className="text-pb-faintest text-sm mb-4">No lists you've created by hand yet.</div>
+            <p className="text-[13px] text-pb-faint mb-4">No lists you've created by hand yet.</p>
           ) : (
-            <ListsCard rows={manualLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+            <ListsCard rows={manualLists} {...cardProps} />
           )}
 
-          <div className="text-pb-text text-sm font-semibold uppercase tracking-wide2 mt-6 mb-1">Auto-generated lists</div>
-          <div className="text-pb-faintest text-xs mb-2 max-w-2xl">
-            Lists built for you by other BetterCricket tools. Rename, manage or delete them like any other list.
-          </div>
+          <SectionHeading className="mt-6 mb-1">Auto-generated lists</SectionHeading>
+          <p className="text-[12.5px] text-pb-faint mb-2 max-w-2xl leading-relaxed">
+            Lists built for you by other BetterCricket tools. Rename, manage, email or delete them like any other list.
+          </p>
           {autoLists.length === 0 ? (
-            <div className="text-pb-faintest text-sm mb-4">Nothing here yet.</div>
+            <p className="text-[13px] text-pb-faint mb-4">Nothing here yet.</p>
           ) : (
-            <ListsCard rows={autoLists} selected={selected} onToggle={toggle} onDelete={del} onRenamed={rename} />
+            <ListsCard rows={autoLists} {...cardProps} />
           )}
         </>
       )}
 
-      {selected && <ListDetail list={selected} lists={lists || []} onChanged={load} />}
+      {selected && (
+        <ListDetail list={lists?.find(l => l.id === selected.id) || selected} lists={lists || []}
+          onChanged={load} onEmail={emailList} emailing={emailing} />
+      )}
     </BetterCommsLayout>
   )
 }

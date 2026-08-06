@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
-import { Button, FilterPill, SearchInput, StatCard, StatReadout } from '../../components/admin/ui'
+import {
+  Button, FilterPill, SearchInput, StatCard, StatReadout,
+  Modal, Field, TextInput, Select, TextArea, Checkbox, Note, Badge,
+} from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 
 function sortSeasons(seasons) {
@@ -12,12 +15,9 @@ function sortSeasons(seasons) {
 const money = n => `$${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
 function StatusPill({ status }) {
-  if (status === 'financial')
-    return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">FINANCIAL</span>
-  if (status === 'non_financial')
-    return <span className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5">OWES</span>
-  if (status === 'needs_tier')
-    return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">NEEDS TIER</span>
+  if (status === 'financial') return <Badge toneKey="ok">Financial</Badge>
+  if (status === 'non_financial') return <Badge toneKey="warn">Owes</Badge>
+  if (status === 'needs_tier') return <Badge>Needs tier</Badge>
   return null
 }
 
@@ -25,7 +25,6 @@ function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }
   const toast = useToast()
   const [form, setForm] = useState({ full_name: '', email: '', mobile: '', fee_schedule_id: '', membership_type_id: '' })
   const [busy, setBusy] = useState(false)
-  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
   async function submit() {
     if (!form.full_name.trim()) { toast.error('Name is required'); return }
@@ -42,55 +41,44 @@ function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
-      <div className="bg-pb-surface pb-card w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
-          <h2 className="font-display font-bold text-pb-text">Add member</h2>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
+    <Modal
+      onClose={onClose}
+      title="Add a person"
+      subtitle="For non-playing members (life members, sponsors, ICL). Players who appear in a game are added automatically."
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit} disabled={busy || !form.full_name.trim()}>
+          {busy ? 'Adding…' : 'Add member'}
+        </Button>
+      </>}
+    >
+      <div className="grid gap-3">
+        <Field label="Full name *">
+          <TextInput autoFocus placeholder="Surname, First" value={form.full_name}
+            onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Email">
+            <TextInput value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+          </Field>
+          <Field label="Mobile">
+            <TextInput value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
+          </Field>
         </div>
-        <div className="p-5 space-y-3">
-          <p className="text-pb-faint text-[12px] leading-relaxed">
-            For non-playing members (life members, sponsors, ICL). Players who appear in a game are added automatically.
-          </p>
-          <div>
-            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">FULL NAME</label>
-            <input autoFocus className={inp} placeholder="Surname, First" value={form.full_name}
-              onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">EMAIL</label>
-              <input className={inp} value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-            </div>
-            <div>
-              <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MOBILE</label>
-              <input className={inp} value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
-            </div>
-          </div>
-          <div>
-            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
-            <select className={inp} value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
-              <option value="">— Needs tier —</option>
-              {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MEMBERSHIP TYPE</label>
-            <select className={inp} value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-              <option value="">— None —</option>
-              {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
-          <button onClick={submit} disabled={busy}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ADDING…' : 'ADD MEMBER'}
-          </button>
-        </div>
+        <Field label="Tier">
+          <Select value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
+            <option value="">— Needs tier —</option>
+            {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+        </Field>
+        <Field label="Membership type">
+          <Select value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
+            <option value="">— None —</option>
+            {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </Select>
+        </Field>
       </div>
-    </div>
+    </Modal>
   )
 }
 
@@ -99,7 +87,6 @@ function ImportMembersModal({ seasonId, onClose, onDone }) {
   const [text, setText] = useState('')
   const [preview, setPreview] = useState(null)
   const [busy, setBusy] = useState(false)
-  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
   function onFile(file) { if (!file) return; const rd = new FileReader(); rd.onload = () => { setText(String(rd.result || '')); setPreview(null) }; rd.readAsText(file) }
   async function runPreview() { setBusy(true); try { setPreview(await api.feeMembersImportPreview(text)) } catch (e) { toast.error(e.message) } finally { setBusy(false) } }
@@ -113,45 +100,45 @@ function ImportMembersModal({ seasonId, onClose, onDone }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
-      <div className="bg-pb-surface pb-card w-full max-w-lg max-h-[86vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
-          <h2 className="font-display font-bold text-pb-text">Import members</h2>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
-        </div>
-        <div className="p-5 space-y-3">
-          <p className="text-pb-faint text-[12px] leading-relaxed">
-            Non-playing members (parents, life members, sponsors…). Columns: <span className="font-mono text-[11px]">name, email, mobile, category, roles</span> (only <span className="font-mono text-[11px]">name</span> required). Matched to existing people by name, so a re-run tops up rather than duplicates. Each imported person is opened into this season as “needs tier”. Players are imported in Stats.
-          </p>
-          <input type="file" accept=".csv,text/csv" onChange={e => onFile(e.target.files?.[0])} className="text-pb-dim text-[12px]" />
-          <textarea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} rows={5}
-            placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
-            className={`${inp} font-mono text-[11.5px]`} />
-          {preview && (
-            <div className="bg-pb-surface2/50 border pb-hairline rounded p-3">
-              <div className="text-pb-text text-sm mb-2">{preview.total} row{preview.total === 1 ? '' : 's'}: <b>{preview.new}</b> new, <b>{preview.existing}</b> existing.</div>
-              <div className="max-h-40 overflow-y-auto space-y-1">
-                {preview.rows.map((r, i) => (
-                  <div key={i} className="text-[12px] text-pb-dim flex gap-2 items-baseline">
-                    <span className={`font-mono text-[9px] w-12 shrink-0 ${r.existing ? 'text-pb-amber' : 'text-green-300'}`}>{r.existing ? 'UPDATE' : 'NEW'}</span>
-                    <span className="text-pb-text">{r.name}</span>
-                    {r.category && <span className="font-mono text-[9.5px] text-pb-faint">{r.category}</span>}
-                    {r.roles.length > 0 && <span className="font-mono text-[9.5px]" style={{ color: 'var(--pb-accent)' }}>{r.roles.join(', ')}</span>}
-                    {r.unknown_roles.length > 0 && <span className="font-mono text-[9.5px] text-pb-amber" title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
-                  </div>
-                ))}
+    <Modal
+      onClose={onClose} width={560}
+      title="Import members from CSV"
+      subtitle={<>
+        Non-playing members (parents, life members, sponsors…). Columns:{' '}
+        <span className="font-mono text-[11px]">name, email, mobile, category, roles</span> (only{' '}
+        <span className="font-mono text-[11px]">name</span> required). Matched to existing people by name, so a re-run
+        tops up rather than duplicates. Each imported person is opened into this season as “needs tier”. Players are
+        imported in Stats.
+      </>}
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        {!preview
+          ? <Button variant="primary" onClick={runPreview} disabled={busy || !text.trim()}>{busy ? 'Reading…' : 'Preview'}</Button>
+          : <Button variant="primary" onClick={runImport} disabled={busy || preview.total === 0}>{busy ? 'Importing…' : `Import ${preview.total}`}</Button>}
+      </>}
+    >
+      <input type="file" accept=".csv,text/csv" onChange={e => onFile(e.target.files?.[0])}
+        className="block text-pb-dim text-[12.5px] mb-2.5" />
+      <TextArea value={text} onChange={e => { setText(e.target.value); setPreview(null) }} rows={5}
+        placeholder={'name,email,mobile,category,roles\nJane Doe,jane@x.com,0400000000,parent,"Canteen Manager, First Aid Officer"'}
+        className="font-mono !text-[11.5px] resize-y" />
+      {preview && (
+        <div className="mt-3 bg-pb-surface2 border border-pb-hairline2 rounded-lg p-3">
+          <div className="text-pb-text text-[13px] mb-2">{preview.total} row{preview.total === 1 ? '' : 's'}: <b>{preview.new}</b> new, <b>{preview.existing}</b> existing.</div>
+          <div className="max-h-40 overflow-y-auto pb-scroll space-y-1">
+            {preview.rows.map((r, i) => (
+              <div key={i} className="text-[12px] text-pb-dim flex gap-2 items-baseline">
+                <span className={`font-mono text-[9px] w-12 shrink-0 ${r.existing ? 'text-pb-amber' : 'text-green-300'}`}>{r.existing ? 'UPDATE' : 'NEW'}</span>
+                <span className="text-pb-text">{r.name}</span>
+                {r.category && <span className="font-mono text-[9.5px] text-pb-faint">{r.category}</span>}
+                {r.roles.length > 0 && <span className="font-mono text-[9.5px]" style={{ color: 'var(--pb-accent-ink)' }}>{r.roles.join(', ')}</span>}
+                {r.unknown_roles.length > 0 && <span className="font-mono text-[9.5px] text-pb-amber" title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
               </div>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
-        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
-          {!preview
-            ? <button onClick={runPreview} disabled={busy || !text.trim()} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>{busy ? 'READING…' : 'PREVIEW'}</button>
-            : <button onClick={runImport} disabled={busy || preview.total === 0} className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>{busy ? 'IMPORTING…' : `IMPORT ${preview.total}`}</button>}
-        </div>
-      </div>
-    </div>
+      )}
+    </Modal>
   )
 }
 
@@ -167,35 +154,23 @@ function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
       onSaved()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
-  const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
-      <div className="bg-pb-surface pb-card w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
-          <h2 className="font-display font-bold text-pb-text">Set tier for {memberIds.length} member{memberIds.length === 1 ? '' : 's'}</h2>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
-        </div>
-        <div className="p-5 space-y-3">
-          <p className="text-pb-faint text-[12px] leading-relaxed">
-            Updates each member's tier for this season — and carries the new tier forward as their default for next season's rollover.
-          </p>
-          <div>
-            <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
-            <select autoFocus className={inp} value={tierId} onChange={e => setTierId(e.target.value)}>
-              <option value="">— Clear tier (needs review) —</option>
-              {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
-            </select>
-          </div>
-        </div>
-        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
-          <button onClick={submit} disabled={busy}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'SAVING…' : 'APPLY'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      onClose={onClose}
+      title={`Set tier for ${memberIds.length} member${memberIds.length === 1 ? '' : 's'}`}
+      subtitle="Updates each member's tier for this season, and carries the new tier forward as their default for next season's rollover."
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit} disabled={busy}>{busy ? 'Saving…' : 'Apply'}</Button>
+      </>}
+    >
+      <Field label="Tier">
+        <Select autoFocus value={tierId} onChange={e => setTierId(e.target.value)}>
+          <option value="">— Clear tier (needs review) —</option>
+          {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
+        </Select>
+      </Field>
+    </Modal>
   )
 }
 
@@ -212,34 +187,23 @@ function RolloverModal({ seasonId, fromSeason, onClose, onDone }) {
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" style={{ backdropFilter: 'blur(2px)' }} onClick={onClose}>
-      <div className="bg-pb-surface pb-card w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <div className="px-5 py-3.5 border-b pb-hairline-b flex items-center justify-between">
-          <h2 className="font-display font-bold text-pb-text">Roll over from {fromSeason.name}</h2>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-text">✕</button>
-        </div>
-        <div className="p-5 space-y-3">
-          <p className="text-pb-faint text-[12px] leading-relaxed">
-            Opens this season for every member that was in {fromSeason.name}. Each member's tier is carried across (matched by name
-            against this season's rate card). Make sure you've seeded or copied the rate card first.
-          </p>
-          <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none">
-            <input type="checkbox" checked={includeLeft} onChange={e => setIncludeLeft(e.target.checked)} />
-            Include "Left Club" tiers (default: skipped)
-          </label>
-          <p className="font-mono text-[10px] text-pb-faintest leading-relaxed">
-            Members who already exist in this season are skipped. Payments stay with the original season.
-          </p>
-        </div>
-        <div className="px-5 py-3.5 border-t pb-hairline-t flex justify-end gap-2">
-          <button onClick={onClose} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
-          <button onClick={go} disabled={busy}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-            {busy ? 'ROLLING OVER…' : 'ROLL OVER'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Modal
+      onClose={onClose}
+      title={`Roll over from ${fromSeason.name}`}
+      subtitle={`Opens this season for every member that was in ${fromSeason.name}. Each member's tier is carried across, matched by name against this season's rate card, so seed or copy the rate card first.`}
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={go} disabled={busy}>{busy ? 'Rolling over…' : 'Roll over'}</Button>
+      </>}
+    >
+      <Checkbox checked={includeLeft} onChange={setIncludeLeft}>
+        Include “Left club” tiers
+        <span className="text-pb-faintest"> · skipped by default</span>
+      </Checkbox>
+      <Note toneKey="calm" className="mt-3.5">
+        Members who already exist in this season are skipped. Payments stay with the original season.
+      </Note>
+    </Modal>
   )
 }
 
@@ -302,7 +266,6 @@ export default function AdminFeesMembers() {
   }, [data, q, needsTierOnly, owesOnly])
 
   const s = data?.summary || {}
-  const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 
   // Header slots: the title, its live count, the filters and the primary action
   // all belong to the shell's sticky header now, which is why the old page-level
@@ -333,9 +296,9 @@ export default function AdminFeesMembers() {
     ),
     actions: (
       <>
-        <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
+        <Select value={seasonId} onChange={e => setSeasonId(e.target.value)} className="!w-auto max-w-[190px]">
           {seasons.map(se => <option key={se.id} value={se.id}>{se.name}</option>)}
-        </select>
+        </Select>
         {previousSeason && <Button size="sm" onClick={() => setShowRollover(true)} disabled={!seasonId}>Roll over</Button>}
         <Button size="sm" onClick={() => setShowImport(true)} disabled={!seasonId}>Import</Button>
         <Button variant="primary" onClick={() => setShowAdd(true)} disabled={!seasonId}>Add member</Button>
@@ -443,15 +406,15 @@ export default function AdminFeesMembers() {
                               <Link to={`/admin/fees/member/${m.member_id}?season=${seasonId}`}
                                 className="text-pb-text text-sm hover:text-pb-accent transition-colors inline-flex items-center gap-1.5">
                                 {m.full_name}
-                                {!m.is_linked && <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1 py-px">MANUAL</span>}
+                                {!m.is_linked && <Badge>Manual</Badge>}
                               </Link>
                             </td>
                             <td className="py-2.5 pr-3">
                               <span className="text-pb-dim text-[12px]">
                                 {membershipTypes.find(t => t.id === m.membership_type_id)?.name || '—'}
                               </span>
-                              {m.is_life_member && <span className="ml-1.5 font-mono text-[8px] tracking-wide2 text-pb-accent border border-pb-accent/40 rounded px-1 py-px">LIFE</span>}
-                              {m.is_honorary && <span className="ml-1.5 font-mono text-[8px] tracking-wide2 text-pb-faint border pb-hairline rounded px-1 py-px">HON.</span>}
+                              {m.is_life_member && <Badge toneKey="accent" className="ml-1.5">Life</Badge>}
+                              {m.is_honorary && <Badge className="ml-1.5">Honorary</Badge>}
                             </td>
                             <td className="py-2.5 pr-3">
                               {m.needs_tier
@@ -466,8 +429,9 @@ export default function AdminFeesMembers() {
                             </td>
                             <td className="py-2.5 pr-5 text-right whitespace-nowrap">
                               {m.in_credit && (
-                                <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5 mr-1.5"
-                                  title="In credit toward future games">+{money(m.credit)}</span>
+                                <span title="In credit toward future games" className="mr-1.5 inline-block">
+                                  <Badge toneKey="ok">+{money(m.credit)}</Badge>
+                                </span>
                               )}
                               <StatusPill status={m.status} />
                             </td>

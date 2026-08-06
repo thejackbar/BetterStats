@@ -12,6 +12,7 @@
 //   1. Mono is for labels and figures. Never a button, heading or body copy.
 //   2. Text on an amber fill is ON_ACCENT — one answer everywhere.
 
+import { useEffect } from 'react'
 import { Icon } from '../../pages/admin/betterselect/ui'
 
 // The single ink colour for text sitting on an accent fill. Deliberately the
@@ -106,6 +107,10 @@ export function Button({
     soft: 'border border-pb-hairline bg-pb-surface2 text-pb-text hover:border-pb-hairline2',
     danger: 'border border-pb-red/40 bg-transparent text-pb-red hover:bg-pb-red/10',
     quiet: 'border border-transparent bg-transparent text-pb-faint hover:text-pb-text',
+    // A destructive action sitting in a row of quiet ones. Same weight as its
+    // neighbours until you reach for it — a bordered Delete among three
+    // borderless actions reads as the important one, which it is not.
+    'quiet-danger': 'border border-transparent bg-transparent text-pb-faint hover:text-pb-red',
   }
   const accentStyle = variant === 'primary' ? { background: 'var(--pb-accent)', color: ON_ACCENT } : undefined
   return (
@@ -159,7 +164,10 @@ export function FilterPill({ active, onClick, children, warn = false, count, cla
 
 /* ── Inputs ──────────────────────────────────────────────────────────── */
 
-const INPUT_CLS =
+// Exported so a screen that still builds an input by hand (a date cell in a
+// table, a width-constrained control inside a row) dresses it the same way
+// rather than inventing a fifth padding/radius pair.
+export const INPUT_CLS =
   'w-full bg-pb-surface2 border border-pb-hairline2 rounded-lg px-3 py-2 text-[13.5px] text-pb-text outline-none transition-colors placeholder:text-pb-faintest focus:border-pb-accent'
 
 export function TextInput({ className = '', ...rest }) {
@@ -167,14 +175,37 @@ export function TextInput({ className = '', ...rest }) {
 }
 
 export function Select({ className = '', children, ...rest }) {
-  return <select className={`${INPUT_CLS} ${className}`} {...rest}>{children}</select>
+  return <select className={`${INPUT_CLS} cursor-pointer ${className}`} {...rest}>{children}</select>
 }
 
-export function Field({ label, children, className = '' }) {
+export function TextArea({ className = '', ...rest }) {
+  return <textarea className={`${INPUT_CLS} min-h-[80px] leading-[1.55] ${className}`} {...rest} />
+}
+
+export function Field({ label, children, hint, className = '' }) {
   return (
     <label className={`block ${className}`}>
       {label && <FieldLabel>{label}</FieldLabel>}
       {children}
+      {hint && <div className="text-[11.5px] text-pb-faintest mt-1 leading-[1.5]">{hint}</div>}
+    </label>
+  )
+}
+
+// A checkbox and its label as one target. The label is body font, not mono —
+// it is a sentence the officer reads, not a column heading.
+export function Checkbox({ checked, onChange, children, hint, disabled = false, className = '' }) {
+  return (
+    <label className={`flex items-start gap-2.5 text-[13px] text-pb-dim ${disabled ? 'opacity-50' : 'cursor-pointer'} ${className}`}>
+      <input
+        type="checkbox" checked={!!checked} disabled={disabled}
+        onChange={e => onChange?.(e.target.checked, e)}
+        className="mt-0.5 accent-pb-accent cursor-pointer shrink-0"
+      />
+      <span className="min-w-0">
+        {children}
+        {hint && <span className="block text-[11.5px] text-pb-faintest mt-0.5 leading-[1.5]">{hint}</span>}
+      </span>
     </label>
   )
 }
@@ -385,6 +416,65 @@ export function Cell({ children, num = false, head = false, first = false, last 
 }
 
 /* ── Overlays ────────────────────────────────────────────────────────── */
+
+// The one dialog in BetterClubhouse, lifted from the Directory's "+ Add person"
+// so every modal in the module reads the same: a 0.55 scrim, a surface card on
+// a 12px radius with the stronger hairline, a 17px title with an optional
+// sentence under it, and the actions right-aligned in a footer that ends in the
+// one primary button.
+//
+// `onClose` fires on the scrim, on Escape and on the ✕ — a dialog you can only
+// leave by finding the Cancel button is the thing this replaces. Pass
+// `dismissable={false}` for a step that must be finished or explicitly
+// cancelled (a running import), which leaves the ✕ and Cancel as the only ways
+// out.
+export function Modal({
+  open = true, onClose, title, subtitle, footer, width = 460,
+  dismissable = true, children, className = '',
+}) {
+  useEffect(() => {
+    if (!open || !dismissable) return
+    const onKey = e => { if (e.key === 'Escape') onClose?.() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [open, dismissable, onClose])
+
+  if (!open) return null
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-5"
+      style={{ background: 'rgba(0,0,0,0.55)' }}
+      onClick={dismissable ? e => { if (e.target === e.currentTarget) onClose?.() } : undefined}
+      role="dialog" aria-modal="true"
+    >
+      <div
+        className={`ch-rise bg-pb-surface border border-pb-hairline2 rounded-xl w-full flex flex-col max-h-[88vh] ${className}`}
+        style={{ maxWidth: width, boxShadow: '0 12px 48px rgba(0,0,0,0.45)' }}
+      >
+        {(title || onClose) && (
+          <div className="flex items-start gap-3 px-5 pt-[18px] pb-3 shrink-0">
+            <div className="min-w-0 flex-1">
+              {title && <h2 className="font-display font-bold text-[17px] text-pb-text leading-snug">{title}</h2>}
+              {subtitle && <div className="text-[12.5px] text-pb-faint mt-1 leading-[1.55]">{subtitle}</div>}
+            </div>
+            {onClose && (
+              <button
+                type="button" onClick={onClose} aria-label="Close"
+                className="shrink-0 -mt-1 -mr-1 p-1.5 rounded-lg text-pb-faint hover:text-pb-text hover:bg-pb-surface2 transition-colors"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+        <div className="px-5 pb-1 overflow-y-auto pb-scroll">{children}</div>
+        {footer && (
+          <div className="flex items-center justify-end gap-2 flex-wrap px-5 py-4 mt-1 shrink-0">{footer}</div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 export function Drawer({ width = 440, onClose, children }) {
   return (

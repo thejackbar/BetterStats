@@ -37,7 +37,7 @@ export default function ClubhouseToday() {
       detail: `${money(counts.owed)} outstanding across subs and match fees${counts.kitOwed > 0 ? `, plus ${money(counts.kitOwed)} of issued kit` : ''}.`,
       actions: [
         { label: 'Open accounts', primary: true, to: '/admin/fees' },
-        modules.comms && { label: `Email these ${counts.owing}`, to: '/admin/clubhouse/audiences', state: { audience: 'owing' } },
+        modules.comms && { label: `Email these ${counts.owing}`, to: '/admin/comms/segments', state: { segment: 'owing' } },
       ],
     })
   }

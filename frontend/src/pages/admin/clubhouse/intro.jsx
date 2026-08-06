@@ -141,15 +141,18 @@ export const INTROS = {
     ],
     history: 'Stock charges land here now. Kit used to be owed in the merch ledger, which never met the fee ledger, so nobody could answer "what does this person owe us".',
   },
+  // Keyed 'audiences' on purpose — the key is what marks the introduction as
+  // seen, per person, so renaming it would show this again to everyone who has
+  // already dismissed it. The screen it belongs to is Segments.
   audiences: {
-    title: 'Audiences',
-    lede: 'One way to describe a group of people, and it resolves when you send.',
+    title: 'Segments',
+    lede: 'A group of people described by a rule, worked out again every time you send.',
     points: [
-      'An audience is a set of conditions, not a frozen copy — someone who joins tomorrow is in it tomorrow.',
-      'A hand-picked list is just an audience whose rule is "these people". There is no second mechanism to learn.',
-      'Every audience reports how many people it matches and how many can actually be reached by email.',
+      'A segment is a set of conditions, not a frozen copy — someone who joins tomorrow is in it tomorrow.',
+      'For people picked by hand, use a list instead. A segment is the rule; a list is the roll call.',
+      'When you write an email you choose its audience, and that audience is one of your segments or one of your lists.',
+      'Every segment reports how many people it matches and how many can actually be reached by email.',
     ],
-    history: 'This replaced Contacts, Lists and Segments — three answers to one question, each with its own screen and its own idea of who a person was.',
   },
   inventory: {
     title: 'Inventory',

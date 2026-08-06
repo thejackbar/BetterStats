@@ -225,6 +225,65 @@
   border-radius: 10px;
 }
 .pb-card-2 { background: var(--pb-surface2); }
+
+/* Buttons, as CSS rather than only as the <Button> component in
+   components/admin/ui.jsx.
+ *
+ * Same sizes, radii and tones as that component — this is the version for a
+ * screen that still builds its own <button>/<a> because the element carries
+ * behaviour the component does not wrap (a file-picker trigger, a drag handle,
+ * an <a download>). Reach for <Button> in new code; these exist so an existing
+ * button can be brought onto the house look by changing its class alone,
+ * without touching the handler wired to it.
+ *
+ * `.pb-btn-primary` sets its own ink rather than inheriting one: text on an
+ * amber fill is a single colour in both themes (ON_ACCENT), and `--pb-bg`
+ * — which several screens reached for — is white on a light theme, which is
+ * amber-on-white and unreadable.
+ *
+ * NOT `var(--pb-on-accent)`, deliberately. That token is computed once from the
+ * CLUB's accent, for the public pages, and does not re-derive when a surface
+ * re-points --pb-accent. These buttons live inside ModuleLayout, which re-points
+ * the accent to a FIXED module brand (Clubhouse amber, Stats green, IQ violet) —
+ * none of them club-configurable — so the right ink here is a constant. Using
+ * the token would paint a navy-accented club's white lettering onto the amber
+ * button. If a module brand ever becomes club-configurable, the fix is for
+ * ModuleLayout to emit its own --pb-on-accent via onAccentInk(), not to reach
+ * for the club-level one. */
+.pb-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.pb-btn:disabled, .pb-btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+.pb-btn-sm { padding: 6px 12px; font-size: 12px; }
+.pb-btn-lg { padding: 10px 18px; font-size: 13.5px; }
+
+.pb-btn-primary { background: var(--pb-accent); color: #0a0d14; font-weight: 600; }
+.pb-btn-primary:hover:not(:disabled) { opacity: 0.9; }
+
+.pb-btn-secondary { border-color: var(--pb-hairline2); color: var(--pb-dim); }
+.pb-btn-secondary:hover:not(:disabled) { color: var(--pb-text); }
+
+.pb-btn-soft { border-color: var(--pb-hairline); background: var(--pb-surface2); color: var(--pb-text); }
+.pb-btn-soft:hover:not(:disabled) { border-color: var(--pb-hairline2); }
+
+.pb-btn-danger { border-color: color-mix(in srgb, var(--pb-red) 40%, transparent); color: var(--pb-red-ink); }
+.pb-btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--pb-red) 10%, transparent); }
+
+.pb-btn-quiet { color: var(--pb-faint); }
+.pb-btn-quiet:hover:not(:disabled) { color: var(--pb-text); }
+
 .pb-hairline-t { border-top: 1px solid var(--pb-hairline); }
 .pb-hairline-b { border-bottom: 1px solid var(--pb-hairline); }
 .pb-hairline-r { border-right: 1px solid var(--pb-hairline); }

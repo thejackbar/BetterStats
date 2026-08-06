@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Caption, SectionHeading, Note, Badge, Empty, FilterPill, INPUT_CLS } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
 const REQUEST_TEMPLATE_EMAIL = 'support@bettersports.com.au'
@@ -48,13 +49,9 @@ function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
   return (
     <div className="mt-4 pt-4 pb-hairline-t">
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-        <span className="text-pb-faintest text-[11px] uppercase tracking-wide2 mr-1">Recipients</span>
+        <Caption className="mr-1">Recipients</Caption>
         {TABS.map(([v, label]) => (
-          <button key={v} type="button" onClick={() => setTab(v)}
-            className={`px-2.5 py-1 rounded text-xs border pb-hairline ${tab === v ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
-            style={tab === v ? { background: 'var(--pb-accent)' } : undefined}>
-            {label}
-          </button>
+          <FilterPill key={v} active={tab === v} onClick={() => setTab(v)}>{label}</FilterPill>
         ))}
       </div>
       {tab && (
@@ -70,9 +67,9 @@ function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
                     {r.name && <span className="text-pb-faintest text-xs ml-1.5">{r.email}</span>}
                   </div>
                   <div className="flex gap-1 shrink-0">
-                    {r.unsubscribed && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-amber-500/40 text-amber-500">unsub</span>}
-                    {r.complained && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-pb-red/40 text-pb-red">spam</span>}
-                    {r.bounced && <span className="text-[10px] uppercase px-1.5 py-0.5 rounded border border-pb-red/40 text-pb-red">bounced</span>}
+                    {r.unsubscribed && <Badge toneKey="warn">Unsub</Badge>}
+                    {r.complained && <Badge toneKey="block">Spam</Badge>}
+                    {r.bounced && <Badge toneKey="block">Bounced</Badge>}
                   </div>
                 </div>
                 {r.events?.length > 0 && (
@@ -296,8 +293,8 @@ export default function CommsCompose() {
     catch (e) { setMsg({ kind: 'error', text: e.message }) }
   }
 
-  if (loading) return <BetterCommsLayout title="Email"><div className="text-pb-faint text-sm">Loading…</div></BetterCommsLayout>
-  if (!campaign) return <BetterCommsLayout title="Email"><div className="text-pb-red text-sm">Not found.</div></BetterCommsLayout>
+  if (loading) return <BetterCommsLayout title="Email"><Empty>Loading…</Empty></BetterCommsLayout>
+  if (!campaign) return <BetterCommsLayout title="Email"><Note toneKey="block">Not found.</Note></BetterCommsLayout>
 
   const isDraft = campaign.status === 'draft'
   const st = campaign.stats || {}
@@ -305,11 +302,12 @@ export default function CommsCompose() {
   return (
     <BetterCommsLayout
       title={isDraft ? 'Compose email' : 'Email'}
-      actions={<button onClick={() => navigate('/admin/comms')} className="text-sm text-pb-faint hover:text-pb-text underline">← All emails</button>}
+      caption={isDraft ? 'Nothing sends until you press Send' : `Status · ${campaign.status}`}
+      actions={<Button onClick={() => navigate('/admin/comms')}>← All emails</Button>}
     >
       <div className="max-w-2xl">
         {msg && (
-          <div className={`pb-card p-3 mb-4 text-sm ${msg.kind === 'error' ? 'text-pb-red' : 'text-green-500'}`}>{msg.text}</div>
+          <Note toneKey={msg.kind === 'error' ? 'block' : 'ok'} className="mb-4">{msg.text}</Note>
         )}
 
         {!isDraft ? (
@@ -345,47 +343,42 @@ export default function CommsCompose() {
         ) : (
           // ── Draft editor ────────────────────────────────────────────────
           <>
-            <label className="block text-sm text-pb-faint mb-1">Subject</label>
+            <Caption className="mb-1.5">Subject</Caption>
             <input ref={subjectInputRef} value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Round 5 — training this Thursday"
-              className="w-full pb-input mb-4 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline" />
+              className={`${INPUT_CLS} mb-4`} />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               <div>
-                <label className="block text-sm text-pb-faint mb-1">Name <span className="text-pb-faintest">(optional)</span></label>
+                <Caption className="mb-1.5">Name (optional)</Caption>
                 <input value={name} onChange={e => setName(e.target.value)}
                   placeholder="Leave blank to auto-name from the subject + date/time"
-                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                  className={INPUT_CLS} />
               </div>
               <div>
-                <label className="block text-sm text-pb-faint mb-1">Description <span className="text-pb-faintest">(optional)</span></label>
+                <Caption className="mb-1.5">Description (optional)</Caption>
                 <input value={description} onChange={e => setDescription(e.target.value)}
                   placeholder="A short note about this email"
-                  className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                  className={INPUT_CLS} />
               </div>
             </div>
 
             <div className="mb-3">
-              <label className="block text-xs text-pb-faint mb-1">Template</label>
+              <Caption className="mb-1.5">Template</Caption>
               <div className="flex items-center gap-2">
                 {templates.length > 0 ? (
                   <select value={templateId} onChange={e => onPickTemplate(e.target.value)}
-                    className="flex-1 min-w-0 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm">
+                    className={`${INPUT_CLS} cursor-pointer flex-1 min-w-0`}>
                     <option value="">No template — write from scratch</option>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 ) : (
-                  <div className="flex-1 min-w-0 px-3 py-2 rounded bg-pb-surface2 text-pb-faint border pb-hairline text-sm">
-                    No templates yet
-                  </div>
+                  <div className={`${INPUT_CLS} flex-1 min-w-0 text-pb-faint`}>No templates yet</div>
                 )}
-                <a href={REQUEST_TEMPLATE_MAILTO}
-                  className="shrink-0 px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 whitespace-nowrap">
-                  Request a template
-                </a>
+                <Button as="a" href={REQUEST_TEMPLATE_MAILTO}>Request a template</Button>
               </div>
             </div>
 
-            <label className="block text-sm text-pb-faint mb-1">Message</label>
+            <Caption className="mb-1.5">Message</Caption>
             <EmailEditorTabs key={editorKey} ref={editorRef} html={body} onChange={setBody} onEnterPreview={onEnterPreview} height={560}
               subject={subject} onSubjectChange={setSubject} subjectInputRef={subjectInputRef} />
             <div className="text-pb-faintest text-xs mb-3 mt-1">
@@ -394,16 +387,18 @@ export default function CommsCompose() {
             </div>
 
             {warnings.length > 0 && (
-              <div className="pb-card p-3 mb-5 border-l-2 border-amber-500/50">
-                <div className="text-amber-500 text-xs font-medium mb-1">Check these before sending</div>
-                <ul className="text-pb-faint text-xs space-y-0.5 list-disc pl-4">
+              <Note toneKey="warn" title="Check these before sending" className="mb-5">
+                <ul className="space-y-0.5 list-disc pl-4">
                   {warnings.map((w, i) => <li key={i}>{w}</li>)}
                 </ul>
-              </div>
+              </Note>
             )}
 
             <div className="pb-card p-4 mb-4">
-              <div className="text-sm text-pb-text mb-2">Audience</div>
+              {/* One slot, filled by one of the club's segments or lists. That
+                  is the whole vocabulary: an email has an audience; the
+                  audience is a segment or a list. */}
+              <SectionHeading className="mb-2">Audience</SectionHeading>
               <select
                 value={audience.type === 'segment' ? `segment:${audience.segment_id}`
                   : audience.type === 'saved_list' ? `list:${audience.list_id}`
@@ -415,7 +410,7 @@ export default function CommsCompose() {
                   else if (v === 'all') setAudience({ type: 'all' })
                   else setAudience({ type: '' })
                 }}
-                className={`w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border text-sm ${audienceSelected ? 'pb-hairline' : 'border-amber-500/60'}`}>
+                className={`${INPUT_CLS} cursor-pointer ${audienceSelected ? '' : '!border-amber-500/60'}`}>
                 <option value="" disabled>Choose an audience…</option>
                 <option value="all">All subscribed contacts</option>
                 {segments.length > 0 && (
@@ -435,15 +430,15 @@ export default function CommsCompose() {
                   : audienceCount != null
                     ? <><span className="text-pb-faint">{audienceCount}</span> contact{audienceCount === 1 ? '' : 's'} will receive this.</>
                     : 'Counting…'}{' '}
-                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent)' }}>Segments</a>
+                <a href="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Segments</a>
                 {' · '}
-                <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent)' }}>Lists</a>
+                <a href="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</a>
               </div>
             </div>
 
             {isMarketing && (
               <div className="pb-card p-4 mb-4">
-                <div className="text-sm text-pb-text mb-1">UTM link tracking</div>
+                <SectionHeading className="mb-1.5">UTM link tracking</SectionHeading>
                 <div className="text-pb-faintest text-xs mb-3">
                   BetterCricket marketing only. Two ways to use these: leave them and they are added to every untagged link
                   automatically, or place them yourself in a link, e.g.{' '}
@@ -453,10 +448,9 @@ export default function CommsCompose() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   {[['utm_source', 'Source', 'e.g. bettercricket'], ['utm_medium', 'Medium', 'e.g. email'], ['utm_campaign', 'Campaign', 'e.g. winter-2026']].map(([k, label, ph]) => (
                     <div key={k}>
-                      <label className="block text-xs text-pb-faint mb-1">{label}</label>
+                      <Caption className="mb-1.5">{label}</Caption>
                       <input value={utm[k] || ''} onChange={e => setUtm(u => ({ ...u, [k]: e.target.value }))}
-                        placeholder={ph}
-                        className="w-full px-2 py-1.5 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                        placeholder={ph} className={INPUT_CLS} />
                     </div>
                   ))}
                 </div>
@@ -464,31 +458,23 @@ export default function CommsCompose() {
             )}
 
             <div className="flex flex-wrap items-center gap-2 mb-2">
-              <button onClick={onSave} disabled={busy === 'save'}
-                className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
-                {busy === 'save' ? 'Saving…' : 'Save draft'}
-              </button>
-              <button onClick={onSend} disabled={!!busy || !canSend}
-                title={sendMissing.length ? `Add ${sendMissing.join(', ')} to send` : ''}
-                className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-50"
-                style={{ background: 'var(--pb-accent)' }}>
+              <Button onClick={onSave} disabled={busy === 'save'}>{busy === 'save' ? 'Saving…' : 'Save draft'}</Button>
+              <Button variant="primary" onClick={onSend} disabled={!!busy || !canSend}
+                title={sendMissing.length ? `Add ${sendMissing.join(', ')} to send` : ''}>
                 {busy === 'send' ? 'Sending…' : `Send${audienceSelected && audienceCount != null ? ` to ${audienceCount}` : ''}`}
-              </button>
-              <button onClick={onDelete} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-red ml-auto">Delete</button>
+              </Button>
+              <Button variant="danger" onClick={onDelete} className="ml-auto">Delete</Button>
             </div>
             <div className="text-pb-faintest text-xs mb-6">
               {sendMissing.length > 0 ? <>Add {sendMissing.join(', ')} to enable Send.</> : <>&nbsp;</>}
             </div>
 
             <div className="pb-card p-4">
-              <div className="text-sm text-pb-text mb-2">Send a test to yourself first</div>
+              <SectionHeading className="mb-2">Send a test to yourself first</SectionHeading>
               <div className="flex gap-2">
                 <input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="you@example.com" type="email"
-                  className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-                <button onClick={onTest} disabled={busy === 'test'}
-                  className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
-                  {busy === 'test' ? 'Sending…' : 'Send test'}
-                </button>
+                  className={INPUT_CLS} />
+                <Button onClick={onTest} disabled={busy === 'test'}>{busy === 'test' ? 'Sending…' : 'Send test'}</Button>
               </div>
               {!live && <div className="text-pb-faintest text-xs mt-2">Preview mode — tests are rendered but not delivered until a provider is connected in Settings.</div>}
             </div>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Note, Empty, INPUT_CLS } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 
 const STARTER = `<!doctype html>
@@ -118,20 +119,17 @@ function Editor({ initial, onSaved, onCancel, onDeleted }) {
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <input value={name} onChange={e => setName(e.target.value)} placeholder="Template name"
-          className="flex-1 min-w-[200px] px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+          className={`${INPUT_CLS} flex-1 !w-auto min-w-[200px]`} />
         <input ref={fileRef} type="file" accept=".html,.htm,.rtf,text/html,text/rtf" onChange={importFile} className="hidden" />
-        <button onClick={() => fileRef.current?.click()} className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2">Import .html</button>
-        {initial?.id && <button onClick={remove} disabled={busy} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-red">Delete</button>}
-        <button onClick={onCancel} className="px-3 py-2 rounded text-sm text-pb-faint hover:text-pb-text">Cancel</button>
-        <button onClick={save} disabled={busy}
-          className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'Saving…' : 'Save template'}
-        </button>
+        <Button onClick={() => fileRef.current?.click()}>Import .html</Button>
+        {initial?.id && <Button variant="danger" onClick={remove} disabled={busy}>Delete</Button>}
+        <Button variant="quiet" onClick={onCancel}>Cancel</Button>
+        <Button variant="primary" onClick={save} disabled={busy}>{busy ? 'Saving…' : 'Save template'}</Button>
       </div>
-      {err && <div className="text-pb-red text-xs mb-2">{err}</div>}
-      {notice && <div className="text-pb-amber text-xs mb-2">{notice}</div>}
+      {err && <Note toneKey="block" className="mb-2">{err}</Note>}
+      {notice && <Note toneKey="warn" className="mb-2">{notice}</Note>}
 
-      <div className="text-pb-faintest text-xs mb-1">
+      <div className="text-[12px] text-pb-faintest mb-1.5 leading-[1.55]">
         Paste your own HTML, or import a file. Click a variable above to insert it wherever your cursor is. Preview
         adds the unsubscribe footer, exactly as a send would.
       </div>
@@ -176,27 +174,20 @@ export default function CommsTemplates() {
   return (
     <BetterCommsLayout
       title="Templates"
-      actions={!editing && (
-        <button onClick={() => setEditing({})}
-          className="px-3 py-1.5 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-          + New template
-        </button>
-      )}
+      caption={editing ? 'Editing a template' : `Reusable email layouts · ${templates?.length ?? 0} saved`}
+      actions={!editing && <Button variant="primary" onClick={() => setEditing({})}>New template</Button>}
     >
-      {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
+      {error && <Note toneKey="block" className="mb-4 max-w-2xl">{error}</Note>}
 
       {editing ? (
         <Editor initial={editing.id ? editing : null} onSaved={onSaved} onCancel={() => setEditing(null)} onDeleted={onDeleted} />
       ) : templates == null ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
+        <Empty>Loading…</Empty>
       ) : templates.length === 0 ? (
         <div className="pb-card p-8 text-center">
-          <div className="text-pb-text font-medium mb-1">No templates yet</div>
-          <div className="text-pb-faint text-sm mb-4">Start from scratch, paste HTML, or import a .html file.</div>
-          <button onClick={() => setEditing({})}
-            className="px-4 py-2 rounded text-sm font-medium text-white" style={{ background: 'var(--pb-accent)' }}>
-            + New template
-          </button>
+          <div className="font-display font-semibold text-[15.5px] text-pb-text mb-1">No templates yet</div>
+          <div className="text-[13px] text-pb-dim mb-4">Start from scratch, paste HTML, or import a .html file.</div>
+          <Button variant="primary" onClick={() => setEditing({})}>New template</Button>
         </div>
       ) : (
         <div className="pb-card overflow-hidden">
@@ -204,14 +195,13 @@ export default function CommsTemplates() {
             <div key={t.id}
               className={`flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
               <button onClick={() => openExisting(t)} className="flex-1 text-left min-w-0">
-                <div className="text-pb-text text-sm truncate">{t.name}</div>
+                <div className="text-pb-text text-[13.5px] font-semibold truncate">{t.name}</div>
               </button>
-              <div className="flex items-center gap-4 shrink-0">
-                <button onClick={() => duplicate(t)} disabled={duplicatingId === t.id}
-                  className="text-pb-faint text-xs hover:text-pb-text disabled:opacity-60">
+              <div className="flex items-center gap-2 shrink-0">
+                <Button size="sm" variant="quiet" onClick={() => duplicate(t)} disabled={duplicatingId === t.id}>
                   {duplicatingId === t.id ? 'Duplicating…' : 'Duplicate'}
-                </button>
-                <button onClick={() => openExisting(t)} className="text-pb-faint text-xs hover:text-pb-text">Edit →</button>
+                </Button>
+                <Button size="sm" onClick={() => openExisting(t)}>Edit</Button>
               </div>
             </div>
           ))}
