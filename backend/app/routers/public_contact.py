@@ -17,7 +17,8 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ClubOnboardingRequest, get_db
-from app.services import meta_capi
+from app.routers import self_serve_trial as sst
+from app.services import meta_capi, rate_limit
 from app.services.crm import sync_deal_for_enquiry
 from app.services.login_audit import client_ip
 from app.services.twenty_sync import mark_contact_source, push_onboarding_enquiry
@@ -26,6 +27,49 @@ from app.services.usage_tracker import record_event_bg
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/public/contact", tags=["public-contact"])
+
+# Every search keystroke reaches the Cricket Australia club-search API, so this
+# is capped per IP the same way the public self-serve wrapper caps its own copy.
+# Sized for a club committee sharing one connection while several people fill
+# the form in, not for scraping.
+SEARCH_LIMIT, SEARCH_WINDOW = 120, 3600
+
+
+@router.get("/club-search")
+async def club_search(q: str = "", request: Request = None, db: AsyncSession = Depends(get_db)):
+    """Club lookup for the Contact form's Club name field.
+
+    Reuses the self-serve registration wizard's own search
+    (``self_serve_trial.search_clubs`` -> the authoritative Grassroots/PlayHQ
+    club list) so both forms resolve a club the same way. Deliberately NOT
+    routed through /public/self-serve: that whole router sits behind the
+    ``self_serve_registration_enabled`` platform flag, and the Contact form
+    has to keep working whether or not self-serve registration is switched on.
+
+    Only the fields the form needs come back. The self-serve search also
+    returns the existing club's public slug and its Primary Admin's first name
+    + last initial, for the "this club is already registered, talk to your
+    admin" card - an enquiry has no use for either, and a marketing page is no
+    place to serve them, so they are dropped here. ``already_registered`` is
+    kept: it is worth showing on the result row, and an already-registered club
+    is still perfectly entitled to get in touch.
+    """
+    rate_limit.enforce(
+        f"pubcontact:search:{client_ip(request)}", SEARCH_LIMIT, SEARCH_WINDOW,
+        detail="Too many searches. Slow down and try again shortly.",
+    )
+    results = await sst.search_clubs(q=q, db=db)
+    return [
+        {
+            "id": org.get("id"),
+            "name": org.get("name"),
+            "shortName": org.get("shortName"),
+            "suburb": org.get("suburb"),
+            "stateName": org.get("stateName"),
+            "already_registered": bool(org.get("already_registered")),
+        }
+        for org in results
+    ]
 
 
 class ContactMeta(BaseModel):
@@ -41,6 +85,13 @@ class ContactMeta(BaseModel):
 class ContactIn(BaseModel):
     name: str = ""
     club: str = ""
+    # Which club the enquirer picked from the club search, and how they got
+    # there: 'search' (picked from the Cricket Australia list, so clubOrgId is
+    # its real organisation guid) or 'manual' (typed in - a club the list
+    # doesn't carry, e.g. one outside Australia). Both optional: the short CTA
+    # modal still posts a bare club name.
+    clubOrgId: Optional[str] = None
+    clubSource: Optional[str] = None
     email: str = ""
     phone: Optional[str] = None
     association: Optional[str] = None
@@ -98,6 +149,13 @@ async def submit_contact(
     if not club or not email:
         raise HTTPException(status_code=422, detail="Club and email are required.")
 
+    # A guid is only meaningful alongside a club actually picked from the
+    # search — a typed-in club name has nothing to key on, and letting a
+    # 'manual' row carry an id would put a guessed identity on the record.
+    club_source = _clip(payload.clubSource, 20)
+    club_source = club_source if club_source in ("search", "manual") else None
+    club_org_id = _clip(payload.clubOrgId, 64) if club_source == "search" else None
+
     row = ClubOnboardingRequest(
         name=name[:200],
         club=club[:200],
@@ -119,6 +177,8 @@ async def submit_contact(
         source=_clip(payload.source, 50) or "contact_form",
         user_agent=_clip(request.headers.get("user-agent"), 500),
         visitor_id=_clip(payload.visitorId, 64),
+        club_org_id=club_org_id,
+        club_source=club_source,
     )
     db.add(row)
     await db.commit()
@@ -131,13 +191,16 @@ async def submit_contact(
     # a prospect can give, so the club is immediately upserted into Twenty as a
     # Company + Lead at a forced Hot (100) engagement score, regardless of
     # whether it was already exported. Backgrounded; never raises.
+    # ``org_id`` is what stops one club arriving as two: a picked club keys the
+    # directory row on its real CA guid instead of a synthetic one derived from
+    # however the name was spelled.
     background.add_task(push_onboarding_enquiry, club_name=club, contact_name=name,
-                        email=email, phone=payload.phone)
+                        email=email, phone=payload.phone, org_id=club_org_id)
     # Same enquiry, the local CRM pipeline's equivalent of the Twenty push
     # above — ensures a New Lead deal exists (or advances an existing one) so
     # the pipeline stays in step with the same trigger. Best-effort.
     background.add_task(sync_deal_for_enquiry, club_name=club, contact_name=name,
-                        email=email, phone=payload.phone)
+                        email=email, phone=payload.phone, org_id=club_org_id)
     # Server-side Lead event (Meta Conversions API), sharing the browser pixel's
     # event_id so Meta dedupes the pair. Best-effort + backgrounded — a CAPI
     # hiccup never affects this response (see meta_capi.send_lead_event).

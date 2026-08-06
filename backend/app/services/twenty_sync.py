@@ -1694,17 +1694,26 @@ async def push_club_and_contacts(marketing_club_id, contact_ids: "list | None" =
 
 
 async def _resolve_onboarding_club(session, *, club_name: str, contact_name: str,
-                                   email: str, phone: "Optional[str]"):
+                                   email: str, phone: "Optional[str]",
+                                   org_id: "Optional[str]" = None):
     """Find-or-create the MarketingClub + MarketingClubContact a direct 'onboard
     my club' enquiry belongs to. Matching mirrors ``_onboarding_signal``'s own
     priority — the submitter's email against a known officer first (the
     strongest signal: this exact person is already on file for a specific
-    club), then an exact club-name match, else a brand-new prospect club is
-    created from what the form gave us, so a first-touch enquiry from a club
-    the PlayHQ crawler hasn't found yet is never silently dropped. Commits
-    nothing itself — the caller commits."""
+    club) — then, when the Contact form's club search gave us one, the club's
+    real CA organisation guid, then an exact club-name match, else a brand-new
+    prospect club is created from what the form gave us, so a first-touch
+    enquiry from a club the PlayHQ crawler hasn't found yet is never silently
+    dropped. Commits nothing itself — the caller commits.
+
+    ``org_id`` is the whole point of the search field: a name a person typed
+    matches only itself, so "Applecross CC" and "Applecross Cricket Club" used
+    to become two prospect rows. A guid matches the club the crawler already
+    knows, whatever either of them called it.
+    """
     name = (club_name or "").strip()
     email_l = (email or "").strip().lower()
+    guid = (org_id or "").strip() or None
 
     club = None
     if email_l:
@@ -1714,6 +1723,9 @@ async def _resolve_onboarding_club(session, *, club_name: str, contact_name: str
             .where(func.lower(MarketingClubContact.email) == email_l)
             .limit(1)
         )).scalars().first()
+    if club is None and guid:
+        club = await session.scalar(
+            select(MarketingClub).where(MarketingClub.grassroots_guid == guid))
     if club is None and name:
         club = (await session.execute(
             select(MarketingClub).where(func.lower(MarketingClub.name) == name.lower()).limit(1)
@@ -1721,17 +1733,33 @@ async def _resolve_onboarding_club(session, *, club_name: str, contact_name: str
     if club is None:
         if not name:
             return None, None
-        # No real PlayHQ GUID for a club that hasn't been crawled — a
-        # deterministic synthetic one keyed on the name, so a second enquiry
-        # from the same club (matched by name above) upserts the same row
-        # rather than minting a duplicate.
+        # A picked club is keyed on its real CA guid — the same one the PlayHQ
+        # crawler uses — so a row created here and a row the crawler finds
+        # later are the same row. With no guid (a club typed in by hand, i.e.
+        # one the CA list doesn't carry) fall back to a deterministic synthetic
+        # guid keyed on the name, so a second enquiry from the same club
+        # (matched by name above) upserts the same row rather than minting a
+        # duplicate.
         club = MarketingClub(
-            grassroots_guid=f"manual:{uuid.uuid5(uuid.NAMESPACE_URL, name.lower())}",
+            grassroots_guid=guid or f"manual:{uuid.uuid5(uuid.NAMESPACE_URL, name.lower())}",
             name=name[:200], kind="club", status="contacted", source="onboarding_form",
             contact_email=email_l or None, contact_phone=phone,
         )
         session.add(club)
         await session.flush()
+    elif guid and str(club.grassroots_guid or "").startswith("manual:"):
+        # Matched a row an earlier free-text enquiry created, and this time we
+        # know the club's real guid. Upgrading it is what lets the crawler's own
+        # row for this club find it later instead of sitting alongside it —
+        # unless some other row already holds that guid, in which case the two
+        # are genuine duplicates and merging them is a decision for a person,
+        # not a silent write from a background task. (grassroots_guid is
+        # unique, so the check is also what keeps this from raising.)
+        taken = await session.scalar(
+            select(MarketingClub.id).where(
+                MarketingClub.grassroots_guid == guid, MarketingClub.id != club.id))
+        if taken is None:
+            club.grassroots_guid = guid
 
     contact = None
     if email_l:
@@ -1755,7 +1783,8 @@ async def _resolve_onboarding_club(session, *, club_name: str, contact_name: str
 
 
 async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
-                                  email: str = "", phone: "Optional[str]" = None) -> dict:
+                                  email: str = "", phone: "Optional[str]" = None,
+                                  org_id: "Optional[str]" = None) -> dict:
     """A direct "onboard my club" / trial-request enquiry — from EITHER the short
     'Get your club on BetterCricket' CTA modal or the full Contact page, both of
     which post to the same ``/public/contact`` endpoint — is the single strongest
@@ -1764,7 +1793,11 @@ async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
     already being in the CRM at all), this immediately upserts the club into
     Twenty as a Company AND a Lead, forced to a Hot (100) engagement score, the
     moment the enquiry lands — regardless of whether the club was already
-    exported. Best-effort and backgrounded by the caller; never raises."""
+    exported. Best-effort and backgrounded by the caller; never raises.
+
+    ``org_id`` is the CA organisation guid behind the club the enquirer picked
+    from the Contact form's club search, when they picked one — it keys the
+    directory row on the club's real identity rather than on the spelling."""
     if not client.configured:
         return {"skipped": "not configured"}
     if not (club_name or "").strip():
@@ -1773,7 +1806,7 @@ async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
         async with async_session_maker() as session:
             club, contact = await _resolve_onboarding_club(
                 session, club_name=club_name, contact_name=contact_name,
-                email=email, phone=phone)
+                email=email, phone=phone, org_id=org_id)
             if club is None:
                 return {"skipped": "no club"}
             await session.commit()

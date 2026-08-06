@@ -1617,6 +1617,12 @@ export const api = {
   // Public marketing Contact form — store a club onboarding enquiry.
   submitOnboarding: (payload) =>
     request('/public/contact', { method: 'POST', body: JSON.stringify(payload) }),
+  // Club lookup behind the Contact form's Club name field. Same Cricket
+  // Australia club list the self-serve registration wizard searches, on the
+  // Contact form's own endpoint so it works whether or not self-serve
+  // registration is switched on.
+  contactClubSearch: (q) =>
+    request(`/public/contact/club-search?q=${encodeURIComponent(q)}`),
 
   // Super admin
   superOverview: () => request('/club-admin/super/overview'),

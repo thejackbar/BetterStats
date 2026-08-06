@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
+import ClubSearchField from '../../components/marketing/ClubSearchField'
 import { FORMSPREE_ID, SUPPORT_EMAIL } from '../../data/marketing'
 import { api } from '../../lib/api'
 import { getVisitorId } from '../../lib/visitor'
@@ -52,7 +53,11 @@ const INTEREST_OPTIONS = [
 ]
 
 const EMPTY_FIELDS = {
-  name: '', club: '', email: '', phone: '',
+  // `club` is the club's name as it will be stored. `clubOrgId` is its Cricket
+  // Australia organisation guid when it was picked from the club search, and
+  // `clubSource` records which of the two paths got us here ('search' |
+  // 'manual') so a hand-typed name is never taken for a confirmed one.
+  name: '', club: '', clubOrgId: null, clubSource: null, email: '', phone: '',
   role: '', founded: '',
   association: '', grades: '',
   playhq: '', historical: '',
@@ -101,9 +106,9 @@ const ChevronIcon = () => (
 
 function ContactForm() {
   const [searchParams] = useSearchParams()
-  const prefillClub = searchParams.get('club')
-  const [fields, setFields] = useState(() =>
-    prefillClub ? { ...EMPTY_FIELDS, club: prefillClub } : EMPTY_FIELDS)
+  // Seeds the club search rather than filling the club in — see ClubSearchField.
+  const prefillClub = searchParams.get('club') || ''
+  const [fields, setFields] = useState(EMPTY_FIELDS)
   const [errors, setErrors] = useState({})
   const [status, setStatus] = useState('idle') // idle | submitting | success | error
 
@@ -117,7 +122,7 @@ function ContactForm() {
   function validate() {
     const e = {}
     if (!fields.name.trim())        e.name        = 'Your name is required.'
-    if (!fields.club.trim())        e.club        = 'Club name is required.'
+    if (!fields.club.trim())        e.club        = 'Please find and select your club, or type its name in yourself.'
     if (!fields.email.trim())       e.email       = 'Email address is required.'
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.email)) e.email = 'Please enter a valid email.'
     if (!fields.phone.trim())       e.phone       = 'Phone number is required.'
@@ -145,6 +150,10 @@ function ContactForm() {
     // delivery and drives success/error, so a failure here never blocks the form.
     api.submitOnboarding({
       name: fields.name, club: fields.club, email: fields.email, phone: fields.phone,
+      // The club's real Cricket Australia id when they picked it from the
+      // search, so the enquiry lands on the right club downstream whatever the
+      // name was spelled like.
+      clubOrgId: fields.clubOrgId, clubSource: fields.clubSource,
       role: fields.role, founded: fields.founded,
       association: fields.association, grades: fields.grades,
       playhq: fields.playhq, historical: fields.historical,
@@ -162,6 +171,11 @@ function ContactForm() {
         body: JSON.stringify({
           name:          fields.name,
           club:          fields.club,
+          // Tells whoever reads the email whether the club name is one we
+          // matched to a real club record or one typed in by hand.
+          clubMatch:     fields.clubSource === 'search'
+            ? `Matched (${fields.clubOrgId})`
+            : 'Typed in by hand — not in the Cricket Australia list',
           email:         fields.email,
           phone:         fields.phone,
           role:          fields.role,
@@ -240,10 +254,13 @@ function ContactForm() {
               className={inputCls('name', errors)} />
           </Field>
           <Field label="Club name" id="club" required error={errors.club}>
-            <input id="club" type="text" name="club"
-              placeholder="Applecross CC"
-              value={fields.club} onChange={set('club')}
-              className={inputCls('club', errors)} />
+            <ClubSearchField
+              inputId="club"
+              initialQuery={prefillClub}
+              value={{ club: fields.club, clubOrgId: fields.clubOrgId, clubSource: fields.clubSource }}
+              onChange={(v) => setFields(f => ({ ...f, ...v }))}
+              inputClassName={inputCls('club', errors)}
+            />
           </Field>
         </div>
 

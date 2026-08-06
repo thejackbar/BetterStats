@@ -3753,6 +3753,14 @@ class ClubOnboardingRequest(Base):
     status = Column(Text, nullable=False, server_default="new")  # new | contacted | onboarded | closed
     source = Column(Text, nullable=False, server_default="contact_form")
     user_agent = Column(Text, nullable=True)
+    # Which club the enquirer actually meant (migration 224). The form searches
+    # the Cricket Australia club list, so a picked club carries its real CA
+    # organisation guid here and every downstream match keys on that rather than
+    # on however the name happened to be spelled. ``club_source`` is 'search'
+    # (picked from the list) or 'manual' (typed in - the fallback for a club
+    # outside Australia, which has no guid).
+    club_org_id = Column(Text, nullable=True)
+    club_source = Column(Text, nullable=True)
     # First-party visitor id (localStorage UUID) sent by the Contact form, so an
     # enquiry can be tied back to the anonymous browsing journey on the Usage page.
     visitor_id = Column(Text, nullable=True)

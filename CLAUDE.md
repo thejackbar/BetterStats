@@ -1070,6 +1070,60 @@ delivery and drives the success/error UI, so a failed store never blocks the for
   without that proxy, point the form at the absolute backend URL instead. It degrades
   gracefully meanwhile, since Formspree still delivers the email.
 
+### Club name is a search, not a text box (migration 224, v9.12.2, Aug 2026)
+
+The Club name field asked a person under time pressure to spell their club, and
+every downstream match then had to work back from that string — so "Applecross
+CC" and "Applecross Cricket Club" became two prospect rows. It now searches the
+same Cricket Australia club list the self-serve trial wizard searches, and a
+picked club carries its real CA organisation guid through with the enquiry.
+
+- **`GET /public/contact/club-search`** reuses `self_serve_trial.search_clubs`
+  (one club list, one matching rule) but is deliberately **NOT** routed through
+  `/public/self-serve`: that whole router sits behind the
+  `self_serve_registration_enabled` platform flag, and the Contact form has to
+  keep working whether or not self-serve registration is switched on. Rate-limited
+  per IP (120/hour) like its sibling, since every keystroke reaches CA's API.
+  The response is **projected down** — the self-serve search also returns the
+  registered club's public slug and its Primary Admin's first name + last initial
+  (for the "talk to your admin" card), and a marketing page has no business
+  serving either. `already_registered` is kept and shown, but never blocks: an
+  already-registered club is still entitled to get in touch.
+- **`club_onboarding_requests.club_org_id` + `.club_source`** ('search' |
+  'manual'). A guid is only ever stored alongside `club_source='search'` — a
+  typed name has nothing to key on, and letting a manual row carry an id would
+  put a guessed identity on the record. An unrecognised `clubSource` drops both.
+- **`_resolve_onboarding_club` (twenty_sync) takes `org_id`** and checks it
+  **after** the submitter's email but **before** the name, so the established
+  email-first priority `_onboarding_signal` shares is untouched. A new row is
+  created on the REAL guid — the same one the PlayHQ crawler uses — so a row
+  created by an enquiry and a row the crawler finds later are one row.
+  `crm.sync_deal_for_enquiry` takes and forwards the same `org_id`, so the local
+  pipeline and the Twenty push can't resolve different clubs.
+- **A `manual:` guid is upgraded once the real one is known**, but only when no
+  other row already holds it. `grassroots_guid` is unique, so the check is also
+  what stops a background task raising; and two rows for one club is a merge
+  decision for a person, not a silent write.
+- **The typed name stays, on purpose.** The CA list only covers Australia, so
+  "can't find your club" hands back a plain text field rather than a dead end —
+  that is what keeps a club in England or New Zealand able to reach us.
+- **`frontend/src/components/marketing/ClubSearchField.jsx`** holds one
+  invariant worth keeping: **`club` is only ever set once `clubSource` is**, so a
+  half-typed search term is the field's own local state and the form's existing
+  "Club name is required" check blocks a search nobody finished. A `?club=` link
+  (`ClubInactive.jsx`) seeds the search rather than answering it.
+- **Verified** against a real Postgres (25 checks — the resolution priority, the
+  guid upgrade and its collision guard, the migration applied twice to a
+  populated pre-224 table, the route bodies incl. a junk `clubSource` and the
+  short CTA form's unchanged bare post, and the original bug reproduced: two
+  spellings made two clubs, now make one) and driven in a browser (search,
+  keyboard pick, submitted payload, the no-results fallback, validation blocking
+  an unfinished search, `?club=` seeding, no mobile overflow).
+- **Not done**: the short "Get your club on BetterCricket" CTA modal
+  (`QuickEnquiryModal`) still posts a free-text club name to the same endpoint —
+  the backend fields are optional so it is unaffected, and it is the obvious next
+  place to reuse `ClubSearchField`.
+
 ## Public Marketing Pricing — modular model (Jun 2026)
 
 The **public** marketing pricing and the in-app entitlement model are both

@@ -1124,6 +1124,9 @@ async def lifespan(app: FastAPI):
             # First-party visitor id captured on the Contact form so an enquiry
             # links precisely to the browsing journey behind it (Usage page).
             "visitor_id",
+            # The club the enquirer picked from the Cricket Australia club
+            # search, and whether they picked it or typed it (migration 224).
+            "club_org_id", "club_source",
         ):
             await conn.execute(text(
                 f"ALTER TABLE club_onboarding_requests ADD COLUMN IF NOT EXISTS {_col} TEXT"
