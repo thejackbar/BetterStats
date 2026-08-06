@@ -153,7 +153,6 @@ const SuperLoginAttempts = lazy(() => import('./pages/admin/SuperLoginAttempts')
 const SuperModuleRequests = lazy(() => import('./pages/admin/SuperModuleRequests'))
 const SuperCommsLimits = lazy(() => import('./pages/admin/SuperCommsLimits'))
 const SuperMarketing = lazy(() => import('./pages/admin/SuperMarketing'))
-const SuperDirectoryAudiences = lazy(() => import('./pages/admin/SuperDirectoryAudiences'))
 const SuperAnnounce = lazy(() => import('./pages/admin/SuperAnnounce'))
 const KlubproMigration = lazy(() => import('./pages/admin/klubpro/KlubproMigration'))
 const BetterSelectHome = lazy(() => import('./pages/admin/betterselect/BetterSelectHome'))
@@ -446,7 +445,10 @@ export default function App() {
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
           <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
           <Route path="/admin/super/marketing" element={<ProtectedRoute requireRole="super_admin"><SuperMarketing /></ProtectedRoute>} />
-          <Route path="/admin/super/directory-audiences" element={<ProtectedRoute requireRole="super_admin"><SuperDirectoryAudiences /></ProtectedRoute>} />
+          {/* The directory segment builder is a BetterClubhouse screen now —
+              /admin/comms/segments mounts it while acting as the outreach org.
+              Kept live so an existing bookmark still lands. */}
+          <Route path="/admin/super/directory-audiences" element={<Navigate to="/admin/comms/segments" replace />} />
           <Route path="/admin/super/announce" element={<ProtectedRoute requireRole="super_admin"><SuperAnnounce /></ProtectedRoute>} />
           <Route path="/admin/super/migration" element={<ProtectedRoute requireRole="super_admin"><KlubproMigration /></ProtectedRoute>} />
 

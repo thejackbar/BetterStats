@@ -682,11 +682,30 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   against the Clubs Directory. **Never expose the Super Admin fields, context
   bar or copy in a club build** — not behind a dropdown, not greyed out, not
   listed and disabled. Enforced structurally: `segmentFields.jsx` exports
-  `CLUB_FIELD_DEFS` (imported by Audiences) and `DIRECTORY_FIELD_DEFS` (imported
-  ONLY by `SuperDirectoryAudiences`, `/admin/super/directory-audiences`), with
-  no runtime context switch to get it wrong; `CommsContextBar` no longer renders
-  in the club layout. Apply the same rule to any future module that gains a
-  platform-side mode.
+  `CLUB_FIELD_DEFS` (imported ONLY by `clubhouse/ClubhouseSegments.jsx`) and
+  `DIRECTORY_FIELD_DEFS` (imported ONLY by `clubhouse/InternalSegments.jsx`),
+  with no runtime context switch to get it wrong; `CommsContextBar` no longer
+  renders in the club layout. Apply the same rule to any future module that
+  gains a platform-side mode.
+- **Both segment builders are Clubhouse screens on one URL** (`/admin/comms/
+  segments`), and `clubhouse/SegmentsRoute.jsx` is the single place the two are
+  chosen between — on `is_marketing_org`, once, lazily, so a club session never
+  fetches the directory chunk. The internal one used to be a separate page
+  outside the module (`SuperDirectoryAudiences`, on the plain `AdminLayout`
+  chrome), so picking Segments in internal mode threw you out of BetterClubhouse
+  mid-task; that page is gone and its URL redirects. **No backend change was
+  needed** — `/segments/*` already resolves against whichever org you are acting
+  as (`get_current_club`), and `/segments/options` already returns
+  `context: "directory"` for the outreach org.
+- **`clubhouse/segmentEngine.jsx` is the shared builder**: `useSegments` (load,
+  live sizes, draft, resolve-as-you-type, save/duplicate/delete, "Email these N
+  now") plus `RuleBuilder` / `SegmentListPane` / `SegmentTitleRow` / `CountBar`.
+  It imports NEITHER field set — `defs` is a required argument, and each screen
+  passes the one constant it imports. **`defs` is required because `newRule`
+  reads the first field's first operator**, so an empty vocabulary is a
+  TypeError, which is what a saved segment carrying zero rules would hit.
+  Adding an `isInternal` flag in here is the wrong move; a third mount is a
+  third screen.
 - **Not done, and it's the real work**: step 4 of the handoff's sequencing —
   joining the data. The Directory is still not the one person list (Fees
   members, Comms contacts and the ClubManager directory remain three), and a
