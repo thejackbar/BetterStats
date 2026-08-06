@@ -9,6 +9,8 @@ import uuid
 from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord
 from sqlalchemy import select as sa_select
 from app.services import playhq_client
+from app.services import grade_scope
+from app.services.grade_labels import suggest_category
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -37,7 +39,14 @@ async def get_records_grades(
         for g in grades:
             if g.name not in seen:
                 seen.add(g.name)
-                out.append({"id": str(g.id), "name": g.name, "season_id": str(g.season_id)})
+                out.append({
+                    "id": str(g.id),
+                    "name": g.name,
+                    "season_id": str(g.season_id),
+                    # Confirmed label, else the name-based guess — same resolution
+                    # the admin grade list uses, so the two never disagree.
+                    "category": g.category or suggest_category(g.name),
+                })
         return out
 
     # DB has no grades — fall back to the Grassroots grades endpoint (one call per
@@ -95,8 +104,25 @@ async def get_records(
     finals_only: bool = Query(False),
     captain_only: bool = Query(False),
     gender: str | None = Query(None),
+    categories: str | None = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, which "
+            "leaves junior out. Ignored when an explicit grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    # An explicitly picked grade beats the category default: someone who chose
+    # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
+    # clause below sees an inactive scope and emits no SQL.
+    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    if grade_id or grade_name:
+        scope = None
+    scope_active = bool(scope is not None and scope.active)
+    scope_clause = scope.clause("g.grade_id") if scope_active else ""
+
     # If grade_id supplied, resolve grade name (for manual record filtering) and season if missing
     manual_grade_name: str | None = None
     if grade_id:
@@ -131,6 +157,8 @@ async def get_records(
         p["grade_name"] = grade_name
     if gender:
         p["gender"] = gender
+    if scope_active:
+        scope.bind(p)
 
     # Clauses for game-level queries (partnerships) that already JOIN games g
     game_season_clause = " JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)" if season_ids else ""
@@ -160,13 +188,15 @@ async def get_records(
             " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
         )
     else:
-        game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else ""
-        pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else ""
+        game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else scope_clause
+        pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else scope_clause
         pairs_game_join = (
             " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
             if season_ids else
+            # scope_active belongs here too: pairs_grade_clause below references
+            # g.grade_id, so without the join the query would name a missing alias.
             (" JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
-             if (grade_id or finals_only) else "")
+             if (grade_id or finals_only or scope_active) else "")
         )
 
     # Inline WHERE additions for player_season_stats aggregate queries
@@ -217,9 +247,14 @@ async def get_records(
         return [dict(r) for r in rows.mappings().all()]
 
     # Whether to use per-game queries (required for grade_name or finals_only)
-    use_game_level = bool(grade_name or finals_only or captain_only)
+    # A category exclusion forces the per-game path for the same reason a
+    # finals or captain filter does: CA's season aggregates carry no grade, so
+    # they cannot answer "not the juniors". Like those two, this means a club's
+    # aggregate-only BetterImport residuals sit out a filtered board — they have
+    # no per-innings rows for a best-innings or best-figures record anyway.
+    use_game_level = bool(grade_name or finals_only or captain_only or scope_active)
     # Grade filter fragment for use-game-level queries that don't use _grade_match
-    _match_grade_filter = f"AND {_grade_match}" if grade_name else ""
+    _match_grade_filter = f"AND {_grade_match}" if grade_name else scope_clause
 
     # For the no-grade-name path (with or without finals_only/captain_only): same joins as
     # grade_name but without the grade filter. Also used (unconditionally, regardless of
@@ -235,6 +270,7 @@ async def get_records(
         _bat_where_ng = (
             f"WHERE p.organisation_id = :org_id"
             f" {_gw_season}"
+            + scope_clause
             + (" AND g.is_final = TRUE" if finals_only else "")
             + (f" AND p.gender = :gender" if gender else "")
             + " AND NOT COALESCE(bi.did_not_bat, FALSE)"
@@ -249,6 +285,7 @@ async def get_records(
         _bowl_where_ng = (
             f"WHERE p.organisation_id = :org_id"
             f" {_gw_season}"
+            + scope_clause
             + (" AND g.is_final = TRUE" if finals_only else "")
             + (f" AND p.gender = :gender" if gender else "")
         )
@@ -1172,6 +1209,12 @@ async def get_records(
         )
 
     return {
+        # What these figures actually cover, plus the categories this club's
+        # grades justify offering a toggle for.
+        "grade_scope": {
+            **(scope.as_meta() if scope is not None else {"categories": [], "excluded_categories": [], "active": False}),
+            "available": await grade_scope.org_available_categories(db, org_id),
+        },
         "batting": {
             "top_career_runs":   top_career_runs,
             "top_high_scores":   top_high_scores,

@@ -10,6 +10,7 @@ import uuid
 
 from app.models.db import Organisation, Season, Grade, User, ClubMembership, MarketingClub, get_db
 from app.services import playhq_client
+from app.services import grade_scope
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services.fixtures_source import org_grassroots_fixtures
@@ -302,6 +303,21 @@ async def get_org_grades(
         params,
     )
     return [{"name": row.display_name} for row in result]
+
+
+@router.get("/{org_id}/grade-categories")
+async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_db)):
+    """Which grade categories this club actually runs, and what counts by default.
+
+    Public and cheap: every stats page needs it to decide which category toggles
+    to draw at all. A club with no junior programme gets an empty `available`
+    and therefore no toggles, which is also the case where the filter itself is
+    a no-op — the two answers agree by construction.
+    """
+    return {
+        "available": await grade_scope.org_available_categories(db, org_id),
+        "default": list(await grade_scope.club_default_categories(db, org_id)),
+    }
 
 
 @router.get("/{org_id}/seasons/{season_id}/grades")

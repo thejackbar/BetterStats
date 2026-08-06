@@ -30,6 +30,7 @@ from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
 )
 from app.services import iq_teammates
+from app.services import grade_scope
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -121,26 +122,35 @@ async def get_player_stats(
     last_n_games: Optional[int] = Query(None),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
+    categories: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, which "
+            "leaves junior out."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
+    scope = await grade_scope.resolve_scope(db, player.organisation_id, categories)
     use_game_filter = last_n_games or start_date or end_date
     if use_game_filter:
         try:
-            batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date)
-            bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date)
-            fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date)
+            batting = await get_career_batting_from_innings(db, player_id, last_n_games, start_date, end_date, scope=scope)
+            bowling = await get_career_bowling_from_spells(db, player_id, last_n_games, start_date, end_date, scope=scope)
+            fielding = await get_career_fielding_from_stats(db, player_id, last_n_games, start_date, end_date, scope=scope)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Stats query failed: {exc}")
     else:
-        batting = await get_career_batting(db, player_id, season_id)
-        bowling = await get_career_bowling(db, player_id, season_id)
-        fielding = await get_career_fielding(db, player_id, season_id)
-    batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id)
-    bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id)
+        batting = await get_career_batting(db, player_id, season_id, scope=scope)
+        bowling = await get_career_bowling(db, player_id, season_id, scope=scope)
+        fielding = await get_career_fielding(db, player_id, season_id, scope=scope)
+    batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
+    bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
     return {
         "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
@@ -149,6 +159,12 @@ async def get_player_stats(
         "career_fielding": _str_keys(fielding),
         "batting_innings": [_str_keys(i) for i in batting_innings],
         "bowling_spells": [_str_keys(s) for s in bowling_spells],
+        # Lets the profile say which categories these figures cover, and offer
+        # only the toggles this club's grades actually justify.
+        "grade_scope": {
+            **scope.as_meta(),
+            "available": await grade_scope.org_available_categories(db, player.organisation_id),
+        },
     }
 
 
@@ -279,11 +295,16 @@ async def get_player_rankings_endpoint(
 
 
 @router.get("/{player_id}/seasons")
-async def get_player_seasons(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_seasons(
+    player_id: str,
+    categories: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_season_by_season(db, player_id, include_prior=True)
+    scope = await grade_scope.resolve_scope(db, player.organisation_id, categories)
+    return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
 
 
 @router.get("/{player_id}/milestones")

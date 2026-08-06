@@ -1,5 +1,79 @@
 # BetterStats — Claude Session Notes
 
+## Junior stats split off career stats (migration 228, v9.16.0, Aug 2026)
+
+An Under-14 season was landing inside a senior career average. `grades.category`
+(migration 123, Senior/Junior/Women's/Masters/Mixed) had existed since v8.x and
+**nothing in the stats layer had ever read it** — it drove grouping and public
+visibility only.
+
+- **`services/grade_scope.py` is the one place a category selection becomes SQL**,
+  and **it works by EXCLUSION, which is load-bearing**. The obvious shape is an
+  include-list of senior grade ids; it is wrong twice. A manual game may have no
+  `grade_id` at all (Grade is optional on Upload Scorecard) and a career-scope
+  import residual has none either — an include-list drops both, an exclude-list
+  keeps them, because **a row we cannot categorise is not a row we know to be
+  junior**. And an empty exclusion set emits **no clause at all**, so a club with
+  no junior grades runs byte-for-byte the queries it ran before. That is what
+  makes a default that excludes junior safe to ship platform-wide. Every caller
+  gates on `scope.active`, never on `scope is None`.
+- **`clause()` is `col IS NULL OR NOT (col = ANY(...))`, not a bare `NOT`** —
+  with a NULL `grade_id` the ANY comparison is NULL and `NOT NULL` is NULL, so a
+  grade-less manual game would be silently dropped by a filter that has no
+  opinion about it.
+- **Categories resolve per grade NAME, in Python, never in the WHERE clause.** A
+  category may be an unconfirmed `suggest_category` guess rather than a stored
+  column (the 25/26 "Under 14s" row typically has `category` NULL), so it cannot
+  go into SQL. Same approach the public lineups endpoint already takes.
+- **CA's season aggregates carry no grade — `v_effective_player_season_stats`'s
+  `api` branch hardcodes `grade_id NULL`.** So a scoped career total is only
+  answerable from per-innings scorecards, and an active scope switches source.
+  Same trade the leaderboards already make for a grade/finals/captain filter
+  (`use_game_level` in records.py now includes `scope_active` for this reason).
+- **The three aggregate-only residual branches must be added back, or a
+  BetterImport club loses its history the moment the default filter applies.**
+  `_RESIDUAL_SOURCES = (manual_aggregate, manual_career, import)` — the branches
+  with no per-innings rows behind them. `api` and `manual_game` are excluded from
+  that list because the per-game views already cover the same games; counting
+  either alongside them doubles every figure. `_career_residuals` does this for
+  one player, `_residual_totals_cte` for the leaderboards (the same shape as the
+  existing `import_totals` CTE beside it). **Every blended average is recomputed
+  from summed counts**, never averaged from two averages.
+- **An explicitly picked grade beats the category default** (`if grade_id or
+  grade_name: scope = None`). Someone choosing "Under 14s" from a dropdown means
+  it; returning an empty board would read as broken.
+- **Two things a scoped view genuinely cannot answer, and says so rather than
+  guessing**: `fielding_stats` holds one run-out count and never splits assisted
+  from unassisted (only CA's season aggregate does) → returned as **NULL, not 0**,
+  because 0 reads as "never assisted a run-out"; and best bowling *figures* come
+  from the per-spell rows only, since a residual branch knows the wicket count but
+  its figures string belongs to a spell we hold no scorecard for.
+- **`get_season_by_season` needed its own per-game variant** (`_season_by_season_scoped`),
+  or the table would sum to a different number than the scoped header above it.
+  It drops the "Prior Seasons & Adjustments" row — that lump is the NULL-season
+  residual and belongs to no season, though it is still counted in the header.
+- **`organisations.stats_grade_categories`** (migration 228, JSONB list, NULL =
+  platform default) is the club's own default. An empty or all-junk selection
+  **stores NULL rather than saving**, or a club would be looking at empty stats
+  with no obvious way back. Edited from Club Settings → "Stats by grade"; Senior
+  is shown but disabled, since it is the baseline the rest are added to.
+- **Bug the verification caught**: the leaderboards' finals and captain branches
+  built `scope_clause` but nothing bound its parameter, so those two combinations
+  failed at execute time. Bound once right after each `params` dict is created.
+  A clause built from a helper and interpolated into several branches needs its
+  bind at the point every branch shares, not beside the interpolation.
+- **Verified against a real Postgres** — 47 service-level + 18 route-level checks
+  against the real 5-branch view stack (pulled straight out of migrations 038 /
+  070 / 075 / 092 / 147 / 169 rather than retyped): the unconfirmed-junior guess,
+  a senior-only club coming out inactive and byte-identical, import history
+  surviving the filter, the season table reconciling with the header, an
+  explicitly picked junior grade still returning its runs, finals composing with
+  the filter, and migration 228 applied twice to a populated table.
+- **Deliberately not touched**: BetterIQ (its own `iq_filters` grade vocabulary
+  and a client-side "Seniors only" preset already), StatLab, Yearbooks, and the
+  AFL silo (`services/afl/grade_labels.py` has its own category set —
+  senior/colts/womens/masters/integrated — and would need its own pass).
+
 ## A club font with no bold, and ink on a dark accent (migration 226, v9.14.0, Aug 2026)
 
 Reported by Leeming Spartan: their uploaded font looked "too dark" as an H1 and

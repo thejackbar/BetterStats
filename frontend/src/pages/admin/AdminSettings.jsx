@@ -9,6 +9,7 @@ import {
 } from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
 import { BASE_URL } from '../../data/marketing'
+import { CATEGORY_LABELS } from '../../lib/gradeCategories'
 
 const INPUT_CLS = 'w-full bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-3 py-2 focus:outline-none focus:border-pb-accent'
 const HEX_RE = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
@@ -230,6 +231,7 @@ export default function AdminSettings() {
         public_show_opening: !!s.public_show_opening,
         public_show_gender: !!s.public_show_gender,
         include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
+        stats_grade_categories: s.effective_stats_grade_categories || [],
         public_header_logo: !!s.public_header_logo,
         password_protected: !!s.password_protected,
       })
@@ -754,6 +756,53 @@ export default function AdminSettings() {
               </span>
             </label>
           </div>
+
+          {/* --- Which grades count towards stats --- */}
+          {(settings.available_grade_categories || []).length > 1 && (
+            <div className="pt-5 pb-hairline-t">
+              <label className={LABEL}>Stats by grade</label>
+              <p className="font-mono text-[10px] text-pb-faintest mb-3">
+                Which of your grades count towards career totals, leaderboards and club
+                records. Junior grades are left out by default, so an Under-14 season
+                doesn't sit inside a senior batting average. Anyone reading the site can
+                switch a category back on for themselves; this sets what they see first.
+                Picking a specific grade from a Grade dropdown always shows that grade,
+                whatever is ticked here.
+              </p>
+              <div className="space-y-2">
+                {(settings.available_grade_categories || []).map(key => (
+                  <label key={key} className="flex items-start gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      disabled={key === 'senior'}
+                      checked={(form.stats_grade_categories || []).includes(key)}
+                      onChange={e => setForm(f => {
+                        const cur = f.stats_grade_categories || []
+                        return {
+                          ...f,
+                          stats_grade_categories: e.target.checked
+                            ? [...cur, key]
+                            : cur.filter(c => c !== key),
+                        }
+                      })}
+                      className="accent-pb-accent mt-0.5 shrink-0 disabled:opacity-50" />
+                    <span className="leading-tight">
+                      <span className="text-pb-text text-sm">{CATEGORY_LABELS[key] || key} grades count by default</span>
+                      {key === 'senior' && (
+                        <span className="font-mono text-[10px] text-pb-faintest block">
+                          Always counted — it's the baseline the others are added to
+                        </span>
+                      )}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <p className="font-mono text-[10px] text-pb-faintest mt-2">
+                A grade's category is set on the Grades screen. Untick everything to go
+                back to the standard default.
+              </p>
+            </div>
+          )}
 
           {/* --- Password protection --- */}
           <div className="pt-5 pb-hairline-t">

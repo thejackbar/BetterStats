@@ -7,6 +7,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
+import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, categoriesParam, scopeNote } from '../lib/gradeCategories'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, Label, Card, Btn,
@@ -2210,13 +2211,58 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   )
 }
 
+// Which grade categories these career figures count. Senior is not offered:
+// it is the baseline the rest are added to. Drawn only when the club actually
+// runs grades in another category, which is also exactly when the filter does
+// anything at all.
+function GradeCategoryToggles({ categories, setCategories, available }) {
+  const toggleable = TOGGLEABLE_CATEGORIES.filter(c => available.includes(c))
+  if (!categories || toggleable.length === 0) return null
+  const flip = (key) => setCategories(
+    categories.includes(key) ? categories.filter(c => c !== key) : [...categories, key]
+  )
+  return (
+    <div className="flex items-center gap-2">
+      <Label>INCLUDE</Label>
+      <div className="flex items-center border border-pb-hairline2 rounded overflow-hidden">
+        {toggleable.map(key => (
+          <button
+            key={key}
+            onClick={() => flip(key)}
+            aria-pressed={categories.includes(key)}
+            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r border-pb-hairline2 last:border-r-0 ${
+              categories.includes(key)
+                ? 'bg-pb-accent/15 text-pb-accent'
+                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+            }`}
+          >
+            {CATEGORY_LABELS[key]}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────
 export default function PlayerProfile() {
   const { playerId } = useParams()
   const { hasCapability } = useAuth()
   const canManage = hasCapability(CAP.MANAGE_PLAYERS)
   const [seasonId, setSeasonId] = useState(null)
-  const { data, loading, error } = usePlayerStats(playerId, { seasonId })
+  // Null until the first response tells us what the club's own default resolved
+  // to. Seeding from the server rather than a hardcoded list means the opening
+  // fetch carries no filter at all, so a junior club that has set its default to
+  // count juniors renders correctly first time instead of correcting itself.
+  const [categories, setCategories] = useState(null)
+  const { data, loading, error } = usePlayerStats(playerId, {
+    seasonId,
+    categories: categories == null ? null : categoriesParam(categories),
+  })
+  const gradeScope = data?.grade_scope
+  useEffect(() => {
+    if (categories == null && gradeScope?.categories) setCategories(gradeScope.categories)
+  }, [gradeScope, categories])
   const [org, setOrg] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [seasonStats, setSeasonStats] = useState([])
@@ -2287,10 +2333,11 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId) return
-    api.getPlayerSeasons(playerId).then(setSeasonStats).catch(() => setSeasonStats([]))
+    api.getPlayerSeasons(playerId, categories == null ? null : categoriesParam(categories))
+      .then(setSeasonStats).catch(() => setSeasonStats([]))
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
     api.getPlayerCaptainStats(playerId).then(setCaptainStats).catch(() => setCaptainStats({}))
-  }, [playerId])
+  }, [playerId, categories])
 
   useEffect(() => {
     if (!data?.player?.organisation_id) return
@@ -2509,7 +2556,15 @@ export default function PlayerProfile() {
                 <option key={s.id} value={s.id}>{formatSeason(s)}</option>
               ))}
             </select>
+            <GradeCategoryToggles
+              categories={categories}
+              setCategories={setCategories}
+              available={gradeScope?.available || []}
+            />
           </div>
+        )}
+        {scopeNote(gradeScope) && (
+          <p className="text-[11px] text-pb-faint mb-5 -mt-3">{scopeNote(gradeScope)}</p>
         )}
 
         {/* Quick stat strip */}

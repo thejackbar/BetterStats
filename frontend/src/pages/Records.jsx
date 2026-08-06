@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
+import { useGradeCategories } from '../hooks/useGradeCategories'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
@@ -722,6 +723,10 @@ export default function Records() {
   const [finalsOnly, setFinalsOnly] = useState(false)
   const [captainOnly, setCaptainOnly] = useState(false)
   const [gender, setGender] = useState(null)
+  const {
+    available: availableCategories, categories, setCategories,
+    param: categoriesParam, ready: categoriesReady,
+  } = useGradeCategories(orgId)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -739,13 +744,13 @@ export default function Records() {
   }, [orgId, selectedSeason])
 
   useEffect(() => {
-    if (!orgId) return
+    if (!orgId || !categoriesReady) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, categoriesReady])
 
   useEffect(() => {
     if (!orgId) return
@@ -785,6 +790,9 @@ export default function Records() {
             setCaptainOnly={setCaptainOnly}
             gender={gender}
             setGender={setGender}
+            categories={categories}
+            setCategories={setCategories}
+            availableCategories={availableCategories}
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">

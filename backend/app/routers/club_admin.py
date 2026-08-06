@@ -44,6 +44,7 @@ from app.services import playhq_client
 from app.services.name_format import name_sort_key
 from app.services import fonts as font_service
 from app.services import theme_config as theme_config_service
+from app.services import grade_scope
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -735,6 +736,11 @@ class SettingsPatch(BaseModel):
     public_show_opening: Optional[bool] = None
     public_show_gender: Optional[bool] = None
     include_fill_ins_in_stats: Optional[bool] = None
+    # Which grade categories count towards the club's stats by default
+    # (migration 228) — a list of grade_labels.GRADE_CATEGORIES keys, or null to
+    # clear back to the platform default of everything-except-junior. An empty
+    # list would hide every stat the club has, so it clears rather than saves.
+    stats_grade_categories: Optional[list[str]] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
@@ -850,6 +856,14 @@ async def get_settings(
         "public_show_opening": bool(club.public_show_opening),
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
+        # The stored preference (null when the club has never set one) alongside
+        # what that actually resolves to, so the settings screen can show the
+        # effective selection without re-deriving the fallback itself.
+        "stats_grade_categories": club.stats_grade_categories,
+        "effective_stats_grade_categories": list(
+            await grade_scope.club_default_categories(db, club.id)
+        ),
+        "available_grade_categories": await grade_scope.org_available_categories(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
@@ -907,6 +921,12 @@ async def patch_settings(
         club.public_show_gender = bool(data.public_show_gender)
     if data.include_fill_ins_in_stats is not None:
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
+    if data.stats_grade_categories is not None:
+        picked = grade_scope.normalise_categories(data.stats_grade_categories)
+        # A selection that survives normalisation to nothing — an empty list, or
+        # nothing but junk keys — is stored as NULL rather than saved. Honouring
+        # it would leave the club looking at empty stats with no obvious way back.
+        club.stats_grade_categories = list(picked) if picked else None
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
     if data.committee_docs_office_bearer_only is not None:

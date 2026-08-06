@@ -1,4 +1,5 @@
 import { formatSeason } from '../lib/cricketFormat'
+import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES } from '../lib/gradeCategories'
 
 export default function SeasonSelector({
   seasons = [],
@@ -19,7 +20,26 @@ export default function SeasonSelector({
   showGenderFilter = true,
   showFinalsFilter = true,
   showCaptainFilter = true,
+  // Which grade categories count. `categories` is the array currently counted;
+  // `availableCategories` is what this club's grades actually justify offering,
+  // so a club with no junior programme never sees a Juniors toggle at all.
+  categories = null,
+  setCategories = () => {},
+  availableCategories = [],
+  showCategoryFilter = true,
 }) {
+  // Senior is not offered as a toggle: it is the baseline every other category
+  // is added to, and letting someone switch it off would mostly produce an
+  // empty page. Turning a category ON adds those grades' games to the figures.
+  const toggleable = TOGGLEABLE_CATEGORIES.filter(c => availableCategories.includes(c))
+  const counted = categories || []
+  const flip = (key) => {
+    const next = counted.includes(key)
+      ? counted.filter(c => c !== key)
+      : [...counted, key]
+    setCategories(next)
+  }
+
   return (
     <div className="flex flex-wrap gap-2 items-center">
       {/* Season - always shown */}
@@ -54,6 +74,34 @@ export default function SeasonSelector({
             <option value="">All grades</option>
             {grades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
           </select>
+        </div>
+      )}
+
+      {/* Grade categories - one on/off pill each. Distinct from Gender below:
+          this is how the GRADE is classified, not a player attribute, so a
+          woman playing in a men's grade is caught by Gender and not by this. */}
+      {showCategoryFilter && toggleable.length > 0 && (
+        <div className="flex items-center gap-2">
+          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Include</label>
+          <div className="flex items-center border pb-hairline rounded overflow-hidden">
+            {toggleable.map(key => (
+              <button
+                key={key}
+                onClick={() => flip(key)}
+                aria-pressed={counted.includes(key)}
+                title={counted.includes(key)
+                  ? `${CATEGORY_LABELS[key]} grades are counted — click to leave them out`
+                  : `${CATEGORY_LABELS[key]} grades are left out — click to count them`}
+                className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+                  counted.includes(key)
+                    ? 'bg-pb-accent/15 text-pb-accent'
+                    : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+                }`}
+              >
+                {CATEGORY_LABELS[key]}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

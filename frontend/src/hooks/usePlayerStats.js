@@ -13,7 +13,10 @@ export function usePlayerStats(playerId, filters = {}) {
       .then(setData)
       .catch(e => setError(e.message))
       .finally(() => setLoading(false))
-  }, [playerId, filters.seasonId, filters.gradeId])
+    // `categories` belongs in the dependency list, not just the request: without
+    // it, switching the Juniors toggle would send a new query and never re-run
+    // the effect, leaving the old figures on screen.
+  }, [playerId, filters.seasonId, filters.gradeId, filters.categories])
 
   return { data, loading, error }
 }

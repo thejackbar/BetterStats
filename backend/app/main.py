@@ -312,6 +312,13 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS "
             "is_public BOOLEAN NOT NULL DEFAULT true"
         ))
+        # A club's own default for which of those categories count towards its
+        # stats (migration 228). NULL = no preference, so the platform default
+        # (everything except junior) applies. See services/grade_scope.py.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "stats_grade_categories JSONB"
+        ))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).

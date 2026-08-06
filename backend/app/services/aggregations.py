@@ -5,10 +5,21 @@ from datetime import date as date_cls
 import uuid
 
 from app.services.milestone_rules import next_threshold, reach_window
+from app.services.grade_scope import GradeScope
 from app.services.season_aliases import (
     resolve_season_filter,
     resolve_season_filter_no_org,
 )
+
+
+def _scoped(scope: Optional[GradeScope]) -> bool:
+    """Is there actually a grade category being excluded?
+
+    An inactive scope must emit no SQL and take no alternate code path, so a club
+    with nothing out of scope keeps running exactly the queries it ran before
+    grade categories existed. Every caller gates on this, not on `scope is None`.
+    """
+    return bool(scope is not None and scope.active)
 
 # Merge-aware grade match fragment (gr must already be joined).
 # Matches grades that are the selected canonical OR are aliases merged into it.
@@ -57,7 +68,211 @@ async def _resolve_grade_name(session: AsyncSession, org_id: str, grade_id: str)
     return row["n"] if row else None
 
 
-async def get_career_batting(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+# The branches of v_effective_player_season_stats that have NO per-innings rows
+# behind them, and so are invisible to the per-game path a scoped career total
+# has to use.
+#
+# `api` is CA's season aggregate for games we also hold scorecards for, and
+# `manual_game` is a rollup of manual games that are themselves in the per-game
+# views — counting either alongside the per-game rows would double every figure.
+# The three below are different: a BetterImport historical CSV, a hand-entered
+# season adjustment and the career-level "Prior Seasons & Adjustments" lump exist
+# only as totals. Drop them and a club with fifty years of imported history would
+# watch it vanish the moment the default junior filter applied.
+_RESIDUAL_SOURCES = ("manual_aggregate", "manual_career", "import")
+
+
+def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
+    """A `residual_totals` CTE keyed on player_id, for the leaderboards.
+
+    Same job as `_career_residuals` does for one player: a scoped leaderboard
+    reads per-innings rows, so without this a club's BetterImport history would
+    drop off its own all-time boards the moment a category filter applied. The
+    existing `import_totals` CTE right beside this is the same pattern for the
+    grade-filtered branch.
+    """
+    params["residual_sources"] = list(_RESIDUAL_SOURCES)
+    scope.bind(params)
+    season_clause = " AND pss.season_id = ANY(:season_ids)" if season_ids else ""
+    return f"""
+        residual_totals AS (
+            SELECT pss.player_id,
+                COALESCE(SUM(pss.matches), 0) AS games,
+                COALESCE(SUM(pss.batting_innings), 0) AS innings,
+                COALESCE(SUM(pss.runs), 0) AS total_runs,
+                MAX(pss.high_score) AS high_score,
+                COALESCE(SUM(pss.not_outs), 0) AS not_outs,
+                COALESCE(SUM(pss.balls_faced), 0) AS total_balls,
+                COALESCE(SUM(pss.fifties), 0) AS fifties,
+                COALESCE(SUM(pss.hundreds), 0) AS hundreds,
+                COALESCE(SUM(pss.ducks), 0) AS ducks,
+                COALESCE(SUM(pss.fours), 0) AS total_fours,
+                COALESCE(SUM(pss.sixes), 0) AS total_sixes,
+                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.runs_conceded), 0) AS bowling_runs,
+                COALESCE(SUM(pss.overs), 0) AS total_overs,
+                COALESCE(SUM(pss.bowling_balls), 0) AS bowling_balls,
+                COALESCE(SUM(pss.maidens), 0) AS total_maidens,
+                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                MAX(pss.best_bowling_wickets) AS best_bowling_wickets,
+                COALESCE(SUM(pss.catches), 0) AS total_catches,
+                COALESCE(SUM(pss.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(pss.catches_non_wk), 0) AS total_catches_non_wk,
+                COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
+                COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
+            FROM v_effective_player_season_stats pss
+            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id")}
+            GROUP BY pss.player_id
+        )
+    """
+
+
+async def _career_residuals(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str],
+    scope: Optional[GradeScope],
+) -> dict:
+    """Aggregate-only career figures that survive a grade-category filter.
+
+    Two of the three residual branches carry a real `grade_id` (a season
+    adjustment, an import delta) and are filtered by it. The career-level lump
+    has none, and is kept: exclusion semantics mean a row we cannot categorise is
+    not a row we know to be out of scope.
+    """
+    params: dict = {"pid": player_id, "sources": list(_RESIDUAL_SOURCES)}
+    season_ids = await resolve_season_filter_no_org(session, season_id)
+    # Matches the unscoped career query's own behaviour: naming a season excludes
+    # the NULL-season career lump, because a NULL never matches a season filter.
+    season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
+    if season_ids:
+        params["sids"] = season_ids
+    scope_clause = scope.clause("pss.grade_id") if _scoped(scope) else ""
+    if _scoped(scope):
+        scope.bind(params)
+    res = await session.execute(
+        text(f"""
+            SELECT
+                COALESCE(SUM(pss.matches), 0) AS games,
+                COALESCE(SUM(pss.batting_innings), 0) AS innings,
+                COALESCE(SUM(pss.runs), 0) AS total_runs,
+                MAX(pss.high_score) AS high_score,
+                COALESCE(SUM(pss.not_outs), 0) AS not_outs,
+                COALESCE(SUM(pss.balls_faced), 0) AS total_balls,
+                COALESCE(SUM(pss.fifties), 0) AS fifties,
+                COALESCE(SUM(pss.hundreds), 0) AS hundreds,
+                COALESCE(SUM(pss.ducks), 0) AS ducks,
+                COALESCE(SUM(pss.fours), 0) AS total_fours,
+                COALESCE(SUM(pss.sixes), 0) AS total_sixes,
+                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
+                COALESCE(SUM(pss.runs_conceded), 0) AS bowling_runs,
+                COALESCE(SUM(pss.overs), 0) AS total_overs,
+                COALESCE(SUM(pss.bowling_balls), 0) AS bowling_balls,
+                COALESCE(SUM(pss.maidens), 0) AS total_maidens,
+                COALESCE(SUM(pss.five_wicket_innings), 0) AS five_fors,
+                MAX(pss.best_bowling_wickets) AS best_bowling_wickets,
+                COALESCE(SUM(pss.catches), 0) AS total_catches,
+                COALESCE(SUM(pss.catches_wk), 0) AS total_catches_wk,
+                COALESCE(SUM(pss.catches_non_wk), 0) AS total_catches_non_wk,
+                COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
+                COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
+            FROM v_effective_player_season_stats pss
+            WHERE pss.player_id = CAST(:pid AS UUID)
+              AND pss.source = ANY(:sources){season_clause}{scope_clause}
+        """),
+        params,
+    )
+    row = res.mappings().first()
+    return dict(row) if row else {}
+
+
+def _n(value) -> int:
+    return int(value or 0)
+
+
+def _ratio(numerator, denominator, places: int = 2):
+    """A derived stat, or None when there is nothing to divide by.
+
+    Every blended average/rate is recomputed from the summed counts here rather
+    than combined from the two sides' own averages, which would weight a career
+    of imported totals the same as a single scorecard.
+    """
+    d = _n(denominator)
+    return round(_n(numerator) / d, places) if d else None
+
+
+async def _game_season_clause(session: AsyncSession, season_id, params: dict) -> str:
+    """Season filter for a per-game query, binding into `params` in place.
+
+    Reads `v_effective_games.season_id` (migration 169) rather than joining
+    grades→seasons: a manual game may have no grade but always has a season, and
+    deriving one through the grade would drop it (the v8.76.1 bug).
+    """
+    if not season_id:
+        return ""
+    season_ids = await resolve_season_filter_no_org(session, season_id)
+    if not season_ids:
+        return ""
+    params["career_season_ids"] = season_ids
+    return " AND g.season_id = ANY(:career_season_ids)"
+
+
+async def _career_identity(session: AsyncSession, player_id: str) -> dict:
+    """The player columns every career payload carries alongside its figures.
+
+    The season-aggregate queries get these from their `players` join for free;
+    the per-game path has no such join, so a scoped career total would otherwise
+    come back missing `name`/`organisation_id` and quietly change the response
+    shape depending on whether a filter happened to be active.
+    """
+    res = await session.execute(
+        text(
+            "SELECT COALESCE(p.display_name_override, p.name) AS name, p.organisation_id "
+            "FROM players p WHERE p.id = CAST(:pid AS UUID)"
+        ),
+        {"pid": player_id},
+    )
+    row = res.mappings().first()
+    return {
+        "player_id": player_id,
+        "name": row["name"] if row else None,
+        "organisation_id": row["organisation_id"] if row else None,
+    }
+
+
+async def get_career_batting(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
+) -> Optional[dict]:
+    # Career totals normally come from CA's own season aggregates, which have no
+    # grade dimension at all (the `api` branch of v_effective_player_season_stats
+    # hardcodes grade_id NULL). Excluding a category is therefore only answerable
+    # from the per-innings scorecards, so an active scope switches source — the
+    # same trade the leaderboards already make when a grade filter is applied.
+    if _scoped(scope):
+        pg = await get_career_batting_from_innings(session, player_id, season_id=season_id, scope=scope) or {}
+        r = await _career_residuals(session, player_id, season_id, scope)
+        innings = _n(pg.get("innings")) + _n(r.get("innings"))
+        runs = _n(pg.get("total_runs")) + _n(r.get("total_runs"))
+        not_outs = _n(pg.get("not_outs")) + _n(r.get("not_outs"))
+        balls = _n(pg.get("total_balls")) + _n(r.get("total_balls"))
+        highs = [h for h in (pg.get("high_score"), r.get("high_score")) if h is not None]
+        return {
+            **await _career_identity(session, player_id),
+            "innings": innings,
+            "total_runs": runs,
+            "high_score": max(highs) if highs else None,
+            "average": _ratio(runs, innings - not_outs),
+            "strike_rate": _ratio(runs * 100, balls),
+            "fifties": _n(pg.get("fifties")) + _n(r.get("fifties")),
+            "hundreds": _n(pg.get("hundreds")) + _n(r.get("hundreds")),
+            "ducks": _n(pg.get("ducks")) + _n(r.get("ducks")),
+            "total_fours": _n(pg.get("total_fours")) + _n(r.get("total_fours")),
+            "total_sixes": _n(pg.get("total_sixes")) + _n(r.get("total_sixes")),
+            "games": _n(pg.get("games")) + _n(r.get("games")),
+        }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
@@ -91,7 +306,37 @@ async def get_career_batting(session: AsyncSession, player_id: str, season_id: O
     return dict(row) if row else None
 
 
-async def get_career_bowling(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+async def get_career_bowling(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
+) -> Optional[dict]:
+    if _scoped(scope):
+        pg = await get_career_bowling_from_spells(session, player_id, season_id=season_id, scope=scope) or {}
+        r = await _career_residuals(session, player_id, season_id, scope)
+        wickets = _n(pg.get("total_wickets")) + _n(r.get("total_wickets"))
+        conceded = _n(pg.get("total_runs")) + _n(r.get("bowling_runs"))
+        balls = _n(pg.get("total_balls")) + _n(r.get("bowling_balls"))
+        best = [w for w in (pg.get("best_figures_wickets"), r.get("best_bowling_wickets")) if w is not None]
+        return {
+            **await _career_identity(session, player_id),
+            "total_wickets": wickets,
+            "average": _ratio(conceded, wickets),
+            "economy": _ratio(conceded * 6, balls),
+            "best_figures_wickets": max(best) if best else None,
+            # Only the per-game side can name the actual figures — a residual
+            # branch carries the wicket count but its `best_bowling_figures`
+            # string belongs to a spell we have no scorecard for, so pairing it
+            # with a blended maximum could print figures from the wrong innings.
+            "best_bowling_figures": pg.get("best_bowling_figures"),
+            "total_maidens": _n(pg.get("total_maidens")) + _n(r.get("total_maidens")),
+            "total_overs": _n(pg.get("total_overs")) + _n(r.get("total_overs")),
+            "total_runs": conceded,
+            "five_fors": _n(pg.get("five_fors")) + _n(r.get("five_fors")),
+            "bowling_strike_rate": _ratio(balls, wickets),
+            "games": _n(pg.get("games")) + _n(r.get("games")),
+        }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
@@ -128,7 +373,34 @@ async def get_career_bowling(session: AsyncSession, player_id: str, season_id: O
     return dict(row) if row else None
 
 
-async def get_career_fielding(session: AsyncSession, player_id: str, season_id: Optional[str] = None) -> Optional[dict]:
+async def get_career_fielding(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
+) -> Optional[dict]:
+    if _scoped(scope):
+        pg = await get_career_fielding_from_stats(session, player_id, season_id=season_id, scope=scope) or {}
+        r = await _career_residuals(session, player_id, season_id, scope)
+        catches = _n(pg.get("total_catches")) + _n(r.get("total_catches"))
+        run_outs = _n(pg.get("total_run_outs")) + _n(r.get("total_run_outs"))
+        stumpings = _n(pg.get("total_stumpings")) + _n(r.get("total_stumpings"))
+        catches_wk = _n(pg.get("total_catches_wk")) + _n(r.get("total_catches_wk"))
+        return {
+            **await _career_identity(session, player_id),
+            "total_catches": catches,
+            "total_catches_wk": catches_wk,
+            "total_catches_non_wk": max(catches - catches_wk, 0),
+            "total_run_outs": run_outs,
+            # See the NULL columns in get_career_fielding_from_stats: the
+            # per-game table holds one run-out count and never splits assisted
+            # from unassisted, so a blended split would be part real, part guess.
+            "total_assisted_run_outs": None,
+            "total_unassisted_run_outs": None,
+            "total_stumpings": stumpings,
+            "total_dismissals": catches + run_outs + stumpings,
+            "games": _n(pg.get("games")) + _n(r.get("games")),
+        }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     params: dict = {"pid": player_id}
@@ -230,10 +502,16 @@ async def get_career_batting_from_innings(
     last_n_games: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> Optional[dict]:
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
+    season_clause = await _game_season_clause(session, season_id, params)
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    if _scoped(scope):
+        scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
@@ -254,7 +532,7 @@ async def get_career_batting_from_innings(
         WHERE bi.player_id = CAST(:pid AS UUID)
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-          {game_filter}
+          {game_filter}{season_clause}{scope_clause}
     )""")
 
     sql = f"""
@@ -270,7 +548,12 @@ async def get_career_batting_from_innings(
             COALESCE(SUM(CASE WHEN runs = 0 AND NOT not_out THEN 1 ELSE 0 END), 0) AS ducks,
             COALESCE(SUM(fours), 0) AS total_fours,
             COALESCE(SUM(sixes), 0) AS total_sixes,
-            COUNT(DISTINCT game_id) AS games
+            COUNT(DISTINCT game_id) AS games,
+            -- Exposed so a caller blending this with the aggregate-only
+            -- residuals below can recompute the average from summed counts
+            -- rather than trying to average two averages.
+            COALESCE(SUM(not_out::int), 0) AS not_outs,
+            COALESCE(SUM(balls), 0) AS total_balls
         FROM qualifying
     """
     result = await session.execute(text(sql), params)
@@ -288,10 +571,16 @@ async def get_career_bowling_from_spells(
     last_n_games: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> Optional[dict]:
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
+    season_clause = await _game_season_clause(session, season_id, params)
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    if _scoped(scope):
+        scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
@@ -310,7 +599,7 @@ async def get_career_bowling_from_spells(
         FROM v_effective_bowling_spells bs
         JOIN v_effective_games g ON g.id = bs.game_id
         WHERE bs.player_id = CAST(:pid AS UUID)
-          {game_filter}
+          {game_filter}{season_clause}{scope_clause}
     )""")
 
     sql = f"""
@@ -323,9 +612,16 @@ async def get_career_bowling_from_spells(
             (SELECT wickets::text || '/' || runs::text FROM qualifying ORDER BY wickets DESC, runs ASC LIMIT 1) AS best_bowling_figures,
             COALESCE(SUM(maidens), 0) AS total_maidens,
             COALESCE(SUM(overs), 0) AS total_overs,
+            -- Runs conceded. The season-aggregate path calls this `total_runs`
+            -- too; a caller switching between the two must not have to rename it.
+            COALESCE(SUM(runs), 0) AS total_runs,
             COALESCE(SUM(CASE WHEN wickets >= 5 THEN 1 ELSE 0 END), 0) AS five_fors,
             COUNT(DISTINCT game_id) AS games,
-            ROUND(SUM(overs)::numeric * 6 / NULLIF(SUM(wickets), 0), 2) AS bowling_strike_rate
+            ROUND(SUM(overs)::numeric * 6 / NULLIF(SUM(wickets), 0), 2) AS bowling_strike_rate,
+            -- Balls bowled, from cricket's own overs notation (10.2 = 10 overs
+            -- and 2 balls, not 10.2 overs). Exposed for the same blending reason
+            -- as batting's not_outs.
+            COALESCE(SUM(FLOOR(overs) * 6 + ROUND((overs - FLOOR(overs)) * 10)), 0) AS total_balls
         FROM qualifying
     """
     result = await session.execute(text(sql), params)
@@ -343,10 +639,16 @@ async def get_career_fielding_from_stats(
     last_n_games: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    season_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> Optional[dict]:
     params: dict = {"pid": player_id}
     ctes = []
     game_filter = ""
+    season_clause = await _game_season_clause(session, season_id, params)
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    if _scoped(scope):
+        scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
@@ -365,7 +667,7 @@ async def get_career_fielding_from_stats(
         FROM v_effective_fielding_stats fs
         JOIN v_effective_games g ON g.id = fs.game_id
         WHERE fs.player_id = CAST(:pid AS UUID)
-          {game_filter}
+          {game_filter}{season_clause}{scope_clause}
     )""")
 
     sql = f"""
@@ -375,6 +677,13 @@ async def get_career_fielding_from_stats(
             COALESCE(SUM(catches_wk), 0) AS total_catches_wk,
             COALESCE(SUM(catches - catches_wk), 0) AS total_catches_non_wk,
             COALESCE(SUM(run_outs), 0) AS total_run_outs,
+            -- `fielding_stats` holds one run-out count per game and never splits
+            -- assisted from unassisted (only CA's season aggregate does), so a
+            -- scoped total genuinely cannot answer this. NULL says "not known
+            -- for this view", which the profile renders as a dash — reporting 0
+            -- would read as "never assisted a run-out".
+            NULL::bigint AS total_assisted_run_outs,
+            NULL::bigint AS total_unassisted_run_outs,
             COALESCE(SUM(stumpings), 0) AS total_stumpings,
             COALESCE(SUM(catches + run_outs + stumpings), 0) AS total_dismissals,
             COUNT(DISTINCT game_id) AS games
@@ -396,8 +705,9 @@ async def get_batting_leaderboard(
     grade_id: Optional[str] = None,
     limit: int = 20,
     finals_only: Optional[bool] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    return await get_batting_leaderboard_extended(session, org_id, season_id, grade_id, "total_runs", limit, finals_only=finals_only)
+    return await get_batting_leaderboard_extended(session, org_id, season_id, grade_id, "total_runs", limit, finals_only=finals_only, scope=scope)
 
 
 async def get_bowling_leaderboard(
@@ -407,8 +717,9 @@ async def get_bowling_leaderboard(
     grade_id: Optional[str] = None,
     limit: int = 20,
     finals_only: Optional[bool] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit, finals_only=finals_only)
+    return await get_bowling_leaderboard_extended(session, org_id, season_id, grade_id, "total_wickets", limit, finals_only=finals_only, scope=scope)
 
 
 async def get_fielding_leaderboard(
@@ -423,14 +734,19 @@ async def get_fielding_leaderboard(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {"total_catches", "total_catches_non_wk", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
+    # An explicitly picked grade beats the category default.
+    if grade_id or grade_name:
+        scope = None
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
@@ -440,6 +756,12 @@ async def get_fielding_leaderboard(
     else:
         overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if _scoped(scope):
+        # Bound once for every branch below: the finals and captain branches
+        # interpolate scope_clause directly, and a clause whose parameter was
+        # never bound fails at execute time, not at import. The SIRS queries
+        # bind their own inside _sirs_base_clauses.
+        scope.bind(params)
     if gender:
         params["gender"] = gender
     if season_ids:
@@ -584,7 +906,7 @@ async def get_fielding_leaderboard(
             -- rows, so scoping the game alone puts the opposition on our board.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
             WHERE s.organisation_id = CAST(:org_id AS UUID)
-              AND g.is_final = TRUE{season_clause}{gender_clause}{overseas_clause}
+              AND g.is_final = TRUE{season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -611,8 +933,47 @@ async def get_fielding_leaderboard(
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             -- Player-scoped for the same reason as the finals branch above.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{gender_clause}{overseas_clause}
+            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
+        """
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if _scoped(scope):
+        # See get_batting_leaderboard_extended's equivalent branch: the plain
+        # board reads grade-blind season aggregates, so a category filter has to
+        # be answered from per-game rows plus the aggregate-only residuals.
+        season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        residual_cte = _residual_totals_cte(scope, season_ids, params)
+        base = f"""
+            WITH {residual_cte}, qualifying AS (
+                SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
+                FROM v_effective_fielding_stats fs
+                JOIN v_effective_games g ON g.id = fs.game_id
+                JOIN seasons s ON s.id = g.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+            )
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    COALESCE(SUM(q.catches), 0) + COALESCE(MAX(rt.total_catches), 0) AS total_catches,
+                    COALESCE(SUM(q.catches_wk), 0) + COALESCE(MAX(rt.total_catches_wk), 0) AS total_catches_wk,
+                    COALESCE(SUM(q.catches - q.catches_wk), 0) + COALESCE(MAX(rt.total_catches_non_wk), 0) AS total_catches_non_wk,
+                    COALESCE(SUM(q.run_outs), 0) + COALESCE(MAX(rt.total_run_outs), 0) AS total_run_outs,
+                    COALESCE(SUM(q.stumpings), 0) + COALESCE(MAX(rt.total_stumpings), 0) AS total_stumpings,
+                    COALESCE(SUM(q.catches + q.run_outs + q.stumpings), 0)
+                        + COALESCE(MAX(rt.total_catches), 0) + COALESCE(MAX(rt.total_run_outs), 0)
+                        + COALESCE(MAX(rt.total_stumpings), 0) AS total_dismissals
+                FROM players p
+                LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN residual_totals rt ON rt.player_id = p.id
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
         result = await session.execute(text(base), params)
@@ -656,10 +1017,15 @@ async def get_player_batting_innings(
     player_id: str,
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
+    if _scoped(scope):
+        # Leading AND already; strip it, the clause list re-joins them.
+        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        scope.bind(params)
     if season_ids:
         clauses.append("s.id = ANY(:sids)")
         params["sids"] = season_ids
@@ -705,10 +1071,15 @@ async def get_player_bowling_spells(
     player_id: str,
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
+    if _scoped(scope):
+        # Leading AND already; strip it, the clause list re-joins them.
+        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        scope.bind(params)
     if season_ids:
         clauses.append("s.id = ANY(:sids)")
         params["sids"] = season_ids
@@ -1195,7 +1566,154 @@ async def get_player_team_breakdown(
 _HISTORICAL_BUNDLE_MATCH_CAP = 60
 
 
-async def get_season_by_season(session: AsyncSession, player_id: str, include_prior: bool = False) -> list[dict]:
+async def _season_by_season_scoped(
+    session: AsyncSession, player_id: str, scope: GradeScope
+) -> list[dict]:
+    """Season-by-season built from scorecards, with out-of-scope grades left out.
+
+    The ordinary path reads CA's season aggregates, which carry no grade at all,
+    so the only way to answer "this season, but not the juniors" is to add the
+    innings up ourselves. It exists so the per-season rows still reconcile with
+    the scoped career header above them — a profile whose total says 1,400 runs
+    over a table summing to 2,050 reads as a broken page, not as a filter.
+
+    Season aliasing is applied first (`season_aliases`), so a club that merged
+    Summer and Winter 25/26 gets the same single row it gets unfiltered.
+    """
+    params: dict = {"pid": player_id}
+    scope.bind(params)
+    clause = scope.clause("g.grade_id")
+    res = await session.execute(
+        text(f"""
+            WITH scoped_games AS (
+                SELECT g.id AS game_id,
+                       COALESCE(sa.canonical_season_id, g.season_id) AS sid
+                FROM v_effective_games g
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = g.season_id AND sa.undone_at IS NULL
+                WHERE g.season_id IS NOT NULL{clause}
+            ),
+            bat AS (
+                SELECT sg.sid,
+                    COUNT(*) AS batting_innings,
+                    SUM(bi.runs) AS total_runs,
+                    MAX(bi.runs) AS high_score,
+                    SUM(bi.not_out::int) AS not_outs,
+                    SUM(bi.balls) AS balls_faced,
+                    SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
+                    SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds,
+                    SUM(CASE WHEN bi.runs = 0 AND NOT bi.not_out THEN 1 ELSE 0 END) AS ducks,
+                    SUM(bi.fours) AS total_fours,
+                    SUM(bi.sixes) AS total_sixes
+                FROM v_effective_batting_innings bi
+                JOIN scoped_games sg ON sg.game_id = bi.game_id
+                WHERE bi.player_id = CAST(:pid AS UUID)
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                GROUP BY sg.sid
+            ),
+            bowl AS (
+                SELECT sg.sid,
+                    SUM(bs.wickets) AS total_wickets,
+                    SUM(bs.runs) AS bowling_runs_conceded,
+                    SUM(bs.overs) AS total_overs,
+                    SUM(FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10)) AS bowling_balls,
+                    SUM(bs.maidens) AS total_maidens,
+                    MAX(bs.wickets) AS best_bowling_wickets,
+                    SUM(CASE WHEN bs.wickets >= 5 THEN 1 ELSE 0 END) AS five_fors,
+                    (ARRAY_AGG(bs.wickets::text || '-' || bs.runs::text
+                        ORDER BY bs.wickets DESC, bs.runs ASC))[1] AS best_bowling_figures
+                FROM v_effective_bowling_spells bs
+                JOIN scoped_games sg ON sg.game_id = bs.game_id
+                WHERE bs.player_id = CAST(:pid AS UUID)
+                GROUP BY sg.sid
+            ),
+            field AS (
+                SELECT sg.sid,
+                    SUM(fs.catches) AS total_catches,
+                    SUM(fs.catches_wk) AS total_catches_wk,
+                    SUM(GREATEST(fs.catches - fs.catches_wk, 0)) AS total_catches_non_wk,
+                    SUM(fs.run_outs) AS total_run_outs,
+                    SUM(fs.stumpings) AS total_stumpings
+                FROM v_effective_fielding_stats fs
+                JOIN scoped_games sg ON sg.game_id = fs.game_id
+                WHERE fs.player_id = CAST(:pid AS UUID)
+                GROUP BY sg.sid
+            ),
+            -- Matches is every game the player turned out in, whether or not he
+            -- batted, bowled or took a catch. UNION (not UNION ALL) across the
+            -- four sources so a game he did all four in still counts once.
+            played AS (
+                SELECT sg.sid, COUNT(DISTINCT t.game_id) AS matches
+                FROM (
+                    SELECT game_id FROM v_effective_batting_innings WHERE player_id = CAST(:pid AS UUID)
+                    UNION SELECT game_id FROM v_effective_bowling_spells WHERE player_id = CAST(:pid AS UUID)
+                    UNION SELECT game_id FROM v_effective_fielding_stats WHERE player_id = CAST(:pid AS UUID)
+                    UNION SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                ) t
+                JOIN scoped_games sg ON sg.game_id = t.game_id
+                GROUP BY sg.sid
+            )
+            SELECT
+                s.id AS season_id,
+                s.name AS season_name,
+                s.year,
+                COALESCE(played.matches, 0) AS matches,
+                COALESCE(bat.batting_innings, 0) AS batting_innings,
+                COALESCE(bat.total_runs, 0) AS total_runs,
+                bat.high_score,
+                ROUND(bat.total_runs::numeric
+                    / NULLIF(bat.batting_innings - bat.not_outs, 0), 2) AS batting_average,
+                ROUND(bat.total_runs::numeric / NULLIF(bat.balls_faced, 0) * 100, 2) AS strike_rate,
+                COALESCE(bat.fifties, 0) AS fifties,
+                COALESCE(bat.hundreds, 0) AS hundreds,
+                COALESCE(bat.not_outs, 0) AS not_outs,
+                COALESCE(bat.ducks, 0) AS ducks,
+                COALESCE(bat.total_fours, 0) AS total_fours,
+                COALESCE(bat.total_sixes, 0) AS total_sixes,
+                COALESCE(bowl.total_wickets, 0) AS total_wickets,
+                COALESCE(bowl.bowling_runs_conceded, 0) AS bowling_runs_conceded,
+                COALESCE(bowl.total_overs, 0) AS total_overs,
+                ROUND(bowl.bowling_runs_conceded::numeric
+                    / NULLIF(bowl.total_wickets, 0), 2) AS bowling_average,
+                ROUND(bowl.bowling_runs_conceded::numeric
+                    / NULLIF(bowl.bowling_balls, 0) * 6, 2) AS economy,
+                bowl.best_bowling_wickets,
+                bowl.best_bowling_figures,
+                COALESCE(bowl.five_fors, 0) AS five_fors,
+                COALESCE(bowl.total_maidens, 0) AS total_maidens,
+                COALESCE(field.total_catches, 0) AS total_catches,
+                COALESCE(field.total_catches_wk, 0) AS total_catches_wk,
+                COALESCE(field.total_catches_non_wk, 0) AS total_catches_non_wk,
+                COALESCE(field.total_run_outs, 0) AS total_run_outs,
+                COALESCE(field.total_stumpings, 0) AS total_stumpings
+            FROM seasons s
+            LEFT JOIN played ON played.sid = s.id
+            LEFT JOIN bat ON bat.sid = s.id
+            LEFT JOIN bowl ON bowl.sid = s.id
+            LEFT JOIN field ON field.sid = s.id
+            WHERE played.sid IS NOT NULL OR bat.sid IS NOT NULL
+               OR bowl.sid IS NOT NULL OR field.sid IS NOT NULL
+            ORDER BY s.year DESC NULLS LAST, s.name
+        """),
+        params,
+    )
+    return [dict(r) for r in res.mappings()]
+
+
+async def get_season_by_season(
+    session: AsyncSession,
+    player_id: str,
+    include_prior: bool = False,
+    scope: Optional[GradeScope] = None,
+) -> list[dict]:
+    if _scoped(scope):
+        # No "Prior Seasons & Adjustments" row on the scoped path: that lump is
+        # the NULL-season career residual, which by definition belongs to no
+        # season and so has no row to sit in here. It is still counted in the
+        # scoped career header (see _career_residuals), which is where it has
+        # always actually mattered.
+        return await _season_by_season_scoped(session, player_id, scope)
     # Merge-aware: if Summer 25/26 + Winter 25/26 are aliased into one canonical
     # season, sum their stats into a single row keyed on the canonical season.
     # Non-aliased seasons map to themselves so the GROUP BY collapses to one
@@ -1756,6 +2274,7 @@ async def get_batting_leaderboard_extended(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_runs", "average", "strike_rate", "total_sixes",
@@ -1766,7 +2285,14 @@ async def get_batting_leaderboard_extended(
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
+    # A grade the viewer picked by name beats the category default. Someone who
+    # has chosen "Under 14s" from the grade dropdown plainly wants the juniors,
+    # and silently returning an empty board would read as broken.
+    if grade_id or grade_name:
+        scope = None
+
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
@@ -1776,6 +2302,12 @@ async def get_batting_leaderboard_extended(
     else:
         overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if _scoped(scope):
+        # Bound once for every branch below: the finals and captain branches
+        # interpolate scope_clause directly, and a clause whose parameter was
+        # never bound fails at execute time, not at import. The SIRS queries
+        # bind their own inside _sirs_base_clauses.
+        scope.bind(params)
     if gender:
         params["gender"] = gender
     if season_ids:
@@ -1942,7 +2474,7 @@ async def get_batting_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
                 WHERE s.organisation_id = CAST(:org_id AS UUID)
-                  AND g.is_final = TRUE{season_clause}
+                  AND g.is_final = TRUE{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -1982,7 +2514,7 @@ async def get_batting_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -2007,6 +2539,58 @@ async def get_batting_leaderboard_extended(
         """
         if min_runs > 0:
             base += " HAVING SUM(q.runs) >= :min_runs"
+            params["min_runs"] = min_runs
+        base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if _scoped(scope):
+        # The plain all-grades board normally reads CA's season aggregates, which
+        # carry no grade at all — so excluding a category means adding the
+        # innings up from scorecards instead, then blending back the aggregate-only
+        # residuals (imports, adjustments) that have no per-innings rows.
+        # Scoped through `v_effective_games.season_id` rather than a grades join,
+        # so a manual game entered without a grade is not silently dropped.
+        season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        residual_cte = _residual_totals_cte(scope, season_ids, params)
+        base = f"""
+            WITH qualifying AS (
+                SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                JOIN seasons s ON s.id = g.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+            ), {residual_cte}
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(q.player_id) + COALESCE(MAX(rt.innings), 0) AS innings,
+                    COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.total_runs), 0) AS total_runs,
+                    GREATEST(MAX(q.runs), MAX(rt.high_score)) AS high_score,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.total_runs), 0))::numeric
+                        / NULLIF((COUNT(q.player_id) + COALESCE(MAX(rt.innings), 0))
+                                 - (COALESCE(SUM(q.not_out::int), 0) + COALESCE(MAX(rt.not_outs), 0)), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.total_runs), 0))::numeric
+                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.total_balls), 0), 0) * 100, 2) AS strike_rate,
+                    SUM(CASE WHEN q.runs >= 50 AND q.runs < 100 THEN 1 ELSE 0 END) + COALESCE(MAX(rt.fifties), 0) AS fifties,
+                    SUM(CASE WHEN q.runs >= 100 THEN 1 ELSE 0 END) + COALESCE(MAX(rt.hundreds), 0) AS hundreds,
+                    SUM(CASE WHEN q.runs = 0 AND NOT q.not_out THEN 1 ELSE 0 END) + COALESCE(MAX(rt.ducks), 0) AS ducks,
+                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    COALESCE(SUM(q.fours), 0) + COALESCE(MAX(rt.total_fours), 0) AS total_fours,
+                    COALESCE(SUM(q.sixes), 0) + COALESCE(MAX(rt.total_sixes), 0) AS total_sixes
+                FROM players p
+                LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN residual_totals rt ON rt.player_id = p.id
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
+        """
+        if min_runs > 0:
+            base += " WHERE total_runs >= :min_runs"
             params["min_runs"] = min_runs
         base += f" ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit"
         result = await session.execute(text(base), params)
@@ -2067,6 +2651,7 @@ async def get_bowling_leaderboard_extended(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     ALLOWED_SORTS = {
         "total_wickets", "average", "economy", "best_figures_wickets",
@@ -2077,7 +2662,13 @@ async def get_bowling_leaderboard_extended(
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
+    # An explicitly picked grade beats the category default — see the note in
+    # get_batting_leaderboard_extended.
+    if grade_id or grade_name:
+        scope = None
+
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     captain_join = (" JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE" if captain_only else "")
     gender_clause = f" AND p.gender = :gender" if gender else ""
     if overseas == "only":
@@ -2087,6 +2678,12 @@ async def get_bowling_leaderboard_extended(
     else:
         overseas_clause = ""
     params: dict = {"org_id": org_id, "limit": limit}
+    if _scoped(scope):
+        # Bound once for every branch below: the finals and captain branches
+        # interpolate scope_clause directly, and a clause whose parameter was
+        # never bound fails at execute time, not at import. The SIRS queries
+        # bind their own inside _sirs_base_clauses.
+        scope.bind(params)
     if gender:
         params["gender"] = gender
     if season_ids:
@@ -2382,6 +2979,66 @@ async def get_bowling_leaderboard_extended(
             params["min_wickets"] = min_wickets
         if having_clauses:
             base += " HAVING " + " AND ".join(having_clauses)
+        base += f" {order_clause} LIMIT :limit"
+        result = await session.execute(text(base), params)
+        return [dict(r) for r in result.mappings()]
+
+    if _scoped(scope):
+        # See get_batting_leaderboard_extended's equivalent branch.
+        season_clause = " AND g.season_id = ANY(:season_ids)" if season_ids else ""
+        residual_cte = _residual_totals_cte(scope, season_ids, params)
+        base = f"""
+            WITH {residual_cte}, qualifying AS (
+                SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.maidens, bs.overs,
+                    FLOOR(bs.overs) * 6 + ROUND((bs.overs - FLOOR(bs.overs)) * 10) AS balls
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                JOIN seasons s ON s.id = g.season_id
+                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+            )
+            SELECT * FROM (
+                SELECT
+                    p.id AS player_id,
+                    COALESCE(p.display_name_override, p.name) AS name,
+                    COUNT(DISTINCT q.game_id) + COALESCE(MAX(rt.games), 0) AS games,
+                    COALESCE(SUM(q.wickets), 0) + COALESCE(MAX(rt.total_wickets), 0) AS total_wickets,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.bowling_runs), 0))::numeric
+                        / NULLIF(COALESCE(SUM(q.wickets), 0) + COALESCE(MAX(rt.total_wickets), 0), 0), 2) AS average,
+                    ROUND((COALESCE(SUM(q.runs), 0) + COALESCE(MAX(rt.bowling_runs), 0))::numeric
+                        / NULLIF(COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.bowling_balls), 0), 0) * 6, 2) AS economy,
+                    GREATEST(MAX(q.wickets), MAX(rt.best_bowling_wickets)) AS best_figures_wickets,
+                    -- Best figures are named from the per-spell rows only: a
+                    -- residual branch knows how many wickets but its figures
+                    -- string belongs to a spell we hold no scorecard for, so
+                    -- pairing it with a blended maximum could print the wrong
+                    -- innings' runs against the right wicket count.
+                    (ARRAY_AGG(q.wickets::text || '-' || q.runs::text
+                        ORDER BY q.wickets DESC NULLS LAST, q.runs ASC NULLS LAST)
+                     FILTER (WHERE q.wickets IS NOT NULL))[1] AS best_bowling_figures,
+                    (ARRAY_AGG(q.runs ORDER BY q.wickets DESC NULLS LAST, q.runs ASC NULLS LAST)
+                     FILTER (WHERE q.wickets IS NOT NULL))[1] AS best_figures_runs,
+                    COALESCE(SUM(q.maidens), 0) + COALESCE(MAX(rt.total_maidens), 0) AS total_maidens,
+                    COALESCE(SUM(q.overs), 0) + COALESCE(MAX(rt.total_overs), 0) AS total_overs,
+                    COALESCE(SUM(CASE WHEN q.wickets >= 5 THEN 1 ELSE 0 END), 0)
+                        + COALESCE(MAX(rt.five_fors), 0) AS five_fors,
+                    COALESCE(SUM(q.balls), 0) + COALESCE(MAX(rt.bowling_balls), 0) AS total_balls
+                FROM players p
+                LEFT JOIN qualifying q ON q.player_id = p.id
+                LEFT JOIN residual_totals rt ON rt.player_id = p.id
+                WHERE p.organisation_id = :org_id{gender_clause}{overseas_clause}
+                  AND (q.player_id IS NOT NULL OR rt.player_id IS NOT NULL)
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+            ) t
+        """
+        having = []
+        if min_wickets > 0:
+            having.append("total_wickets >= :min_wickets")
+            params["min_wickets"] = min_wickets
+        if min_overs > 0:
+            having.append("total_balls >= :min_overs * 6")
+            params["min_overs"] = min_overs
+        if having:
+            base += " WHERE " + " AND ".join(having)
         base += f" {order_clause} LIMIT :limit"
         result = await session.execute(text(base), params)
         return [dict(r) for r in result.mappings()]
@@ -3129,8 +3786,14 @@ async def get_player_rankings(
     }
 
 
-async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=False, stat_alias='bi'):
-    """Return (season_clause, finals_clause, grade_clause, captain_join) strings and mutate params."""
+async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=False, stat_alias='bi', scope=None):
+    """Return (season_clause, finals_clause, grade_clause, captain_join) strings and mutate params.
+
+    The grade-category scope rides along in `grade_clause`, which every SIRS
+    query already interpolates — these are all per-game queries, so the filter
+    needs no alternate source the way the leaderboards do. A named grade wins
+    over the category default, same rule as the leaderboards.
+    """
     season_clause = ""
     season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
     if season_ids:
@@ -3141,6 +3804,9 @@ async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only
     if grade_name:
         params["grade_name"] = grade_name
         grade_clause = f" AND {_GRADE_MATCH}"
+    elif _scoped(scope):
+        grade_clause = scope.clause("g.grade_id")
+        scope.bind(params)
     captain_join = (f" JOIN game_appearances gap ON gap.game_id = {stat_alias}.game_id AND gap.player_id = {stat_alias}.player_id AND gap.is_captain = TRUE" if captain_only else "")
     return season_clause, finals_clause, grade_clause, captain_join
 
@@ -3166,9 +3832,10 @@ async def get_sirs_batting(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bi')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bi', scope=scope)
     gender_clause = f" AND p.gender = :gender" if gender else ""
     overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:
@@ -3213,9 +3880,10 @@ async def get_sirs_bowling_innings(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs', scope=scope)
     gender_clause = f" AND p.gender = :gender" if gender else ""
     overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:
@@ -3259,9 +3927,10 @@ async def get_sirs_bowling_match(
     captain_only: Optional[bool] = None,
     gender: Optional[str] = None,
     overseas: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     params: dict = {"org_id": org_id, "limit": limit}
-    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs')
+    season_clause, finals_clause, grade_clause, captain_join = await _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only, params, captain_only=bool(captain_only), stat_alias='bs', scope=scope)
     gender_clause = f" AND p.gender = :gender" if gender else ""
     overseas_clause = " AND p.is_overseas = TRUE" if overseas == "only" else (" AND (p.is_overseas IS NULL OR p.is_overseas = FALSE)" if overseas == "exclude" else "")
     if gender:

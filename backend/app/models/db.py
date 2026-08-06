@@ -300,6 +300,11 @@ class Organisation(Base):
     # only in the menu bar, and turning this on for everyone would change every
     # existing club's public site without anyone asking for it.
     public_header_logo = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Which grade categories count towards this club's stats by default — a
+    # JSONB list of grade_labels.GRADE_CATEGORIES keys (migration 228). NULL
+    # means no club preference, and the platform default applies: everything
+    # except junior. Read through services/grade_scope.py, never directly.
+    stats_grade_categories = Column(JSONB, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
