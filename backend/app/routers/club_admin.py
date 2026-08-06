@@ -3683,6 +3683,12 @@ async def list_onboarding_requests(
             "id": str(r.id),
             "name": r.name,
             "club": r.club,
+            # The CA organisation guid behind the club name when the enquirer
+            # picked their club from the search, and how the name was arrived
+            # at ('search' | 'manual'). Both null on an enquiry that predates
+            # the search field.
+            "club_org_id": r.club_org_id,
+            "club_source": r.club_source,
             "email": r.email,
             "phone": r.phone,
             "association": r.association,

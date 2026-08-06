@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import User, Organisation, get_db
+from app.models.db import User, Organisation, MembershipType, get_db
 from app.routers.auth import get_current_club
 from app.auth.capabilities import (
     require_cap, require_any_cap,
@@ -23,6 +23,7 @@ from app.auth.capabilities import (
 from app.services import directory as svc
 from app.services import members as members_svc
 from app.services import member_import as import_svc
+from app.services import membership_types as membership_types_svc
 
 router = APIRouter(prefix="/club-admin/directory", tags=["club-admin-directory"])
 _read = Depends(require_any_cap(MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS))
@@ -41,6 +42,11 @@ class MemberUpsert(BaseModel):
     mobile: Optional[str] = None
     member_category: Optional[str] = None
     notes: Optional[str] = None
+    # The club's membership-type catalogue entry (Senior Player, Social Member,
+    # Sponsor Contact…). Owned by the same `fee_members` row BetterFees edits;
+    # "" clears it. Settable here so a club with no BetterFees can still say
+    # what kind of member someone is.
+    membership_type_id: Optional[str] = None
 
 
 class RoleBody(BaseModel):
@@ -49,14 +55,38 @@ class RoleBody(BaseModel):
 
 @router.get("/people")
 async def list_people(include_archived: bool = False, _: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"people": await svc.list_people(db, club.id, include_archived=include_archived), "categories": members_svc.MEMBER_CATEGORIES}
+    # The membership-type catalogue rides along with the people. Its own CRUD
+    # lives in BetterFees (behind MANAGE_FEES + the fees module), which the
+    # Directory's readers don't necessarily hold — so this reads the same
+    # service directly rather than sending the screen to an endpoint that would
+    # 403 for a volunteer or committee manager.
+    return {
+        "people": await svc.list_people(db, club.id, include_archived=include_archived),
+        "categories": members_svc.MEMBER_CATEGORIES,
+        "membership_types": await membership_types_svc.list_types(db, club.id),
+    }
+
+
+async def _resolved_type_id(db: AsyncSession, club: Organisation, raw: Optional[str]):
+    """"" clears the type; anything else must be one of this club's own."""
+    if raw in (None, ""):
+        return None
+    try:
+        tid = uuid.UUID(raw)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=422, detail="Membership type not found")
+    mt = await db.get(MembershipType, tid)
+    if not mt or mt.organisation_id != club.id:
+        raise HTTPException(status_code=422, detail="Membership type not found")
+    return mt.id
 
 
 @router.post("/people")
 async def create_member(data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
         mid = await members_svc.create_person(db, club.id, full_name=data.full_name, email=data.email,
-                                               mobile=data.mobile, member_category=data.member_category, notes=data.notes)
+                                               mobile=data.mobile, member_category=data.member_category, notes=data.notes,
+                                               membership_type_id=await _resolved_type_id(db, club, data.membership_type_id))
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
@@ -65,7 +95,10 @@ async def create_member(data: MemberUpsert, _: User = _write, club: Organisation
 
 @router.patch("/people/{member_id}")
 async def update_member(member_id: str, data: MemberUpsert, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    await members_svc.update_person(db, club.id, _uuid(member_id), **data.model_dump(exclude_unset=True))
+    fields = data.model_dump(exclude_unset=True)
+    if "membership_type_id" in fields:
+        fields["membership_type_id"] = await _resolved_type_id(db, club, fields["membership_type_id"])
+    await members_svc.update_person(db, club.id, _uuid(member_id), **fields)
     await db.commit()
     return {"ok": True}
 

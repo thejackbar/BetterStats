@@ -2286,7 +2286,8 @@ async def check_web_signal_promotion(*, org_id=None, utm_id=None, utm_source=Non
 
 
 async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
-                                email: str = "", phone: Optional[str] = None) -> dict:
+                                email: str = "", phone: Optional[str] = None,
+                                org_id: Optional[str] = None) -> dict:
     """Backgrounded counterpart to ``twenty_sync.push_onboarding_enquiry`` — a
     direct 'onboard my club' enquiry (either the short CTA modal or the full
     Contact page) is the strongest buying signal a prospect can give, so it
@@ -2302,13 +2303,18 @@ async def sync_deal_for_enquiry(*, club_name: str, contact_name: str = "",
     score itself already believes. The row this call is counting was already
     committed by ``routers/public_contact.py`` before this background task
     fires, so the just-submitted enquiry is included in the count. Opens its
-    own session; never raises."""
+    own session; never raises.
+
+    ``org_id`` is the CA organisation guid of the club the enquirer picked from
+    the Contact form's club search, passed straight through so this and the
+    Twenty push resolve the same directory row."""
     from app.models.db import async_session_maker
     from app.services.twenty_sync import _resolve_onboarding_club, _onboarding_signal
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_onboarding_club(
-                session, club_name=club_name, contact_name=contact_name, email=email, phone=phone)
+                session, club_name=club_name, contact_name=contact_name, email=email,
+                phone=phone, org_id=org_id)
             if club is None:
                 return {"skipped": "no club"}
             person = await resolve_person(

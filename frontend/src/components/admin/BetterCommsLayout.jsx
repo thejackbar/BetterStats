@@ -2,11 +2,12 @@ import BetterClubhouseLayout from './BetterClubhouseLayout'
 
 // The Comms screens are the Comms section of BetterClubhouse now.
 //
-// CommsContextBar no longer renders here. It is Super Admin machinery — the
-// BetterCricket marketing-org switch and the act-as-club mechanism — and a club
-// build must never carry BetterCricket's own sales surface, not behind a
-// dropdown and not greyed out. It lives on the super-admin Clubs Directory
-// instead. See docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
+// The club ⇄ BetterCricket-internal switch is not a bar on the Comms screens any
+// more. It is ClubhouseContextControl, in the BetterClubhouse sidebar footer, so
+// it covers Directory as well as Comms and the mode is visible from every screen
+// rather than only the one you happen to be on. It renders for super admins only:
+// a club build must never carry BetterCricket's own sales surface, not behind a
+// dropdown and not greyed out. See docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
 export default function BetterCommsLayout(props) {
   return <BetterClubhouseLayout {...props} />
 }

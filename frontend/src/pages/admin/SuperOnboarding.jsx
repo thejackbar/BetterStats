@@ -130,6 +130,18 @@ export default function SuperOnboarding() {
                     <td className="px-3 py-2.5 whitespace-nowrap text-pb-dim">{fmtDate(r.created_at)}</td>
                     <td className="px-3 py-2.5 font-medium text-pb-text">
                       {r.club}
+                      {/* Whether the name is one the enquirer picked out of the
+                          Cricket Australia club list (so it's the club's real
+                          record, guid and all) or one they typed in — worth
+                          knowing before matching them to a club by hand. */}
+                      {r.club_source === 'search' && (
+                        <div className="font-normal text-pb-faint text-xs" title={r.club_org_id || ''}>
+                          Matched from PlayHQ
+                        </div>
+                      )}
+                      {r.club_source === 'manual' && (
+                        <div className="font-normal text-pb-faint text-xs">Typed in by hand</div>
+                      )}
                       {r.founded_year && <div className="font-normal text-pb-faint text-xs">est. {r.founded_year}</div>}
                     </td>
                     <td className="px-3 py-2.5">

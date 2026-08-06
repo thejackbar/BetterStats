@@ -73,7 +73,7 @@ function NavBadge({ count, toneKey }) {
 
 export default function ModuleLayout({
   moduleName, nav = [], children, title, caption, onHelp, filters, stats, actions,
-  bare = false, hideHeader = false,
+  bare = false, hideHeader = false, sidebarFooterTop = null,
 }) {
   // Each module surface wears its own brand colour (BetterSocials magenta,
   // BetterClubhouse amber). moduleName ("Socials" / "Clubhouse") resolves to the
@@ -146,7 +146,14 @@ export default function ModuleLayout({
             >{(club?.name || 'B')[0]}</span>}
         <div className="min-w-0">
           <div className="font-display font-bold text-sm leading-[1.2] truncate" title={club?.name || ''}>{club?.name || 'BetterCricket'}</div>
-          <div className="font-mono text-[10px] tracking-wide2 text-pb-faintest">{seasonLabel()}</div>
+          {/* Acting on BetterCricket's own outreach org rather than a club. The
+              season line is meaningless there, and the mode has to be obvious
+              from any screen — sending a club campaign while you thought you
+              were internal is the failure this guards against. Super admins
+              only, so a club admin never sees it whatever the org is flagged. */}
+          {user?.can_switch_clubs && user?.is_marketing_org
+            ? <div className="font-mono text-[10px] tracking-wide2" style={{ color: 'var(--pb-accent-ink)' }}>INTERNAL MODE</div>
+            : <div className="font-mono text-[10px] tracking-wide2 text-pb-faintest">{seasonLabel()}</div>}
         </div>
       </div>
       <ModuleLockup
@@ -161,6 +168,9 @@ export default function ModuleLayout({
   // The platform chrome the per-module sidebars used to leave to the header.
   const renderSidebarFooter = () => (
     <div className="border-t pb-hairline px-3 py-[11px] shrink-0">
+      {/* A module may put its own control above the switcher — BetterClubhouse
+          uses it for the club ⇄ BetterCricket-internal switch. */}
+      {sidebarFooterTop}
       <div className="font-mono text-[9px] tracking-[0.12em] uppercase text-pb-faintest mb-1.5">Switch module</div>
       <ModuleSwitcher wrap compact className="flex gap-1" />
       <div className="flex items-center gap-2 mt-2.5 pt-2.5 border-t pb-hairline">

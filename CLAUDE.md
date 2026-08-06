@@ -1,5 +1,56 @@
 # BetterStats — Claude Session Notes
 
+## What kind of member is this? The Directory's three type axes (v9.11.1, Aug 2026)
+
+Reported: BetterStats → Players marks a player Inactive, but the Clubhouse
+Directory read every person the same — a social member, a life member, a
+sponsor's contact and this season's opening bat all just "Player" or nothing.
+
+- **There is no single "membership type" column, and there should not be. Three
+  independent axes already exist and all three are now returned by
+  `services/directory.list_people`:**
+  1. **`membership_types`** (migration 175) — the club's own cross-season
+     catalogue: Senior/Junior Player, Parent, Social Member, Life Member, Coach,
+     Selector, Volunteer, Umpire, Scorer, **Sponsor Contact**, Committee Member,
+     Honorary Member (`services/membership_types.STARTER_TYPES`, carrying
+     `is_playing` + voting/insurance/WWCC/PlayHQ flags). **This is the real
+     membership type**, and nothing seeds it — a club adopts the starter set or
+     builds its own, so it is legitimately empty for plenty of clubs.
+  2. **`fee_members.member_category`** — volunteer | parent | committee |
+     life_member | third_party | official | other. What the Directory's own
+     "Add person" TYPE dropdown writes; drives the computed `segs`.
+  3. **`players.status`** ('active' | 'inactive') — the flag the Stats Players
+     screen shows. Returned as `player_status`, and **NULL for a non-player**,
+     so "not playing" and "not a player" stay distinguishable. Plus the
+     `is_life_member` / `is_honorary` (+ expiry) flags on `fee_members`.
+- **Sponsors are not people.** `org_sponsors` is the sponsoring ORGANISATION
+  (name, logo, website, one carried-over contact name/email from the KlubPro
+  import). A sponsor's person belongs in the Directory as an ordinary member
+  with the "Sponsor Contact" membership type. Don't union the two lists.
+- **The membership-type catalogue's CRUD lives in BetterFees** (`/club-admin/fees/
+  membership-types`, `MANAGE_FEES` + the fees module), which a volunteer or
+  committee manager does not hold — so `GET /club-admin/directory/people`
+  returns the catalogue itself alongside the people rather than sending the
+  screen to an endpoint that would 403 for half its readers.
+- **The Directory can now SET `membership_type_id`** (`MemberUpsert`, resolved
+  through `_resolved_type_id` → 422 for another club's id, "" clears it). Without
+  this the filter would be dead for every club that doesn't run BetterFees,
+  since nothing else writes the column.
+- **The `membership_types` join is org-scoped on BOTH sides**
+  (`mt.organisation_id = fm.organisation_id`), same rule as the `players` join
+  above it — see the cross-club member leak note further down.
+- **Frontend** (`redesign/screens/Directory.jsx`): `typeLabel(p)` falls
+  membership type → category → player/former player → "Member", shown on every
+  list row and as an accented chip on the detail pane. New filters: Playing /
+  Former players (both exclude non-players rather than lumping them in with the
+  inactive), a membership-type select with a **"No type set"** option, and the
+  Life member / Official / Honorary segments — `list_people` had always computed
+  those and they simply had no pill.
+- **Verified against a real Postgres** (27 checks): the new join and every
+  returned field, a member pointed at another club's type reading as no type,
+  read-through players carrying their status, archived behaviour, and the
+  router's own guard rejecting a foreign/unknown/non-uuid type id.
+
 ## BetterFootball — Import Results (v9.7.0, Aug 2026)
 
 A club's own results register (one row per match, going back as far as the
@@ -1126,6 +1177,60 @@ delivery and drives the success/error UI, so a failed store never blocks the for
   container + nginx `/api` proxy). If the marketing domain is ever served separately
   without that proxy, point the form at the absolute backend URL instead. It degrades
   gracefully meanwhile, since Formspree still delivers the email.
+
+### Club name is a search, not a text box (migration 224, v9.12.2, Aug 2026)
+
+The Club name field asked a person under time pressure to spell their club, and
+every downstream match then had to work back from that string — so "Applecross
+CC" and "Applecross Cricket Club" became two prospect rows. It now searches the
+same Cricket Australia club list the self-serve trial wizard searches, and a
+picked club carries its real CA organisation guid through with the enquiry.
+
+- **`GET /public/contact/club-search`** reuses `self_serve_trial.search_clubs`
+  (one club list, one matching rule) but is deliberately **NOT** routed through
+  `/public/self-serve`: that whole router sits behind the
+  `self_serve_registration_enabled` platform flag, and the Contact form has to
+  keep working whether or not self-serve registration is switched on. Rate-limited
+  per IP (120/hour) like its sibling, since every keystroke reaches CA's API.
+  The response is **projected down** — the self-serve search also returns the
+  registered club's public slug and its Primary Admin's first name + last initial
+  (for the "talk to your admin" card), and a marketing page has no business
+  serving either. `already_registered` is kept and shown, but never blocks: an
+  already-registered club is still entitled to get in touch.
+- **`club_onboarding_requests.club_org_id` + `.club_source`** ('search' |
+  'manual'). A guid is only ever stored alongside `club_source='search'` — a
+  typed name has nothing to key on, and letting a manual row carry an id would
+  put a guessed identity on the record. An unrecognised `clubSource` drops both.
+- **`_resolve_onboarding_club` (twenty_sync) takes `org_id`** and checks it
+  **after** the submitter's email but **before** the name, so the established
+  email-first priority `_onboarding_signal` shares is untouched. A new row is
+  created on the REAL guid — the same one the PlayHQ crawler uses — so a row
+  created by an enquiry and a row the crawler finds later are one row.
+  `crm.sync_deal_for_enquiry` takes and forwards the same `org_id`, so the local
+  pipeline and the Twenty push can't resolve different clubs.
+- **A `manual:` guid is upgraded once the real one is known**, but only when no
+  other row already holds it. `grassroots_guid` is unique, so the check is also
+  what stops a background task raising; and two rows for one club is a merge
+  decision for a person, not a silent write.
+- **The typed name stays, on purpose.** The CA list only covers Australia, so
+  "can't find your club" hands back a plain text field rather than a dead end —
+  that is what keeps a club in England or New Zealand able to reach us.
+- **`frontend/src/components/marketing/ClubSearchField.jsx`** holds one
+  invariant worth keeping: **`club` is only ever set once `clubSource` is**, so a
+  half-typed search term is the field's own local state and the form's existing
+  "Club name is required" check blocks a search nobody finished. A `?club=` link
+  (`ClubInactive.jsx`) seeds the search rather than answering it.
+- **Verified** against a real Postgres (25 checks — the resolution priority, the
+  guid upgrade and its collision guard, the migration applied twice to a
+  populated pre-224 table, the route bodies incl. a junk `clubSource` and the
+  short CTA form's unchanged bare post, and the original bug reproduced: two
+  spellings made two clubs, now make one) and driven in a browser (search,
+  keyboard pick, submitted payload, the no-results fallback, validation blocking
+  an unfinished search, `?club=` seeding, no mobile overflow).
+- **Not done**: the short "Get your club on BetterCricket" CTA modal
+  (`QuickEnquiryModal`) still posts a free-text club name to the same endpoint —
+  the backend fields are optional so it is unaffected, and it is the obvious next
+  place to reuse `ClubSearchField`.
 
 ## Public Marketing Pricing — modular model (Jun 2026)
 
@@ -4284,9 +4389,13 @@ Comms could reach 128. Two separate causes, and the second is the structural one
   and takes addresses from its own data, so a stale or tampered payload cannot
   introduce a recipient the club does not hold. Contacts go through
   `_upsert_contact`, which is what stops list-building resurrecting an opt-out.
-- **`directory.list_people` returns `player_status`**, NULL exactly when there is
-  no player behind the person — that is what separates the Directory's
-  Non-player filter from its Inactive-player one.
+- **The Directory's own kind-of-member filters came from v9.11.1 on main**
+  (`membership_type` / `category` / `player_status`, the Playing and Former
+  players pills). This release adds only **Has email / No email** on top, plus
+  the header's no-email count. An earlier cut of this branch had its own
+  Non-player and Inactive-player pills; they were dropped in the merge rather
+  than shipped alongside, because two overlapping ways to ask the same question
+  is how the two drift apart.
 - **When adding a Comms surface that lists people**, call
   `reconcile_contacts_from_directory` first rather than reintroducing a sync
   button. Do not add a `status` filter to who becomes a contact — targeting is a

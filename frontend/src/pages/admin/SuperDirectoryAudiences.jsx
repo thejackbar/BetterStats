@@ -13,9 +13,11 @@ import { DIRECTORY_FIELD_DEFS, RuleRow, newRule } from './bettercomms/segmentFie
 // and this is the other one. See
 // docs/design_handoff_betterclubhouse/PROJECT_RULES.md.
 //
-// It runs against the marketing organisation, so the switch into that org (what
-// CommsContextBar used to do inside the club surface) belongs on the Clubs
-// Directory beside it, not here.
+// It runs against the marketing organisation. The switch into that org is
+// ClubhouseContextControl, in the BetterClubhouse sidebar footer; in internal
+// mode the Segments nav item points here rather than at the club Audiences
+// screen, which is how the two field sets stay two components and not one
+// component with a flag.
 
 const DEFS = DIRECTORY_FIELD_DEFS
 
@@ -133,8 +135,9 @@ export default function SuperDirectoryAudiences() {
         {!onMarketing && (
           <div className="pb-card p-3 mb-4 text-[13px] text-pb-dim">
             You are not acting as the marketing organisation, so these audiences resolve against whichever club
-            you are currently in. Switch context from the{' '}
-            <a href="/admin/super/marketing" className="underline" style={{ color: 'var(--pb-accent)' }}>Club Directory</a>.
+            you are currently in. Switch with &ldquo;BetterCricket internal&rdquo; in the{' '}
+            <a href="/admin/clubhouse" className="underline" style={{ color: 'var(--pb-accent)' }}>BetterClubhouse</a>{' '}
+            sidebar footer.
           </div>
         )}
 

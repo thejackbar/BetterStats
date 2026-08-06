@@ -66,6 +66,11 @@ async def update_person(db: AsyncSession, org_id, member_id, **fields) -> None:
     if "member_category" in fields:
         sets.append("member_category = :cat")
         params["cat"] = normalise_category(fields["member_category"])
+    # Already resolved to one of this club's own types (or None to clear) by the
+    # caller — this only writes it.
+    if "membership_type_id" in fields:
+        sets.append("membership_type_id = :mt")
+        params["mt"] = fields["membership_type_id"]
     if not sets:
         return
     await db.execute(text(

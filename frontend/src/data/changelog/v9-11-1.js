@@ -1,15 +1,13 @@
 export default {
   version: 'v9.11.1',
   date: '2026-08-06',
-  sortKey: '2026-08-11T09:00:00Z',
-  title: 'Opposition players no longer count as ours',
+  sortKey: '2026-08-10T12:00:00Z',
+  title: 'The Directory says what kind of member each person is',
   items: [
-    'A match between two clubs that both sync BetterCricket is a single game in our records, carrying both sides’ batting, bowling and fielding. Fifteen queries were reading those games without checking which club a player actually belongs to, so the opposition were being counted as ours.',
-    'The fielding leaderboard was affected with the Finals or Captain filter on. An opposition fielder could appear on your club’s board.',
-    'BetterIQ Team analysis was affected throughout: fielding, bowling attack, bowling discipline, captaincy records, batting pairs, winning combinations, collapse analysis, batting by position and the batting breakdown. The average team score shown under each captain was including the opposition’s runs.',
-    'Match review picked the best partnership of the game without checking whose it was, so it could report the opposition’s stand as yours.',
-    'The teammates list could show players you had never played alongside, only against.',
-    'An opponent scouting dossier could pick up players from a third club the opponent had played.',
-    'Nothing about your stored data changed and no re-sync is needed. Every figure corrects itself the next time the page loads.',
+    'Everyone in the Directory now shows their membership type on their row, so a social member, a life member, a sponsor contact and a playing member no longer read the same.',
+    'A player who has been marked inactive in BetterStats is now marked as such here too, and there are Playing and Former players filters to pull up either group.',
+    'A membership type filter sits beside the existing ones, including a “No type set” option for working through the people nobody has filed yet.',
+    'Life members, officials and honorary members can now be filtered for — the Directory already worked out who they were and just had nowhere to show it.',
+    'A person’s membership type can be set from the Directory itself, not only from Accounts.',
   ],
 }
