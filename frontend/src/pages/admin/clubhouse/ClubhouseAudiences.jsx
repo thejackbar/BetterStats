@@ -4,7 +4,7 @@ import { api } from '../../../lib/api'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
   Button, Caption, Note, ListRow, Badge, Empty, TextInput,
-  TableWrap, TableHead, TableRow, Cell, Toast, SectionHeading, TINT,
+  TableWrap, TableHead, TableRow, Cell, Toast, SectionHeading, TINT, INPUT_CLS,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS, RuleRow, newRule } from '../bettercomms/segmentFields'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
@@ -39,7 +39,10 @@ function reachability(c) {
 }
 
 function AudienceRules({ rules, setRules, opts }) {
-  const inputCls = 'bg-pb-surface2 border border-pb-hairline2 rounded-lg px-2.5 py-1.5 text-[13px] text-pb-text outline-none focus:border-pb-accent'
+  // The rule row builds its own controls, so it takes the class rather than the
+  // component. `!w-auto` because a condition is a row of three controls sized to
+  // their content, not one full-width field.
+  const inputCls = `${INPUT_CLS} !w-auto !py-1.5 !text-[13px]`
   return (
     <div>
       <Caption>Match people where all of these are true</Caption>
@@ -52,7 +55,7 @@ function AudienceRules({ rules, setRules, opts }) {
           />
         ))}
       </div>
-      <Button size="sm" variant="quiet" className="mt-1" onClick={() => setRules(rs => [...rs, newRule(CLUB_FIELD_DEFS)])}>
+      <Button size="sm" onClick={() => setRules(rs => [...rs, newRule(CLUB_FIELD_DEFS)])} className="mt-1.5">
         + Add condition
       </Button>
     </div>
@@ -113,8 +116,16 @@ export default function ClubhouseAudiences() {
 
   // Editing a saved audience works on a draft, so a half-built rule never
   // reaches the server.
+  //
+  // It only ever LOADS a draft, and never clears one. It used to null the draft
+  // whenever nothing was selected, which is exactly the state "New audience"
+  // puts the screen in — so pressing it set a fresh draft, this effect then ran
+  // because `selected` had just gone null, and wiped it in the same commit. The
+  // button read as doing nothing at all, and a club with no saved audiences yet
+  // could never build its first one. Clearing is now the caller's job (delete
+  // does it explicitly), which is the only place it is actually wanted.
   useEffect(() => {
-    if (!selected) { setDraft(null); return }
+    if (!selected) return
     setDraft({
       id: selected.id,
       name: selected.name,
@@ -172,21 +183,33 @@ export default function ClubhouseAudiences() {
   async function remove() {
     if (!draft?.id || !window.confirm(`Delete "${draft.name}"? Emails already sent to it are unaffected.`)) return
     setBusy(true)
-    try { await api.commsDeleteSegment(draft.id); setSelId(null); await load() }
+    try { await api.commsDeleteSegment(draft.id); setSelId(null); setDraft(null); await load() }
     catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
   function startNew() {
     setSelId(null)
     setDraft({ id: null, name: '', rules: [newRule(CLUB_FIELD_DEFS)] })
+    setError('')
   }
 
-  const emailThese = () => {
-    setToast({
-      title: `Composing to ${total} ${total === 1 ? 'person' : 'people'}`,
-      body: 'The audience travels with the email and resolves again when you send.',
-    })
-    navigate('/admin/comms', { state: { skipIntro: true, audienceId: draft?.id } })
+  // Start an email already addressed to this audience.
+  //
+  // This used to navigate to the Emails list carrying an `audienceId` in router
+  // state that nothing on the other side ever read, so it dropped the officer on
+  // a list of every email with the audience silently lost. It now creates the
+  // draft the same way "+ New email" does — with the audience already set — and
+  // opens it, which is what the button has always claimed to do.
+  const emailThese = async () => {
+    if (!draft?.id) return
+    setBusy(true); setError('')
+    try {
+      const c = await api.commsCreateCampaign({
+        subject: '', body_html: '',
+        audience: { type: 'segment', segment_id: draft.id },
+      })
+      navigate(`/admin/comms/${c.id}`, { state: { skipIntro: true } })
+    } catch (e) { setError(e.message); setBusy(false) }
   }
 
   if (intro.showing) {

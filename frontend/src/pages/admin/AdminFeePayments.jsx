@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
+import { Button, Select, SearchInput, StatCard, Badge, Empty } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -61,63 +62,51 @@ export default function AdminFeePayments() {
     catch (e) { toast.error(e.message) }
   }
 
-  const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+  // Title, live count, filters and the two actions all belong to the shell's
+  // sticky header, the same as the Directory — so the page-level <h1> and the
+  // paragraph under it are gone rather than drawn a second time in the body.
+  const header = {
+    title: 'Payments',
+    caption: `The season's full ledger · ${filtered.length} of ${payments?.length ?? 0} shown`,
+    filters: (
+      <div className="flex items-center gap-2 flex-wrap">
+        <SearchInput value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
+        <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="!w-auto">
+          <option value="">All kinds</option>
+          <option value="membership">Membership only</option>
+          <option value="match_day">Match day only</option>
+        </Select>
+      </div>
+    ),
+    actions: (
+      <>
+        <Select value={seasonId} onChange={e => setSeasonId(e.target.value)} className="!w-auto max-w-[190px]">
+          {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
+        </Select>
+        <Button as={Link} to={`/admin/fees/payments/bulk${seasonId ? `?season=${seasonId}` : ''}`}>Bulk payment</Button>
+        <Button as={Link} to="/admin/fees/payments/import" variant="primary">Import bank CSV</Button>
+      </>
+    ),
+  }
 
   return (
-    <BetterFeesLayout>
+    <BetterFeesLayout {...header}>
       <div className="max-w-5xl">
-        <div className="flex flex-wrap items-start justify-between gap-3 mb-1">
-          <h1 className="font-display font-bold text-2xl text-pb-text">Payments</h1>
-          <div className="flex items-center gap-2">
-            <Link to={`/admin/fees/payments/bulk${seasonId ? `?season=${seasonId}` : ''}`}
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors whitespace-nowrap">
-              + BULK PAYMENT
-            </Link>
-            <Link to="/admin/fees/payments/import"
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
-              + IMPORT BANK CSV
-            </Link>
-          </div>
-        </div>
-        <p className="text-pb-faint text-sm mb-5">
-          The full ledger for one season. Log payments from the individual member page (or bulk-import from a bank-statement CSV);
-          this view is for searching, reconciling, and removing mistakes.
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3 mb-5">
-          <select value={seasonId} onChange={e => setSeasonId(e.target.value)} className={inp}>
-            {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
-          </select>
-          <input className={`${inp} flex-1 min-w-[180px]`} placeholder="Search name, bank ref, method…" value={q} onChange={e => setQ(e.target.value)} />
-          <select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className={inp}>
-            <option value="">All kinds</option>
-            <option value="membership">Membership only</option>
-            <option value="match_day">Match day only</option>
-          </select>
-        </div>
-
         {payments === null ? <PbSpinner message="Loading payments…" /> : (
           <>
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              <div className="pb-card px-4 py-3">
-                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Payments</div>
-                <div className="font-display font-bold text-xl text-pb-text">{filtered.length}</div>
-              </div>
-              <div className="pb-card px-4 py-3">
-                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Membership</div>
-                <div className="font-display font-bold text-xl text-pb-text">{money(total.membership)}</div>
-              </div>
-              <div className="pb-card px-4 py-3" style={{ borderColor: 'var(--pb-accent)', borderOpacity: 0.4 }}>
-                <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Total</div>
-                <div className="font-display font-bold text-xl" style={{ color: 'var(--pb-accent)' }}>{money(total.total)}</div>
-              </div>
+            <div className="grid grid-cols-3 gap-2 mb-4">
+              <StatCard label="Payments" value={filtered.length} ink="var(--pb-text)" />
+              <StatCard label="Membership" value={money(total.membership)} ink="var(--pb-text)" />
+              <StatCard label="Total" value={money(total.total)} accent />
             </div>
 
             {filtered.length === 0 ? (
-              <div className="pb-card p-6 text-center text-pb-dim text-sm">
-                {(payments || []).length === 0
-                  ? 'No payments logged yet. Add them from the member page.'
-                  : 'No payments match your filter.'}
+              <div className="pb-card">
+                <Empty>
+                  {(payments || []).length === 0
+                    ? 'No payments logged yet. Add them from the member page.'
+                    : 'No payments match your filter.'}
+                </Empty>
               </div>
             ) : (
               <div className="pb-card overflow-hidden">
@@ -141,7 +130,7 @@ export default function AdminFeePayments() {
                           <Link to={`/admin/fees/member/${p.member_id}?season=${seasonId}`}
                             className="text-pb-text text-sm hover:text-pb-accent transition-colors">{p.full_name}</Link>
                         </td>
-                        <td className="py-2.5 pr-3 font-mono text-[10px] text-pb-faint whitespace-nowrap">{KIND_LABEL[p.kind]}</td>
+                        <td className="py-2.5 pr-3 whitespace-nowrap"><Badge>{KIND_LABEL[p.kind]}</Badge></td>
                         <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-text tabular-nums whitespace-nowrap">{money(p.amount)}</td>
                         <td className="py-2.5 pr-3 font-mono text-[10px] text-pb-dim whitespace-nowrap">{p.method || '—'}</td>
                         <td className="py-2.5 pr-3 text-pb-faint text-[12px] truncate max-w-0">
@@ -149,8 +138,7 @@ export default function AdminFeePayments() {
                           {p.notes && <span className="text-pb-faintest"> · {p.notes}</span>}
                         </td>
                         <td className="py-2.5 pr-5 text-right">
-                          <button onClick={() => del(p.id)}
-                            className="font-mono text-[9px] text-pb-red/50 hover:text-pb-red transition-colors">DEL</button>
+                          <Button size="sm" variant="danger" onClick={() => del(p.id)}>Delete</Button>
                         </td>
                       </tr>
                     ))}

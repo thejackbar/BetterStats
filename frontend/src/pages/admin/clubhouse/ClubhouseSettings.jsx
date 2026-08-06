@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
-import { Button, FilterPill, Caption, SectionHeading } from '../../../components/admin/ui'
+import { Button, FilterPill, Caption, SectionHeading, Select } from '../../../components/admin/ui'
 import { useIntroSettings, INTRO_MODES, INTROS } from './intro'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -123,11 +123,10 @@ function DiaryYearPanel() {
         cricket season; January suits one that runs to the calendar.
       </p>
       <div className="flex items-center gap-2 mt-4 flex-wrap">
-        <select value={month ?? 7} disabled={!canEdit || month === null}
-          onChange={e => choose(Number(e.target.value))}
-          className="bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm">
+        <Select value={month ?? 7} disabled={!canEdit || month === null}
+          onChange={e => choose(Number(e.target.value))} className="!w-auto min-w-[160px]">
           {MONTHS.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
-        </select>
+        </Select>
         {saving && <span className="font-mono text-[10px] text-pb-faintest">saving…</span>}
       </div>
       {month && (

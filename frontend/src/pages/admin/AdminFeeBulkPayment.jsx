@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
+import { Button, Field, Select, StatReadout, Caption, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 
 import { formatSeason } from '../../lib/cricketFormat'
@@ -30,8 +31,6 @@ function BulkRow({ row, idx, members, onChange, onRemove, onLoadDays }) {
   const selectedDays = (row.unpaid_days || []).filter(d => row.match_day_ids.includes(d.id))
   const computedFromDays = selectedDays.reduce((sum, d) => sum + (Number(row.match_day_rate) * Number(d.days_played)), 0)
 
-  const cell = 'bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
-
   function toggleDay(dayId, daysPlayed) {
     const has = row.match_day_ids.includes(dayId)
     const next = has
@@ -48,21 +47,22 @@ function BulkRow({ row, idx, members, onChange, onRemove, onLoadDays }) {
   return (
     <div className={`pb-card p-4 ${row.member_season_id ? '' : 'border-pb-amber/30'}`}>
       <div className="grid grid-cols-1 sm:grid-cols-[1.4fr_auto_auto_auto] gap-3 items-end">
-        <div>
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MEMBER</label>
+        <Field label="Member">
           {row.member_season_id ? (
             <div className="flex items-center gap-2">
-              <span className="text-pb-text text-sm flex-1">{row.full_name}</span>
-              <button onClick={() => onChange(idx, { member_season_id: '', member_id: '', full_name: '', match_day_ids: [], unpaid_days: [] })}
-                className="font-mono text-[9px] text-pb-faint hover:text-pb-text">CHANGE</button>
+              <span className="text-pb-text text-[13.5px] flex-1">{row.full_name}</span>
+              <Button size="sm" variant="quiet"
+                onClick={() => onChange(idx, { member_season_id: '', member_id: '', full_name: '', match_day_ids: [], unpaid_days: [] })}>
+                Change
+              </Button>
             </div>
           ) : (
             <div>
-              <input className={`${cell} w-full`} placeholder="Search members…"
+              <input className={INPUT_CLS} placeholder="Search members…"
                 value={memberSearch} onChange={e => setMemberSearch(e.target.value)} />
               {memberSearch.trim() && (
-                <div className="mt-1 max-h-48 overflow-y-auto border pb-hairline rounded bg-pb-surface">
-                  {filtered.length === 0 && <div className="px-3 py-2 font-mono text-[10px] text-pb-faintest">No match</div>}
+                <div className="mt-1 max-h-48 overflow-y-auto pb-scroll border border-pb-hairline2 rounded-lg bg-pb-surface">
+                  {filtered.length === 0 && <div className="px-3 py-2 text-[12.5px] text-pb-faintest">No match</div>}
                   {filtered.map(m => (
                     <button key={m.member_season_id} onClick={() => {
                       onChange(idx, {
@@ -73,7 +73,7 @@ function BulkRow({ row, idx, members, onChange, onRemove, onLoadDays }) {
                       setMemberSearch('')
                       onLoadDays(idx, m.member_id)
                     }}
-                      className="block w-full text-left px-3 py-1.5 text-sm text-pb-text hover:bg-pb-surface2 transition-colors">
+                      className="block w-full text-left px-3 py-1.5 text-[13px] text-pb-text hover:bg-pb-surface2 transition-colors">
                       {m.full_name}
                       {m.needs_tier && <span className="ml-2 font-mono text-[9px] text-pb-amber">⚠ needs tier</span>}
                     </button>
@@ -82,51 +82,50 @@ function BulkRow({ row, idx, members, onChange, onRemove, onLoadDays }) {
               )}
             </div>
           )}
-        </div>
-        <div>
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">KIND</label>
-          <select className={`${cell} w-32`} value={row.kind}
+        </Field>
+        <Field label="Kind">
+          <select className={`${INPUT_CLS} cursor-pointer !w-32`} value={row.kind}
             onChange={e => onChange(idx, { kind: e.target.value, match_day_ids: [] })}>
-            <option value="match_day">Match Day</option>
+            <option value="match_day">Match day</option>
             <option value="membership">Membership</option>
           </select>
-        </div>
-        <div>
-          <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">AMOUNT</label>
-          <input type="number" min="0" step="0.01" className={`${cell} w-24 text-right tabular-nums`}
+        </Field>
+        <Field label="Amount">
+          <input type="number" min="0" step="0.01" className={`${INPUT_CLS} !w-24 text-right pb-num`}
             value={row.amount} onChange={e => onChange(idx, { amount: e.target.value })} />
-        </div>
-        <button onClick={() => onRemove(idx)}
-          className="font-mono text-[9px] text-pb-red/60 hover:text-pb-red transition-colors px-2 py-2">REMOVE</button>
+        </Field>
+        <Button variant="danger" size="sm" onClick={() => onRemove(idx)} className="mb-0.5">Remove</Button>
       </div>
 
       {isMatchDay && row.member_season_id && (
         <div className="mt-3 pt-3 border-t pb-hairline-t">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">UNPAID MATCH DAYS</span>
+          <div className="flex items-center gap-2 mb-2 flex-wrap">
+            <Caption>Unpaid match days</Caption>
             <span className="font-mono text-[9px] text-pb-faintest">
               {(row.unpaid_days || []).length === 0 ? 'none' : `${row.match_day_ids.length} / ${row.unpaid_days.length} selected · auto-calc ${money(computedFromDays)}`}
             </span>
             {(row.unpaid_days || []).length > 0 && (
-              <button onClick={() => {
+              <Button size="sm" variant="quiet" className="ml-auto" onClick={() => {
                 const all = row.unpaid_days.map(d => d.id)
                 const total = row.unpaid_days.reduce((s, d) => s + Number(row.match_day_rate) * Number(d.days_played), 0)
                 onChange(idx, { match_day_ids: all, amount: total.toFixed(2) })
-              }} className="ml-auto font-mono text-[9px] text-pb-faint hover:text-pb-text">SELECT ALL</button>
+              }}>Select all</Button>
             )}
           </div>
           {(row.unpaid_days || []).length === 0 ? (
-            <p className="font-mono text-[10px] text-pb-faintest">No unpaid match days for this member. Amount won't be linked to a specific day.</p>
+            <p className="text-[12.5px] text-pb-faintest">No unpaid match days for this member. The amount won't be linked to a specific day.</p>
           ) : (
             <div className="flex flex-wrap gap-1.5">
               {row.unpaid_days.map(d => {
                 const on = row.match_day_ids.includes(d.id)
                 return (
                   <button key={d.id} onClick={() => toggleDay(d.id, d.days_played)}
-                    className={`font-mono text-[10px] rounded px-2 py-1 border transition-colors ${on
-                      ? 'border-pb-accent text-pb-bg'
-                      : 'pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent/50'}`}
-                    style={on ? { background: 'var(--pb-accent)' } : {}}>
+                    className={`font-mono text-[10px] rounded-full px-2.5 py-1 border transition-colors ${on
+                      ? ''
+                      : 'border-pb-hairline2 text-pb-dim hover:text-pb-text'}`}
+                    style={on
+                      ? { borderColor: 'color-mix(in srgb, var(--pb-accent) 50%, transparent)', background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', color: 'var(--pb-accent-ink)' }
+                      : undefined}>
                     {d.played_at || '—'} · {d.days_played}d {d.match ? `· ${d.match}` : ''}
                   </button>
                 )
@@ -237,54 +236,48 @@ export default function AdminFeeBulkPayment() {
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
-  const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
-
   return (
-    <BetterFeesLayout>
+    <BetterFeesLayout
+      title="Bulk payment"
+      caption="One deposit covering several players"
+      actions={<Button as={Link} to="/admin/fees/payments">← Payments</Button>}
+    >
       <div className="max-w-4xl">
-        <Link to="/admin/fees/payments" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← PAYMENTS</Link>
-        <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Bulk payment</h1>
-        <p className="text-pb-faint text-sm mb-5 leading-relaxed">
-          One deposit covering multiple players — for when a captain collects cash from the team and transfers it as one lump sum.
-          Each row becomes its own payment (so each player's balance updates), and any match days you tick get marked Paid.
+        <p className="text-pb-dim text-[13px] mb-5 leading-relaxed">
+          For when a captain collects cash from the team and transfers it as one lump sum. Each row becomes its own
+          payment, so every player's balance updates, and any match days you tick get marked paid.
         </p>
 
         {members.length === 0 ? <PbSpinner message="Loading members…" /> : (
           <>
             {/* Shared payment metadata */}
             <div className="pb-card p-5 mb-5">
-              <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Deposit Details</p>
+              <Caption screen className="mb-3">Deposit details</Caption>
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-                <div>
-                  <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">SEASON</label>
-                  <select className={`${inp} w-full`} value={seasonId} onChange={e => setSeasonId(e.target.value)}>
+                <Field label="Season">
+                  <Select value={seasonId} onChange={e => setSeasonId(e.target.value)}>
                     {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">DATE</label>
-                  <input type="date" className={`${inp} w-full`} value={header.paid_at}
+                  </Select>
+                </Field>
+                <Field label="Date">
+                  <input type="date" className={INPUT_CLS} value={header.paid_at}
                     onChange={e => setHeader(h => ({ ...h, paid_at: e.target.value }))} />
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">METHOD</label>
-                  <select className={`${inp} w-full`} value={header.method}
-                    onChange={e => setHeader(h => ({ ...h, method: e.target.value }))}>
+                </Field>
+                <Field label="Method">
+                  <Select value={header.method} onChange={e => setHeader(h => ({ ...h, method: e.target.value }))}>
                     {PAY_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">EXPECTED TOTAL</label>
+                  </Select>
+                </Field>
+                <Field label="Expected total">
                   <input type="number" min="0" step="0.01" placeholder="optional"
-                    className={`${inp} w-full text-right tabular-nums`}
+                    className={`${INPUT_CLS} text-right pb-num`}
                     value={header.expected_total} onChange={e => setHeader(h => ({ ...h, expected_total: e.target.value }))} />
-                </div>
+                </Field>
               </div>
-              <div className="mt-3">
-                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">BANK REF (optional)</label>
-                <input className={`${inp} w-full`} placeholder="e.g. TRF FROM J BARENDSE 19/10"
+              <Field label="Bank ref (optional)" className="mt-3">
+                <input className={INPUT_CLS} placeholder="e.g. TRF FROM J BARENDSE 19/10"
                   value={header.bank_ref} onChange={e => setHeader(h => ({ ...h, bank_ref: e.target.value }))} />
-              </div>
+              </Field>
             </div>
 
             {/* Rows */}
@@ -294,43 +287,35 @@ export default function AdminFeeBulkPayment() {
                   onChange={patchRow} onRemove={removeRow} onLoadDays={loadDays} />
               ))}
               <button onClick={addRow}
-                className="w-full py-2.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline border-dashed text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors">
-                + ADD PLAYER
+                className="w-full py-2.5 rounded-lg text-[13px] border border-dashed border-pb-hairline2 text-pb-dim hover:text-pb-text hover:border-pb-faint transition-colors">
+                + Add player
               </button>
             </div>
 
             {/* Footer: totals + commit */}
             {rows.length > 0 && (
               <div className="pb-card p-5 sticky bottom-4">
-                <div className="grid grid-cols-3 gap-4 mb-3">
-                  <div>
-                    <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">ROW TOTAL</div>
-                    <div className="font-display font-bold text-xl text-pb-text tabular-nums">{money(total)}</div>
-                  </div>
+                <div className="flex items-start gap-8 flex-wrap mb-3.5">
+                  <StatReadout value={money(total)} label="ROW TOTAL" />
                   {expected > 0 && (
                     <>
-                      <div>
-                        <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">EXPECTED</div>
-                        <div className="font-display font-bold text-xl text-pb-dim tabular-nums">{money(expected)}</div>
-                      </div>
-                      <div>
-                        <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">DELTA</div>
-                        <div className={`font-display font-bold text-xl tabular-nums ${matchesExpected ? 'text-green-300' : 'text-pb-amber'}`}>
-                          {matchesExpected ? '✓ match' : (delta > 0 ? `+${money(delta)}` : `−${money(Math.abs(delta))}`)}
-                        </div>
-                      </div>
+                      <StatReadout value={money(expected)} label="EXPECTED" ink="var(--pb-dim)" />
+                      <StatReadout
+                        label="DELTA"
+                        ink={matchesExpected ? 'var(--pb-positive-ink)' : '#f5b542'}
+                        value={matchesExpected ? '✓ match' : (delta > 0 ? `+${money(delta)}` : `−${money(Math.abs(delta))}`)}
+                      />
                     </>
                   )}
                 </div>
-                <button onClick={commit} disabled={!canCommit || busy}
-                  className="w-full py-2.5 rounded font-mono text-[11px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>
-                  {busy ? 'COMMITTING…' : `COMMIT ${readyRows.length} PAYMENT${readyRows.length === 1 ? '' : 'S'}`}
-                </button>
+                <Button variant="primary" size="lg" onClick={commit} disabled={!canCommit || busy} className="w-full">
+                  {busy ? 'Committing…' : `Commit ${readyRows.length} payment${readyRows.length === 1 ? '' : 's'}`}
+                </Button>
                 {!canCommit && rows.length > 0 && (
-                  <p className="font-mono text-[10px] text-pb-faintest mt-2">
+                  <p className="text-[12px] text-pb-faintest mt-2">
                     {readyRows.length < rows.length
                       ? 'Each row needs a member and a positive amount.'
-                      : 'Row total must match the expected deposit.'}
+                      : 'The row total must match the expected deposit.'}
                   </p>
                 )}
               </div>

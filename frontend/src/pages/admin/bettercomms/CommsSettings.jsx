@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Caption, SectionHeading, Checkbox, Badge, Empty, INPUT_CLS } from '../../../components/admin/ui'
 
 const SUPPRESSION_LABEL = {
   hard_bounce: 'Bounced (address undeliverable)',
@@ -232,11 +233,10 @@ export default function CommsSettings() {
                   </div>
                   <textarea value={reqReason} onChange={e => setReqReason(e.target.value)} rows={2}
                     placeholder="e.g. 300-member club, weekly newsletter to our own members"
-                    className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-2" />
-                  <button onClick={requestLimit} disabled={reqBusy}
-                    className="px-3 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+                    className={`${INPUT_CLS} mb-2`} />
+                  <Button variant="primary" onClick={requestLimit} disabled={reqBusy}>
                     {reqBusy ? 'Sending…' : 'Request Production limit'}
-                  </button>
+                  </Button>
                 </div>
               ) : null}
             </div>
@@ -246,12 +246,12 @@ export default function CommsSettings() {
         {/* Bounces & unsubscribes — last email and all emails */}
         {engagement && (
           <div className="pb-card p-4 mb-4">
-            <div className="text-sm text-pb-text font-medium mb-3">Bounces & unsubscribes</div>
+            <SectionHeading className="mb-3">Bounces &amp; unsubscribes</SectionHeading>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 mb-1.5 truncate">
+                <Caption className="mb-1.5 truncate">
                   Last email{engagement.last?.name ? ` — ${engagement.last.name}` : ''}
-                </div>
+                </Caption>
                 {engagement.last ? (
                   <div className="text-sm space-y-1">
                     <EngRow label="Sent" value={engagement.last.sent} />
@@ -261,7 +261,7 @@ export default function CommsSettings() {
                 ) : <div className="text-pb-faintest text-sm">No emails sent yet.</div>}
               </div>
               <div>
-                <div className="text-pb-faintest text-[11px] uppercase tracking-wide2 mb-1.5">All emails</div>
+                <Caption className="mb-1.5">All emails</Caption>
                 <div className="text-sm space-y-1">
                   <EngRow label="Sent" value={engagement.all.sent} />
                   <EngRow label="Bounced" value={engagement.all.bounced} bad />
@@ -278,28 +278,20 @@ export default function CommsSettings() {
 
         {/* Auto-remove unsubscribed/bounced contacts from all lists */}
         <div className="pb-card p-4 mb-4">
-          <label className="flex items-start gap-3 cursor-pointer">
-            <input type="checkbox" className="accent-pb-accent mt-0.5" checked={autoRemove}
-              disabled={autoRemoveBusy} onChange={e => toggleAutoRemove(e.target.checked)} />
-            <span>
-              <span className="text-sm text-pb-text font-medium">Auto-Remove Unsubscribed/Bounced Contacts from all Lists</span>
-              <span className="block text-pb-faintest text-xs mt-1 leading-relaxed">
-                When on, a contact that unsubscribes or is bounced / marks spam is removed from every
-                list it's on, so your lists only hold contactable people. They're always skipped when
-                sending regardless — this just keeps the lists themselves tidy.
-              </span>
-            </span>
-          </label>
+          <Checkbox checked={autoRemove} disabled={autoRemoveBusy} onChange={toggleAutoRemove}
+            hint="When on, a contact that unsubscribes or is bounced or marks spam is removed from every list it is on, so your lists only hold contactable people. They are always skipped when sending regardless, so this just keeps the lists themselves tidy.">
+            <span className="text-pb-text font-semibold">Remove unsubscribed and bounced contacts from all lists</span>
+          </Checkbox>
         </div>
 
         {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
         {isPlatform && (
           <div className="pb-card p-4 mb-4">
             <div className="flex items-center justify-between mb-2">
-              <div className="text-sm text-pb-text font-medium">Amazon SES (platform)</div>
-              <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${ses.ses?.access_key_configured ? 'text-green-500 border-green-500/40' : 'text-amber-500 border-amber-500/40'}`}>
+              <SectionHeading>Amazon SES (platform)</SectionHeading>
+              <Badge toneKey={ses.ses?.access_key_configured ? 'ok' : 'warn'}>
                 {ses.ses?.access_key_configured ? 'Connected' : 'Not configured'}
-              </span>
+              </Badge>
             </div>
             <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
               AWS credentials live in server config and are never shown here. This is read-only status. To change them, update the server <code className="text-pb-faint">SES_*</code> environment values.
@@ -325,10 +317,9 @@ export default function CommsSettings() {
             ))}
             {ses.tenants?.provisioning_configured && (
               <div className="mt-3 pt-3 border-t pb-hairline flex items-center gap-2">
-                <button onClick={provisionTenants} disabled={tenantBusy}
-                  className="px-3 py-1.5 rounded text-xs border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
+                <Button size="sm" onClick={provisionTenants} disabled={tenantBusy}>
                   {tenantBusy ? 'Provisioning…' : 'Provision club tenants'}
-                </button>
+                </Button>
                 <span className="text-pb-faintest text-xs">Creates an SES tenant for every club (idempotent).</span>
               </div>
             )}
@@ -337,17 +328,17 @@ export default function CommsSettings() {
 
         {/* Sender identity */}
         <div className="pb-card p-4 mb-4">
-          <div className="text-sm text-pb-text font-medium mb-3">Sender</div>
-          <label className="block text-xs text-pb-faint mb-1">From name</label>
+          <SectionHeading className="mb-3">Sender</SectionHeading>
+          <Caption className="mb-1.5">From name</Caption>
           <input value={fromName} onChange={e => setFromName(e.target.value)} placeholder={s.from_name}
-            className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm mb-3" />
+            className={`${INPUT_CLS} mb-3`} />
           {p.live && p.provider === 'ses' && (
             <>
-              <label className="block text-xs text-pb-faint mb-1">Sending address</label>
+              <Caption className="mb-1.5">Sending address</Caption>
               <div className="flex items-center gap-2 mb-1">
                 <input value={fromLocal} onChange={e => setFromLocal(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
                   placeholder={(s.from_address || '').split('@')[0] || 'hello'}
-                  className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+                  className={INPUT_CLS} />
                 <span className="text-pb-faint text-sm shrink-0">@{(s.from_address || '').split('@')[1] || ''}</span>
               </div>
               <div className="text-pb-faintest text-xs mb-3">
@@ -355,20 +346,19 @@ export default function CommsSettings() {
               </div>
             </>
           )}
-          <label className="flex items-center gap-2 mb-2 text-xs text-pb-faint cursor-pointer">
-            <input type="checkbox" checked={noReply}
-              onChange={e => setReplyTo(e.target.checked ? 'noreply@betteradmin-comms.work' : '')} />
-            No-reply address (replies are not monitored)
-          </label>
-          <label className="block text-xs text-pb-faint mb-1">Reply-to email</label>
+          <Checkbox className="mb-2.5" checked={noReply}
+            onChange={on => setReplyTo(on ? 'noreply@betteradmin-comms.work' : '')}>
+            No-reply address, so replies are not monitored
+          </Checkbox>
+          <Caption className="mb-1.5">Reply-to email</Caption>
           <input value={replyTo} onChange={e => setReplyTo(e.target.value)} placeholder="committee@yourclub.org.au" type="email"
-            className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+            className={INPUT_CLS} />
           <div className="text-pb-faintest text-xs mt-1">Replies go here. Defaults to your club contact email. Tick no-reply to send from an unmonitored address.</div>
         </div>
 
         {/* Compliance footer */}
         <div className="pb-card p-4 mb-4">
-          <div className="text-sm text-pb-text font-medium mb-1">Email footer</div>
+          <SectionHeading className="mb-1.5">Email footer</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
             Australian law (Spam Act 2003) requires every email to identify the sender and offer a one-click
             unsubscribe. The unsubscribe link is added automatically — put your club's legal name and a
@@ -376,35 +366,31 @@ export default function CommsSettings() {
           </div>
           <textarea value={footer} onChange={e => setFooter(e.target.value)} rows={3}
             placeholder={`${s.from_name} Cricket Club\nABN 00 000 000 000 · PO Box 1, Suburb WA 6000`}
-            className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
+            className={INPUT_CLS} />
         </div>
 
         <div className="flex items-center gap-3">
-          <button onClick={save} disabled={saving}
-            className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-60" style={{ background: 'var(--pb-accent)' }}>
+          <Button variant="primary" size="lg" onClick={save} disabled={saving}>
             {saving ? 'Saving…' : 'Save settings'}
-          </button>
+          </Button>
           <span className="text-pb-faintest text-xs">{s.subscribed_contacts} subscribed contact{s.subscribed_contacts === 1 ? '' : 's'}</span>
         </div>
 
         {/* Send a test email */}
         <div className="pb-card p-4 mt-4">
-          <div className="text-sm text-pb-text font-medium mb-1">Send a test email</div>
+          <SectionHeading className="mb-1.5">Send a test email</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3">Checks the connection by sending a test to an address you choose, using the current sender settings. Save your changes first.</div>
           <div className="flex gap-2">
             <input value={testEmail} onChange={e => setTestEmail(e.target.value)} placeholder="you@example.com" type="email"
-              className="flex-1 px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm" />
-            <button onClick={sendTest} disabled={testBusy}
-              className="px-3 py-2 rounded text-sm border pb-hairline text-pb-text hover:bg-pb-surface2 disabled:opacity-60">
-              {testBusy ? 'Sending…' : 'Send test'}
-            </button>
+              className={INPUT_CLS} />
+            <Button onClick={sendTest} disabled={testBusy}>{testBusy ? 'Sending…' : 'Send test'}</Button>
           </div>
           {!p.live && <div className="text-pb-faintest text-xs mt-2">Preview mode — the test is rendered but not delivered until a provider is connected.</div>}
         </div>
 
         {/* Deliverability — blocked addresses (Phase 1) */}
         <div className="pb-card p-4 mt-4">
-          <div className="text-sm text-pb-text font-medium mb-1">Deliverability</div>
+          <SectionHeading className="mb-1.5">Deliverability</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
             Addresses that bounced or marked an email as spam are blocked automatically so they never get another send.
             If someone has fixed their inbox, you can let them back in.
@@ -421,10 +407,7 @@ export default function CommsSettings() {
                     <div className="text-pb-text text-sm truncate">{r.email}</div>
                     <div className="text-pb-faintest text-xs">{SUPPRESSION_LABEL[r.reason] || r.reason}</div>
                   </div>
-                  <button onClick={() => unsuppress(r.email)}
-                    className="shrink-0 px-2.5 py-1 rounded text-xs border pb-hairline text-pb-faint hover:text-pb-text">
-                    Allow again
-                  </button>
+                  <Button size="sm" onClick={() => unsuppress(r.email)}>Allow again</Button>
                 </div>
               ))}
             </div>

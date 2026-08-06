@@ -2,13 +2,9 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
+import { Button, Badge, Note, Empty } from '../../../components/admin/ui'
 
-const STATUS_STYLE = {
-  draft: 'text-pb-faint border-pb-faint/30',
-  sending: 'text-pb-accent border-pb-accent/40',
-  sent: 'text-green-500 border-green-500/40',
-  error: 'text-pb-red border-pb-red/40',
-}
+const STATUS_TONE = { draft: 'calm', sending: 'accent', sent: 'ok', error: 'block' }
 
 function fmtDate(s) {
   if (!s) return ''
@@ -70,39 +66,32 @@ export default function CommsCampaigns() {
   return (
     <BetterCommsLayout
       title="Emails"
+      caption={`Drafts and sends · ${campaigns.length} total`}
       actions={<>
-        <Link to="/admin/comms/templates"
-          className="px-3 py-1.5 rounded-lg text-[13px] border border-pb-hairline2 text-pb-dim hover:text-pb-text whitespace-nowrap">
-          Templates
-        </Link>
-        <button onClick={newEmail} disabled={creating}
-          className="px-3 py-1.5 rounded text-sm font-medium text-white disabled:opacity-60"
-          style={{ background: 'var(--pb-accent)' }}>
-          {creating ? 'Creating…' : '+ New email'}
-        </button>
+        <Button as={Link} to="/admin/comms/templates">Templates</Button>
+        <Button variant="primary" onClick={newEmail} disabled={creating}>
+          {creating ? 'Creating…' : 'New email'}
+        </Button>
       </>}
     >
-      {error && <div className="pb-card p-3 mb-4 text-pb-red text-sm">{error}</div>}
+      {error && <Note toneKey="block" className="mb-4 max-w-2xl">{error}</Note>}
 
       {settings && !live && (
-        <div className="pb-card p-3 mb-4 text-sm text-pb-faint border-l-2 border-amber-500/50">
-          <span className="text-amber-500 font-medium">Preview mode.</span> No email provider is connected yet, so
-          sends are logged but <strong>not delivered</strong>. Connect a free provider in{' '}
-          <a href="/admin/comms/settings" className="underline" style={{ color: 'var(--pb-accent)' }}>Settings</a> to go live.
-        </div>
+        <Note toneKey="warn" title="Preview mode" className="mb-4 max-w-2xl">
+          No email provider is connected yet, so sends are logged but <strong>not delivered</strong>. Connect a free
+          provider in <a href="/admin/comms/settings" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Email settings</a> to go live.
+        </Note>
       )}
 
       {loading ? (
-        <div className="text-pb-faint text-sm">Loading…</div>
+        <Empty>Loading…</Empty>
       ) : campaigns.length === 0 ? (
         <div className="pb-card p-8 text-center">
-          <div className="text-pb-text font-medium mb-1">No emails yet</div>
-          <div className="text-pb-faint text-sm mb-4">Send your first newsletter or announcement to the club.</div>
-          <button onClick={newEmail} disabled={creating}
-            className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-60"
-            style={{ background: 'var(--pb-accent)' }}>
-            {creating ? 'Creating…' : '+ New email'}
-          </button>
+          <div className="font-display font-semibold text-[15.5px] text-pb-text mb-1">No emails yet</div>
+          <div className="text-[13px] text-pb-dim mb-4">Send your first newsletter or announcement to the club.</div>
+          <Button variant="primary" onClick={newEmail} disabled={creating}>
+            {creating ? 'Creating…' : 'New email'}
+          </Button>
         </div>
       ) : (
         <div className="pb-card overflow-hidden">
@@ -112,7 +101,7 @@ export default function CommsCampaigns() {
               <div key={c.id}
                 className={`w-full flex items-center justify-between gap-4 px-5 py-3.5 hover:bg-pb-surface2 transition-colors ${i > 0 ? 'pb-hairline-t' : ''}`}>
                 <button onClick={() => navigate(`/admin/comms/${c.id}`)} className="min-w-0 flex-1 text-left">
-                  <div className="text-pb-text text-sm truncate">{c.name || c.subject || <span className="text-pb-faintest italic">(no subject)</span>}</div>
+                  <div className="text-pb-text text-[13.5px] font-semibold truncate">{c.name || c.subject || <span className="text-pb-faintest font-normal italic">(no subject)</span>}</div>
                   {c.description && <div className="text-pb-faint text-xs mt-0.5 truncate" title={c.description}>{c.description}</div>}
                   {c.name && c.subject && c.name !== c.subject && (
                     <div className="text-pb-faintest text-[11px] mt-0.5 truncate">Subject: {c.subject}</div>
@@ -138,12 +127,9 @@ export default function CommsCampaigns() {
                   )}
                 </button>
                 <div className="shrink-0 flex items-center gap-3">
-                  <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${STATUS_STYLE[c.status] || STATUS_STYLE.draft}`}>
-                    {c.status}
-                  </span>
+                  <Badge toneKey={STATUS_TONE[c.status] || 'calm'}>{c.status}</Badge>
                   {c.status !== 'sending' && (
-                    <button onClick={() => remove(c)} title="Delete"
-                      className="text-pb-faintest hover:text-pb-red text-sm px-1">✕</button>
+                    <Button size="sm" variant="danger" onClick={() => remove(c)} title="Delete">Delete</Button>
                   )}
                 </div>
               </div>

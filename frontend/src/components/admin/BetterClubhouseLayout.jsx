@@ -47,12 +47,13 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Comms' },
     { to: '/admin/comms', label: 'Emails', icon: 'list', cap: CAP.MANAGE_COMMS, module: 'comms', exact: true, badge: counts.drafts },
-    // An audience is not a place you go — it is the list or segment picked
-    // while writing an email. What a club maintains is the pieces an email is
-    // built from, so those get the items and the segment editor is named for
-    // what it edits.
+    // What a club maintains is the pieces an email is built from, so those get
+    // the items. The saved-conditions editor is called Audiences here because
+    // that is what the screen it opens is called and what its own button makes
+    // — the item used to say "Segments" and land on a page titled "Audiences",
+    // which read as two different things.
     { to: '/admin/comms/lists', label: 'Lists', icon: 'teams', cap: CAP.MANAGE_COMMS, module: 'comms' },
-    { to: '/admin/comms/segments', label: 'Segments', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
+    { to: '/admin/comms/segments', label: 'Audiences', icon: 'filter', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/templates', label: 'Templates', icon: 'sheet', cap: CAP.MANAGE_COMMS, module: 'comms' },
     { to: '/admin/comms/settings', label: 'Email settings', icon: 'settings', cap: CAP.MANAGE_COMMS, module: 'comms' },
 

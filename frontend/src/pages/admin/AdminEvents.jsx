@@ -3,12 +3,15 @@ import QRCode from 'qrcode'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import { INPUT_CLS, Modal as UiModal } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import DateTimePicker from '../../components/admin/crm/DateTimePicker'
 import { PersonPicker } from '../../components/admin/clubmanager/pickers'
 
-const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
+// One input look for the whole module — the same class the shared kit's
+// TextInput/Select wear, so a hand-built control here matches a kit one.
+const inp = INPUT_CLS
 const EVENT_COLOR = '#8b7cf6'
 const REGISTRATION_STATUSES = ['free', 'awaiting_payment', 'paid', 'cancelled']
 const label = (s) => (s || '').split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
@@ -30,24 +33,13 @@ const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-AU', { hour: 'nume
 const fmtDateTime = (iso) => new Date(iso).toLocaleString('en-AU', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit' })
 
 // ─── modal shell ─────────────────────────────────────────────────────────────
+// The house dialog, kept behind this screen's original `open`/`wide` props so
+// every call site below is unchanged.
 function Modal({ open, onClose, title, children, wide }) {
-  useEffect(() => {
-    if (!open) return
-    const onKey = (e) => { if (e.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [open, onClose])
-  if (!open) return null
   return (
-    <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/60 py-8 px-4" onMouseDown={onClose}>
-      <div className={`pb-card bg-pb-surface w-full ${wide ? 'max-w-3xl' : 'max-w-xl'} p-5`} onMouseDown={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-display text-lg font-bold text-pb-text">{title}</h2>
-          <button onClick={onClose} className="text-pb-faint hover:text-pb-red text-lg leading-none">✕</button>
-        </div>
-        {children}
-      </div>
-    </div>
+    <UiModal open={open} onClose={onClose} title={title} width={wide ? 760 : 600}>
+      <div className="pb-4">{children}</div>
+    </UiModal>
   )
 }
 
@@ -71,7 +63,7 @@ function RegistrationRow({ reg, onChanged }) {
         <select className="bg-pb-surface2 text-pb-text text-[10px] font-mono border pb-hairline rounded px-1 py-1" value={reg.payment_status} onChange={e => setStatus(e.target.value)}>
           {REGISTRATION_STATUSES.map(s => <option key={s} value={s}>{label(s)}</option>)}
         </select>
-        <button onClick={remove} className="font-mono text-[10px] text-pb-faintest hover:text-pb-red">✕</button>
+        <button onClick={remove} className="pb-btn pb-btn-sm pb-btn-danger">✕</button>
       </div>
     </div>
   )
@@ -95,7 +87,7 @@ function NewRegistrationForm({ eventId, onAdded }) {
       <input className={`${inp} flex-1 min-w-[120px]`} placeholder="Name" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
       <input className={`${inp} w-40`} placeholder="Email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
       <input type="number" min="1" className={`${inp} w-20`} value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: Number(e.target.value) || 1 }))} />
-      <button onClick={submit} disabled={busy || !form.full_name.trim()} className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">
+      <button onClick={submit} disabled={busy || !form.full_name.trim()} className="pb-btn pb-btn-sm pb-btn-secondary">
         + Add (manual RSVP)
       </button>
     </div>
@@ -136,7 +128,7 @@ function RegistrationsPanel({ event }) {
           <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">PUBLIC REGISTRATION LINK</div>
           <div className="flex items-center gap-2">
             <input readOnly className={`${inp} text-[11px]`} value={publicUrl} onClick={e => e.target.select()} />
-            <button onClick={copyLink} className="px-2.5 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">Copy</button>
+            <button onClick={copyLink} className="pb-btn pb-btn-sm pb-btn-secondary">Copy</button>
           </div>
           {!event.registration_open && <div className="font-mono text-[10px] text-pb-amber mt-1">Registration closed. The link won't accept new registrations.</div>}
         </div>
@@ -283,9 +275,9 @@ function EventForm({ event, seedDate, types, members, onSaved, onClose }) {
       </div>
 
       <div className="flex justify-end gap-2 mt-5">
-        <button onClick={onClose} className="px-4 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text">CANCEL</button>
+        <button onClick={onClose} className="pb-btn pb-btn-secondary">CANCEL</button>
         <button onClick={submit} disabled={busy || !form.title.trim() || !form.starts_at}
-          className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+          className="pb-btn pb-btn-primary">
           {busy ? 'Saving…' : isEdit ? 'Save changes' : '+ Create event'}
         </button>
       </div>
@@ -324,8 +316,8 @@ function TypeRow({ type, onChanged }) {
         Committee-only
       </label>
       <div className="flex justify-end gap-2">
-        <button onClick={() => setEditing(false)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Cancel</button>
-        <button onClick={save} disabled={busy || !draft.name.trim()} className="px-3 py-1 rounded font-mono text-[10px] text-pb-bg disabled:opacity-40" style={{ background: 'var(--pb-accent)' }}>Save</button>
+        <button onClick={() => setEditing(false)} className="pb-btn pb-btn-sm pb-btn-quiet">Cancel</button>
+        <button onClick={save} disabled={busy || !draft.name.trim()} className="pb-btn pb-btn-sm pb-btn-primary">Save</button>
       </div>
     </div>
   )
@@ -380,11 +372,11 @@ function TypesPanel({ types, onChanged }) {
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">STARTER SETS</div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => seed(false)} disabled={seeding}
-            className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+            className="pb-btn pb-btn-secondary">
             + STARTER SET (11 TYPES)
           </button>
           <button onClick={() => seed(true)} disabled={seeding}
-            className="px-3 py-2 rounded text-[12.5px] font-semibold border pb-hairline text-pb-faint hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-50">
+            className="pb-btn pb-btn-secondary">
             + COMMITTEE SET (8 TYPES)
           </button>
         </div>
@@ -400,7 +392,7 @@ function TypesPanel({ types, onChanged }) {
             Committee-only
           </label>
           <button onClick={add} disabled={busy || !draft.name.trim()}
-            className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+            className="pb-btn pb-btn-primary">
             + ADD
           </button>
         </div>
@@ -567,7 +559,7 @@ export default function AdminEvents() {
           <div className="flex items-center gap-2">
             <button onClick={() => setScreen('types')} className={pill(screen === 'types')}>Types</button>
             <button onClick={openCreate}
-              className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40 whitespace-nowrap" style={{ background: 'var(--pb-accent)' }}>
+              className="pb-btn pb-btn-primary">
               + NEW EVENT
             </button>
           </div>
@@ -611,7 +603,7 @@ export default function AdminEvents() {
               )}
               {anyFilter && (
                 <button onClick={() => { setQ(''); setTypeFilter(''); setOrganiserFilter(''); setDateFrom(''); setDateTo('') }}
-                  className="font-mono text-[10px] text-pb-faint hover:text-pb-text underline pb-1">Clear filters</button>
+                  className="pb-btn pb-btn-sm pb-btn-quiet">Clear filters</button>
               )}
             </div>
 
