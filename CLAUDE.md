@@ -1,5 +1,56 @@
 # BetterStats — Claude Session Notes
 
+## What kind of member is this? The Directory's three type axes (v9.11.1, Aug 2026)
+
+Reported: BetterStats → Players marks a player Inactive, but the Clubhouse
+Directory read every person the same — a social member, a life member, a
+sponsor's contact and this season's opening bat all just "Player" or nothing.
+
+- **There is no single "membership type" column, and there should not be. Three
+  independent axes already exist and all three are now returned by
+  `services/directory.list_people`:**
+  1. **`membership_types`** (migration 175) — the club's own cross-season
+     catalogue: Senior/Junior Player, Parent, Social Member, Life Member, Coach,
+     Selector, Volunteer, Umpire, Scorer, **Sponsor Contact**, Committee Member,
+     Honorary Member (`services/membership_types.STARTER_TYPES`, carrying
+     `is_playing` + voting/insurance/WWCC/PlayHQ flags). **This is the real
+     membership type**, and nothing seeds it — a club adopts the starter set or
+     builds its own, so it is legitimately empty for plenty of clubs.
+  2. **`fee_members.member_category`** — volunteer | parent | committee |
+     life_member | third_party | official | other. What the Directory's own
+     "Add person" TYPE dropdown writes; drives the computed `segs`.
+  3. **`players.status`** ('active' | 'inactive') — the flag the Stats Players
+     screen shows. Returned as `player_status`, and **NULL for a non-player**,
+     so "not playing" and "not a player" stay distinguishable. Plus the
+     `is_life_member` / `is_honorary` (+ expiry) flags on `fee_members`.
+- **Sponsors are not people.** `org_sponsors` is the sponsoring ORGANISATION
+  (name, logo, website, one carried-over contact name/email from the KlubPro
+  import). A sponsor's person belongs in the Directory as an ordinary member
+  with the "Sponsor Contact" membership type. Don't union the two lists.
+- **The membership-type catalogue's CRUD lives in BetterFees** (`/club-admin/fees/
+  membership-types`, `MANAGE_FEES` + the fees module), which a volunteer or
+  committee manager does not hold — so `GET /club-admin/directory/people`
+  returns the catalogue itself alongside the people rather than sending the
+  screen to an endpoint that would 403 for half its readers.
+- **The Directory can now SET `membership_type_id`** (`MemberUpsert`, resolved
+  through `_resolved_type_id` → 422 for another club's id, "" clears it). Without
+  this the filter would be dead for every club that doesn't run BetterFees,
+  since nothing else writes the column.
+- **The `membership_types` join is org-scoped on BOTH sides**
+  (`mt.organisation_id = fm.organisation_id`), same rule as the `players` join
+  above it — see the cross-club member leak note further down.
+- **Frontend** (`redesign/screens/Directory.jsx`): `typeLabel(p)` falls
+  membership type → category → player/former player → "Member", shown on every
+  list row and as an accented chip on the detail pane. New filters: Playing /
+  Former players (both exclude non-players rather than lumping them in with the
+  inactive), a membership-type select with a **"No type set"** option, and the
+  Life member / Official / Honorary segments — `list_people` had always computed
+  those and they simply had no pill.
+- **Verified against a real Postgres** (27 checks): the new join and every
+  returned field, a member pointed at another club's type reading as no type,
+  read-through players carrying their status, archived behaviour, and the
+  router's own guard rejecting a foreign/unknown/non-uuid type id.
+
 ## BetterFootball — Import Results (v9.7.0, Aug 2026)
 
 A club's own results register (one row per match, going back as far as the

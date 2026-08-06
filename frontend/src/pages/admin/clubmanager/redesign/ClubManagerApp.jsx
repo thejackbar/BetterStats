@@ -46,6 +46,7 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       // per-screen locals
       diaryTab: 'plan', cadFilter: 'All', issuesOnly: false, diaryCollapsed: {},
       dirQuery: '', dirSeg: 'All', dirRole: null, dirExpiring: false, dirSel: null,
+      dirType: '', dirPlaying: 'all',
       facTab: 'availability', bookings: null, requests: null, returned: {},
       cteTab: 'meetings', cteMeeting: 'm5',
       event: 'e3',
