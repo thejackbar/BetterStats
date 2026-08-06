@@ -212,6 +212,63 @@ real email, phone and photo. Not a display bug — Applecross genuinely held a
   a **fourth, separately-populated table** that nothing syncs from the other
   three. A club will legitimately see four different totals until step 4 of the
   Clubhouse handoff (joining the data) is done.
+## The shared-game rule: scope the PLAYER, not just the game (v9.11.1, Aug 2026)
+
+The member leak above was one instance of a much wider bug. An audit of every
+SQL block that reads a per-game table and joins `players` found **15 more
+sites** doing the same thing, and a production count confirmed **326,816
+cross-club rows across 38 clubs** were being read as the viewing club's own.
+
+- **The rule, and it is not optional**: a fixture between two clubs that BOTH
+  sync is a SINGLE `games` row, and each club's sync writes its own players'
+  rows against it. So `games → grades → seasons → organisation_id` tells you the
+  game is in our competition; it tells you **nothing** about whose player a row
+  belongs to. **Any read of `batting_innings`, `bowling_spells`,
+  `fielding_stats`, `game_appearances`, `partnerships`, `fall_of_wickets` or
+  `bowler_wickets` that attributes a row to our side must ALSO scope
+  `players.organisation_id`.** Season-aggregate reads (`player_season_stats`)
+  are a different shape and are already handled by the v7.32.1 view fix.
+- **Fixed here**: `aggregations.get_fielding_leaderboard` (the finals and
+  captain branches, the only public-facing one), all ten of `iq_team.py`
+  (`_team_fielding`, `_batting_pairs`, `_attack_structure`, `_captaincy`,
+  `_combinations`, `_discipline`, `_collapse_bowlers`, `_role_ratings`,
+  `_batting_extra`), `iq_review.game_review`'s best-partnership query,
+  `iq_teammates.teammates`, and `iq_opponent._db_season_accumulators` (×3).
+  `iq.py` had already been done in v8.74; `iq_team.py` never got the same pass.
+- **`_captaincy` also summed the OPPOSITION's runs** into "average team score
+  under this captain" — its `scores` CTE read `batting_innings` for our games
+  with no player scope at all. Not a join bug, so an audit that only looks at
+  `JOIN players` misses it. Check the CTEs too.
+- **`is_club_innings` is set PER CLUB** (`sync.py`: TRUE for whichever side is
+  its own), so a shared fixture's one `games` row carries BOTH clubs'
+  partnerships marked TRUE. `WHERE game_id = X AND is_club_innings IS TRUE` is
+  therefore NOT a club filter. That is what put the opposition's best stand in
+  our own match review.
+- **Scope ONE side of a partnership, not both.** Both batters in a stand are
+  from the same innings and so the same club, so scoping either one excludes an
+  opposition pair. Scoping both would also drop a legitimate stand involving a
+  teammate whose `players` row sits under another club (the shared-participant-
+  GUID case). `_combinations` is the exception and scopes BOTH, because its
+  pairs come from appearances on the same game, where one of ours can genuinely
+  pair with one of theirs. Same reasoning for `bowler_wickets`: scope the
+  BOWLER, leave the fielder, they are on the same fielding side.
+- **Deliberately left unscoped** (verified safe, do not "fix" them):
+  `aggregations.get_player_partnerships` and `iq_trends.bowler_deep_dive`
+  (anchored on a specific `:pid`), `yearbooks._generate_narrative_core`,
+  `statlab.derived_best_partnership_pair` / `_partnership_aggregates_pair` /
+  `_century_partnerships_pair` / `_bowler_fielder_combo` (one side already
+  scoped), and `iq_team._team_fielding`'s combo query / `_batting_pairs`
+  (partner alias, per the rule above).
+- **The audit is repeatable and worth re-running when adding a per-game read.**
+  Extract every triple-quoted SQL block, keep those with a per-game table after
+  `FROM`/`JOIN` **and** a `JOIN players <alias>`, and flag any alias with no
+  `<alias>.organisation_id` anywhere in the block. Match the table only after
+  `FROM`/`JOIN` or `st.batting_innings` (a COLUMN on `player_season_stats`)
+  produces a pile of false positives.
+- **Read-side only.** No migration, no data change, no re-sync: the rows are
+  correct and belong exactly where they are. Every affected figure corrects
+  itself on the next page load.
+
 ## BetterFootball — Import Awards (v9.9.0, Aug 2026)
 
 A club's honour board imported as real `player_achievements` rows. Third

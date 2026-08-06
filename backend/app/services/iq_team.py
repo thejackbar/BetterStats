@@ -247,7 +247,7 @@ async def _team_fielding(session: AsyncSession, org_id: str, season_id: str | No
                    COALESCE(SUM(fs.catches_wk), 0) AS ctwk,
                    COALESCE(SUM(fs.stumpings), 0) AS st
             FROM v_effective_fielding_stats fs
-            JOIN players p ON p.id = fs.player_id
+            JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -273,7 +273,11 @@ async def _team_fielding(session: AsyncSession, org_id: str, season_id: str | No
                    COALESCE(pb.display_name_override, pb.name) AS bowler, COUNT(*) AS n
             FROM v_effective_bowler_wickets bw
             JOIN players pf ON pf.id = bw.fielder_id
-            JOIN players pb ON pb.id = bw.bowler_id
+            -- Scoping the BOWLER is enough to keep the opposition's combos out:
+            -- the fielder credited on a wicket is on the same fielding side. Left
+            -- off the fielder deliberately, so a teammate whose `players` row sits
+            -- under another club (the shared-participant-GUID case) still counts.
+            JOIN players pb ON pb.id = bw.bowler_id AND pb.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bw.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -378,7 +382,9 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
                    COUNT(*) FILTER (WHERE pr.runs >= 50) AS fifties,
                    COUNT(*) FILTER (WHERE pr.wk = 1) AS opening
             FROM pr
-            JOIN players pa ON pa.id = pr.a
+            -- Both batters in a stand are from the same innings and so the same
+            -- club; scoping one side is enough to exclude an opposition pair.
+            JOIN players pa ON pa.id = pr.a AND pa.organisation_id = CAST(:org AS UUID)
             JOIN players pb ON pb.id = pr.b
             GROUP BY pa.id, a_name, pb.id, b_name
             HAVING COUNT(*) >= :min_stands
@@ -426,7 +432,7 @@ async def _attack_structure(session: AsyncSession, org_id: str, season_id: str |
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    p.bowling_type AS bt, SUM(sp.balls) AS balls,
                    SUM(sp.runs) AS runs, SUM(sp.wkts) AS wkts
-            FROM sp JOIN players p ON p.id = sp.pid
+            FROM sp JOIN players p ON p.id = sp.pid AND p.organisation_id = CAST(:org AS UUID)
             GROUP BY p.id, name, p.bowling_type
             HAVING SUM(sp.balls) >= :min_balls
             ORDER BY SUM(sp.balls) DESC
@@ -552,9 +558,14 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
                 WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
             ),
             scores AS (
+                -- OUR runs, so the batter has to be ours. A shared fixture is one
+                -- `games` row carrying both sides' innings, and without the player
+                -- scope this summed the opposition's runs into the team score we
+                -- report under each captain.
                 SELECT bi.game_id, SUM(bi.runs) AS our_runs
                 FROM v_effective_batting_innings bi
                 JOIN our_games og ON og.id = bi.game_id
+                JOIN players bp ON bp.id = bi.player_id AND bp.organisation_id = CAST(:org AS UUID)
                 WHERE bi.did_not_bat IS NOT TRUE
                 GROUP BY bi.game_id
             )
@@ -568,7 +579,7 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
                    AVG(sc.our_runs) AS avg_score
             FROM game_appearances ga
             JOIN our_games og ON og.id = ga.game_id
-            JOIN players p ON p.id = ga.player_id
+            JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
             LEFT JOIN scores sc ON sc.game_id = ga.game_id
             WHERE ga.is_captain IS TRUE
             GROUP BY p.id, p.display_name_override, p.name
@@ -631,8 +642,11 @@ async def _combinations(session: AsyncSession, org_id: str, season_id: str | Non
             FROM app a
             JOIN app b ON a.game_id = b.game_id AND a.player_id < b.player_id
             JOIN og ON og.id = a.game_id
-            JOIN players pa ON pa.id = a.player_id
-            JOIN players pb ON pb.id = b.player_id
+            -- BOTH sides scoped here, unlike the batting-pair query above: these
+            -- pairs come from appearances on the same game, so on a shared fixture
+            -- one of ours can genuinely pair with one of theirs.
+            JOIN players pa ON pa.id = a.player_id AND pa.organisation_id = CAST(:org AS UUID)
+            JOIN players pb ON pb.id = b.player_id AND pb.organisation_id = CAST(:org AS UUID)
             GROUP BY a.player_id, b.player_id, a_name, b_name
             HAVING COUNT(*) FILTER (WHERE og.result IN ('WIN', 'LOSS')) >= :min_together
             """
@@ -815,7 +829,7 @@ async def _discipline(session: AsyncSession, org_id: str, season_id: str | None,
             SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
                    SUM(sp.balls) AS balls, SUM(sp.runs) AS runs,
                    SUM(sp.wides) AS wides, SUM(sp.nb) AS nb
-            FROM sp JOIN players p ON p.id = sp.pid
+            FROM sp JOIN players p ON p.id = sp.pid AND p.organisation_id = CAST(:org AS UUID)
             GROUP BY p.id, p.display_name_override, p.name
             """
         ),
@@ -954,7 +968,7 @@ async def _collapse_bowlers(session: AsyncSession, org_id: str, season_id: str |
                    bw.game_id::text AS gid, bw.innings_number AS inn,
                    COUNT(*) AS wkts
             FROM v_effective_bowler_wickets bw
-            JOIN players pl ON pl.id = bw.bowler_id
+            JOIN players pl ON pl.id = bw.bowler_id AND pl.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bw.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1085,7 +1099,7 @@ async def _role_ratings(session: AsyncSession, org_id: str, season_id: str | Non
                    SUM(bi.runs) AS runs,
                    COUNT(*) FILTER (WHERE NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS outs
             FROM v_effective_batting_innings bi
-            JOIN players p ON p.id = bi.player_id
+            JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1298,7 +1312,7 @@ async def _batting_extra(session: AsyncSession, org_id: str, season_id: str | No
                    bi.runs AS runs, bi.batting_position AS pos,
                    bi.not_out AS no, bi.dismissal_type AS dt, bi.caught_behind AS cb
             FROM v_effective_batting_innings bi
-            JOIN players p ON p.id = bi.player_id
+            JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

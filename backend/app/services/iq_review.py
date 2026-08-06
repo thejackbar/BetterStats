@@ -155,14 +155,20 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
                    COALESCE(b1.display_name_override, b1.name) AS b1,
                    COALESCE(b2.display_name_override, b2.name) AS b2
             FROM v_effective_partnerships p
-            LEFT JOIN players b1 ON b1.id = p.batter1_id
-            LEFT JOIN players b2 ON b2.id = p.batter2_id
+            LEFT JOIN players b1 ON b1.id = p.batter1_id AND b1.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN players b2 ON b2.id = p.batter2_id AND b2.organisation_id = CAST(:org AS UUID)
             WHERE p.game_id = CAST(:gid AS UUID) AND p.is_club_innings IS TRUE AND p.runs IS NOT NULL
+              -- `is_club_innings` is set per club (sync stamps TRUE for whichever
+              -- side is its own), so on a fixture between two synced clubs the one
+              -- `games` row carries BOTH clubs' stands marked TRUE. Requiring a
+              -- batter to resolve within our org is what keeps the opposition's
+              -- best stand out of our match review.
+              AND (b1.id IS NOT NULL OR b2.id IS NOT NULL)
             ORDER BY p.runs DESC NULLS LAST
             LIMIT 1
             """
         ),
-        {"gid": game_id},
+        {"gid": game_id, "org": org_id},
     )).mappings().first()
     best_partnership = None
     if bp and (bp["b1"] or bp["b2"]):

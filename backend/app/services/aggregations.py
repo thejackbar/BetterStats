@@ -579,7 +579,10 @@ async def get_fielding_leaderboard(
             JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id{captain_join}
-            JOIN players p ON p.id = fs.player_id
+            -- Scope the PLAYER as well as the season. A fixture between two
+            -- synced clubs is a single `games` row carrying BOTH clubs' fielding
+            -- rows, so scoping the game alone puts the opposition on our board.
+            JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND g.is_final = TRUE{season_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
@@ -606,7 +609,8 @@ async def get_fielding_leaderboard(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
-            JOIN players p ON p.id = fs.player_id
+            -- Player-scoped for the same reason as the finals branch above.
+            JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
             WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit

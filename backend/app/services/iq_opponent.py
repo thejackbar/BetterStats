@@ -457,7 +457,11 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
                    bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out,
                    bi.dismissal_type, bi.caught_behind
             FROM v_effective_batting_innings bi
-            JOIN players pl ON pl.id = bi.player_id
+            -- Their club's players only. These seasons are theirs, but a fixture
+            -- between them and a THIRD synced club is a single `games` row holding
+            -- both sides' rows, so scoping the season alone pulls that third club
+            -- into the opponent's dossier.
+            JOIN players pl ON pl.id = bi.player_id AND pl.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bi.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -505,7 +509,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
                    g.id::text AS match_id, g.played_at,
                    bs.overs, bs.maidens, bs.runs, bs.wickets
             FROM v_effective_bowling_spells bs
-            JOIN players pl ON pl.id = bs.player_id
+            JOIN players pl ON pl.id = bs.player_id AND pl.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -539,7 +543,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
                    SUM(fs.catches) AS ct, SUM(fs.catches_wk) AS ct_wk,
                    SUM(fs.run_outs) AS ro, SUM(fs.stumpings) AS st
             FROM v_effective_fielding_stats fs
-            JOIN players pl ON pl.id = fs.player_id
+            JOIN players pl ON pl.id = fs.player_id AND pl.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = fs.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id

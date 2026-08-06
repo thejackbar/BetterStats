@@ -67,7 +67,10 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
                    COUNT(*) FILTER (WHERE shared.result IN ('DRAW', 'TIE')) AS draws
             FROM shared
             JOIN game_appearances ga ON ga.game_id = shared.id AND ga.player_id <> CAST(:pid AS UUID)
-            JOIN players p ON p.id = ga.player_id
+            -- Org-scope the teammate. A shared fixture between two synced clubs is
+            -- one `games` row holding both sides' appearances, so without this the
+            -- opposition reads as people you have played alongside.
+            JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
             GROUP BY p.id
             ORDER BY games DESC, wins DESC, name
             """
