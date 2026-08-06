@@ -5,6 +5,7 @@ import ImageEditorModal from '../../components/ImageEditorModal'
 import {
   BRAND, COLOR_FIELDS, HONOUR_FIELDS, PALETTE_FIELDS, resolveTheme, buildThemeCss,
   deriveDarkPalette, gradientCss, resolveClubFonts, DISPLAY_FONT_PRESETS, BODY_FONT_PRESETS, MONO_FONT_PRESETS,
+  FONT_WEIGHT_CHOICES, FONT_WEIGHT_DEFAULTS,
 } from '../../lib/theme'
 import { validateImageFile } from '../../lib/validation'
 import { BASE_URL } from '../../data/marketing'
@@ -42,9 +43,20 @@ function ColorField({ label, hint, value, fallback, onChange, onReset }) {
 const FONT_ALLOWED_EXTS = '.woff2,.woff,.ttf,.otf'
 const FONT_ROLE_LABEL = { display: 'Heading', body: 'Body', mono: 'Numbers' }
 
-function FontRoleField({ role, label, hint, presets, config, sampleText, busy, onSelectPreset, onSelectDefault, onUpload, onRemove }) {
+function FontRoleField({ role, label, hint, presets, config, sampleText, busy, onSelectPreset, onSelectDefault, onUpload, onRemove, onSelectWeight }) {
   const fileRef = useRef(null)
   const source = config?.source
+  const weight = config?.weight || FONT_WEIGHT_DEFAULTS[role]
+
+  // Whether this font can actually produce a bold. A font file holds one weight
+  // unless it is a variable font, so most uploads cannot — and a bold asked of
+  // one gets synthesised by the browser, which reads muddy and too dark. Worth
+  // saying out loud on this screen: an admin whose headings stopped looking
+  // bold should know it is the font, not a failed upload.
+  const preset = source === 'preset' ? presets.find(p => p.key === config.preset) : null
+  const metrics = source === 'upload' ? (config.metrics || {}) : null
+  const oneWeight = preset ? !!preset.oneWeight : (metrics ? !metrics.variable : false)
+  const fileWeight = metrics && !metrics.variable ? metrics.weight : null
 
   const handlePick = (e) => {
     const value = e.target.value
@@ -82,11 +94,29 @@ function FontRoleField({ role, label, hint, presets, config, sampleText, busy, o
         )}
       </div>
       <input ref={fileRef} type="file" accept={FONT_ALLOWED_EXTS} className="hidden" onChange={handleFile} />
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        <label className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase">Weight</label>
+        <select value={weight} onChange={e => onSelectWeight(Number(e.target.value))} disabled={busy}
+          className="bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+          {FONT_WEIGHT_CHOICES.map(w => (
+            <option key={w.value} value={w.value}>
+              {w.label} ({w.value}){w.value === FONT_WEIGHT_DEFAULTS[role] ? ' — default' : ''}
+            </option>
+          ))}
+        </select>
+      </div>
       {source === 'upload' && (
         <p className="font-mono text-[10px] text-pb-faint mb-1">Uploaded: {config.family}</p>
       )}
+      {oneWeight && (
+        <p className="font-mono text-[10px] text-pb-amber mb-1">
+          This font has one weight{fileWeight ? ` (${fileWeight})` : ''}, so it can't be bolded.
+          We render it as drawn rather than letting the browser fake a bold, which looks heavy and smudged.
+        </p>
+      )}
       <p className="font-mono text-[10px] text-pb-faintest">{hint}</p>
-      <p className="mt-2 text-lg text-pb-text truncate" style={{ fontFamily: `var(--pb-font-${role})` }}>
+      <p className="mt-2 text-lg text-pb-text truncate"
+        style={{ fontFamily: `var(--pb-font-${role})`, fontWeight: weight }}>
         {sampleText}
       </p>
     </div>
@@ -200,6 +230,7 @@ export default function AdminSettings() {
         public_show_opening: !!s.public_show_opening,
         public_show_gender: !!s.public_show_gender,
         include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
+        public_header_logo: !!s.public_header_logo,
         password_protected: !!s.password_protected,
       })
     }).catch(() => {})
@@ -289,10 +320,30 @@ export default function AdminSettings() {
     }
   }
 
+  // The chosen weight survives a change of family — it is a separate decision,
+  // and losing it every time someone tries another font would be maddening.
   const selectFontPreset = (role, preset) =>
-    setFontConfig(c => ({ ...c, [role]: { source: 'preset', preset } }))
+    setFontConfig(c => ({ ...c, [role]: { ...(c[role] || {}), source: 'preset', preset } }))
   const selectFontDefault = (role) =>
-    setFontConfig(c => { const n = { ...c }; delete n[role]; return n })
+    setFontConfig((c) => {
+      const weight = c[role]?.weight
+      const n = { ...c }
+      if (weight) n[role] = { source: 'default', weight }
+      else delete n[role]
+      return n
+    })
+  const selectFontWeight = (role, weight) =>
+    setFontConfig((c) => {
+      const entry = { ...(c[role] || { source: 'default' }) }
+      if (weight === FONT_WEIGHT_DEFAULTS[role]) delete entry.weight
+      else entry.weight = weight
+      if (entry.source === 'default' && !entry.weight) {
+        const n = { ...c }
+        delete n[role]
+        return n
+      }
+      return { ...c, [role]: entry }
+    })
 
   const uploadFont = async (role, file, family) => {
     setFontBusy(b => ({ ...b, [role]: true }))
@@ -434,6 +485,17 @@ export default function AdminSettings() {
                 <p className="font-mono text-[10px] text-pb-faintest">
                   PNG, JPG, WEBP or GIF · max 2 MB. Use Edit to crop or remove the background on the existing logo. With a custom logo set, it appears top-left and the BetterCricket logo moves to the top-right.
                 </p>
+                <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
+                  <input type="checkbox" checked={!!form.public_header_logo}
+                    onChange={e => setForm(f => ({ ...f, public_header_logo: e.target.checked }))}
+                    className="mt-0.5 w-4 h-4 accent-pb-accent shrink-0" />
+                  <span>
+                    <span className="text-sm text-pb-text">Show the logo on your club dashboard</span>
+                    <span className="block font-mono text-[10px] text-pb-faintest mt-0.5">
+                      Puts the crest beside your club name at the top of the public dashboard, as well as in the menu bar.
+                    </span>
+                  </span>
+                </label>
               </div>
             </div>
             <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif"
@@ -593,6 +655,7 @@ export default function AdminSettings() {
                 onSelectPreset={p => selectFontPreset('display', p)}
                 onSelectDefault={() => selectFontDefault('display')}
                 onUpload={(file, family) => uploadFont('display', file, family)}
+                onSelectWeight={w => selectFontWeight('display', w)}
                 onRemove={() => removeFont('display')} />
               <FontRoleField role="body" label="Body text" hint="Ordinary paragraph and table text across the site. Font files: woff2, woff, ttf or otf, max 6 MB."
                 presets={BODY_FONT_PRESETS} config={fontConfig.body} busy={fontBusy.body}
@@ -600,6 +663,7 @@ export default function AdminSettings() {
                 onSelectPreset={p => selectFontPreset('body', p)}
                 onSelectDefault={() => selectFontDefault('body')}
                 onUpload={(file, family) => uploadFont('body', file, family)}
+                onSelectWeight={w => selectFontWeight('body', w)}
                 onRemove={() => removeFont('body')} />
               <FontRoleField role="mono" label="Numbers & stats" hint="Scores, averages and tabular figures across the site. Font files: woff2, woff, ttf or otf, max 6 MB."
                 presets={MONO_FONT_PRESETS} config={fontConfig.mono} busy={fontBusy.mono}
@@ -607,6 +671,7 @@ export default function AdminSettings() {
                 onSelectPreset={p => selectFontPreset('mono', p)}
                 onSelectDefault={() => selectFontDefault('mono')}
                 onUpload={(file, family) => uploadFont('mono', file, family)}
+                onSelectWeight={w => selectFontWeight('mono', w)}
                 onRemove={() => removeFont('mono')} />
             </div>
           </div>

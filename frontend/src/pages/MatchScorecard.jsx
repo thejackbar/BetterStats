@@ -618,8 +618,8 @@ function ClaimFillInModal({ row, existingPlayers, onClose, onSaved }) {
             CANCEL
           </button>
           <button type="button" onClick={save} disabled={saving}
-            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50 text-pb-bg"
-            style={{ background: 'var(--pb-accent)' }}>
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>
             {saving ? 'SAVING…' : matchedId ? 'MERGE INTO PLAYER' : 'CREATE PLAYER'}
           </button>
         </div>

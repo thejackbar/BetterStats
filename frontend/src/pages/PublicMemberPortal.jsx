@@ -99,13 +99,13 @@ function FeesCard({ slug, fees, canPay, onPaid }) {
         <div className="flex flex-wrap gap-2">
           {fin.membership_outstanding > 0 && (
             <button onClick={() => pay('membership')} disabled={paying === 'membership'}
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 disabled:opacity-50" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>
               {paying === 'membership' ? 'REDIRECTING…' : `PAY MEMBERSHIP ${money(fin.membership_outstanding)}`}
             </button>
           )}
           {fin.match_fee_outstanding > 0 && (
             <button onClick={() => pay('match_day')} disabled={paying === 'match_day'}
-              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
+              className="px-3 py-2 rounded font-mono text-[10px] tracking-wide2 disabled:opacity-50" style={{ background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }}>
               {paying === 'match_day' ? 'REDIRECTING…' : `PAY MATCH FEES ${money(fin.match_fee_outstanding)}`}
             </button>
           )}

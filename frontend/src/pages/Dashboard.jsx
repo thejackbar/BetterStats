@@ -198,6 +198,8 @@ export default function Dashboard() {
           gradient
           eyebrow={`${org.short_name || org.name} · CLUB DASHBOARD`}
           title={org.name}
+          logo={club?.public_header_logo ? club.logo_url : null}
+          logoAlt={`${org.name} crest`}
           meta={[
             summary && <span key="m">PLAYED <span className="text-pb-text">{fmtCount(summary.total_games)}</span></span>,
             summary && <span key="r"><span className="text-pb-text">{fmtCount(summary.total_runs)}</span> RUNS</span>,
@@ -210,7 +212,7 @@ export default function Dashboard() {
                 {syncing ? 'Syncing…' : syncDone ? '✓ Synced' : 'Sync ↻'}
               </Btn>
             ),
-            <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded text-[#08110b] hover:opacity-90 transition" style={{ background: "var(--pb-accent)" }}>
+            <Link key="lb" to={`/${clubSlug}/leaderboard`} className="font-mono text-[11px] tracking-wide2 px-3.5 py-2 rounded hover:opacity-90 transition" style={{ background: "var(--pb-accent)", color: "var(--pb-on-accent)" }}>
               Leaderboard →
             </Link>,
           ].filter(Boolean)}

@@ -287,6 +287,11 @@ class Organisation(Base):
     # all-time club records — those are already scoped to a `players` join
     # that a NULL player_id naturally never matches.
     include_fill_ins_in_stats = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Show the club crest beside the club name in public page headers
+    # (migration 226). Opt-in: a club that has uploaded a logo used to see it
+    # only in the menu bar, and turning this on for everyone would change every
+    # existing club's public site without anyone asking for it.
+    public_header_logo = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —

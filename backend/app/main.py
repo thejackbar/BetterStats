@@ -3028,6 +3028,11 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS claim_note TEXT"
         ))
+        # Club crest in public page headers (migration 226).
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "public_header_logo BOOLEAN NOT NULL DEFAULT false"
+        ))
         # Stripe Checkout billing (migration 150) — see services/stripe_billing.py.
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT"

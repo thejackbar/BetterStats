@@ -735,6 +735,8 @@ class SettingsPatch(BaseModel):
     public_show_opening: Optional[bool] = None
     public_show_gender: Optional[bool] = None
     include_fill_ins_in_stats: Optional[bool] = None
+    # Club crest beside the club name in public page headers (migration 226).
+    public_header_logo: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
     # True = the uploader, current Office Bearers and the Main Admin only.
     # False = any committee member who can reach the register.
@@ -787,13 +789,18 @@ def _sanitize_font_config(raw: dict, existing: Optional[dict]) -> dict:
     version) from whatever the /font/{role} upload endpoint actually stored —
     never trust a client-supplied family string here, since this generic PATCH
     only ever chooses BETWEEN an already-uploaded file and a preset (or clears
-    back to the app default); it never sets the uploaded bytes themselves."""
+    back to the app default); it never sets the uploaded bytes themselves.
+
+    ``weight`` IS client-supplied (it is a plain form choice), validated against
+    FONT_WEIGHT_CHOICES. ``metrics`` never is - it is read off the uploaded file
+    at upload time and only ever carried forward from what is already stored."""
     existing = existing or {}
     clean: dict = {}
     for role in font_service.FONT_ROLES:
         entry = raw.get(role)
         if not isinstance(entry, dict):
             continue
+        weight = font_service.sanitize_weight(entry.get("weight"))
         source = entry.get("source")
         if source == "preset":
             preset = entry.get("preset")
@@ -803,6 +810,14 @@ def _sanitize_font_config(raw: dict, existing: Optional[dict]) -> dict:
             prior = existing.get(role) or {}
             if prior.get("source") == "upload" and prior.get("family"):
                 clean[role] = {"source": "upload", "family": prior["family"], "v": prior.get("v")}
+                if isinstance(prior.get("metrics"), dict):
+                    clean[role]["metrics"] = prior["metrics"]
+        elif weight is not None:
+            # A weight on its own is a valid choice: keep the app's default
+            # font but render it lighter or heavier.
+            clean[role] = {"source": "default"}
+        if weight is not None and role in clean:
+            clean[role]["weight"] = weight
     return clean
 
 
@@ -835,6 +850,7 @@ async def get_settings(
         "public_show_opening": bool(club.public_show_opening),
         "public_show_gender": bool(club.public_show_gender),
         "include_fill_ins_in_stats": bool(club.include_fill_ins_in_stats),
+        "public_header_logo": bool(club.public_header_logo),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
         "socials_style": club.socials_style,
@@ -891,6 +907,8 @@ async def patch_settings(
         club.public_show_gender = bool(data.public_show_gender)
     if data.include_fill_ins_in_stats is not None:
         club.include_fill_ins_in_stats = bool(data.include_fill_ins_in_stats)
+    if data.public_header_logo is not None:
+        club.public_header_logo = bool(data.public_header_logo)
     if data.committee_docs_office_bearer_only is not None:
         club.committee_docs_office_bearer_only = bool(data.committee_docs_office_bearer_only)
     if data.diary_start_month is not None:
@@ -1050,7 +1068,19 @@ async def upload_font(
     setattr(club, f"font_{role}_mime", font_service.mime_for_ext(ext))
 
     cfg = dict(club.font_config or {})
-    cfg[role] = {"source": "upload", "family": clean_family, "v": version}
+    prior_weight = font_service.sanitize_weight((cfg.get(role) or {}).get("weight"))
+    # What weights the file actually holds, so the frontend can stop the browser
+    # faking a bold on a single-weight face (see services/fonts.describe_font).
+    metrics = font_service.describe_font(data, ext)
+    entry = {
+        "source": "upload",
+        "family": clean_family,
+        "v": version,
+        "metrics": metrics,
+    }
+    if prior_weight is not None:
+        entry["weight"] = prior_weight
+    cfg[role] = entry
     club.font_config = cfg
     await db.commit()
     return font_service.public_font_fields(club)

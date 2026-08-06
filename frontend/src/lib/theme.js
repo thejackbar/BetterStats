@@ -89,18 +89,27 @@ export const FONT_STACKS = {
   mono: "'JetBrains Mono','Fira Code',monospace",
 }
 
+/**
+ * `oneWeight: true` marks a family that ships a single weight — either the
+ * family genuinely has no bold cut (Anton, Bebas Neue, Archivo Black, Abril
+ * Fatface, Bungee) or index.html requests it without a weight axis. Asking such
+ * a family for `font-weight: 700` makes the browser SYNTHESISE a bold by
+ * smearing the outlines, which reads as muddy and too dark. buildThemeCss turns
+ * synthesis off for these, so a bold request renders the real weight instead.
+ * Keep the flags in step with the Google Fonts <link> in index.html.
+ */
 export const DISPLAY_FONT_PRESETS = [
   { key: 'barlow_condensed', name: 'Barlow Condensed', family: "'Barlow Condensed', sans-serif" },
   { key: 'oswald', name: 'Oswald', family: "'Oswald', sans-serif" },
-  { key: 'anton', name: 'Anton', family: "'Anton', sans-serif" },
-  { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif" },
-  { key: 'archivo_black', name: 'Archivo Black', family: "'Archivo Black', sans-serif" },
+  { key: 'anton', name: 'Anton', family: "'Anton', sans-serif", oneWeight: true },
+  { key: 'bebas', name: 'Bebas Neue', family: "'Bebas Neue', sans-serif", oneWeight: true },
+  { key: 'archivo_black', name: 'Archivo Black', family: "'Archivo Black', sans-serif", oneWeight: true },
   { key: 'teko', name: 'Teko', family: "'Teko', sans-serif" },
   { key: 'big_shoulders', name: 'Big Shoulders', family: "'Big Shoulders Display', sans-serif" },
   { key: 'antonio', name: 'Antonio', family: "'Antonio', sans-serif" },
   { key: 'saira_condensed', name: 'Saira Condensed', family: "'Saira Condensed', sans-serif" },
-  { key: 'abril', name: 'Abril Fatface', family: "'Abril Fatface', serif" },
-  { key: 'bungee', name: 'Bungee', family: "'Bungee', sans-serif" },
+  { key: 'abril', name: 'Abril Fatface', family: "'Abril Fatface', serif", oneWeight: true },
+  { key: 'bungee', name: 'Bungee', family: "'Bungee', sans-serif", oneWeight: true },
   { key: 'playfair', name: 'Playfair Display', family: "'Playfair Display', serif" },
   { key: 'fredoka', name: 'Fredoka', family: "'Fredoka', sans-serif" },
 ]
@@ -125,37 +134,80 @@ export const FONT_PRESETS_BY_ROLE = { display: DISPLAY_FONT_PRESETS, body: BODY_
 
 export const FONT_ROLES = ['display', 'body', 'mono']
 
+/** What the app uses when a club hasn't chosen a weight for the role. */
+export const FONT_WEIGHT_DEFAULTS = { display: 700, body: 400, mono: 600 }
+
+/** Weights offered in Typography settings. Mirrors fonts.FONT_WEIGHT_CHOICES. */
+export const FONT_WEIGHT_CHOICES = [
+  { value: 300, label: 'Light' },
+  { value: 400, label: 'Regular' },
+  { value: 500, label: 'Medium' },
+  { value: 600, label: 'Semibold' },
+  { value: 700, label: 'Bold' },
+  { value: 800, label: 'Extrabold' },
+  { value: 900, label: 'Black' },
+]
+
 /**
  * Resolve a club's chosen fonts (from its font_config + resolved upload
- * URLs) into what buildThemeCss needs: a CSS font-family value per role, plus
- * an optional @font-face descriptor for an uploaded file. Returns
- * `{ display: {...}|null, body: {...}|null, mono: {...}|null }` — null means
- * "use the app default".
+ * URLs) into what buildThemeCss needs: a CSS font-family value per role, an
+ * optional @font-face descriptor for an uploaded file, the chosen weight, and
+ * whether the family can actually produce a bold.
+ *
+ * `hasBold: false` is the one that matters — a font file holds exactly one
+ * weight unless it is a variable font, so asking it for a bold gets a
+ * synthesised one (smeared outlines, muddy and too dark). buildThemeCss turns
+ * synthesis off in that case. Returns one entry per role; `family` is null
+ * when the club is on the app default, but `weight` may still be set.
  */
 export function resolveClubFonts(club) {
   const cfg = (club && club.font_config) || {}
   const out = {}
   for (const role of FONT_ROLES) {
-    const entry = cfg[role]
-    if (entry && entry.source === 'preset') {
+    const entry = cfg[role] || {}
+    const weight = FONT_WEIGHT_CHOICES.some(w => w.value === entry.weight) ? entry.weight : null
+    const base = { cssFamily: null, fontFace: null, weight, hasBold: true, oneWeight: false }
+
+    if (entry.source === 'preset') {
       const preset = FONT_PRESETS_BY_ROLE[role].find(f => f.key === entry.preset)
-      if (preset) { out[role] = { cssFamily: preset.family, fontFace: null }; continue }
+      if (preset) {
+        out[role] = { ...base, cssFamily: preset.family, hasBold: !preset.oneWeight, oneWeight: !!preset.oneWeight }
+        continue
+      }
     }
-    if (entry && entry.source === 'upload') {
+    if (entry.source === 'upload') {
       const url = club && club[`font_${role}_url`]
       const format = club && club[`font_${role}_format`]
       if (url) {
         const family = String(entry.family || 'Club Font').replace(/['"\\]/g, '').slice(0, 60)
+        // metrics is written by the upload endpoint from the file itself
+        // (services/fonts.describe_font). Missing for a file uploaded before
+        // that shipped — treat it as the single weight it almost certainly is.
+        const m = entry.metrics || {}
+        const variable = !!m.variable
         out[role] = {
+          ...base,
           cssFamily: `'${family}', ${FONT_STACKS[role]}`,
-          fontFace: { family, url, format: format || 'woff2' },
+          fontFace: {
+            family,
+            url,
+            format: format || 'woff2',
+            weight: variable ? `${m.min_weight || 1} ${m.max_weight || 1000}` : (m.weight || null),
+          },
+          hasBold: variable,
+          oneWeight: !variable,
         }
         continue
       }
     }
-    out[role] = null
+    out[role] = base
   }
   return out
+}
+
+/** The role's effective weight — the club's choice, else the app default. */
+export function fontWeightFor(fonts, role) {
+  return (fonts && fonts[role] && fonts[role].weight) || FONT_WEIGHT_DEFAULTS[role]
 }
 
 /** Expand #abc → #aabbcc and lowercase; returns null if not a 3/6-digit hex. */
@@ -229,6 +281,28 @@ export function safeAccent2(accent2, accent, mode) {
   return h
 }
 
+/** WCAG contrast ratio between two hex colours (1 = identical, 21 = max). */
+function contrastRatio(a, b) {
+  const la = relLuminance(a)
+  const lb = relLuminance(b)
+  const [hi, lo] = la > lb ? [la, lb] : [lb, la]
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+/**
+ * Readable ink for text sitting ON an accent fill (a primary button, a filled
+ * pill). Whichever of near-black and white has more contrast against the accent
+ * wins, so a navy or maroon club gets white lettering while the default green
+ * keeps its dark ink. Reported by a club running navy, whose primary button was
+ * near-black text on a near-black fill.
+ */
+export const ACCENT_INK_DARK = '#08110b'
+export function onAccentInk(accent) {
+  const h = normHex(accent)
+  if (!h) return ACCENT_INK_DARK
+  return contrastRatio(h, '#ffffff') > contrastRatio(h, ACCENT_INK_DARK) ? '#ffffff' : ACCENT_INK_DARK
+}
+
 /** Merge a club's stored theme_config over the brand defaults. */
 export function resolveTheme(config) {
   const c = config || {}
@@ -261,8 +335,47 @@ function buildFontFaceCss(fonts) {
   return FONT_ROLES
     .map(role => fonts[role]?.fontFace)
     .filter(Boolean)
-    .map(f => `@font-face{font-family:'${f.family}';src:url('${f.url}') format('${f.format}');font-display:swap;}`)
+    .map((f) => {
+      // A variable font needs its weight RANGE declared or the browser never
+      // uses the axis; a static file gets its real weight so the match is
+      // honest rather than an assumed 400.
+      const weight = f.weight ? `font-weight:${f.weight};` : ''
+      return `@font-face{font-family:'${f.family}';src:url('${f.url}') format('${f.format}');${weight}font-display:swap;}`
+    })
     .join('')
+}
+
+/**
+ * Weight rules for the roles where a club has chosen one, plus the
+ * synthesis switch.
+ *
+ * The two-class selectors (`.font-display.font-bold`) are deliberate: they beat
+ * a single Tailwind utility on specificity, so a club's chosen heading weight
+ * wins over the `font-bold` written into the components without every one of
+ * those having to be edited. Scoped to elements that opted into the club's
+ * display or mono font, so ordinary bold body text is left alone.
+ */
+function buildWeightCss(fonts) {
+  if (!fonts) return ''
+  const out = []
+  const BOLDS = ['.font-bold', '.font-semibold', '.font-extrabold', '.font-black']
+
+  if (fonts.display?.weight) {
+    out.push(`${BOLDS.map(b => `.font-display${b}`).join(',')}{font-weight:var(--pb-weight-display);}`)
+  }
+  if (fonts.mono?.weight) {
+    out.push(`${BOLDS.map(b => `.font-mono${b}`).join(',')}{font-weight:var(--pb-weight-mono);}`)
+  }
+  if (fonts.body?.weight) {
+    out.push(`body{font-weight:var(--pb-weight-body);}`)
+  }
+  // Stop the browser faking a bold (or an italic) the font does not have. Safe
+  // to apply page-wide: every app default and multi-weight preset carries a
+  // real bold, so nothing that could be bolded properly loses it.
+  if (FONT_ROLES.some(role => fonts[role] && !fonts[role].hasBold)) {
+    out.push(`:root{font-synthesis:none;}`)
+  }
+  return out.join('')
 }
 
 /**
@@ -278,7 +391,12 @@ export function buildThemeCss(config, fonts) {
     `--pb-font-display:${fonts?.display?.cssFamily || FONT_STACKS.display}`,
     `--pb-font-body:${fonts?.body?.cssFamily || FONT_STACKS.body}`,
     `--pb-font-mono:${fonts?.mono?.cssFamily || FONT_STACKS.mono}`,
+    `--pb-weight-display:${fontWeightFor(fonts, 'display')}`,
+    `--pb-weight-body:${fontWeightFor(fonts, 'body')}`,
+    `--pb-weight-mono:${fontWeightFor(fonts, 'mono')}`,
     `--pb-accent:${t.accent}`,
+    // Text sitting ON an accent fill — white or near-black, whichever reads.
+    `--pb-on-accent:${onAccentInk(t.accent)}`,
     `--pb-accent-2:${t.accent2}`,
     `--pb-gradient:${gradientCss(t.accent, t.accent2)}`,
     `--pb-positive:${t.positive}`,
@@ -319,5 +437,6 @@ export function buildThemeCss(config, fonts) {
   return fontFaces +
     `:root{${shared}}` +
     `[data-theme="dark"]{${palette(t.dark)};${safeVars('dark')}}` +
-    `[data-theme="light"]{${palette(t.light)};${safeVars('light')}}`
+    `[data-theme="light"]{${palette(t.light)};${safeVars('light')}}` +
+    buildWeightCss(fonts)
 }

@@ -392,10 +392,10 @@ export default function PlayerComparison() {
                 onClick={() => setFilterMode(p.id)}
                 className={`font-mono text-[10px] tracking-wide2 px-2.5 py-1 rounded border transition-colors ${
                   filterMode === p.id
-                    ? 'border-transparent text-white'
+                    ? 'border-transparent'
                     : 'border-pb-hairline text-pb-dim hover:text-pb-text hover:border-pb-faint'
                 }`}
-                style={filterMode === p.id ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : {}}
+                style={filterMode === p.id ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)', color: 'var(--pb-on-accent)' } : {}}
               >
                 {p.label}
               </button>
@@ -426,7 +426,7 @@ export default function PlayerComparison() {
                 disabled={!draftStart && !draftEnd}
                 className="font-mono text-[10px] tracking-wide2 px-3 py-1 rounded border transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 style={draftDirty && (draftStart || draftEnd)
-                  ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)', color: 'white' }
+                  ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }
                   : { borderColor: 'var(--pb-hairline)', color: 'var(--pb-dim)' }}
               >
                 Apply

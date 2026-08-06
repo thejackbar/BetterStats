@@ -96,7 +96,7 @@ function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, vot
               <span className="flex-1 text-[15.5px] font-medium">{p.name}</span>
               <span className="w-[26px] h-[26px] rounded-lg flex items-center justify-center font-mono text-xs font-bold shrink-0"
                 style={chosen
-                  ? { background: 'var(--pb-accent)', color: 'var(--pb-bg)' }
+                  ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }
                   : { border: '1px dashed var(--pb-hairline2)', color: 'var(--pb-hairline2)' }}>
                 {chosen ? values[at] : (nextSlot >= 0 ? values[nextSlot] : '')}
               </span>
@@ -108,7 +108,7 @@ function Ballot({ fixture, values, votable, picks, setPicks, onSubmit, busy, vot
       <button onClick={onSubmit} disabled={!complete || busy}
         className="w-full mt-4 py-4 rounded-2xl text-[15.5px] font-bold transition"
         style={complete
-          ? { background: 'var(--pb-accent)', color: 'var(--pb-bg)' }
+          ? { background: 'var(--pb-accent)', color: 'var(--pb-on-accent)' }
           : { background: 'var(--pb-surface2)', color: 'var(--pb-faintest)' }}>
         {busy ? 'Saving…' : complete
           ? (fixture.my_ballot?.length ? 'Update my votes' : 'Submit my votes')

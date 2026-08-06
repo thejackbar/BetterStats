@@ -135,8 +135,8 @@ export function Btn({ children, primary = false, danger = false, sm = false, onC
   if (primary) {
     return (
       <button type={type} onClick={onClick} disabled={disabled}
-        className={`${base} font-semibold text-[#08110b] hover:opacity-90`}
-        style={{ background: "var(--pb-accent)" }}>
+        className={`${base} font-semibold hover:opacity-90`}
+        style={{ background: "var(--pb-accent)", color: "var(--pb-on-accent)" }}>
         {icon}{children}
       </button>
     );
@@ -204,7 +204,7 @@ export function Kpi({ label, value, sub, accent = false, suffix = "", decimals =
       <Label>{label}</Label>
       <div className="flex items-baseline gap-2 mt-1">
         <span
-          className="font-mono text-3xl font-semibold tracking-tight leading-none pb-num"
+          className="font-mono text-3xl pb-figure tracking-tight leading-none pb-num"
           style={{ color: accent ? "var(--pb-accent)" : "var(--pb-text)" }}
         >
           <AnimatedNum value={value} decimals={decimals} suffix={suffix} enabled={motion} />
@@ -231,11 +231,16 @@ export function Skeleton({ className = "", w, h }) {
 }
 
 // ── Page header ────────────────────────────────────────────────────────
-export function PageHeader({ eyebrow, title, meta, actions, gradient }) {
+// `logo` is the club crest, shown beside the title when the club has switched
+// it on (organisations.public_header_logo). Beside rather than instead of the
+// name, so the page keeps a real heading for search engines and screen readers.
+export function PageHeader({ eyebrow, title, meta, actions, gradient, logo, logoAlt }) {
   const content = (
     <div>
       {eyebrow && <Label>{eyebrow}</Label>}
-      <h1 className="font-display text-[40px] sm:text-[56px] font-bold tracking-tight leading-[0.95] mt-1.5 text-pb-text">
+      {/* pb-heading, not font-bold: a club whose font ships one weight gets a
+          smeared synthetic bold here otherwise. See styles/theme.css. */}
+      <h1 className="font-display text-[40px] sm:text-[56px] pb-heading tracking-tight leading-[0.95] mt-1.5 text-pb-text">
         {title}
       </h1>
       {meta && (
@@ -245,16 +250,27 @@ export function PageHeader({ eyebrow, title, meta, actions, gradient }) {
       )}
     </div>
   );
+  const titled = logo ? (
+    <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+      <img
+        src={logo}
+        alt={logoAlt || ""}
+        className="h-12 sm:h-16 w-auto max-w-[96px] object-contain shrink-0"
+        onError={(e) => { e.currentTarget.style.display = "none"; }}
+      />
+      {content}
+    </div>
+  ) : content;
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-5">
       {gradient ? (
         // A thin primary→secondary bar puts both club colours on the page without
         // a contrast trap (nothing readable sits on the gradient).
-        <div className="flex items-stretch gap-3.5">
+        <div className="flex items-stretch gap-3.5 min-w-0">
           <span className="w-1 rounded-full shrink-0" style={{ background: "var(--pb-gradient)" }} />
-          {content}
+          {titled}
         </div>
-      ) : content}
+      ) : titled}
       {actions && <div className="flex gap-2 flex-wrap">{actions}</div>}
     </div>
   );
