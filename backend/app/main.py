@@ -3096,6 +3096,12 @@ async def lifespan(app: FastAPI):
         # in the meta_ads ad-signups report.
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_source TEXT"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS signup_attribution JSONB"))
+        # How the club was onboarded (migration 225) — 'self_serve_trial' |
+        # 'super_admin_trial' | 'direct_subscriber' | 'none'. Read by
+        # services/trial_engagement.py (staff-performed registrations score
+        # lower) and routers/onboarding_wizard.py (auto-open the setup wizard
+        # for a genuinely new trial club, never a long-established one).
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS onboarding_method TEXT"))
         # Stripe Product id cache for add-on subscription items (migration
         # 152) — see services/stripe_client.py::_ensure_product.
         await conn.execute(text("""

@@ -2479,15 +2479,49 @@ async def sync_self_serve_trial_deal(session: AsyncSession, club: MarketingClub,
     derive one from (see lead_source_from_attribution) — pass None to leave
     it as-is. Returns None if the 'self_serve_signup' rule is disabled or its
     target stage doesn't exist."""
+    return await _sync_trial_registration_deal(
+        session, club, trigger="self_serve_signup", onboarding_method="self_serve_trial",
+        lead_source=lead_source)
+
+
+async def sync_super_admin_trial_deal(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
+    """The same thing for a club a SUPER ADMIN registered on its behalf
+    (routers/club_admin.py::create_club — All Clubs → New Club), which now
+    always starts the club on a trial of every module exactly as the
+    self-serve wizard does.
+
+    Two deliberate differences from its self-serve sibling. The trigger is
+    the existing ``trial_started`` rule rather than ``self_serve_signup`` —
+    that IS what happened, and it keeps this honest against a super admin who
+    has retargeted or disabled either rule (a club that didn't sign itself up
+    must not fire the self-serve rule). And there's no ``lead_source``: a
+    staff member typing a club into All Clubs has no first-touch ad
+    attribution behind it, and guessing one would put a fabricated
+    acquisition channel on the card.
+
+    The onboarding method is stamped 'Super Admin Trial' either way, so the
+    pipeline can tell the two apart at a glance and crm_targets' trial
+    win/loss split (which already counts both methods) keeps working."""
+    return await _sync_trial_registration_deal(
+        session, club, trigger="trial_started", onboarding_method="super_admin_trial")
+
+
+async def _sync_trial_registration_deal(session: AsyncSession, club: MarketingClub, *,
+                                        trigger: str, onboarding_method: str,
+                                        lead_source: Optional[str] = None) -> Optional[CrmDeal]:
+    """Shared body of the two functions above — one implementation so a
+    self-serve trial and a super-admin trial can never end up with differently
+    shaped deals. Returns None if ``trigger``'s rule is disabled or its target
+    stage doesn't exist."""
     from app.services import crm_rules
     pipeline = await ensure_platform_pipeline(session)
-    match = await crm_rules.resolve(session, pipeline, "self_serve_signup")
+    match = await crm_rules.resolve(session, pipeline, trigger)
     if match is None:
         return None
     deal = await sync_platform_deal_for_club(
-        session, club, stage_key=match["stage_key"], source="self_serve_trial",
+        session, club, stage_key=match["stage_key"], source=onboarding_method,
         advance_only=not match["force"])
-    deal.onboarding_method = "self_serve_trial"
+    deal.onboarding_method = onboarding_method
     if lead_source:
         deal.lead_source = lead_source
     if not deal.module_keys:
@@ -2508,15 +2542,42 @@ async def sync_self_serve_trial_registration(*, org_id, org_name: str, contact_n
     integration's state, so this resolves the MarketingClub itself rather than
     relying on the Twenty push having already done so. Opens its own session;
     never raises."""
+    return await _sync_trial_registration(
+        org_id=org_id, org_name=org_name, contact_name=contact_name, email=email,
+        phone=phone, source="self_serve_trial",
+        deal_factory=lambda session, club: sync_self_serve_trial_deal(
+            session, club, lead_source=lead_source_from_attribution(attribution)),
+    )
+
+
+async def sync_super_admin_trial_registration(*, org_id, org_name: str, contact_name: str = "",
+                                              email: str = "", phone: Optional[str] = None) -> dict:
+    """Same, for Super Admin → All Clubs → New Club. Fired as a background
+    task from routers/club_admin.py::create_club so the club lands on the
+    Sales Pipeline the moment it's created, with the deal card marked
+    'Super Admin Trial' — before this, a super-admin-created club had no deal
+    at all until someone made one by hand, or a later trial/subscription
+    change happened to fire ``_push_club_to_twenty``'s own crm_trigger."""
+    return await _sync_trial_registration(
+        org_id=org_id, org_name=org_name, contact_name=contact_name, email=email,
+        phone=phone, source="super_admin_trial", deal_factory=sync_super_admin_trial_deal,
+    )
+
+
+async def _sync_trial_registration(*, org_id, org_name: str, contact_name: str, email: str,
+                                   phone: Optional[str], source: str, deal_factory) -> dict:
+    """Resolve the club's directory row + registering admin, build its deal,
+    and link that admin as the deal's point of contact. Opens its own session;
+    never raises — a CRM hiccup can't undo the registration that already
+    committed."""
     from app.models.db import async_session_maker
     from app.services.twenty_sync import _resolve_self_serve_club
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_self_serve_club(
                 session, org_id=org_id, org_name=org_name, contact_name=contact_name,
-                email=email, phone=phone)
-            deal = await sync_self_serve_trial_deal(
-                session, club, lead_source=lead_source_from_attribution(attribution))
+                email=email, phone=phone, source=source)
+            deal = await deal_factory(session, club)
             if deal is not None:
                 # Link the registering admin as the deal's point of contact —
                 # without this the deal card's Contact Name/Email/Mobile is
@@ -2528,5 +2589,5 @@ async def sync_self_serve_trial_registration(*, org_id, org_name: str, contact_n
             await session.commit()
             return {"deal_id": str(deal.id)} if deal else {"skipped": "no trial stage"}
     except Exception:  # noqa: BLE001 - a CRM hiccup can't undo the registration that already committed
-        logger.exception("crm: failed to sync self-serve trial deal for org %s", org_id)
+        logger.exception("crm: failed to sync %s deal for org %s", source, org_id)
         return {"error": "failed"}

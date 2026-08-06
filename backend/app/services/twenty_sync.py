@@ -1821,7 +1821,8 @@ async def push_onboarding_enquiry(*, club_name: str, contact_name: str = "",
 
 
 async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_name: str,
-                                   email: str, phone: "Optional[str]"):
+                                   email: str, phone: "Optional[str]",
+                                   source: str = "self_serve_trial"):
     """Find-or-create the MarketingClub + registering-admin MarketingClubContact
     a self-serve trial registration (routers/self_serve_trial.py) belongs to.
     Checked in order: (1) a directory row already linked to this exact org —
@@ -1838,7 +1839,13 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
     identifier at all, so it mints a synthetic ``manual:`` guid), a self-serve
     registration always has a real org to key (2) on. Always (re-)stamps
     ``existing_org_id`` — the row is now definitely a real BetterCricket
-    customer. Commits nothing itself — the caller commits."""
+    customer. Commits nothing itself — the caller commits.
+
+    ``source`` is what a newly-created directory row / contact records about
+    where it came from. Super Admin → New Club (routers/club_admin.py::
+    create_club) reuses this whole resolution — a staff-registered club needs
+    exactly the same find-or-create — and passes 'super_admin_trial' so the
+    row doesn't claim the club signed itself up."""
     guid = str(org_id)
     club = await session.scalar(
         select(MarketingClub).where(MarketingClub.existing_org_id == org_id))
@@ -1852,7 +1859,7 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
     if club is None:
         club = MarketingClub(
             grassroots_guid=guid, name=org_name[:200], kind="club",
-            status="contacted", source="self_serve_trial",
+            status="contacted", source=source,
             contact_email=email_l or None, contact_phone=phone,
         )
         session.add(club)
@@ -1870,7 +1877,7 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
         contact = MarketingClubContact(
             marketing_club_id=club.id, full_name=(contact_name or "").strip()[:200] or None,
             email=email_l or None, mobile=phone, role="Club Admin", role_rank=1,
-            source="self_serve_trial", subscribed=True, outreach_selected=True,
+            source=source, subscribed=True, outreach_selected=True,
         )
         session.add(contact)
         await session.flush()
@@ -1882,7 +1889,10 @@ async def _resolve_self_serve_club(session, *, org_id, org_name: str, contact_na
 
 async def push_self_serve_registration(*, org_id, org_name: str, contact_name: str = "",
                                        email: str = "", phone: "Optional[str]" = None,
-                                       modules: "Optional[list]" = None) -> dict:
+                                       modules: "Optional[list]" = None,
+                                       source: str = "self_serve_trial",
+                                       lead_lifecycle: "Optional[str]" = "SELF_SERVE_TRIAL",
+                                       opportunity_stage: "Optional[str]" = "SELF_SERVE_TRIAL") -> dict:
     """A self-serve trial registration is a real signal — a real person just
     created real login credentials for a real club — but unlike a direct
     "onboard my club" enquiry it is NOT forced to a flat Hot score any more:
@@ -1909,14 +1919,26 @@ async def push_self_serve_registration(*, org_id, org_name: str, contact_name: s
     ``stage`` "Self-Serve Trial" too (permanent — Opportunity stage is never
     recomputed by anything, only a human moving the deal in Twenty changes
     it), so both read distinctly from an enquiry- or outbound-originated deal.
-    Best-effort and backgrounded by the caller; never raises."""
+    Best-effort and backgrounded by the caller; never raises.
+
+    Super Admin → All Clubs → New Club (routers/club_admin.py::create_club)
+    calls this too — it now registers a club and starts the same trial, so it
+    deserves the same immediate Company/Contact/Lead rather than waiting on
+    the nightly refresh. It passes ``source='super_admin_trial'`` (what a
+    freshly-created directory row records about itself) and BOTH stage
+    overrides as None: "Self-Serve Trial" would be a false claim about a club
+    that didn't sign itself up, and Twenty's own enum has no
+    super-admin-trial member to name instead — so the Lead simply opens at
+    its normally-computed lifecycle and any Opportunity at Twenty's default
+    stage. Our own pipeline is where the distinction is recorded, via the
+    deal's ``onboarding_method`` (crm.sync_super_admin_trial_deal)."""
     if not client.configured:
         return {"skipped": "not configured"}
     try:
         async with async_session_maker() as session:
             club, contact = await _resolve_self_serve_club(
                 session, org_id=org_id, org_name=org_name, contact_name=contact_name,
-                email=email, phone=phone)
+                email=email, phone=phone, source=source)
             await session.commit()
             club_id, contact_id = club.id, contact.id
     except Exception as e:  # noqa: BLE001 — never let a CRM error affect the caller
@@ -1926,7 +1948,7 @@ async def push_self_serve_registration(*, org_id, org_name: str, contact_name: s
     return await push_club_and_contacts(
         club_id, contact_ids=[contact_id], force_lead=True,
         create_opportunity=True, opportunity_modules=_twenty_modules(modules or []),
-        lead_lifecycle_override="SELF_SERVE_TRIAL", opportunity_stage="SELF_SERVE_TRIAL")
+        lead_lifecycle_override=lead_lifecycle, opportunity_stage=opportunity_stage)
 
 
 async def push_org_company(org_id, engagement_override: "Optional[dict]" = None) -> dict:
