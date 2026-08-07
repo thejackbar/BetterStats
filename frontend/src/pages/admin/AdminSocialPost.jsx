@@ -634,6 +634,37 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
   )
 }
 
+const NO_RECENT_MATCHES = "We couldn't find any completed matches for your club this season to match that link against."
+
+// Shown when the pasted link can't name one match on its own. A playhq.com
+// game-centre URL carries PlayHQ's own short code (e.g. .../game-centre/abecedd5),
+// which is a different id namespace from the Cricket Australia match GUID our
+// scorecards are keyed on — there's no way to translate one into the other, so
+// the club's own recent matches are offered instead, narrowed to the grade in
+// the link.
+function MatchPickList({ picks, onPick, onDismiss }) {
+  if (!picks?.matches?.length) return null
+  return (
+    <div className="mt-2 rounded border pb-hairline bg-pb-surface p-2">
+      <div className="flex items-start gap-2 mb-2">
+        <p className="flex-1 font-mono text-[9px] text-pb-faint leading-relaxed">{picks.message}</p>
+        <button onClick={onDismiss} className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">✕</button>
+      </div>
+      <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+        {picks.matches.map((m) => (
+          <button key={m.match_id} onClick={() => onPick(m.match_id)}
+            className="text-left px-2 py-1.5 rounded border pb-hairline bg-pb-surface2 hover:border-pb-accent transition-colors">
+            <div className="text-pb-text text-[12px] truncate">v {m.opponent || 'TBC'}</div>
+            <div className="font-mono text-[9px] text-pb-faint truncate">
+              {[m.grade, m.round, m.date, m.home_away === 'H' ? 'Home' : 'Away'].filter(Boolean).join(' · ')}
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
@@ -777,6 +808,9 @@ export default function AdminSocialPost() {
   const [scorecardMatch, setScorecardMatch] = useState(DEFAULT_SCORECARD)
   const [scUrlInput, setScUrlInput] = useState('')
   const [scUrlStatus, setScUrlStatus] = useState(null)
+  // Set when the pasted link can't name one match on its own (a playhq.com
+  // link) — { message, matches: [...] } for the picker.
+  const [scPicks, setScPicks] = useState(null)
 
   // Editor: { key: 'hero' | `sponsor-${i}`, source: File|string }
   const [editor, setEditor] = useState(null)
@@ -813,6 +847,7 @@ export default function AdminSocialPost() {
   // batters/bowlers for both sides, scores, result, MOTM + matched photos).
   const [resUrlInput, setResUrlInput] = useState('')
   const [resUrlStatus, setResUrlStatus] = useState(null)
+  const [resPicks, setResPicks] = useState(null)
   // Fixtures / results roundups — one post, all grades. Seeded with sample rows
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
@@ -1058,13 +1093,16 @@ export default function AdminSocialPost() {
     window.history.replaceState({}, document.title)
   }, [location.state, allPlayers])
 
-  // Scorecard URL import
-  const handleScUrlImport = async () => {
-    const urlOrId = scUrlInput.trim()
-    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
-    const m = urlOrId.match(uuidRe)
-    if (!m) { setScUrlStatus('Paste a match URL or a match ID'); return }
-    const matchId = m[0]
+  // Scorecard URL import.
+  //
+  // The box takes a play.cricket.com.au link (or a bare match ID), which
+  // carries the Grassroots GUID the scorecard endpoint needs, AND a playhq.com
+  // game-centre link, which carries PlayHQ's own short code instead — a
+  // separate id namespace with no translation back to Grassroots. The lookup
+  // endpoint sorts out which is which and hands back either a match to load or
+  // a short list of the club's own recent matches to pick from.
+  const loadScorecardMatch = async (matchId) => {
+    setScPicks(null)
     setScUrlStatus('loading')
     try {
       const data = await api.getSocialScorecard(matchId)
@@ -1078,6 +1116,25 @@ export default function AdminSocialPost() {
     } catch (e) {
       setScUrlStatus(e?.message || 'Failed to load scorecard')
     }
+  }
+
+  const handleScUrlImport = async () => {
+    setScPicks(null)
+    setScUrlStatus('loading')
+    let res
+    try {
+      res = await api.socialMatchLookup(scUrlInput.trim())
+    } catch (e) {
+      setScUrlStatus(e?.message || 'Could not look that match up')
+      return
+    }
+    if (res.kind === 'match') { await loadScorecardMatch(res.match_id); return }
+    if (res.kind === 'choose' && res.matches?.length) {
+      setScPicks(res)
+      setScUrlStatus(null)
+      return
+    }
+    setScUrlStatus(res.kind === 'choose' ? NO_RECENT_MATCHES : (res.message || 'Paste a match link or a match ID'))
   }
 
   // Resolve a scorecard participant id (ours, merge-resolved) to the loaded
@@ -1158,19 +1215,36 @@ export default function AdminSocialPost() {
     }
   }, [settings, playerForPid])
 
-  const handleResultImport = async () => {
-    const urlOrId = resUrlInput.trim()
-    const uuidRe = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
-    const m = urlOrId.match(uuidRe)
-    if (!m) { setResUrlStatus('Paste a match URL or a match ID'); return }
+  // Same two-step as the scorecard import above — see loadScorecardMatch.
+  const loadResultMatch = async (matchId) => {
+    setResPicks(null)
     setResUrlStatus('loading')
     try {
-      const data = await api.getSocialScorecard(m[0])
+      const data = await api.getSocialScorecard(matchId)
       applyResultScorecard(data)
       setResUrlStatus('ok')
     } catch (e) {
       setResUrlStatus(e?.message || 'Failed to load scorecard')
     }
+  }
+
+  const handleResultImport = async () => {
+    setResPicks(null)
+    setResUrlStatus('loading')
+    let res
+    try {
+      res = await api.socialMatchLookup(resUrlInput.trim())
+    } catch (e) {
+      setResUrlStatus(e?.message || 'Could not look that match up')
+      return
+    }
+    if (res.kind === 'match') { await loadResultMatch(res.match_id); return }
+    if (res.kind === 'choose' && res.matches?.length) {
+      setResPicks(res)
+      setResUrlStatus(null)
+      return
+    }
+    setResUrlStatus(res.kind === 'choose' ? NO_RECENT_MATCHES : (res.message || 'Paste a match link or a match ID'))
   }
 
   // ── Play.cricket fixtures / results round import ────────────────────────────
@@ -2192,7 +2266,7 @@ export default function AdminSocialPost() {
                         value={activeTab === 'result' ? resUrlInput : scUrlInput}
                         onChange={(e) => { if (activeTab === 'result') { setResUrlInput(e.target.value); setResUrlStatus(null) } else { setScUrlInput(e.target.value); setScUrlStatus(null) } }}
                         onKeyDown={(e) => e.key === 'Enter' && (activeTab === 'result' ? handleResultImport() : handleScUrlImport())}
-                        placeholder="Match link or ID (e.g. 37af9ea5-…)"
+                        placeholder="Play.Cricket or PlayHQ match link, or a match ID"
                         className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-2 text-xs text-pb-text font-mono" />
                       <button onClick={activeTab === 'result' ? handleResultImport : handleScUrlImport}
                         disabled={(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading'}
@@ -2206,6 +2280,9 @@ export default function AdminSocialPost() {
                       const ok = st === 'ok'
                       return <p className={`font-mono text-[9px] mt-1.5 ${ok ? 'text-green-400' : 'text-pb-red'}`}>{ok ? (activeTab === 'result' ? '✓ Result, scores & top performers loaded' : '✓ Scorecard loaded') : `✗ ${st}`}</p>
                     })()}
+                    <MatchPickList picks={activeTab === 'result' ? resPicks : scPicks}
+                      onPick={(id) => (activeTab === 'result' ? loadResultMatch(id) : loadScorecardMatch(id))}
+                      onDismiss={() => (activeTab === 'result' ? setResPicks(null) : setScPicks(null))} />
                     <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">Pulls the scores, top performers and matched player photos. You can still edit everything after.</p>
                   </div>
                 )}
@@ -2850,8 +2927,8 @@ export default function AdminSocialPost() {
                 <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
-                    <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null) }}
-                      placeholder="Match link or match ID (e.g. 37af9ea5-…)"
+                    <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null); setResPicks(null) }}
+                      placeholder="Play.Cricket or PlayHQ match link, or a match ID"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleResultImport()} />
                     <button onClick={handleResultImport} disabled={resUrlStatus === 'loading'}
@@ -2865,6 +2942,7 @@ export default function AdminSocialPost() {
                       {resUrlStatus === 'ok' ? '✓ Top performers, scores & MOTM filled — review below' : `✗ ${resUrlStatus}`}
                     </p>
                   )}
+                  <MatchPickList picks={resPicks} onPick={loadResultMatch} onDismiss={() => setResPicks(null)} />
                   <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Pulls the top 3 batters & bowlers for both sides and matches your players for photos.</p>
                 </div>
 
@@ -3135,8 +3213,8 @@ export default function AdminSocialPost() {
                 <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
-                    <input type="text" value={scUrlInput} onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null) }}
-                      placeholder="Match link or match ID (e.g. 37af9ea5-…)"
+                    <input type="text" value={scUrlInput} onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null); setScPicks(null) }}
+                      placeholder="Play.Cricket or PlayHQ match link, or a match ID"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleScUrlImport()} />
                     <button onClick={handleScUrlImport} disabled={scUrlStatus === 'loading'}
@@ -3150,6 +3228,7 @@ export default function AdminSocialPost() {
                       {scUrlStatus === 'ok' ? '✓ Scorecard loaded' : `✗ ${scUrlStatus}`}
                     </p>
                   )}
+                  <MatchPickList picks={scPicks} onPick={loadScorecardMatch} onDismiss={() => setScPicks(null)} />
                 </div>
 
                 {/* Meta fields */}

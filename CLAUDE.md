@@ -1,5 +1,54 @@
 # BetterStats — Claude Session Notes
 
+## A PlayHQ game-centre link is a different id namespace (v9.18.0.2, Aug 2026)
+
+Reported: pasting `playhq.com/.../a-grade-gatorade/game-centre/abecedd5` into
+BetterPosts → Final Score got "Paste a match URL or a match ID". Both import
+handlers matched a full UUID and nothing else, so a PlayHQ link was a dead end.
+
+- **The short code is NOT a prefix of the Grassroots GUID, and nothing derives
+  one from the other.** Checked against the reported match rather than assumed:
+  PlayHQ `abecedd5` is Grassroots `ef9b6401-787f-4f93-b9b8-8de0316f3686`
+  (D&DCC A Grade semi-final, 31 May 2026, found by walking
+  org search → seasons → teams → `/scores/grades/{guid}/matches`). The grade
+  short code `596e3b20` likewise has nothing to do with the grade GUID
+  `f1d5d3aa-…`. **This contradicts the AFL note in `docs/afl-playhq-data-source.md`
+  ("the short code IS the real gameID") — that holds for the AFL tenant's own
+  discover API, not for cricket's Grassroots API.**
+- **PlayHQ's public `discoverGame` GraphQL does answer for a short code**
+  (`tenant: ca`, returns date/grade/round), **but do not build on it.** It sits
+  behind a CloudFront WAF that started 403-ing this environment's IP after
+  about three requests and never recovered — an import button a club presses
+  cannot depend on that. Schema introspection is blocked too.
+- **So the resolution is local**: `services/social_match_lookup.py` +
+  `GET /admin/social/match-lookup`. A full UUID (a Play.Cricket link, or a
+  pasted id) resolves straight through exactly as before; a PlayHQ link comes
+  back as the club's own recent completed matches for the admin to pick from,
+  narrowed by slugifying the grade out of the URL and matching it against our
+  grade names ("A Grade (Gatorade)" → `a-grade-gatorade`, with a
+  either-side-prefix fallback for a sponsor suffix one side carries). Candidate
+  discovery reuses `_current_grade_rows` + `gr.get_grade_results`, the same
+  machinery behind the Results roundup, so there is no second copy of "which
+  matches are ours". Lookback is 240 days, not the roundup's 90 — the reported
+  match was a semi-final ~10 weeks old.
+- **Bug found while verifying, in the same import path**: `_get_social_scorecard_inner`
+  read `result`/`venue`/`date` off `matchSummary`, which on a `/scores/*` match
+  only carries `resultText` + `teams`. All three live at the TOP level
+  (`raw.venue`, `raw.matchSchedule[0].startDateTime`, `matchSummary.resultText`),
+  so every imported post had a blank date, a blank ground and a bare "RESULT".
+  Fixed as extra fallbacks, matchSummary still tried first. `format` now reads
+  `matchType` instead of hardcoding "T20" (a 50-over final was labelled T20),
+  `overs` takes the longest innings bowled, and the round label only gets a
+  "ROUND " prefix when the name has no letters — it used to emit
+  "ROUND Round 7" and "ROUND Semi Finals".
+- **Verified against live Cricket Australia data end to end**, then driven in a
+  real browser (Chromium, the dev server with the API stubbed but the actual
+  resolver and scorecard parser running): the reported link narrows to 10 A
+  Grade matches, picking the semi-final fills 9/243 v 227 with both sides' top
+  three batters and bowlers, MOTM, Kahlin Oval and 31 May; a Play.Cricket URL
+  still loads with no picker; junk input reports plainly; no page errors, no
+  overflow at 390px.
+
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
 An Under-14 season was landing inside a senior career average. `grades.category`
