@@ -14,26 +14,49 @@ function useOutsideClose(ref, onClose, open) {
   }, [open, ref, onClose])
 }
 
+// How many rows the dropdown draws at once. A club can hold well over a
+// thousand people, and rendering all of them on focus janks the panel — but the
+// old cap of 30 was low enough that an unfiltered list stopped inside the A's,
+// which reads as "these are the only members" rather than "there are more".
+// So: draw a useful number, and always SAY how many are behind them.
+const SHOWN = 60
+
+// A person's identity in this picker. Usually their member id; a club player
+// with no member row yet has none, so they are keyed on the player instead.
+const personKey = m => m.member_id || (m.player_id ? `player:${m.player_id}` : m.full_name)
+
 // Searchable single-member picker. `members`: [{ member_id, full_name, ... }].
-// `value` = member_id | null. onChange(member_id | null).
+// `value` = member_id (or a `player:<id>` key) | null.
+// onChange(key | null, person | null) — the second argument carries the whole
+// row, which is what a caller needs to enrol a not-yet-a-member player.
 export function MemberSelect({ members = [], value, onChange, placeholder = 'Search for a member…' }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const wrap = useRef(null)
   useOutsideClose(wrap, () => setOpen(false), open)
-  const selected = members.find(m => m.member_id === value)
+  // Guarded on `value` being set: a not-yet-enrolled player's member_id is
+  // null, so an unguarded `m.member_id === value` matches them the moment
+  // nothing is chosen, and the picker opens looking already answered.
+  const selected = value ? members.find(m => personKey(m) === value || m.member_id === value) : null
+  // Archived people have been removed from the club, so they are not offered
+  // for anything new. One already chosen stays visible, or clearing a record
+  // would be the only way to see what it says.
+  const pool = useMemo(
+    () => members.filter(m => !m.archived || personKey(m) === value),
+    [members, value])
   const matches = useMemo(() => {
     const n = q.trim().toLowerCase()
-    const list = n ? members.filter(m => (m.full_name || '').toLowerCase().includes(n)) : members
-    return list.slice(0, 30)
-  }, [members, q])
+    return n ? pool.filter(m => (m.full_name || '').toLowerCase().includes(n)) : pool
+  }, [pool, q])
+  const shown = matches.slice(0, SHOWN)
+  const hidden = matches.length - shown.length
 
   return (
     <div className="relative" ref={wrap}>
       {selected && !open ? (
         <div className={`${inp} flex items-center justify-between`}>
           <span className="truncate">{selected.full_name}</span>
-          <button type="button" onClick={() => { onChange(null); setQ(''); setOpen(true) }}
+          <button type="button" onClick={() => { onChange(null, null); setQ(''); setOpen(true) }}
             className="text-pb-faint hover:text-pb-red text-[11px] shrink-0 ml-2">clear</button>
         </div>
       ) : (
@@ -43,12 +66,18 @@ export function MemberSelect({ members = [], value, onChange, placeholder = 'Sea
       {open && (
         <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-56 overflow-y-auto shadow-xl">
           {matches.length === 0 && <div className="px-3 py-2 text-[12px] text-pb-faintest">No members match.</div>}
-          {matches.map(m => (
-            <button type="button" key={m.member_id} onClick={() => { onChange(m.member_id); setOpen(false); setQ('') }}
+          {shown.map(m => (
+            <button type="button" key={personKey(m)}
+              onClick={() => { onChange(personKey(m), m); setOpen(false); setQ('') }}
               className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">
               {m.full_name}{m.is_linked ? <span className="text-pb-faint text-[10px]"> · player</span> : null}
             </button>
           ))}
+          {hidden > 0 && (
+            <div className="px-3 py-2 text-[11px] text-pb-faintest border-t pb-hairline sticky bottom-0 bg-pb-surface">
+              {shown.length} of {matches.length} shown. Type a name to find the rest.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -65,11 +94,15 @@ export function PersonPicker({ members = [], memberId, name, onChange, placehold
   const selectedMember = members.find(m => m.member_id === memberId)
   useEffect(() => { if (!memberId) setQ(name || '') }, [name, memberId])
 
+  const pool = useMemo(
+    () => members.filter(m => !m.archived || m.member_id === memberId),
+    [members, memberId])
   const matches = useMemo(() => {
     const n = q.trim().toLowerCase()
-    if (!n) return members.slice(0, 20)
-    return members.filter(m => (m.full_name || '').toLowerCase().includes(n)).slice(0, 20)
-  }, [members, q])
+    return n ? pool.filter(m => (m.full_name || '').toLowerCase().includes(n)) : pool
+  }, [pool, q])
+  const shown = matches.slice(0, SHOWN)
+  const hidden = matches.length - shown.length
 
   if (selectedMember) {
     return (
@@ -89,10 +122,15 @@ export function PersonPicker({ members = [], memberId, name, onChange, placehold
         onChange={e => { setQ(e.target.value); onChange({ member_id: null, name: e.target.value || null }); setOpen(true) }} />
       {open && (
         <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-56 overflow-y-auto shadow-xl">
-          {matches.map(m => (
+          {shown.map(m => (
             <button type="button" key={m.member_id} onClick={() => { onChange({ member_id: m.member_id, name: null }); setOpen(false) }}
               className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">{m.full_name}</button>
           ))}
+          {hidden > 0 && (
+            <div className="px-3 py-2 text-[11px] text-pb-faintest border-t pb-hairline">
+              {shown.length} of {matches.length} shown. Type a name to find the rest.
+            </div>
+          )}
           {q.trim() && (
             <div className="px-3 py-2 text-[11px] text-pb-faint border-t border-pb-hairline">Or use “{q.trim()}” as a typed name.</div>
           )}

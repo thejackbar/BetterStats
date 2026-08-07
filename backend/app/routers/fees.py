@@ -19,7 +19,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from jose import jwt
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 
@@ -480,21 +480,57 @@ async def seed_starter_membership_types(
 # those tools' capabilities, not just MANAGE_FEES.
 @router.get("/all-members")
 async def list_all_members(
+    include_players: bool = False,
     _: User = Depends(require_any_cap(
         MANAGE_FEES, MANAGE_VOLUNTEERS, MANAGE_QUALIFICATIONS,
         MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    """Everyone the club holds a member row for.
+
+    `include_players` adds the club's players who have NO member row yet — real
+    people the club can pick, who simply have not been enrolled. They come back
+    with `member_id: null` and `needs_member: true`, so a caller can tell that a
+    member row has to be minted before anything can be linked to them. It is
+    opt-in because most callers write `member_id` straight onto a record and a
+    null there would be a silent failure.
+
+    Archived people are still returned, flagged `archived`. They are not
+    offered for anything new (the pickers drop them), but a record that already
+    names one has to keep resolving to a name rather than showing a dash.
+    """
     rows = (await db.execute(
         select(FeeMember).where(FeeMember.organisation_id == club.id)
         .order_by(func.lower(FeeMember.full_name))
     )).scalars().all()
-    return {"members": [
+    members = [
         {"member_id": str(m.id), "full_name": m.full_name, "email": m.email, "mobile": m.mobile,
-         "player_id": str(m.player_id) if m.player_id else None, "is_linked": m.player_id is not None}
+         "player_id": str(m.player_id) if m.player_id else None, "is_linked": m.player_id is not None,
+         "archived": m.archived_at is not None, "needs_member": False}
         for m in rows
-    ]}
+    ]
+    if include_players:
+        # Same read-through the Directory does, and org-scoped on both sides:
+        # a member row may point at ANOTHER club's player, and a player of ours
+        # must not be judged "already enrolled" by someone else's member row.
+        extra = (await db.execute(text("""
+            SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.email, p.phone
+            FROM players p
+            WHERE p.organisation_id = :org
+              AND NOT EXISTS (
+                  SELECT 1 FROM fee_members fm
+                  WHERE fm.player_id = p.id AND fm.organisation_id = :org
+              )
+        """), {"org": club.id})).mappings().all()
+        members += [
+            {"member_id": None, "full_name": p["name"], "email": p["email"], "mobile": p["phone"],
+             "player_id": str(p["id"]), "is_linked": True,
+             "archived": False, "needs_member": True}
+            for p in extra
+        ]
+        members.sort(key=lambda m: (m["full_name"] or "").lower())
+    return {"members": members}
 
 
 @router.get("/members")

@@ -40,17 +40,21 @@ function TabBar({ tab, setTab }) {
 // ── Committee Roles tab (succession) ────────────────────────────────────────
 function StartTermForm({ position, members, onClose, onDone }) {
   const toast = useToast()
-  const [memberId, setMemberId] = useState(null)
+  // The whole person, not just an id: a club player who has not been enrolled
+  // yet has no member id to hold on to, and the server needs their player id to
+  // create the person row.
+  const [person, setPerson] = useState(null)
+  const [key, setKey] = useState(null)
   const [startedAt, setStartedAt] = useState(today())
   const [busy, setBusy] = useState(false)
-  const selected = members.find(m => m.member_id === memberId)
   async function submit() {
-    if (!memberId || !selected) { toast.error('Pick a member'); return }
+    if (!person) { toast.error('Pick a member'); return }
     setBusy(true)
     try {
       await api.committeeStartTerm(position.id, {
-        member_id: memberId,
-        holder_name: selected.full_name,
+        member_id: person.member_id || null,
+        player_id: person.member_id ? null : (person.player_id || null),
+        holder_name: person.full_name,
         started_at: startedAt || today(),
       })
       toast.success('Term started')
@@ -60,10 +64,11 @@ function StartTermForm({ position, members, onClose, onDone }) {
   return (
     <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:items-start">
       <div className="flex-1 min-w-[180px]">
-        <MemberSelect members={members} value={memberId} onChange={setMemberId} placeholder="Choose member…" />
+        <MemberSelect members={members} value={key}
+          onChange={(k, p) => { setKey(k); setPerson(p) }} placeholder="Choose member…" />
       </div>
       <input type="date" className={`${inp} sm:w-40`} value={startedAt} onChange={e => setStartedAt(e.target.value)} />
-      <button onClick={submit} disabled={busy || !memberId}
+      <button onClick={submit} disabled={busy || !person}
         className="pb-btn pb-btn-sm pb-btn-primary">
         {busy ? 'Saving…' : 'Start term'}
       </button>
@@ -1029,8 +1034,12 @@ export default function AdminCommittee() {
   // Deliberately not depending on `toast`: the context value changes whenever a
   // toast is raised, so a club without the fees module used to fail, raise a
   // toast, re-run this effect, and fail again forever.
+  // includePlayers: a committee seat can go to anyone in the club, including a
+  // player nobody has enrolled as a member yet. Starting their term creates the
+  // person row server-side.
   useEffect(() => {
-    api.feeAllMembers().then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
+    api.feeAllMembers({ includePlayers: true })
+      .then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
   }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

@@ -21,6 +21,7 @@ from app.models.db import (
 from app.routers.auth import get_current_club
 from app.auth.capabilities import require_cap, MANAGE_COMMITTEE
 from app.services import committee as committee_service
+from app.services import members as members_svc
 from app.services import office_bearers
 
 router = APIRouter(prefix="/club-admin/committee", tags=["club-admin-committee"])
@@ -188,6 +189,10 @@ async def position_history(position_id: str, _: User = _require, club: Organisat
 
 class TermStart(BaseModel):
     member_id: Optional[str] = None
+    # A club player who has no member row yet. Committee terms point at
+    # fee_members, so one is created for them here rather than making the
+    # secretary go and enrol the person somewhere else first.
+    player_id: Optional[str] = None
     holder_name: str
     started_at: Optional[date] = None
 
@@ -196,10 +201,20 @@ class TermStart(BaseModel):
 async def start_term(position_id: str, data: TermStart, _: User = _require, club: Organisation = Depends(get_current_club),
                      db: AsyncSession = Depends(get_db)):
     await _position_or_404(db, club, position_id)
+    member_id = data.member_id
+    if not member_id and data.player_id:
+        # Enrolled here, under MANAGE_COMMITTEE. The Directory's own
+        # ensure-member route needs MANAGE_MEMBERS, which a committee manager
+        # does not necessarily hold — and holding a committee seat is itself a
+        # good enough reason for the club to have a person row.
+        try:
+            member_id = await members_svc.ensure_for_player(db, club.id, uuid.UUID(data.player_id))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     try:
         term = await committee_service.start_term(
             db, club.id, uuid.UUID(position_id),
-            member_id=uuid.UUID(data.member_id) if data.member_id else None,
+            member_id=uuid.UUID(member_id) if member_id else None,
             holder_name=data.holder_name, started_at=data.started_at,
         )
     except ValueError as e:

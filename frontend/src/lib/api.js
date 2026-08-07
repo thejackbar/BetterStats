@@ -742,7 +742,11 @@ export const api = {
   diarySeasonPlan: (year) => request(`/club-admin/club-diary/season/${year}`),
 
   // Shared member/person picker across BetterClubManager (all org members).
-  feeAllMembers: () => request('/club-admin/fees/all-members'),
+  // includePlayers adds the club's players who have no member row yet. They
+  // come back with member_id null, so only ask for them on a screen that knows
+  // to enrol the person rather than writing a null id onto a record.
+  feeAllMembers: ({ includePlayers = false } = {}) =>
+    request(`/club-admin/fees/all-members${includePlayers ? '?include_players=true' : ''}`),
 
   // Roles & Activities taxonomy (core capability, shared by Volunteers + Qualifications)
   raRoleTypes: (includeInactive) =>

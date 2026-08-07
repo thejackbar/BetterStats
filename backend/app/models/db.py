@@ -2506,6 +2506,11 @@ class FeeMember(Base):
     is_life_member = Column(Boolean, nullable=False, server_default="false", default=False)
     is_honorary = Column(Boolean, nullable=False, server_default="false", default=False)
     honorary_expires_at = Column(Date, nullable=True)  # NULL + is_honorary = perpetual
+    # Soft-delete (migration 212). The Directory hides an archived person and
+    # the pickers stop offering them, but nothing is destroyed, so a record that
+    # already names one still resolves. The column has existed since 212 and was
+    # only ever read through raw SQL; mapping it lets the ORM readers see it too.
+    archived_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
