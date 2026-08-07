@@ -1074,6 +1074,28 @@ async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db)
         raise HTTPException(500, f"Scorecard parse error: {exc}") from exc
 
 
+@router.get("/social/match-lookup", dependencies=[Depends(require_module("socials"))])
+async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Work out which match an admin means from whatever they pasted.
+
+    A play.cricket.com.au link (or a bare match ID) carries the Grassroots GUID
+    the scorecard import needs and resolves straight through. A playhq.com
+    game-centre link carries PlayHQ's own eight-character code instead, which
+    maps to nothing on the Grassroots side — so it comes back as a short list
+    of the club's own recent matches for the admin to pick from, narrowed by
+    the grade in the URL. See services/social_match_lookup for why there is no
+    direct translation.
+    """
+    from app.services.social_match_lookup import resolve_match_reference
+    try:
+        return await resolve_match_reference(db, club, q)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social match lookup failed for %s", getattr(club, "id", "?"))
+        raise HTTPException(500, f"Match lookup error: {exc}") from exc
+
+
 @router.get("/social/fixtures", dependencies=[Depends(require_module("socials"))])
 async def get_social_fixtures(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Upcoming/live fixtures across the club's grades, grouped by match-day, for
@@ -1396,9 +1418,25 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     if not away.get("logo"):
         away["logo"] = await _org_logo_for_team(away["name"], db)
 
-    result_text = (match_summary.get("result") or match_summary.get("statusText") or "RESULT").upper()
-    venue = (match_summary.get("venue") or {}).get("name") or ""
-    date_raw = match_summary.get("dateTimeUTC") or match_summary.get("startDateTime") or ""
+    # Result, venue, date and match type live at the TOP level of a /scores/*
+    # match, not on matchSummary (which only carries `resultText` + `teams`) —
+    # reading them off matchSummary alone silently produced a post with no
+    # date, no venue and a bare "RESULT". The matchSummary lookups are kept
+    # first so an upstream shape that does carry them still wins.
+    result_text = (
+        match_summary.get("result")
+        or match_summary.get("resultText")
+        or match_summary.get("statusText")
+        or raw.get("resultText")
+        or "RESULT"
+    ).upper()
+    venue = ((match_summary.get("venue") or raw.get("venue")) or {}).get("name") or ""
+    date_raw = (
+        match_summary.get("dateTimeUTC")
+        or match_summary.get("startDateTime")
+        or ((raw.get("matchSchedule") or [{}])[0] or {}).get("startDateTime")
+        or ""
+    )
     date_str = date_raw[:10] if date_raw else ""
     grade_obj = raw.get("grade") or match_summary.get("grade") or {}
     grade_name = (grade_obj.get("name") or "").upper()
@@ -1407,12 +1445,26 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         round_name = round_raw.get("name") or round_raw.get("shortName") or ""
     else:
         round_name = str(round_raw)
+    # "Round 7" needs the prefix; "Semi Finals" and "Grand Final" already read
+    # as the round they are, so don't turn them into "ROUND Semi Finals".
+    round_label = round_name.strip()
+    if round_label and not re.search(r"[a-z]", round_label, re.I):
+        round_label = f"ROUND {round_label}"
+    match_type = (raw.get("matchType") or "").strip()
+    # Nothing upstream states the allotment, so take the longest innings bowled
+    # — right for any innings that went the distance, and a far better guess
+    # than a flat 20 on a 50-over game. It stays editable on the form.
+    bowled = [
+        int(float(i.get("oversBowled") or 0))
+        for i in innings_list
+        if i.get("oversBowled")
+    ]
 
     meta = {
         "competition": grade_name,
-        "round": f"ROUND {round_name}".strip() if round_name else "ROUND",
-        "format": "T20",
-        "overs": 20,
+        "round": round_label or "ROUND",
+        "format": (match_type or "T20").upper(),
+        "overs": max(bowled) if bowled else 20,
         "venue": venue,
         "date": date_str,
         "toss": "",

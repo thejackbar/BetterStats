@@ -112,6 +112,7 @@ export const api = {
   // Organisations (UUID-based, used internally once slug is resolved)
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
+  socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
   getSocialFixtures: () => request('/admin/social/fixtures'),
   getSocialResults: () => request('/admin/social/results'),
 
