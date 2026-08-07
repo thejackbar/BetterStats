@@ -377,7 +377,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
 
 function AgendaItem({
   item, index, isCurrent, onOpen, dragProps, present, pool, nameOf, objectives, objectiveOf,
-  motions, actions, onItemChange, onItemDelete,
+  sections, motions, actions, onItemChange, onItemDelete,
   onAddMotion, onMotionChange, onMotionDelete, onMotionVotes,
   onAddAction, onActionChange, onActionDelete,
   motionDrag,
@@ -386,7 +386,12 @@ function AgendaItem({
   const [addingAction, setAddingAction] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.title)
+  const [sectionDraft, setSectionDraft] = useState(item.section || '')
   const saveNotes = useAutosave(v => onItemChange({ outcome_notes: v }))
+  const saveEdit = () => {
+    onItemChange({ title: draft, section: sectionDraft.trim() || null })
+    setEditing(false)
+  }
 
   return (
     <div className={`pb-card p-3 ${isCurrent ? 'ring-1' : ''}`}
@@ -396,10 +401,21 @@ function AgendaItem({
         <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5" title="Drag to reorder">⠿</span>
         <div className="flex-1 min-w-0">
           {editing ? (
-            <div className="flex gap-2">
-              <input className={inp} value={draft} autoFocus onChange={e => setDraft(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') { onItemChange({ title: draft }); setEditing(false) } }} />
-              <button onClick={() => { onItemChange({ title: draft }); setEditing(false) }} className={btn}>Save</button>
+            <div className="flex gap-2 flex-wrap">
+              <input className={`${inp} flex-1 min-w-[10rem]`} value={draft} autoFocus
+                onChange={e => setDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveEdit() }} />
+              {/* Type a new heading or pick one already in this meeting. A
+                  datalist rather than a select, because the first item of a
+                  section has to be able to invent it. */}
+              <input className={`${inp} w-full sm:w-52`} list={`sections-${item.id}`}
+                placeholder="Section (optional)" value={sectionDraft}
+                onChange={e => setSectionDraft(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') saveEdit() }} />
+              <datalist id={`sections-${item.id}`}>
+                {(sections || []).map(s => <option key={s} value={s} />)}
+              </datalist>
+              <button onClick={saveEdit} className={btn}>Save</button>
             </div>
           ) : (
             <button onClick={onOpen} className="text-left w-full">
@@ -434,7 +450,7 @@ function AgendaItem({
           className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px] shrink-0">
           {AGENDA_STATUSES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
         </select>
-        <button onClick={() => { setDraft(item.title); setEditing(true) }}
+        <button onClick={() => { setDraft(item.title); setSectionDraft(item.section || ''); setEditing(true) }}
           className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">Edit</button>
         <button onClick={onItemDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red shrink-0">✕</button>
       </div>
@@ -561,6 +577,9 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
     const o = objectives.find(x => x.id === id)
     return o ? objectiveLabel(o) : null
   }, [objectives])
+  // The headings already in use, in agenda order, for the section picker.
+  const sections = useMemo(
+    () => [...new Set(items.map(i => i.section).filter(Boolean))], [items])
   // Only people actually in the room can vote or be given an action.
   // Who is in the room, for voting. The chair is present too.
   const present = useMemo(
@@ -642,8 +661,15 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
     const next = [...items]
     const [moved] = next.splice(from, 1)
     next.splice(toIdx, 0, moved)
+    // An item dragged in among another section's rows joins that section —
+    // dropping it under "Annual reports" and having it stay in "Opening
+    // formalities" is not what the person doing it meant. It takes the section
+    // of whatever it landed after, or of the row below when it went to the top.
+    const at = next.indexOf(moved)
+    const neighbour = next[at - 1] || next[at + 1]
+    moved.section = neighbour ? (neighbour.section || null) : moved.section
     setData(d => ({ ...d, agenda_items: next }))   // optimistic, so the drag feels instant
-    await api.committeeReorderAgenda(meetingId, next.map(i => i.id))
+    await api.committeeReorderAgenda(meetingId, next.map(i => i.id), next.map(i => i.section || null))
   })
 
   const motionDrag = {
@@ -726,6 +752,12 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
               onDragOver={e => { e.preventDefault(); if (dragOver !== idx) setDragOver(idx) }}
               onDragLeave={() => setDragOver(o => (o === idx ? null : o))}
               onDrop={() => onDrop(idx)}>
+              {/* The order of business is one ordered list; a heading is drawn
+                  wherever the section changes. So the agenda reads as a club's
+                  agenda without a second thing to keep in order. */}
+              {(item.section || null) !== (items[idx - 1]?.section || null) && item.section && (
+                <div className={`${cap} pt-3 pb-1`}>{item.section.toUpperCase()}</div>
+              )}
               <AgendaItem
                 item={item} index={idx} isCurrent={currentId === item.id}
                 onOpen={() => setCurrentId(c => (c === item.id ? null : item.id))}
@@ -735,7 +767,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
                   onDragEnd: () => { drag.current = { kind: null, index: null, motionId: null }; setDragOver(null) },
                 }}
                 motionDrag={motionDrag}
-                present={present} pool={pool} nameOf={nameOf}
+                present={present} pool={pool} nameOf={nameOf} sections={sections}
                 objectives={objectives} objectiveOf={objectiveOf}
                 motions={motions.filter(m => m.agenda_item_id === item.id)}
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
@@ -752,21 +784,31 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
             </div>
           ))}
 
-          <div className="flex gap-2 pt-1">
-            <input className={`${inp} flex-1`} placeholder="Add an agenda item…" value={newItem}
-              onChange={e => setNewItem(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && newItem.trim()) {
-                  wrap(() => api.committeeCreateAgendaItem(meetingId, { title: newItem.trim(), position: items.length }))()
-                  setNewItem('')
-                }
-              }} />
-            <button className={btn} disabled={!newItem.trim()}
-              onClick={() => {
-                wrap(() => api.committeeCreateAgendaItem(meetingId, { title: newItem.trim(), position: items.length }))()
-                setNewItem('')
-              }}>+ Item</button>
-          </div>
+          {/* A new item joins whatever section the agenda currently ends in,
+              which is what building one top to bottom means. Edit it if the
+              new item starts the next section instead. */}
+          {(() => {
+            const tail = items[items.length - 1]?.section || null
+            const addItem = () => {
+              wrap(() => api.committeeCreateAgendaItem(meetingId, {
+                title: newItem.trim(), position: items.length, section: tail,
+              }))()
+              setNewItem('')
+            }
+            return (
+              <div className="pt-1">
+                <div className="flex gap-2">
+                  <input className={`${inp} flex-1`} placeholder="Add an agenda item…" value={newItem}
+                    onChange={e => setNewItem(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && newItem.trim()) addItem() }} />
+                  <button className={btn} disabled={!newItem.trim()} onClick={addItem}>+ Item</button>
+                </div>
+                {tail && (
+                  <div className={`${cap} mt-1`}>GOES UNDER {tail.toUpperCase()}</div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Anything raised before an agenda existed, or against a deleted item,
               would otherwise be invisible on this screen. */}

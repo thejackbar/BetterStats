@@ -621,13 +621,31 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
     if (!confirm(`Delete template "${t.name}"?`)) return
     try { await api.committeeDeleteAgendaTemplate(t.id); onChanged() } catch (e) { toast.error(e.message) }
   }
+  async function seedStarter() {
+    setBusy(true)
+    try {
+      const r = await api.committeeSeedStarterAgendaTemplates()
+      const n = (r.templates || []).length
+      toast.success(n ? `Added ${n} agenda${n === 1 ? '' : 's'}` : 'You already have both')
+      onChanged()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
 
   return (
     <div className="pb-card p-4 mb-4">
       <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5">AGENDA TEMPLATES</div>
       <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
-        A saved agenda shape — pick one when creating a meeting to copy its items straight onto the new meeting's agenda.
+        A saved agenda shape, grouped into sections. Pick one when creating a meeting to copy its
+        items straight onto the new meeting's agenda.
       </p>
+      <div className="mb-3">
+        <button onClick={seedStarter} disabled={busy} className="pb-btn pb-btn-sm pb-btn-secondary">
+          {busy ? 'Adding…' : 'Add the standard AGM and committee agendas'}
+        </button>
+        <div className="font-mono text-[10px] text-pb-faintest mt-1">
+          Starting points to edit. An agenda you already have by that name is left alone.
+        </div>
+      </div>
       {templates.length > 0 && (
         <div className="space-y-1.5 mb-3">
           {templates.map(t => (
@@ -635,6 +653,12 @@ function AgendaTemplatesPanel({ templates, onChanged }) {
               <div>
                 <span className="text-pb-text text-sm">{t.name}</span>
                 <span className="font-mono text-[10px] text-pb-faint ml-2">{t.items.length} item{t.items.length === 1 ? '' : 's'}</span>
+                {(() => {
+                  const secs = [...new Set(t.items.map(i => i && i.section).filter(Boolean))]
+                  return secs.length ? (
+                    <div className="font-mono text-[10px] text-pb-faintest mt-0.5">{secs.join(' · ')}</div>
+                  ) : null
+                })()}
               </div>
               <button onClick={() => remove(t)} className="pb-btn pb-btn-sm pb-btn-danger shrink-0">Remove</button>
             </div>
@@ -710,7 +734,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   const [minutes, setMinutes] = useState('')
   const [status, setStatus] = useState(meeting.status)
   const [savingMeta, setSavingMeta] = useState(false)
-  const [newItem, setNewItem] = useState({ title: '', description: '' })
+  const [newItem, setNewItem] = useState({ title: '', description: '', section: '' })
   const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion', objective_id: '' })
   const [newNom, setNewNom] = useState({ position_id: '', candidate_member_id: '' })
   const [attendance, setAttendance] = useState({})
@@ -746,8 +770,15 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   async function addAgendaItem() {
     if (!newItem.title.trim()) return
     try {
-      await api.committeeCreateAgendaItem(meeting.id, { ...newItem, position: (detail?.agenda_items?.length || 0) })
-      setNewItem({ title: '', description: '' }); load()
+      await api.committeeCreateAgendaItem(meeting.id, {
+        ...newItem,
+        // A new item joins whatever section the agenda currently ends in unless
+        // one was typed, which is what building an agenda top-down means.
+        section: newItem.section.trim()
+          || (detail?.agenda_items?.[detail.agenda_items.length - 1]?.section ?? null),
+        position: (detail?.agenda_items?.length || 0),
+      })
+      setNewItem({ title: '', description: '', section: '' }); load()
     } catch (e) { toast.error(e.message) }
   }
   async function setItemStatus(item, itemStatus) {
@@ -849,8 +880,13 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-1.5 mt-3">AGENDA</div>
         <div className="space-y-1.5 mb-2">
           {(detail.agenda_items || []).length === 0 && <div className="font-mono text-[10px] text-pb-faintest">No agenda items yet.</div>}
-          {(detail.agenda_items || []).map(item => (
-            <div key={item.id} className="pb-card px-3 py-2">
+          {(detail.agenda_items || []).map((item, idx) => (
+            <div key={item.id}>
+            {/* One ordered agenda; a heading appears wherever the section changes. */}
+            {(item.section || null) !== (detail.agenda_items[idx - 1]?.section || null) && item.section && (
+              <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest pt-2 pb-1">{item.section.toUpperCase()}</div>
+            )}
+            <div className="pb-card px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-pb-text text-[13px]">{item.title}</div>
                 <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border pb-hairline ${item.status === 'carried' ? 'text-pb-accent' : 'text-pb-faint'}`}>{label(item.status)}</span>
@@ -863,10 +899,17 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
                 <button onClick={() => removeItem(item)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
               </div>
             </div>
+            </div>
           ))}
         </div>
-        <div className="flex gap-2 mb-3 no-print">
+        <div className="flex flex-col sm:flex-row gap-2 mb-3 no-print">
           <input className={`${inp} flex-1`} placeholder="New agenda item" value={newItem.title} onChange={e => setNewItem(f => ({ ...f, title: e.target.value }))} />
+          <input className={`${inp} sm:w-52`} list="agenda-sections" placeholder="Section (optional)"
+            value={newItem.section} onChange={e => setNewItem(f => ({ ...f, section: e.target.value }))} />
+          <datalist id="agenda-sections">
+            {[...new Set((detail.agenda_items || []).map(i => i.section).filter(Boolean))]
+              .map(s => <option key={s} value={s} />)}
+          </datalist>
           <button onClick={addAgendaItem} className="pb-btn pb-btn-sm pb-btn-secondary">+ Item</button>
         </div>
 

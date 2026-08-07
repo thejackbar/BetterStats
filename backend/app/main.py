@@ -4653,6 +4653,11 @@ async def lifespan(app: FastAPI):
               AND LOWER(BTRIM(p.name)) = LOWER(BTRIM(o.plan))
         """))
 
+        # Migration 231: an agenda item belongs to a section of the meeting's
+        # order of business. Byte-identical to
+        # alembic/versions/231_agenda_sections.py.
+        await conn.execute(text("ALTER TABLE meeting_agenda_items ADD COLUMN IF NOT EXISTS section TEXT"))
+
         # Migration 223: a member row may only link to a player of the SAME
         # club. NOT VALID, so it guards every new write from the moment it
         # lands without failing on rows an earlier bug already left behind

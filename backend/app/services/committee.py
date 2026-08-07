@@ -150,6 +150,7 @@ def _agenda_item_dict(i: MeetingAgendaItem) -> dict:
         "id": str(i.id), "meeting_id": str(i.meeting_id), "title": i.title, "description": i.description,
         "proposed_by_member_id": str(i.proposed_by_member_id) if i.proposed_by_member_id else None,
         "position": i.position, "status": i.status, "outcome_notes": i.outcome_notes,
+        "section": i.section,
     }
 
 
@@ -648,6 +649,84 @@ async def delete_event(session: AsyncSession, e: ClubEvent) -> None:
     await session.delete(e)
 
 
+# ─── The order of business ────────────────────────────────────────────────────
+#
+# A club's agenda is grouped, not flat: formalities, then reports, then
+# elections, then general business, then closing. `section` is the heading an
+# item sits under, and it is deliberately a plain label — the agenda stays ONE
+# ordered sequence, so dragging works as it always did and the screen draws a
+# heading wherever the section changes.
+
+def _clean_section(value) -> Optional[str]:
+    """A blank section means "not under any heading", not an empty heading."""
+    return (str(value).strip()[:120] or None) if value else None
+
+
+# The two agendas nearly every community club runs, so a committee starts from
+# something to edit rather than an empty page. Nothing is auto-seeded: a club
+# adopts these, or writes its own.
+STARTER_AGENDA_TEMPLATES = [
+    ("Annual General Meeting", [
+        ("Opening formalities", "Welcome & attendance", "Open the meeting and record members present."),
+        ("Opening formalities", "Acknowledgement of Country", "Respect traditional owners of the land."),
+        ("Opening formalities", "Apologies", "Record members who sent apologies for absence."),
+        ("Opening formalities", "Minutes of previous AGM", "Read and confirm the minutes from the last AGM."),
+        ("Opening formalities", "Business arising from previous minutes", "Any unresolved items from those minutes."),
+        ("Annual reports", "President's report", "The club's on-field and off-field season."),
+        ("Annual reports", "Treasurer's report & financial statements", "Profit and loss and balance sheet for the financial year."),
+        ("Annual reports", "Registrar / Secretary report", "Registration numbers, team nominations, association updates."),
+        ("Annual reports", "Junior & coaching coordinator report", "Junior development, Blast programs, coaching."),
+        ("Elections and appointments", "Declaration of all positions vacant", "The current committee steps down."),
+        ("Elections and appointments", "Election of executive committee", "President, Vice-President, Secretary, Treasurer."),
+        ("Elections and appointments", "Election of general committee", "Registrar, junior coordinator, social coordinator, gear steward."),
+        ("Elections and appointments", "Appointment of auditor / reviewer", "If your state's incorporation rules require one."),
+        ("General business & special motions", "Life memberships & awards", "Vote on or announce new life memberships and club recognitions."),
+        ("General business & special motions", "Constitution or rule amendments", "Vote on proposed changes to the constitution or by-laws."),
+        ("General business & special motions", "General business", "Member questions, next season's fees, facility proposals."),
+        ("Closing", "Date of next meeting", "Set a first date for the incoming committee."),
+        ("Closing", "Close of meeting", "Formal close of the AGM."),
+    ]),
+    ("Committee meeting", [
+        ("Opening formalities", "Welcome & attendance", None),
+        ("Opening formalities", "Apologies", None),
+        ("Opening formalities", "Minutes of previous meeting", "Confirm the last meeting's minutes."),
+        ("Opening formalities", "Business arising / action list", "Work through the actions still open."),
+        ("Reports", "President's report", None),
+        ("Reports", "Treasurer's report", "Accounts, outstanding fees, budget against actual."),
+        ("Reports", "Cricket operations / registrar report", "Registrations, teams, selection, association matters."),
+        ("Reports", "Junior coordinator report", None),
+        ("General business", "Grounds & facilities", None),
+        ("General business", "Sponsorship & fundraising", None),
+        ("General business", "Social & events", None),
+        ("General business", "Volunteers & rosters", None),
+        ("Closing", "Other business", None),
+        ("Closing", "Date of next meeting", None),
+    ]),
+]
+
+
+async def seed_starter_agenda_templates(session: AsyncSession, org_id) -> list[AgendaTemplate]:
+    """Add the standard AGM and committee agendas.
+
+    Skips a template the club already has by that name rather than replacing
+    it, so pressing the button twice never overwrites an agenda somebody has
+    since edited.
+    """
+    have = {(t.name or "").strip().lower() for t in await list_agenda_templates(session, org_id)}
+    made = []
+    for name, rows in STARTER_AGENDA_TEMPLATES:
+        if name.strip().lower() in have:
+            continue
+        t = AgendaTemplate(
+            organisation_id=org_id, name=name,
+            items=[{"section": s, "title": title, "description": desc} for s, title, desc in rows],
+        )
+        session.add(t)
+        made.append(t)
+    await session.flush()
+    return made
+
+
 # ─── Agenda templates ─────────────────────────────────────────────────────────
 
 async def list_agenda_templates(session: AsyncSession, org_id) -> list[AgendaTemplate]:
@@ -698,6 +777,9 @@ async def _apply_agenda_template(session: AsyncSession, meeting: CommitteeMeetin
         session.add(MeetingAgendaItem(
             meeting_id=meeting.id, title=str(item["title"])[:300],
             description=item.get("description"), position=pos,
+            # A template written before sections existed simply has none, and
+            # its items land under no heading, which is what they always did.
+            section=_clean_section(item.get("section")),
         ))
 
 
@@ -806,6 +888,7 @@ async def create_agenda_item(session: AsyncSession, meeting_id, **fields) -> Mee
     i = MeetingAgendaItem(
         meeting_id=meeting_id, title=title[:300], description=fields.get("description"),
         proposed_by_member_id=fields.get("proposed_by_member_id"), position=fields.get("position") or 0,
+        section=_clean_section(fields.get("section")),
     )
     session.add(i)
     await session.flush()
@@ -816,6 +899,9 @@ async def update_agenda_item(session: AsyncSession, i: MeetingAgendaItem, **fiel
     for f in ("title", "description", "proposed_by_member_id", "position", "status", "outcome_notes"):
         if f in fields and fields[f] is not None:
             setattr(i, f, fields[f])
+    # Nullable, so an explicit null takes the item back out of every section.
+    if "section" in fields:
+        i.section = _clean_section(fields["section"])
     return i
 
 
@@ -1418,17 +1504,32 @@ async def plan_report(session: AsyncSession, org_id, *, include_archived: bool =
 # small writes, rather than a dozen round trips per agenda item.
 
 
-async def reorder_agenda_items(session: AsyncSession, meeting_id, item_ids: list) -> None:
-    """Persist a dragged agenda order. Ids not belonging to this meeting are
-    ignored rather than trusted — the list comes from a browser."""
+async def reorder_agenda_items(session: AsyncSession, meeting_id, item_ids: list,
+                               sections: Optional[list] = None) -> None:
+    """Persist a dragged agenda order, and optionally which section each item
+    now sits in.
+
+    Order and section move together in one write because dragging an item under
+    a different heading is one action to the person doing it. Two requests could
+    half-succeed and leave an item sitting under a heading it is not in.
+
+    Ids not belonging to this meeting are ignored rather than trusted — the list
+    comes from a browser.
+    """
     rows = (await session.execute(
         select(MeetingAgendaItem).where(MeetingAgendaItem.meeting_id == meeting_id)
     )).scalars().all()
     by_id = {str(r.id): r for r in rows}
+    # Only honoured when it lines up with the ids, so a mismatched pair of
+    # arrays cannot shuffle sections onto the wrong items.
+    aligned = sections if sections is not None and len(sections) == len(item_ids) else None
     for i, raw in enumerate(item_ids):
         row = by_id.get(str(raw))
-        if row is not None:
-            row.position = i
+        if row is None:
+            continue
+        row.position = i
+        if aligned is not None:
+            row.section = _clean_section(aligned[i])
     await session.flush()
 
 

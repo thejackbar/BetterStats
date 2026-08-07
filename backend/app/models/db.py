@@ -3034,6 +3034,11 @@ class MeetingAgendaItem(Base):
     position = Column(Integer, nullable=False, server_default="0", default=0)
     status = Column(Text, nullable=False, server_default="proposed", default="proposed")
     outcome_notes = Column(Text, nullable=True)
+    # Which part of the order of business this item sits in (migration 231) —
+    # "Opening formalities", "Annual reports", "Elections". A label rather than
+    # a table: the agenda stays one ordered sequence and the screen draws a
+    # heading wherever the section changes.
+    section = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

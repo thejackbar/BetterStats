@@ -784,6 +784,16 @@ async def list_agenda_templates(_: User = _require, club: Organisation = Depends
     return {"templates": [committee_service._agenda_template_dict(t) for t in rows]}
 
 
+@router.post("/agenda-templates/seed-starter")
+async def seed_starter_agenda_templates(_: User = _require, club: Organisation = Depends(get_current_club),
+                                        db: AsyncSession = Depends(get_db)):
+    """Add the standard AGM and committee agendas, so a club starts from
+    something to edit rather than an empty page."""
+    made = await committee_service.seed_starter_agenda_templates(db, club.id)
+    await db.commit()
+    return {"templates": [committee_service._agenda_template_dict(t) for t in made]}
+
+
 class AgendaTemplateCreate(BaseModel):
     name: str
     items: List[dict] = []
@@ -874,6 +884,10 @@ async def meeting_room(meeting_id: str, _: User = _require, club: Organisation =
 
 
 class OrderBody(BaseModel):
+    # `sections` is optional and parallel to `ids`: a dragged agenda item moves
+    # under a new heading and to a new position in one action, so both are sent
+    # together. Motions ignore it.
+    sections: Optional[List[Optional[str]]] = None
     ids: List[str]
 
 
@@ -881,7 +895,7 @@ class OrderBody(BaseModel):
 async def reorder_agenda(meeting_id: str, data: OrderBody, _: User = _require,
                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     m = await _meeting_or_404(db, club, meeting_id)
-    await committee_service.reorder_agenda_items(db, m.id, data.ids)
+    await committee_service.reorder_agenda_items(db, m.id, data.ids, sections=data.sections)
     await db.commit()
     return {"ok": True}
 
@@ -955,6 +969,8 @@ class AgendaItemCreate(BaseModel):
     description: Optional[str] = None
     proposed_by_member_id: Optional[str] = None
     position: int = 0
+    # Which part of the order of business it sits under (migration 231).
+    section: Optional[str] = None
 
 
 @router.post("/meetings/{meeting_id}/agenda-items")
@@ -978,6 +994,7 @@ class AgendaItemPatch(BaseModel):
     position: Optional[int] = None
     status: Optional[str] = None
     outcome_notes: Optional[str] = None
+    section: Optional[str] = None
 
 
 @router.patch("/meetings/{meeting_id}/agenda-items/{item_id}")

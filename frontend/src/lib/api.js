@@ -561,6 +561,9 @@ export const api = {
     request(`/club-admin/committee/agenda-templates/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   committeeDeleteAgendaTemplate: (id) =>
     request(`/club-admin/committee/agenda-templates/${id}`, { method: 'DELETE' }),
+  // The standard AGM and committee agendas, so a club edits rather than starts blank.
+  committeeSeedStarterAgendaTemplates: () =>
+    request('/club-admin/committee/agenda-templates/seed-starter', { method: 'POST' }),
 
   committeeListMeetings: (meetingType) =>
     request(`/club-admin/committee/meetings${meetingType ? `?meeting_type=${meetingType}` : ''}`),
@@ -573,8 +576,11 @@ export const api = {
   // Returns a draft; it is not saved. The secretary decides what is true.
   committeeDraftMinutes: (id) =>
     request(`/club-admin/committee/meetings/${id}/draft-minutes`, { method: 'POST' }),
-  committeeReorderAgenda: (meetingId, ids) =>
-    request(`/club-admin/committee/meetings/${meetingId}/agenda-items/reorder`, { method: 'POST', body: JSON.stringify({ ids }) }),
+  // `sections` is optional and parallel to `ids`: dragging an item under a
+  // different heading moves it and re-sections it in the one request.
+  committeeReorderAgenda: (meetingId, ids, sections) =>
+    request(`/club-admin/committee/meetings/${meetingId}/agenda-items/reorder`,
+      { method: 'POST', body: JSON.stringify(sections ? { ids, sections } : { ids }) }),
   committeeReorderMotions: (meetingId, ids) =>
     request(`/club-admin/committee/meetings/${meetingId}/motions/reorder`, { method: 'POST', body: JSON.stringify({ ids }) }),
   committeeUpdateMeeting: (id, data) =>

@@ -1,5 +1,49 @@
 # BetterStats — Claude Session Notes
 
+## An agenda has sections (migration 231, v9.19.2, Aug 2026)
+
+A club's order of business is grouped — opening formalities, the reports,
+elections, general business, closing — and the agenda was a flat ordered list,
+so a 20-item AGM read as one undifferentiated column.
+
+- **`meeting_agenda_items.section` is a LABEL, not a table, and that is the
+  whole design.** The agenda stays ONE ordered sequence (`position`), which is
+  what keeps the existing drag-to-reorder working untouched; the screen draws a
+  heading wherever the section changes from the previous item. A section table
+  would buy draggable and empty sections at the cost of a join, a second CRUD
+  surface and a second ordering to keep in step. **A section with no items is
+  not a state a meeting needs to hold.**
+- **Order and section move in ONE write.** `reorder_agenda_items` takes an
+  optional `sections` list parallel to `ids`, because dragging an item under a
+  different heading is one action to the person doing it — two requests could
+  half-succeed and leave an item under a heading it is not in. A mismatched pair
+  of arrays is ignored rather than applied, so it cannot shuffle sections onto
+  the wrong items.
+- **A dragged item adopts the section it lands among** (the row above, or below
+  when it goes to the top), and a NEW item joins whatever section the agenda
+  currently ends in. Both are "what the person obviously meant", and both are
+  editable after the fact.
+- **A section repeated in two non-adjacent runs draws its heading twice.** That
+  is deliberate: the agenda is what the order actually is, and sorting items by
+  section behind the club's back would silently reorder a meeting.
+- **`STARTER_AGENDA_TEMPLATES` (AGM + committee meeting) are the real win**, and
+  the reason is not schema: a volunteer committee opening a blank agenda closes
+  it. Seeded on demand like `seed_starter_positions`, never automatically, and a
+  template the club already has by that name is **skipped, not replaced** — so
+  pressing the button twice cannot overwrite an agenda somebody has since
+  edited.
+- **`agenda_templates.items` is JSONB and needed no migration** to carry
+  `{section, title, description}`. A template written before sections has none
+  and its items land under no heading, exactly as they always did.
+- **Verified against a real Postgres** (31 checks: the migration applied three
+  times to a populated pre-231 agenda, the starter seeding and its
+  skip-don't-replace rule, template application preserving sections and order,
+  clearing a section, the mismatched-arrays guard, and an item from another
+  meeting being unable to be re-sectioned through this one) and driven in
+  Chromium (25: headings once per run and in order, the add box naming the
+  section it will join, the section editor, a drag sending both arrays, and the
+  starter button on the manage screen).
+
 ## Picking a person is a SEARCH, not a list (v9.19.1, Aug 2026)
 
 Reported: the Start-a-term dropdown on Committee Roles is "very short". It was
