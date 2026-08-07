@@ -14,6 +14,15 @@ function fmtDate(iso) {
 }
 const isToday = (iso) => iso && new Date(iso).toDateString() === new Date().toDateString()
 
+// Newest meeting first — the list and anything inserted into it after a meeting
+// is created have to agree on the order, so both sort through here.
+const byNewest = (a, b) => new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0)
+
+// `meeting_type` is free text on the server, so this is the vocabulary the club
+// actually writes. Same list the manage screen offers — keep the two in step.
+const MEETING_TYPES = ['committee', 'agm', 'special_general', 'sub_committee', 'other']
+const typeLabel = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+
 function meetingStatus(m) {
   if (isToday(m.scheduled_at)) return { label: 'TODAY', fg: 'var(--pb-accent)' }
   const s = (m.status || '').toLowerCase()
@@ -137,6 +146,14 @@ export default function Committee({ st, patch, narrow }) {
   // Which agenda items are open. Keyed by item id and kept per meeting view, so
   // opening one item does not collapse the rest.
   const [expanded, setExpanded] = useState({})
+  // The new-meeting modal. One modal on two steps: the meeting itself, and the
+  // agenda template it can be built from — because "I need a template first" is
+  // discovered halfway through creating the meeting, not before it.
+  //   null | { step: 'meeting' | 'template', form, tpl, busy, error }
+  const [mk, setMk] = useState(null)
+  // Templates are only fetched when the modal is first opened — null means not
+  // asked for yet, so glancing at the committee costs nothing extra.
+  const [templates, setTemplates] = useState(null)
 
   // Reorder a position before another and persist the new sequence.
   const movePosition = (fromId, toId) => {
@@ -172,7 +189,7 @@ export default function Committee({ st, patch, narrow }) {
         ;(membersRes?.members || membersRes || []).forEach(m => { nameById[m.member_id] = m.full_name })
         setData({
           positions: posRes?.positions || [],
-          meetings: meetings.sort((a, b) => new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0)),
+          meetings: meetings.sort(byNewest),
           tasks: Array.isArray(tasksRes) ? tasksRes : (tasksRes?.tasks || []),
           nameById,
         })
@@ -204,6 +221,73 @@ export default function Committee({ st, patch, narrow }) {
     } : d))
   }, [])
 
+  const loadTemplates = useCallback(async () => {
+    try {
+      const res = await api.committeeListAgendaTemplates()
+      setTemplates(res?.templates || [])
+    } catch { setTemplates([]) }
+  }, [])
+
+  const openNew = () => {
+    setMk({
+      step: 'meeting', busy: false, error: null,
+      form: { title: '', meeting_type: 'committee', scheduled_at: '', location: '', agenda_template_id: '' },
+      tpl: { name: '', items: [], draft: '' },
+    })
+    if (templates === null) loadTemplates()
+  }
+  const setField = (k, v) => setMk(m => ({ ...m, form: { ...m.form, [k]: v } }))
+  const setTplField = (k, v) => setMk(m => ({ ...m, tpl: { ...m.tpl, [k]: v } }))
+  const addTplItem = () => setMk(m => (m.tpl.draft.trim()
+    ? { ...m, tpl: { ...m.tpl, items: [...m.tpl.items, { title: m.tpl.draft.trim() }], draft: '' } }
+    : m))
+
+  async function createMeeting() {
+    const f = mk.form
+    if (!f.title.trim() || !f.scheduled_at) return
+    setMk(m => ({ ...m, busy: true, error: null }))
+    try {
+      const created = await api.committeeCreateMeeting({
+        title: f.title.trim(),
+        meeting_type: f.meeting_type,
+        scheduled_at: new Date(f.scheduled_at).toISOString(),
+        location: f.location.trim() || null,
+        agenda_template_id: f.agenda_template_id || null,
+      })
+      // Read the new meeting back the same way the first load does, so a meeting
+      // built from a template shows its agenda straight away instead of reading
+      // as empty until the screen is opened again.
+      const full = await api.committeeGetMeeting(created.id).catch(() => created)
+      const row = { agenda_items: [], motions: [], actions: [], attendance: [], ...full }
+      setData(d => (d ? { ...d, meetings: [row, ...d.meetings].sort(byNewest) } : d))
+      setMk(null)
+      patch({ cteMeeting: created.id, cteRoom: null })
+    } catch (e) {
+      setMk(m => ({ ...m, busy: false, error: String(e?.message || e) }))
+    }
+  }
+
+  async function saveTemplate() {
+    // A title typed but not yet added counts — losing the last line someone
+    // typed because they pressed Save instead of Enter is its own small bug.
+    const items = mk.tpl.draft.trim() ? [...mk.tpl.items, { title: mk.tpl.draft.trim() }] : mk.tpl.items
+    if (!mk.tpl.name.trim() || items.length === 0) return
+    setMk(m => ({ ...m, busy: true, error: null }))
+    try {
+      const created = await api.committeeCreateAgendaTemplate({ name: mk.tpl.name.trim(), items })
+      setTemplates(ts => [...(ts || []), created])
+      // Back to the meeting, with the template just written already chosen —
+      // which is the only reason to have gone and made one mid-flow.
+      setMk(m => ({
+        ...m, busy: false, error: null, step: 'meeting',
+        tpl: { name: '', items: [], draft: '' },
+        form: { ...m.form, agenda_template_id: created.id },
+      }))
+    } catch (e) {
+      setMk(m => ({ ...m, busy: false, error: String(e?.message || e) }))
+    }
+  }
+
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
   const chip = (fg, fs = 8.5) => ({ fontFamily: MONO, fontSize: fs, letterSpacing: '0.08em', padding: '2px 6px', borderRadius: 4, border: `1px solid ${fg}66`, color: fg, flexShrink: 0 })
   // The OPEN pill is a button, and its colour is the club's accent rather than
@@ -219,6 +303,15 @@ export default function Committee({ st, patch, narrow }) {
     cursor: 'pointer',
   })
 
+  // Form furniture, matching the Directory's — these two screens sit beside each
+  // other in Clubhouse and their dialogs should read as the same dialog.
+  const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '8px 11px', color: C.text, fontSize: 13, outline: 'none', width: '100%', fontFamily: 'inherit' }
+  const lbl = { fontFamily: MONO, fontSize: 9.5, color: C.faint }
+  // Amber is the module's brand, not the club's, so the ink on it is the fixed
+  // ON_ACCENT constant rather than a token that follows a club's own accent.
+  const btnP = { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#0a0d14', cursor: 'pointer', fontFamily: 'inherit' }
+  const btnS = { padding: '8px 13px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontFamily: 'inherit' }
+
   const Header = ({ children }) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
@@ -227,7 +320,10 @@ export default function Committee({ st, patch, narrow }) {
         <Caption tone={C.faint} style={{ marginTop: 2 }}>Positions, meetings, motions and actions</Caption>
       </div>
       <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={[{ key: 'meetings', label: 'Meetings' }, { key: 'positions', label: 'Positions' }, { key: 'motions', label: 'Motions & actions' }]} />
-      <ManageLink to="/admin/clubhouse/committee/manage">Manage meetings &amp; positions</ManageLink>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
+        <ManageLink to="/admin/clubhouse/committee/manage">Manage meetings &amp; positions</ManageLink>
+        {data && <button onClick={openNew} style={btnP}>+ New meeting</button>}
+      </div>
       {children}
     </ScreenHeader>
   )
@@ -439,6 +535,123 @@ export default function Committee({ st, patch, narrow }) {
                 {openTasks.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No open committee actions.</div>}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {mk && (
+        <div onClick={() => { if (!mk.busy) setMk(null) }}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ width: 'min(460px, 100%)', maxHeight: '90vh', overflowY: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}
+            className="pb-scroll">
+
+            {mk.step === 'meeting' ? (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>New meeting</div>
+                <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>
+                  Schedule a committee meeting or an AGM. Pick an agenda template and its items are copied straight onto the new meeting’s agenda.
+                </div>
+                <div style={{ display: 'grid', gap: 11 }}>
+                  <label style={lbl}>TITLE *
+                    <input value={mk.form.title} onChange={e => setField('title', e.target.value)}
+                      placeholder="e.g. Committee Meeting - September 2026" style={{ ...inp, marginTop: 4 }} />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
+                    <label style={lbl}>TYPE
+                      <select value={mk.form.meeting_type} onChange={e => setField('meeting_type', e.target.value)} style={{ ...inp, marginTop: 4 }}>
+                        {MEETING_TYPES.map(t => <option key={t} value={t}>{typeLabel(t)}</option>)}
+                      </select>
+                    </label>
+                    <label style={lbl}>DATE &amp; TIME *
+                      <input type="datetime-local" value={mk.form.scheduled_at} onChange={e => setField('scheduled_at', e.target.value)}
+                        style={{ ...inp, marginTop: 4 }} />
+                    </label>
+                  </div>
+                  <label style={lbl}>LOCATION
+                    <input value={mk.form.location} onChange={e => setField('location', e.target.value)}
+                      placeholder="e.g. Clubrooms" style={{ ...inp, marginTop: 4 }} />
+                  </label>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                      <span style={lbl}>AGENDA TEMPLATE</span>
+                      {/* Making one is a step people reach for from here, halfway
+                          through the meeting they came to create — so it is on
+                          this dialog rather than back on the manage screen. */}
+                      <button onClick={() => setMk(m => ({ ...m, step: 'template', error: null }))}
+                        style={{ marginLeft: 'auto', background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, color: 'var(--pb-accent-ink)' }}>
+                        + New template
+                      </button>
+                    </div>
+                    <select value={mk.form.agenda_template_id} onChange={e => setField('agenda_template_id', e.target.value)}
+                      style={{ ...inp, marginTop: 4 }}>
+                      <option value="">{templates === null ? 'Loading templates…' : 'No agenda template'}</option>
+                      {(templates || []).map(t => (
+                        <option key={t.id} value={t.id}>{t.name} ({(t.items || []).length} item{(t.items || []).length === 1 ? '' : 's'})</option>
+                      ))}
+                    </select>
+                    {templates !== null && templates.length === 0 && (
+                      <div style={{ fontSize: 12, color: C.faint, marginTop: 6, lineHeight: 1.5 }}>
+                        No templates saved yet. Make one and every meeting after this can start from it.
+                      </div>
+                    )}
+                  </div>
+                </div>
+                {mk.error && <div style={{ fontSize: 12.5, color: C.block, marginTop: 12 }}>{mk.error}</div>}
+                <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setMk(null)} disabled={mk.busy} style={btnS}>Cancel</button>
+                  <button onClick={createMeeting}
+                    disabled={mk.busy || !mk.form.title.trim() || !mk.form.scheduled_at}
+                    style={{ ...btnP, opacity: (mk.busy || !mk.form.title.trim() || !mk.form.scheduled_at) ? 0.6 : 1 }}>
+                    {mk.busy ? 'Creating…' : 'Create meeting'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>New agenda template</div>
+                <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>
+                  A saved agenda shape. Save it and it is chosen for the meeting you are creating, and offered on every meeting after that.
+                </div>
+                <div style={{ display: 'grid', gap: 11 }}>
+                  <label style={lbl}>TEMPLATE NAME *
+                    <input value={mk.tpl.name} onChange={e => setTplField('name', e.target.value)}
+                      placeholder="e.g. Standard committee meeting" style={{ ...inp, marginTop: 4 }} />
+                  </label>
+                  <div>
+                    <div style={lbl}>AGENDA ITEMS *</div>
+                    {mk.tpl.items.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0 8px' }}>
+                        {mk.tpl.items.map((it, idx) => (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '7px 10px' }}>
+                            <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, width: 12, flexShrink: 0 }}>{idx + 1}</span>
+                            <span style={{ fontSize: 13, color: C.text, flex: 1, minWidth: 0 }}>{it.title}</span>
+                            <button onClick={() => setMk(m => ({ ...m, tpl: { ...m.tpl, items: m.tpl.items.filter((_, i) => i !== idx) } }))}
+                              title="Remove this item"
+                              style={{ background: 'transparent', border: 'none', color: C.faint, cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: '2px 4px' }}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginTop: mk.tpl.items.length ? 0 : 4 }}>
+                      <input value={mk.tpl.draft} onChange={e => setTplField('draft', e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTplItem() } }}
+                        placeholder="Agenda item title, press Enter" style={{ ...inp, flex: 1 }} />
+                      <button onClick={addTplItem} disabled={!mk.tpl.draft.trim()} style={{ ...btnS, opacity: mk.tpl.draft.trim() ? 1 : 0.6, flexShrink: 0 }}>Add item</button>
+                    </div>
+                  </div>
+                </div>
+                {mk.error && <div style={{ fontSize: 12.5, color: C.block, marginTop: 12 }}>{mk.error}</div>}
+                <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>
+                  <button onClick={() => setMk(m => ({ ...m, step: 'meeting', error: null }))} disabled={mk.busy} style={btnS}>Back</button>
+                  <button onClick={saveTemplate}
+                    disabled={mk.busy || !mk.tpl.name.trim() || !(mk.tpl.items.length || mk.tpl.draft.trim())}
+                    style={{ ...btnP, opacity: (mk.busy || !mk.tpl.name.trim() || !(mk.tpl.items.length || mk.tpl.draft.trim())) ? 0.6 : 1 }}>
+                    {mk.busy ? 'Saving…' : 'Save template'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
