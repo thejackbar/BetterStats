@@ -1146,6 +1146,69 @@ async def delete_note(session: AsyncSession, org_id, note_id) -> bool:
 # objective and the plan in the same breath, and there is no second set of
 # figures to keep in step.
 
+def _pillar_dict(p) -> dict:
+    return {
+        "id": str(p.id), "name": p.name, "description": p.description,
+        "sort_order": p.sort_order, "is_active": p.is_active,
+    }
+
+
+async def list_pillars(session: AsyncSession, org_id, *, include_inactive: bool = False) -> list[dict]:
+    from app.models.db import ClubStrategicPillar
+
+    stmt = select(ClubStrategicPillar).where(ClubStrategicPillar.organisation_id == org_id)
+    if not include_inactive:
+        stmt = stmt.where(ClubStrategicPillar.is_active.is_(True))
+    stmt = stmt.order_by(ClubStrategicPillar.sort_order, ClubStrategicPillar.name)
+    return [_pillar_dict(p) for p in (await session.execute(stmt)).scalars().all()]
+
+
+async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields) -> dict:
+    from app.models.db import ClubStrategicPillar
+
+    if pillar_id:
+        p = (await session.execute(
+            select(ClubStrategicPillar).where(ClubStrategicPillar.id == pillar_id,
+                                              ClubStrategicPillar.organisation_id == org_id)
+        )).scalar_one_or_none()
+        if not p:
+            raise ValueError("Pillar not found")
+        if "name" in fields and not (fields["name"] or "").strip():
+            raise ValueError("A pillar needs a name")
+    else:
+        name = (fields.get("name") or "").strip()
+        if not name:
+            raise ValueError("A pillar needs a name")
+        p = ClubStrategicPillar(organisation_id=org_id, name=name[:120])
+        session.add(p)
+    if fields.get("name"):
+        p.name = fields["name"].strip()[:120]
+    for f in ("sort_order", "is_active"):
+        if f in fields and fields[f] is not None:
+            setattr(p, f, fields[f])
+    if "description" in fields:
+        p.description = fields["description"]
+    p.updated_at = func.now()
+    await session.flush()
+    return _pillar_dict(p)
+
+
+async def delete_pillar(session: AsyncSession, org_id, pillar_id) -> bool:
+    """Delete a pillar. Its objectives survive and simply stop being grouped
+    under it (FK SET NULL) — a theme being dropped from the plan is not a reason
+    to bin the work that was filed under it."""
+    from app.models.db import ClubStrategicPillar
+
+    p = (await session.execute(
+        select(ClubStrategicPillar).where(ClubStrategicPillar.id == pillar_id,
+                                          ClubStrategicPillar.organisation_id == org_id)
+    )).scalar_one_or_none()
+    if not p:
+        return False
+    await session.delete(p)
+    return True
+
+
 def _plan_dict(p) -> dict:
     return {
         "id": str(p.id), "name": p.name, "description": p.description,
@@ -1216,7 +1279,8 @@ async def delete_plan(session: AsyncSession, org_id, plan_id) -> bool:
     return True
 
 
-def _objective_dict(o, *, plan_name: Optional[str] = None) -> dict:
+def _objective_dict(o, *, plan_name: Optional[str] = None, pillar_name: Optional[str] = None,
+                    owner_position_name: Optional[str] = None) -> dict:
     return {
         "id": str(o.id), "title": o.title, "description": o.description,
         "season_year": o.season_year, "status": o.status, "sort_order": o.sort_order,
@@ -1226,6 +1290,11 @@ def _objective_dict(o, *, plan_name: Optional[str] = None) -> dict:
         "due_date": o.due_date.isoformat() if o.due_date else None,
         "owner_member_id": str(o.owner_member_id) if o.owner_member_id else None,
         "budget": float(o.budget) if o.budget is not None else None,
+        # Migration 232 — the theme it groups under, and a seat that owns it.
+        "pillar_id": str(o.pillar_id) if o.pillar_id else None,
+        "pillar_name": pillar_name,
+        "owner_position_id": str(o.owner_position_id) if o.owner_position_id else None,
+        "owner_position_name": owner_position_name,
     }
 
 
@@ -1239,6 +1308,23 @@ async def _plan_names(session: AsyncSession, org_id) -> dict:
     return {str(i): n for i, n in rows}
 
 
+async def _objective_labels(session: AsyncSession, org_id) -> tuple[dict, dict, dict]:
+    """The names behind an objective's three foreign keys, looked up once for a
+    whole list rather than a join per row."""
+    from app.models.db import ClubStrategicPillar
+
+    plans = await _plan_names(session, org_id)
+    pillars = {str(i): n for i, n in (await session.execute(
+        select(ClubStrategicPillar.id, ClubStrategicPillar.name)
+        .where(ClubStrategicPillar.organisation_id == org_id)
+    )).all()}
+    positions = {str(i): n for i, n in (await session.execute(
+        select(CommitteePosition.id, CommitteePosition.name)
+        .where(CommitteePosition.organisation_id == org_id)
+    )).all()}
+    return plans, pillars, positions
+
+
 async def list_objectives(session: AsyncSession, org_id, *, include_archived: bool = False,
                           plan_id=None) -> list[dict]:
     from app.models.db import ClubObjective
@@ -1249,8 +1335,10 @@ async def list_objectives(session: AsyncSession, org_id, *, include_archived: bo
     if plan_id:
         stmt = stmt.where(ClubObjective.plan_id == plan_id)
     stmt = stmt.order_by(ClubObjective.sort_order, ClubObjective.title)
-    names = await _plan_names(session, org_id)
-    return [_objective_dict(o, plan_name=names.get(str(o.plan_id)))
+    plans, pillars, positions = await _objective_labels(session, org_id)
+    return [_objective_dict(o, plan_name=plans.get(str(o.plan_id)),
+                            pillar_name=pillars.get(str(o.pillar_id)),
+                            owner_position_name=positions.get(str(o.owner_position_id)))
             for o in (await session.execute(stmt)).scalars().all()]
 
 
@@ -1272,27 +1360,37 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
             raise ValueError("Title is required")
         o = ClubObjective(organisation_id=org_id, title=title[:300])
         session.add(o)
-    # A plan from another club would put this objective on someone else's plan,
-    # so it is checked rather than trusted — the id comes from a browser.
-    if fields.get("plan_id"):
-        owned = (await session.execute(
-            select(ClubStrategicPlan.id).where(ClubStrategicPlan.id == fields["plan_id"],
-                                               ClubStrategicPlan.organisation_id == org_id)
-        )).scalar_one_or_none()
-        if not owned:
-            raise ValueError("That plan does not belong to this club")
+    # A plan, pillar or position from another club would file this objective
+    # under someone else's, so each is checked rather than trusted — the ids
+    # come from a browser.
+    from app.models.db import ClubStrategicPillar
+    for field, model, label in (
+        ("plan_id", ClubStrategicPlan, "plan"),
+        ("pillar_id", ClubStrategicPillar, "pillar"),
+        ("owner_position_id", CommitteePosition, "committee position"),
+    ):
+        if fields.get(field):
+            owned = (await session.execute(
+                select(model.id).where(model.id == fields[field],
+                                       model.organisation_id == org_id)
+            )).scalar_one_or_none()
+            if not owned:
+                raise ValueError(f"That {label} does not belong to this club")
     if "title" in fields and fields["title"]:
         o.title = fields["title"].strip()[:300]
     for f in ("status", "sort_order"):
         if f in fields and fields[f] is not None:
             setattr(o, f, fields[f])
-    for f in ("description", "season_year", "plan_id", "due_date", "owner_member_id", "budget"):
+    for f in ("description", "season_year", "plan_id", "due_date", "owner_member_id", "budget",
+              "pillar_id", "owner_position_id"):
         if f in fields:
             setattr(o, f, fields[f])
     o.updated_at = func.now()
     await session.flush()
-    names = await _plan_names(session, org_id)
-    return _objective_dict(o, plan_name=names.get(str(o.plan_id)))
+    plans, pillars, positions = await _objective_labels(session, org_id)
+    return _objective_dict(o, plan_name=plans.get(str(o.plan_id)),
+                           pillar_name=pillars.get(str(o.pillar_id)),
+                           owner_position_name=positions.get(str(o.owner_position_id)))
 
 
 async def delete_objective(session: AsyncSession, org_id, objective_id) -> bool:
@@ -1372,6 +1470,90 @@ async def objective_progress(session: AsyncSession, org_id, *, include_archived:
                     own_due=date.fromisoformat(o["due_date"]) if o["due_date"] else None,
                     today=today),
     } for o in objectives]
+
+
+# The four themes nearly every community club's plan comes down to, and one
+# recognisable objective under each. A committee that opens a filled-in plan and
+# deletes what does not apply will finish; one that opens an empty page will not.
+STARTER_PILLARS = [
+    ("On-field & participation", "Player numbers, pathways, coaching and results.",
+     "Grow player registrations across juniors and seniors"),
+    ("Finances & fundraising", "Revenue, sponsorship, grants and the club's reserves.",
+     "Secure three new local sponsors"),
+    ("Volunteers & governance", "Committee workload, compliance and club administration.",
+     "Every coach and team manager holds a current WWCC"),
+    ("Facilities & community", "Grounds, nets, equipment and the club's place locally.",
+     "Improve the training nets"),
+]
+
+
+def _season_label(start_month: int, today: Optional[date] = None) -> str:
+    """The club's own year, e.g. "2026/27" for a July start. Uses the diary
+    year the club already configured rather than inventing a second idea of
+    when a season runs."""
+    today = today or date.today()
+    start = today.year if today.month >= (start_month or 7) else today.year - 1
+    return f"{start}/{str(start + 1)[-2:]}"
+
+
+async def seed_starter_plan(session: AsyncSession, org_id) -> dict:
+    """Give a club a plan to edit instead of an empty page.
+
+    Adds the four pillars, a plan for the club's current year, and one example
+    objective per pillar. Skips a pillar the club already has by name, and only
+    creates the plan (and its examples) when there is no plan by that name — so
+    pressing the button twice never duplicates anything or overwrites work.
+    """
+    from app.models.db import ClubObjective, ClubStrategicPillar, ClubStrategicPlan, Organisation
+
+    org = await session.get(Organisation, org_id)
+    label = _season_label(getattr(org, "diary_start_month", 7) or 7)
+    plan_name = f"Club Plan {label}"
+
+    have_pillars = {p["name"].strip().lower(): p["id"]
+                    for p in await list_pillars(session, org_id, include_inactive=True)}
+    pillar_ids: dict = {}
+    made_pillars = []
+    for order, (name, desc, _objective) in enumerate(STARTER_PILLARS):
+        existing = have_pillars.get(name.strip().lower())
+        if existing:
+            pillar_ids[name] = uuid.UUID(existing)
+            continue
+        p = ClubStrategicPillar(organisation_id=org_id, name=name, description=desc, sort_order=order)
+        session.add(p)
+        await session.flush()
+        pillar_ids[name] = p.id
+        made_pillars.append(_pillar_dict(p))
+
+    existing_plan = (await session.execute(
+        select(ClubStrategicPlan).where(ClubStrategicPlan.organisation_id == org_id,
+                                        func.lower(ClubStrategicPlan.name) == plan_name.lower())
+    )).scalars().first()
+    if existing_plan is not None:
+        return {"plan": _plan_dict(existing_plan), "pillars": made_pillars,
+                "objectives": [], "created_plan": False}
+
+    year = int(label.split("/")[0])
+    plan = ClubStrategicPlan(
+        organisation_id=org_id, name=plan_name, start_year=year, end_year=year + 1,
+        description="What the club is setting out to do this year. Edit anything here, "
+                    "or delete what does not apply.",
+    )
+    session.add(plan)
+    await session.flush()
+
+    objectives = []
+    for order, (name, _desc, title) in enumerate(STARTER_PILLARS):
+        o = ClubObjective(organisation_id=org_id, title=title, plan_id=plan.id,
+                          pillar_id=pillar_ids[name], sort_order=order)
+        session.add(o)
+        objectives.append(o)
+    await session.flush()
+    return {
+        "plan": _plan_dict(plan), "pillars": made_pillars,
+        "objectives": [{"id": str(o.id), "title": o.title} for o in objectives],
+        "created_plan": True,
+    }
 
 
 async def plan_report(session: AsyncSession, org_id, *, include_archived: bool = False) -> dict:
@@ -1487,6 +1669,9 @@ async def plan_report(session: AsyncSession, org_id, *, include_archived: bool =
         }
 
     return {
+        # The club's themes, so the screen can group and filter objectives by
+        # one without a second request.
+        "pillars": await list_pillars(session, org_id),
         "plans": [{**p, "objective_list": by_plan.get(p["id"], []), **roll(by_plan.get(p["id"], []))}
                   for p in plans],
         # An objective can sit outside every plan — either because the club has

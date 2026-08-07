@@ -4658,6 +4658,31 @@ async def lifespan(app: FastAPI):
         # alembic/versions/231_agenda_sections.py.
         await conn.execute(text("ALTER TABLE meeting_agenda_items ADD COLUMN IF NOT EXISTS section TEXT"))
 
+        # Migration 232: the club's strategic pillars, and an objective that can
+        # be owned by a committee SEAT so ownership survives the AGM.
+        # Byte-identical to alembic/versions/232_strategic_pillars.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_strategic_pillars (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_strategic_pillars_org "
+            "ON club_strategic_pillars(organisation_id, is_active)"
+        ))
+        for col, ddl in (
+            ("pillar_id", "UUID REFERENCES club_strategic_pillars(id) ON DELETE SET NULL"),
+            ("owner_position_id", "UUID REFERENCES committee_positions(id) ON DELETE SET NULL"),
+        ):
+            await conn.execute(text(f"ALTER TABLE club_objectives ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+
         # Migration 223: a member row may only link to a player of the SAME
         # club. NOT VALID, so it guards every new write from the moment it
         # lands without failing on rows an earlier bug already left behind

@@ -1,5 +1,55 @@
 # BetterStats — Claude Session Notes
 
+## Themes, a seat that owns work, and a plan to start from (migration 232, v9.19.3, Aug 2026)
+
+The reference a club gave for a real strategic plan has four **pillars**
+(participation, finances, volunteers, facilities), each with an objective and
+owner. Two rounds of pushback shaped what got built and what did not:
+**community clubs are run by volunteers, so this has to stay simple.**
+
+- **A pillar is a GROUPING, not a fourth level.** `club_strategic_pillars` +
+  `club_objectives.pillar_id`, drawn as a filter chip row above the plans and a
+  heading inside one. Plan → objective → action stays three deep, because the
+  screen had only just been made legible at three and a fourth indent would undo
+  it. **Resist adding a level here.**
+- **Club-scoped, not plan-scoped, and that is the whole reason it is a table.**
+  A club's pillars are stable across plans, so the same four serve the 12-month
+  plan and the 5-year one and "how is Finances going" can be asked across both.
+  A free-text field would also have repeated the two-spellings bug migration 230
+  had to clean up.
+- **`club_objectives.owner_position_id` — a committee SEAT can own an
+  objective**, so ownership transfers at the AGM with nobody editing anything.
+  Copied from `club_diary_task_definitions.default_assignee_position_id`, which
+  already does this for the same reason. The form opens on the seat and offers a
+  named person as the exception; **one owner is written, never both**.
+- **`seed_starter_plan` is the point of the whole release.** Four pillars, a
+  plan named for the club's own diary year (`_season_label` reads
+  `organisations.diary_start_month`, so it is not a second idea of when a season
+  runs), and one example objective per pillar. **The blank page is what kills
+  this feature, not a missing column** — a committee that opens something
+  filled-in and deletes what does not apply will finish.
+- **Seeding is skip-don't-replace at every level**: a pillar the club already
+  has by name is reused, and the plan is only created when there is none by that
+  name, so the examples can never be dumped into a plan somebody has edited.
+  Re-seeding after deleting the plan reuses the existing pillars.
+- **Deleting never takes work with it** (the rule 230 set): a deleted pillar
+  leaves its objectives, they just stop being grouped.
+- **Deliberately NOT built, after cross-checking the proposal against a
+  volunteer committee**: parent/child plan nesting (a club wanting a 5-year and
+  a 12-month plan just wants two plans), a `horizon` enum (the year range says
+  it), a `progress_source` setting (derive it: targets if there are any, else
+  the actions), and `item_type` on agenda items. Each was a plausible-sounding
+  level of configuration that a tradie treasurer would have had to answer.
+- **Still open**: objective TARGETS — a label, a target number and where it is
+  up to now, three fields, so "grow registrations by 15%" is expressible. Today
+  an objective's percentage is effort (the mean of its actions'), not outcome.
+- **Verified against a real Postgres** (49 checks: the migration applied three
+  times to a populated pre-232 table, pillar CRUD and cross-club rejection of a
+  foreign pillar or position, clearing either owner, the seeding's
+  skip-don't-replace at both levels, and `_season_label` either side of the
+  diary-year boundary) and driven in Chromium (54 on the Plan screen, plus 12
+  on an empty club pressing the starter button).
+
 ## An agenda has sections (migration 231, v9.19.2, Aug 2026)
 
 A club's order of business is grouped — opening formalities, the reports,

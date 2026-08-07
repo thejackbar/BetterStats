@@ -1263,6 +1263,53 @@ async def delete_note(note_id: str, _: User = _require, club: Organisation = Dep
     return {"deleted": True}
 
 
+# ─── Strategic pillars (migration 232) ────────────────────────────────────────
+
+class PillarUpsert(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+@router.get("/pillars")
+async def list_pillars(include_inactive: bool = False, _: User = _require,
+                       club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"pillars": await committee_service.list_pillars(db, club.id, include_inactive=include_inactive)}
+
+
+@router.post("/pillars")
+async def create_pillar(data: PillarUpsert, _: User = _require,
+                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        p = await committee_service.upsert_pillar(db, club.id, **data.model_dump(exclude_unset=True))
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    await db.commit()
+    return p
+
+
+@router.patch("/pillars/{pillar_id}")
+async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
+                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        p = await committee_service.upsert_pillar(db, club.id, uuid.UUID(pillar_id),
+                                                  **data.model_dump(exclude_unset=True))
+    except ValueError as err:
+        raise HTTPException(status_code=404 if "not found" in str(err) else 422, detail=str(err))
+    await db.commit()
+    return p
+
+
+@router.delete("/pillars/{pillar_id}")
+async def delete_pillar(pillar_id: str, _: User = _require,
+                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id)):
+        raise HTTPException(status_code=404, detail="Pillar not found")
+    await db.commit()
+    return {"deleted": True}
+
+
 # ─── Strategic plans → objectives (migration 230) ─────────────────────────────
 
 class PlanUpsert(BaseModel):
@@ -1286,6 +1333,16 @@ async def plan_report(include_archived: bool = False, _: User = _require,
     """Every plan, its objectives, and the actions and motions serving each —
     with progress, spend against budget and what is running late."""
     return await committee_service.plan_report(db, club.id, include_archived=include_archived)
+
+
+@router.post("/plans/seed-starter")
+async def seed_starter_plan(_: User = _require, club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    """A plan to edit rather than an empty page: the four pillars, a plan for
+    the club's current year, and one example objective under each."""
+    result = await committee_service.seed_starter_plan(db, club.id)
+    await db.commit()
+    return result
 
 
 @router.post("/plans")
@@ -1331,6 +1388,10 @@ class ObjectiveUpsert(BaseModel):
     due_date: Optional[date] = None
     owner_member_id: Optional[str] = None
     budget: Optional[float] = None
+    # Migration 232 — the theme it groups under, and a committee seat that owns
+    # it (so ownership transfers at the AGM without anyone editing anything).
+    pillar_id: Optional[str] = None
+    owner_position_id: Optional[str] = None
 
 
 def _objective_fields(data: ObjectiveUpsert) -> dict:
@@ -1338,7 +1399,7 @@ def _objective_fields(data: ObjectiveUpsert) -> dict:
     # or the plan an objective belongs to is a real edit, and dropping nulls
     # would make those four fields one-way.
     fields = data.model_dump(exclude_unset=True)
-    for key in ("plan_id", "owner_member_id"):
+    for key in ("plan_id", "owner_member_id", "pillar_id", "owner_position_id"):
         if key in fields:
             fields[key] = uuid.UUID(fields[key]) if fields[key] else None
     return fields

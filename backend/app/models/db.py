@@ -3124,6 +3124,29 @@ class ClubStrategicPlan(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class ClubStrategicPillar(Base):
+    """A theme the club's objectives group under (migration 232) — on-field,
+    finances, volunteers, facilities.
+
+    Club-scoped rather than plan-scoped on purpose: a club's pillars are stable
+    across plans, so the same few serve the 12-month plan and the 5-year one and
+    the club can ask how a theme is going across both at once.
+
+    A pillar is a GROUPING, not another level of the hierarchy — plan →
+    objective → action stays three deep.
+    """
+    __tablename__ = "club_strategic_pillars"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ClubObjective(Base):
     """A line in the club's business or strategic plan (migration 217).
     Committee actions point at one, which is what turns a task register into
@@ -3148,6 +3171,11 @@ class ClubObjective(Base):
     due_date = Column(Date, nullable=True)
     owner_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
     budget = Column(Numeric(12, 2), nullable=True)
+    # Migration 232 — the theme it groups under, and a committee SEAT that owns
+    # it. A position owner transfers at the AGM without anyone editing anything,
+    # which a person owner cannot. Both are optional; a club may use either.
+    pillar_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_pillars.id", ondelete="SET NULL"), nullable=True)
+    owner_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

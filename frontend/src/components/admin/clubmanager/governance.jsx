@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
+import { PersonSearch } from './pickers'
 
 // The editing surface for what migration 217 added: an action's budget, spend,
 // progress, plan and dependencies; a carried motion recorded as a resolution
@@ -664,20 +665,31 @@ function PlanForm({ plan, onSave, onCancel }) {
 
 /* ── An objective within a plan ─────────────────────────────────────────── */
 
-const emptyObjective = { title: '', description: '', due_date: '', owner_member_id: '', budget: '', season_year: '' }
+const emptyObjective = {
+  title: '', description: '', due_date: '', budget: '', season_year: '',
+  pillar_id: '', owner_position_id: '',
+}
 
-function ObjectiveForm({ objective, plans, planId, members, onSave, onCancel }) {
+function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId, members, onSave, onCancel }) {
   const [form, setForm] = useState(() => objective
     ? {
         title: objective.title || '', description: objective.description || '',
-        due_date: objective.due_date || '', owner_member_id: objective.owner_member_id || '',
+        due_date: objective.due_date || '',
         // `own_budget` on a rolled-up row is the club's OWN allocation;
         // `budget` there is the effective figure and may have been summed from
         // the actions, which is not something to seed an edit form with.
         budget: ownBudget(objective) ?? '', season_year: objective.season_year ?? '',
-        plan_id: objective.plan_id || '',
+        plan_id: objective.plan_id || '', pillar_id: objective.pillar_id || '',
+        owner_position_id: objective.owner_position_id || '',
       }
-    : { ...emptyObjective, plan_id: planId || '' })
+    : { ...emptyObjective, plan_id: planId || '', pillar_id: pillarId || '' })
+  // A person owner is the exception, so the form opens on the committee seat
+  // unless this objective already names someone.
+  const [ownerMode, setOwnerMode] = useState(objective?.owner_member_id ? 'person' : 'position')
+  const [person, setPerson] = useState(() => {
+    const m = (members || []).find(x => x.member_id === objective?.owner_member_id)
+    return m ? { member_id: m.member_id, full_name: m.full_name } : null
+  })
   const [busy, setBusy] = useState(false)
 
   async function submit() {
@@ -687,15 +699,21 @@ function ObjectiveForm({ objective, plans, planId, members, onSave, onCancel }) 
       await onSave({
         title: form.title.trim(),
         description: form.description.trim() || null,
-        // All four are nullable and the API takes an explicit null as "clear
-        // it", so an owner or a budget can be taken off again once set.
+        // Every one of these is nullable and the API reads an explicit null as
+        // "clear it", so anything set here can be taken off again.
         plan_id: form.plan_id || null,
+        pillar_id: form.pillar_id || null,
         due_date: form.due_date || null,
-        owner_member_id: form.owner_member_id || null,
+        // One owner, not two: a seat OR a person, never both half-set.
+        owner_position_id: ownerMode === 'position' ? (form.owner_position_id || null) : null,
+        owner_member_id: ownerMode === 'person' ? (person?.member_id || null) : null,
         budget: form.budget === '' ? null : Number(form.budget),
         season_year: form.season_year === '' ? null : Number(form.season_year),
       })
-      if (!objective) setForm({ ...emptyObjective, plan_id: planId || '' })
+      if (!objective) {
+        setForm({ ...emptyObjective, plan_id: planId || '', pillar_id: pillarId || '' })
+        setPerson(null)
+      }
     } finally { setBusy(false) }
   }
 
@@ -716,13 +734,36 @@ function ObjectiveForm({ objective, plans, planId, members, onSave, onCancel }) 
           </select>
         </label>
         <label className="block">
-          <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
-          <select className={inp} value={form.owner_member_id}
-            onChange={e => setForm(f => ({ ...f, owner_member_id: e.target.value }))}>
-            <option value="">— unassigned —</option>
-            {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+          <span className={`${cap} block mb-1`}>THEME</span>
+          <select className={inp} value={form.pillar_id}
+            onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}>
+            <option value="">— no theme —</option>
+            {(pillars || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
+        {/* A committee SEAT by default: ownership then transfers at the AGM
+            without anyone editing this. A named person is still available for
+            work that genuinely belongs to an individual. */}
+        <div className="block">
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <span className={cap}>RESPONSIBLE</span>
+            <button type="button"
+              onClick={() => setOwnerMode(m => m === 'position' ? 'person' : 'position')}
+              className="font-mono text-[9px] text-pb-faint hover:text-pb-text">
+              {ownerMode === 'position' ? 'a specific person instead' : 'a committee role instead'}
+            </button>
+          </div>
+          {ownerMode === 'position' ? (
+            <select className={inp} value={form.owner_position_id}
+              onChange={e => setForm(f => ({ ...f, owner_position_id: e.target.value }))}>
+              <option value="">— unassigned —</option>
+              {(positions || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          ) : (
+            <PersonSearch value={person} onChange={setPerson}
+              placeholder="Type a name to search the club…" />
+          )}
+        </div>
         <label className="block">
           <span className={`${cap} block mb-1`}>DUE</span>
           <input type="date" className={inp} value={form.due_date}
@@ -868,7 +909,7 @@ function MotionLine({ motion }) {
   )
 }
 
-function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
+function ObjectiveCard({ objective, plans, pillars, positions, members, memberName, onChanged }) {
   const toast = useToast()
   const [editing, setEditing] = useState(false)
   const [open, setOpen] = useState(false)
@@ -892,8 +933,8 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
 
   if (editing) {
     return (
-      <ObjectiveForm objective={o} plans={plans} members={members}
-        onSave={save} onCancel={() => setEditing(false)} />
+      <ObjectiveForm objective={o} plans={plans} pillars={pillars} positions={positions}
+        members={members} onSave={save} onCancel={() => setEditing(false)} />
     )
   }
 
@@ -907,7 +948,9 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
           </div>
           {o.description && <div className="text-pb-faint text-[12.5px] mt-0.5">{o.description}</div>}
           <div className="font-mono text-[9.5px] text-pb-faintest mt-1 flex flex-wrap gap-x-2">
-            {o.owner_member_id && <span>{memberName(o.owner_member_id)}</span>}
+            {/* A seat reads as the seat, so it stays right after a handover. */}
+            {o.owner_position_name && <span>{o.owner_position_name}</span>}
+            {!o.owner_position_name && o.owner_member_id && <span>{memberName(o.owner_member_id)}</span>}
             {o.due_date && <span>due {o.due_date}</span>}
             {o.season_year && <span>{o.season_year}</span>}
             {ownBudget(o) != null && <span>allocated {money(ownBudget(o))}</span>}
@@ -964,21 +1007,115 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
 
 /* ── The Plan tab ───────────────────────────────────────────────────────── */
 
+/* ── The club's themes ──────────────────────────────────────────────────────
+ *
+ * A pillar groups objectives; it is NOT another level of the hierarchy. So it
+ * shows as a filter above the plans and a heading inside one, and the plan →
+ * objective → action indent stays three deep.
+ */
+function PillarBar({ pillars, active, onPick, onChanged }) {
+  const toast = useToast()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  async function add() {
+    if (!draft.trim()) return
+    try { await api.committeeCreatePillar({ name: draft.trim() }); setDraft(''); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function rename(p) {
+    const name = prompt('Rename this theme', p.name)
+    if (!name || !name.trim() || name === p.name) return
+    try { await api.committeeUpdatePillar(p.id, { name: name.trim() }); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function remove(p) {
+    if (!confirm(`Delete "${p.name}"? Its objectives stay, they just stop being grouped under it.`)) return
+    try { await api.committeeDeletePillar(p.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+
+  if (!pillars.length && !editing) {
+    return (
+      <button onClick={() => setEditing(true)}
+        className="font-mono text-[10px] text-pb-faintest hover:text-pb-faint mb-3">
+        + Group objectives by theme
+      </button>
+    )
+  }
+  return (
+    <div className="mb-4">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className={cap}>THEME</span>
+        <button onClick={() => onPick(null)}
+          className={`px-2.5 py-1 rounded-full text-[12px] border ${!active ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+          style={!active ? { borderColor: mix(55), background: mix(10) } : undefined}>All</button>
+        {pillars.map(p => (
+          <span key={p.id} className="inline-flex items-center">
+            <button onClick={() => onPick(active === p.id ? null : p.id)}
+              className={`px-2.5 py-1 rounded-full text-[12px] border ${active === p.id ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+              style={active === p.id ? { borderColor: mix(55), background: mix(10) } : undefined}>
+              {p.name}
+            </button>
+            {editing && (
+              <>
+                <button onClick={() => rename(p)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-text ml-1">edit</button>
+                <button onClick={() => remove(p)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red ml-1">✕</button>
+              </>
+            )}
+          </span>
+        ))}
+        <button onClick={() => setEditing(v => !v)}
+          className="font-mono text-[9px] text-pb-faintest hover:text-pb-text ml-1">
+          {editing ? 'Done' : 'Edit themes'}
+        </button>
+      </div>
+      {editing && (
+        <div className="flex gap-2 mt-2 max-w-sm">
+          <input className={inp} placeholder="New theme, e.g. Facilities & community"
+            value={draft} onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') add() }} />
+          <button onClick={add} disabled={!draft.trim()}
+            className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap">
+            + Theme
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export function PlanTab({ members }) {
   const toast = useToast()
   const [report, setReport] = useState(null)
+  const [positions, setPositions] = useState([])
   const [addingPlan, setAddingPlan] = useState(false)
   const [editingPlan, setEditingPlan] = useState(null)
   const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)   // plan id, or '' for no plan
   const [openPlan, setOpenPlan] = useState(null)
   const [view, setView] = useState('plan')                            // plan | delivery
+  const [pillarFilter, setPillarFilter] = useState(null)
+  const [seeding, setSeeding] = useState(false)
 
   const load = useCallback(() => {
     api.committeePlanReport()
       .then(setReport)
-      .catch(e => { toast.error(e.message); setReport({ plans: [], unassigned: { objective_list: [] } }) })
+      .catch(e => { toast.error(e.message); setReport({ plans: [], pillars: [], unassigned: { objective_list: [] } }) })
   }, [toast])
   useEffect(() => { load() }, [load])
+  // Committee seats, for the owner picker. Small list, fetched once.
+  useEffect(() => {
+    api.committeeListPositions().then(d => setPositions(d.positions || [])).catch(() => {})
+  }, [])
+
+  async function seedStarter() {
+    setSeeding(true)
+    try {
+      const r = await api.committeeSeedStarterPlan()
+      toast.success(r.created_plan ? 'Added a plan to edit' : 'You already have this year\'s plan')
+      setOpenPlan(r.plan?.id || null)
+      load()
+    } catch (e) { toast.error(e.message) } finally { setSeeding(false) }
+  }
 
   const memberName = useCallback(
     id => (members || []).find(m => m.member_id === id)?.full_name || 'Someone',
@@ -1004,8 +1141,22 @@ export function PlanTab({ members }) {
   if (report === null) return <div className="font-mono text-[11px] text-pb-faint">Loading the plan…</div>
 
   const plans = report.plans || []
+  const pillars = report.pillars || []
   const unassigned = report.unassigned || { objective_list: [] }
-  const objectiveProps = { plans, members, memberName, onChanged: load }
+  const objectiveProps = { plans, pillars, positions, members, memberName, onChanged: load }
+  // The theme filter narrows what is shown; it never changes what is stored.
+  const inTheme = o => !pillarFilter || o.pillar_id === pillarFilter
+  // Objectives within a plan, grouped under their theme. Themes come out in the
+  // club's own pillar order, with anything untagged last.
+  const byTheme = list => {
+    const shown = list.filter(inTheme)
+    const groups = pillars
+      .map(p => ({ id: p.id, name: p.name, rows: shown.filter(o => o.pillar_id === p.id) }))
+      .filter(g => g.rows.length)
+    const loose = shown.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
+    if (loose.length) groups.push({ id: '', name: pillars.length ? 'No theme' : null, rows: loose })
+    return groups
+  }
 
   return (
     <div>
@@ -1014,6 +1165,10 @@ export function PlanTab({ members }) {
         Everything below adds up from the register the committee already keeps, so the plan reports
         against itself rather than a spreadsheet nobody updates.
       </p>
+
+      {view === 'plan' && (
+        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} onChanged={load} />
+      )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {[['plan', 'By plan'], ['delivery', 'All work']].map(([k, l]) => (
@@ -1037,9 +1192,18 @@ export function PlanTab({ members }) {
 
             {plans.length === 0 && !addingPlan && (
               <div className="pb-card p-6 text-center">
-                <div className="text-pb-text text-[13px] mb-1">No strategic plan yet.</div>
-                <div className="font-mono text-[11px] text-pb-faintest">
-                  Add one, then hang the club's objectives off it.
+                <div className="text-pb-text text-[13px] mb-1">No plan yet.</div>
+                <div className="font-mono text-[11px] text-pb-faintest mb-3 max-w-md mx-auto leading-relaxed">
+                  Start from a filled-in one and change what does not fit. It sets up
+                  four themes, a plan for this year, and an example objective under each.
+                </div>
+                <button onClick={seedStarter} disabled={seeding}
+                  className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40"
+                  style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+                  {seeding ? 'SETTING UP…' : 'START ME OFF'}
+                </button>
+                <div className="font-mono text-[10px] text-pb-faintest mt-2">
+                  Or use + STRATEGIC PLAN above to write your own.
                 </div>
               </div>
             )}
@@ -1106,14 +1270,22 @@ export function PlanTab({ members }) {
                 {openPlan === p.id && (
                   <Nested level="objective" className="mt-3 space-y-2">
                     {addingObjectiveTo === p.id && (
-                      <ObjectiveForm plans={plans} planId={p.id} members={members}
+                      <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+                        planId={p.id} pillarId={pillarFilter} members={members}
                         onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
                     )}
-                    {(p.objective_list || []).length === 0 && addingObjectiveTo !== p.id && (
-                      <div className="font-mono text-[10px] text-pb-faintest">Nothing on this plan yet.</div>
+                    {byTheme(p.objective_list || []).length === 0 && addingObjectiveTo !== p.id && (
+                      <div className="font-mono text-[10px] text-pb-faintest">
+                        {pillarFilter ? 'Nothing on this plan under that theme.' : 'Nothing on this plan yet.'}
+                      </div>
                     )}
-                    {(p.objective_list || []).map(o => (
-                      <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
+                    {/* A theme is a heading, not another indent — the plan →
+                        objective → action depth stays three. */}
+                    {byTheme(p.objective_list || []).map(g => (
+                      <div key={g.id || '__none'} className="space-y-2">
+                        {g.name && <div className={`${cap} pt-1`}>{g.name.toUpperCase()}</div>}
+                        {g.rows.map(o => <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />)}
+                      </div>
                     ))}
                   </Nested>
                 )}
@@ -1137,11 +1309,15 @@ export function PlanTab({ members }) {
                 </div>
                 <Nested level="objective" className="mt-3 space-y-2">
                   {addingObjectiveTo === '' && (
-                    <ObjectiveForm plans={plans} planId="" members={members}
+                    <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+                      planId="" pillarId={pillarFilter} members={members}
                       onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
                   )}
-                  {(unassigned.objective_list || []).map(o => (
-                    <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
+                  {byTheme(unassigned.objective_list || []).map(g => (
+                    <div key={g.id || '__none'} className="space-y-2">
+                      {g.name && <div className={`${cap} pt-1`}>{g.name.toUpperCase()}</div>}
+                      {g.rows.map(o => <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />)}
+                    </div>
                   ))}
                 </Nested>
               </div>

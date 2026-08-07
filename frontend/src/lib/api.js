@@ -387,6 +387,20 @@ export const api = {
     request(`/club-admin/committee/notes/${entityType}/${entityId}`, { method: 'POST', body: JSON.stringify({ body, author_member_id: authorMemberId || null }) }),
   committeeDeleteNote: (noteId) =>
     request(`/club-admin/committee/notes/${noteId}`, { method: 'DELETE' }),
+  // The club's strategic themes. Objectives group under one; a pillar is a
+  // heading, not another level of the hierarchy.
+  committeeListPillars: (includeInactive) =>
+    request(`/club-admin/committee/pillars${includeInactive ? '?include_inactive=true' : ''}`),
+  committeeCreatePillar: (data) =>
+    request('/club-admin/committee/pillars', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdatePillar: (id, data) =>
+    request(`/club-admin/committee/pillars/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeletePillar: (id) =>
+    request(`/club-admin/committee/pillars/${id}`, { method: 'DELETE' }),
+  // The four pillars, a plan for this year and an example objective under each,
+  // so a committee edits rather than starts from nothing.
+  committeeSeedStarterPlan: () =>
+    request('/club-admin/committee/plans/seed-starter', { method: 'POST' }),
   committeeListPlans: (includeArchived) =>
     request(`/club-admin/committee/plans${includeArchived ? '?include_archived=true' : ''}`),
   committeePlanReport: (includeArchived) =>
