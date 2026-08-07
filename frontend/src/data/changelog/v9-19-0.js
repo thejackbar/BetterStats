@@ -1,7 +1,7 @@
 export default {
   version: 'v9.19.0',
   date: '2026-08-07',
-  sortKey: '2026-08-14T14:00:00Z',
+  sortKey: '2026-08-15T10:00:00Z',
   title: 'Strategic plans, objectives and the work that delivers them',
   items: [
     'Clubhouse → Committee → Plan now holds the club\'s strategic plans as records you can add, rename, date and delete, rather than a plan name typed onto each objective. Whatever your club already typed has become real plans, and two spellings of the same one are now one plan.',
