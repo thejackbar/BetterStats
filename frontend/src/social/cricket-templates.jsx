@@ -1458,7 +1458,11 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
             : <div key={i} style={{ padding: '6px 18px', border: `1px dashed ${dimmer}`, borderRadius: 6 }}>SPONSOR LOGO</div>
         })}
       </div>
-      <CreditMark ink={palette.ink} h={44} />
+      {/* `ink` is the footer's OWN text colour, handed in by each SC template.
+          SC2 inverts the bar (bg={ink} ink={bg}), so read the prop, never the
+          palette: this component is not given one, and reaching for it is what
+          made every scorecard post throw "palette is not defined". */}
+      <CreditMark ink={ink} h={44} />
     </div>
   )
 }
@@ -1697,7 +1701,7 @@ export function SC2_Brutalist({ match, palette = {} }) {
         <TeamCol team={m.home || {}} side='home' />
         <TeamCol team={m.away || {}} side='away' />
       </div>
-      <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
+      <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
       <GrainSVG opacity={dark ? 0.28 : 0.18} id='sc2g' />
     </div>
   )
@@ -1822,7 +1826,7 @@ export function SC3_Dashboard({ match, palette = {} }) {
         <TeamCard team={m.home || {}} accentC={m.home?.color || '#2563eb'} side='home' />
         <TeamCard team={m.away || {}} accentC={m.away?.color || '#10b981'} side='away' />
       </div>
-      <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} />
+      <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
     </div>
   )
 }
