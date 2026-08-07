@@ -5,6 +5,8 @@ read from our own DB (DB-first); only the not-yet-played fixtures — which we
 don't persist until a match is synced — are fetched live from Grassroots via
 ``/scores/grades/{id}/matches`` (status 0=UPCOMING / 2=LIVE).
 """
+from typing import NamedTuple
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,18 +15,38 @@ from app.services.club_match import club_match_keys
 from app.services.grade_labels import category_for_name, category_label, org_grade_categories
 
 
-async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
-    """``[(grade_guid, our_grade_id, grade_name, season_name)]`` for the org's
-    latest season.
+class GradeRow(NamedTuple):
+    """One of the org's current-season grades, as ``_current_grade_rows`` returns it.
 
-    The raw CA grade GUID (``grassroots_id``, COALESCE'd with ``id`` for legacy
-    rows) is what ``/scores/grades/{id}/matches`` is keyed on. Restricting to the
-    org's most-recent season year keeps this to ~one season of grades rather than
-    fanning out across all of history. ``our_grade_id`` is our own DB grade's
-    PK — NOT always the same as the raw guid (a per-club ``uuid5`` on a
-    cross-club collision, see the grade-collision note in CLAUDE.md) — so
-    callers that need to stamp a real ``grades.id`` FK (e.g. a persisted
-    Fixture row) must use it, not the guid.
+    A NamedTuple rather than a bare tuple ON PURPOSE. This started life as a
+    3-tuple; ``our_grade_id`` was added for a caller that needed to stamp a real
+    ``grades.id`` FK, and the other caller's ``for guid, gname, _ in rows`` kept
+    compiling and kept passing ``py_compile`` while raising "too many values to
+    unpack (expected 3)" on every request — which took the whole BetterPosts
+    Results tab down for every club until it was reported from the wild. Read the
+    fields by NAME, and a fifth column can be added here without silently
+    breaking a caller that doesn't want it.
+    """
+
+    guid: str
+    """The RAW Cricket Australia grade GUID. What ``/scores/grades/{id}/matches``
+    is keyed on, and what a discovered match carries as its ``grade_id`` — so
+    it's also the right key for a lookup built off upstream match payloads."""
+
+    our_grade_id: object
+    """Our own ``grades.id`` PK. NOT always the same as ``guid`` (a per-club
+    ``uuid5`` on a cross-club collision, see the grade-collision note in
+    CLAUDE.md), so a caller stamping a real FK must use this, never the guid."""
+
+    grade_name: str | None
+    season_name: str | None
+
+
+async def _current_grade_rows(db: AsyncSession, org_id) -> list[GradeRow]:
+    """The org's latest season's grades as :class:`GradeRow`.
+
+    Restricting to the org's most-recent season year keeps this to ~one season of
+    grades rather than fanning out across all of history.
     """
     res = await db.execute(
         text(
@@ -44,7 +66,7 @@ async def _current_grade_rows(db: AsyncSession, org_id) -> list[tuple]:
         ),
         {"org": str(org_id)},
     )
-    return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
+    return [GradeRow(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
 
 
 async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
@@ -64,10 +86,10 @@ async def org_grassroots_fixtures(db: AsyncSession, org) -> list[dict]:
     rows = await _current_grade_rows(db, org.id)
     if not rows:
         return []
-    meta = {guid: (grade_id, gname, sname) for guid, grade_id, gname, sname in rows}
+    meta = {r.guid: (r.our_grade_id, r.grade_name, r.season_name) for r in rows}
     categories = await org_grade_categories(db, org.id)
     fixtures = await gr.get_grades_fixtures(
-        [guid for guid, _, _, _ in rows], club_match_keys(org)
+        [r.guid for r in rows], club_match_keys(org)
     )
     for fx in fixtures:
         db_grade_id, gname, sname = meta.get(fx.get("grade_id"), (None, None, None))
