@@ -305,6 +305,11 @@ class Organisation(Base):
     # means no club preference, and the platform default applies: everything
     # except junior. Read through services/grade_scope.py, never directly.
     stats_grade_categories = Column(JSONB, nullable=True)
+    # When the club default would leave out every grade category a player has
+    # actually played, show them the categories they did play rather than a page
+    # of zeroes (migration 229). Only ever affects the default, never an explicit
+    # pick. See services/grade_scope.resolve_scope_for_player.
+    stats_auto_show_played_grades = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —

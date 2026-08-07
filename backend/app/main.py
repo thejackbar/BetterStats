@@ -319,6 +319,12 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "stats_grade_categories JSONB"
         ))
+        # Migration 229 — show a player the grades they actually played when the
+        # default would hide every one of them.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "stats_auto_show_played_grades BOOLEAN NOT NULL DEFAULT true"
+        ))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).

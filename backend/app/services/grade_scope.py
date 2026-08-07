@@ -189,6 +189,85 @@ async def resolve_scope(
     return GradeScope(wanted, excluded_ids, tuple(sorted(excluded_categories)), param)
 
 
+async def player_categories(session: AsyncSession, player_id, org_id) -> set[str]:
+    """The grade categories a player has actually turned out in.
+
+    Reads the grades behind their per-game rows and any grade-attributable
+    aggregate residual. A career-level residual carries no grade and so says
+    nothing about categories — it is left out here rather than counted as
+    senior, since it is equally likely to be junior.
+    """
+    if not player_id or not org_id:
+        return set()
+    res = await session.execute(
+        text(
+            """
+            SELECT DISTINCT gr.name
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID)
+              AND (
+                EXISTS (
+                    SELECT 1 FROM v_effective_games g
+                    WHERE g.grade_id = gr.id AND (
+                        EXISTS (SELECT 1 FROM v_effective_batting_innings bi
+                                WHERE bi.game_id = g.id AND bi.player_id = CAST(:pid AS UUID))
+                     OR EXISTS (SELECT 1 FROM v_effective_bowling_spells bs
+                                WHERE bs.game_id = g.id AND bs.player_id = CAST(:pid AS UUID))
+                     OR EXISTS (SELECT 1 FROM v_effective_fielding_stats fs
+                                WHERE fs.game_id = g.id AND fs.player_id = CAST(:pid AS UUID))
+                     OR EXISTS (SELECT 1 FROM game_appearances ga
+                                WHERE ga.game_id = g.id AND ga.player_id = CAST(:pid AS UUID))
+                    )
+                )
+                OR EXISTS (
+                    SELECT 1 FROM v_effective_player_season_stats pss
+                    WHERE pss.player_id = CAST(:pid AS UUID) AND pss.grade_id = gr.id
+                )
+              )
+            """
+        ),
+        {"pid": str(player_id), "org": str(org_id)},
+    )
+    names = await org_grade_categories(session, org_id)
+    return {category_for_name(names, row[0]) for row in res.fetchall()}
+
+
+async def resolve_scope_for_player(
+    session: AsyncSession,
+    org_id,
+    player_id,
+    categories=None,
+    *,
+    auto_widen: bool = True,
+    param: str = "gs_excluded_grade_ids",
+) -> tuple[GradeScope, bool]:
+    """A scope for one player's own page, widened if the default would empty it.
+
+    A junior who has never played a senior game would otherwise open on a page of
+    zeroes, which reads as broken rather than as a filter doing its job. When the
+    club's default leaves out every category this player has actually played, the
+    categories they DID play are added back and the caller is told, so the page
+    can say why it is showing junior figures.
+
+    Only ever applies to the default. An explicit `categories` selection is a
+    choice someone made and is honoured even when it comes back empty — otherwise
+    switching juniors off for a junior-only player would silently switch them on
+    again, and the toggle would look broken instead.
+    """
+    explicit = normalise_categories(categories) is not None
+    scope = await resolve_scope(session, org_id, categories, param=param)
+    if explicit or not auto_widen or not scope.active:
+        return scope, False
+    played = await player_categories(session, player_id, org_id)
+    if not played or played & set(scope.categories):
+        return scope, False
+    widened = await resolve_scope(
+        session, org_id, sorted(set(scope.categories) | played), param=param
+    )
+    return widened, True
+
+
 async def org_available_categories(session: AsyncSession, org_id) -> list[str]:
     """The categories this club's grades actually fall into, in canonical order.
 

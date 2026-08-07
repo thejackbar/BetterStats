@@ -136,7 +136,11 @@ async def get_player_stats(
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
 
-    scope = await grade_scope.resolve_scope(db, player.organisation_id, categories)
+    org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
+    scope, auto_shown = await grade_scope.resolve_scope_for_player(
+        db, player.organisation_id, player_id, categories,
+        auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+    )
     use_game_filter = last_n_games or start_date or end_date
     if use_game_filter:
         try:
@@ -164,6 +168,11 @@ async def get_player_stats(
         "grade_scope": {
             **scope.as_meta(),
             "available": await grade_scope.org_available_categories(db, player.organisation_id),
+            # True when the club default would have left this player with nothing
+            # at all, so the categories they actually played were added back. The
+            # profile says so rather than quietly showing a wider set than the
+            # rest of the site.
+            "auto_shown": auto_shown,
         },
     }
 
@@ -303,7 +312,11 @@ async def get_player_seasons(
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    scope = await grade_scope.resolve_scope(db, player.organisation_id, categories)
+    org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
+    scope, _ = await grade_scope.resolve_scope_for_player(
+        db, player.organisation_id, player_id, categories,
+        auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+    )
     return await get_season_by_season(db, player_id, include_prior=True, scope=scope)
 
 

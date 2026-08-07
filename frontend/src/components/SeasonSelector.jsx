@@ -1,5 +1,5 @@
 import { formatSeason } from '../lib/cricketFormat'
-import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES } from '../lib/gradeCategories'
+import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, scopeNote } from '../lib/gradeCategories'
 
 export default function SeasonSelector({
   seasons = [],
@@ -40,7 +40,17 @@ export default function SeasonSelector({
     setCategories(next)
   }
 
+  // Derived from the props already here rather than threaded down from a
+  // response: what is left out is exactly the club's categories minus the ones
+  // currently ticked, and the leaderboard endpoints return bare arrays with no
+  // scope of their own to read.
+  const excluded = availableCategories.filter(c => !counted.includes(c))
+  const note = categories
+    ? scopeNote({ active: excluded.length > 0, excluded_categories: excluded })
+    : null
+
   return (
+    <div className="space-y-1.5">
     <div className="flex flex-wrap gap-2 items-center">
       {/* Season - always shown */}
       {seasons.length > 0 && (
@@ -206,6 +216,11 @@ export default function SeasonSelector({
           </div>
         </div>
       )}
+    </div>
+    {/* Says what the figures currently leave out, and where to change it. Only
+        renders while something is actually excluded, so a club with only senior
+        grades never reads about a filter that is doing nothing. */}
+    {note && <p className="text-[11px] text-pb-faint">{note}</p>}
     </div>
   )
 }

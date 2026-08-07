@@ -741,6 +741,9 @@ class SettingsPatch(BaseModel):
     # clear back to the platform default of everything-except-junior. An empty
     # list would hide every stat the club has, so it clears rather than saves.
     stats_grade_categories: Optional[list[str]] = None
+    # When the default would leave a player with nothing (a junior who has never
+    # played a senior game), show them the grades they did play (migration 229).
+    stats_auto_show_played_grades: Optional[bool] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
@@ -831,6 +834,8 @@ def _sanitize_font_config(raw: dict, existing: Optional[dict]) -> dict:
 async def get_settings(
     current_user: User = Depends(get_current_user),
     club: Organisation = Depends(get_current_club),
+    # Needed by the grade-category fields below, which read the club's grades.
+    db: AsyncSession = Depends(get_db),
 ):
     return {
         "id": str(club.id),
@@ -864,6 +869,7 @@ async def get_settings(
             await grade_scope.club_default_categories(db, club.id)
         ),
         "available_grade_categories": await grade_scope.org_available_categories(db, club.id),
+        "stats_auto_show_played_grades": bool(club.stats_auto_show_played_grades),
         "public_header_logo": bool(club.public_header_logo),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
@@ -927,6 +933,8 @@ async def patch_settings(
         # nothing but junk keys — is stored as NULL rather than saved. Honouring
         # it would leave the club looking at empty stats with no obvious way back.
         club.stats_grade_categories = list(picked) if picked else None
+    if data.stats_auto_show_played_grades is not None:
+        club.stats_auto_show_played_grades = bool(data.stats_auto_show_played_grades)
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
     if data.committee_docs_office_bearer_only is not None:

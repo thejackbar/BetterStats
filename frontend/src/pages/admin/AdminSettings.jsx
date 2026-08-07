@@ -232,6 +232,7 @@ export default function AdminSettings() {
         public_show_gender: !!s.public_show_gender,
         include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
         stats_grade_categories: s.effective_stats_grade_categories || [],
+        stats_auto_show_played_grades: s.stats_auto_show_played_grades !== false,
         public_header_logo: !!s.public_header_logo,
         password_protected: !!s.password_protected,
       })
@@ -764,10 +765,15 @@ export default function AdminSettings() {
               <p className="font-mono text-[10px] text-pb-faintest mb-3">
                 Which of your grades count towards career totals, leaderboards and club
                 records. Junior grades are left out by default, so an Under-14 season
-                doesn't sit inside a senior batting average. Anyone reading the site can
-                switch a category back on for themselves; this sets what they see first.
-                Picking a specific grade from a Grade dropdown always shows that grade,
-                whatever is ticked here.
+                doesn't sit inside a senior batting average — a player who made 200
+                against other 14-year-olds and 50 in first grade reads as a first-grade
+                batsman.
+              </p>
+              <p className="font-mono text-[10px] text-pb-faintest mb-3">
+                This is what a visitor sees first, not a wall. Every stats page has an
+                Include row for switching a category back on, and nothing is deleted or
+                hidden — the figures come straight back. Picking a specific grade from a
+                Grade dropdown always shows that grade, whatever is ticked here.
               </p>
               <div className="space-y-2">
                 {(settings.available_grade_categories || []).map(key => (
@@ -798,9 +804,30 @@ export default function AdminSettings() {
                 ))}
               </div>
               <p className="font-mono text-[10px] text-pb-faintest mt-2">
-                A grade's category is set on the Grades screen. Untick everything to go
-                back to the standard default.
+                A grade's category is set on the Grades screen, under Merge Grades. A grade
+                nobody has classified is worked out from its name, so Under 14s, Colts and
+                Year 7 are picked up without anyone labelling them. Untick everything here
+                to go back to the standard default.
               </p>
+
+              <label className="flex items-start gap-2.5 cursor-pointer mt-4 pt-4 pb-hairline-t">
+                <input
+                  type="checkbox"
+                  checked={!!form.stats_auto_show_played_grades}
+                  onChange={e => setForm(f => ({ ...f, stats_auto_show_played_grades: e.target.checked }))}
+                  className="accent-pb-accent mt-0.5 shrink-0" />
+                <span className="leading-tight">
+                  <span className="text-pb-text text-sm">Show a player the grades they actually played</span>
+                  <span className="font-mono text-[10px] text-pb-faintest block mt-1">
+                    A 13-year-old who has only ever played junior cricket would otherwise
+                    open their own profile on a page of zeroes. With this on, a profile
+                    that would have nothing to show counts the grades that player did play
+                    and says so at the top. It only changes what loads first — anyone can
+                    still switch a category on or off themselves, and it never affects the
+                    Leaderboard or Records.
+                  </span>
+                </span>
+              </label>
             </div>
           )}
 

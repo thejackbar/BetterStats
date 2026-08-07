@@ -32,12 +32,31 @@ export function categoriesParam(categories) {
   return GRADE_CATEGORIES.filter(c => set.has(c)).join(',')
 }
 
+function joinLabels(keys) {
+  const labels = (keys || []).map(c => CATEGORY_LABELS[c] || c)
+  if (labels.length <= 1) return labels[0] || ''
+  return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`
+}
+
 // A short line for a page to explain what its figures currently cover.
 // Returns null when nothing is excluded, so a club with no junior grades never
 // sees a note about a filter that is not doing anything.
 export function scopeNote(scope) {
   if (!scope || !scope.active) return null
-  const left = (scope.excluded_categories || []).map(c => CATEGORY_LABELS[c] || c)
-  if (left.length === 0) return null
-  return `${left.join(' and ')} grades are not counted in these figures.`
+  const left = joinLabels(scope.excluded_categories)
+  if (!left) return null
+  return `${left} grades are not counted here. Use Include above to add them back.`
+}
+
+// The profile-only case: this player has never played in any category the club
+// counts by default, so the grades they DID play were switched on for them.
+// Worth saying out loud — otherwise their figures look inconsistent with the
+// Leaderboard, and nobody would know why.
+export function autoShownNote(scope) {
+  if (!scope || !scope.auto_shown) return null
+  const shown = joinLabels((scope.categories || []).filter(c => c !== 'senior'))
+  return shown
+    ? `This player has only played ${shown} cricket, so those grades are being counted. `
+      + 'Elsewhere on the site they are left out by default.'
+    : null
 }

@@ -69,6 +69,23 @@ visibility only.
   surviving the filter, the season table reconciling with the header, an
   explicitly picked junior grade still returning its runs, finals composing with
   the filter, and migration 228 applied twice to a populated table.
+- **A junior-only player must not open on a page of zeroes** (migration 229,
+  `organisations.stats_auto_show_played_grades`, default TRUE).
+  `resolve_scope_for_player` widens the scope to the categories a player has
+  actually turned out in **when the default would leave them with nothing at
+  all**, and returns `auto_shown` so the profile can say why its figures differ
+  from the Leaderboard's. Three rules: it only ever applies to the DEFAULT (an
+  explicit `categories=` is honoured even when it comes back empty, or the
+  toggle would appear not to work); it is **profile-only**, never a club-wide
+  board; and a career-level residual carries no grade, so it counts towards
+  neither side of "has this player played in a counted category".
+- **Bug found in the wild**: `get_settings` had no `db` dependency, so the two
+  grade-category fields added to its response raised at request time and the
+  Settings page sat on "Loading…" forever (`AdminSettings.jsx` swallows the
+  error with `.catch(() => {})`). The route suite had exercised every OTHER new
+  endpoint but never `get_settings` itself. **A handler missing a `Depends`
+  compiles, imports and passes `py_compile` — only actually awaiting it fails.**
+  It is called for real in the suite now.
 - **Deliberately not touched**: BetterIQ (its own `iq_filters` grade vocabulary
   and a client-side "Seniors only" preset already), StatLab, Yearbooks, and the
   AFL silo (`services/afl/grade_labels.py` has its own category set —

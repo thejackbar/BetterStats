@@ -7,7 +7,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
-import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, categoriesParam, scopeNote } from '../lib/gradeCategories'
+import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, categoriesParam, scopeNote, autoShownNote } from '../lib/gradeCategories'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, Label, Card, Btn,
@@ -2563,8 +2563,10 @@ export default function PlayerProfile() {
             />
           </div>
         )}
-        {scopeNote(gradeScope) && (
-          <p className="text-[11px] text-pb-faint mb-5 -mt-3">{scopeNote(gradeScope)}</p>
+        {(autoShownNote(gradeScope) || scopeNote(gradeScope)) && (
+          <p className="text-[11px] text-pb-faint mb-5 -mt-3">
+            {autoShownNote(gradeScope) || scopeNote(gradeScope)}
+          </p>
         )}
 
         {/* Quick stat strip */}
