@@ -460,6 +460,60 @@ const AMBER = '#f5b542'
 // budget a rolled-up row carries (which falls back to the sum of its actions').
 const ownBudget = o => ('own_budget' in o ? o.own_budget : o.budget)
 
+// Three levels, and the page has to read as three levels. Each one steps in
+// from the left behind its own rail and takes a weaker share of the accent, so
+// depth is legible at a glance instead of every card looking equally important.
+//
+// The rails are `color-mix`, not `${accent}66` — the accent resolves to a
+// var(), and a hex suffix on a var() is not a colour, so the border silently
+// disappears (the same trap `chip()` documents).
+const mix = (pctAccent, base = 'transparent') =>
+  `color-mix(in srgb, var(--pb-accent) ${pctAccent}%, ${base})`
+
+// The figures step down the same way the rails do, so a plan's numbers read
+// louder than its objectives' and an objective's louder than its actions'.
+// Mixed towards the body colour rather than switched to a different hue: they
+// are the same kind of figure, just less of the club's accent each time.
+const LEVEL = {
+  plan: {
+    rail: mix(75), tint: 'transparent',
+    figure: 'var(--pb-accent-ink)', size: 'text-[19px]',
+  },
+  objective: {
+    rail: mix(42), tint: mix(5, 'var(--pb-surface2)'),
+    figure: 'color-mix(in srgb, var(--pb-accent-ink) 66%, var(--pb-dim))', size: 'text-[15px]',
+  },
+  work: {
+    rail: mix(22), tint: 'transparent',
+    figure: 'var(--pb-dim)', size: 'text-[13px]',
+  },
+}
+
+// The step-in itself. Modest at 390px, where a deep indent would cost more
+// reading width than the structure is worth.
+function Nested({ level, children, className = '' }) {
+  const L = LEVEL[level]
+  return (
+    <div className={`ml-2 sm:ml-4 pl-3 sm:pl-4 border-l-2 rounded-l-none ${className}`}
+      style={{ borderColor: L.rail }}>
+      {children}
+    </div>
+  )
+}
+
+// "Raised at the March committee, 4 Mar 2026" — the context that turns a line
+// of a plan into something a committee recognises.
+function RaisedAt({ title, date, verb = 'Raised at' }) {
+  if (!title && !date) return null
+  const when = date ? new Date(date).toLocaleDateString(undefined,
+    { day: 'numeric', month: 'short', year: 'numeric' }) : null
+  return (
+    <span className="font-mono text-[9px] text-pb-faintest">
+      {verb} {title || 'a meeting'}{when ? ` · ${when}` : ''}
+    </span>
+  )
+}
+
 function Bar({ percent, tone }) {
   return (
     <div className="h-1.5 rounded bg-pb-surface2 overflow-hidden">
@@ -472,8 +526,10 @@ function Bar({ percent, tone }) {
 }
 
 // Progress, spend against what was allocated, and whether it has run late —
-// the three questions asked of anything on a plan, in one strip.
-function Delivery({ row, compact = false }) {
+// the three questions asked of anything on a plan, in one strip. `level` sets
+// how loudly it reads, so an objective's figures do not compete with its plan's.
+function Delivery({ row, level = 'objective' }) {
+  const L = LEVEL[level]
   const spendTone = row.over_budget ? AMBER : 'var(--pb-accent)'
   const stats = [
     { v: `${row.actions_done}/${row.actions}`, l: 'ACTIONS DONE' },
@@ -483,11 +539,11 @@ function Delivery({ row, compact = false }) {
   ]
   return (
     <div>
-      <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 ${compact ? 'mt-2' : 'mt-3'}`}>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
         {stats.map(s => (
           <div key={s.l}>
-            <div className={`font-display font-bold pb-num ${compact ? 'text-[15px]' : 'text-[19px]'}`}
-              style={{ color: s.warn ? AMBER : 'var(--pb-accent-ink)' }}>{s.v}</div>
+            <div className={`font-display font-bold pb-num ${L.size}`}
+              style={{ color: s.warn ? AMBER : L.figure }}>{s.v}</div>
             <div className={cap}>{s.l}</div>
           </div>
         ))}
@@ -727,7 +783,7 @@ function ActionLine({ action, onSave }) {
   }
 
   return (
-    <div className="border pb-hairline rounded px-3 py-2">
+    <div className="border pb-hairline rounded px-3 py-2" style={{ background: LEVEL.work.tint }}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[12.5px] text-pb-text">{action.title}</div>
@@ -745,6 +801,11 @@ function ActionLine({ action, onSave }) {
             )}
             {action.status === 'done' && <span style={{ color: 'var(--pb-positive)' }}>done</span>}
           </div>
+          {action.meeting_title && (
+            <div className="mt-0.5">
+              <RaisedAt title={action.meeting_title} date={action.meeting_date} />
+            </div>
+          )}
         </div>
         <button onClick={() => setOpen(o => !o)}
           className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">
@@ -788,18 +849,17 @@ function MotionLine({ motion }) {
   const tone = motion.outcome === 'carried' ? 'var(--pb-positive)'
     : motion.outcome === 'lost' ? 'var(--pb-red)' : 'var(--pb-faint)'
   return (
-    <div className="border pb-hairline rounded px-3 py-2">
+    <div className="border pb-hairline rounded px-3 py-2" style={{ background: LEVEL.work.tint }}>
       <div className="flex items-start justify-between gap-2">
         <div className="text-[12.5px] text-pb-text min-w-0">{motion.description}</div>
         <span className="font-mono text-[9px] tracking-wide2 shrink-0" style={{ color: tone }}>
           {(motion.outcome || 'pending').toUpperCase()}
         </span>
       </div>
-      <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
-        {motion.meeting_title && <span>{motion.meeting_title}</span>}
-        {motion.meeting_date && <span>{motion.meeting_date.slice(0, 10)}</span>}
+      <div className="mt-0.5 flex flex-wrap items-center gap-x-2">
+        <RaisedAt title={motion.meeting_title} date={motion.meeting_date} verb="Moved at" />
         {motion.is_resolution && (
-          <span style={{ color: 'var(--pb-accent-ink)' }}>
+          <span className="font-mono text-[9px]" style={{ color: 'var(--pb-accent-ink)' }}>
             RESOLUTION{motion.resolution_ref ? ` · ${motion.resolution_ref}` : ''}
           </span>
         )}
@@ -838,9 +898,10 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
   }
 
   return (
-    <div className="pb-card p-4">
+    <div className="rounded-lg border pb-hairline p-3 sm:p-4" style={{ background: LEVEL.objective.tint }}>
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div className="min-w-0">
+          <div className={`${cap} mb-0.5`}>OBJECTIVE</div>
           <div className="text-pb-text font-medium flex items-center gap-2 flex-wrap">
             {o.title}<LateTag row={o} />
           </div>
@@ -861,15 +922,15 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
         </div>
       </div>
 
-      <Delivery row={o} />
+      <Delivery row={o} level="objective" />
 
       <button onClick={() => setOpen(v => !v)}
         className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text mt-3">
-        {open ? 'Hide' : 'Show'} work · {actions.length} {actions.length === 1 ? 'action' : 'actions'} · {motions.length} {motions.length === 1 ? 'motion' : 'motions'} · notes
+        {open ? '▾' : '▸'} {open ? 'Hide' : 'Show'} work · {actions.length} {actions.length === 1 ? 'action' : 'actions'} · {motions.length} {motions.length === 1 ? 'motion' : 'motions'} · notes
       </button>
 
       {open && (
-        <div className="mt-3 space-y-3">
+        <Nested level="work" className="mt-3 space-y-3">
           <div>
             <div className={`${cap} mb-1.5`}>ACTIONS</div>
             {actions.length === 0 ? (
@@ -895,7 +956,7 @@ function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
             )}
           </div>
           <NoteThread entityType="objective" entityId={o.id} />
-        </div>
+        </Nested>
       )}
     </div>
   )
@@ -986,10 +1047,11 @@ export function PlanTab({ members }) {
             {plans.map(p => editingPlan === p.id ? (
               <PlanForm key={p.id} plan={p} onSave={d => savePlan(p.id, d)} onCancel={() => setEditingPlan(null)} />
             ) : (
-              <div key={p.id} className="pb-card p-4">
+              <div key={p.id} className="pb-card p-4 border-l-2" style={{ borderLeftColor: LEVEL.plan.rail }}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <div className="min-w-0">
-                    <div className="text-pb-text font-medium text-[15px]">{p.name}</div>
+                    <div className={`${cap} mb-0.5`}>STRATEGIC PLAN</div>
+                    <div className="text-pb-text font-semibold text-[17px]">{p.name}</div>
                     <div className={`${cap} mt-0.5`}>
                       {[p.start_year, p.end_year].filter(Boolean).join('–') || 'NO DATES SET'}
                       {' · '}{p.objectives} {p.objectives === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
@@ -1035,14 +1097,14 @@ export function PlanTab({ members }) {
                 <div className="flex items-center gap-3 mt-3">
                   <button onClick={() => setOpenPlan(v => v === p.id ? null : p.id)}
                     className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">
-                    {openPlan === p.id ? 'Hide objectives' : 'Show objectives'}
+                    {openPlan === p.id ? '▾ Hide objectives' : '▸ Show objectives'}
                   </button>
                   <button onClick={() => { setOpenPlan(p.id); setAddingObjectiveTo(p.id) }}
                     className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">+ Objective</button>
                 </div>
 
                 {openPlan === p.id && (
-                  <div className="mt-3 space-y-2">
+                  <Nested level="objective" className="mt-3 space-y-2">
                     {addingObjectiveTo === p.id && (
                       <ObjectiveForm plans={plans} planId={p.id} members={members}
                         onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
@@ -1053,7 +1115,7 @@ export function PlanTab({ members }) {
                     {(p.objective_list || []).map(o => (
                       <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
                     ))}
-                  </div>
+                  </Nested>
                 )}
               </div>
             ))}
@@ -1073,7 +1135,7 @@ export function PlanTab({ members }) {
                   <button onClick={() => setAddingObjectiveTo('')}
                     className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">+ Objective</button>
                 </div>
-                <div className="mt-3 space-y-2">
+                <Nested level="objective" className="mt-3 space-y-2">
                   {addingObjectiveTo === '' && (
                     <ObjectiveForm plans={plans} planId="" members={members}
                       onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
@@ -1081,7 +1143,7 @@ export function PlanTab({ members }) {
                   {(unassigned.objective_list || []).map(o => (
                     <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
                   ))}
-                </div>
+                </Nested>
               </div>
             )}
 

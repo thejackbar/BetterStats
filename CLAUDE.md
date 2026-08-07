@@ -1,5 +1,43 @@
 # BetterStats — Claude Session Notes
 
+## Picking a person is a SEARCH, not a list (v9.19.1, Aug 2026)
+
+Reported: the Start-a-term dropdown on Committee Roles is "very short". It was
+drawing `.slice(0, 30)` of `/fees/all-members` with nothing to say there were
+more, so an unfiltered list stopped inside the A's and read as the whole club.
+
+- **`PersonSearch` (clubmanager/pickers.jsx) is the pattern now** — type a name,
+  the SERVER searches, only matches come back. Modelled on the meeting room's
+  "who is doing it" field. A club with fifteen hundred people should never have
+  its roster shipped to the browser to draw a dropdown somebody is about to type
+  into anyway. **Reach for this over `MemberSelect` on any picker that has to
+  offer the whole club.**
+- **`GET /club-admin/fees/people/search`** searches `fee_members` UNION the
+  club's players with no member row, org-scoped on both sides of the
+  read-through, archived never offered. Returns `needs_member: true` for a
+  player who is not enrolled, and asks for one row over the limit purely to
+  answer "is that all of them" without a second COUNT.
+- **Debounced 220ms, and the response is DROPPED if the box has moved on** — a
+  slow search for "sm" must not land on top of the results for "smith".
+- **`start_term` takes a `player_id` and enrols them itself.** Committee terms
+  FK to `fee_members`, so a not-yet-enrolled player needs a row first; doing it
+  here keeps it one request under `MANAGE_COMMITTEE`, whereas the Directory's
+  own ensure-member route needs `MANAGE_MEMBERS`, which a committee manager does
+  not necessarily hold. `members.ensure_for_player` is idempotent and un-archives.
+- **`fee_members.archived_at` had existed since migration 212 and was never
+  mapped on the model**, so reading it off an ORM row raised at request time.
+  Mapped now. **A raw-SQL column the services only ever touched through `text()`
+  is invisible to the ORM until someone adds it.**
+- **`/fees/all-members` still means "member rows"** and is unchanged for its
+  eight callers, plus an `archived` flag. Screens keep using it to resolve a
+  name against a record that already names someone; only CHOOSING is a search.
+- **Verified against a real Postgres** (27 checks: the read-through, cross-club
+  scoping both ways, archived never offered, enrolling on the first term and
+  reusing the row on the second, the limit bounded against a caller asking for
+  thousands) and driven in Chromium (17: nothing listed before typing, no
+  request for an empty box, four keystrokes debounced into one, and the payloads
+  for both an ordinary member and an unenrolled player).
+
 ## Strategic plans → objectives → actions and motions (migration 230, v9.19.0, Aug 2026)
 
 Reported: the Committee screen's Plan tab could create an objective and nothing
@@ -66,6 +104,17 @@ to edit or delete an objective, and a motion could not point at the plan at all.
   editable hierarchy) and "All work" (every action and motion flat, in plan
   context, filterable to late / over budget). Both read the one `/plans/report`
   fetch.
+- **Three levels, three shades (v9.19.1).** `LEVEL` in governance.jsx sets the
+  rail, tint and figure colour per depth, and `Nested` is the step-in. The rails
+  are `color-mix`, never `${accent}66` — the accent resolves to a `var()` and a
+  hex suffix on one is not a colour, so the border silently vanishes (the trap
+  `chip()` already documents). Figures are mixed towards `--pb-dim` rather than
+  switched to another hue: same kind of number, less of the club's accent each
+  time. Checked by computing the styles in both themes, not by eye.
+- **An action reports the meeting it was raised at**, falling back to its
+  MOTION's meeting when it has none of its own. Served as `raised_meeting_id`,
+  deliberately NOT overwriting `meeting_id` — that key means the action's own
+  column, and a row must not claim a link it does not hold.
 - **Verified against a real Postgres** — 85 service- and route-level checks
   (the migration applied twice to a populated pre-230 table, the two-spelling
   collapse, cross-club rejection of a foreign plan id, every clearable field,

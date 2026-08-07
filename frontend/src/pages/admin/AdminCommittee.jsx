@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
 import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
-import { MemberSelect } from '../../components/admin/clubmanager/pickers'
+import { PersonSearch } from '../../components/admin/clubmanager/pickers'
 import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, PlanTab, ActionTimeline, ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
@@ -38,13 +38,12 @@ function TabBar({ tab, setTab }) {
 }
 
 // ── Committee Roles tab (succession) ────────────────────────────────────────
-function StartTermForm({ position, members, onClose, onDone }) {
+function StartTermForm({ position, onClose, onDone }) {
   const toast = useToast()
   // The whole person, not just an id: a club player who has not been enrolled
   // yet has no member id to hold on to, and the server needs their player id to
   // create the person row.
   const [person, setPerson] = useState(null)
-  const [key, setKey] = useState(null)
   const [startedAt, setStartedAt] = useState(today())
   const [busy, setBusy] = useState(false)
   async function submit() {
@@ -64,8 +63,8 @@ function StartTermForm({ position, members, onClose, onDone }) {
   return (
     <div className="mt-2 flex flex-col sm:flex-row gap-2 sm:items-start">
       <div className="flex-1 min-w-[180px]">
-        <MemberSelect members={members} value={key}
-          onChange={(k, p) => { setKey(k); setPerson(p) }} placeholder="Choose member…" />
+        <PersonSearch value={person} onChange={setPerson} autoFocus
+          placeholder="Type a name to search the club…" />
       </div>
       <input type="date" className={`${inp} sm:w-40`} value={startedAt} onChange={e => setStartedAt(e.target.value)} />
       <button onClick={submit} disabled={busy || !person}
@@ -151,7 +150,7 @@ function PositionCard({ position, members, onChanged }) {
         {!term && !showStart && (
           <button onClick={() => setShowStart(true)} className="mt-2 font-mono text-[10px] text-pb-faint hover:text-pb-text">+ Start a term</button>
         )}
-        {showStart && <StartTermForm position={position} members={members} onClose={() => setShowStart(false)} onDone={() => { setShowStart(false); onChanged() }} />}
+        {showStart && <StartTermForm position={position} onClose={() => setShowStart(false)} onDone={() => { setShowStart(false); onChanged() }} />}
       </div>
       {showHistory && history && (
         <div className="mt-2 pt-2 border-t pb-hairline-t space-y-1">
@@ -1034,12 +1033,11 @@ export default function AdminCommittee() {
   // Deliberately not depending on `toast`: the context value changes whenever a
   // toast is raised, so a club without the fees module used to fail, raise a
   // toast, re-run this effect, and fail again forever.
-  // includePlayers: a committee seat can go to anyone in the club, including a
-  // player nobody has enrolled as a member yet. Starting their term creates the
-  // person row server-side.
+  // The club's members, for showing a name against a record that already names
+  // someone. CHOOSING a person is a search (PersonSearch), not a list, so this
+  // never has to carry every player the club has ever had.
   useEffect(() => {
-    api.feeAllMembers({ includePlayers: true })
-      .then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
+    api.feeAllMembers().then(d => setMembers(d.members || [])).catch(e => toast.error(e.message))
   }, [])   // eslint-disable-line react-hooks/exhaustive-deps
 
   return (

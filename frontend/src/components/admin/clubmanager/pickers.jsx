@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
+import { api } from '../../../lib/api'
 
 // Shared pickers for BetterClubManager. All use the module's input styling.
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -76,6 +77,86 @@ export function MemberSelect({ members = [], value, onChange, placeholder = 'Sea
           {hidden > 0 && (
             <div className="px-3 py-2 text-[11px] text-pb-faintest border-t pb-hairline sticky bottom-0 bg-pb-surface">
               {shown.length} of {matches.length} shown. Type a name to find the rest.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Type a name, the server finds the person. The same interaction as the meeting
+// room's "who is doing it" field, and for the same reason: a club can hold well
+// over a thousand people, and a dropdown that lists them all is both a big
+// payload and unreadable — the first screenful never gets past the A's.
+//
+// Anyone in the club can be found, including a player who has never been
+// enrolled as a member. Those come back with `member_id: null` and
+// `needs_member: true`; the caller is responsible for enrolling them, so
+// `onChange` hands back the whole person, not just an id.
+export function PersonSearch({ value, onChange, placeholder = 'Type a name to search…', autoFocus = false }) {
+  const [q, setQ] = useState('')
+  const [results, setResults] = useState(null)
+  const [more, setMore] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+  useOutsideClose(wrap, () => setOpen(false), open)
+
+  useEffect(() => {
+    const term = q.trim()
+    if (!term) { setResults(null); setMore(false); return }
+    // Debounced, and the response is dropped if the box has moved on — a slow
+    // search for "sm" must not land on top of the results for "smith".
+    let live = true
+    setBusy(true)
+    const t = setTimeout(() => {
+      api.searchClubPeople(term)
+        .then(d => { if (live) { setResults(d.people || []); setMore(!!d.more) } })
+        .catch(() => { if (live) { setResults([]); setMore(false) } })
+        .finally(() => { if (live) setBusy(false) })
+    }, 220)
+    return () => { live = false; clearTimeout(t) }
+  }, [q])
+
+  if (value) {
+    return (
+      <div className={`${inp} flex items-center justify-between`}>
+        <span className="truncate">
+          {value.full_name}
+          {value.needs_member && <span className="text-pb-faint text-[10px]"> · not yet a member</span>}
+        </span>
+        <button type="button" onClick={() => { onChange(null); setQ(''); setOpen(true) }}
+          className="text-pb-faint hover:text-pb-red text-[11px] shrink-0 ml-2">clear</button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="relative" ref={wrap}>
+      <input className={inp} placeholder={placeholder} value={q} autoFocus={autoFocus}
+        onFocus={() => setOpen(true)} onChange={e => { setQ(e.target.value); setOpen(true) }} />
+      {open && q.trim() !== '' && (
+        <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-56 overflow-y-auto shadow-xl">
+          {busy && results === null && (
+            <div className="px-3 py-2 text-[12px] text-pb-faintest">Searching…</div>
+          )}
+          {results !== null && results.length === 0 && !busy && (
+            <div className="px-3 py-2 text-[12px] text-pb-faintest">Nobody in the club matches that.</div>
+          )}
+          {(results || []).map(p => (
+            <button type="button" key={p.member_id || `player:${p.player_id}`}
+              onClick={() => { onChange(p); setOpen(false); setQ('') }}
+              className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">
+              {p.full_name}
+              {p.needs_member
+                ? <span className="text-pb-faint text-[10px]"> · player, not yet a member</span>
+                : p.is_linked ? <span className="text-pb-faint text-[10px]"> · player</span> : null}
+            </button>
+          ))}
+          {more && (
+            <div className="px-3 py-2 text-[11px] text-pb-faintest border-t pb-hairline">
+              More people match. Type a bit more of the name.
             </div>
           )}
         </div>

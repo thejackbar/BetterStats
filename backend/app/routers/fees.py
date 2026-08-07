@@ -478,59 +478,95 @@ async def seed_starter_membership_types(
 # member/person picker used across BetterClubManager (Volunteers, Qualifications,
 # Event organiser, Booking owner, Club Diary responsibility). Readable by any of
 # those tools' capabilities, not just MANAGE_FEES.
+_PEOPLE_CAPS = require_any_cap(
+    MANAGE_FEES, MANAGE_VOLUNTEERS, MANAGE_QUALIFICATIONS,
+    MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY)
+
+
 @router.get("/all-members")
 async def list_all_members(
-    include_players: bool = False,
-    _: User = Depends(require_any_cap(
-        MANAGE_FEES, MANAGE_VOLUNTEERS, MANAGE_QUALIFICATIONS,
-        MANAGE_COMMITTEE, MANAGE_ASSETS, MANAGE_CLUB_DIARY)),
+    _: User = Depends(_PEOPLE_CAPS),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
     """Everyone the club holds a member row for.
 
-    `include_players` adds the club's players who have NO member row yet — real
-    people the club can pick, who simply have not been enrolled. They come back
-    with `member_id: null` and `needs_member: true`, so a caller can tell that a
-    member row has to be minted before anything can be linked to them. It is
-    opt-in because most callers write `member_id` straight onto a record and a
-    null there would be a silent failure.
-
-    Archived people are still returned, flagged `archived`. They are not
-    offered for anything new (the pickers drop them), but a record that already
-    names one has to keep resolving to a name rather than showing a dash.
+    Archived people are returned, flagged `archived`. They are not offered for
+    anything new (the pickers drop them), but a record that already names one
+    has to keep resolving to a name rather than showing a dash.
     """
     rows = (await db.execute(
         select(FeeMember).where(FeeMember.organisation_id == club.id)
         .order_by(func.lower(FeeMember.full_name))
     )).scalars().all()
-    members = [
+    return {"members": [
         {"member_id": str(m.id), "full_name": m.full_name, "email": m.email, "mobile": m.mobile,
          "player_id": str(m.player_id) if m.player_id else None, "is_linked": m.player_id is not None,
          "archived": m.archived_at is not None, "needs_member": False}
         for m in rows
+    ]}
+
+
+@router.get("/people/search")
+async def search_people(
+    q: str = "",
+    limit: int = 20,
+    _: User = Depends(_PEOPLE_CAPS),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find a person by typing their name — members AND the club's players who
+    have no member row yet.
+
+    A picker that has to offer everyone cannot ship everyone: a club with
+    fifteen hundred people would send the whole roster to the browser to draw a
+    dropdown somebody is about to type into anyway. So the search runs here and
+    only the matches come back.
+
+    A player with no member row comes back with `member_id: null` and
+    `needs_member: true` — they are a real person the club can pick, but a
+    member row has to be minted before anything can be linked to them.
+    Archived people are never offered.
+    """
+    term = (q or "").strip()
+    if not term:
+        return {"people": [], "query": ""}
+    limit = max(1, min(limit, 50))
+    like = f"%{term.lower()}%"
+    # Org-scoped on both sides of the read-through: a member row may point at
+    # ANOTHER club's player, and a player of ours must not be judged "already
+    # enrolled" by someone else's member row.
+    rows = (await db.execute(text("""
+        SELECT fm.id AS member_id, fm.full_name, fm.email, fm.mobile,
+               fm.player_id, false AS needs_member
+        FROM fee_members fm
+        WHERE fm.organisation_id = :org
+          AND fm.archived_at IS NULL
+          AND LOWER(fm.full_name) LIKE :like
+        UNION ALL
+        SELECT NULL, COALESCE(p.display_name_override, p.name), p.email, p.phone,
+               p.id, true
+        FROM players p
+        WHERE p.organisation_id = :org
+          AND LOWER(COALESCE(p.display_name_override, p.name)) LIKE :like
+          AND NOT EXISTS (
+              SELECT 1 FROM fee_members fm
+              WHERE fm.player_id = p.id AND fm.organisation_id = :org
+          )
+        ORDER BY 2
+        LIMIT :lim
+    """), {"org": club.id, "like": like, "lim": limit + 1})).mappings().all()
+    people = [
+        {"member_id": str(r["member_id"]) if r["member_id"] else None,
+         "full_name": r["full_name"], "email": r["email"], "mobile": r["mobile"],
+         "player_id": str(r["player_id"]) if r["player_id"] else None,
+         "is_linked": r["player_id"] is not None,
+         "archived": False, "needs_member": bool(r["needs_member"])}
+        for r in rows[:limit]
     ]
-    if include_players:
-        # Same read-through the Directory does, and org-scoped on both sides:
-        # a member row may point at ANOTHER club's player, and a player of ours
-        # must not be judged "already enrolled" by someone else's member row.
-        extra = (await db.execute(text("""
-            SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.email, p.phone
-            FROM players p
-            WHERE p.organisation_id = :org
-              AND NOT EXISTS (
-                  SELECT 1 FROM fee_members fm
-                  WHERE fm.player_id = p.id AND fm.organisation_id = :org
-              )
-        """), {"org": club.id})).mappings().all()
-        members += [
-            {"member_id": None, "full_name": p["name"], "email": p["email"], "mobile": p["phone"],
-             "player_id": str(p["id"]), "is_linked": True,
-             "archived": False, "needs_member": True}
-            for p in extra
-        ]
-        members.sort(key=lambda m: (m["full_name"] or "").lower())
-    return {"members": members}
+    # One row over the limit was asked for purely to answer "is that all of
+    # them", without a second COUNT over the same predicate.
+    return {"people": people, "query": term, "more": len(rows) > limit}
 
 
 @router.get("/members")

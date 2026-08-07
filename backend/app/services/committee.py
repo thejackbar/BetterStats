@@ -1323,6 +1323,41 @@ async def plan_report(session: AsyncSession, org_id, *, include_archived: bool =
             .order_by(CommitteeMeeting.scheduled_at.desc().nullslast())
         )).all()
 
+    # Where each piece of work was raised. An action carries the meeting it came
+    # out of, and one raised under a motion inherits that motion's meeting when
+    # it has none of its own — "we agreed this in March" is the context that
+    # makes a line of the plan mean something, and it is a lookup on data we
+    # already hold rather than another request from the screen.
+    meetings: dict = {}
+    meeting_ids = {t.meeting_id for t in tasks if t.meeting_id}
+    motion_meeting: dict = {str(m.id): m.meeting_id for m, _t, _s in motion_rows}
+    meeting_ids |= {motion_meeting[str(t.motion_id)]
+                    for t in tasks if t.motion_id and str(t.motion_id) in motion_meeting}
+    if meeting_ids:
+        # Org-scoped: a meeting id reached through a task must still belong to
+        # this club before its title is served back.
+        rows = (await session.execute(
+            select(CommitteeMeeting.id, CommitteeMeeting.title, CommitteeMeeting.scheduled_at)
+            .where(CommitteeMeeting.organisation_id == org_id,
+                   CommitteeMeeting.id.in_(meeting_ids))
+        )).all()
+        meetings = {str(i): (t, s) for i, t, s in rows}
+
+    def _raised_at(t) -> dict:
+        mid = str(t.meeting_id) if t.meeting_id else None
+        if not mid and t.motion_id:
+            via = motion_meeting.get(str(t.motion_id))
+            mid = str(via) if via else None
+        title, when = meetings.get(mid or "", (None, None))
+        # Deliberately NOT `meeting_id` — that key already means the action's own
+        # column, and overwriting it with a meeting reached through the motion
+        # would have the row claim a link it does not hold.
+        return {
+            "raised_meeting_id": mid,
+            "meeting_title": title,
+            "meeting_date": when.isoformat() if when else None,
+        }
+
     tasks_by_obj: dict = {}
     for t in tasks:
         tasks_by_obj.setdefault(str(t.objective_id), []).append(t)
@@ -1336,7 +1371,7 @@ async def plan_report(session: AsyncSession, org_id, *, include_archived: bool =
 
     filled = [{
         **o,
-        "action_list": [_task_dict(t) for t in tasks_by_obj.get(o["id"], [])],
+        "action_list": [{**_task_dict(t), **_raised_at(t)} for t in tasks_by_obj.get(o["id"], [])],
         "motion_list": motions_by_obj.get(o["id"], []),
     } for o in objectives]
 
