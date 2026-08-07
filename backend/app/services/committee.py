@@ -8,6 +8,7 @@ was previously open for that position, so a position can never show two
 """
 from __future__ import annotations
 
+import uuid
 from datetime import date
 from typing import Optional
 
@@ -167,6 +168,8 @@ def _motion_dict(m: MeetingMotion) -> dict:
         "is_resolution": bool(m.is_resolution),
         "resolution_ref": m.resolution_ref,
         "resolved_at": m.resolved_at.isoformat() if m.resolved_at else None,
+        # Migration 230 — the objective this motion serves.
+        "objective_id": str(m.objective_id) if m.objective_id else None,
         "votes": [{"member_id": str(v.member_id), "vote": v.vote} for v in (getattr(m, "_votes", None) or [])],
     }
 
@@ -418,12 +421,23 @@ async def create_task(session: AsyncSession, org_id, **fields) -> CommitteeTask:
     return t
 
 
+# Columns on an action that are nullable, so sending an explicit null means
+# "clear it" rather than "not sent". The caller passes exclude_unset fields, so
+# a key being present IS the intent. Without this an action could be given a
+# budget, an objective or a due date and never have one taken away again.
+_TASK_CLEARABLE = (
+    "description", "position_id", "assigned_to_member_id", "due_date", "recurrence_note",
+    "objective_id", "budget_estimate", "actual_expenditure", "start_date",
+    "closed_by_member_id", "outcome_notes", "meeting_id", "motion_id",
+)
+
+
 async def update_task(session: AsyncSession, t: CommitteeTask, **fields) -> CommitteeTask:
-    for f in ("title", "description", "category", "position_id", "assigned_to_member_id",
-              "due_date", "status", "is_recurring", "recurrence_note",
-              "objective_id", "budget_estimate", "actual_expenditure", "percent_complete",
-              "start_date", "closed_by_member_id", "outcome_notes", "meeting_id", "motion_id"):
+    for f in ("title", "category", "status", "is_recurring", "percent_complete"):
         if f in fields and fields[f] is not None:
+            setattr(t, f, fields[f])
+    for f in _TASK_CLEARABLE:
+        if f in fields:
             setattr(t, f, fields[f])
     if "status" in fields and fields["status"] is not None:
         done = fields["status"] == "done"
@@ -820,6 +834,7 @@ async def create_motion(session: AsyncSession, meeting_id, **fields) -> MeetingM
         motion_type=fields.get("motion_type") or "motion", description=description[:2000],
         proposed_by_member_id=fields.get("proposed_by_member_id"),
         seconded_by_member_id=fields.get("seconded_by_member_id"),
+        objective_id=fields.get("objective_id"),
     )
     session.add(m)
     await session.flush()
@@ -831,6 +846,11 @@ async def update_motion(session: AsyncSession, m: MeetingMotion, **fields) -> Me
               "votes_for", "votes_against", "votes_abstain", "outcome", "notes"):
         if f in fields and fields[f] is not None:
             setattr(m, f, fields[f])
+    # The link to the plan is separate because it has to be CLEARABLE — picking
+    # "no objective" is a real choice, and the loop above reads a null as "not
+    # sent" so it could never be unset.
+    if "objective_id" in fields:
+        m.objective_id = fields["objective_id"]
     return m
 
 
@@ -884,7 +904,7 @@ async def delete_nomination(session: AsyncSession, n: AgmNomination) -> None:
 # the notes and documents hung off any of it.
 
 _VOTES = ("for", "against", "abstain")
-_ENTITIES = ("task", "motion", "meeting", "objective")
+_ENTITIES = ("task", "motion", "meeting", "objective", "plan")
 
 
 async def set_motion_votes(session: AsyncSession, motion: MeetingMotion, votes: list[dict]) -> MeetingMotion:
@@ -1029,25 +1049,127 @@ async def delete_note(session: AsyncSession, org_id, note_id) -> bool:
     return True
 
 
-def _objective_dict(o) -> dict:
+# ─── Strategic plans → objectives → actions and motions (migration 230) ──────
+#
+# Three levels, each one owning the one below it. A plan is the club's strategic
+# or business plan; an objective is a line in it; an action or a motion is the
+# work that serves it. Notes hang off any of them.
+#
+# The rollups below are all DERIVED from the register the committee already
+# keeps, never stored — so correcting an action's spend or closing it moves the
+# objective and the plan in the same breath, and there is no second set of
+# figures to keep in step.
+
+def _plan_dict(p) -> dict:
     return {
-        "id": str(o.id), "title": o.title, "description": o.description, "plan": o.plan,
-        "season_year": o.season_year, "status": o.status, "sort_order": o.sort_order,
+        "id": str(p.id), "name": p.name, "description": p.description,
+        "start_year": p.start_year, "end_year": p.end_year,
+        "status": p.status, "sort_order": p.sort_order,
     }
 
 
-async def list_objectives(session: AsyncSession, org_id, *, include_archived: bool = False) -> list[dict]:
+async def list_plans(session: AsyncSession, org_id, *, include_archived: bool = False) -> list[dict]:
+    from app.models.db import ClubStrategicPlan
+
+    stmt = select(ClubStrategicPlan).where(ClubStrategicPlan.organisation_id == org_id)
+    if not include_archived:
+        stmt = stmt.where(ClubStrategicPlan.status != "archived")
+    stmt = stmt.order_by(ClubStrategicPlan.sort_order,
+                         ClubStrategicPlan.start_year.desc().nullslast(),
+                         ClubStrategicPlan.name)
+    return [_plan_dict(p) for p in (await session.execute(stmt)).scalars().all()]
+
+
+async def upsert_plan(session: AsyncSession, org_id, plan_id=None, **fields) -> dict:
+    from app.models.db import ClubStrategicPlan
+
+    if plan_id:
+        p = (await session.execute(
+            select(ClubStrategicPlan).where(ClubStrategicPlan.id == plan_id,
+                                            ClubStrategicPlan.organisation_id == org_id)
+        )).scalar_one_or_none()
+        if not p:
+            raise ValueError("Plan not found")
+        if "name" in fields and not (fields["name"] or "").strip():
+            raise ValueError("A plan needs a name")
+    else:
+        name = (fields.get("name") or "").strip()
+        if not name:
+            raise ValueError("A plan needs a name")
+        p = ClubStrategicPlan(organisation_id=org_id, name=name[:300])
+        session.add(p)
+    if "name" in fields and fields["name"]:
+        p.name = fields["name"].strip()[:300]
+    for f in ("status", "sort_order"):
+        if f in fields and fields[f] is not None:
+            setattr(p, f, fields[f])
+    # Nullable, so an explicit null clears it — the caller only sends what was
+    # actually edited.
+    for f in ("description", "start_year", "end_year"):
+        if f in fields:
+            setattr(p, f, fields[f])
+    p.updated_at = func.now()
+    await session.flush()
+    return _plan_dict(p)
+
+
+async def delete_plan(session: AsyncSession, org_id, plan_id) -> bool:
+    """Delete a plan. Its objectives survive and fall back to belonging to no
+    plan (FK SET NULL) — an objective is real work the club committed to, and
+    binning it because the document it was written in was deleted would lose
+    every action and motion serving it too."""
+    from app.models.db import ClubStrategicPlan
+
+    p = (await session.execute(
+        select(ClubStrategicPlan).where(ClubStrategicPlan.id == plan_id,
+                                        ClubStrategicPlan.organisation_id == org_id)
+    )).scalar_one_or_none()
+    if not p:
+        return False
+    await session.delete(p)
+    return True
+
+
+def _objective_dict(o, *, plan_name: Optional[str] = None) -> dict:
+    return {
+        "id": str(o.id), "title": o.title, "description": o.description,
+        "season_year": o.season_year, "status": o.status, "sort_order": o.sort_order,
+        # Migration 230 — the plan it belongs to and what it is planned with.
+        "plan_id": str(o.plan_id) if o.plan_id else None,
+        "plan_name": plan_name,
+        "due_date": o.due_date.isoformat() if o.due_date else None,
+        "owner_member_id": str(o.owner_member_id) if o.owner_member_id else None,
+        "budget": float(o.budget) if o.budget is not None else None,
+    }
+
+
+async def _plan_names(session: AsyncSession, org_id) -> dict:
+    from app.models.db import ClubStrategicPlan
+
+    rows = (await session.execute(
+        select(ClubStrategicPlan.id, ClubStrategicPlan.name)
+        .where(ClubStrategicPlan.organisation_id == org_id)
+    )).all()
+    return {str(i): n for i, n in rows}
+
+
+async def list_objectives(session: AsyncSession, org_id, *, include_archived: bool = False,
+                          plan_id=None) -> list[dict]:
     from app.models.db import ClubObjective
 
     stmt = select(ClubObjective).where(ClubObjective.organisation_id == org_id)
     if not include_archived:
         stmt = stmt.where(ClubObjective.status != "archived")
+    if plan_id:
+        stmt = stmt.where(ClubObjective.plan_id == plan_id)
     stmt = stmt.order_by(ClubObjective.sort_order, ClubObjective.title)
-    return [_objective_dict(o) for o in (await session.execute(stmt)).scalars().all()]
+    names = await _plan_names(session, org_id)
+    return [_objective_dict(o, plan_name=names.get(str(o.plan_id)))
+            for o in (await session.execute(stmt)).scalars().all()]
 
 
 async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **fields) -> dict:
-    from app.models.db import ClubObjective
+    from app.models.db import ClubObjective, ClubStrategicPlan
 
     if objective_id:
         o = (await session.execute(
@@ -1056,18 +1178,35 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
         )).scalar_one_or_none()
         if not o:
             raise ValueError("Objective not found")
+        if "title" in fields and not (fields["title"] or "").strip():
+            raise ValueError("Title is required")
     else:
         title = (fields.get("title") or "").strip()
         if not title:
             raise ValueError("Title is required")
         o = ClubObjective(organisation_id=org_id, title=title[:300])
         session.add(o)
-    for f in ("title", "description", "plan", "season_year", "status", "sort_order"):
+    # A plan from another club would put this objective on someone else's plan,
+    # so it is checked rather than trusted — the id comes from a browser.
+    if fields.get("plan_id"):
+        owned = (await session.execute(
+            select(ClubStrategicPlan.id).where(ClubStrategicPlan.id == fields["plan_id"],
+                                               ClubStrategicPlan.organisation_id == org_id)
+        )).scalar_one_or_none()
+        if not owned:
+            raise ValueError("That plan does not belong to this club")
+    if "title" in fields and fields["title"]:
+        o.title = fields["title"].strip()[:300]
+    for f in ("status", "sort_order"):
         if f in fields and fields[f] is not None:
+            setattr(o, f, fields[f])
+    for f in ("description", "season_year", "plan_id", "due_date", "owner_member_id", "budget"):
+        if f in fields:
             setattr(o, f, fields[f])
     o.updated_at = func.now()
     await session.flush()
-    return _objective_dict(o)
+    names = await _plan_names(session, org_id)
+    return _objective_dict(o, plan_name=names.get(str(o.plan_id)))
 
 
 async def delete_objective(session: AsyncSession, org_id, objective_id) -> bool:
@@ -1079,16 +1218,52 @@ async def delete_objective(session: AsyncSession, org_id, objective_id) -> bool:
     )).scalar_one_or_none()
     if not o:
         return False
-    await session.delete(o)   # actions fall back to no objective (FK SET NULL)
+    await session.delete(o)   # actions and motions fall back to no objective (FK SET NULL)
     return True
 
 
-async def objective_progress(session: AsyncSession, org_id) -> list[dict]:
+def _delivery(tasks: list, *, own_budget=None, own_due=None, today: Optional[date] = None) -> dict:
+    """Roll a set of actions up into how the thing they serve is going.
+
+    Two rules worth keeping. Progress is the mean of the actions' own
+    percentages, so an objective with one action half done reads 50%, not 0% —
+    "done or not done" is not how a season of work looks. And the budget is the
+    objective's OWN allocation when it has one, falling back to the sum of what
+    its actions were budgeted; a club that sets a figure at the plan level and
+    a club that only budgets per action both get a percentage that means
+    something.
+    """
+    today = today or date.today()
+    done = [t for t in tasks if (t.status or "") == "done"]
+    spent = float(sum(t.actual_expenditure or 0 for t in tasks))
+    action_budget = float(sum(t.budget_estimate or 0 for t in tasks))
+    budget = float(own_budget) if own_budget is not None else action_budget
+    percent = round(sum(t.percent_complete or 0 for t in tasks) / len(tasks)) if tasks else 0
+    overdue = [t for t in tasks if t.due_date and t.due_date < today and (t.status or "") != "done"]
+    # Late means the deadline has gone by with work outstanding. An objective
+    # past its own due date is late even with no actions against it — nothing
+    # was done, which is the worst version of late, not an excuse from it.
+    own_late = bool(own_due and own_due < today and percent < 100)
+    return {
+        "actions": len(tasks),
+        "actions_done": len(done),
+        "actions_overdue": len(overdue),
+        "percent_complete": percent,
+        "budget": budget,
+        "budget_from_actions": action_budget,
+        "spent": spent,
+        "percent_spent": round(spent / budget * 100) if budget else None,
+        "over_budget": bool(budget and spent > budget),
+        "is_late": bool(own_late or overdue),
+    }
+
+
+async def objective_progress(session: AsyncSession, org_id, *, include_archived: bool = False) -> list[dict]:
     """Each objective with the actions serving it rolled up: how many are done,
     what they were budgeted and what they have cost. This is the club's plan
     reported against itself, from the same action register the committee already
     keeps rather than a second spreadsheet."""
-    objectives = await list_objectives(session, org_id)
+    objectives = await list_objectives(session, org_id, include_archived=include_archived)
     rows = (await session.execute(
         select(CommitteeTask).where(CommitteeTask.organisation_id == org_id,
                                     CommitteeTask.objective_id.isnot(None))
@@ -1096,19 +1271,108 @@ async def objective_progress(session: AsyncSession, org_id) -> list[dict]:
     by_obj: dict = {}
     for t in rows:
         by_obj.setdefault(str(t.objective_id), []).append(t)
-    out = []
-    for o in objectives:
-        tasks = by_obj.get(o["id"], [])
-        done = [t for t in tasks if (t.status or "") == "done"]
-        out.append({
-            **o,
-            "actions": len(tasks),
-            "actions_done": len(done),
-            "percent_complete": round(sum(t.percent_complete or 0 for t in tasks) / len(tasks)) if tasks else 0,
-            "budget": float(sum(t.budget_estimate or 0 for t in tasks)),
-            "spent": float(sum(t.actual_expenditure or 0 for t in tasks)),
+    today = date.today()
+    # `budget` comes back as the EFFECTIVE figure (the objective's own
+    # allocation, or the sum of its actions'), so `own_budget` keeps what the
+    # club actually allocated. Without it a rolled-up 0 is indistinguishable
+    # from "nothing allocated", and the screen says "allocated $0" about an
+    # objective nobody has budgeted — and its edit form seeds a 0 the club
+    # never typed.
+    return [{
+        **o,
+        "own_budget": o["budget"],
+        **_delivery(by_obj.get(o["id"], []),
+                    own_budget=o["budget"],
+                    own_due=date.fromisoformat(o["due_date"]) if o["due_date"] else None,
+                    today=today),
+    } for o in objectives]
+
+
+async def plan_report(session: AsyncSession, org_id, *, include_archived: bool = False) -> dict:
+    """The whole plan, top to bottom: every strategic plan, its objectives, and
+    the actions and motions serving each one.
+
+    One fetch rather than a request per level. The screen that reads this is
+    asking "how is the plan going", and a plan whose progress arrives in six
+    round trips is a plan nobody looks at.
+    """
+    from app.models.db import ClubObjective
+
+    plans = await list_plans(session, org_id, include_archived=include_archived)
+    objectives = await objective_progress(session, org_id, include_archived=include_archived)
+
+    obj_ids = [uuid.UUID(o["id"]) for o in objectives]
+    tasks = (await session.execute(
+        select(CommitteeTask)
+        .where(CommitteeTask.organisation_id == org_id, CommitteeTask.objective_id.isnot(None))
+        .order_by(CommitteeTask.due_date.asc().nullslast(), CommitteeTask.created_at)
+    )).scalars().all()
+    await load_task_assignees(session, tasks)
+
+    # Motions are scoped through their MEETING's org, not the objective's —
+    # meeting_motions has no organisation_id of its own, and an objective id
+    # arriving from another club must not be able to pull that club's motions
+    # into this report.
+    motion_rows = []
+    if obj_ids:
+        motion_rows = (await session.execute(
+            select(MeetingMotion, CommitteeMeeting.title, CommitteeMeeting.scheduled_at)
+            .join(CommitteeMeeting, CommitteeMeeting.id == MeetingMotion.meeting_id)
+            .where(CommitteeMeeting.organisation_id == org_id,
+                   MeetingMotion.objective_id.in_(obj_ids))
+            .order_by(CommitteeMeeting.scheduled_at.desc().nullslast())
+        )).all()
+
+    tasks_by_obj: dict = {}
+    for t in tasks:
+        tasks_by_obj.setdefault(str(t.objective_id), []).append(t)
+    motions_by_obj: dict = {}
+    for m, meeting_title, scheduled_at in motion_rows:
+        motions_by_obj.setdefault(str(m.objective_id), []).append({
+            **_motion_dict(m),
+            "meeting_title": meeting_title,
+            "meeting_date": scheduled_at.isoformat() if scheduled_at else None,
         })
-    return out
+
+    filled = [{
+        **o,
+        "action_list": [_task_dict(t) for t in tasks_by_obj.get(o["id"], [])],
+        "motion_list": motions_by_obj.get(o["id"], []),
+    } for o in objectives]
+
+    by_plan: dict = {}
+    for o in filled:
+        by_plan.setdefault(o["plan_id"] or "", []).append(o)
+
+    def roll(group: list[dict]) -> dict:
+        """A plan's own figures are the sum of its objectives', not a second
+        pass over the actions — otherwise an objective with its own budget and
+        an objective budgeted through its actions would be added up two
+        different ways in the same total."""
+        budget = sum(o["budget"] or 0 for o in group)
+        spent = sum(o["spent"] or 0 for o in group)
+        return {
+            "objectives": len(group),
+            "objectives_done": sum(1 for o in group if o["percent_complete"] >= 100),
+            "actions": sum(o["actions"] for o in group),
+            "actions_done": sum(o["actions_done"] for o in group),
+            "motions": sum(len(o["motion_list"]) for o in group),
+            "percent_complete": round(sum(o["percent_complete"] for o in group) / len(group)) if group else 0,
+            "budget": budget,
+            "spent": spent,
+            "percent_spent": round(spent / budget * 100) if budget else None,
+            "over_budget": bool(budget and spent > budget),
+            "late_objectives": sum(1 for o in group if o["is_late"]),
+        }
+
+    return {
+        "plans": [{**p, "objective_list": by_plan.get(p["id"], []), **roll(by_plan.get(p["id"], []))}
+                  for p in plans],
+        # An objective can sit outside every plan — either because the club has
+        # not written one down yet, or because the plan it belonged to was
+        # deleted. It is still real work, so it is reported rather than hidden.
+        "unassigned": {"objective_list": by_plan.get("", []), **roll(by_plan.get("", []))},
+    }
 
 
 # ─── The meeting room ─────────────────────────────────────────────────────────

@@ -1,5 +1,81 @@
 # BetterStats — Claude Session Notes
 
+## Strategic plans → objectives → actions and motions (migration 230, v9.19.0, Aug 2026)
+
+Reported: the Committee screen's Plan tab could create an objective and nothing
+else. There was no CRUD for the strategic plan an objective belongs to, no way
+to edit or delete an objective, and a motion could not point at the plan at all.
+
+- **A plan was free text on every objective row** (`club_objectives.plan`,
+  migration 217), so "Strategic Plan 2026" and "strategic plan 2026" were two
+  plans, renaming one was impossible, and a plan had nowhere to keep its own
+  dates or description. **`club_strategic_plans` is the record now**, and
+  `club_objectives.plan_id` points at it. The old text column is **backfilled
+  and then left alone as history — nothing reads it after 230**; the API returns
+  `plan_id` + `plan_name` instead.
+- **The backfill groups case-insensitively on the trimmed name**, so a club that
+  typed the same plan two ways gets one plan rather than two to merge by hand.
+- **It guards with `NOT EXISTS`, NOT `ON CONFLICT`, and that is load-bearing.**
+  Found by running the migration twice: there is no unique constraint on
+  `(organisation_id, name)` for a conflict clause to fire against, so the first
+  cut minted a fresh set of plans on **every app boot** (this file is mirrored
+  into `main.py`'s lifespan, which re-runs it each time). The constraint is
+  deliberately absent — a club is entitled to name two plans the same thing.
+- **An objective carries its own `due_date`, `owner_member_id` and `budget`.**
+  Those three sat on the ACTIONS serving an objective and nowhere on the
+  objective itself, so an objective with no actions yet had no owner, no date
+  and no budget.
+- **`budget` vs `own_budget` in the rollup, and the distinction matters.**
+  `_delivery()` returns `budget` as the EFFECTIVE figure (the objective's own
+  allocation, else the sum of its actions'), so `objective_progress` also emits
+  **`own_budget`** — the club's actual allocation. Without it a rolled-up 0 is
+  indistinguishable from "nothing allocated", and the screen said "allocated $0"
+  about an objective nobody had budgeted while its edit form seeded a 0 the club
+  never typed. Caught by screenshotting the real page, not by any assertion.
+- **`meeting_motions.objective_id`** — an action already had one, so "the
+  committee resolved to do this" and "someone is doing it" reported against the
+  plan differently. An action raised under a motion in the meeting room
+  **inherits the motion's objective**, because retyping it is the step that gets
+  skipped and then the plan reports short.
+- **A null means "clear it", and that needed fixing in three places.**
+  `update_task` guarded every field with `if fields[f] is not None`, so an
+  action's objective, budget, spend or due date could be set and never unset —
+  `_TASK_CLEARABLE` lists the nullable columns and assigns them on presence
+  alone (the router sends `exclude_unset`, so a key being there IS the intent).
+  Same for `update_motion`'s `objective_id` and the objective/plan routes, which
+  moved from `exclude_none` to `exclude_unset`. Title, category, status and
+  percent stay guarded — they are NOT NULL.
+- **Deleting never cascades into the work.** A deleted plan leaves its
+  objectives (FK SET NULL, reported under "Not on a plan"); a deleted objective
+  leaves its actions and motions. An objective is real work the club committed
+  to, and binning it because the document it was written in was deleted would
+  take every action serving it down too.
+- **`plan_report` scopes motions through their MEETING's org**, not the
+  objective's — `meeting_motions` has no `organisation_id` of its own, so an
+  objective id arriving from a browser must not be able to pull another club's
+  motions into the report. Same rule the shared-game notes below describe.
+- **A plan's figures are the sum of its OBJECTIVES', not a second pass over the
+  actions** — otherwise an objective with its own budget and an objective
+  budgeted through its actions get added up two different ways in one total.
+- **`ObjectiveSelect` / `useObjectives` (governance.jsx) is the one picker**, and
+  it shows `Plan › Objective`: two plans can each have an objective called "Grow
+  junior numbers" and picking the wrong one is otherwise invisible. Fetched once
+  per screen, never per motion — a meeting with ten motions would otherwise fire
+  ten identical requests.
+- **`ObjectivesTab` became `PlanTab`** and has two views: "By plan" (the
+  editable hierarchy) and "All work" (every action and motion flat, in plan
+  context, filterable to late / over budget). Both read the one `/plans/report`
+  fetch.
+- **Verified against a real Postgres** — 85 service- and route-level checks
+  (the migration applied twice to a populated pre-230 table, the two-spelling
+  collapse, cross-club rejection of a foreign plan id, every clearable field,
+  the budget fallback, the motion leak) plus 11 asserting the lifespan mirror
+  runs the same statements in the same order and lands on the same schema after
+  three applications. Then driven in a real browser (Chromium, dev server with
+  the API stubbed at the network layer): 38 checks on the Plan screen and 17 on
+  the meeting room, including the payloads sent on the wire, no page errors and
+  no overflow at 390px.
+
 ## A PlayHQ game-centre link is a different id namespace (v9.18.0.2, Aug 2026)
 
 Reported: pasting `playhq.com/.../a-grade-gatorade/game-centre/abecedd5` into

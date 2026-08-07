@@ -3053,6 +3053,10 @@ class MeetingMotion(Base):
     is_resolution = Column(Boolean, nullable=False, server_default="false", default=False)
     resolution_ref = Column(Text, nullable=True)
     resolved_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Migration 230 — the objective this motion serves. An action already had
+    # one, so "the committee resolved to do this" and "someone is doing it"
+    # reported against the plan differently until this existed.
+    objective_id = Column(UUID(as_uuid=True), ForeignKey("club_objectives.id", ondelete="SET NULL"), nullable=True)
     # Motions are ordered so they can sit against the agenda item they relate
     # to rather than in the order someone happened to type them (migration 220).
     position = Column(Integer, nullable=False, server_default="0", default=0)
@@ -3089,6 +3093,27 @@ class MeetingMotionVote(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class ClubStrategicPlan(Base):
+    """The club's business or strategic plan (migration 230).
+
+    Objectives belong to a plan and actions and motions belong to an objective,
+    so a club can run "Strategic Plan 2026-29" and "Facilities Plan" side by
+    side and report each against the register the committee already keeps.
+    """
+    __tablename__ = "club_strategic_plans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    start_year = Column(Integer, nullable=True)
+    end_year = Column(Integer, nullable=True)
+    status = Column(Text, nullable=False, server_default="active", default="active")
+    sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class ClubObjective(Base):
     """A line in the club's business or strategic plan (migration 217).
     Committee actions point at one, which is what turns a task register into
@@ -3099,10 +3124,20 @@ class ClubObjective(Base):
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     title = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
+    # The plan this used to belong to, as free text (migration 217). Backfilled
+    # into real plan rows by migration 230 and not written again — `plan_id` is
+    # the plan now. Kept so a club's own first spelling stays on the record.
     plan = Column(Text, nullable=True)
     season_year = Column(Integer, nullable=True)
     status = Column(Text, nullable=False, server_default="active", default="active")
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
+    # Migration 230 — what a club plans WITH. These sat on the actions serving
+    # an objective and nowhere on the objective itself, so an objective with no
+    # actions yet had no owner, no date and no budget.
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="SET NULL"), nullable=True)
+    due_date = Column(Date, nullable=True)
+    owner_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
+    budget = Column(Numeric(12, 2), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

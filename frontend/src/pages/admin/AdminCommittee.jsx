@@ -6,7 +6,7 @@ import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLay
 import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { MemberSelect } from '../../components/admin/clubmanager/pickers'
-import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, ObjectivesTab, ActionTimeline } from '../../components/admin/clubmanager/governance'
+import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, PlanTab, ActionTimeline, ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -380,7 +380,7 @@ function TasksTab({ members }) {
         </select>
         <select className={selInp} value={objId} onChange={e => setObjId(e.target.value)}>
           <option value="">Any objective</option>
-          {objectives.map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
+          {objectives.map(o => <option key={o.id} value={o.id}>{objectiveLabel(o)}</option>)}
         </select>
         <select className={selInp} value={who} onChange={e => setWho(e.target.value)}>
           <option value="">Anyone</option>
@@ -707,9 +707,12 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   const [status, setStatus] = useState(meeting.status)
   const [savingMeta, setSavingMeta] = useState(false)
   const [newItem, setNewItem] = useState({ title: '', description: '' })
-  const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion' })
+  const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion', objective_id: '' })
   const [newNom, setNewNom] = useState({ position_id: '', candidate_member_id: '' })
   const [attendance, setAttendance] = useState({})
+  // Fetched once for the whole meeting rather than per motion — a meeting with
+  // ten motions would otherwise fire ten identical requests.
+  const objectives = useObjectives()
 
   const load = useCallback(() => {
     api.committeeGetMeeting(meeting.id).then(d => {
@@ -754,12 +757,16 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   async function addMotion() {
     if (!newMotion.description.trim()) return
     try {
-      await api.committeeCreateMotion(meeting.id, newMotion)
-      setNewMotion({ description: '', motion_type: 'motion' }); load()
+      await api.committeeCreateMotion(meeting.id, { ...newMotion, objective_id: newMotion.objective_id || null })
+      setNewMotion({ description: '', motion_type: 'motion', objective_id: '' }); load()
     } catch (e) { toast.error(e.message) }
   }
   async function setMotionOutcome(motion, outcome) {
     try { await api.committeeUpdateMotion(meeting.id, motion.id, { outcome }); load() } catch (e) { toast.error(e.message) }
+  }
+  async function setMotionObjective(motion, objectiveId) {
+    try { await api.committeeUpdateMotion(meeting.id, motion.id, { objective_id: objectiveId }); load() }
+    catch (e) { toast.error(e.message) }
   }
   async function removeMotion(motion) {
     if (!confirm('Remove this motion?')) return
@@ -874,12 +881,28 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
                 ))}
                 <button onClick={() => removeMotion(m)} className="font-mono text-[8px] text-pb-faintest hover:text-pb-red ml-auto">✕</button>
               </div>
+              {/* Which objective in the club's plan this motion serves, so a
+                  decision and the work that follows it report against the same
+                  line of the plan. */}
+              <div className="mt-1.5 no-print max-w-md">
+                <ObjectiveSelect objectives={objectives} value={m.objective_id}
+                  onChange={v => setMotionObjective(m, v)} className={`${inp} text-[12px]`} label="SERVES OBJECTIVE" />
+              </div>
+              {m.objective_id && (
+                <div className="hidden print:block font-mono text-[9px] text-pb-faintest mt-1">
+                  Serves: {objectiveLabel(objectives.find(o => o.id === m.objective_id) || { title: '—' })}
+                </div>
+              )}
               <MotionGovernance meeting={meeting} motion={m} members={members} onChanged={load} />
             </div>
           ))}
         </div>
-        <div className="flex gap-2 mb-3 no-print">
+        <div className="flex flex-col sm:flex-row gap-2 mb-3 no-print">
           <input className={`${inp} flex-1`} placeholder="New motion wording" value={newMotion.description} onChange={e => setNewMotion(f => ({ ...f, description: e.target.value }))} />
+          <div className="sm:w-64">
+            <ObjectiveSelect objectives={objectives} value={newMotion.objective_id}
+              onChange={v => setNewMotion(f => ({ ...f, objective_id: v || '' }))} label={null} />
+          </div>
           <button onClick={addMotion} className="pb-btn pb-btn-sm pb-btn-secondary">+ Motion</button>
         </div>
 
@@ -1016,7 +1039,7 @@ export default function AdminCommittee() {
         <TabBar tab={tab} setTab={setTab} />
         {tab === 'positions' && <PositionsTab members={members} />}
         {tab === 'tasks' && <TasksTab members={members} />}
-        {tab === 'objectives' && <ObjectivesTab />}
+        {tab === 'objectives' && <PlanTab members={members} />}
         {tab === 'documents' && <DocumentsTab />}
         {tab === 'calendar' && <CalendarTab />}
         {tab === 'meetings' && <MeetingsTab />}

@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubhouseLayout from '../../components/admin/BetterClubhouseLayout'
 import { PbSpinner } from '../../lib/presskit'
+import { ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
 
 // The meeting room — one screen a secretary runs a meeting from.
 //
@@ -155,8 +156,14 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
 
 /* ── Actions raised in the meeting ──────────────────────────────────────── */
 
-function ActionForm({ agendaItemId, motionId, present, pool, onSave, onCancel }) {
-  const [form, setForm] = useState({ title: '', due_date: '', budget_estimate: '' })
+function ActionForm({ agendaItemId, motionId, present, pool, objectives, defaultObjectiveId, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    title: '', due_date: '', budget_estimate: '',
+    // Raised under a motion that already serves an objective? Then it serves
+    // the same one unless somebody says otherwise — retyping it is the step
+    // that gets skipped, and then the plan reports short.
+    objective_id: defaultObjectiveId || '',
+  })
   const [owners, setOwners] = useState([])
   const [busy, setBusy] = useState(false)
   const [who, setWho] = useState('')
@@ -179,11 +186,13 @@ function ActionForm({ agendaItemId, motionId, present, pool, onSave, onCancel })
         title: form.title.trim(),
         due_date: form.due_date || null,
         budget_estimate: form.budget_estimate === '' ? null : Number(form.budget_estimate),
+        objective_id: form.objective_id || null,
         agenda_item_id: agendaItemId || null,
         motion_id: motionId || null,
         assignee_member_ids: owners,
       })
-      setForm({ title: '', due_date: '', budget_estimate: '' }); setOwners([])
+      setForm({ title: '', due_date: '', budget_estimate: '', objective_id: defaultObjectiveId || '' })
+      setOwners([])
     } finally { setBusy(false) }
   }
 
@@ -202,6 +211,10 @@ function ActionForm({ agendaItemId, motionId, present, pool, onSave, onCancel })
           <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
             onChange={e => setForm(f => ({ ...f, budget_estimate: e.target.value }))} />
         </label>
+      </div>
+      <div className="mb-2">
+        <ObjectiveSelect objectives={objectives} value={form.objective_id}
+          onChange={v => setForm(f => ({ ...f, objective_id: v || '' }))} label="SERVES OBJECTIVE" />
       </div>
       <div className={`${cap} mb-1`}>WHO IS DOING IT</div>
       <input className={`${inp} mb-1.5`} placeholder="Anyone in the club — type to search…"
@@ -230,8 +243,9 @@ function ActionForm({ agendaItemId, motionId, present, pool, onSave, onCancel })
   )
 }
 
-function ActionRow({ action, nameOf, onChange, onDelete }) {
+function ActionRow({ action, nameOf, objectiveOf, onChange, onDelete }) {
   const owners = (action.assignee_member_ids || []).map(nameOf).filter(Boolean)
+  const serves = objectiveOf?.(action.objective_id)
   return (
     <div className="flex items-start justify-between gap-2 border pb-hairline rounded px-2.5 py-2 bg-pb-surface2/30"
       style={edge(action.status === 'done' ? 'carried' : action.status === 'blocked' ? 'lost' : 'deferred')}>
@@ -243,6 +257,7 @@ function ActionRow({ action, nameOf, onChange, onDelete }) {
           {action.budget_estimate != null && <span>${Number(action.budget_estimate).toLocaleString('en-AU')}</span>}
           <span>{titleCase(action.status)}</span>
         </div>
+        {serves && <div className="font-mono text-[9px] text-pb-faintest mt-0.5">serves {serves}</div>}
       </div>
       <div className="flex gap-1 shrink-0">
         {action.status !== 'done' && (
@@ -256,8 +271,8 @@ function ActionRow({ action, nameOf, onChange, onDelete }) {
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
-function Motion({ motion, present, pool, nameOf, onChange, onDelete, onVotes, onAddAction, actions,
-                 onActionChange, onActionDelete, dragProps, isOver }) {
+function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChange, onDelete, onVotes,
+                 onAddAction, actions, onActionChange, onActionDelete, dragProps, isOver }) {
   const [showVotes, setShowVotes] = useState(false)
   const [adding, setAdding] = useState(false)
   const votes = useMemo(() => {
@@ -304,6 +319,14 @@ function Motion({ motion, present, pool, nameOf, onChange, onDelete, onVotes, on
         <button onClick={() => setAdding(a => !a)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">+ Action</button>
       </div>
 
+      {/* Which line of the club's plan this decision serves. An action raised
+          under the motion inherits it, so the decision and the work that
+          follows report against the same objective. */}
+      <div className="mt-1.5 max-w-md">
+        <ObjectiveSelect objectives={objectives} value={motion.objective_id}
+          onChange={v => onChange({ objective_id: v })} className={`${inp} text-[12px]`} label="SERVES OBJECTIVE" />
+      </div>
+
       {showVotes && (
         <div className="mt-2 border-t pb-hairline pt-2">
           {present.length === 0 ? (
@@ -335,12 +358,13 @@ function Motion({ motion, present, pool, nameOf, onChange, onDelete, onVotes, on
 
       {adding && (
         <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present} pool={pool}
+          objectives={objectives} defaultObjectiveId={motion.objective_id}
           onSave={async d => { await onAddAction(d); setAdding(false) }} onCancel={() => setAdding(false)} />
       )}
       {actions.length > 0 && (
         <div className="mt-2 space-y-1">
           {actions.map(a => (
-            <ActionRow key={a.id} action={a} nameOf={nameOf}
+            <ActionRow key={a.id} action={a} nameOf={nameOf} objectiveOf={objectiveOf}
               onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
           ))}
         </div>
@@ -352,7 +376,7 @@ function Motion({ motion, present, pool, nameOf, onChange, onDelete, onVotes, on
 /* ── One agenda item ────────────────────────────────────────────────────── */
 
 function AgendaItem({
-  item, index, isCurrent, onOpen, dragProps, present, pool, nameOf,
+  item, index, isCurrent, onOpen, dragProps, present, pool, nameOf, objectives, objectiveOf,
   motions, actions, onItemChange, onItemDelete,
   onAddMotion, onMotionChange, onMotionDelete, onMotionVotes,
   onAddAction, onActionChange, onActionDelete,
@@ -429,6 +453,7 @@ function AgendaItem({
             <div className="space-y-2">
               {motions.map((mo, mi) => (
                 <Motion key={mo.id} motion={mo} present={present} pool={pool} nameOf={nameOf}
+                  objectives={objectives} objectiveOf={objectiveOf}
                   actions={actions.filter(a => a.motion_id === mo.id)}
                   onChange={p => onMotionChange(mo.id, p)} onDelete={() => onMotionDelete(mo.id)}
                   onVotes={v => onMotionVotes(mo.id, v)} onAddAction={onAddAction}
@@ -454,12 +479,12 @@ function AgendaItem({
             <div className={`${cap} mb-1`}>ACTIONS</div>
             <div className="space-y-1">
               {actions.filter(a => !a.motion_id).map(a => (
-                <ActionRow key={a.id} action={a} nameOf={nameOf}
+                <ActionRow key={a.id} action={a} nameOf={nameOf} objectiveOf={objectiveOf}
                   onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
               ))}
             </div>
             {addingAction ? (
-              <ActionForm agendaItemId={item.id} present={present} pool={pool}
+              <ActionForm agendaItemId={item.id} present={present} pool={pool} objectives={objectives}
                 onSave={async d => { await onAddAction(d); setAddingAction(false) }}
                 onCancel={() => setAddingAction(false)} />
             ) : (
@@ -529,6 +554,13 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   const attendance = data?.attendance || []
 
   const nameOf = useCallback(id => pool.find(p => p.member_id === id)?.full_name, [pool])
+  // The club's plan, so anything raised in the meeting can be pointed at the
+  // objective it serves. Fetched once for the room, not per motion.
+  const objectives = useObjectives()
+  const objectiveOf = useCallback(id => {
+    const o = objectives.find(x => x.id === id)
+    return o ? objectiveLabel(o) : null
+  }, [objectives])
   // Only people actually in the room can vote or be given an action.
   // Who is in the room, for voting. The chair is present too.
   const present = useMemo(
@@ -704,6 +736,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
                 }}
                 motionDrag={motionDrag}
                 present={present} pool={pool} nameOf={nameOf}
+                objectives={objectives} objectiveOf={objectiveOf}
                 motions={motions.filter(m => m.agenda_item_id === item.id)}
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
                 onItemChange={wrap(p => api.committeeUpdateAgendaItem(meetingId, item.id, p))}
@@ -742,7 +775,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
               <div className={`${cap} mb-1.5`}>ACTIONS NOT AGAINST AN AGENDA ITEM</div>
               <div className="space-y-1">
                 {actions.filter(a => !a.agenda_item_id).map(a => (
-                  <ActionRow key={a.id} action={a} nameOf={nameOf}
+                  <ActionRow key={a.id} action={a} nameOf={nameOf} objectiveOf={objectiveOf}
                     onChange={wrap(p => api.committeeUpdateTask(a.id, p))}
                     onDelete={wrap(() => api.committeeDeleteTask(a.id))} />
                 ))}

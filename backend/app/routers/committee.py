@@ -996,6 +996,8 @@ class MotionCreate(BaseModel):
     description: str
     proposed_by_member_id: Optional[str] = None
     seconded_by_member_id: Optional[str] = None
+    # Migration 230 — the objective in the club's plan this motion serves.
+    objective_id: Optional[str] = None
 
 
 @router.post("/meetings/{meeting_id}/motions")
@@ -1003,7 +1005,7 @@ async def create_motion(meeting_id: str, data: MotionCreate, _: User = _require,
                         db: AsyncSession = Depends(get_db)):
     m = await _meeting_or_404(db, club, meeting_id)
     fields = data.model_dump()
-    for f in ("agenda_item_id", "proposed_by_member_id", "seconded_by_member_id"):
+    for f in ("agenda_item_id", "proposed_by_member_id", "seconded_by_member_id", "objective_id"):
         fields[f] = uuid.UUID(fields[f]) if fields.get(f) else None
     try:
         motion = await committee_service.create_motion(db, m.id, **fields)
@@ -1024,6 +1026,8 @@ class MotionPatch(BaseModel):
     votes_abstain: Optional[int] = None
     outcome: Optional[str] = None
     notes: Optional[str] = None
+    # Migration 230 — the objective in the club's plan this motion serves.
+    objective_id: Optional[str] = None
 
 
 @router.patch("/meetings/{meeting_id}/motions/{motion_id}")
@@ -1032,7 +1036,7 @@ async def update_motion(meeting_id: str, motion_id: str, data: MotionPatch, _: U
     m = await _meeting_or_404(db, club, meeting_id)
     motion = await _motion_or_404(db, club, m, motion_id)
     fields = data.model_dump(exclude_unset=True)
-    for f in ("agenda_item_id", "proposed_by_member_id", "seconded_by_member_id"):
+    for f in ("agenda_item_id", "proposed_by_member_id", "seconded_by_member_id", "objective_id"):
         if f in fields:
             fields[f] = uuid.UUID(fields[f]) if fields[f] else None
     await committee_service.update_motion(db, motion, **fields)
@@ -1227,33 +1231,109 @@ async def delete_note(note_id: str, _: User = _require, club: Organisation = Dep
     return {"deleted": True}
 
 
-class ObjectiveUpsert(BaseModel):
-    title: Optional[str] = None
+# ─── Strategic plans → objectives (migration 230) ─────────────────────────────
+
+class PlanUpsert(BaseModel):
+    name: Optional[str] = None
     description: Optional[str] = None
-    plan: Optional[str] = None
-    season_year: Optional[int] = None
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
     status: Optional[str] = None
     sort_order: Optional[int] = None
 
 
+@router.get("/plans")
+async def list_plans(include_archived: bool = False, _: User = _require,
+                     club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    return {"plans": await committee_service.list_plans(db, club.id, include_archived=include_archived)}
+
+
+@router.get("/plans/report")
+async def plan_report(include_archived: bool = False, _: User = _require,
+                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Every plan, its objectives, and the actions and motions serving each —
+    with progress, spend against budget and what is running late."""
+    return await committee_service.plan_report(db, club.id, include_archived=include_archived)
+
+
+@router.post("/plans")
+async def create_plan(data: PlanUpsert, _: User = _require,
+                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        p = await committee_service.upsert_plan(db, club.id, **data.model_dump(exclude_unset=True))
+    except ValueError as err:
+        raise HTTPException(status_code=422, detail=str(err))
+    await db.commit()
+    return p
+
+
+@router.patch("/plans/{plan_id}")
+async def update_plan(plan_id: str, data: PlanUpsert, _: User = _require,
+                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        p = await committee_service.upsert_plan(db, club.id, uuid.UUID(plan_id),
+                                                **data.model_dump(exclude_unset=True))
+    except ValueError as err:
+        raise HTTPException(status_code=404 if "not found" in str(err) else 422, detail=str(err))
+    await db.commit()
+    return p
+
+
+@router.delete("/plans/{plan_id}")
+async def delete_plan(plan_id: str, _: User = _require,
+                      club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id)):
+        raise HTTPException(status_code=404, detail="Plan not found")
+    await db.commit()
+    return {"deleted": True}
+
+
+class ObjectiveUpsert(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    season_year: Optional[int] = None
+    status: Optional[str] = None
+    sort_order: Optional[int] = None
+    # Migration 230 — the plan it belongs to, and what it is planned with.
+    plan_id: Optional[str] = None
+    due_date: Optional[date] = None
+    owner_member_id: Optional[str] = None
+    budget: Optional[float] = None
+
+
+def _objective_fields(data: ObjectiveUpsert) -> dict:
+    # exclude_unset, not exclude_none: clearing a due date, an owner, a budget
+    # or the plan an objective belongs to is a real edit, and dropping nulls
+    # would make those four fields one-way.
+    fields = data.model_dump(exclude_unset=True)
+    for key in ("plan_id", "owner_member_id"):
+        if key in fields:
+            fields[key] = uuid.UUID(fields[key]) if fields[key] else None
+    return fields
+
+
 @router.get("/objectives")
-async def list_objectives(include_archived: bool = False, _: User = _require,
+async def list_objectives(include_archived: bool = False, plan_id: Optional[str] = None, _: User = _require,
                           club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"objectives": await committee_service.list_objectives(db, club.id, include_archived=include_archived)}
+    return {"objectives": await committee_service.list_objectives(
+        db, club.id, include_archived=include_archived,
+        plan_id=uuid.UUID(plan_id) if plan_id else None)}
 
 
 @router.get("/objectives/progress")
-async def objective_progress(_: User = _require, club: Organisation = Depends(get_current_club),
+async def objective_progress(include_archived: bool = False, _: User = _require,
+                             club: Organisation = Depends(get_current_club),
                              db: AsyncSession = Depends(get_db)):
     """The club's plan, reported against the actions serving it."""
-    return {"objectives": await committee_service.objective_progress(db, club.id)}
+    return {"objectives": await committee_service.objective_progress(
+        db, club.id, include_archived=include_archived)}
 
 
 @router.post("/objectives")
 async def create_objective(data: ObjectiveUpsert, _: User = _require,
                            club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
-        o = await committee_service.upsert_objective(db, club.id, **data.model_dump(exclude_none=True))
+        o = await committee_service.upsert_objective(db, club.id, **_objective_fields(data))
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err))
     await db.commit()
@@ -1265,9 +1345,9 @@ async def update_objective(objective_id: str, data: ObjectiveUpsert, _: User = _
                            club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
         o = await committee_service.upsert_objective(db, club.id, uuid.UUID(objective_id),
-                                                     **data.model_dump(exclude_none=True))
+                                                     **_objective_fields(data))
     except ValueError as err:
-        raise HTTPException(status_code=404, detail=str(err))
+        raise HTTPException(status_code=404 if "not found" in str(err) else 422, detail=str(err))
     await db.commit()
     return o
 

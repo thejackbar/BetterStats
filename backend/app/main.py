@@ -4594,6 +4594,65 @@ async def lifespan(app: FastAPI):
             ON volunteer_hours(roster_shift_id) WHERE roster_shift_id IS NOT NULL
         """))
 
+        # Migration 230: a strategic plan is a record rather than a name typed
+        # onto every objective, an objective carries its own due date/owner/
+        # budget, and a motion can serve an objective the way an action already
+        # could. Byte-identical to alembic/versions/230_strategic_plans.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS club_strategic_plans (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                description TEXT,
+                start_year INTEGER,
+                end_year INTEGER,
+                status TEXT NOT NULL DEFAULT 'active',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_strategic_plans_org "
+            "ON club_strategic_plans(organisation_id, status)"
+        ))
+        for col, ddl in (
+            ("plan_id", "UUID REFERENCES club_strategic_plans(id) ON DELETE SET NULL"),
+            ("due_date", "DATE"),
+            ("owner_member_id", "UUID REFERENCES fee_members(id) ON DELETE SET NULL"),
+            ("budget", "NUMERIC(12,2)"),
+        ):
+            await conn.execute(text(f"ALTER TABLE club_objectives ADD COLUMN IF NOT EXISTS {col} {ddl}"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS ix_club_objectives_plan ON club_objectives(plan_id)"))
+        await conn.execute(text(
+            "ALTER TABLE meeting_motions ADD COLUMN IF NOT EXISTS "
+            "objective_id UUID REFERENCES club_objectives(id) ON DELETE SET NULL"
+        ))
+        # NOT EXISTS, not ON CONFLICT: this block re-runs on every boot and
+        # there is no unique constraint on (org, name) for a conflict clause to
+        # fire against, so without it each restart would mint the plans again.
+        await conn.execute(text("""
+            INSERT INTO club_strategic_plans (organisation_id, name)
+            SELECT o.organisation_id, MIN(BTRIM(o.plan))
+            FROM club_objectives o
+            WHERE o.plan IS NOT NULL AND BTRIM(o.plan) <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM club_strategic_plans p
+                  WHERE p.organisation_id = o.organisation_id
+                    AND LOWER(BTRIM(p.name)) = LOWER(BTRIM(o.plan))
+              )
+            GROUP BY o.organisation_id, LOWER(BTRIM(o.plan))
+        """))
+        await conn.execute(text("""
+            UPDATE club_objectives o
+            SET plan_id = p.id
+            FROM club_strategic_plans p
+            WHERE o.plan_id IS NULL
+              AND o.plan IS NOT NULL
+              AND p.organisation_id = o.organisation_id
+              AND LOWER(BTRIM(p.name)) = LOWER(BTRIM(o.plan))
+        """))
+
         # Migration 223: a member row may only link to a player of the SAME
         # club. NOT VALID, so it guards every new write from the moment it
         # lands without failing on rows an earlier bug already left behind

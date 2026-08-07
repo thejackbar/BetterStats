@@ -250,14 +250,8 @@ export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged
       <div className={cap}>PLAN</div>
 
       <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className={`${cap} block mb-1`}>OBJECTIVE</span>
-          <select className={inp} value={form.objective_id}
-            onChange={e => setForm(f => ({ ...f, objective_id: e.target.value }))}>
-            <option value="">— none —</option>
-            {(objectives || []).map(o => <option key={o.id} value={o.id}>{o.title}</option>)}
-          </select>
-        </label>
+        <ObjectiveSelect objectives={objectives} value={form.objective_id}
+          onChange={v => setForm(f => ({ ...f, objective_id: v || '' }))} />
         <label className="block">
           <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
           <select className={inp} value={form.assigned_to_member_id}
@@ -452,90 +446,781 @@ export function MotionGovernance({ meeting, motion, members, onChanged }) {
   )
 }
 
-/* ── Objectives ─────────────────────────────────────────────────────────── */
+/* ── Strategic plans → objectives → actions and motions ─────────────────── */
 
-export function ObjectivesTab() {
-  const toast = useToast()
-  const [rows, setRows] = useState(null)
-  const [form, setForm] = useState({ title: '', plan: '' })
+// Three levels, and the screen reads top down: the club's plans, the objectives
+// in each, and the actions and motions serving each objective. Every figure
+// here is derived from the action register the committee already keeps, so
+// correcting an action's spend moves its objective and its plan in the same
+// breath — there is no second set of numbers to keep in step.
+
+const pct = n => (n === null || n === undefined ? '—' : `${n}%`)
+const AMBER = '#f5b542'
+// What the club allocated to this objective itself, as opposed to the effective
+// budget a rolled-up row carries (which falls back to the sum of its actions').
+const ownBudget = o => ('own_budget' in o ? o.own_budget : o.budget)
+
+function Bar({ percent, tone }) {
+  return (
+    <div className="h-1.5 rounded bg-pb-surface2 overflow-hidden">
+      <div className="h-full" style={{
+        width: `${Math.max(0, Math.min(100, percent || 0))}%`,
+        background: tone || 'var(--pb-accent)',
+      }} />
+    </div>
+  )
+}
+
+// Progress, spend against what was allocated, and whether it has run late —
+// the three questions asked of anything on a plan, in one strip.
+function Delivery({ row, compact = false }) {
+  const spendTone = row.over_budget ? AMBER : 'var(--pb-accent)'
+  const stats = [
+    { v: `${row.actions_done}/${row.actions}`, l: 'ACTIONS DONE' },
+    { v: pct(row.percent_complete), l: 'PROGRESS' },
+    { v: money(row.budget), l: 'BUDGET' },
+    { v: money(row.spent), l: 'SPENT', warn: row.over_budget },
+  ]
+  return (
+    <div>
+      <div className={`grid grid-cols-2 sm:grid-cols-4 gap-3 ${compact ? 'mt-2' : 'mt-3'}`}>
+        {stats.map(s => (
+          <div key={s.l}>
+            <div className={`font-display font-bold pb-num ${compact ? 'text-[15px]' : 'text-[19px]'}`}
+              style={{ color: s.warn ? AMBER : 'var(--pb-accent-ink)' }}>{s.v}</div>
+            <div className={cap}>{s.l}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-2 space-y-1">
+        <Bar percent={row.percent_complete} />
+        {row.budget > 0 && (
+          <div className="flex items-center gap-2">
+            <div className="flex-1"><Bar percent={row.percent_spent} tone={spendTone} /></div>
+            <span className="font-mono text-[9px] shrink-0"
+              style={{ color: row.over_budget ? AMBER : 'var(--pb-faintest)' }}>
+              {pct(row.percent_spent)} of budget spent
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── Pointing something at the plan ─────────────────────────────────────── */
+
+// One picker for "which objective does this serve", used by an action's plan
+// panel, a motion in the meetings list and the meeting room. It shows the plan
+// an objective belongs to as well as the objective, because two plans can each
+// have an objective called "Grow junior numbers" and picking the wrong one is
+// otherwise invisible.
+export function useObjectives() {
+  const [objectives, setObjectives] = useState([])
+  useEffect(() => {
+    let live = true
+    api.committeeListObjectives()
+      .then(d => { if (live) setObjectives(d.objectives || []) })
+      .catch(() => {})
+    return () => { live = false }
+  }, [])
+  return objectives
+}
+
+export const objectiveLabel = o => (o.plan_name ? `${o.plan_name} › ${o.title}` : o.title)
+
+export function ObjectiveSelect({ objectives, value, onChange, className, label = 'OBJECTIVE' }) {
+  const rows = objectives || []
+  return (
+    <label className="block">
+      {label && <span className={`${cap} block mb-1`}>{label}</span>}
+      <select className={className || inp} value={value || ''} onChange={e => onChange(e.target.value || null)}>
+        <option value="">— not on the plan —</option>
+        {rows.map(o => <option key={o.id} value={o.id}>{objectiveLabel(o)}</option>)}
+      </select>
+    </label>
+  )
+}
+
+function LateTag({ row }) {
+  if (!row.is_late) return null
+  const overdue = row.actions_overdue || 0
+  return (
+    <span className="font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border border-pb-red/40 text-pb-red">
+      LATE{overdue ? ` · ${overdue} OVERDUE` : ''}
+    </span>
+  )
+}
+
+/* ── The plan itself ────────────────────────────────────────────────────── */
+
+const emptyPlan = { name: '', description: '', start_year: '', end_year: '' }
+
+function PlanForm({ plan, onSave, onCancel }) {
+  const [form, setForm] = useState(() => plan
+    ? { name: plan.name || '', description: plan.description || '',
+        start_year: plan.start_year ?? '', end_year: plan.end_year ?? '' }
+    : emptyPlan)
   const [busy, setBusy] = useState(false)
 
+  async function submit() {
+    if (!form.name.trim()) return
+    setBusy(true)
+    try {
+      await onSave({
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        start_year: form.start_year === '' ? null : Number(form.start_year),
+        end_year: form.end_year === '' ? null : Number(form.end_year),
+      })
+      if (!plan) setForm(emptyPlan)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-4 space-y-2">
+      <div className={cap}>{plan ? 'EDIT PLAN' : 'NEW PLAN'}</div>
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input className={`${inp} flex-1`} placeholder="Plan name (e.g. Strategic Plan 2026-29)"
+          value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+        <input type="number" className={`${inp} sm:w-28`} placeholder="From"
+          value={form.start_year} onChange={e => setForm(f => ({ ...f, start_year: e.target.value }))} />
+        <input type="number" className={`${inp} sm:w-28`} placeholder="To"
+          value={form.end_year} onChange={e => setForm(f => ({ ...f, end_year: e.target.value }))} />
+      </div>
+      <textarea rows={2} className={inp} placeholder="What this plan is for (optional)"
+        value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={busy || !form.name.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+          {busy ? 'SAVING…' : plan ? 'SAVE PLAN' : '+ PLAN'}
+        </button>
+        {onCancel && (
+          <button onClick={onCancel} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── An objective within a plan ─────────────────────────────────────────── */
+
+const emptyObjective = { title: '', description: '', due_date: '', owner_member_id: '', budget: '', season_year: '' }
+
+function ObjectiveForm({ objective, plans, planId, members, onSave, onCancel }) {
+  const [form, setForm] = useState(() => objective
+    ? {
+        title: objective.title || '', description: objective.description || '',
+        due_date: objective.due_date || '', owner_member_id: objective.owner_member_id || '',
+        // `own_budget` on a rolled-up row is the club's OWN allocation;
+        // `budget` there is the effective figure and may have been summed from
+        // the actions, which is not something to seed an edit form with.
+        budget: ownBudget(objective) ?? '', season_year: objective.season_year ?? '',
+        plan_id: objective.plan_id || '',
+      }
+    : { ...emptyObjective, plan_id: planId || '' })
+  const [busy, setBusy] = useState(false)
+
+  async function submit() {
+    if (!form.title.trim()) return
+    setBusy(true)
+    try {
+      await onSave({
+        title: form.title.trim(),
+        description: form.description.trim() || null,
+        // All four are nullable and the API takes an explicit null as "clear
+        // it", so an owner or a budget can be taken off again once set.
+        plan_id: form.plan_id || null,
+        due_date: form.due_date || null,
+        owner_member_id: form.owner_member_id || null,
+        budget: form.budget === '' ? null : Number(form.budget),
+        season_year: form.season_year === '' ? null : Number(form.season_year),
+      })
+      if (!objective) setForm({ ...emptyObjective, plan_id: planId || '' })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="pb-card p-4 space-y-2">
+      <div className={cap}>{objective ? 'EDIT OBJECTIVE' : 'NEW OBJECTIVE'}</div>
+      <input className={inp} placeholder="Objective (e.g. Upgrade the practice nets)"
+        value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+      <textarea rows={2} className={inp} placeholder="What success looks like (optional)"
+        value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <label className="block">
+          <span className={`${cap} block mb-1`}>STRATEGIC PLAN</span>
+          <select className={inp} value={form.plan_id}
+            onChange={e => setForm(f => ({ ...f, plan_id: e.target.value }))}>
+            <option value="">— not on a plan —</option>
+            {(plans || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
+          <select className={inp} value={form.owner_member_id}
+            onChange={e => setForm(f => ({ ...f, owner_member_id: e.target.value }))}>
+            <option value="">— unassigned —</option>
+            {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className={`${cap} block mb-1`}>DUE</span>
+          <input type="date" className={inp} value={form.due_date}
+            onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+        </label>
+        <label className="block">
+          <span className={`${cap} block mb-1`}>BUDGET</span>
+          <input type="number" step="0.01" className={inp} placeholder="Leave blank to add up its actions"
+            value={form.budget} onChange={e => setForm(f => ({ ...f, budget: e.target.value }))} />
+        </label>
+      </div>
+      <div className="flex gap-2">
+        <button onClick={submit} disabled={busy || !form.title.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+          {busy ? 'SAVING…' : objective ? 'SAVE OBJECTIVE' : '+ OBJECTIVE'}
+        </button>
+        {onCancel && (
+          <button onClick={onCancel} className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/* ── What is actually being done about an objective ─────────────────────── */
+
+// An action's own progress and spend, editable where they are read. The Actions
+// board can do this too, but an objective is where somebody reviewing the plan
+// is sitting, and sending them to another tab to move a percentage is how a
+// plan goes stale.
+function ActionLine({ action, onSave }) {
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({
+    percent_complete: action.percent_complete ?? 0,
+    actual_expenditure: action.actual_expenditure ?? '',
+    budget_estimate: action.budget_estimate ?? '',
+  })
+  const [busy, setBusy] = useState(false)
+
+  const budget = Number(action.budget_estimate || 0)
+  const spent = Number(action.actual_expenditure || 0)
+  const spentPct = budget ? Math.round(spent / budget * 100) : null
+  const overdue = action.status !== 'done' && action.due_date && action.due_date < new Date().toISOString().slice(0, 10)
+
+  async function save() {
+    setBusy(true)
+    try {
+      await onSave({
+        percent_complete: Number(form.percent_complete) || 0,
+        actual_expenditure: form.actual_expenditure === '' ? null : Number(form.actual_expenditure),
+        budget_estimate: form.budget_estimate === '' ? null : Number(form.budget_estimate),
+      })
+      setOpen(false)
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="border pb-hairline rounded px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="text-[12.5px] text-pb-text">{action.title}</div>
+          <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
+            <span>{action.percent_complete || 0}% complete</span>
+            {budget > 0 && (
+              <span style={spent > budget ? { color: AMBER } : undefined}>
+                {money(spent)} of {money(budget)}{spentPct !== null ? ` · ${spentPct}%` : ''}
+              </span>
+            )}
+            {action.due_date && (
+              <span style={overdue ? { color: 'var(--pb-red)' } : undefined}>
+                due {action.due_date}{overdue ? ' · late' : ''}
+              </span>
+            )}
+            {action.status === 'done' && <span style={{ color: 'var(--pb-positive)' }}>done</span>}
+          </div>
+        </div>
+        <button onClick={() => setOpen(o => !o)}
+          className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">
+          {open ? 'Close' : 'Update'}
+        </button>
+      </div>
+      <div className="mt-1.5"><Bar percent={action.percent_complete} tone={action.status === 'done' ? 'var(--pb-positive)' : overdue ? 'var(--pb-red)' : undefined} /></div>
+
+      {open && (
+        <div className="mt-2 pt-2 border-t pb-hairline space-y-2">
+          <label className="block">
+            <span className={`${cap} block mb-1`}>PROGRESS · {form.percent_complete}%</span>
+            <input type="range" min="0" max="100" step="5" className="w-full accent-pb-accent"
+              value={form.percent_complete}
+              onChange={e => setForm(f => ({ ...f, percent_complete: e.target.value }))} />
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className={`${cap} block mb-1`}>BUDGET</span>
+              <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
+                onChange={e => setForm(f => ({ ...f, budget_estimate: e.target.value }))} />
+            </label>
+            <label className="block">
+              <span className={`${cap} block mb-1`}>SPENT TO DATE</span>
+              <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.actual_expenditure}
+                onChange={e => setForm(f => ({ ...f, actual_expenditure: e.target.value }))} />
+            </label>
+          </div>
+          <button onClick={save} disabled={busy}
+            className="px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            {busy ? 'SAVING…' : 'SAVE'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function MotionLine({ motion }) {
+  const tone = motion.outcome === 'carried' ? 'var(--pb-positive)'
+    : motion.outcome === 'lost' ? 'var(--pb-red)' : 'var(--pb-faint)'
+  return (
+    <div className="border pb-hairline rounded px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-[12.5px] text-pb-text min-w-0">{motion.description}</div>
+        <span className="font-mono text-[9px] tracking-wide2 shrink-0" style={{ color: tone }}>
+          {(motion.outcome || 'pending').toUpperCase()}
+        </span>
+      </div>
+      <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
+        {motion.meeting_title && <span>{motion.meeting_title}</span>}
+        {motion.meeting_date && <span>{motion.meeting_date.slice(0, 10)}</span>}
+        {motion.is_resolution && (
+          <span style={{ color: 'var(--pb-accent-ink)' }}>
+            RESOLUTION{motion.resolution_ref ? ` · ${motion.resolution_ref}` : ''}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function ObjectiveCard({ objective, plans, members, memberName, onChanged }) {
+  const toast = useToast()
+  const [editing, setEditing] = useState(false)
+  const [open, setOpen] = useState(false)
+
+  const o = objective
+  const actions = o.action_list || []
+  const motions = o.motion_list || []
+
+  async function save(data) {
+    try { await api.committeeUpdateObjective(o.id, data); toast.success('Objective saved'); setEditing(false); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function remove() {
+    if (!confirm(`Delete "${o.title}"? The actions and motions serving it keep going, they just stop pointing at an objective.`)) return
+    try { await api.committeeDeleteObjective(o.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+  async function updateAction(id, data) {
+    try { await api.committeeUpdateTask(id, data); toast.success('Action updated'); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+
+  if (editing) {
+    return (
+      <ObjectiveForm objective={o} plans={plans} members={members}
+        onSave={save} onCancel={() => setEditing(false)} />
+    )
+  }
+
+  return (
+    <div className="pb-card p-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-pb-text font-medium flex items-center gap-2 flex-wrap">
+            {o.title}<LateTag row={o} />
+          </div>
+          {o.description && <div className="text-pb-faint text-[12.5px] mt-0.5">{o.description}</div>}
+          <div className="font-mono text-[9.5px] text-pb-faintest mt-1 flex flex-wrap gap-x-2">
+            {o.owner_member_id && <span>{memberName(o.owner_member_id)}</span>}
+            {o.due_date && <span>due {o.due_date}</span>}
+            {o.season_year && <span>{o.season_year}</span>}
+            {ownBudget(o) != null && <span>allocated {money(ownBudget(o))}</span>}
+            {ownBudget(o) == null && o.budget > 0 && <span>{money(o.budget)} across its actions</span>}
+          </div>
+        </div>
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setEditing(true)}
+            className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+          <button onClick={remove}
+            className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+        </div>
+      </div>
+
+      <Delivery row={o} />
+
+      <button onClick={() => setOpen(v => !v)}
+        className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text mt-3">
+        {open ? 'Hide' : 'Show'} work · {actions.length} {actions.length === 1 ? 'action' : 'actions'} · {motions.length} {motions.length === 1 ? 'motion' : 'motions'} · notes
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className={`${cap} mb-1.5`}>ACTIONS</div>
+            {actions.length === 0 ? (
+              <div className="font-mono text-[10px] text-pb-faintest">
+                Nothing yet. Point an action at this objective from the Actions tab or in a meeting.
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                {actions.map(a => (
+                  <ActionLine key={a.id} action={a} onSave={d => updateAction(a.id, d)} />
+                ))}
+              </div>
+            )}
+          </div>
+          <div>
+            <div className={`${cap} mb-1.5`}>MOTIONS</div>
+            {motions.length === 0 ? (
+              <div className="font-mono text-[10px] text-pb-faintest">
+                No motion has been tied to this objective.
+              </div>
+            ) : (
+              <div className="space-y-1.5">{motions.map(m => <MotionLine key={m.id} motion={m} />)}</div>
+            )}
+          </div>
+          <NoteThread entityType="objective" entityId={o.id} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── The Plan tab ───────────────────────────────────────────────────────── */
+
+export function PlanTab({ members }) {
+  const toast = useToast()
+  const [report, setReport] = useState(null)
+  const [addingPlan, setAddingPlan] = useState(false)
+  const [editingPlan, setEditingPlan] = useState(null)
+  const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)   // plan id, or '' for no plan
+  const [openPlan, setOpenPlan] = useState(null)
+  const [view, setView] = useState('plan')                            // plan | delivery
+
   const load = useCallback(() => {
-    api.committeeObjectiveProgress()
-      .then(d => setRows(d.objectives || []))
-      .catch(e => { toast.error(e.message); setRows([]) })
+    api.committeePlanReport()
+      .then(setReport)
+      .catch(e => { toast.error(e.message); setReport({ plans: [], unassigned: { objective_list: [] } }) })
   }, [toast])
   useEffect(() => { load() }, [load])
 
-  async function add() {
-    if (!form.title.trim()) return
-    setBusy(true)
-    try { await api.committeeCreateObjective({ ...form, plan: form.plan || null }); setForm({ title: '', plan: '' }); load() }
-    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  const memberName = useCallback(
+    id => (members || []).find(m => m.member_id === id)?.full_name || 'Someone',
+    [members])
+
+  async function createPlan(data) {
+    try { await api.committeeCreatePlan(data); toast.success('Plan created'); setAddingPlan(false); load() }
+    catch (e) { toast.error(e.message) }
   }
-  async function remove(o) {
-    if (!confirm(`Delete "${o.title}"? Actions serving it keep going, they just stop pointing at a plan.`)) return
-    try { await api.committeeDeleteObjective(o.id); load() } catch (e) { toast.error(e.message) }
+  async function savePlan(id, data) {
+    try { await api.committeeUpdatePlan(id, data); toast.success('Plan saved'); setEditingPlan(null); load() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function removePlan(p) {
+    if (!confirm(`Delete "${p.name}"? Its objectives survive and simply stop belonging to a plan.`)) return
+    try { await api.committeeDeletePlan(p.id); load() } catch (e) { toast.error(e.message) }
+  }
+  async function createObjective(data) {
+    try { await api.committeeCreateObjective(data); toast.success('Objective added'); setAddingObjectiveTo(null); load() }
+    catch (e) { toast.error(e.message) }
   }
 
-  if (rows === null) return <div className="font-mono text-[11px] text-pb-faint">Loading objectives…</div>
+  if (report === null) return <div className="font-mono text-[11px] text-pb-faint">Loading the plan…</div>
+
+  const plans = report.plans || []
+  const unassigned = report.unassigned || { objective_list: [] }
+  const objectiveProps = { plans, members, memberName, onChanged: load }
 
   return (
     <div>
       <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
-        The club's business or strategic plan. An action points at an objective, so the plan reports against
-        the register the committee already keeps rather than a spreadsheet nobody updates.
+        The club's strategic plans, the objectives in each, and the actions and motions doing the work.
+        Everything below adds up from the register the committee already keeps, so the plan reports
+        against itself rather than a spreadsheet nobody updates.
       </p>
 
-      <div className="pb-card p-4 mb-4 flex flex-col sm:flex-row gap-2">
-        <input className={`${inp} flex-1`} placeholder="Objective (e.g. Upgrade the practice nets)"
-          value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-        <input className={`${inp} sm:w-56`} placeholder="Plan (e.g. Strategic Plan 2026-29)"
-          value={form.plan} onChange={e => setForm(f => ({ ...f, plan: e.target.value }))} />
-        <button onClick={add} disabled={busy || !form.title.trim()}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40 whitespace-nowrap"
-          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        {[['plan', 'By plan'], ['delivery', 'All work']].map(([k, l]) => (
+          <button key={k} onClick={() => setView(k)}
+            className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+        ))}
+        {view === 'plan' && !addingPlan && (
+          <button onClick={() => { setAddingPlan(true); setEditingPlan(null) }}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold ml-auto"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ STRATEGIC PLAN</button>
+        )}
       </div>
 
-      {rows.length === 0 && <div className="font-mono text-[11px] text-pb-faintest">No objectives yet.</div>}
-      <div className="space-y-2">
-        {rows.map(o => {
-          const overspend = o.budget > 0 && o.spent > o.budget
-          return (
-            <div key={o.id} className="pb-card p-4 group">
+      {view === 'delivery'
+        ? <DeliveryRegister report={report} memberName={memberName} onChanged={load} />
+        : (
+          <div className="space-y-3">
+            {addingPlan && (
+              <PlanForm onSave={createPlan} onCancel={() => setAddingPlan(false)} />
+            )}
+
+            {plans.length === 0 && !addingPlan && (
+              <div className="pb-card p-6 text-center">
+                <div className="text-pb-text text-[13px] mb-1">No strategic plan yet.</div>
+                <div className="font-mono text-[11px] text-pb-faintest">
+                  Add one, then hang the club's objectives off it.
+                </div>
+              </div>
+            )}
+
+            {plans.map(p => editingPlan === p.id ? (
+              <PlanForm key={p.id} plan={p} onSave={d => savePlan(p.id, d)} onCancel={() => setEditingPlan(null)} />
+            ) : (
+              <div key={p.id} className="pb-card p-4">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <div className="text-pb-text font-medium text-[15px]">{p.name}</div>
+                    <div className={`${cap} mt-0.5`}>
+                      {[p.start_year, p.end_year].filter(Boolean).join('–') || 'NO DATES SET'}
+                      {' · '}{p.objectives} {p.objectives === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
+                      {p.late_objectives > 0 ? ` · ${p.late_objectives} LATE` : ''}
+                    </div>
+                    {p.description && <div className="text-pb-faint text-[12.5px] mt-1">{p.description}</div>}
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button onClick={() => { setEditingPlan(p.id); setAddingPlan(false) }}
+                      className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+                    <button onClick={() => removePlan(p)}
+                      className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
+                  {[
+                    { v: `${p.objectives_done}/${p.objectives}`, l: 'OBJECTIVES DONE' },
+                    { v: pct(p.percent_complete), l: 'PROGRESS' },
+                    { v: money(p.budget), l: 'BUDGET' },
+                    { v: money(p.spent), l: 'SPENT', warn: p.over_budget },
+                  ].map(s => (
+                    <div key={s.l}>
+                      <div className="font-display font-bold text-[19px] pb-num"
+                        style={{ color: s.warn ? AMBER : 'var(--pb-accent-ink)' }}>{s.v}</div>
+                      <div className={cap}>{s.l}</div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 space-y-1">
+                  <Bar percent={p.percent_complete} />
+                  {p.budget > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1"><Bar percent={p.percent_spent} tone={p.over_budget ? AMBER : 'var(--pb-accent)'} /></div>
+                      <span className="font-mono text-[9px] shrink-0"
+                        style={{ color: p.over_budget ? AMBER : 'var(--pb-faintest)' }}>
+                        {pct(p.percent_spent)} of budget spent
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 mt-3">
+                  <button onClick={() => setOpenPlan(v => v === p.id ? null : p.id)}
+                    className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">
+                    {openPlan === p.id ? 'Hide objectives' : 'Show objectives'}
+                  </button>
+                  <button onClick={() => { setOpenPlan(p.id); setAddingObjectiveTo(p.id) }}
+                    className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">+ Objective</button>
+                </div>
+
+                {openPlan === p.id && (
+                  <div className="mt-3 space-y-2">
+                    {addingObjectiveTo === p.id && (
+                      <ObjectiveForm plans={plans} planId={p.id} members={members}
+                        onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
+                    )}
+                    {(p.objective_list || []).length === 0 && addingObjectiveTo !== p.id && (
+                      <div className="font-mono text-[10px] text-pb-faintest">Nothing on this plan yet.</div>
+                    )}
+                    {(p.objective_list || []).map(o => (
+                      <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* An objective can sit outside every plan — the club hasn't written
+                one down yet, or the plan it belonged to was deleted. It is still
+                real work, so it is shown rather than quietly dropped. */}
+            {((unassigned.objective_list || []).length > 0 || addingObjectiveTo === '') && (
+              <div className="pb-card p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-pb-text font-medium text-[15px]">Not on a plan</div>
+                    <div className={`${cap} mt-0.5`}>
+                      {(unassigned.objective_list || []).length} {(unassigned.objective_list || []).length === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
+                    </div>
+                  </div>
+                  <button onClick={() => setAddingObjectiveTo('')}
+                    className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">+ Objective</button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {addingObjectiveTo === '' && (
+                    <ObjectiveForm plans={plans} planId="" members={members}
+                      onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
+                  )}
+                  {(unassigned.objective_list || []).map(o => (
+                    <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {plans.length > 0 && (unassigned.objective_list || []).length === 0 && addingObjectiveTo !== '' && (
+              <button onClick={() => setAddingObjectiveTo('')}
+                className="font-mono text-[10px] text-pb-faintest hover:text-pb-faint">
+                + Add an objective that isn't on a plan
+              </button>
+            )}
+          </div>
+        )}
+    </div>
+  )
+}
+
+/* ── Every action and motion, in plan context ───────────────────────────── */
+
+// The same work as above read the other way round: one flat register of
+// everything serving the plan, so "what is late" and "what has eaten its
+// budget" can be answered without opening each plan in turn.
+function DeliveryRegister({ report, memberName, onChanged }) {
+  const toast = useToast()
+  const [lateOnly, setLateOnly] = useState(false)
+  const [overOnly, setOverOnly] = useState(false)
+
+  const today = new Date().toISOString().slice(0, 10)
+  const groups = [...(report.plans || []), { id: '', name: 'Not on a plan', ...(report.unassigned || {}) }]
+
+  const rows = []
+  for (const p of groups) {
+    for (const o of (p.objective_list || [])) {
+      for (const a of (o.action_list || [])) {
+        const budget = Number(a.budget_estimate || 0)
+        const spent = Number(a.actual_expenditure || 0)
+        rows.push({
+          kind: 'action', id: a.id, title: a.title, plan: p.name, objective: o.title,
+          percent: a.percent_complete || 0, budget, spent,
+          percentSpent: budget ? Math.round(spent / budget * 100) : null,
+          over: budget > 0 && spent > budget,
+          late: a.status !== 'done' && !!a.due_date && a.due_date < today,
+          due: a.due_date, status: a.status,
+          owner: a.assigned_to_member_id ? memberName(a.assigned_to_member_id) : null,
+        })
+      }
+      for (const m of (o.motion_list || [])) {
+        rows.push({
+          kind: 'motion', id: m.id, title: m.description, plan: p.name, objective: o.title,
+          percent: null, budget: 0, spent: 0, percentSpent: null, over: false,
+          // A motion is a decision, not work with a deadline of its own. It
+          // reads as late when the objective it serves is, which is the only
+          // honest thing to say about it.
+          late: !!o.is_late, due: null, status: m.outcome,
+          resolution: m.is_resolution, ref: m.resolution_ref,
+          meeting: m.meeting_title, meetingDate: m.meeting_date,
+        })
+      }
+    }
+  }
+
+  const shown = rows.filter(r => (!lateOnly || r.late) && (!overOnly || r.over))
+
+  async function bump(row, data) {
+    try { await api.committeeUpdateTask(row.id, data); toast.success('Action updated'); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <button onClick={() => setLateOnly(v => !v)}
+          className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border ${lateOnly ? 'text-pb-text border-pb-red/60' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}>
+          LATE ({rows.filter(r => r.late).length})
+        </button>
+        <button onClick={() => setOverOnly(v => !v)}
+          className={`px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border ${overOnly ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+          style={overOnly ? { borderColor: AMBER } : undefined}>
+          OVER BUDGET ({rows.filter(r => r.over).length})
+        </button>
+        <span className="font-mono text-[10px] text-pb-faintest ml-auto">{shown.length} of {rows.length}</span>
+      </div>
+
+      {shown.length === 0 ? (
+        <div className="pb-card p-6 text-center">
+          <div className="text-pb-text text-[13px] mb-1">Nothing to show.</div>
+          <div className="font-mono text-[11px] text-pb-faintest">
+            Point an action or a motion at an objective and it appears here.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {shown.map(r => (
+            <div key={`${r.kind}-${r.id}`} className="pb-card px-3 py-2.5">
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div className="min-w-0">
-                  <div className="text-pb-text font-medium">{o.title}</div>
-                  {o.plan && <div className={`${cap} mt-0.5`}>{o.plan.toUpperCase()}{o.season_year ? ` · ${o.season_year}` : ''}</div>}
-                </div>
-                <button onClick={() => remove(o)}
-                  className="font-mono text-[9px] text-pb-faintest hover:text-pb-red opacity-0 group-hover:opacity-100 transition">✕</button>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3">
-                {[
-                  { v: `${o.actions_done}/${o.actions}`, l: 'ACTIONS DONE' },
-                  { v: `${o.percent_complete}%`, l: 'PROGRESS' },
-                  { v: money(o.budget), l: 'BUDGETED' },
-                  { v: money(o.spent), l: 'SPENT', warn: overspend },
-                ].map(s => (
-                  <div key={s.l}>
-                    <div className="font-display font-bold text-[19px] pb-num"
-                      style={{ color: s.warn ? '#f5b542' : 'var(--pb-accent-ink)' }}>{s.v}</div>
-                    <div className={cap}>{s.l}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-mono text-[8.5px] tracking-wide2 border pb-hairline rounded px-1.5 py-px text-pb-faintest">
+                      {r.kind === 'action' ? 'ACTION' : 'MOTION'}
+                    </span>
+                    <span className="text-[12.5px] text-pb-text">{r.title}</span>
+                    {r.late && <span className="font-mono text-[8.5px] tracking-wide2 text-pb-red">LATE</span>}
+                    {r.over && <span className="font-mono text-[8.5px] tracking-wide2" style={{ color: AMBER }}>OVER BUDGET</span>}
+                    {r.resolution && (
+                      <span className="font-mono text-[8.5px] tracking-wide2" style={{ color: 'var(--pb-accent-ink)' }}>
+                        RESOLUTION{r.ref ? ` · ${r.ref}` : ''}
+                      </span>
+                    )}
                   </div>
-                ))}
+                  <div className={`${cap} mt-1`}>{r.plan.toUpperCase()} › {r.objective.toUpperCase()}</div>
+                  <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
+                    {r.owner && <span>{r.owner}</span>}
+                    {r.due && <span>due {r.due}</span>}
+                    {r.meeting && <span>{r.meeting}{r.meetingDate ? ` · ${r.meetingDate.slice(0, 10)}` : ''}</span>}
+                    {r.status && <span>{r.status.replace('_', ' ')}</span>}
+                  </div>
+                </div>
+                {r.kind === 'action' && (
+                  <div className="text-right shrink-0">
+                    <div className="font-display font-bold text-[17px] pb-num" style={{ color: 'var(--pb-accent-ink)' }}>
+                      {r.percent}%
+                    </div>
+                    <div className={cap}>
+                      {r.budget > 0 ? `${money(r.spent)} / ${money(r.budget)} · ${r.percentSpent}%` : 'NO BUDGET'}
+                    </div>
+                  </div>
+                )}
               </div>
-
-              <div className="h-1.5 rounded bg-pb-surface2 overflow-hidden mt-3">
-                <div className="h-full" style={{ width: `${o.percent_complete}%`, background: 'var(--pb-accent)' }} />
-              </div>
-
-              <div className="mt-3"><NoteThread entityType="objective" entityId={o.id} compact /></div>
+              {r.kind === 'action' && (
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="flex-1"><Bar percent={r.percent} tone={r.status === 'done' ? 'var(--pb-positive)' : r.late ? 'var(--pb-red)' : undefined} /></div>
+                  {r.status !== 'done' && (
+                    <button onClick={() => bump(r, { status: 'done' })}
+                      className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">Mark done</button>
+                  )}
+                </div>
+              )}
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

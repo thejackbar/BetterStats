@@ -387,6 +387,16 @@ export const api = {
     request(`/club-admin/committee/notes/${entityType}/${entityId}`, { method: 'POST', body: JSON.stringify({ body, author_member_id: authorMemberId || null }) }),
   committeeDeleteNote: (noteId) =>
     request(`/club-admin/committee/notes/${noteId}`, { method: 'DELETE' }),
+  committeeListPlans: (includeArchived) =>
+    request(`/club-admin/committee/plans${includeArchived ? '?include_archived=true' : ''}`),
+  committeePlanReport: (includeArchived) =>
+    request(`/club-admin/committee/plans/report${includeArchived ? '?include_archived=true' : ''}`),
+  committeeCreatePlan: (data) =>
+    request('/club-admin/committee/plans', { method: 'POST', body: JSON.stringify(data) }),
+  committeeUpdatePlan: (id, data) =>
+    request(`/club-admin/committee/plans/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  committeeDeletePlan: (id) =>
+    request(`/club-admin/committee/plans/${id}`, { method: 'DELETE' }),
   committeeListObjectives: (includeArchived) =>
     request(`/club-admin/committee/objectives${includeArchived ? '?include_archived=true' : ''}`),
   committeeObjectiveProgress: () => request('/club-admin/committee/objectives/progress'),
