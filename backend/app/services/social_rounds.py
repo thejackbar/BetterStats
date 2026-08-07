@@ -294,12 +294,14 @@ async def social_results(db: AsyncSession, org) -> dict:
     if not rows:
         return {"season": None, "club": _club_dict(org), "dates": []}
     keys = club_match_keys(org)
-    grade_name_by_guid = {guid: gname for guid, gname, _ in rows}
-    season = next((sname for _, _, sname in rows if sname), None)
+    # Keyed on the raw CA grade guid, which is what a discovered match carries,
+    # NOT our own grades.id (the second column). See _current_grade_rows.
+    grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
+    season = next((sname for *_, sname in rows if sname), None)
     since = (date.today() - timedelta(days=_RESULT_WINDOW_DAYS)).isoformat()
 
     discovered = await asyncio.gather(
-        *[gr.get_grade_results(guid, since=since) for guid, _, _ in rows],
+        *[gr.get_grade_results(guid, since=since) for guid, *_ in rows],
         return_exceptions=True,
     )
     club_matches: list[dict] = []
