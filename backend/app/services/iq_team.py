@@ -26,7 +26,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.grade_labels import suggest_category
-from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_grade_clause
+from app.services.iq_filters import (
+    grade_canonical_label,
+    grade_match_clause,
+    season_grade_clause,
+    season_member_clause,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,22 +56,89 @@ def _uuid_list(values) -> list[str]:
 
 
 
-async def _safe(session: AsyncSession, factory, default):
+async def _safe(session: AsyncSession, factory, default, key: str | None = None, degraded: list | None = None):
     """Run an optional add-on analysis; if it fails, log it and roll the session
     back so the remaining add-ons (and the core response) still succeed. Keeps a
-    single broken query from blanking the whole Team analysis page."""
+    single broken query from blanking the whole Team analysis page.
+
+    ``key``/``degraded`` (optional, so existing call shapes still work): when a
+    card fails, its ``key`` is appended to the caller's ``degraded`` list so the
+    frontend can tell "the query broke" apart from "genuinely no data" — both
+    otherwise look like the same default."""
     try:
         return await factory()
     except Exception:
         logger.exception("team_overview add-on failed")
+        if degraded is not None and key:
+            degraded.append(key)
         try:
             await session.rollback()
         except Exception:
             pass
         return default
 
-# "What score wins" bands when batting first.
+# "What score wins" bands when batting first — the FALLBACK edges only, used
+# when the scope's own totals are too thin (or too bunched) to derive
+# format-relative quartile bands from (see ``_derive_bands``).
 _BANDS = [(0, 120, "<120"), (120, 150, "120–149"), (150, 180, "150–179"), (180, 10_000, "180+")]
+
+
+def _percentile(sorted_vals: list, q: float) -> float | None:
+    """Linear-interpolated percentile over an already-sorted list (q in 0..1)."""
+    if not sorted_vals:
+        return None
+    if len(sorted_vals) == 1:
+        return float(sorted_vals[0])
+    k = (len(sorted_vals) - 1) * q
+    f = int(k)
+    c = min(f + 1, len(sorted_vals) - 1)
+    return float(sorted_vals[f]) + (float(sorted_vals[c]) - float(sorted_vals[f])) * (k - f)
+
+
+def _derive_bands(totals: list) -> list[tuple]:
+    """Format-relative score-band edges — quartiles of the scope's own
+    qualifying totals, rounded to the nearest 10, so a two-day side isn't read
+    against hardcoded T20 bands. Falls back to the static ``_BANDS`` when the
+    sample is too thin or the rounded quartiles collapse onto each other."""
+    vals = sorted(v for v in totals if v is not None)
+    if len(vals) >= 4:
+        qs = statistics.quantiles(vals, n=4)
+        edges = sorted({int(round(q / 10) * 10) for q in qs if q > 0})
+        if len(edges) >= 2:
+            bands: list[tuple] = []
+            lo = 0
+            for e in edges:
+                bands.append((lo, e, f"<{e}" if lo == 0 else f"{lo}–{e - 1}"))
+                lo = e
+            bands.append((lo, 10_000, f"{lo}+"))
+            return bands
+    return _BANDS
+
+
+def _fmt_of(match_format: str | None, fee_format: str | None) -> str | None:
+    """Classify a game's format into two_day / t20 / one_day — the game's own
+    ``match_format`` first, else the grade's ``fee_format`` override (the same
+    vocabulary ``services.fees.derive_fee_format`` maps). Unlike the fees
+    version this returns None when neither says anything, so an unknown format
+    stays unknown instead of defaulting to one_day."""
+    for raw in (match_format, fee_format):
+        v = (raw or "").strip().lower()
+        if not v or v == "exclude":
+            continue
+        if "two" in v:
+            return "two_day"
+        if "t20" in v or "twenty" in v:
+            return "t20"
+        return "one_day"
+    return None
+
+
+def _card_complete(g: dict) -> bool:
+    """Completeness gate for score-derived stats (par, bands, margins, chase
+    targets): only trust a game's reconstructed total when the batting card
+    looks complete — nearly bowled out, or most of the order recorded. A
+    two-row card sums to a "30 all out" that would drag par into the floor."""
+    return (g.get("wkts_lost") or 0) >= 8 or (g.get("bat_rows") or 0) >= 7
 
 
 def _avg(vals: list) -> float | None:
@@ -157,25 +229,81 @@ def _scope(season_id: str | None, grade_id: str | None) -> str:
     return season_grade_clause(season_id, grade_id)
 
 
+# ``_scope``, but with the season filter on the games view's OWN ``season_id``
+# (migration 169) instead of gr.season_id — used by ``_per_game``, whose grades
+# join is a LEFT JOIN, so a grade-less manual game (Grade is optional on Upload
+# Scorecard) keeps its season instead of falling out of every season filter.
+# An explicit grade pick still matches by name on ``gr`` (a NULL grade name
+# matches nothing, which is right — a grade-less game belongs to no picked grade).
+def _scope_game(season_id: str | None, grade_id: str | None) -> str:
+    sids = _RANGE_SEASONS.get()
+    if sids:
+        in_list = ", ".join("'" + s + "'::uuid" for s in sids)
+        parts = [f"AND g.season_id IN ({in_list})"]
+        if grade_id:
+            parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
+        return " ".join(parts)
+    parts = []
+    if season_id:
+        parts.append(season_member_clause("g.season_id", season_id))
+    if grade_id:
+        parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
+    return " ".join(parts)
+
+
 async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> list[dict]:
-    season_clause = _scope(season_id, grade_id)
+    season_clause = _scope_game(season_id, grade_id)
     res = await session.execute(
         text(
             f"""
             WITH our_games AS (
-                SELECT g.id, g.played_at, g.result, g.venue, gr.name AS grade_name,
+                -- Ownership + result mirror aggregations._club_results: a game
+                -- is ours via the per-club org sides (migration 167), the
+                -- view's own organisation_id (169, covers grade-less manual
+                -- games), the season's org, or an appearance by one of our
+                -- players — so a shared game the OPPONENT synced first still
+                -- counts. Grades are LEFT JOINed for the same reason. g.result
+                -- is relative to whichever club's sync wrote it first, so the
+                -- result is re-derived from the neutral winning_team against
+                -- OUR side, falling back to g.result when winning_team is NULL.
+                SELECT g.id, g.played_at, g.venue, g.opp_club_name,
+                       g.match_format, gr.fee_format,
+                       CASE
+                           WHEN g.winning_team IS NULL THEN g.result
+                           WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
+                           WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'LOSS'
+                           WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'WIN'
+                           WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'LOSS'
+                           ELSE g.result
+                       END AS result,
                        CASE WHEN g.away_club = g.opp_club_name THEN 'HOME'
                             WHEN g.home_club = g.opp_club_name THEN 'AWAY' ELSE NULL END AS our_venue
                 FROM v_effective_games g
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org AS UUID) {season_clause}
+                LEFT JOIN grades gr ON gr.id = g.grade_id
+                LEFT JOIN seasons s ON s.id = g.season_id
+                WHERE (
+                    g.organisation_id = CAST(:org AS UUID)
+                    OR g.home_org_id = CAST(:org AS UUID)
+                    OR g.away_org_id = CAST(:org AS UUID)
+                    OR s.organisation_id = CAST(:org AS UUID)
+                    OR EXISTS (
+                        SELECT 1 FROM game_appearances ga
+                        JOIN players gp ON gp.id = ga.player_id
+                        WHERE ga.game_id = g.id AND gp.organisation_id = CAST(:org AS UUID)
+                    )
+                ) {season_clause}
             ),
             bat AS (
+                -- OUR rows only. A shared both-synced fixture is ONE games row
+                -- carrying BOTH clubs' innings, so without the player scope
+                -- this summed the opposition's runs into ours, counted their
+                -- dismissals into wkts_lost (up to 20), and BOOL_OR over both
+                -- sides' innings numbers made batted_first always true.
                 SELECT bi.game_id,
                        SUM(bi.runs) AS our_runs,
                        SUM(COALESCE(bi.balls, 0)) AS our_balls,
                        SUM(4 * COALESCE(bi.fours, 0) + 6 * COALESCE(bi.sixes, 0)) AS boundary_runs,
+                       COUNT(*) AS bat_rows,
                        COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS wkts_lost,
                        COALESCE(SUM(bi.runs) FILTER (WHERE bi.batting_position BETWEEN 1 AND 3), 0) AS top3,
                        COALESCE(SUM(bi.runs) FILTER (WHERE bi.batting_position BETWEEN 4 AND 7), 0) AS mid,
@@ -183,17 +311,22 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
                        BOOL_OR(bi.innings_number = 1) AS batted_first
                 FROM v_effective_batting_innings bi
                 JOIN our_games og ON og.id = bi.game_id
+                JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
                 WHERE bi.did_not_bat IS NOT TRUE
                 GROUP BY bi.game_id
             ),
             bowl AS (
+                -- Same scope on the bowler: opp_runs = runs OUR bowlers conceded.
                 SELECT bs.game_id, SUM(bs.runs) AS opp_runs, SUM(bs.wickets) AS wkts_taken
                 FROM v_effective_bowling_spells bs
                 JOIN our_games og ON og.id = bs.game_id
+                JOIN players p ON p.id = bs.player_id AND p.organisation_id = CAST(:org AS UUID)
                 GROUP BY bs.game_id
             )
-            SELECT og.result, og.venue, og.our_venue,
-                   b.our_runs, b.our_balls, b.boundary_runs, b.wkts_lost,
+            SELECT og.id::text AS game_id, og.played_at, og.opp_club_name,
+                   og.match_format, og.fee_format,
+                   og.result, og.venue, og.our_venue,
+                   b.our_runs, b.our_balls, b.boundary_runs, b.wkts_lost, b.bat_rows,
                    b.top3, b.mid, b.low, b.batted_first,
                    bw.opp_runs, bw.wkts_taken
             FROM our_games og
@@ -203,7 +336,12 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
         ),
         {"org": org_id, "season": season_id, "grade": grade_id},
     )
-    return [dict(r) for r in res.mappings()]
+    rows = []
+    for r in res.mappings():
+        d = dict(r)
+        d["fmt"] = _fmt_of(d.pop("match_format", None), d.pop("fee_format", None))
+        rows.append(d)
+    return rows
 
 
 async def _partnerships(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> list[dict]:
@@ -216,7 +354,17 @@ async def _partnerships(session: AsyncSession, org_id: str, season_id: str | Non
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
+            -- `is_club_innings` is stamped per club, so a shared both-synced
+            -- fixture carries BOTH clubs' stands marked TRUE — requiring ONE
+            -- batter to resolve within our org keeps the opposition's out
+            -- (both batters of a stand are same-club; scoping one side is
+            -- enough, and scoping both would drop a stand with a teammate
+            -- whose players row sits under another club). Same pattern as
+            -- iq_review.game_review's best-partnership query.
+            LEFT JOIN players b1 ON b1.id = p.batter1_id AND b1.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN players b2 ON b2.id = p.batter2_id AND b2.organisation_id = CAST(:org AS UUID)
             WHERE s.organisation_id = CAST(:org AS UUID)
+              AND (b1.id IS NOT NULL OR b2.id IS NOT NULL)
               AND p.is_club_innings IS TRUE AND p.wicket_number BETWEEN 1 AND 10 {season_clause}
             GROUP BY p.wicket_number
             HAVING COUNT(*) >= 3
@@ -298,7 +446,9 @@ async def _all_rounders(session: AsyncSession, org_id: str, season_id: str | Non
     """All-rounder analysis (brief §5) — players who contribute with both bat and
     ball, ranked by the classic batting-average − bowling-average difference."""
     season_clause = _scope(season_id, grade_id)
-    min_inns, min_wkts = (4, 4) if (season_id or grade_id) else (10, 10)
+    # Filtered floors raised 4/4 → 6/6: four innings and four wickets in one
+    # season is a cameo, not an all-rounder record worth ranking on.
+    min_inns, min_wkts = (6, 6) if (season_id or grade_id) else (10, 10)
     res = await session.execute(
         text(
             f"""
@@ -392,7 +542,9 @@ async def _batting_pairs(session: AsyncSession, org_id: str, season_id: str | No
             LIMIT 12
             """
         ),
-        {"org": org_id, "season": season_id, "grade": grade_id, "min_stands": 2 if (season_id or grade_id) else 3},
+        # Filtered floor raised 2 → 3: two stands in one afternoon isn't a
+        # "prolific pair", and a season-scoped board full of them is noise.
+        {"org": org_id, "season": season_id, "grade": grade_id, "min_stands": 3},
     )
     pairs = []
     for r in res.mappings():
@@ -496,7 +648,15 @@ async def _collapses(session: AsyncSession, org_id: str, season_id: str | None, 
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
+            -- One-side org scope (see _partnerships): on a shared fixture both
+            -- clubs' stands are is_club_innings TRUE, and both sides can share
+            -- an innings_number — the reconstruction dict below keys on
+            -- (game_id, innings_number), so without this scope the two clubs'
+            -- wicket maps merged into one phantom innings.
+            LEFT JOIN players b1 ON b1.id = p.batter1_id AND b1.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN players b2 ON b2.id = p.batter2_id AND b2.organisation_id = CAST(:org AS UUID)
             WHERE s.organisation_id = CAST(:org AS UUID) AND p.is_club_innings IS TRUE
+              AND (b1.id IS NOT NULL OR b2.id IS NOT NULL)
               AND p.wicket_number BETWEEN 1 AND 10 AND p.runs IS NOT NULL {season_clause}
             ORDER BY p.game_id, p.innings_number, p.wicket_number
             """
@@ -546,7 +706,7 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
     as ``_per_game`` (SUM of our batting). Toss-decision analysis isn't reachable
     — we don't store the toss."""
     season_clause = _scope(season_id, grade_id)
-    min_games = 3
+    min_games = 3  # decided (WIN/LOSS) games led, not just games led
     res = await session.execute(
         text(
             f"""
@@ -576,6 +736,9 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
                    COUNT(*) FILTER (WHERE og.result IN ('DRAW', 'TIE')) AS draws,
                    COUNT(*) FILTER (WHERE og.is_final IS TRUE) AS finals,
                    COUNT(*) FILTER (WHERE og.is_final IS TRUE AND og.result = 'WIN') AS finals_won,
+                   -- avg_score caveat: `scores` sums EVERY one of our batting
+                   -- innings in the game, so a two-day game's two innings read
+                   -- as one total — close, not exact, kept for continuity.
                    AVG(sc.our_runs) AS avg_score
             FROM game_appearances ga
             JOIN our_games og ON og.id = ga.game_id
@@ -583,7 +746,9 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
             LEFT JOIN scores sc ON sc.game_id = ga.game_id
             WHERE ga.is_captain IS TRUE
             GROUP BY p.id, p.display_name_override, p.name
-            HAVING COUNT(*) >= :min_games
+            -- The floor is on DECIDED games: three rained-off draws is not a
+            -- captaincy record, and a 1-0 skipper shouldn't make the board.
+            HAVING COUNT(*) FILTER (WHERE og.result IN ('WIN', 'LOSS')) >= :min_games
             ORDER BY COUNT(*) DESC, COUNT(*) FILTER (WHERE og.result = 'WIN') DESC
             """
         ),
@@ -599,9 +764,10 @@ async def _captaincy(session: AsyncSession, org_id: str, season_id: str | None, 
             "finals": int(r["finals"] or 0), "finals_won": int(r["finals_won"] or 0),
             "avg_score": round(float(r["avg_score"]), 1) if r["avg_score"] is not None else None,
         })
-    # Best record as skipper first: win% desc (None last), then more games led,
-    # then more wins — so the most successful captain tops the board.
-    out.sort(key=lambda c: (c["win_pct"] if c["win_pct"] is not None else -1.0, c["led"], c["wins"]), reverse=True)
+    # Wins first, win% as the tiebreak — a raw win% lead off a handful of games
+    # can't outrank a skipper who actually banked the wins (an un-gameable
+    # primary sort), and the decided-games floor above backs it up.
+    out.sort(key=lambda c: (c["wins"], c["win_pct"] if c["win_pct"] is not None else -1.0), reverse=True)
     return out
 
 
@@ -887,6 +1053,10 @@ async def _wickets_quality(session: AsyncSession, org_id: str, season_id: str | 
             SELECT bw.batter_position AS pos, bw.batter_runs AS runs,
                    bw.dismissal_type AS dt, bw.caught_behind AS cb
             FROM v_effective_bowler_wickets bw
+            -- Scope the BOWLER (mirrors _collapse_bowlers): a shared fixture's
+            -- one games row carries both clubs' wicket events, and without
+            -- this the opposition's scalps profiled as our attack's.
+            JOIN players bp ON bp.id = bw.bowler_id AND bp.organisation_id = CAST(:org AS UUID)
             JOIN v_effective_games g ON g.id = bw.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
@@ -1046,7 +1216,12 @@ async def _team_starts(session: AsyncSession, org_id: str, season_id: str | None
             JOIN v_effective_games g ON g.id = p.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
+            -- One-side org scope (see _partnerships) — without it a shared
+            -- fixture's OPPOSITION opening stand read as one of ours.
+            LEFT JOIN players b1 ON b1.id = p.batter1_id AND b1.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN players b2 ON b2.id = p.batter2_id AND b2.organisation_id = CAST(:org AS UUID)
             WHERE s.organisation_id = CAST(:org AS UUID)
+              AND (b1.id IS NOT NULL OR b2.id IS NOT NULL)
               AND p.is_club_innings IS TRUE AND p.wicket_number = 1 AND p.runs IS NOT NULL {season_clause}
             """
         ),
@@ -1139,7 +1314,8 @@ async def _role_ratings(session: AsyncSession, org_id: str, season_id: str | Non
     return out[:12] if out else None
 
 
-async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
+async def player_impact(session: AsyncSession, org_id: str, season_id: str | None = None,
+                        grade_id: str | None = None, season_ids: list[str] | None = None) -> dict:
     """Player Impact / club MVP board (brief §15.3) — a season-VALUE rating: who
     contributed the most over the season. Built from season TOTALS (runs, wickets,
     fielding dismissals) with average / economy as quality modifiers, z-scored
@@ -1148,7 +1324,12 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
 
     Totals — not per-match rates — because the MVP is about accumulated value over
     a season: 479 runs & 22 wickets across the year must outrank a high per-game
-    rate off three games. (The earlier per-match version let small samples win.)"""
+    rate off three games. (The earlier per-match version let small samples win.)
+
+    ``season_ids`` (Compare mode) scopes the board to that explicit set of season
+    rows, the same way ``team_overview`` does; the ``_RANGE_SEASONS`` contextvar
+    is honoured too, so a call made inside a range-scoped overview inherits it
+    instead of silently rating a single season."""
     seasons = await team_seasons(session, org_id)
     if not seasons:
         return {"season": None, "players": []}
@@ -1157,9 +1338,54 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     # Scope by the SEASON's org, NOT player membership (the cross-club anti-pattern
     # that emptied the board for shared-GUID players). Aggregate all season records
     # of the year (+ the latest season id) so a year split across season rows /
-    # comps is fully counted.
-    scope = "AND (s.year = :year OR s.id = CAST(:sid AS UUID))" if year is not None else "AND s.id = CAST(:sid AS UUID)"
+    # comps is fully counted. In Compare mode the explicit in-range season-row set
+    # wins (validated UUIDs inlined, same as _scope).
+    range_ids = _uuid_list(season_ids) if season_ids else (_RANGE_SEASONS.get() or None)
+    if range_ids:
+        in_list = ", ".join("'" + s + "'::uuid" for s in range_ids)
+        scope = f"AND s.id IN ({in_list})"
+    elif year is not None:
+        scope = "AND (s.year = :year OR s.id = CAST(:sid AS UUID))"
+    else:
+        scope = "AND s.id = CAST(:sid AS UUID)"
     params = {"org": org_id, "year": year, "sid": sid, "grade": grade_id}
+
+    psg_fallback = False
+
+    async def _ungraded_pls() -> list[dict]:
+        res = await session.execute(
+            text(
+                f"""
+                SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
+                       GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                                COALESCE(SUM(pss.bowling_innings), 0)) AS games,
+                       COALESCE(SUM(pss.runs), 0) AS runs,
+                       COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
+                       COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
+                       COALESCE(SUM(pss.wickets), 0) AS wkts,
+                       COALESCE(SUM(pss.runs_conceded), 0) AS rc,
+                       COALESCE(SUM(pss.bowling_balls), 0) AS bb,
+                       COALESCE(SUM(pss.catches_non_wk), 0) + COALESCE(SUM(pss.catches_wk), 0)
+                         + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
+                FROM players p
+                JOIN player_season_stats pss ON pss.player_id = p.id
+                JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
+                GROUP BY p.id, p.display_name_override, p.name
+                HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
+                                COALESCE(SUM(pss.bowling_innings), 0)) >= 3
+                """
+            ),
+            params,
+        )
+        out = []
+        for r in res.mappings():
+            out.append({
+                "id": r["id"], "name": r["name"], "matches": int(r["games"]),
+                "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
+                "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
+                "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
+            })
+        return out
 
     if grade_id:
         # Grade-scoped from the per-grade stats table (grade NAME → its rows in
@@ -1195,41 +1421,17 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                 "bat_avg": (int(r["runs"]) / bat_outs) if bat_outs > 0 else None,
                 "econ": None,
             })
+        if not pls:
+            # player_season_grade_stats only covers what the per-grade feed
+            # returned — plenty of (older) scopes have none. Fall back to the
+            # whole-club season totals and SAY so, rather than an empty board.
+            pls = await _ungraded_pls()
+            psg_fallback = bool(pls)
     else:
-        res = await session.execute(
-            text(
-                f"""
-                SELECT p.id::text AS id, COALESCE(p.display_name_override, p.name) AS name,
-                       GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
-                                COALESCE(SUM(pss.bowling_innings), 0)) AS games,
-                       COALESCE(SUM(pss.runs), 0) AS runs,
-                       COALESCE(SUM(pss.batting_average * pss.batting_innings), 0) AS bavg_w,
-                       COALESCE(SUM(pss.batting_innings) FILTER (WHERE pss.batting_average IS NOT NULL), 0) AS bavg_n,
-                       COALESCE(SUM(pss.wickets), 0) AS wkts,
-                       COALESCE(SUM(pss.runs_conceded), 0) AS rc,
-                       COALESCE(SUM(pss.bowling_balls), 0) AS bb,
-                       COALESCE(SUM(pss.catches_non_wk), 0) + COALESCE(SUM(pss.catches_wk), 0)
-                         + COALESCE(SUM(pss.run_outs), 0) + COALESCE(SUM(pss.stumpings), 0) AS dis
-                FROM players p
-                JOIN player_season_stats pss ON pss.player_id = p.id
-                JOIN seasons s ON s.id = pss.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
-                GROUP BY p.id, p.display_name_override, p.name
-                HAVING GREATEST(COALESCE(SUM(pss.matches), 0), COALESCE(SUM(pss.batting_innings), 0),
-                                COALESCE(SUM(pss.bowling_innings), 0)) >= 3
-                """
-            ),
-            params,
-        )
-        pls = []
-        for r in res.mappings():
-            pls.append({
-                "id": r["id"], "name": r["name"], "matches": int(r["games"]),
-                "runs": int(r["runs"]), "wickets": int(r["wkts"]), "dismissals": int(r["dis"]),
-                "bat_avg": float(r["bavg_w"] / r["bavg_n"]) if r["bavg_n"] else None,
-                "econ": float(r["rc"] * 6 / r["bb"]) if r["bb"] and r["bb"] >= 30 else None,
-            })
+        pls = await _ungraded_pls()
     if not pls:
-        return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": []}
+        return {"season": {"id": resolved["season_id"], "name": resolved["name"]},
+                "players": [], "psg_fallback": psg_fallback}
 
     def zmap(key, invert=False, only_present=False):
         vals = [p[key] for p in pls if p[key] is not None] if only_present else [p[key] for p in pls]
@@ -1270,7 +1472,8 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
         for k in ("bat_avg", "econ"):
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
-    return {"season": {"id": resolved["season_id"], "name": resolved["name"]}, "players": pls[:12]}
+    return {"season": {"id": resolved["season_id"], "name": resolved["name"]},
+            "players": pls[:12], "psg_fallback": psg_fallback}
 
 
 def _dismissal_key(dt: str | None, caught_behind: bool | None = False) -> str | None:
@@ -1396,6 +1599,8 @@ async def team_overview(session: AsyncSession, org_id: str, season_id: str | Non
 
 
 async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str | None = None, grade_id: str | None = None) -> dict:
+    from collections import Counter
+
     games = await _per_game(session, org_id, season_id, grade_id)
     decided = [g for g in games if g["result"] in ("WIN", "LOSS")]
 
@@ -1425,55 +1630,115 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
         "lower_pct": round(100 * sum(g["low"] or 0 for g in scored) / tot_runs) if tot_runs else None,
         "boundary_pct": round(100 * sum(g["boundary_runs"] or 0 for g in scored) / tot_runs) if tot_runs else None,
     }
-    # Team total distribution — how often we post a total in each band (over every
-    # innings we have a score for). Same bands as "what score wins" so they read
-    # together. Powers the Batting-tab "How big do we bat" chart.
-    total_distribution = []
-    if scored:
-        n_sc = len(scored)
-        for lo, hi, label in _BANDS:
-            cnt = sum(1 for g in scored if lo <= g["our_runs"] < hi)
-            total_distribution.append({"band": label, "count": cnt, "pct": round(100 * cnt / n_sc)})
-    batting["total_distribution"] = total_distribution
-
     conceded = [g for g in games if g["opp_runs"] is not None]
     bowling = {
         "avg_conceded": _avg([g["opp_runs"] for g in conceded]),
         "avg_wickets_taken": _avg([g["wkts_taken"] for g in conceded]),
     }
 
-    # Bat-first vs chase.
+    # Bat-first vs chase. The completeness gate (``_card_complete``) applies to
+    # every SCORE-derived figure from here down (par, bands, margins, the
+    # bat-first/chase averages) — an all-but-empty card reads as a 30 all out
+    # and drags par into the floor. Win/loss counts stay ungated: the result is
+    # trustworthy even when the card isn't.
     bf = [g for g in decided if g["batted_first"] is True]
     ch = [g for g in decided if g["batted_first"] is False]
+    bf_q = [g for g in bf if _card_complete(g)]
+    ch_q = [g for g in ch if _card_complete(g)]
     innings = {
         "bat_first": {
             "played": len(bf), "wins": sum(1 for g in bf if g["result"] == "WIN"),
             "win_pct": _win_pct(sum(1 for g in bf if g["result"] == "WIN"), len(bf)),
-            "avg_score": _avg([g["our_runs"] for g in bf if g["our_runs"] is not None]),
+            "avg_score": _avg([g["our_runs"] for g in bf_q if g["our_runs"] is not None]),
         },
         "chasing": {
             "played": len(ch), "wins": sum(1 for g in ch if g["result"] == "WIN"),
             "win_pct": _win_pct(sum(1 for g in ch if g["result"] == "WIN"), len(ch)),
-            "avg_target": _avg([g["opp_runs"] for g in ch if g["opp_runs"] is not None]),
+            "avg_target": _avg([g["opp_runs"] for g in ch_q if g["opp_runs"] is not None]),
         },
     }
 
-    # Par score (brief §15.9) — the median first-innings total in our bat-first
-    # wins, plus the lowest we've successfully defended. "What's a winning score."
-    bf_win_scores = sorted(g["our_runs"] for g in bf if g["result"] == "WIN" and g["our_runs"] is not None)
+    # Par score (brief §15.9) — the median total over QUALIFYING bat-first wins
+    # in the scope's DOMINANT format. "What's a winning score" only means
+    # anything within one format, so a club that plays both two-day and T20
+    # doesn't get a par that's an average of the two vocabularies; a game with
+    # no recorded format counts as the dominant one rather than being dropped
+    # (older cards rarely say).
+    bf_wins = [g for g in bf if g["result"] == "WIN" and g["our_runs"] is not None]
+    bf_wins_q = [g for g in bf_wins if _card_complete(g)]
+    fmt_counts = Counter(g["fmt"] for g in bf_wins_q if g["fmt"])
+    dominant_fmt = fmt_counts.most_common(1)[0][0] if fmt_counts else None
+
+    def _fmt_ok(g):
+        return dominant_fmt is None or g["fmt"] is None or g["fmt"] == dominant_fmt
+
+    par_wins = [g for g in bf_wins_q if _fmt_ok(g)]
+    par_pool = sorted(g["our_runs"] for g in par_wins)
+    low_g = min(par_wins, key=lambda g: g["our_runs"], default=None)
     innings["par"] = {
-        "par_score": int(statistics.median(bf_win_scores)) if bf_win_scores else None,
-        "lowest_defended": bf_win_scores[0] if bf_win_scores else None,
-        "samples": len(bf_win_scores),
+        "par_score": int(statistics.median(par_pool)) if par_pool else None,
+        "typical_low": int(round(_percentile(par_pool, 0.25))) if par_pool else None,
+        "typical_high": int(round(_percentile(par_pool, 0.75))) if par_pool else None,
+        "lowest_defended": low_g["our_runs"] if low_g else None,
+        "lowest_defended_game_id": low_g["game_id"] if low_g else None,
+        "lowest_defended_date": (low_g["played_at"].isoformat() if low_g and low_g["played_at"] else None),
+        "lowest_defended_opponent": low_g["opp_club_name"] if low_g else None,
+        "samples": len(par_pool),
+        "excluded_incomplete": len(bf_wins) - len(bf_wins_q),
+        "format": dominant_fmt,
+        "format_mixed": len(fmt_counts) > 1,
     }
+
+    # Band edges are format-relative — quartiles of the scope's own qualifying
+    # bat-first totals (dominant format) — falling back to the static _BANDS on
+    # a thin sample. Derived ONCE so "what score wins", the total distribution
+    # and the chase target bands all read on the same edges.
+    band_pop = [g for g in bf_q if g["our_runs"] is not None and _fmt_ok(g)]
+    bands = _derive_bands([g["our_runs"] for g in band_pop])
 
     # "What score wins" — win% by our-score band when batting first.
     score_bands = []
-    for lo, hi, label in _BANDS:
-        band = [g for g in bf if g["our_runs"] is not None and lo <= g["our_runs"] < hi]
+    for lo, hi, label in bands:
+        band = [g for g in band_pop if lo <= g["our_runs"] < hi]
         if band:
             w = sum(1 for g in band if g["result"] == "WIN")
             score_bands.append({"band": label, "played": len(band), "wins": w, "win_pct": _win_pct(w, len(band))})
+
+    # Team total distribution — how often we post a total in each band (over every
+    # innings we have a score for). Same bands as "what score wins" so they read
+    # together. Powers the Batting-tab "How big do we bat" chart.
+    total_distribution = []
+    if scored:
+        n_sc = len(scored)
+        for lo, hi, label in bands:
+            cnt = sum(1 for g in scored if lo <= g["our_runs"] < hi)
+            total_distribution.append({"band": label, "count": cnt, "pct": round(100 * cnt / n_sc)})
+    batting["total_distribution"] = total_distribution
+
+    # Chase mirror — win% by TARGET band (opp_runs) when batting second, on the
+    # same derived edges, so "what can we chase" reads beside "what score wins".
+    by_target_band = []
+    ch_pop = [g for g in ch_q if g["opp_runs"] is not None and _fmt_ok(g)]
+    for lo, hi, label in bands:
+        band = [g for g in ch_pop if lo <= g["opp_runs"] < hi]
+        if band:
+            w = sum(1 for g in band if g["result"] == "WIN")
+            by_target_band.append({"band": label, "played": len(band), "wins": w, "win_pct": _win_pct(w, len(band))})
+    innings["chasing"]["by_target_band"] = by_target_band
+
+    # Winning margins on decided bat-first games (our_runs − opp_runs; both are
+    # runs-reconstructed, so extras-exclusive — close, not exact). Loss margins
+    # reported positive.
+    margins_w = [g["our_runs"] - g["opp_runs"] for g in bf_q
+                 if g["result"] == "WIN" and g["our_runs"] is not None and g["opp_runs"] is not None]
+    margins_l = [g["opp_runs"] - g["our_runs"] for g in bf_q
+                 if g["result"] == "LOSS" and g["our_runs"] is not None and g["opp_runs"] is not None]
+    innings["margin"] = {
+        "avg_win_margin_runs": _avg(margins_w),
+        "avg_loss_margin_runs": _avg(margins_l),
+        "biggest_win_runs": max(margins_w, default=None),
+        "closest_win_runs": min(margins_w, default=None),
+    }
 
     # Venues — record + avg score.
     venue_map: dict[str, dict] = {}
@@ -1494,20 +1759,23 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
                            "losses": v["losses"], "avg_score": _avg(v["_runs"])})
     venues.sort(key=lambda x: x["played"], reverse=True)
 
-    partnerships = await _safe(session, lambda: _partnerships(session, org_id, season_id, grade_id), [])
-    fielding = await _safe(session, lambda: _team_fielding(session, org_id, season_id, grade_id), {"fielders": [], "keepers": [], "combos": []})
-    all_rounders = await _safe(session, lambda: _all_rounders(session, org_id, season_id, grade_id), [])
-    batting_pairs = await _safe(session, lambda: _batting_pairs(session, org_id, season_id, grade_id), [])
-    collapses = await _safe(session, lambda: _collapses(session, org_id, season_id, grade_id), None)
-    attack = await _safe(session, lambda: _attack_structure(session, org_id, season_id, grade_id), None)
-    discipline = await _safe(session, lambda: _discipline(session, org_id, season_id, grade_id), None)
-    captaincy = await _safe(session, lambda: _captaincy(session, org_id, season_id, grade_id), [])
-    combinations = await _safe(session, lambda: _combinations(session, org_id, season_id, grade_id, record.get("win_pct")), None)
-    wickets_quality = await _safe(session, lambda: _wickets_quality(session, org_id, season_id, grade_id), None)
-    collapse_bowlers = await _safe(session, lambda: _collapse_bowlers(session, org_id, season_id, grade_id), None)
-    starts = await _safe(session, lambda: _team_starts(session, org_id, season_id, grade_id), None)
-    role_ratings = await _safe(session, lambda: _role_ratings(session, org_id, season_id, grade_id), None)
-    batting_extra = await _safe(session, lambda: _batting_extra(session, org_id, season_id, grade_id), None)
+    # A card that FAILS lands its key in `degraded` (see _safe), so the frontend
+    # can tell a broken query apart from a genuinely empty default.
+    degraded: list[str] = []
+    partnerships = await _safe(session, lambda: _partnerships(session, org_id, season_id, grade_id), [], key="partnerships", degraded=degraded)
+    fielding = await _safe(session, lambda: _team_fielding(session, org_id, season_id, grade_id), {"fielders": [], "keepers": [], "combos": []}, key="fielding", degraded=degraded)
+    all_rounders = await _safe(session, lambda: _all_rounders(session, org_id, season_id, grade_id), [], key="all_rounders", degraded=degraded)
+    batting_pairs = await _safe(session, lambda: _batting_pairs(session, org_id, season_id, grade_id), [], key="batting_pairs", degraded=degraded)
+    collapses = await _safe(session, lambda: _collapses(session, org_id, season_id, grade_id), None, key="collapses", degraded=degraded)
+    attack = await _safe(session, lambda: _attack_structure(session, org_id, season_id, grade_id), None, key="attack", degraded=degraded)
+    discipline = await _safe(session, lambda: _discipline(session, org_id, season_id, grade_id), None, key="discipline", degraded=degraded)
+    captaincy = await _safe(session, lambda: _captaincy(session, org_id, season_id, grade_id), [], key="captaincy", degraded=degraded)
+    combinations = await _safe(session, lambda: _combinations(session, org_id, season_id, grade_id, record.get("win_pct")), None, key="combinations", degraded=degraded)
+    wickets_quality = await _safe(session, lambda: _wickets_quality(session, org_id, season_id, grade_id), None, key="wickets_quality", degraded=degraded)
+    collapse_bowlers = await _safe(session, lambda: _collapse_bowlers(session, org_id, season_id, grade_id), None, key="collapse_bowlers", degraded=degraded)
+    starts = await _safe(session, lambda: _team_starts(session, org_id, season_id, grade_id), None, key="starts", degraded=degraded)
+    role_ratings = await _safe(session, lambda: _role_ratings(session, org_id, season_id, grade_id), None, key="role_ratings", degraded=degraded)
+    batting_extra = await _safe(session, lambda: _batting_extra(session, org_id, season_id, grade_id), None, key="batting_extra", degraded=degraded)
     win_lose = _how_we_win_lose(record, batting, innings, partnerships)
 
     return {
@@ -1533,6 +1801,7 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
         "all_rounders": all_rounders,
         "how_we_win": win_lose[0],
         "how_we_lose": win_lose[1],
+        "degraded": degraded,
         "coverage": {
             "notes": [
                 "Team scores are reconstructed from per-innings data (our batting / our bowling), so they exclude some extras — close, not exact.",

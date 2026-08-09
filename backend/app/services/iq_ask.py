@@ -47,6 +47,16 @@ _SYSTEM = (
     "(no corporate words). Never use the \"—\" (em dash) character anywhere in your "
     "answer; use a comma, full stop, or parentheses instead. Numbers in the tool "
     "results are the truth.\n"
+    "Scope and samples:\n"
+    "- Every tool result echoes a 'scope' (which season, or all-time). Always say "
+    "which scope your figures come from ('across all seasons we hold', 'in 2024/25', "
+    "'this season'), and don't blend scopes without saying so. team_overview defaults "
+    "to all-time; form_movers and current_squad default to the latest season; all "
+    "three take an optional season (e.g. '2024/25').\n"
+    "- Treat any figure built from fewer than about 6 innings or 6 wickets as a "
+    "small sample: say so plainly rather than leaning on it.\n"
+    "- If a tool comes back with 'ambiguous' and a list of players, don't guess "
+    "which one was meant — ask the user which player they mean, naming the options.\n"
     "Selection sense:\n"
     "- For picking/dropping/promoting/relegating between teams, judge by who is "
     "actually IN that side now — each player's 'squad' (their BetterSelect team like "
@@ -140,23 +150,32 @@ TOOLS = [
     },
     {
         "name": "team_overview",
-        "description": "The club's record and approach: win rate, home/away, batting-first vs chasing win rate, par first-innings score, how we win and lose, score-band win rates, batting & bowling profile, best opening partnerships and our typical opening stand. Optionally scope to one grade.",
+        "description": "The club's record and approach: win rate, home/away, batting-first vs chasing win rate, par first-innings score, how we win and lose, score-band win rates, batting & bowling profile, best opening partnerships and our typical opening stand. Optionally scope to one grade and/or one season; without a season the figures are ALL-TIME.",
         "input_schema": {
             "type": "object",
-            "properties": {"grade": {"type": "string", "description": "optional grade name (from grades)"}},
+            "properties": {
+                "grade": {"type": "string", "description": "optional grade name (from grades)"},
+                "season": {"type": "string", "description": "optional season, e.g. '2024/25' or '2024'; omit for all-time"},
+            },
         },
     },
     {
         "name": "form_movers",
-        "description": "Who is in or out of form this season: batters and bowlers rising or sliding vs their career baseline, plus emerging players. Use for 'who's in/out of form' questions.",
-        "input_schema": {"type": "object", "properties": {}},
+        "description": "Who is in or out of form in a season: batters and bowlers rising or sliding vs their career baseline, plus emerging players. Use for 'who's in/out of form' questions. Defaults to the latest season; pass a season to look at an earlier one.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"season": {"type": "string", "description": "optional season, e.g. '2023/24'; omit for the latest season"}},
+        },
     },
     {
         "name": "current_squad",
-        "description": "Players who've played this season with their form (runs/average, wickets/average), their selection squad (BetterSelect team like '1st XI'/'2nd XI'), role, whether they keep wicket, and their bowling_style (e.g. 'Off spin') and bowling_class ('pace' or 'spin'). Returns the list of squads present too. Use for selection questions: a player's SQUAD is which side they're picked in, and a grade and its same-numbered XI are usually the same team, so filter by squad to answer 'who's in the 2nd XI'. Optionally pass a grade name; if it matches nothing it falls back to the whole squad.",
+        "description": "Players who've played in a season with their form (runs/average, wickets/average), their selection squad (BetterSelect team like '1st XI'/'2nd XI'), role, whether they keep wicket, and their bowling_style (e.g. 'Off spin') and bowling_class ('pace' or 'spin'). Returns the list of squads present too. Use for selection questions: a player's SQUAD is which side they're picked in, and a grade and its same-numbered XI are usually the same team, so filter by squad to answer 'who's in the 2nd XI'. Optionally pass a grade name; if it matches nothing it falls back to the whole squad. Defaults to the latest season; pass a season for an earlier one.",
         "input_schema": {
             "type": "object",
-            "properties": {"grade": {"type": "string", "description": "optional grade name (from grades)"}},
+            "properties": {
+                "grade": {"type": "string", "description": "optional grade name (from grades)"},
+                "season": {"type": "string", "description": "optional season, e.g. '2023/24'; omit for the latest season"},
+            },
         },
     },
     {
@@ -202,8 +221,65 @@ def _round(v, nd=2):
         return v
 
 
-async def _resolve_pid(session: AsyncSession, org_id: str, value: str) -> str | None:
-    """Accept a player_id or a name; return the id (best name match if a name)."""
+def _scope_echo(*, season: str | None = None, grade: str | None = None, basis: str | None = None) -> dict:
+    """The resolved scope echoed on every tool result, so the model can state
+    which season (or all-time) its figures come from."""
+    return {
+        "season": season or "all seasons",
+        "grade": grade or "all grades",
+        "basis": basis or ("season" if season else "all-time"),
+    }
+
+
+_YEAR4 = re.compile(r"(\d{4})")
+_YEAR2 = re.compile(r"\b(\d{2})\s*[/-]\s*\d{2}\b")
+
+
+def _season_label(row: dict) -> str:
+    y = row.get("year")
+    return f"{y}/{str(y + 1)[-2:]}" if y is not None else (row.get("name") or "season")
+
+
+def _parse_season_year(value: str) -> int | None:
+    """'2024/25', '2024-25' or '2024' → 2024 (Season.year is the START year);
+    '24/25' → 2024."""
+    m = _YEAR4.search(value)
+    if m:
+        return int(m.group(1))
+    m = _YEAR2.search(value)
+    if m:
+        return 2000 + int(m.group(1))
+    return None
+
+
+async def _resolve_season(session: AsyncSession, org_id: str, season: str | None) -> tuple[str | None, str | None]:
+    """Resolve a model-supplied season label ('2024/25', '2024', a stored season
+    name) to a (season_row_id, display_label) pair. Any ONE row of the real
+    season is enough — the IQ season filter year-expands it to every sibling row
+    of the same year (see iq_filters). Returns (None, None) when no season was
+    asked for, and (None, <as typed>) when the label matched nothing we hold, so
+    the caller says so instead of silently answering from a different scope."""
+    season = (season or "").strip()
+    if not season:
+        return None, None
+    rows = await iq_team.team_seasons(session, org_id)
+    sl = season.lower()
+    named = [r for r in rows if sl == (r["name"] or "").lower()]
+    if named:
+        return named[0]["season_id"], _season_label(named[0])
+    year = _parse_season_year(season)
+    if year is not None:
+        for r in rows:
+            if r["year"] == year:
+                return r["season_id"], _season_label(r)
+    return None, season
+
+
+async def _resolve_pid(session: AsyncSession, org_id: str, value: str) -> str | dict | None:
+    """Accept a player_id or a name; return the id when it resolves to ONE
+    player, None when nothing matches, or {"ambiguous": [candidates]} when
+    several players match — the calling tool returns that to the model, whose
+    instructions say to ask the user which player they meant rather than guess."""
     value = (value or "").strip()
     if not value:
         return None
@@ -212,10 +288,22 @@ async def _resolve_pid(session: AsyncSession, org_id: str, value: str) -> str | 
     players = await iq_players.list_all_players(session, org_id)
     vl = value.lower()
     exact = [p for p in players if (p["name"] or "").lower() == vl]
-    if exact:
+    if len(exact) == 1:
         return exact[0]["player_id"]
-    partial = [p for p in players if vl in (p["name"] or "").lower()]
-    return partial[0]["player_id"] if partial else None
+    matches = exact or [p for p in players if vl in (p["name"] or "").lower()]
+    if not matches:
+        return None
+    if len(matches) == 1:
+        return matches[0]["player_id"]
+    return {"ambiguous": [
+        {"player_id": p["player_id"], "name": p["name"], "squad": p.get("squad"),
+         "matches": p["matches"], "last_year": p["last_year"]}
+        for p in matches[:8]
+    ]}
+
+
+_AMBIGUOUS_NOTE = ("Several players match that name. Ask the user which one they "
+                   "meant, then call again with the exact player_id.")
 
 
 async def _tool_find_players(session, org_id, *, query=None):
@@ -224,7 +312,7 @@ async def _tool_find_players(session, org_id, *, query=None):
         q = query.strip().lower()
         players = [p for p in players if q in (p["name"] or "").lower()]
     players = players[:40]
-    return {"count": len(players), "players": [
+    return {"count": len(players), "scope": _scope_echo(), "players": [
         {"player_id": p["player_id"], "name": p["name"], "role": p.get("player_role"),
          "keeper": p.get("is_keeper"), "bowling_style": p.get("bowling_style"), "bowling_class": p.get("bowling_class"),
          "squad": p.get("squad"),
@@ -235,6 +323,8 @@ async def _tool_find_players(session, org_id, *, query=None):
 
 async def _tool_player_detail(session, org_id, *, player_id):
     pid = await _resolve_pid(session, org_id, player_id)
+    if isinstance(pid, dict):
+        return {"ambiguous": pid["ambiguous"], "note": _AMBIGUOUS_NOTE}
     if not pid:
         return {"error": "No player found for that id/name. Call find_players first."}
     # Role / keeper / bowling style from the player row (cheap; so a keeper isn't
@@ -274,6 +364,7 @@ async def _tool_player_detail(session, org_id, *, player_id):
         "name": (trend.get("player") or {}).get("name"),
         "role": role, "keeper": keeper,
         "bowling_style": bstyle, "bowling_class": bclass,
+        "scope": _scope_echo(),  # career figures span every season we hold
         "verdict": trend.get("verdict"),
         "batting": {"runs": b.get("total_runs"), "average": _round(b.get("average")), "100s": b.get("hundreds"), "50s": b.get("fifties")},
         "bowling": {"wickets": bo.get("total_wickets"), "average": _round(bo.get("average")), "economy": _round(bo.get("economy"))},
@@ -297,6 +388,8 @@ async def _tool_player_detail(session, org_id, *, player_id):
 
 async def _tool_player_vs_club(session, org_id, *, player_id, club=None):
     pid = await _resolve_pid(session, org_id, player_id)
+    if isinstance(pid, dict):
+        return {"ambiguous": pid["ambiguous"], "note": _AMBIGUOUS_NOTE}
     if not pid:
         return {"error": "No player found for that id/name."}
     rows = await get_player_by_opposition(session, pid) or []
@@ -304,7 +397,7 @@ async def _tool_player_vs_club(session, org_id, *, player_id, club=None):
         cl = club.strip().lower()
         rows = [r for r in rows if cl in (r["opposition"] or "").lower()]
     rows = rows[:20]
-    return {"opponents": [
+    return {"scope": _scope_echo(), "opponents": [
         {"club": r["opposition"], "games": r["games"], "wins": r["wins"], "losses": r["losses"],
          "runs": r["total_runs"], "bat_avg": _round(r.get("batting_average")), "high": r.get("high_score"),
          "wickets": r["wickets"], "bowl_avg": _round(r.get("bowling_average"))}
@@ -315,22 +408,30 @@ async def _tool_player_vs_club(session, org_id, *, player_id, club=None):
 async def _tool_players_together(session, org_id, *, player_a, player_b):
     a = await _resolve_pid(session, org_id, player_a)
     b = await _resolve_pid(session, org_id, player_b)
+    for res in (a, b):
+        if isinstance(res, dict):
+            return {"ambiguous": res["ambiguous"], "note": _AMBIGUOUS_NOTE}
     if not a or not b:
         return {"error": "Couldn't find one of those players. Call find_players first."}
     if a == b:
         return {"error": "Those are the same player — pass two different players."}
-    return await iq_team.pair_synergy(session, org_id, a, b)
+    out = await iq_team.pair_synergy(session, org_id, a, b)
+    if isinstance(out, dict):
+        out.setdefault("scope", _scope_echo())
+    return out
 
 
-async def _tool_team_overview(session, org_id, *, grade=None):
-    ov = await iq_team.team_overview(session, org_id, grade_id=grade)
+async def _tool_team_overview(session, org_id, *, grade=None, season=None):
+    season_id, season_label = await _resolve_season(session, org_id, season)
+    ov = await iq_team.team_overview(session, org_id, season_id=season_id, grade_id=grade)
     rec = ov.get("record") or {}
     inn = ov.get("innings") or {}
     bat = ov.get("batting") or {}
     bowl = ov.get("bowling") or {}
     pairs = ov.get("batting_pairs") or []
     starts = ov.get("starts") or {}
-    return {
+    out = {
+        "scope": _scope_echo(season=season_label if season_id else None, grade=grade),
         "grade": grade or "all grades",
         "record": {"wins": rec.get("wins"), "losses": rec.get("losses"), "draws": rec.get("draws"), "matches": rec.get("matches"), "win_pct": rec.get("win_pct")},
         "bat_first_win_pct": (inn.get("bat_first") or {}).get("win_pct"),
@@ -344,36 +445,53 @@ async def _tool_team_overview(session, org_id, *, grade=None):
         "opening_partnerships": [{"pair": f"{p['a']} & {p['b']}", "stands": p["stands"], "avg": _round(p.get("avg")), "best": p.get("best"), "opening": p.get("opening")} for p in pairs[:8]],
         "typical_opening_stand": {"avg": _round(starts.get("avg")), "best": starts.get("best")} if starts else None,
     }
+    if season and not season_id:
+        out["note"] = f"Season '{season}' didn't match a season we hold — these figures are ALL-TIME instead."
+    return out
 
 
-async def _tool_form_movers(session, org_id):
-    ov = await iq_trends.trends_overview(session, org_id)
+async def _tool_form_movers(session, org_id, *, season=None):
+    season_id, season_label = await _resolve_season(session, org_id, season)
+    ov = await iq_trends.trends_overview(session, org_id, season_id=season_id)
+    # trends_overview always answers for ONE season (latest with stats when none
+    # was picked), so echo the year it actually used.
+    sy = ov.get("season_year")
+    label = season_label if season_id else (_season_label({"year": sy}) if sy is not None else "latest season")
 
     def mv(items):
         return [{"name": p["name"], "from": _round(p.get("baseline")), "to": _round(p.get("latest"))} for p in (items or [])[:6]]
-    return {
+    out = {
+        "scope": _scope_echo(season=label, basis="season"),
         "batting_rising": mv((ov.get("batting") or {}).get("risers")),
         "batting_sliding": mv((ov.get("batting") or {}).get("fallers")),
         "bowling_improving": mv((ov.get("bowling") or {}).get("risers")),
         "bowling_slipping": mv((ov.get("bowling") or {}).get("fallers")),
         "emerging": [{"name": e["name"], "runs": e.get("runs"), "wickets": e.get("wickets")} for e in (ov.get("emerging") or [])[:6]],
     }
+    if season and not season_id:
+        out["note"] = f"Season '{season}' didn't match a season we hold — showing the latest season instead."
+    return out
 
 
-async def _tool_current_squad(session, org_id, *, grade=None):
-    players = await iq_trends.list_players(session, org_id, grade_id=grade) or []
+async def _tool_current_squad(session, org_id, *, grade=None, season=None):
+    season_id, season_label = await _resolve_season(session, org_id, season)
+    players = await iq_trends.list_players(session, org_id, season_id=season_id, grade_id=grade) or []
     note = None
+    if season and not season_id:
+        note = f"Season '{season}' didn't match a season we hold — showing the latest season instead."
     if grade and not players:
-        # A grade name that matched nothing — fall back to the whole current squad
-        # so the model can filter by the selection squad itself (the XI and the
-        # same-numbered grade are usually the same side).
-        players = await iq_trends.list_players(session, org_id) or []
-        note = (f"No current-season players under grade '{grade}'. Showing the whole current squad; "
-                "filter by 'squad' (the selection team, e.g. '2nd XI') yourself — a grade and its "
-                "same-numbered XI are usually the same side.")
+        # A grade name that matched nothing — fall back to the whole squad for
+        # that season so the model can filter by the selection squad itself (the
+        # XI and the same-numbered grade are usually the same side).
+        players = await iq_trends.list_players(session, org_id, season_id=season_id) or []
+        note = ((note + " ") if note else "") + (
+            f"No players under grade '{grade}' for that season. Showing the whole squad; "
+            "filter by 'squad' (the selection team, e.g. '2nd XI') yourself — a grade and its "
+            "same-numbered XI are usually the same side.")
     players = sorted(players, key=lambda p: (p.get("runs") or 0), reverse=True)[:40]
     squads = sorted({p.get("squad_name") for p in players if p.get("squad_name")})
     return {
+        "scope": _scope_echo(season=(season_label if season_id else "latest season"), grade=grade, basis="season"),
         "grade": grade or "all grades",
         "note": note,
         "squads": squads,
@@ -442,7 +560,13 @@ def _trim_performer(p, kind):
     if kind == "bat":
         out.update({"runs": p.get("runs"), "average": _round(p.get("average")), "innings": p.get("innings"), "high_score": p.get("high_score")})
     else:
-        out.update({"wickets": p.get("wickets"), "average": _round(p.get("average")), "economy": _round(p.get("economy"))})
+        # Keep the sample sizes the source rows carry (wickets + runs conceded;
+        # innings when present), same as the batting branch keeps "innings" —
+        # so the model can flag a 3-wicket "hold" as a small sample.
+        out.update({"wickets": p.get("wickets"), "average": _round(p.get("average")), "economy": _round(p.get("economy")),
+                    "runs_conceded": p.get("runs"), "best_wickets": p.get("best_wickets")})
+        if p.get("innings") is not None:
+            out["innings"] = p.get("innings")
     return out
 
 
@@ -468,6 +592,9 @@ async def _tool_opposition_report(session, org_id, *, fixture_id=None, opponent=
     out = {
         "opponent": (rep.get("opponent") or {}).get("name"),
         "grade_scope": grade or "all grades",
+        "scope": _scope_echo(grade=grade),
+        "note": "The head-to-head and performer figures span every season we hold against this opponent"
+                + (" within that grade." if grade else " (there is no season filter on this tool)."),
         "record": {
             "meetings": h2h.get("meetings"), "wins": h2h.get("wins"), "losses": h2h.get("losses"),
             "draws": h2h.get("draws"), "win_pct": h2h.get("win_pct"),
@@ -586,6 +713,30 @@ _DISPATCH = {
 }
 
 
+# The ~900-word system prompt + 11 tool schemas are the stable prefix of every
+# request in the up-to-8-step tool loop, so one cache breakpoint on the last
+# (only) system block caches them all — tools render before system, and the
+# combined prefix clears the model's minimum cacheable size. anthropic 0.40.0's
+# typed params don't know cache_control on a system block, but the SDK forwards
+# unknown dict keys to the API unchanged (the same pass-through the scorecard
+# reader's PDF document blocks already rely on), so the plain dict works.
+_SYSTEM_BLOCKS = [{"type": "text", "text": _SYSTEM, "cache_control": {"type": "ephemeral"}}]
+
+
+def _answer_from(resp, *, empty_msg: str) -> dict:
+    """Turn a final (non-tool_use) model response into the route payload, honest
+    about WHY it ended: a max_tokens cut is marked truncated rather than passed
+    off as complete, and a refusal or empty response gets a plain message
+    instead of reading as a generic failure."""
+    text = strip_em_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
+    if resp.stop_reason == "refusal":
+        return {"available": True,
+                "answer": text or "I'd best not answer that one. Try a question about the club's cricket."}
+    if resp.stop_reason == "max_tokens" and text:
+        return {"available": True, "answer": text + " (answer truncated)"}
+    return {"available": True, "answer": text or empty_msg}
+
+
 async def _run_tool(org_id: str, name: str, args: dict) -> dict:
     fn = _DISPATCH.get(name)
     if not fn:
@@ -639,13 +790,12 @@ async def answer(
             resp = await client.messages.create(
                 model=MODEL,
                 max_tokens=MAX_TOKENS,
-                system=_SYSTEM,
+                system=_SYSTEM_BLOCKS,
                 tools=TOOLS,
                 messages=messages,
             )
             if resp.stop_reason != "tool_use":
-                text = strip_em_dashes("".join(b.text for b in resp.content if b.type == "text").strip())
-                return {"available": True, "answer": text or "I couldn't put an answer together, try rephrasing."}
+                return _answer_from(resp, empty_msg="I couldn't put an answer together, try rephrasing.")
 
             messages.append({"role": "assistant", "content": resp.content})
             results = []
@@ -657,10 +807,9 @@ async def answer(
 
         # Ran out of steps — ask for a final answer with no more tools.
         final = await client.messages.create(
-            model=MODEL, max_tokens=MAX_TOKENS, system=_SYSTEM, messages=messages,
+            model=MODEL, max_tokens=MAX_TOKENS, system=_SYSTEM_BLOCKS, messages=messages,
         )
-        text = strip_em_dashes("".join(b.text for b in final.content if b.type == "text").strip())
-        return {"available": True, "answer": text or "That one took too many steps, try a more specific question."}
+        return _answer_from(final, empty_msg="That one took too many steps, try a more specific question.")
     except Exception as e:
         logger.exception("iq_ask: model call failed")
         return {"available": False, "message": f"Couldn't get an answer just now ({str(e)[:120]}). Try again shortly."}

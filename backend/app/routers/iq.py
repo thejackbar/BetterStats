@@ -72,6 +72,7 @@ async def opposition_dossier(
     opponent: str | None = Query(None, description="opp_key from the opponents list (or any CA org GUID)"),
     fixture_id: str | None = Query(None, description="resolve the opponent (and grade) from a fixture"),
     team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id); omit for the whole club"),
+    grade: str | None = Query(None, description="the IQ filter bar's grade selection (canonical names, '||'-joined) — narrows which of THEIR grades are scouted"),
     name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -81,9 +82,11 @@ async def opposition_dossier(
     ``{status: 'building'}`` until ready, then the assembled payload. Poll it.
 
     By default scouts the whole club (every team/grade) so no player is missed;
-    pass ``team`` (a grade_id from the payload's ``teams``) to focus on one side.
-    ``opponent`` can be ANY Cricket Australia org GUID (from the club search) —
-    a club outside our competitions is discovered via its own org endpoints."""
+    pass ``team`` (a grade_id from the payload's ``teams``) to focus on one side,
+    or ``grade`` (the filter bar's names) to scope the scout AND the head-to-head
+    to those grades. ``opponent`` can be ANY Cricket Australia org GUID (from the
+    club search) — a club outside our competitions is discovered via its own org
+    endpoints."""
     opp_key, name, grade_id = await iq_service.resolve_opponent(
         db, str(club.id), opponent=opponent, fixture_id=fixture_id, display_name=name
     )
@@ -101,7 +104,8 @@ async def opposition_dossier(
             ),
         }
     return await iq_opponent.get_or_start_dossier(
-        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team
+        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team,
+        grade_filter=grade,
     )
 
 
@@ -122,6 +126,7 @@ async def refresh_opposition_dossier(
     opponent: str | None = Query(None),
     fixture_id: str | None = Query(None),
     team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id)"),
+    grade: str | None = Query(None, description="the IQ filter bar's grade selection (canonical names, '||'-joined)"),
     name: str | None = Query(None, description="display name for a club outside our history"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -134,7 +139,8 @@ async def refresh_opposition_dossier(
     if not key:
         return {"status": "unavailable", "opponent": {"opp_key": None, "name": name}}
     return await iq_opponent.get_or_start_dossier(
-        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team, force=True
+        db, str(club.id), key, opp_name=name, grade_id=grade_id, team_grade_id=team,
+        grade_filter=grade, force=True
     )
 
 
@@ -279,11 +285,12 @@ async def refresh_opposition_player_deep(
 
 @router.get("/selection/lineups")
 async def selection_lineups(
+    grade_id: str | None = Query(None, description="filter fixtures to one grade/team BEFORE the row cap (a grade id or name)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Fixtures with a saved BetterSelect lineup, ready to analyse."""
-    return await iq_selection.list_lineups(db, club)
+    return await iq_selection.list_lineups(db, club, grade_id=grade_id)
 
 
 @router.get("/selection/analysis")
@@ -356,11 +363,14 @@ async def trends_players(
 @router.get("/trends/player/{player_id}")
 async def trends_player(
     player_id: str,
+    season_id: str | None = Query(None, description="scope the per-game blocks to one season (year-expanded)"),
+    grade_id: str | None = Query(None, description="scope to a grade name (or several joined with '||')"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """One player's trajectory, career totals, next milestones and verdict."""
-    result = await iq_trends.player_trend(db, str(club.id), player_id)
+    """One player's trajectory, career totals, next milestones and verdict.
+    The payload's ``scope`` key states which scope was actually served."""
+    result = await iq_trends.player_trend(db, str(club.id), player_id, season_id=season_id, grade_id=grade_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return result
@@ -369,12 +379,14 @@ async def trends_player(
 @router.get("/trends/player/{player_id}/deep")
 async def trends_player_deep(
     player_id: str,
+    season_id: str | None = Query(None, description="scope the innings pull to one season (year-expanded)"),
+    grade_id: str | None = Query(None, description="scope to a grade name (or several joined with '||')"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Conversion & starts, dismissal patterns, by-position, by-opposition and a
     scouting note for one player (analytics brief §1)."""
-    result = await iq_trends.player_deep_dive(db, str(club.id), player_id)
+    result = await iq_trends.player_deep_dive(db, str(club.id), player_id, season_id=season_id, grade_id=grade_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return result
@@ -383,12 +395,14 @@ async def trends_player_deep(
 @router.get("/trends/player/{player_id}/bowling-deep")
 async def trends_player_bowling_deep(
     player_id: str,
+    season_id: str | None = Query(None, description="scope the pulls to one season (year-expanded)"),
+    grade_id: str | None = Query(None, description="scope to a grade name (or several joined with '||')"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Wicket quality (set vs new batters), fielder combos, extras discipline and
     a bowling scouting note for one bowler (analytics brief §2.5/§2.9)."""
-    result = await iq_trends.bowler_deep_dive(db, str(club.id), player_id)
+    result = await iq_trends.bowler_deep_dive(db, str(club.id), player_id, season_id=season_id, grade_id=grade_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Player not found")
     return result
@@ -506,11 +520,12 @@ async def team_overview(
 async def team_mvp(
     season_id: str | None = Query(None, description="filter to one season; omit for the latest"),
     grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
+    season_ids: list[str] | None = Query(None, description="Compare mode: scope the board to this set of season rows"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Club MVP board — a season-value player-impact rating from season totals."""
-    return await iq_team.player_impact(db, str(club.id), season_id=season_id, grade_id=grade_id)
+    return await iq_team.player_impact(db, str(club.id), season_id=season_id, grade_id=grade_id, season_ids=season_ids)
 
 
 @router.get("/team/phases")
@@ -552,11 +567,15 @@ async def opposition_phases(
 async def review_games(
     season_id: str | None = Query(None, description="filter to one season"),
     grade_id: str | None = Query(None, description="filter to one grade/team (a grade name)"),
+    season_ids: str | None = Query(None, description="Compare mode: comma-separated season-row ids to scope to"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
     """Recent completed games to review (newest first), optionally season/grade-scoped."""
-    return await iq_review.list_review_games(db, str(club.id), season_id=season_id, grade_id=grade_id)
+    sids = [s for s in (season_ids.split(",") if season_ids else []) if s.strip()]
+    return await iq_review.list_review_games(
+        db, str(club.id), season_id=season_id, grade_id=grade_id, season_ids=sids or None
+    )
 
 
 @router.get("/review/game/{game_id}")

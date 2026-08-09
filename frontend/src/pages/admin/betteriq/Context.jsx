@@ -149,9 +149,21 @@ export function seasonIdsInRange(ctx, seasons) {
 }
 // The single representative season-row id a page sends to the backend; undefined
 // in "All seasons" mode (all-time, no season scope). The backend year-expands it.
+// NOTE: in 'range' (Compare) mode this is only the NEWEST end of the range — a
+// route that advertises Compare must ALSO send effectiveSeasonIds() or its data
+// silently collapses to one season under a "Comparing N seasons" tag.
 export function effectiveSeasonId(ctx) {
   if (!ctx || !ctx.season || ctx.season.mode === 'all') return undefined
   return ctx.season.to?.id || undefined
+}
+// Every season-row id across the selected Compare range — what a range-capable
+// endpoint's `season_ids` should carry. Undefined outside 'range' mode (single
+// mode sends effectiveSeasonId, which the backend year-expands; 'all' sends
+// nothing).
+export function effectiveSeasonIds(ctx, seasons) {
+  if (!ctx || !ctx.season || ctx.season.mode !== 'range') return undefined
+  const ids = seasonIdsInRange(ctx, seasons)
+  return ids.length ? ids : undefined
 }
 export function seasonSpanCount(ctx, seasons) { return Math.max(1, seasonsInRange(ctx, seasons).length) }
 export function seasonLabel(ctx, seasons) {
@@ -178,7 +190,9 @@ export function gradeBase(name) {
 export const ROUTE_FILTERS = {
   overview: { team: true, season: 'single' },
   preview: { team: true, season: false },
-  opposition: { team: true, season: 'range', teamLabel: 'Their grade' },
+  // 'Grade', not 'Their grade': the one selection scopes BOTH sides — our games
+  // in that competition (the report) and their sides in it (the dossier).
+  opposition: { team: true, season: 'range', teamLabel: 'Grade' },
   selection: { team: true, season: false },
   trends: { team: true, season: 'range' },
   team: { team: true, season: 'range' },
