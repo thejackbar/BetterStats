@@ -11,6 +11,27 @@ Nothing in this document is a guess. Both reported symptoms are fully
 root-caused, and both turn out to be instances of wider structural problems
 rather than one-off bugs.
 
+## Implementation status
+
+P0 and P1 from the roadmap (section 10) are implemented and verified against
+a real Postgres instance (24 checks: the opponent-first-synced shared game,
+an incomplete-scorecard "win", junior/senior mixing, a third club's rows
+leaking into a shared fixture, and the dossier grade filter narrowing a
+synced opponent's pool without dropping a player who plays across grades).
+Both reported bugs are fixed and covered by the harness. Commits:
+`9771283` (backend) and `a5ecd7e` (frontend + a cross-club season-matching
+fix the verification pass surfaced — `iq_filters.season_member_clause_cross_club`,
+needed because a shared game the opponent synced first carries their own
+per-club season row).
+
+Most of P2 landed alongside P1 (migration-228 scope integration in
+`player_trend`, selection clash-awareness, Ask IQ season args + name
+disambiguation + prompt caching, the statistical-hygiene fixes). Not done:
+P3 (persisting true innings totals at sync, the ~11→5 nav consolidation,
+a dedicated mobile pass) — each is a larger, more invasive change (sync.py
+rewrites, a navigation IA redesign) that wasn't undertaken in this pass and
+should get its own scoping discussion before starting.
+
 ---
 
 ## 1. Reported bug 1: the grade filter does not reach the opposition scout
