@@ -34,6 +34,38 @@ def season_member_clause(column: str, season_id) -> str:
     return f"AND {column} IN {_SEASON_YEAR_SET}" if season_id else ""
 
 
+# The year set PLUS every OTHER club's sibling row of the same CA season —
+# per-club season rows minted for a cross-club collision share `grassroots_id`
+# (the raw CA season GUID), so this is how a shared game the OPPONENT synced
+# first (whose `season_id` resolves to THEIR season row, migration 167's note)
+# still matches OUR season filter. Mirrors aggregations._club_results.
+_SEASON_YEAR_SET_CROSS = (
+    "(SELECT s5.id FROM seasons s5 "
+    f"WHERE s5.id IN {_SEASON_YEAR_SET} "
+    "OR (s5.grassroots_id IS NOT NULL AND s5.grassroots_id IN "
+    f"(SELECT s6.grassroots_id FROM seasons s6 WHERE s6.id IN {_SEASON_YEAR_SET} "
+    "AND s6.grassroots_id IS NOT NULL)))"
+)
+
+
+def season_member_clause_cross_club(column: str, season_id) -> str:
+    """``season_member_clause`` for a GAME's season column: also matches another
+    club's sibling row of the same CA season, so an opponent-first-synced shared
+    game isn't dropped by our season filter."""
+    return f"AND {column} IN {_SEASON_YEAR_SET_CROSS}" if season_id else ""
+
+
+def season_ids_cross_club(in_list: str, column: str = "g.season_id") -> str:
+    """Compare-mode variant: ``column`` matches an explicit inlined id list OR a
+    cross-club sibling (shared ``grassroots_id``) of any id in it."""
+    return (
+        f"AND ({column} IN ({in_list}) OR {column} IN "
+        f"(SELECT s5.id FROM seasons s5 WHERE s5.grassroots_id IS NOT NULL "
+        f"AND s5.grassroots_id IN (SELECT s6.grassroots_id FROM seasons s6 "
+        f"WHERE s6.id IN ({in_list}) AND s6.grassroots_id IS NOT NULL)))"
+    )
+
+
 def grade_base(col: str) -> str:
     """SQL expression: a grade name with a trailing sponsor parenthetical
     stripped, so "B Grade (DXC Technology)" and "B Grade" read as the SAME

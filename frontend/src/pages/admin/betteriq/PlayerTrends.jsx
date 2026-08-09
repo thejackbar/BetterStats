@@ -374,16 +374,20 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
   // Career radar (career = omit season) unless a single season is active.
   const seasonId = ctx?.season?.mode === 'single' ? (ctx?.season?.to?.id || undefined) : undefined
 
+  // The per-player cards follow the same filter the header shows — they used to
+  // be all-career while the sticky bar overhead read "2024/25 · A Grade", so one
+  // screen showed four different scopes. The payload's `scope` badges the rest.
+  const detailGrade = ctx?.team?.id || undefined
   useEffect(() => {
     if (!playerId) return
     let alive = true
     setDetail(null); setDeep(null); setBdeep(null); setScouting(null)
-    api.iqTrendsPlayer(playerId).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
-    api.iqPlayerDeepDive(playerId).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
-    api.iqBowlerDeepDive(playerId).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
+    api.iqTrendsPlayer(playerId, seasonId, detailGrade).then(d => { if (alive) setDetail(d) }).catch(() => { if (alive) setDetail({ error: true }) })
+    api.iqPlayerDeepDive(playerId, seasonId, detailGrade).then(d => { if (alive) setDeep(d) }).catch(() => { if (alive) setDeep(null) })
+    api.iqBowlerDeepDive(playerId, seasonId, detailGrade).then(d => { if (alive) setBdeep(d) }).catch(() => { if (alive) setBdeep(null) })
     api.iqPlayerScouting(playerId).then(d => { if (alive) setScouting(d) }).catch(() => { if (alive) setScouting(null) })
     return () => { alive = false }
-  }, [playerId])
+  }, [playerId, seasonId, detailGrade])
 
   const saveScouting = async (body) => {
     const saved = await api.iqSavePlayerScouting(playerId, body)
@@ -407,6 +411,16 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
 
   return (
     <div className="iq-fade space-y-6">
+      {/* What scope the cards below were actually built from (career vs the
+          filtered season/grade) — stated, not implied by the header. */}
+      {(detail?.scope || deep?.scope) && (
+        <div className="flex items-center gap-2 -mb-2">
+          <Tag>{(deep?.scope?.label || detail?.scope?.label) === 'filtered'
+            ? 'Scoped to your filter'
+            : 'Career · all grades'}</Tag>
+          {detail?.auto_shown && <Tag tone="accent">Includes grades this player has actually played</Tag>}
+        </div>
+      )}
       <TrendSummary detail={detail} />
 
       <Tabs value={tab} onChange={setTab} tabs={[

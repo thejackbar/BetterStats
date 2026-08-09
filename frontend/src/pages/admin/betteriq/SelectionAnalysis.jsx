@@ -249,6 +249,31 @@ function Analysis({ data, fixtureId, onNavigate }) {
     <div className="iq-fade">
       <PageIntro>Pick the XI here — start from the saved BetterSelect team or, on an empty fixture, from the suggested best available side. Add or remove anyone, set availability to re-rank, then send the XI back to BetterSelect.</PageIntro>
 
+      {/* Server-side selection intelligence: same-day clashes the suggestions
+          skipped, and how fresh the availability answers actually are. */}
+      {(data.clash_excluded?.length > 0 || data.stale_answers > 0) && (
+        <div className="space-y-1.5 mb-5">
+          {data.clash_excluded?.length > 0 && (
+            <div className="flex items-start gap-2 px-4 py-2.5 text-[12.5px]"
+              style={{ background: 'color-mix(in srgb, var(--pb-amber) 9%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 28%, transparent)', borderRadius: 10, color: 'var(--pb-dim)' }}>
+              <Icon name="info" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-amber)' }} />
+              <span>
+                Not suggested (already picked the same day):{' '}
+                {data.clash_excluded.slice(0, 4).map(c => `${c.name}${c.picked_in?.length ? ` (${c.picked_in[0]})` : ''}`).join(', ')}
+                {data.clash_excluded.length > 4 ? ` and ${data.clash_excluded.length - 4} more` : ''}.
+              </span>
+            </div>
+          )}
+          {data.stale_answers > 0 && (
+            <div className="flex items-start gap-2 px-4 py-2.5 text-[12.5px]"
+              style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 10, color: 'var(--pb-dim)' }}>
+              <Icon name="clock" size={15} className="mt-0.5 shrink-0 text-pb-faint" />
+              <span>{data.stale_answers} availability answer{data.stale_answers === 1 ? ' is' : 's are'} more than two weeks old — worth a nudge before locking the side.</span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-wrap items-end justify-between gap-3 mb-6">
         <div>
           <div className="flex items-center gap-2"><div className="iq-eyebrow whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>Selection</div><Tag tone="accent">Synced · BetterSelect</Tag></div>
@@ -403,13 +428,19 @@ export default function SelectionAnalysis() {
   const [data, setData] = useState(null)
   const [err, setErr] = useState(false)
 
-  useEffect(() => { api.iqSelectionLineups().then(setRows).catch(() => setRows([])) }, [])
+  // Follow the global Grade filter SERVER-side — the list is capped at 40 rows,
+  // so a client-only filter at a multi-grade club could show an empty picker
+  // even though lower-grade fixtures exist beyond the cap.
+  const gradeParam = gradeNames.length === 1 ? gradeNames[0] : null
+  useEffect(() => {
+    api.iqSelectionLineups(gradeParam || undefined).then(setRows).catch(() => setRows([]))
+  }, [gradeParam])
 
-  // Follow the global Grade filter — narrow the fixture picker to that grade
-  // (rows carry the raw, sponsor-decorated grade name, so normalise to match).
+  // Multi-grade selections still narrow client-side on top (rows carry the raw,
+  // sponsor-decorated grade name, so normalise to match).
   const visibleRows = useMemo(() => {
     if (!rows || !gradeNames.length) return rows
-    return rows.filter(r => gradeNames.includes(gradeBase(r.grade_name)))
+    return rows.filter(r => !r.grade_name || gradeNames.includes(gradeBase(r.grade_name)))
   }, [rows, gradeNames])
   useEffect(() => {
     if (!fixtureId) { setData(null); return }

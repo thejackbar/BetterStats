@@ -212,5 +212,8 @@
   .iq-print-area { position: absolute !important; left: 0; top: 0; width: 100% !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
   .iq-no-print { display: none !important; }
   .iq-cs-overlay { position: absolute !important; inset: auto !important; background: #fff !important; backdrop-filter: none !important; padding: 0 !important; overflow: visible !important; }
+  /* A sheet that spills to a second page must not split a card or a player row
+     mid-block — the columns and the plan strip stay whole. */
+  .iq-print-area > div > div { break-inside: avoid; page-break-inside: avoid; }
   @page { size: landscape; margin: 10mm; }
 }

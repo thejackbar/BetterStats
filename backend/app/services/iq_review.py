@@ -21,7 +21,7 @@ from collections import defaultdict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_member_clause
+from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_member_clause_cross_club
 
 # Canonical "this game is ours" predicate — mirrors aggregations._club_results
 # (migrations 167/169). A shared fixture between two both-synced clubs is ONE
@@ -77,12 +77,20 @@ async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
     opponent and a grade-less manual game both list, and ``result`` is the
     re-derived ``_EFFECTIVE_RESULT`` so a shared game shows OUR W/L, not the
     first-syncing club's."""
-    clauses = season_member_clause("g.season_id", season_id)
+    # Cross-club variant: a shared game the opponent synced first carries THEIR
+    # season row, which the ownership predicate includes and a plain same-org
+    # season filter would then drop again.
+    clauses = season_member_clause_cross_club("g.season_id", season_id)
     params: dict = {"org": org_id, "limit": limit, "season": season_id, "grade": grade_id}
     if grade_id:
         clauses += f" AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
     if season_ids:
-        clauses += " AND g.season_id = ANY(:season_ids)"
+        clauses += (
+            " AND (g.season_id = ANY(:season_ids) OR g.season_id IN ("
+            "SELECT s5.id FROM seasons s5 WHERE s5.grassroots_id IS NOT NULL "
+            "AND s5.grassroots_id IN (SELECT s6.grassroots_id FROM seasons s6 "
+            "WHERE s6.id = ANY(:season_ids) AND s6.grassroots_id IS NOT NULL)))"
+        )
         params["season_ids"] = [_uuid.UUID(str(x)) for x in season_ids]
     res = await session.execute(
         text(

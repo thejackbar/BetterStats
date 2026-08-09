@@ -2,7 +2,7 @@
    Restyled to the v2 high-fidelity design; wired to the real instant report,
    ladder and team-overview endpoints. Never calls the live dossier. */
 import { useState, useEffect, useMemo } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { useIQFilter, gradeBase, teamNames } from './Context'
@@ -177,8 +177,24 @@ export default function MatchPreview() {
 
   useEffect(() => {
     api.iqListOpponents().then(setOpp).catch(() => setOpp({ opponents: [], upcoming: [] }))
-    api.iqTeamOverview().then(setTeam).catch(() => setTeam(null))
   }, [])
+  // The par/record card is scoped to the CURRENT season and the active grade —
+  // called bare, this was every game the club ever synced (all seasons, juniors
+  // included), which is how "lowest defended: 21" happened. The grade follows
+  // the top filter, else the selected fixture's own grade, so a 4th-XI preview
+  // reads a 4th-XI par. undefined season = the backend's latest-season default.
+  const teamGrade = gradeFilter || (sel?.meta?.grade_name ? gradeBase(sel.meta.grade_name) : null)
+  useEffect(() => {
+    let alive = true
+    api.iqTeamSeasons().then(list => {
+      if (!alive) return
+      const newest = (list || [])[0]  // /iq/team/seasons is newest-first
+      const sid = newest?.season_id || newest?.id || undefined
+      return api.iqTeamOverview(sid, teamGrade || undefined)
+        .then(d => { if (alive) setTeam(d) })
+    }).catch(() => { if (alive) setTeam(null) })
+    return () => { alive = false }
+  }, [teamGrade])
 
   // Restore from URL once the fixtures are loaded.
   useEffect(() => {
@@ -226,7 +242,7 @@ export default function MatchPreview() {
   const goScout = () => navigate(`/admin/betteriq/opposition${qs ? `?${qs}` : ''}`)
   const goCheatSheet = () => {
     if (!sel?.opponent) return
-    navigate(`/admin/betteriq/opposition/cheatsheet?opponent=${encodeURIComponent(sel.opponent)}${sel.fixtureId ? `&fixture=${encodeURIComponent(sel.fixtureId)}` : ''}`)
+    navigate(`/admin/betteriq/opposition/cheatsheet?opponent=${encodeURIComponent(sel.opponent)}${sel.fixtureId ? `&fixture=${encodeURIComponent(sel.fixtureId)}` : ''}${effGrade ? `&grade=${encodeURIComponent(effGrade)}` : ''}`)
   }
   const goSelection = () => navigate(`/admin/betteriq/selection${qs ? `?${qs}` : ''}`)
 
@@ -409,16 +425,33 @@ export default function MatchPreview() {
               </Card>
             </div>
 
-            {/* Par callout */}
+            {/* Par callout — scoped to this season + the fixture's grade (see the
+                teamGrade fetch above), with the sample it's built from stated.
+                It used to be all-time, all grades, juniors included — the
+                "lowest defended: 21" bug. */}
             {par?.par_score != null && (
-              <Card eyebrow="set the target" title="Par at this level">
+              <Card eyebrow="set the target" title="Par at this level"
+                right={<Tag>{[teamGrade || 'All grades', 'this season'].join(' · ')}</Tag>}>
                 <div className="flex items-center gap-5 flex-wrap">
                   <div className="iq-headline iq-num" style={{ fontSize: 'clamp(40px,5vw,60px)', color: 'var(--pb-accent)' }}><CountUp value={par.par_score} /></div>
                   <div className="text-pb-dim text-[13.5px] max-w-sm leading-relaxed">
-                    Median winning first-innings score across our grounds — post that batting first and you're in the box seat.
-                    {par.lowest_defended != null && <> The lowest total we've defended is <span className="iq-num font-semibold text-pb-text">{fmtCount(par.lowest_defended)}</span>.</>}
+                    Median winning bat-first score{par.samples ? ` across ${par.samples} win${par.samples === 1 ? '' : 's'}` : ''} at this level — post that batting first and you're in the box seat.
+                    {par.typical_low != null && par.typical_high != null && (
+                      <> Typical winning range <span className="iq-num font-semibold text-pb-text">{fmtCount(par.typical_low)}–{fmtCount(par.typical_high)}</span>.</>
+                    )}
+                    {par.lowest_defended != null && (
+                      <> Lowest defended{' '}
+                        {par.lowest_defended_game_id
+                          ? <Link to={`/games/${par.lowest_defended_game_id}`} className="iq-num font-semibold text-pb-text underline decoration-dotted underline-offset-2">{fmtCount(par.lowest_defended)}</Link>
+                          : <span className="iq-num font-semibold text-pb-text">{fmtCount(par.lowest_defended)}</span>}
+                        {par.lowest_defended_opponent ? ` (v ${par.lowest_defended_opponent})` : ''}.
+                      </>
+                    )}
                   </div>
                 </div>
+                {par.format_mixed && (
+                  <Note>Mixed formats in this scope — par is computed from the most common one ({par.format || 'unknown'}).</Note>
+                )}
               </Card>
             )}
 

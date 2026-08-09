@@ -30,7 +30,9 @@ from app.services.iq_filters import (
     grade_canonical_label,
     grade_match_clause,
     season_grade_clause,
+    season_ids_cross_club,
     season_member_clause,
+    season_member_clause_cross_club,
 )
 
 logger = logging.getLogger(__name__)
@@ -236,16 +238,19 @@ def _scope(season_id: str | None, grade_id: str | None) -> str:
 # An explicit grade pick still matches by name on ``gr`` (a NULL grade name
 # matches nothing, which is right — a grade-less game belongs to no picked grade).
 def _scope_game(season_id: str | None, grade_id: str | None) -> str:
+    # Cross-club season matching: a shared game the OPPONENT synced first
+    # carries THEIR season row, so the plain same-org year expansion would drop
+    # it right after the ownership predicate went to the trouble of including it.
     sids = _RANGE_SEASONS.get()
     if sids:
         in_list = ", ".join("'" + s + "'::uuid" for s in sids)
-        parts = [f"AND g.season_id IN ({in_list})"]
+        parts = [season_ids_cross_club(in_list, "g.season_id")]
         if grade_id:
             parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
         return " ".join(parts)
     parts = []
     if season_id:
-        parts.append(season_member_clause("g.season_id", season_id))
+        parts.append(season_member_clause_cross_club("g.season_id", season_id))
     if grade_id:
         parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
     return " ".join(parts)

@@ -3,6 +3,7 @@
    overview; a season RANGE additionally plots win-rate-over-time across the
    in-range seasons. Every section is guarded — any sub-object may be null. */
 import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import {
@@ -112,7 +113,12 @@ function Overview({ d, isRange, compareRows, compareLoading }) {
 
         {d.score_bands?.length > 0 && (
           <Card eyebrow="what score wins" title={inn?.par?.par_score != null ? `Par: ${inn.par.par_score}` : 'What score wins'}
-            right={inn?.par?.lowest_defended != null ? <span className="text-pb-faint text-[12px] iq-num">defended {inn.par.lowest_defended}</span> : null}>
+            right={inn?.par?.lowest_defended != null
+              ? (inn.par.lowest_defended_game_id
+                ? <Link to={`/games/${inn.par.lowest_defended_game_id}`} className="text-pb-faint text-[12px] iq-num underline decoration-dotted underline-offset-2"
+                    title={inn.par.lowest_defended_opponent ? `v ${inn.par.lowest_defended_opponent}` : undefined}>defended {inn.par.lowest_defended}</Link>
+                : <span className="text-pb-faint text-[12px] iq-num">defended {inn.par.lowest_defended}</span>)
+              : null}>
             <div className="space-y-2.5">
               {d.score_bands.map((s, i) => (
                 <div key={s.band} className="flex items-center gap-3 text-[13px]">
@@ -122,7 +128,13 @@ function Overview({ d, isRange, compareRows, compareLoading }) {
                 </div>
               ))}
             </div>
-            <Note>Win rate when we post a first-innings total in each band (count of such games in brackets).</Note>
+            <Note>
+              Win rate when we post a first-innings total in each band (count of such games in brackets).
+              {inn?.par?.samples != null ? ` Par from ${inn.par.samples} qualifying bat-first win${inn.par.samples === 1 ? '' : 's'}` : ''}
+              {inn?.par?.typical_low != null && inn?.par?.typical_high != null ? ` · typical winning range ${inn.par.typical_low}–${inn.par.typical_high}` : ''}
+              {inn?.par?.excluded_incomplete ? ` · ${inn.par.excluded_incomplete} incomplete card${inn.par.excluded_incomplete === 1 ? '' : 's'} excluded` : ''}
+              {inn?.par?.format_mixed ? ` · mixed formats, computed from the most common (${inn.par.format || 'unknown'})` : ''}
+            </Note>
           </Card>
         )}
       </div>
@@ -732,6 +744,15 @@ export default function TeamAnalysis() {
 
           {data && data.record && (
             <div className="iq-fade">
+              {/* A card that failed server-side is reported, not silently blank —
+                  "no data" and "the query failed" are different things. */}
+              {data.degraded?.length > 0 && (
+                <div className="flex items-start gap-2 mb-5 px-4 py-3 text-[12.5px]"
+                  style={{ background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 30%, transparent)', borderRadius: 10, color: 'var(--pb-dim)' }}>
+                  <Icon name="info" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-amber)' }} />
+                  <span>Some cards couldn't be computed this time ({data.degraded.join(', ')}) — the rest of the page is unaffected. Reload to retry.</span>
+                </div>
+              )}
               {tab === 'overview' && <Overview d={data} isRange={isRange} compareRows={compareRows} compareLoading={compareLoading} />}
               {tab === 'batting' && <Batting d={data} seasonId={seasonId} teamId={teamId} />}
               {tab === 'bowling' && <Bowling d={data} seasonId={seasonId} teamId={teamId} />}
