@@ -994,7 +994,10 @@ async def patch_settings(
 # ---------------------------------------------------------------------------
 
 LOGO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-LOGO_MAX_BYTES = 2 * 1024 * 1024
+# 8 MB: the admin app crops every pick through ImageEditorModal before
+# uploading, but its lossless-PNG export of a detailed photo at the 1600px
+# default can clear 2 MB — the old cap 400'd exactly those.
+LOGO_MAX_BYTES = 8 * 1024 * 1024
 
 _IMAGE_MIME = {
     ".jpg": "image/jpeg",
@@ -1027,7 +1030,7 @@ async def upload_logo(
     if not data:
         raise HTTPException(400, "Empty file")
     if len(data) > LOGO_MAX_BYTES:
-        raise HTTPException(400, "Logo must be 2 MB or smaller")
+        raise HTTPException(400, "Logo must be 8 MB or smaller")
 
     _remove_uploaded_logo(club.logo_url)  # clean up any legacy on-disk file
     club.logo_data = data
@@ -1137,7 +1140,7 @@ async def delete_font(
 # ---------------------------------------------------------------------------
 
 PHOTO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-PHOTO_MAX_BYTES = 2 * 1024 * 1024
+PHOTO_MAX_BYTES = 8 * 1024 * 1024  # editor output (see LOGO_MAX_BYTES note)
 
 
 def _remove_player_photo(photo_url: Optional[str]) -> None:
@@ -1167,7 +1170,7 @@ async def upload_player_photo(
     if not data:
         raise HTTPException(400, "Empty file")
     if len(data) > PHOTO_MAX_BYTES:
-        raise HTTPException(400, "Photo must be 2 MB or smaller")
+        raise HTTPException(400, "Photo must be 8 MB or smaller")
 
     _remove_player_photo(player.photo_url)  # clean up any legacy on-disk file
     player.photo_data = data
@@ -4985,8 +4988,8 @@ async def upload_sponsor_logo(
     if file.content_type not in ("image/png", "image/jpeg", "image/svg+xml", "image/webp", "image/gif"):
         raise HTTPException(status_code=422, detail="Unsupported image type")
     data = await file.read()
-    if len(data) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Logo must be under 2 MB")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Logo must be under 8 MB")
     sponsor.logo_data = data
     sponsor.logo_mime = file.content_type
     import time as _time

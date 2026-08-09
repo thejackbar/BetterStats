@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
-import { validateImageFile } from '../../../lib/validation'
+import { validateImageFile, DIRECT_IMAGE_MAX_BYTES } from '../../../lib/validation'
 import { useFlash, Flash, inputCls, btnPrimary, btnGhost, btnDanger } from './adminParts'
 
 function ImageManager({ album, onBack, onChange }) {
@@ -13,7 +13,7 @@ function ImageManager({ album, onBack, onChange }) {
     setUploading(true)
     let added = [...album.images]
     for (const f of files) {
-      const v = validateImageFile(f)
+      const v = validateImageFile(f, { maxBytes: DIRECT_IMAGE_MAX_BYTES })
       if (v) { toast.error(`${f.name}: ${v}`); continue }
       try { const img = await api.webAdminAddGalleryImage(album.id, f); added = [...added, img] }
       catch (e) { toast.error(e.message) }

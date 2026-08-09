@@ -1,6 +1,6 @@
 // Shared bits for the Website admin sections.
 import { useState, useCallback } from 'react'
-import { validateImageFile } from '../../../lib/validation'
+import { validateImageFile, DIRECT_IMAGE_MAX_BYTES } from '../../../lib/validation'
 
 export function useFlash() {
   const [flash, setFlash] = useState(null)
@@ -35,7 +35,8 @@ export function UploadButton({ label = 'UPLOAD', uploading, onFile, className = 
           const f = e.target.files?.[0]
           e.target.value = ''
           if (!f) return
-          const v = validateImageFile(f)
+          // Direct upload, no crop editor — cap at what the server accepts.
+          const v = validateImageFile(f, { maxBytes: DIRECT_IMAGE_MAX_BYTES })
           if (v) { setErr(v); return }
           setErr(null)
           onFile(f)

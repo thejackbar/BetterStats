@@ -244,7 +244,10 @@ async def patch_player(
 # avatar, say — passing through untouched.
 
 PHOTO_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
-PHOTO_MAX_BYTES = 2 * 1024 * 1024
+# 8 MB: what arrives here is ImageEditorModal's re-encoded crop, not the
+# picked camera file (the frontend allows a 15 MB original because it never
+# leaves the browser) — but a detailed lossless-PNG export can clear 2 MB.
+PHOTO_MAX_BYTES = 8 * 1024 * 1024
 _PHOTO_MIME = {
     ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
     ".webp": "image/webp", ".gif": "image/gif",
@@ -279,7 +282,7 @@ async def upload_player_photo(
     if not data:
         raise HTTPException(status_code=400, detail="Empty file")
     if len(data) > PHOTO_MAX_BYTES:
-        raise HTTPException(status_code=400, detail="Photo must be 2 MB or smaller")
+        raise HTTPException(status_code=400, detail="Photo must be 8 MB or smaller")
 
     player.photo_data = data
     player.photo_mime = _PHOTO_MIME.get(ext, "image/png")

@@ -138,7 +138,7 @@ export function BrandingStep({ onRefresh }) {
       setMsg({ tone: 'good', text: 'Logo saved.' })
       onRefresh()
     } catch (e) {
-      setMsg({ tone: 'bad', text: e?.message || 'Upload failed. JPG, PNG, WEBP or GIF up to 2 MB.' })
+      setMsg({ tone: 'bad', text: e?.message || 'Upload failed. JPG, PNG, WEBP or GIF up to 15 MB.' })
     } finally {
       setUploading(false)
     }

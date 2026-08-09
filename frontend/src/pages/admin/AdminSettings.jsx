@@ -486,7 +486,7 @@ export default function AdminSettings() {
                   )}
                 </div>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  PNG, JPG, WEBP or GIF · max 2 MB. Use Edit to crop or remove the background on the existing logo. With a custom logo set, it appears top-left and the BetterCricket logo moves to the top-right.
+                  PNG, JPG, WEBP or GIF · max 15 MB. Use Edit to crop or remove the background on the existing logo. With a custom logo set, it appears top-left and the BetterCricket logo moves to the top-right.
                 </p>
                 <label className="flex items-start gap-2.5 mt-3 cursor-pointer">
                   <input type="checkbox" checked={!!form.public_header_logo}

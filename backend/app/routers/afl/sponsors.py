@@ -108,8 +108,8 @@ async def upload_sponsor_logo(
     if file.content_type not in ("image/png", "image/jpeg", "image/svg+xml", "image/webp", "image/gif"):
         raise HTTPException(status_code=422, detail="Unsupported image type")
     data = await file.read()
-    if len(data) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="Logo must be under 2 MB")
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Logo must be under 8 MB")
     sponsor.logo_data = data
     sponsor.logo_mime = file.content_type
     sponsor.logo_url = f"/images/sponsors/{sponsor_id}/logo?v={int(time.time())}"

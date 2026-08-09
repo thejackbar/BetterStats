@@ -100,7 +100,7 @@ function PhotoField({ player, onChanged }) {
               </>
             )}
           </div>
-          <span className="text-[11px] text-pb-faintest">JPG, PNG, WEBP or GIF, up to 2 MB.</span>
+          <span className="text-[11px] text-pb-faintest">JPG, PNG, WEBP or GIF, up to 15 MB.</span>
         </div>
       </div>
       <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif"
@@ -113,9 +113,9 @@ function PhotoField({ player, onChanged }) {
         aspect={1}
         // PNG, not JPEG, because the background-removal tools are the point of
         // the editor and transparency has to survive the export. 800px keeps
-        // the result comfortably inside the 2 MB the endpoint accepts — the
-        // component's 1600 default can push a detailed photo past it once
-        // it's re-encoded as a lossless PNG.
+        // the result comfortably inside the 8 MB the endpoint accepts — the
+        // 15 MB pick limit is for the ORIGINAL file (a camera JPEG), which
+        // never leaves the browser; only this re-encoded crop is uploaded.
         outputType="image/png"
         outputName={`player-${player.id}.png`}
         maxOutputSize={800}
