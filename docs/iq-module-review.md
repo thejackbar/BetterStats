@@ -24,22 +24,29 @@ fix the verification pass surfaced — `iq_filters.season_member_clause_cross_cl
 needed because a shared game the opponent synced first carries their own
 per-club season row).
 
-Most of P2 landed alongside P1 (migration-228 scope integration in
-`player_trend`, selection clash-awareness, Ask IQ season args + name
-disambiguation + prompt caching, the statistical-hygiene fixes, and —
-separately, `4cfb38f` — the cheat sheet's nav entry and cold-nav picker).
-
-Two P2 items remain open, found by checking the roadmap against the code
-rather than memory: **"Seniors only" is still an include-list, not the
-exclusion semantics `grade_scope.py` exists to provide** (`Context.jsx:250-275`)
-— converting it means every IQ backend query with a grade filter supporting
-an exclude mode alongside the current include-only `grade_match_clause`,
-closer to another P1-scale backend pass than a quick fix, not undertaken here.
-The Opposition grade-control split (item 15) turned out NOT to need doing —
-now that the dossier resolves grade filters by canonical name against the
-opponent's own grades, one "Grade" control correctly means the same thing on
-both sides, so the single relabelled control is the right outcome, not a
-shortcut.
+P2 is fully landed: migration-228 scope integration in `player_trend`,
+selection clash-awareness, Ask IQ season args + name disambiguation + prompt
+caching, the statistical-hygiene fixes, the cheat sheet's nav entry and
+cold-nav picker (`4cfb38f`), and — last, `ea340ed` — **"Seniors only" is now
+genuine exclusion, not an include-list**. `grade_match_clause`
+(`iq_filters.py`) gained a second mode driven entirely by the runtime value
+bound to `:grade`: a `!`-prefixed value means EXCLUDE those names and is
+NULL-tolerant (`col IS NULL OR NOT (...)`), so a grade-less manual game or
+import residual now stays in a "Seniors only" view instead of silently
+vanishing — the exact anti-pattern `grade_scope.py` exists to avoid, applied
+to the IQ filter's name-based matching. The surgical shape this turned into
+made it far cheaper than the original "another P1-scale backend pass"
+estimate: every one of the ~12 existing `grade_match_clause` call sites
+across `iq_team`/`iq_trends`/`iq_opponent`/`iq_review`/`iq_selection`/`iq.py`
+needed no changes at all, since they already forward the grade wire value
+verbatim — the mode rides along for free. Verified against a real Postgres
+instance (36 checks total, 7 new, run three times fresh to confirm
+determinism after fixing an unrelated flaky assertion the same pass
+surfaced). The Opposition grade-control split (the other half of item 15)
+turned out NOT to need doing — now that the dossier resolves grade filters
+by canonical name against the opponent's own grades, one "Grade" control
+correctly means the same thing on both sides, so the single relabelled
+control is the right outcome, not a shortcut.
 
 P3 status, after a scoping discussion on the three items:
 
