@@ -56,10 +56,13 @@ function _rowYear(s) {
   return m ? Number(m[1]) : null
 }
 
-/* A team selection is `{ id, name, names? }`. `id` stays the value every page
-   sends to the backend: one grade NAME, or several names joined with '||' (the
-   multi-select wire format — `season_grade_clause` splits it server-side), or
-   null for "All grades". `names` is the picked list for the UI. */
+/* A team selection is `{ id, name, names?, mode? }`. `id` stays the value
+   every page sends to the backend as-is: one grade NAME, or several names
+   joined with '||' (the multi-select wire format — `grade_match_clause`
+   splits it server-side), or null for "All grades". `names` is the resolved
+   list used for the UI (checkbox state) and for the handful of client-side
+   filters (fixture pickers) that treat it as an include list — that's fine
+   for those low-stakes uses even under `mode: 'exclude'`, see below. */
 export function teamFromNames(names) {
   const list = (names || []).filter(Boolean)
   if (!list.length) return { id: null, name: 'All grades', names: [] }
@@ -72,18 +75,46 @@ export function teamNames(team) {
   return String(team.id).split('||').filter(Boolean)
 }
 
+/* `mode: 'exclude'` team — the "Seniors only" preset. `id` carries a leading
+   `!` (the server-side `grade_match_clause` NULL-tolerant exclude convention:
+   backend/app/services/iq_filters.py) so a grade-less manual game or import
+   residual stays IN the result instead of silently dropping out, which the
+   plain include form (send every senior grade name) could never do — a row
+   with no grade at all can never appear in an include list, however that
+   list is built. `names` stays the resolved SENIOR list (not the excluded
+   one) so the picker's checkboxes and the few client-side consumers of
+   `teamNames()` keep behaving exactly like a normal include selection.
+   Returns null when there's nothing to exclude (a club with only senior
+   grades) or nothing senior at all — the caller falls back to "All grades". */
+export function seniorsOnlyTeam(grades) {
+  const list = grades || []
+  const seniorNames = list.filter(g => (g.category || 'senior') === 'senior').map(g => g.name)
+  const nonSeniorNames = list.filter(g => g.category && g.category !== 'senior').map(g => g.name)
+  if (!seniorNames.length || !nonSeniorNames.length) return null
+  return { id: '!' + nonSeniorNames.join('||'), name: 'Seniors only', names: seniorNames, mode: 'exclude' }
+}
+
 function _reconcile(saved) {
   if (!saved || !saved.season || !_seasons?.length) return null
   const newest = _seasons[_seasons.length - 1]
   const from = _seasonById(saved.season.from?.id) || newest
   const to = _seasonById(saved.season.to?.id) || newest
-  // Grades are keyed by NAME now (de-duped across seasons). Drop any saved
-  // names that no longer match a known grade (e.g. an old raw-uuid id from a
-  // previous build) so it falls back to "All grades" instead of filtering to
-  // nothing.
-  const known = new Set((_grades || []).flatMap(g => [g.id, g.name]))
-  const savedNames = teamNames(saved.team).filter(n => known.has(n))
-  const team = teamFromNames(savedNames)
+  let team
+  if (saved.team?.mode === 'exclude') {
+    // "Seniors only" is a PRESET, not a manual pick — re-derive it fresh
+    // against the grades known NOW rather than trust a stored '!'-prefixed
+    // wire value verbatim (which grade is senior can change between
+    // sessions as grades are synced/merged/recategorised).
+    team = seniorsOnlyTeam(_grades) || { id: null, name: 'All grades', names: [] }
+  } else {
+    // Grades are keyed by NAME now (de-duped across seasons). Drop any saved
+    // names that no longer match a known grade (e.g. an old raw-uuid id from
+    // a previous build) so it falls back to "All grades" instead of
+    // filtering to nothing.
+    const known = new Set((_grades || []).flatMap(g => [g.id, g.name]))
+    const savedNames = teamNames(saved.team).filter(n => known.has(n))
+    team = teamFromNames(savedNames)
+  }
   const mode = saved.season.mode === 'range' ? 'range' : saved.season.mode === 'all' ? 'all' : 'single'
   return { team, season: { mode, from, to }, touched: !!saved.touched }
 }
@@ -249,7 +280,12 @@ function TeamPicker({ value, grades, onChange, label = 'Team' }) {
   const picked = new Set(teamNames(value))
   const seniorNames = (grades || []).filter(g => (g.category || 'senior') === 'senior').map(g => g.name)
   const hasNonSenior = seniorNames.length > 0 && seniorNames.length < (grades || []).length
-  const seniorsActive = picked.size > 0 && picked.size === seniorNames.length && seniorNames.every(n => picked.has(n))
+  // 'Seniors only' is the one preset that carries a real EXCLUDE-mode wire
+  // value (grade_match_clause's '!'-prefixed, NULL-tolerant form) instead of
+  // an include list — the mode flag is what's active here, not a name-set
+  // comparison (a manual pick that happens to tick every senior grade is a
+  // genuinely different, non-NULL-tolerant filter and must not read as active).
+  const seniorsActive = value?.mode === 'exclude'
   const toggle = (name) => {
     const next = new Set(picked)
     if (next.has(name)) next.delete(name)
@@ -270,9 +306,9 @@ function TeamPicker({ value, grades, onChange, label = 'Team' }) {
             <button onClick={() => { onChange(teamFromNames([])); close() }}
               className="iq-display font-semibold text-[11.5px] transition" style={presetBtn(picked.size === 0)}>All grades</button>
             {hasNonSenior && (
-              <button onClick={() => onChange(teamFromNames(seniorNames))}
+              <button onClick={() => { const t = seniorsOnlyTeam(grades); if (t) onChange(t) }}
                 className="iq-display font-semibold text-[11.5px] transition" style={presetBtn(seniorsActive)}
-                title="Every senior grade — excludes junior, women's, masters and mixed/social grades">Seniors only</button>
+                title="Every senior grade — excludes junior, women's, masters and mixed/social grades, but keeps games we can't categorise (a grade-less manual entry, an import residual) rather than dropping them">Seniors only</button>
             )}
           </div>
           <div className="space-y-0.5 max-h-72 overflow-y-auto iq-scroll">
@@ -473,9 +509,20 @@ export function ContextBar({ route }) {
     }
     return [...byName.values()].sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   }, [ctx, seasons, grades])
-  // Drop selected grades the club didn't field in the new season.
+  // Drop selected grades the club didn't field in the new season. 'Seniors
+  // only' is a PRESET, not a manual pick — re-derive it fresh against the new
+  // season's grades (which grade is senior can differ season to season)
+  // rather than reconstruct it via teamFromNames, which would silently
+  // demote it back to a plain include-list and lose the NULL-tolerant
+  // exclude semantics the whole preset exists for.
   useEffect(() => {
-    const names = teamNames(ctx?.team)
+    if (!ctx?.team) return
+    if (ctx.team.mode === 'exclude') {
+      const fresh = seniorsOnlyTeam(visibleGrades) || { id: null, name: 'All grades', names: [] }
+      if (fresh.id !== ctx.team.id) setCtx({ ...ctx, team: fresh })
+      return
+    }
+    const names = teamNames(ctx.team)
     if (names.length && visibleGrades.length) {
       const known = new Set(visibleGrades.map(g => g.name))
       const kept = names.filter(n => known.has(n))

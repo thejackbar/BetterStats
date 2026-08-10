@@ -81,11 +81,37 @@ def grade_base(col: str) -> str:
 
 
 def grade_match_clause(col_expr: str) -> str:
-    """``<base name> = ANY(...)`` against the ``:grade`` parameter, which may be a
-    single grade name or several joined with ``||`` (multi-select). For a single
-    name ``string_to_array`` yields a one-element array, so behaviour is
-    identical to the old ``= :grade`` equality."""
-    return f"{col_expr} = ANY(string_to_array(:grade, '||'))"
+    """``<base name> = ANY(...)`` against the ``:grade`` parameter — a single
+    grade name, or several joined with ``||`` (multi-select), matched
+    INCLUDE-style. For a single name ``string_to_array`` yields a one-element
+    array, so behaviour is identical to the old ``= :grade`` equality.
+
+    A value prefixed with ``!`` instead means EXCLUDE those names — and,
+    unlike include mode, is NULL-tolerant: a row whose grade can't resolve to
+    a name at all (a grade-less manual game, a career-scope import residual)
+    is KEPT rather than silently dropped. This mirrors ``grade_scope.clause()``
+    's rule for BetterStats' junior/senior split — "a row we cannot categorise
+    is not a row we know to exclude" — applied here because the IQ grade
+    filter matches by NAME across per-club/per-season grade-id variations, not
+    a stored grade_id set, so it can't reuse that helper directly. Include
+    mode is deliberately NOT NULL-tolerant: an explicit pick means exactly
+    those grades, and a grade-less row is correctly outside an explicit pick.
+
+    Powers the "Seniors only" preset (``Context.jsx``'s ``TeamPicker``), which
+    sends the EXCLUDED (non-senior) names rather than the included ones —
+    the include form of "every senior grade" used to drop every grade-less
+    manual game and import residual from a "seniors only" view, the exact
+    anti-pattern ``grade_scope.py`` was built to avoid. Every existing caller
+    of this function needs no change: the mode is carried entirely in the
+    runtime VALUE bound to ``:grade``, which every call site already forwards
+    verbatim from the ``grade``/``grade_id``/``grade_filter`` parameter it
+    receives. A grade name is assumed to never start with ``!`` or contain
+    ``||`` (the existing multi-select delimiter convention)."""
+    return (
+        "(CASE WHEN :grade LIKE '!%' THEN "
+        f"({col_expr} IS NULL OR NOT ({col_expr} = ANY(string_to_array(substring(:grade FROM 2), '||')))) "
+        f"ELSE {col_expr} = ANY(string_to_array(:grade, '||')) END)"
+    )
 
 
 def grade_canonical_label(alias: str = "gr", org_param: str = "org") -> str:
