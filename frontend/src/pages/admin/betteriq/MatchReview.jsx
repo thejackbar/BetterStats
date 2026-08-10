@@ -6,7 +6,7 @@ import { useSearchParams } from 'react-router-dom'
 import IQLayout from '../../../components/admin/IQLayout'
 import { api } from '../../../lib/api'
 import { Card, Note, Tag, Btn, Empty, PageIntro, LoadingCard, fmtCount, fmtOvers } from './ui'
-import { useIQFilter, effectiveSeasonId } from './Context'
+import { useIQFilter, effectiveSeasonId, effectiveSeasonIds } from './Context'
 import { PlayerLink } from './PlayerLink'
 
 const ord = (k) => ({ 1: '1st', 2: '2nd', 3: '3rd' }[k] || `${k}th`)
@@ -195,8 +195,9 @@ function GameReviewDetail({ review }) {
 
 export default function MatchReview() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const { ctx } = useIQFilter()
+  const { ctx, seasons } = useIQFilter()
   const seasonId = effectiveSeasonId(ctx)
+  const seasonIds = effectiveSeasonIds(ctx, seasons)  // Compare mode: the WHOLE range, not just its newest end
   const gradeId = ctx?.team?.id || undefined
   const [games, setGames] = useState(null)
   const [gameId, setGameId] = useState(searchParams.get('game') || null)
@@ -205,8 +206,8 @@ export default function MatchReview() {
   // Follow the global Season + Team filter — the review list is the games it scopes.
   useEffect(() => {
     setGames(null)
-    api.iqReviewGames(seasonId, gradeId).then(setGames).catch(() => setGames([]))
-  }, [seasonId, gradeId])
+    api.iqReviewGames(seasonIds ? undefined : seasonId, gradeId, seasonIds).then(setGames).catch(() => setGames([]))
+  }, [seasonId, gradeId, seasonIds ? seasonIds.join(',') : ''])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Default to the most recent game once the list loads (the detail pane is
   // always populated, mirroring the design) — unless the URL already pins one.

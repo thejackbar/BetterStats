@@ -782,10 +782,16 @@ async def _their_danger_batters(
                 COALESCE(SUM(bw.batter_runs), 0) AS runs,
                 MAX(bw.batter_runs) AS top_score
             FROM v_effective_bowler_wickets bw
+            -- OUR bowlers only: a shared both-synced fixture carries the other
+            -- club's bowler_wickets rows on the same games row, so without this
+            -- their bowlers' scalps of OUR batters would read as "batters to
+            -- watch" (the shared-game player-scoping rule).
+            JOIN players bp ON bp.id = bw.bowler_id AND bp.organisation_id = CAST(:org_id AS UUID)
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND {_OPP_KEY} = :opp_key
               AND bw.batter_name IS NOT NULL AND bw.batter_name <> ''
+              AND bw.batter_name !~ '^\\*+$'
               {scope}
             GROUP BY bw.batter_name
             HAVING COALESCE(SUM(bw.batter_runs), 0) > 0
@@ -834,9 +840,13 @@ async def search_opponent_players(session: AsyncSession, org_id: str, q: str) ->
                    MAX(bw.batter_runs) AS top_score,
                    MAX(g.played_at) AS last_played
             FROM v_effective_bowler_wickets bw
+            -- OUR bowlers only — same shared-game scoping rule as
+            -- _their_danger_batters above.
+            JOIN players bp ON bp.id = bw.bowler_id AND bp.organisation_id = CAST(:org_id AS UUID)
             JOIN v_effective_games g ON g.id = bw.game_id{_ORG_SCOPE}
             WHERE s.organisation_id = CAST(:org_id AS UUID)
               AND bw.batter_name ILIKE :q
+              AND bw.batter_name !~ '^\\*+$'
               AND {_OPP_KEY} IS NOT NULL
             GROUP BY bw.batter_name, {_OPP_KEY}
             ORDER BY runs DESC, times_out DESC

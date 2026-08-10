@@ -32,7 +32,12 @@ async def list_all_players(session: AsyncSession, org_id: str) -> list[dict]:
             LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             LEFT JOIN seasons s ON s.id = pss.season_id
             LEFT JOIN teams t ON t.id = p.squad_team_id
+            -- is_player IS TRUE: coaches/officials (is_player = FALSE) have no
+            -- business in a scouting roster or the Ask IQ player pickers. The
+            -- column was added with server_default 'true' (migration 023), so
+            -- every real player reads TRUE.
             WHERE p.organisation_id = CAST(:org AS UUID)
+              AND p.is_player IS TRUE
             GROUP BY p.id
             ORDER BY last_year DESC NULLS LAST, runs DESC
             """

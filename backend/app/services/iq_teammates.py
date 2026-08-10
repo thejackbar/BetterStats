@@ -2,7 +2,8 @@
 together.
 
 Two read-only views over data we already hold (``game_appearances`` + results +
-the per-innings tables), org-scoped via grades→seasons:
+the per-innings tables), the games universe scoped by the canonical ownership
+predicate (``_OG_CTE``, mirroring ``aggregations._club_results``):
 
 - ``teammates(player)`` — every player the focal player has been in the same XI
   with, most games together first, with the team's record over those shared
@@ -23,6 +24,40 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.bowling_style import bowling_class, bowling_label
+
+# The focal games universe ("og") — canonical ownership predicate + re-derived
+# result, mirroring aggregations._club_results (migrations 167/169). grades are
+# LEFT JOINed and the season comes off the view's own g.season_id, so a shared
+# fixture whose grade belongs to the club that synced it first, and a grade-less
+# manual game, both count; the CASE re-derives WIN/LOSS against OUR home/away
+# side since g.result is relative to whichever club's sync wrote it.
+_OG_CTE = """
+    og AS (
+        SELECT g.id,
+               CASE
+                   WHEN g.winning_team IS NULL THEN g.result
+                   WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
+                   WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'LOSS'
+                   WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'WIN'
+                   WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'LOSS'
+                   ELSE g.result
+               END AS result
+        FROM v_effective_games g
+        LEFT JOIN grades gr ON gr.id = g.grade_id
+        LEFT JOIN seasons s ON s.id = g.season_id
+        WHERE (
+            g.organisation_id = CAST(:org AS UUID)
+            OR g.home_org_id = CAST(:org AS UUID)
+            OR g.away_org_id = CAST(:org AS UUID)
+            OR s.organisation_id = CAST(:org AS UUID)
+            OR EXISTS (
+                SELECT 1 FROM game_appearances oga
+                JOIN players op ON op.id = oga.player_id
+                WHERE oga.game_id = g.id AND op.organisation_id = CAST(:org AS UUID)
+            )
+        )
+    )
+"""
 
 
 def _win_pct(w: int, dec: int) -> float | None:
@@ -48,14 +83,8 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
         return None
     res = await session.execute(
         text(
-            """
-            WITH og AS (
-                SELECT g.id, g.result
-                FROM v_effective_games g
-                JOIN grades gr ON gr.id = g.grade_id
-                JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org AS UUID)
-            ),
+            f"""
+            WITH {_OG_CTE},
             mine AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)),
             shared AS (SELECT og.id, og.result FROM og JOIN mine ON mine.game_id = og.id)
             SELECT p.id::text AS id,
@@ -90,16 +119,11 @@ async def teammates(session: AsyncSession, org_id: str, player_id: str) -> dict 
     return {"player": {"player_id": player_id, "name": name}, "teammates": mates}
 
 
-# Shared CTE block for the with/without split — the focal player's org games,
-# each tagged with whether the teammate was also in the side.
-_SPLIT_CTES = """
-    WITH og AS (
-        SELECT g.id, g.result
-        FROM v_effective_games g
-        JOIN grades gr ON gr.id = g.grade_id
-        JOIN seasons s ON s.id = gr.season_id
-        WHERE s.organisation_id = CAST(:org AS UUID)
-    ),
+# Shared CTE block for the with/without split — the focal player's org games
+# (canonical ownership universe, see _OG_CTE), each tagged with whether the
+# teammate was also in the side.
+_SPLIT_CTES = f"""
+    WITH {_OG_CTE},
     pg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:p AS UUID)),
     xg AS (SELECT DISTINCT game_id FROM game_appearances WHERE player_id = CAST(:x AS UUID)),
     pgames AS (

@@ -36,6 +36,10 @@ const ROUTES = [
   { key: 'preview', to: '/admin/betteriq/preview', label: 'Match preview', icon: 'fixtures', eyebrow: 'Scout the opposition', title: 'Match preview', cap: CAP.MANAGE_IQ },
   { key: 'opposition', to: '/admin/betteriq/opposition', label: 'Opposition club', icon: 'search', eyebrow: 'Scout the opposition', title: 'Opposition analysis', cap: CAP.MANAGE_IQ },
   { key: 'opposition-player', to: '/admin/betteriq/opposition-player', label: 'Opposition player', icon: 'player', eyebrow: 'Scout the opposition', title: 'Opposition player', cap: CAP.MANAGE_IQ },
+  // Standalone route (own overlay chrome, no IQLayout — see CheatSheet.jsx's
+  // own header comment); opens to its own opponent/fixture picker when
+  // reached cold from here, same as every button-driven deep link into it.
+  { key: 'cheatsheet', to: '/admin/betteriq/opposition/cheatsheet', label: 'Cheat sheet', icon: 'print', eyebrow: 'Scout the opposition', title: 'Cheat sheet', cap: CAP.MANAGE_IQ },
   { group: 'Know your club' },
   { key: 'selection', to: '/admin/betteriq/selection', label: 'Selection', icon: 'selection', eyebrow: 'Know your club', title: 'Selection analysis', cap: CAP.MANAGE_IQ },
   { key: 'trends', to: '/admin/betteriq/trends', label: 'Form & trends', icon: 'trend', eyebrow: 'Know your club', title: 'Form & trends', cap: CAP.MANAGE_IQ },

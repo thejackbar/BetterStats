@@ -40,6 +40,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import OppositionDossier, async_session_maker
 from app.services import grassroots_scores_client as gr
 from app.services import iq_phrases
+from app.services.iq_filters import grade_canonical_label, grade_match_clause
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ logger = logging.getLogger(__name__)
 # rebuilt on next view, so new analysis (game plan, how-they-win/lose, scouting
 # notes, …) pulls through for EVERY cache key — whole-club AND each team — without
 # waiting on the TTL or a manual refresh.
-DOSSIER_VERSION = 8
+DOSSIER_VERSION = 9
 
 # Squads change slowly and a rebuild is heavy; a week's freshness with a manual
 # Refresh button is the right trade-off.
@@ -97,6 +98,14 @@ _TEAM_SUFFIXES = (
 
 def _norm(s: str | None) -> str:
     return (s or "").strip().lower()
+
+
+def _is_redacted_name(name: str | None) -> bool:
+    """A CA-redacted junior renders as '********' (or blank). Such a player can
+    still be counted in team totals, but must never be a named danger pick or a
+    game-plan target — "Get ******** early" helps nobody."""
+    n = (name or "").strip()
+    return not n or bool(re.fullmatch(r"\*+", n))
 
 
 def _club_norm(name: str | None) -> str:
@@ -391,7 +400,10 @@ async def _synced_opponent_org(session: AsyncSession, opp_key: str) -> str | Non
     return opp_key if hit else None
 
 
-async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
+async def _db_season_accumulators(
+    session: AsyncSession, opp_org_id: str,
+    grade_filter: str | None = None, team_grade_id: str | None = None,
+):
     """Build the dossier's ``season_bat/bowl/field/fow`` accumulators from the
     opponent's OWN stored data — identical in-memory shape to what
     ``_scout_grade`` builds from live Grassroots, so the rest of ``_assemble``
@@ -402,7 +414,10 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
     the whole dossier to an empty year, the "SQUAD (0)" symptom. ``pid`` = their
     players' raw participant GUID (``grassroots_id``) so the vs-us records
     (parsed from the GR head-to-head cards, whose participantId is that same
-    GUID) key-align. Returns ``(bat, bowl, field, fow, dates, teams)``.
+    GUID) key-align. ``grade_filter`` (canonical grade names, ``'||'``-joined)
+    and ``team_grade_id`` narrow which of THEIR grades feed the pool — before
+    these, a synced opponent's dossier was always whole-club regardless of the
+    filter or the chosen team. Returns ``(bat, bowl, field, fow, dates, teams)``.
     """
     bat: dict = {}
     bowl: dict = {}
@@ -427,12 +442,22 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
     if yr is None:
         return bat, bowl, field, fow, dates, teams
     p = {"org": opp_org_id, "yr": yr}
+    # Grade narrowing shared by every data query below. Canonical-name matching
+    # (merge- and sponsor-aware) so OUR filter bar's vocabulary matches THEIR
+    # grade rows; team_grade_id matches either id form (raw CA GUID or PK).
+    scope = ""
+    if team_grade_id:
+        scope += " AND (gr.grassroots_id = :tgid OR gr.id::text = :tgid)"
+        p["tgid"] = team_grade_id
+    if grade_filter:
+        scope += f" AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
+        p["grade"] = grade_filter
 
     grade_rows = await session.execute(
         text(
-            """
+            f"""
             SELECT COALESCE(gr.grassroots_id, gr.id::text) AS grade_id,
-                   COALESCE(gr.display_name_override, gr.name) AS grade_name,
+                   {grade_canonical_label('gr', 'org')} AS grade_name,
                    COUNT(DISTINCT g.id) AS matches
             FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
@@ -442,7 +467,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
             ORDER BY matches DESC NULLS LAST, grade_name
             """
         ),
-        p,
+        {"org": opp_org_id, "yr": yr},
     )
     for r in grade_rows:
         teams.append({"grade_id": r.grade_id, "grade_name": r.grade_name,
@@ -450,7 +475,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
 
     bat_rows = await session.execute(
         text(
-            """
+            f"""
             SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    g.id::text AS match_id, g.played_at,
@@ -468,6 +493,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
               AND NOT COALESCE(bi.did_not_bat, FALSE)
               AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+              {scope}
             """
         ),
         p,
@@ -503,7 +529,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
 
     bowl_rows = await session.execute(
         text(
-            """
+            f"""
             SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    g.id::text AS match_id, g.played_at,
@@ -514,6 +540,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+              {scope}
             """
         ),
         p,
@@ -537,7 +564,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
 
     field_rows = await session.execute(
         text(
-            """
+            f"""
             SELECT COALESCE(pl.grassroots_id, pl.id::text) AS pid,
                    COALESCE(pl.display_name_override, pl.name) AS name,
                    SUM(fs.catches) AS ct, SUM(fs.catches_wk) AS ct_wk,
@@ -548,6 +575,7 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
+              {scope}
             GROUP BY 1, 2
             """
         ),
@@ -558,19 +586,29 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
         f["ct"], f["ct_wk"], f["ro"], f["st"] = int(r.ct or 0), int(r.ct_wk or 0), int(r.ro or 0), int(r.st or 0)
         field[r.pid] = f
 
-    # Partnership-by-wicket / collapse map from their stored partnerships
-    # (is_club_innings = their batting). Cumulative partnership runs within an
-    # innings == the score at each fall, so we recover the live fow shape exactly.
+    # Partnership-by-wicket / collapse map from their stored partnerships.
+    # `is_club_innings IS TRUE` is NOT a club filter on a shared fixture — a
+    # match between the opponent and a THIRD synced club is one `games` row and
+    # both clubs stamp their own innings TRUE — so one batter side must also
+    # resolve to the opponent's own roster (both batters in a stand are from the
+    # same innings, so scoping either side excludes the third club's stands).
+    # Cumulative partnership runs within an innings == the score at each fall,
+    # so we recover the live fow shape exactly.
     part_rows = await session.execute(
         text(
-            """
+            f"""
             SELECT g.id::text AS match_id, pt.innings_number, pt.wicket_number, pt.runs
             FROM v_effective_partnerships pt
             JOIN v_effective_games g ON g.id = pt.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN players b1 ON b1.id = pt.batter1_id
+            LEFT JOIN players b2 ON b2.id = pt.batter2_id
             WHERE s.organisation_id = CAST(:org AS UUID) AND s.year = :yr
               AND pt.is_club_innings IS TRUE
+              AND (b1.organisation_id = CAST(:org AS UUID)
+                   OR b2.organisation_id = CAST(:org AS UUID))
+              {scope}
             ORDER BY g.id, pt.innings_number, pt.wicket_number
             """
         ),
@@ -593,8 +631,17 @@ async def _db_season_accumulators(session: AsyncSession, opp_org_id: str):
 
 
 def _danger_index_bat(p: dict) -> float:
-    """Rank batters by output, leaning on recent form. Explainable, not magic."""
-    base = (p["average"] or 0) * 0.5 + (p["runs"] or 0) * 0.05
+    """Rank batters by output, leaning on recent form. Explainable, not magic.
+
+    The average is SHRUNK toward a modest club baseline (20) by three phantom
+    dismissals before it counts — a raw average off one or two innings used to
+    dominate this index, which is how a two-knock cameo topped the "remove
+    early" tile over a 400-run regular. (runs + 3*20) / (outs + 3) reads as
+    "what the average looks like after three more ordinary innings"."""
+    runs = p.get("runs") or 0
+    outs = (p.get("innings") or 0) - (p.get("not_outs") or 0)
+    shrunk = (runs + 60) / (max(outs, 0) + 3)
+    base = shrunk * 0.5 + runs * 0.05
     if p["form"] == "hot":
         base *= 1.3
     elif p["form"] == "cold":
@@ -626,10 +673,21 @@ async def _upsert(session: AsyncSession, org_id: str, opp_key: str, **fields) ->
     await session.commit()
 
 
-def _cache_key(opp_key: str, team_grade_id: str | None) -> str:
+def _cache_key(opp_key: str, team_grade_id: str | None, grade_filter: str | None = None) -> str:
     """Dossier cache key. A team-scoped dossier is cached separately from the
-    whole-club one (and from other teams) by suffixing the chosen grade."""
-    return f"{opp_key}::team::{team_grade_id}" if team_grade_id else opp_key
+    whole-club one (and from other teams) by suffixing the chosen grade; a
+    grade-FILTERED dossier likewise — a dossier built under one filter must
+    never be served under another (the filter changes which of their grades
+    feed the pool). Bare ``opp_key`` stays the unfiltered whole-club key, so
+    prewarm and Ask IQ keep hitting the same rows they always did."""
+    key = opp_key
+    if team_grade_id:
+        key += f"::team::{team_grade_id}"
+    if grade_filter:
+        # Deterministic + short: the filter is a '||'-joined name list.
+        import hashlib
+        key += "::gf::" + hashlib.sha1(grade_filter.encode("utf-8")).hexdigest()[:12]
+    return key
 
 
 async def get_or_start_dossier(
@@ -640,6 +698,7 @@ async def get_or_start_dossier(
     opp_name: str | None = None,
     grade_id: str | None = None,
     team_grade_id: str | None = None,
+    grade_filter: str | None = None,
     force: bool = False,
 ) -> dict:
     """Return a ready dossier, or kick off a background build and report status.
@@ -649,8 +708,11 @@ async def get_or_start_dossier(
     fresh cache hit. ``team_grade_id`` narrows the squad+form scout to one of the
     opponent's teams (a grade); ``None`` scouts the whole club across all their
     grades. ``grade_id`` is the fixture's grade — a hint for which season to scout.
+    ``grade_filter`` is the IQ filter bar's grade selection (canonical names,
+    ``'||'``-joined) — it narrows which of THEIR grades are scouted, so a
+    filtered page never headlines a player from a side outside the filter.
     """
-    cache_key = _cache_key(opp_key, team_grade_id)
+    cache_key = _cache_key(opp_key, team_grade_id, grade_filter)
     row = await _load_row(session, org_id, cache_key)
     now = datetime.now(timezone.utc)
 
@@ -670,17 +732,18 @@ async def get_or_start_dossier(
 
     # Mark building and launch the detached build (its own session).
     await _upsert(session, org_id, cache_key, opp_name=opp_name, status="building", error=None)
-    task = asyncio.create_task(_run_build(org_id, cache_key, opp_key, opp_name, grade_id, team_grade_id))
+    task = asyncio.create_task(_run_build(org_id, cache_key, opp_key, opp_name, grade_id, team_grade_id, grade_filter))
     _BUILD_TASKS.add(task)
     task.add_done_callback(_BUILD_TASKS.discard)
     return {"status": "building", "opponent": {"opp_key": opp_key, "name": opp_name}}
 
 
 async def _run_build(org_id: str, cache_key: str, opp_key: str, opp_name: str | None,
-                     grade_hint: str | None, team_grade_id: str | None) -> None:
+                     grade_hint: str | None, team_grade_id: str | None,
+                     grade_filter: str | None = None) -> None:
     async with async_session_maker() as session:
         try:
-            payload = await _assemble(session, org_id, opp_key, opp_name, grade_hint, team_grade_id)
+            payload = await _assemble(session, org_id, opp_key, opp_name, grade_hint, team_grade_id, grade_filter)
             await _upsert(
                 session, org_id, cache_key,
                 opp_name=payload.get("opponent", {}).get("name") or opp_name,
@@ -697,21 +760,31 @@ async def _run_build(org_id: str, cache_key: str, opp_key: str, opp_name: str | 
 
 # ─── the build itself ────────────────────────────────────────────────────────
 
-async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str) -> list[dict]:
+async def _our_games_vs(session: AsyncSession, org_id: str, opp_key: str,
+                        grade_filter: str | None = None) -> list[dict]:
+    # Org-scoped off the view's own organisation_id (migration 169) with grades
+    # LEFT JOINed, so a grade-less manual game still lists (it has no GR
+    # scorecard, so the fetch loop skips it harmlessly — but it must not error
+    # out of the universe). With a grade filter, the vs-us pool narrows to games
+    # in the filtered grade(s) so the head-to-head matches the page's header.
+    extra = f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}" if grade_filter else ""
+    params: dict = {"org": org_id, "opp_key": opp_key}
+    if grade_filter:
+        params["grade"] = grade_filter
     res = await session.execute(
         text(
-            """
+            f"""
             SELECT g.id::text AS id, g.played_at,
                    COALESCE(gr.grassroots_id, g.grade_id::text) AS grade_id, g.venue
             FROM v_effective_games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            WHERE g.organisation_id = CAST(:org AS UUID)
               AND COALESCE(g.opp_org_id, g.opp_club_name) = :opp_key
+              {extra}
             ORDER BY g.played_at DESC NULLS LAST
             """
         ),
-        {"org": org_id, "opp_key": opp_key},
+        params,
     )
     return [dict(r) for r in res.mappings()]
 
@@ -774,22 +847,23 @@ async def _grade_name(session: AsyncSession, grade_id: str) -> str | None:
     return row["name"] if row else None
 
 
-async def _target_season_grades(session: AsyncSession, org_id: str, opp_key: str | None, grade_hint: str | None) -> list[tuple[str, str]]:
-    """All (grade_id, grade_name) in the season we should scout the opponent in.
+async def _target_season_id(session: AsyncSession, org_id: str, opp_key: str | None, grade_hint: str | None) -> str | None:
+    """The season we should scout the opponent in.
 
-    Season precedence: the fixture's grade season → the season of our most recent
-    meeting → our latest season. A club fields one team per grade per season, so a
-    season's grades are the universe of their 'teams' we can see.
+    Precedence: the fixture's grade season → the season of our most recent
+    meeting → our latest season. Exposed separately from the grade listing so
+    ``_assemble`` can echo WHICH season the dossier was actually built against
+    (a dossier keyed off an old meeting used to be labelled "this season").
     """
-    season_id = None
     if grade_hint:
         res = await session.execute(
             text("SELECT season_id::text AS sid FROM grades WHERE id = CAST(:g AS UUID)"),
             {"g": grade_hint},
         )
         row = res.mappings().first()
-        season_id = row["sid"] if row else None
-    if not season_id and opp_key:
+        if row:
+            return row["sid"]
+    if opp_key:
         res = await session.execute(
             text(
                 """
@@ -806,75 +880,116 @@ async def _target_season_grades(session: AsyncSession, org_id: str, opp_key: str
             {"org": org_id, "opp": opp_key},
         )
         row = res.mappings().first()
-        season_id = row["sid"] if row else None
-    if not season_id:
-        res = await session.execute(
-            text(
-                """
-                SELECT id::text AS sid FROM seasons
-                WHERE organisation_id = CAST(:org AS UUID)
-                ORDER BY COALESCE(display_order, 999999) ASC, year DESC NULLS LAST
-                LIMIT 1
-                """
-            ),
-            {"org": org_id},
-        )
-        row = res.mappings().first()
-        season_id = row["sid"] if row else None
+        if row:
+            return row["sid"]
+    res = await session.execute(
+        text(
+            """
+            SELECT id::text AS sid FROM seasons
+            WHERE organisation_id = CAST(:org AS UUID)
+            ORDER BY COALESCE(display_order, 999999) ASC, year DESC NULLS LAST
+            LIMIT 1
+            """
+        ),
+        {"org": org_id},
+    )
+    row = res.mappings().first()
+    return row["sid"] if row else None
+
+
+async def _target_season_grades(
+    session: AsyncSession, org_id: str, season_id: str | None, grade_filter: str | None = None,
+) -> list[tuple[str, str]]:
+    """All (grade_id, grade_name) in the season we should scout the opponent in.
+
+    A club fields one team per grade per season, so a season's grades are the
+    universe of their 'teams' we can see. ``grade_filter`` (the IQ filter bar's
+    ``'||'``-joined canonical grade names) narrows that universe — THE fix for a
+    lower-grade opponent player headlining a filtered scout: without it, every
+    grade our club fields a side in was scouted regardless of the filter.
+    Returned names are the canonical (merge- and sponsor-aware) labels so the
+    frontend's grade matching agrees with the filter bar's own vocabulary.
+    """
     if not season_id:
         return []
     # gid feeds the grassroots /scores/grades/{id}/matches API, which is keyed on
     # the shared raw CA grade GUID — use grassroots_id (== id for legacy grades),
     # not the (possibly per-club uuid5) primary key.
+    extra = f"AND {grade_match_clause(grade_canonical_label('grades', 'org'))}" if grade_filter else ""
+    params: dict = {"sid": season_id, "org": org_id}
+    if grade_filter:
+        params["grade"] = grade_filter
     res = await session.execute(
         text(
-            "SELECT COALESCE(grassroots_id, id::text) AS gid, name "
-            "FROM grades WHERE season_id = CAST(:sid AS UUID)"
+            f"SELECT COALESCE(grassroots_id, id::text) AS gid, "
+            f"{grade_canonical_label('grades', 'org')} AS gname "
+            f"FROM grades WHERE season_id = CAST(:sid AS UUID) {extra}"
         ),
-        {"sid": season_id},
+        params,
     )
-    return [(r["gid"], r["name"]) for r in res.mappings()]
+    return [(r["gid"], r["gname"]) for r in res.mappings()]
 
 
 async def _discover_opponent_teams(
-    session: AsyncSession, org_id: str, opp_key: str | None, opp_name: str | None, grade_hint: str | None
-) -> tuple[list[dict], str | None, bool]:
+    session: AsyncSession, org_id: str, opp_key: str | None, opp_name: str | None,
+    grade_hint: str | None, grade_filter: str | None = None,
+) -> tuple[list[dict], str | None, bool, bool]:
     """The opponent's teams this season = the grades they field a side in.
 
     Returns ``([{grade_id, grade_name, team_name, matches}], opp_org_id,
-    external)`` — each entry a selectable 'team'. ``opp_org_id`` is resolved
-    opportunistically from the first matching team's owning org (handy when we
-    only had a club name). ``external`` flags that the teams came from the
-    club's OWN org endpoints rather than our grades (see below).
+    external, grade_filter_matched)`` — each entry a selectable 'team'.
+    ``opp_org_id`` is resolved opportunistically from the first matching team's
+    owning org (handy when we only had a club name). ``external`` flags that the
+    teams came from the club's OWN org endpoints rather than our grades (see
+    below). When ``grade_filter`` narrows discovery to nothing (they field no
+    side in the filtered grade), discovery retries unfiltered and
+    ``grade_filter_matched`` comes back False so the UI can say so instead of
+    silently showing the whole club as if it were the filtered view.
     """
     opp_org_id = opp_key if _is_uuid(opp_key) else None
-    season_grades = await _target_season_grades(session, org_id, opp_key, grade_hint)
-    teams: list[dict] = []
-    for gid, gname in season_grades[:MAX_DISCOVERY_GRADES]:
-        try:
-            matches = await gr.get_grade_matches(gid)
-        except Exception:
-            matches = []
-        team_name = None
-        count = 0
-        for m in matches:
-            hit = next(
-                (t for t in (m.get("teams") or [])
-                 if _team_is_opponent(t, opp_org_id=opp_org_id, opp_name=opp_name)),
-                None,
-            )
-            if not hit:
-                continue
-            count += 1
-            if not team_name:
-                team_name = hit.get("displayName") or hit.get("name")
-            if not opp_org_id:
-                oid = (hit.get("owningOrganisation") or {}).get("id")
-                if oid:
-                    opp_org_id = oid
-        if count:
-            teams.append({"grade_id": gid, "grade_name": gname, "team_name": team_name or gname, "matches": count})
-    teams.sort(key=lambda d: (_team_rank(d["team_name"]), d["grade_name"] or ""))
+    season_id = await _target_season_id(session, org_id, opp_key, grade_hint)
+    season_grades = await _target_season_grades(session, org_id, season_id, grade_filter)
+    grade_filter_matched = True
+    if grade_filter and not season_grades:
+        season_grades = await _target_season_grades(session, org_id, season_id, None)
+        grade_filter_matched = False
+    async def _teams_in(grades_list: list[tuple[str, str]]) -> list[dict]:
+        nonlocal opp_org_id
+        found: list[dict] = []
+        for gid, gname in grades_list[:MAX_DISCOVERY_GRADES]:
+            try:
+                matches = await gr.get_grade_matches(gid)
+            except Exception:
+                matches = []
+            team_name = None
+            count = 0
+            for m in matches:
+                hit = next(
+                    (t for t in (m.get("teams") or [])
+                     if _team_is_opponent(t, opp_org_id=opp_org_id, opp_name=opp_name)),
+                    None,
+                )
+                if not hit:
+                    continue
+                count += 1
+                if not team_name:
+                    team_name = hit.get("displayName") or hit.get("name")
+                if not opp_org_id:
+                    oid = (hit.get("owningOrganisation") or {}).get("id")
+                    if oid:
+                        opp_org_id = oid
+            if count:
+                found.append({"grade_id": gid, "grade_name": gname, "team_name": team_name or gname, "matches": count})
+        found.sort(key=lambda d: (_team_rank(d["team_name"]), d["grade_name"] or ""))
+        return found
+
+    teams = await _teams_in(season_grades)
+    if not teams and grade_filter and grade_filter_matched:
+        # The grades matched the filter but the opponent fields no side in any of
+        # them (e.g. filtered to our 1st-grade comp, they only play lower grades)
+        # — retry unfiltered rather than shipping an empty scout, and say so.
+        grade_filter_matched = False
+        teams = await _teams_in(await _target_season_grades(session, org_id, season_id, None))
 
     external = False
     if not teams and opp_org_id:
@@ -888,7 +1003,7 @@ async def _discover_opponent_teams(
             external = bool(teams)
         except Exception as e:
             logger.warning(f"BetterIQ: external team discovery failed for {opp_org_id}: {e}")
-    return teams, opp_org_id, external
+    return teams, opp_org_id, external, grade_filter_matched
 
 
 async def _scout_grade(
@@ -1042,8 +1157,11 @@ def _enrich_batter(b: dict, rank: int) -> None:
     plan = iq_phrases.batter_plan(arch, dominant, seed)
 
     vs = b.get("vs_us")
-    if vs and vs.get("average") and (avg is None or vs["average"] >= avg):
-        bits.append(f"Averages {vs['average']:.2f} against us specifically.")
+    # A vs-us average needs a real sample behind it — one good knock used to
+    # print "averages 68.00 against us" as if it were a career-long pattern.
+    vs_sound = bool(vs and vs.get("average") and (vs.get("innings") or 0) >= 3)
+    if vs_sound and (avg is None or vs["average"] >= avg):
+        bits.append(f"Averages {vs['average']:.2f} against us ({vs['innings']} inns).")
 
     # Danger vs paper-tiger read (brief §16.2/16.3). Be inclusive about danger so
     # the *obvious* threats (top scorer, in form, high average, history vs us) all
@@ -1063,8 +1181,8 @@ def _enrich_batter(b: dict, rank: int) -> None:
     # otherwise it's a paper-tiger tell handled below.
     if avg is not None and avg >= 35 and sound and not flattered:
         danger_reasons.append(f"averages {avg:.2f}")
-    if vs and vs.get("average") and vs["average"] >= 30 and (avg is None or vs["average"] >= avg):
-        danger_reasons.append(f"{vs['average']:.2f} vs us")
+    if vs_sound and vs["average"] >= 30 and (avg is None or vs["average"] >= avg):
+        danger_reasons.append(f"{vs['average']:.2f} vs us ({vs['innings']} inns)")
     if (b.get("fifties") or 0) + (b.get("hundreds") or 0) >= 3:
         danger_reasons.append("piles up big scores")
     if flattered and avg:
@@ -1117,11 +1235,14 @@ def _enrich_bowler(b: dict, rank: int) -> None:
     b["risk"] = "high" if level == "danger" else ("low" if level == "caution" else "medium")
 
 
-def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships):
+def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships, mixed_grades: bool = False):
     win, lose = [], []
     total_runs = sum(b.get("runs") or 0 for b in batters)
     top3 = sum((b.get("runs") or 0) for b in sorted(batters, key=lambda x: x.get("runs") or 0, reverse=True)[:3])
-    if total_runs and top3 / total_runs >= 0.5:
+    # The top-order concentration read only means something for ONE side: in a
+    # whole-club (multi-grade) pool the "top three" are usually from three
+    # different XIs, and a thin pool makes any share look concentrated.
+    if not mixed_grades and total_runs >= 300 and len(batters) >= 6 and top3 / total_runs >= 0.5:
         pct = round(100 * top3 / total_runs)
         win.append(f"Top-order driven — {pct}% of their runs come from their top three.")
         lose.append(f"Early wickets choke them — {pct}% of their scoring rides on the top three.")
@@ -1163,8 +1284,14 @@ def _game_plan(danger_batters, danger_bowlers, bowlers):
     warning = None
     if remove:
         vs = remove.get("vs_us")
-        warning = (f"{remove['name']} averages {vs['average']:.2f} against us." if vs and vs.get("average")
-                   else f"{remove['name']} is their danger man.")
+        # The vs-us warning needs the same floor _enrich_batter applies: >= 3
+        # innings, and a vs-us average that's actually at or above their season
+        # form — a single 68 used to headline the whole plan as settled fact.
+        if (vs and vs.get("average") and (vs.get("innings") or 0) >= 3
+                and (remove.get("average") is None or vs["average"] >= remove["average"])):
+            warning = f"{remove['name']} averages {vs['average']:.2f} against us ({vs['innings']} inns)."
+        else:
+            warning = f"{remove['name']} is their danger man."
     return {
         "remove_early": {"name": remove["name"], "why": remove.get("key_note")} if remove else None,
         "see_off": {"name": see_off["name"], "why": see_off.get("key_note")} if see_off else None,
@@ -1175,14 +1302,32 @@ def _game_plan(danger_batters, danger_bowlers, bowlers):
 
 
 async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: str | None,
-                    grade_hint: str | None, team_grade_id: str | None) -> dict:
+                    grade_hint: str | None, team_grade_id: str | None,
+                    grade_filter: str | None = None) -> dict:
     opp_name = opp_name or (opp_key if not _is_uuid(opp_key) else None)
-    our_games = await _our_games_vs(session, org_id, opp_key)
+    our_games = await _our_games_vs(session, org_id, opp_key, grade_filter)
+    if grade_filter and not our_games:
+        # No meetings in the filtered grade — fall back to the club-wide history
+        # for the vs-us layer (better than an empty head-to-head; the coverage
+        # note says which scope was used).
+        our_games = await _our_games_vs(session, org_id, opp_key)
+        h2h_grade_filtered = False
+    else:
+        h2h_grade_filtered = bool(grade_filter)
 
     # Discover the opponent's teams (= the grades they field a side in this season).
-    teams, opp_org_id, external_discovery = await _discover_opponent_teams(session, org_id, opp_key, opp_name, grade_hint)
+    teams, opp_org_id, external_discovery, grade_filter_matched = await _discover_opponent_teams(
+        session, org_id, opp_key, opp_name, grade_hint, grade_filter
+    )
     if opp_name is None:
         opp_name = next((t["team_name"] for t in teams), None)
+    season_id = await _target_season_id(session, org_id, opp_key, grade_hint)
+    season_name = None
+    if season_id:
+        row = (await session.execute(
+            text("SELECT name FROM seasons WHERE id = CAST(:sid AS UUID)"), {"sid": season_id}
+        )).mappings().first()
+        season_name = row["name"] if row else None
 
     season_bat: dict = {}
     season_bowl: dict = {}
@@ -1202,17 +1347,34 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     db_built = False
     if synced_org:
         season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
-            await _db_season_accumulators(session, synced_org)
+            await _db_season_accumulators(session, synced_org, grade_filter, team_grade_id)
         season_matches = len(
             {m for b in season_bat.values() for m in b["matches"]}
             | {m for b in season_bowl.values() for m in b["matches"]}
         )
+        if not season_matches and (grade_filter or team_grade_id):
+            # Narrowed to nothing (they hold no game-level rows in the filtered
+            # grade) — retry whole-club rather than shipping an empty squad, and
+            # flag it so the UI says the filter couldn't be applied.
+            grade_filter_matched = False
+            season_bat, season_bowl, season_field, season_fow, season_dates, db_teams = \
+                await _db_season_accumulators(session, synced_org)
+            season_matches = len(
+                {m for b in season_bat.values() for m in b["matches"]}
+                | {m for b in season_bowl.values() for m in b["matches"]}
+            )
         if season_matches:
             db_built = True
             if not teams and db_teams:
                 teams = db_teams
             scout_grades = teams
-            teams_scouted = len(db_teams)
+            if grade_filter and grade_filter_matched:
+                # db_teams is the full picker list; the note's "across N teams"
+                # should count only the grades the filter actually scoped to.
+                wanted = set(grade_filter.split("||"))
+                teams_scouted = len([t for t in db_teams if t["grade_name"] in wanted]) or 1
+            else:
+                teams_scouted = len(db_teams)
         else:
             # Synced club but no usable game-level rows (aggregate-only sync, a
             # failed sync, …) — fall through to the live scout rather than ship
@@ -1287,6 +1449,8 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
             "innings": vs["innings"], "runs": vs["runs"], "average": vs["average"],
             "high_score": vs["high_score"], "fifties": vs["fifties"], "hundreds": vs["hundreds"],
         } if vs else None
+        row["confidence"] = _confidence(row.get("innings"))
+        row["redacted"] = _is_redacted_name(row.get("name"))
         batters.append(row)
     batters.sort(key=lambda p: (p["runs"] or 0), reverse=True)
 
@@ -1297,6 +1461,8 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         row["vs_us"] = {
             "wickets": vs["wickets"], "average": vs["average"], "economy": vs["economy"], "best": vs["best"],
         } if vs else None
+        row["confidence"] = _confidence(row.get("matches"))
+        row["redacted"] = _is_redacted_name(row.get("name"))
         bowlers.append(row)
     bowlers.sort(key=lambda p: (p["wickets"] or 0, -(p["average"] or 1e9)), reverse=True)
 
@@ -1306,16 +1472,22 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     ]
     keepers.sort(key=lambda p: (p["catches"] + p["stumpings"]), reverse=True)
 
-    danger_batters = sorted(batters, key=_danger_index_bat, reverse=True)[:5]
+    # A redacted junior can't be a named danger pick or a game-plan target —
+    # they stay in the full lists (flagged) so team totals still add up.
+    danger_batters = sorted(
+        [b for b in batters if not b["redacted"]], key=_danger_index_bat, reverse=True
+    )[:5]
     danger_bowlers = sorted(
-        [b for b in bowlers if b["wickets"]], key=lambda p: (p["wickets"], -(p["average"] or 1e9)), reverse=True
+        [b for b in bowlers if b["wickets"] and not b["redacted"]],
+        key=lambda p: (p["wickets"], -(p["average"] or 1e9)), reverse=True
     )[:5]
 
     # Players who've historically hurt us but aren't in the scouted squad — still
     # worth flagging ("watch for a recall").
     season_pids = set(season_bat) | set(season_bowl)
     threats_history = sorted(
-        [r for pid, r in h2h_bat_final.items() if pid not in season_pids and (r["runs"] or 0) >= 50],
+        [r for pid, r in h2h_bat_final.items()
+         if pid not in season_pids and (r["runs"] or 0) >= 50 and not _is_redacted_name(r.get("name"))],
         key=lambda p: (p["runs"] or 0), reverse=True,
     )[:5]
 
@@ -1364,7 +1536,10 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         _enrich_batter(db, rank)
     for rank, db in enumerate(danger_bowlers):
         _enrich_bowler(db, rank)
-    how_they_win, how_they_lose = _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships)
+    mixed_grades = teams_scouted > 1
+    how_they_win, how_they_lose = _how_they_win_lose(
+        batters, bowlers, danger_bowlers, partnerships, mixed_grades=mixed_grades
+    )
     game_plan = _game_plan(danger_batters, danger_bowlers, bowlers)
 
     coverage = "rich" if season_matches else ("history_only" if h2h_games else "none")
@@ -1389,8 +1564,19 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         )
     else:
         notes.append("No current-season matches found — showing head-to-head history only.")
+    if grade_filter and grade_filter_matched:
+        gf_names = ", ".join(grade_filter.split("||"))
+        notes.append(f"Scoped to {gf_names} per your filter.")
+    elif grade_filter and not grade_filter_matched:
+        gf_names = ", ".join(grade_filter.split("||"))
+        notes.append(
+            f"Your grade filter ({gf_names}) matched none of their sides — showing the whole club instead."
+        )
+    if season_name:
+        notes.append(f"Season scouted: {season_name}.")
     if h2h_games:
-        notes.append(f"Head-to-head built from {h2h_games} of our games against them.")
+        h2h_scope = "in the filtered grade(s)" if h2h_grade_filtered else "across every grade and season we hold"
+        notes.append(f"Head-to-head built from {h2h_games} of our games against them, {h2h_scope}.")
     notes.append("Based on scorecards (no ball-by-ball), so no phase or ball-level matchup data.")
 
     return {
@@ -1401,10 +1587,18 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
         "teams": teams,
         "selected_team": team_grade_id,
         "selected_team_name": selected_team_name,
+        # The scope this dossier was actually built under — the UI badges it so
+        # a filtered header can never sit over an unfiltered scout unremarked.
+        "grade_filter": grade_filter.split("||") if grade_filter else None,
+        "grade_filter_matched": grade_filter_matched if grade_filter else None,
+        "mixed_grades": mixed_grades,
         "scouted": {
             "season_matches": season_matches,
             "teams_scouted": teams_scouted,
             "head_to_head_games": h2h_games,
+            "h2h_grade_filtered": h2h_grade_filtered,
+            "season_id": season_id,
+            "season_name": season_name,
             "span": {
                 "from": min(season_dates).isoformat() if season_dates else None,
                 "to": max(season_dates).isoformat() if season_dates else None,

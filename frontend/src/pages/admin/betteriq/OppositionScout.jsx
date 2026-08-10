@@ -31,6 +31,9 @@ import { PlayerLink, OppPlayerLink } from './PlayerLink'
 import Dropdown from '../../../components/Dropdown'
 
 const POLL_MS = 2500
+// A first build lands in ~10-40s; give a slow one a couple of minutes, then
+// stop polling instead of spinning forever behind a fake progress bar.
+const MAX_POLLS = 60
 const num = (v, d = '—') => (v === null || v === undefined ? d : v)
 
 /* ── Picker ──────────────────────────────────────────────────────────────── */
@@ -240,31 +243,56 @@ function RecentMeetings({ recent }) {
 
 /* ── Game plan (synthesis, from dossier + the instant report's edge) ─────── */
 
-function PlanTile({ label, name, sub, tone }) {
+function PlanTile({ label, name, sub, tone, confidence }) {
   const color = tone === 'remove' ? 'var(--pb-red)' : tone === 'see' ? 'var(--pb-amber)' : 'var(--pb-brand)'
   return (
     <div className="p-4" style={{ background: 'var(--pb-surface2)', borderRadius: 12, border: '1px solid var(--pb-hairline)' }}>
-      <div className="iq-eyebrow" style={{ color }}>{label}</div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="iq-eyebrow" style={{ color }}>{label}</span>
+        {confidence && confidence !== 'high' && (
+          <span className="iq-mono uppercase" style={{ fontSize: 9, color: confidence === 'low' ? 'var(--pb-amber)' : 'var(--pb-faint)' }}>
+            {confidence === 'low' ? 'thin sample' : 'medium sample'}
+          </span>
+        )}
+      </div>
       <div className="iq-display font-bold text-[16px] mt-2 truncate">{name || '—'}</div>
       {sub && <div className="text-pb-faint text-[11.5px] mt-1 leading-snug">{sub}</div>}
     </div>
   )
 }
 
-function GamePlan({ plan, report }) {
+function GamePlan({ plan, report, dossier }) {
   if (!plan) return null
   const h2h = report?.head_to_head
   const ourBat = report?.our_performers?.batting?.[0]
   const ourBowl = report?.our_performers?.bowling?.[0]
   const bestVenue = (report?.venues || []).filter(v => v.wins > (v.losses || 0)).sort((a, b) => b.played - a.played)[0]
+  // Confidence for each tile, looked up from the danger lists the plan was
+  // built from — computed server-side, previously discarded by this card.
+  const conf = (name, list) => (list || []).find(p => p.name === name)?.confidence || null
+  const removeConf = conf(plan.remove_early?.name, dossier?.danger_batters)
+  const seeConf = conf(plan.see_off?.name, dossier?.danger_bowlers)
+  // What scope the plan was actually built from — a filtered header must never
+  // sit over an unfiltered plan without saying so.
+  const scopeBits = []
+  if (dossier?.grade_filter?.length && dossier.grade_filter_matched) scopeBits.push(dossier.grade_filter.join(', '))
+  else if (dossier?.mixed_grades) scopeBits.push(`whole club · ${dossier.scouted?.teams_scouted || 'several'} sides`)
+  if (dossier?.scouted?.season_name) scopeBits.push(dossier.scouted.season_name)
   return (
-    <Card accent eyebrow="The game plan" title="How to beat them" right={<Tag tone="accent">Synthesised</Tag>}>
+    <Card accent eyebrow="The game plan" title="How to beat them"
+      right={<span className="flex items-center gap-1.5">{scopeBits.length > 0 && <Tag>{scopeBits.join(' · ')}</Tag>}<Tag tone="accent">Synthesised</Tag></span>}>
+      {dossier?.grade_filter?.length > 0 && dossier.grade_filter_matched === false && (
+        <div className="flex gap-2 mb-4 text-[12.5px]" style={{ color: 'var(--pb-amber)' }}>
+          <Icon name="info" size={15} className="mt-0.5 shrink-0" />
+          <span>Your grade filter matched none of their sides — this plan covers their whole club.</span>
+        </div>
+      )}
       {plan.one_liner && (
         <div className="iq-display font-bold leading-snug mb-5" style={{ fontSize: 'clamp(18px,2.2vw,24px)', letterSpacing: '-0.01em', maxWidth: 640 }}>{plan.one_liner}</div>
       )}
       <div className="grid sm:grid-cols-3 gap-3 mb-5">
-        <PlanTile label="Remove early" tone="remove" name={plan.remove_early?.name} sub={plan.remove_early?.why} />
-        <PlanTile label="See off" tone="see" name={plan.see_off?.name} sub={plan.see_off?.why} />
+        <PlanTile label="Remove early" tone="remove" name={plan.remove_early?.name} sub={plan.remove_early?.why} confidence={removeConf} />
+        <PlanTile label="See off" tone="see" name={plan.see_off?.name} sub={plan.see_off?.why} confidence={seeConf} />
         <PlanTile label="Target" tone="target" name={plan.target_bowler?.name || 'No clear weak link'}
           sub={plan.target_bowler ? `leaks at econ ${a2(plan.target_bowler.economy)}` : 'nobody’s really leaking'} />
       </div>
@@ -761,11 +789,20 @@ export default function OppositionScout() {
   const filterLabel = [ctx?.team?.id ? ctx.team.name : null, seasonActive ? seasonText : null].filter(Boolean).join(' · ') || 'Filtered'
   // First landing (filter bar untouched this session): default the season to
   // All seasons so the record card's all-time numbers and the header agree.
-  // The moment the user touches the bar, their choice wins and sticks.
+  // The moment the user touches the bar, their choice wins and sticks. The
+  // default is PAGE-LOCAL: it's restored on unmount when the bar is still
+  // untouched, so this page's all-time default never leaks into another IQ
+  // page's header (it used to persist "48 seasons · all-time" module-wide).
+  const restoreSeasonRef = useRef(null)
   useEffect(() => {
     if (!filterReady || !ctx || ctx.touched) return
     if (ctx.season.mode !== 'all' && seasons.length) {
+      restoreSeasonRef.current = ctx.season
       setCtx({ ...ctx, season: { mode: 'all', from: seasons[0], to: seasons[seasons.length - 1] } })
+    }
+    return () => {
+      const prev = restoreSeasonRef.current
+      if (prev) setCtx(c => (c && !c.touched ? { ...c, season: prev } : c))
     }
   }, [filterReady])  // eslint-disable-line react-hooks/exhaustive-deps
   // Map the selected grade NAME(s) onto THIS opponent's grade_id for the live
@@ -846,23 +883,37 @@ export default function OppositionScout() {
   }, [selected, effGrade, effSeasonKey])
 
   // Live dossier — re-polled when the opponent OR chosen grade (top bar) changes.
+  // The grade filter goes to the SERVER as names ('||'-joined) — the backend
+  // resolves them against the opponent's own grades, so the old client-side
+  // name→grade_id translation (which silently failed on sponsor-suffixed names
+  // and always missed the first request) is no longer the only narrowing path.
+  const gradeKey = ctxGradeNames.join('||')
   useEffect(() => {
     stopPoll()
     setDossier(null)
     if (!selected) return
     let alive = true
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId, name: selected.name }
+    let polls = 0
+    const params = {
+      opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId,
+      grade: gradeKey || undefined, name: selected.name,
+    }
     const poll = () => {
       api.iqOppositionDossier(params).then(d => {
         if (!alive) return
         setDossier(d)
         if (d.teams?.length) setTeamsList(d.teams)
-        if (d.status === 'building') pollRef.current = setTimeout(poll, POLL_MS)
+        if (d.status === 'building') {
+          // Bounded: a wedged build shouldn't leave the page polling forever
+          // behind a progress bar (the cheat sheet already caps its polls).
+          if (++polls < MAX_POLLS) pollRef.current = setTimeout(poll, POLL_MS)
+          else setDossier({ status: 'error', timeout: true })
+        }
       }).catch(() => { if (alive) setDossier({ status: 'error' }) })
     }
     poll()
     return () => { alive = false; stopPoll() }
-  }, [selected, teamGradeId])
+  }, [selected, teamGradeId, gradeKey])
 
   const pick = (sel) => {
     setSelected(sel)
@@ -894,7 +945,11 @@ export default function OppositionScout() {
   const refresh = () => {
     if (!selected) return
     setDossier({ status: 'building' })
-    const params = { opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId, name: selected.name }
+    let polls = 0
+    const params = {
+      opponent: selected.opponent, fixtureId: selected.fixtureId, team: teamGradeId,
+      grade: gradeKey || undefined, name: selected.name,
+    }
     api.iqRefreshDossier(params)
       .then(d => {
         setDossier(d)
@@ -903,7 +958,12 @@ export default function OppositionScout() {
           stopPoll()
           pollRef.current = setTimeout(function p() {
             api.iqOppositionDossier(params).then(d2 => {
-              setDossier(d2); if (d2.teams?.length) setTeamsList(d2.teams); if (d2.status === 'building') pollRef.current = setTimeout(p, POLL_MS)
+              setDossier(d2)
+              if (d2.teams?.length) setTeamsList(d2.teams)
+              if (d2.status === 'building') {
+                if (++polls < MAX_POLLS) pollRef.current = setTimeout(p, POLL_MS)
+                else setDossier({ status: 'error', timeout: true })
+              }
             }).catch(() => setDossier({ status: 'error' }))
           }, POLL_MS)
         }
@@ -923,6 +983,7 @@ export default function OppositionScout() {
     if (selected.opponent) qs.set('opponent', selected.opponent)
     if (selected.fixtureId) qs.set('fixture', selected.fixtureId)
     if (teamGradeId) qs.set('team', teamGradeId)
+    if (gradeKey) qs.set('grade', gradeKey)  // the sheet prints the same scope this page shows
     navigate(`/admin/betteriq/opposition/cheatsheet?${qs}`)
   }
 
@@ -1007,10 +1068,11 @@ export default function OppositionScout() {
           </>
         )}
 
-        {/* The live squad scout below follows the top "Their grade" filter — when
-            it's narrowed to a grade this club doesn't field, fall back to the
-            whole club rather than show nothing. */}
-        {ctxGradeNames.length > 0 && teamsList.length > 0 && !teamGradeId && (
+        {/* The live squad scout below follows the top Grade filter. The server
+            resolves the filter itself now and reports whether it matched — the
+            old client-side teamGradeId check false-alarmed on sponsor-suffixed
+            names and missed the real mismatch cases. */}
+        {ready && dossier?.grade_filter?.length > 0 && dossier.grade_filter_matched === false && (
           <Note>They don't field a side in “{ctx?.team?.name}” — showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
         )}
 
@@ -1021,17 +1083,21 @@ export default function OppositionScout() {
           <Note>{dossier.message || 'No live data available for this opponent yet — the head-to-head above still applies.'}</Note>
         )}
         {dossier?.status === 'error' && (
-          <Note>Couldn't build the live dossier just now. The head-to-head above still applies — try Refresh in a moment.</Note>
+          <Note>{dossier.timeout
+            ? "The dossier build is taking longer than usual — the head-to-head above still applies. Try Refresh in a minute."
+            : "Couldn't build the live dossier just now. The head-to-head above still applies — try Refresh in a moment."}</Note>
         )}
 
         {ready && (
           <div className="space-y-5 iq-fade">
-            <GamePlan plan={dossier.game_plan} report={report} />
+            <GamePlan plan={dossier.game_plan} report={report} dossier={dossier} />
 
             {/* Key players — the signature flick-through showcase cards */}
             {(dossier.danger_batters?.length > 0 || dossier.danger_bowlers?.length > 0) && (
               <div className="grid gap-5 lg:grid-cols-2">
-                <KeyPlayersCard title="Danger batters" subtitle="their top run-scorers this season" players={dossier.danger_batters} kind="bat" oppKey={oppLinkKey} oppName={oppName} />
+                <KeyPlayersCard title="Danger batters"
+                  subtitle={`their top run-scorers${dossier.scouted?.season_name ? ` · ${dossier.scouted.season_name}` : ' this season'}`}
+                  players={dossier.danger_batters} kind="bat" oppKey={oppLinkKey} oppName={oppName} />
                 <KeyPlayersCard title="Danger bowlers" subtitle="their leading wicket-takers" players={dossier.danger_bowlers} kind="bowl" oppKey={oppLinkKey} oppName={oppName} />
               </div>
             )}
@@ -1051,7 +1117,7 @@ export default function OppositionScout() {
             {(dossier.dismissal_breakdown?.length > 0 || dossier.partnerships?.length > 0) && (
               <div className="grid gap-5 lg:grid-cols-2 items-start">
                 {dossier.dismissal_breakdown?.length > 0 && (
-                  <Card eyebrow="this season" title="How they get out"><StackedBar data={dossier.dismissal_breakdown} /></Card>
+                  <Card eyebrow={dossier.scouted?.season_name || 'this season'} title="How they get out"><StackedBar data={dossier.dismissal_breakdown} /></Card>
                 )}
                 <Partnerships partnerships={dossier.partnerships} insight={dossier.partnership_insight} />
               </div>
@@ -1077,8 +1143,10 @@ export default function OppositionScout() {
               </Card>
             )}
 
-            {dossier.coverage?.notes?.length > 0 && (
-              <Note>{dossier.coverage.notes.join(' ')}{dossier.built_at ? ` · built ${new Date(dossier.built_at).toLocaleString()}` : ''}</Note>
+            {/* The build date renders whether or not there are coverage notes —
+                a week-old cached dossier must never read as live. */}
+            {(dossier.coverage?.notes?.length > 0 || dossier.built_at) && (
+              <Note>{(dossier.coverage?.notes || []).join(' ')}{dossier.built_at ? `${dossier.coverage?.notes?.length ? ' · ' : ''}Built ${new Date(dossier.built_at).toLocaleString()}${dossier.cached ? ' (cached)' : ''}` : ''}</Note>
             )}
           </div>
         )}

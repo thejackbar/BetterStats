@@ -206,11 +206,32 @@
 .iq-root ::selection { background: color-mix(in srgb, var(--pb-accent) 35%, transparent); }
 
 /* ── Print: isolate the cheat sheet ───────────────────────────────────────── */
+/* Cheat sheet: the three-column layout (and the header) stack on a narrow
+   phone screen so nothing overflows before the captain hits Print — but print
+   is always landscape A4 with plenty of width, so both are pinned back to a
+   row regardless of the viewport that triggered window.print(). */
+.iq-cs-columns {
+  --iq-cs-divider-w: 0px;
+}
+.iq-cs-divider {
+  display: none;
+}
+@media (min-width: 640px) {
+  .iq-cs-divider { display: block; width: 1px; align-self: stretch; background: var(--pb-hairline); }
+}
+
 @media print {
   body * { visibility: hidden !important; }
   .iq-print-area, .iq-print-area * { visibility: visible !important; }
   .iq-print-area { position: absolute !important; left: 0; top: 0; width: 100% !important; max-width: none !important; box-shadow: none !important; border-radius: 0 !important; }
   .iq-no-print { display: none !important; }
   .iq-cs-overlay { position: absolute !important; inset: auto !important; background: #fff !important; backdrop-filter: none !important; padding: 0 !important; overflow: visible !important; }
+  .iq-cs-header { flex-direction: row !important; align-items: flex-start !important; justify-content: space-between !important; }
+  .iq-cs-header > div:last-child { text-align: right !important; }
+  .iq-cs-columns { flex-direction: row !important; }
+  .iq-cs-divider { display: block !important; width: 1px !important; align-self: stretch; background: var(--pb-hairline); }
+  /* A sheet that spills to a second page must not split a card or a player row
+     mid-block — the columns and the plan strip stay whole. */
+  .iq-print-area > div > div { break-inside: avoid; page-break-inside: avoid; }
   @page { size: landscape; margin: 10mm; }
 }

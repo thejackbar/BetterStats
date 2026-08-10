@@ -8,17 +8,54 @@ Read-only, per-game, from stored per-innings data (no live fetch):
 
 Ceiling: we hold scorecards, not ball-by-ball, so "biggest over / win-probability
 swing / turning point" (brief §16.8) are out of reach — the contribution and
-collapse reads are the scorecard-reachable subset. Org-scoped via grades→seasons
-over the ``v_effective_*`` views, like the rest of BetterIQ.
+collapse reads are the scorecard-reachable subset. The games universe uses the
+canonical ownership predicate (``_OWNS_GAME``, mirroring
+``aggregations._club_results``); every per-innings read is additionally scoped
+to OUR players (``players.organisation_id``), per the shared-game rule.
 """
 from __future__ import annotations
 
+import uuid as _uuid
 from collections import defaultdict
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.iq_filters import season_grade_clause
+from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_member_clause_cross_club
+
+# Canonical "this game is ours" predicate — mirrors aggregations._club_results
+# (migrations 167/169). A shared fixture between two both-synced clubs is ONE
+# `games` row whose grade may belong to whichever club synced it first, and a
+# manual game may have no grade at all — so ownership is home/away org, the
+# view's own organisation_id (manual games), the grade's season's org, or a
+# recorded appearance by one of our players. Requires `g` = v_effective_games
+# with grades LEFT JOINed as `gr` and seasons LEFT JOINed off g.season_id as
+# `s`, and `:org` bound.
+_OWNS_GAME = """(
+    g.organisation_id = CAST(:org AS UUID)
+    OR g.home_org_id = CAST(:org AS UUID)
+    OR g.away_org_id = CAST(:org AS UUID)
+    OR s.organisation_id = CAST(:org AS UUID)
+    OR EXISTS (
+        SELECT 1 FROM game_appearances oga
+        JOIN players op ON op.id = oga.player_id
+        WHERE oga.game_id = g.id AND op.organisation_id = CAST(:org AS UUID)
+    )
+)"""
+
+# g.result is relative to whichever club's sync wrote it first, so on a shared
+# fixture the opponent's WIN reads as ours. g.winning_team is the neutral
+# winning-team name — re-derive WIN/LOSS against OUR home/away side, falling
+# back to g.result (draw/tie, or a row the org backfill can't place). Same
+# expression as aggregations._club_results.
+_EFFECTIVE_RESULT = """CASE
+    WHEN g.winning_team IS NULL THEN g.result
+    WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'WIN'
+    WHEN g.home_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'LOSS'
+    WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.away_team THEN 'WIN'
+    WHEN g.away_org_id = CAST(:org AS UUID) AND g.winning_team = g.home_team THEN 'LOSS'
+    ELSE g.result
+END"""
 
 
 def _ordinal(n: int) -> str:
@@ -26,26 +63,50 @@ def _ordinal(n: int) -> str:
 
 
 async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
-                            season_id: str | None = None, grade_id: str | None = None) -> list[dict]:
+                            season_id: str | None = None, grade_id: str | None = None,
+                            season_ids: list[str] | None = None) -> list[dict]:
     """Recent completed games to review — newest first (a lightweight picker).
     Optionally scoped to one season and/or grade (grade matched by NAME, the IQ
     filter convention; the season is year-expanded — see iq_filters) so the
-    Overview's form/results follow the global filter."""
-    clauses = season_grade_clause(season_id, grade_id)
+    Overview's form/results follow the global filter. ``season_ids`` is an
+    exact season-row filter (no year expansion) on the view's own ``season_id``
+    for Compare mode; it composes with (rather than replaces) ``season_id``.
+
+    Ownership uses the canonical ``_OWNS_GAME`` predicate (grades/seasons LEFT
+    JOINed, season off ``g.season_id``) so a shared fixture first synced by the
+    opponent and a grade-less manual game both list, and ``result`` is the
+    re-derived ``_EFFECTIVE_RESULT`` so a shared game shows OUR W/L, not the
+    first-syncing club's."""
+    # Cross-club variant: a shared game the opponent synced first carries THEIR
+    # season row, which the ownership predicate includes and a plain same-org
+    # season filter would then drop again.
+    clauses = season_member_clause_cross_club("g.season_id", season_id)
+    params: dict = {"org": org_id, "limit": limit, "season": season_id, "grade": grade_id}
+    if grade_id:
+        clauses += f" AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
+    if season_ids:
+        clauses += (
+            " AND (g.season_id = ANY(:season_ids) OR g.season_id IN ("
+            "SELECT s5.id FROM seasons s5 WHERE s5.grassroots_id IS NOT NULL "
+            "AND s5.grassroots_id IN (SELECT s6.grassroots_id FROM seasons s6 "
+            "WHERE s6.id = ANY(:season_ids) AND s6.grassroots_id IS NOT NULL)))"
+        )
+        params["season_ids"] = [_uuid.UUID(str(x)) for x in season_ids]
     res = await session.execute(
         text(
             f"""
-            SELECT g.id::text AS id, g.played_at, g.result, g.venue, g.is_final,
+            SELECT g.id::text AS id, g.played_at, {_EFFECTIVE_RESULT} AS result,
+                   g.venue, g.is_final,
                    g.opp_club_name AS opp, g.home_team, g.away_team, gr.name AS grade
             FROM v_effective_games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = CAST(:org AS UUID) AND g.played_at IS NOT NULL {clauses}
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN seasons s ON s.id = g.season_id
+            WHERE {_OWNS_GAME} AND g.played_at IS NOT NULL {clauses}
             ORDER BY g.played_at DESC NULLS LAST
             LIMIT :limit
             """
         ),
-        {"org": org_id, "limit": limit, "season": season_id, "grade": grade_id},
+        params,
     )
     out = []
     for r in res.mappings():
@@ -65,15 +126,19 @@ async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
 async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict | None:
     """One game's review: top contributions, best stand, extras, a collapse check
     and a plain-language synthesis of what changed the game."""
+    # Same ownership predicate + result re-derivation as list_review_games — a
+    # game that lists (shared fixture synced by the opponent first, grade-less
+    # manual game) must also open, and open with OUR result.
     meta = (await session.execute(
         text(
-            """
-            SELECT g.id::text AS id, g.played_at, g.result, g.venue, g.is_final,
+            f"""
+            SELECT g.id::text AS id, g.played_at, {_EFFECTIVE_RESULT} AS result,
+                   g.venue, g.is_final,
                    g.opp_club_name AS opp, g.home_team, g.away_team, gr.name AS grade
             FROM v_effective_games g
-            JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons s ON s.id = gr.season_id
-            WHERE g.id = CAST(:gid AS UUID) AND s.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN grades gr ON gr.id = g.grade_id
+            LEFT JOIN seasons s ON s.id = g.season_id
+            WHERE g.id = CAST(:gid AS UUID) AND {_OWNS_GAME}
             """
         ),
         {"gid": game_id, "org": org_id},
@@ -185,12 +250,23 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
             """
             SELECT p.innings_number AS inn, p.wicket_number AS wk, p.runs AS runs
             FROM v_effective_partnerships p
+            LEFT JOIN players b1 ON b1.id = p.batter1_id AND b1.organisation_id = CAST(:org AS UUID)
+            LEFT JOIN players b2 ON b2.id = p.batter2_id AND b2.organisation_id = CAST(:org AS UUID)
             WHERE p.game_id = CAST(:gid AS UUID) AND p.is_club_innings IS TRUE
               AND p.wicket_number BETWEEN 1 AND 10 AND p.runs IS NOT NULL
+              -- Same org-scope as the best-partnership read above: on a shared
+              -- fixture is_club_innings IS TRUE marks BOTH clubs' stands, so an
+              -- unscoped pull hands the collapse check an interleaved mix of
+              -- the two sides' partnership runs.
+              AND (b1.id IS NOT NULL OR b2.id IS NOT NULL)
             """
         ),
-        {"gid": game_id},
+        {"gid": game_id, "org": org_id},
     )
+    # Keyed on innings_number alone — safe ONLY because the org scope above
+    # makes the rows single-club; without it two clubs' wicket maps for the
+    # same innings number would merge into one dict and the 3-wicket spans
+    # would straddle sides.
     by_inn: dict[int, dict[int, int]] = defaultdict(dict)
     for r in pr.mappings():
         by_inn[r["inn"]][int(r["wk"])] = int(r["runs"])

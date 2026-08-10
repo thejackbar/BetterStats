@@ -258,8 +258,10 @@ export function Stat({ label, value, sub, tone, big = false, decimals = 0, suffi
   )
 }
 export function Note({ children }) {
+  // Notes carry every caveat and sample-size disclosure in BetterIQ — they must
+  // be readable, not the faintest type on the page under a 24px bold claim.
   return (
-    <div className="flex items-start gap-1.5 text-pb-faintest text-[11px] mt-3 leading-relaxed">
+    <div className="flex items-start gap-1.5 text-pb-faint text-[11.5px] mt-3 leading-relaxed">
       <Icon name="info" size={12} className="mt-0.5 shrink-0" /><span>{children}</span>
     </div>
   )

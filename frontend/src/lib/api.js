@@ -2665,17 +2665,20 @@ export const api = {
   },
   // Live dossier (squad + form + deep vs-us). Poll until status === 'ready'.
   // `team` (a grade_id from the dossier's `teams`) narrows the scout to one side;
-  // omit it for the whole club. `opponent` can be ANY CA org GUID (club search):
-  // a club outside our competitions is discovered via its own org endpoints.
-  iqOppositionDossier: ({ opponent, fixtureId, team, name } = {}) =>
-    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team, name)}`),
+  // omit it for the whole club. `grade` (the filter bar's grade names, '||'-
+  // joined) scopes which of THEIR grades are scouted AND the vs-us pool — the
+  // server resolves names, so no client-side grade-id translation is needed.
+  // `opponent` can be ANY CA org GUID (club search): a club outside our
+  // competitions is discovered via its own org endpoints.
+  iqOppositionDossier: ({ opponent, fixtureId, team, grade, name } = {}) =>
+    request(`/iq/opposition/dossier?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`),
   // Live ladder standing for an upcoming opponent (our row + theirs).
   iqOpponentLadder: ({ opponent, fixtureId } = {}) =>
     request(`/iq/opposition/ladder?${_iqQs(opponent, fixtureId)}`),
   iqMatchOpponent: ({ opponentName, oppKey, displayName } = {}) =>
     request(`/iq/opposition/match?opponent_name=${encodeURIComponent(opponentName)}&opp_key=${encodeURIComponent(oppKey)}${displayName ? `&display_name=${encodeURIComponent(displayName)}` : ''}`, { method: 'POST' }),
-  iqRefreshDossier: ({ opponent, fixtureId, team, name } = {}) =>
-    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team, name)}`, { method: 'POST' }),
+  iqRefreshDossier: ({ opponent, fixtureId, team, grade, name } = {}) =>
+    request(`/iq/opposition/dossier/refresh?${_iqQs(opponent, fixtureId, team, name)}${grade ? `&grade=${encodeURIComponent(grade)}` : ''}`, { method: 'POST' }),
   // Search opposition players by name across every opponent we've faced.
   iqSearchOpponentPlayers: (q) => request(`/iq/opposition/player-search?q=${encodeURIComponent(q)}`),
   // Every player at a club across the last 5 years (light list from the cached
@@ -2698,8 +2701,11 @@ export const api = {
     request(`/iq/opposition/player-tags/${encodeURIComponent(playerId)}`, { method: 'PUT', body: JSON.stringify(body) }),
 
   // ─── BetterIQ: Selection analysis ───────────────────────
-  // Fixtures with a saved BetterSelect lineup, ready to analyse.
-  iqSelectionLineups: () => request('/iq/selection/lineups'),
+  // Fixtures with a saved BetterSelect lineup, ready to analyse. `gradeId`
+  // filters server-side BEFORE the row cap, so a lower-grade picker isn't
+  // starved by 40 rows of higher-grade fixtures.
+  iqSelectionLineups: (gradeId) =>
+    request(`/iq/selection/lineups${gradeId ? `?grade_id=${encodeURIComponent(gradeId)}` : ''}`),
   // Balance / form / warnings / promote-rest / fairness for one fixture's XI.
   iqSelectionAnalysis: (fixtureId) =>
     request(`/iq/selection/analysis?fixture_id=${encodeURIComponent(fixtureId)}`),
@@ -2725,13 +2731,34 @@ export const api = {
     const s = qs.toString()
     return request(`/iq/trends/players${s ? `?${s}` : ''}`)
   },
-  iqTrendsPlayer: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}`),
-  iqPlayerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep`),
-  // 6-axis batting/bowling radar, normalised vs the squad (50 = squad average).
+  // Per-player cards. Pass the filter bar's season/grade so the card matches the
+  // header — omitted, each is the career all-grades view (the payload's `scope`
+  // key says which was served, so the UI can badge it honestly).
+  iqTrendsPlayer: (playerId, seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/trends/player/${encodeURIComponent(playerId)}${s ? `?${s}` : ''}`)
+  },
+  iqPlayerDeepDive: (playerId, seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/trends/player/${encodeURIComponent(playerId)}/deep${s ? `?${s}` : ''}`)
+  },
+  // 6-axis batting/bowling radar, normalised vs the squad (50 = squad median).
   iqPlayerRadar: (playerId, seasonId) =>
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/radar${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   // Bowler wicket-quality deep dive (set vs new batters, fielders, discipline).
-  iqBowlerDeepDive: (playerId) => request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep`),
+  iqBowlerDeepDive: (playerId, seasonId, gradeId) => {
+    const qs = new URLSearchParams()
+    if (seasonId) qs.set('season_id', seasonId)
+    if (gradeId) qs.set('grade_id', gradeId)
+    const s = qs.toString()
+    return request(`/iq/trends/player/${encodeURIComponent(playerId)}/bowling-deep${s ? `?${s}` : ''}`)
+  },
   // Teammates: who a player has shared a side with (most games first), and the
   // with-vs-without split of the focal player's output alongside one teammate.
   iqTeammates: (playerId) => request(`/iq/teammates/${encodeURIComponent(playerId)}`),
@@ -2754,10 +2781,11 @@ export const api = {
     const s = qs.toString()
     return request(`/iq/team/overview${s ? `?${s}` : ''}`)
   },
-  iqTeamMvp: (seasonId, gradeId) => {
+  iqTeamMvp: (seasonId, gradeId, seasonIds) => {
     const qs = new URLSearchParams()
     if (seasonId) qs.set('season_id', seasonId)
     if (gradeId) qs.set('grade_id', gradeId)
+    if (Array.isArray(seasonIds)) seasonIds.forEach(id => id && qs.append('season_ids', id))
     const s = qs.toString()
     return request(`/iq/team/mvp${s ? `?${s}` : ''}`)
   },
@@ -2775,10 +2803,11 @@ export const api = {
     request(`/iq/opposition/phases?${_iqQs(opponent, fixtureId)}`),
 
   // ─── BetterIQ: Post-match review ────────────────────────
-  iqReviewGames: (seasonId, gradeId) => {
+  iqReviewGames: (seasonId, gradeId, seasonIds) => {
     const qs = new URLSearchParams()
     if (seasonId) qs.set('season_id', seasonId)
     if (gradeId) qs.set('grade_id', gradeId)
+    if (Array.isArray(seasonIds) && seasonIds.length) qs.set('season_ids', seasonIds.join(','))
     const s = qs.toString()
     return request(`/iq/review/games${s ? `?${s}` : ''}`)
   },

@@ -34,6 +34,38 @@ def season_member_clause(column: str, season_id) -> str:
     return f"AND {column} IN {_SEASON_YEAR_SET}" if season_id else ""
 
 
+# The year set PLUS every OTHER club's sibling row of the same CA season —
+# per-club season rows minted for a cross-club collision share `grassroots_id`
+# (the raw CA season GUID), so this is how a shared game the OPPONENT synced
+# first (whose `season_id` resolves to THEIR season row, migration 167's note)
+# still matches OUR season filter. Mirrors aggregations._club_results.
+_SEASON_YEAR_SET_CROSS = (
+    "(SELECT s5.id FROM seasons s5 "
+    f"WHERE s5.id IN {_SEASON_YEAR_SET} "
+    "OR (s5.grassroots_id IS NOT NULL AND s5.grassroots_id IN "
+    f"(SELECT s6.grassroots_id FROM seasons s6 WHERE s6.id IN {_SEASON_YEAR_SET} "
+    "AND s6.grassroots_id IS NOT NULL)))"
+)
+
+
+def season_member_clause_cross_club(column: str, season_id) -> str:
+    """``season_member_clause`` for a GAME's season column: also matches another
+    club's sibling row of the same CA season, so an opponent-first-synced shared
+    game isn't dropped by our season filter."""
+    return f"AND {column} IN {_SEASON_YEAR_SET_CROSS}" if season_id else ""
+
+
+def season_ids_cross_club(in_list: str, column: str = "g.season_id") -> str:
+    """Compare-mode variant: ``column`` matches an explicit inlined id list OR a
+    cross-club sibling (shared ``grassroots_id``) of any id in it."""
+    return (
+        f"AND ({column} IN ({in_list}) OR {column} IN "
+        f"(SELECT s5.id FROM seasons s5 WHERE s5.grassroots_id IS NOT NULL "
+        f"AND s5.grassroots_id IN (SELECT s6.grassroots_id FROM seasons s6 "
+        f"WHERE s6.id IN ({in_list}) AND s6.grassroots_id IS NOT NULL)))"
+    )
+
+
 def grade_base(col: str) -> str:
     """SQL expression: a grade name with a trailing sponsor parenthetical
     stripped, so "B Grade (DXC Technology)" and "B Grade" read as the SAME
@@ -49,11 +81,37 @@ def grade_base(col: str) -> str:
 
 
 def grade_match_clause(col_expr: str) -> str:
-    """``<base name> = ANY(...)`` against the ``:grade`` parameter, which may be a
-    single grade name or several joined with ``||`` (multi-select). For a single
-    name ``string_to_array`` yields a one-element array, so behaviour is
-    identical to the old ``= :grade`` equality."""
-    return f"{col_expr} = ANY(string_to_array(:grade, '||'))"
+    """``<base name> = ANY(...)`` against the ``:grade`` parameter — a single
+    grade name, or several joined with ``||`` (multi-select), matched
+    INCLUDE-style. For a single name ``string_to_array`` yields a one-element
+    array, so behaviour is identical to the old ``= :grade`` equality.
+
+    A value prefixed with ``!`` instead means EXCLUDE those names — and,
+    unlike include mode, is NULL-tolerant: a row whose grade can't resolve to
+    a name at all (a grade-less manual game, a career-scope import residual)
+    is KEPT rather than silently dropped. This mirrors ``grade_scope.clause()``
+    's rule for BetterStats' junior/senior split — "a row we cannot categorise
+    is not a row we know to exclude" — applied here because the IQ grade
+    filter matches by NAME across per-club/per-season grade-id variations, not
+    a stored grade_id set, so it can't reuse that helper directly. Include
+    mode is deliberately NOT NULL-tolerant: an explicit pick means exactly
+    those grades, and a grade-less row is correctly outside an explicit pick.
+
+    Powers the "Seniors only" preset (``Context.jsx``'s ``TeamPicker``), which
+    sends the EXCLUDED (non-senior) names rather than the included ones —
+    the include form of "every senior grade" used to drop every grade-less
+    manual game and import residual from a "seniors only" view, the exact
+    anti-pattern ``grade_scope.py`` was built to avoid. Every existing caller
+    of this function needs no change: the mode is carried entirely in the
+    runtime VALUE bound to ``:grade``, which every call site already forwards
+    verbatim from the ``grade``/``grade_id``/``grade_filter`` parameter it
+    receives. A grade name is assumed to never start with ``!`` or contain
+    ``||`` (the existing multi-select delimiter convention)."""
+    return (
+        "(CASE WHEN :grade LIKE '!%' THEN "
+        f"({col_expr} IS NULL OR NOT ({col_expr} = ANY(string_to_array(substring(:grade FROM 2), '||')))) "
+        f"ELSE {col_expr} = ANY(string_to_array(:grade, '||')) END)"
+    )
 
 
 def grade_canonical_label(alias: str = "gr", org_param: str = "org") -> str:

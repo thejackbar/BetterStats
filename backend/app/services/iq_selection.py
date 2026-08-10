@@ -16,22 +16,43 @@ On top of that shared pool we layer: XI **balance**, recent **form**, **warnings
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Fixture
+from app.services.grade_labels import strip_sponsor_suffix
 from app.services.iq import resolve_opponent
+from app.services.iq_filters import grade_base, grade_canonical_label, grade_match_clause, season_member_clause
 from app.services.selection_pool import assemble_selection
 
 THIN_ATTACK = 5            # fewer front-line bowling options than this → warn
 OUT_OF_FORM_AVG = 15.0     # recent batting average below this (min 3 inns) → flag
 PROMOTE_LIMIT = 6
 RECENT_GAMES = 5
+STALE_AVAIL_DAYS = 14      # availability answers older than this are "stale"
 
 _PACE = {"FAST", "FAST_MEDIUM", "MEDIUM", "MEDIUM_FAST"}
 _SPIN = {"FINGER_SPIN", "WRIST_SPIN"}
-_ORG_SCOPE = " JOIN grades gr ON gr.id = g.grade_id JOIN seasons s ON s.id = gr.season_id"
+# Ownership joins + predicate — mirrors aggregations._club_results (migrations
+# 167/169): grades LEFT JOINed, season off the view's own g.season_id, and a
+# game is ours if we're home/away org, it's our manual game (organisation_id),
+# the grade's season is ours, or one of our players has a recorded appearance.
+# The old INNER grades→seasons chain silently dropped grade-less manual games
+# and shared fixtures whose grade belongs to whichever club synced first.
+_OWN_JOIN = " LEFT JOIN grades gr ON gr.id = g.grade_id LEFT JOIN seasons s ON s.id = g.season_id"
+_OWN_PRED = """(
+    g.organisation_id = CAST(:org AS UUID)
+    OR g.home_org_id = CAST(:org AS UUID)
+    OR g.away_org_id = CAST(:org AS UUID)
+    OR s.organisation_id = CAST(:org AS UUID)
+    OR EXISTS (
+        SELECT 1 FROM game_appearances oga
+        JOIN players op ON op.id = oga.player_id
+        WHERE oga.game_id = g.id AND op.organisation_id = CAST(:org AS UUID)
+    )
+)"""
 
 
 def _skills(sp) -> set[str]:
@@ -58,8 +79,13 @@ def _does_bowl(p) -> bool:
 
 def _best_available_xi(pool: list[dict], target: int) -> list[dict]:
     """Greedy best-available XI from the eligible pool: top form, available first,
-    then constraint-repaired to include a keeper and ≥5 bowling options."""
-    cands = [p for p in pool if p.get("autofill_eligible") and p.get("availability") != "UNAVAILABLE"]
+    then constraint-repaired to include a keeper and ≥5 bowling options.
+
+    A clash-blocked player (already named in a same-day XI that this fixture
+    does not outrank — the pool's ``clash_blocks``) is not available to this
+    XI, so they're excluded the same way the board itself refuses the pick."""
+    cands = [p for p in pool if p.get("autofill_eligible") and p.get("availability") != "UNAVAILABLE"
+             and not p.get("clash_blocks")]
     cands.sort(key=lambda p: (_AVAIL_RANK.get(p.get("availability"), 3), -(p.get("score") or 0)))
     if len(cands) <= target:
         return sorted(cands, key=lambda p: -(p.get("score") or 0))
@@ -91,11 +117,30 @@ def _best_available_xi(pool: list[dict], target: int) -> list[dict]:
     return sorted(picked, key=lambda p: -(p.get("score") or 0))
 
 
-async def list_lineups(db: AsyncSession, club) -> list[dict]:
-    """Fixtures with a saved lineup, soonest-upcoming first then recent past."""
+async def list_lineups(db: AsyncSession, club, grade_id: str | None = None) -> list[dict]:
+    """Fixtures with a saved lineup, soonest-upcoming first then recent past.
+
+    ``grade_id`` (a grades row id) filters server-side BEFORE the 40-row cap,
+    matching the fixture's own grade id or its sponsor-stripped base NAME (so
+    sibling season rows of the same competition grade match too). A fixture
+    with no grade_id stays visible under any filter — resolving its grade via
+    the synced game's playhq_id would cost a per-row cast/join for a picker,
+    and dropping it would hide a real saved XI."""
+    grade_clause = ""
+    params: dict = {"org": str(club.id)}
+    if grade_id:
+        grade_clause = f"""
+              AND (
+                f.grade_id IS NULL
+                OR f.grade_id = CAST(:grade_id AS UUID)
+                OR {grade_base("COALESCE(gr.display_name_override, gr.name)")} = (
+                    SELECT {grade_base("COALESCE(g2.display_name_override, g2.name)")}
+                    FROM grades g2 WHERE g2.id = CAST(:grade_id AS UUID))
+              )"""
+        params["grade_id"] = grade_id
     res = await db.execute(
         text(
-            """
+            f"""
             SELECT f.id::text AS id, f.opponent_name, f.played_on, f.home_away,
                    f.venue, gr.name AS grade_name, t.name AS team_name,
                    COUNT(fl.player_id) AS lineup_count
@@ -103,12 +148,13 @@ async def list_lineups(db: AsyncSession, club) -> list[dict]:
             LEFT JOIN fixture_lineups fl ON fl.fixture_id = f.id
             LEFT JOIN grades gr ON gr.id = f.grade_id
             LEFT JOIN teams t ON t.id = f.team_id
-            WHERE f.organisation_id = CAST(:org AS UUID)
-            GROUP BY f.id, f.opponent_name, f.played_on, f.home_away, f.venue, gr.name, t.name
+            WHERE f.organisation_id = CAST(:org AS UUID){grade_clause}
+            GROUP BY f.id, f.opponent_name, f.played_on, f.home_away, f.venue,
+                     gr.display_name_override, gr.name, t.name
             HAVING COUNT(fl.player_id) > 0 OR f.played_on >= CURRENT_DATE
             """
         ),
-        {"org": str(club.id)},
+        params,
     )
     from datetime import date
     today = date.today()
@@ -132,7 +178,15 @@ async def list_lineups(db: AsyncSession, club) -> list[dict]:
 
 
 async def _recent_scores(db: AsyncSession, org_id: str) -> dict[str, dict]:
-    """Per-player last-5 batting scores + bowling wicket-hauls (club-wide)."""
+    """Per-player last-5 batting scores + bowling wicket-hauls (club-wide).
+
+    The innings pull is scoped to OUR players (a shared both-synced fixture's
+    one games row carries both clubs' innings) and the games universe is the
+    canonical ownership predicate, so a grade-less manual game still counts.
+    NOTE: intentionally a different window from selection_pool's own form
+    computation — the pool scores on the last-4 raw per-innings rows, this
+    strip shows the last-5 over the effective views. Don't unify them here.
+    """
     form: dict[str, dict] = {}
     bat = await db.execute(
         text(
@@ -143,8 +197,9 @@ async def _recent_scores(db: AsyncSession, org_id: str) -> dict[str, dict]:
                            PARTITION BY bi.player_id ORDER BY g.played_at DESC NULLS LAST, bi.id DESC
                        ) AS rn
                 FROM v_effective_batting_innings bi
-                JOIN v_effective_games g ON g.id = bi.game_id{_ORG_SCOPE}
-                WHERE s.organisation_id = CAST(:org AS UUID)
+                JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
+                JOIN v_effective_games g ON g.id = bi.game_id{_OWN_JOIN}
+                WHERE {_OWN_PRED}
                   AND bi.did_not_bat IS NOT TRUE AND bi.runs IS NOT NULL
             )
             SELECT player_id::text AS id, runs, not_out FROM innings WHERE rn <= :n ORDER BY player_id, rn
@@ -164,8 +219,9 @@ async def _recent_scores(db: AsyncSession, org_id: str) -> dict[str, dict]:
                            PARTITION BY bs.player_id ORDER BY g.played_at DESC NULLS LAST, bs.id DESC
                        ) AS rn
                 FROM v_effective_bowling_spells bs
-                JOIN v_effective_games g ON g.id = bs.game_id{_ORG_SCOPE}
-                WHERE s.organisation_id = CAST(:org AS UUID)
+                JOIN players p ON p.id = bs.player_id AND p.organisation_id = CAST(:org AS UUID)
+                JOIN v_effective_games g ON g.id = bs.game_id{_OWN_JOIN}
+                WHERE {_OWN_PRED}
             )
             SELECT player_id::text AS id, wickets FROM spells WHERE rn <= :n ORDER BY player_id, rn
             """
@@ -184,26 +240,49 @@ async def _recent_scores(db: AsyncSession, org_id: str) -> dict[str, dict]:
     return form
 
 
-async def _season_load(db: AsyncSession, grade_id: str | None) -> dict[str, int]:
-    """This-season match count per player (for fairness/load), via the fixture's grade's season."""
-    if not grade_id:
+async def _season_load(db: AsyncSession, grade_id: str | None, org_id: str | None = None) -> dict[str, int]:
+    """Games in THIS GRADE this season per player (for fairness/load).
+
+    The season is year-expanded (all the org's season rows sharing the fixture
+    grade's year — the iq_filters convention, since one real season is stored
+    as several rows) and scoped to the fixture's grade by its merged,
+    sponsor-stripped base NAME via ``grade_match_clause``, counted from
+    org-scoped ``game_appearances`` — ``player_season_stats`` carries no grade
+    dimension, so a grade-scoped load can only come from per-game rows. The
+    old read summed the whole season's pss matches across every grade."""
+    if not grade_id or not org_id:
+        return {}
+    g = (await db.execute(
+        text("SELECT season_id::text AS season_id, COALESCE(display_name_override, name) AS name "
+             "FROM grades WHERE id = CAST(:gid AS UUID)"),
+        {"gid": grade_id},
+    )).mappings().first()
+    if not g or not g["season_id"]:
         return {}
     res = await db.execute(
         text(
-            """
-            SELECT pss.player_id::text AS id, COALESCE(SUM(pss.matches), 0) AS m
-            FROM player_season_stats pss
-            WHERE pss.season_id = (SELECT season_id FROM grades WHERE id = CAST(:gid AS UUID))
-            GROUP BY pss.player_id
+            f"""
+            SELECT ga.player_id::text AS id, COUNT(DISTINCT ga.game_id) AS m
+            FROM game_appearances ga
+            JOIN players p ON p.id = ga.player_id AND p.organisation_id = CAST(:org AS UUID)
+            JOIN v_effective_games g ON g.id = ga.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            WHERE TRUE {season_member_clause('gr.season_id', g["season_id"])}
+              AND {grade_match_clause(grade_canonical_label('gr', 'org'))}
+            GROUP BY ga.player_id
             """
         ),
-        {"gid": grade_id},
+        {"org": org_id, "season": g["season_id"], "grade": strip_sponsor_suffix(g["name"])},
     )
-    return {r["id"]: r["m"] for r in res.mappings()}
+    return {r["id"]: int(r["m"] or 0) for r in res.mappings()}
 
 
 async def _vs_opponent(db: AsyncSession, org_id: str, opp_key: str) -> dict[str, dict]:
-    """Each of our players' record vs this opponent (match-up tie-in)."""
+    """Each of our players' record vs this opponent (match-up tie-in).
+
+    The innings pulls are scoped to OUR players — on a shared both-synced
+    fixture the one games row carries both clubs' rows, so an unscoped read
+    would fold the opponent's own batting/bowling into "our record vs them"."""
     out: dict[str, dict] = {}
     bat = await db.execute(
         text(
@@ -212,8 +291,9 @@ async def _vs_opponent(db: AsyncSession, org_id: str, opp_key: str) -> dict[str,
                    COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0) AS runs,
                    COUNT(*) FILTER (WHERE bi.did_not_bat IS NOT TRUE AND NOT bi.not_out AND bi.dismissal_type IS NOT NULL) AS outs
             FROM v_effective_batting_innings bi
-            JOIN v_effective_games g ON g.id = bi.game_id{_ORG_SCOPE}
-            WHERE s.organisation_id = CAST(:org AS UUID) AND COALESCE(g.opp_org_id, g.opp_club_name) = :k
+            JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
+            JOIN v_effective_games g ON g.id = bi.game_id{_OWN_JOIN}
+            WHERE {_OWN_PRED} AND COALESCE(g.opp_org_id, g.opp_club_name) = :k
             GROUP BY bi.player_id
             """
         ),
@@ -229,8 +309,9 @@ async def _vs_opponent(db: AsyncSession, org_id: str, opp_key: str) -> dict[str,
             SELECT bs.player_id::text AS id,
                    COALESCE(SUM(bs.wickets), 0) AS wkts, COALESCE(SUM(bs.runs), 0) AS runs
             FROM v_effective_bowling_spells bs
-            JOIN v_effective_games g ON g.id = bs.game_id{_ORG_SCOPE}
-            WHERE s.organisation_id = CAST(:org AS UUID) AND COALESCE(g.opp_org_id, g.opp_club_name) = :k
+            JOIN players p ON p.id = bs.player_id AND p.organisation_id = CAST(:org AS UUID)
+            JOIN v_effective_games g ON g.id = bs.game_id{_OWN_JOIN}
+            WHERE {_OWN_PRED} AND COALESCE(g.opp_org_id, g.opp_club_name) = :k
             GROUP BY bs.player_id
             """
         ),
@@ -262,7 +343,30 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     grade_id = sel["fixture"].get("grade_id")
 
     form = await _recent_scores(db, str(club.id))
-    load = await _season_load(db, grade_id)
+    load = await _season_load(db, grade_id, str(club.id))
+
+    # When each player's availability answer for the match date was recorded
+    # (per-date rows only — a period-fallback answer has no per-date row and
+    # simply carries no timestamp). Backs the stale-answer count below.
+    answered_at: dict[str, datetime] = {}
+    if fx.played_on:
+        av = await db.execute(
+            text("SELECT player_id::text AS id, COALESCE(recorded_at, created_at) AS at "
+                 "FROM player_availability "
+                 "WHERE organisation_id = CAST(:org AS UUID) AND avail_date = :d"),
+            {"org": str(club.id), "d": fx.played_on},
+        )
+        for r in av.mappings():
+            if r["at"] is not None:
+                answered_at[r["id"]] = r["at"]
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=STALE_AVAIL_DAYS)
+
+    def _answer_stale(ts) -> bool:
+        if ts is None:
+            return False
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts < stale_cutoff
 
     # Who's already picked in OTHER upcoming fixtures (cross-fixture awareness for
     # a multi-grade round) → player_id -> ["2nd XI vs …", …].
@@ -295,8 +399,9 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     if missing:
         nf = await db.execute(
             text("SELECT id::text AS id, COALESCE(display_name_override, name) AS name "
-                 "FROM players WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
-            {"ids": [uuid.UUID(x) for x in missing]},
+                 "FROM players WHERE id IN :ids AND organisation_id = CAST(:org AS UUID)"
+                 ).bindparams(bindparam("ids", expanding=True)),
+            {"ids": [uuid.UUID(x) for x in missing], "org": str(club.id)},
         )
         name_fallback = {r["id"]: r["name"] for r in nf.mappings()}
 
@@ -343,6 +448,11 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
                 flags.append("inactive")
             elif p.get("is_dormant"):
                 flags.append("dormant")
+            # The pool's 12-month autofill recency wall — a player outside it
+            # is ineligible on BetterSelect's own board, so a saved pick of
+            # them deserves a flag here too.
+            if p.get("recent_ok") is False:
+                flags.append("not-recent")
         if p.get("availability") == "UNAVAILABLE":
             flags.append("unavailable")
 
@@ -356,6 +466,7 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
             "bowling_type": p.get("bowling_type"),
             "is_opener": bool(p.get("is_opening_batsman")),
             "availability": p.get("availability"),
+            "availability_answered_at": (answered_at[pid].isoformat() if pid in answered_at else None),
             "last_played": p.get("last_played"),
             "season_matches": load.get(pid, 0),
             "play_updown": _tier_updown(p.get("tier")),
@@ -402,6 +513,9 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     unavailable = [p["name"] for p in players if "unavailable" in p["flags"]]
     if unavailable:
         warnings.append({"level": "warn", "text": "Selected but marked unavailable: " + ", ".join(unavailable) + "."})
+    not_recent = [p["name"] for p in players if "not-recent" in p["flags"]]
+    if not_recent:
+        warnings.append({"level": "warn", "text": "Outside BetterSelect's 12-month selection window: " + ", ".join(not_recent) + "."})
     cold = [p["name"] for p in players
             if p["recent_avg"] is not None and p["recent_avg"] < OUT_OF_FORM_AVG
             and "BAT" in p["skills"] and len(p["recent_scores"]) >= 3]
@@ -409,13 +523,24 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
         warnings.append({"level": "info", "text": "Out of form with the bat: " + ", ".join(cold) + "."})
 
     # ── Promote: eligible (recent + right gender + squad tier), available, left out ──
+    # A clash-blocked candidate (already named in a same-day XI this fixture
+    # doesn't outrank — the pool's `clash_blocks`) isn't a real promote option;
+    # they're surfaced separately in `clash_excluded` so the selector sees WHY.
     promote = []
+    clash_excluded = []
     for p in sel["pool"]:
         if p["id"] in selected_ids or not p.get("autofill_eligible"):
             continue
         if p.get("availability") == "UNAVAILABLE":
             continue
         f = form.get(p["id"], {})
+        if p.get("clash_blocks"):
+            clash_excluded.append({
+                "player_id": p["id"], "name": p["display_name"], "score": p["score"],
+                "picked_in": p.get("clash", []),
+                "clash_detail": p.get("clash_detail", []),
+            })
+            continue
         promote.append({
             "player_id": p["id"], "name": p["display_name"], "score": p["score"],
             "recent_scores": f.get("bat", []), "recent_wickets": f.get("bowl", []),
@@ -424,6 +549,7 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
         })
     promote.sort(key=lambda x: (x["score"] or 0), reverse=True)
     promote = promote[:PROMOTE_LIMIT]
+    clash_excluded.sort(key=lambda x: (x["score"] or 0), reverse=True)
 
     # ── Rest / watch: picked but ineligible or out of form ──
     rest = []
@@ -476,6 +602,8 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
             flags.append("inactive")
         elif p.get("is_dormant"):
             flags.append("dormant")
+        if p.get("recent_ok") is False:
+            flags.append("not-recent")
         if p.get("availability") == "UNAVAILABLE":
             flags.append("unavailable")
         lrow = order_by_id.get(p["id"])
@@ -502,11 +630,17 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
             "flags": flags,
         })
     # Keep any saved player who falls outside the eligibility pool (so the saved
-    # XI is preserved faithfully and they can still be removed).
+    # XI is preserved faithfully and they can still be removed). The defaults
+    # ahead of **pl fill the pool-row-only keys a `players` row doesn't carry
+    # (they'd otherwise be undefined on the frontend); pl's own values win.
     pool_ids = {p["id"] for p in sel["pool"]}
     for pl in players:
         if pl["player_id"] not in pool_ids:
-            pool_out.append({**pl, "in_xi": True, "autofill_eligible": False})
+            pool_out.append({
+                "squads": [], "squad_team_id": None, "clash": None,
+                "season_matches": None,
+                **pl, "in_xi": True, "autofill_eligible": False,
+            })
 
     # ── Verdict (one-liner) ──
     warn_count = sum(1 for w in warnings if w["level"] == "warn")
@@ -528,15 +662,25 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
         "pool": pool_out,
         "warnings": warnings,
         "promote": promote,
+        "clash_excluded": clash_excluded,
         "rest": rest,
         "best_xi": best_xi,
         "suggest_in": suggest_in,
         "suggest_out": suggest_out,
         "team_size_target": sel.get("default_team_size", 11),
+        # Selected players whose per-date availability answer is older than
+        # STALE_AVAIL_DAYS (period-fallback answers carry no timestamp and
+        # aren't counted).
+        "stale_answers": sum(1 for pl in players if _answer_stale(answered_at.get(pl["player_id"]))),
+        # What `season_matches` now counts (grade-scoped, year-expanded season).
+        "season_matches_label": "games in this grade this season",
         "coverage": {
             "notes": [
-                "Eligibility (recency, gender, squad) matches BetterSelect's selection board exactly.",
+                "Eligibility (recency, gender, squad) matches BetterSelect's selection board exactly; "
+                "promote and best-XI suggestions also honour same-day clash blocks (a player already "
+                "named in an XI this fixture doesn't outrank is listed under clash_excluded, not promoted).",
                 "Form is the last 5 innings/spells; availability is the answer for the match date.",
+                "Season load counts games in this fixture's grade across the season's rows.",
                 ("Match-up column shows each player's record vs " + opp_name + ".") if opp_key and opp_name else
                 "No opponent history matched, so the match-up column is blank.",
             ]

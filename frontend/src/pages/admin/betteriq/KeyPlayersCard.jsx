@@ -105,9 +105,11 @@ export default function KeyPlayersCard({ title, subtitle, players, kind = 'bat',
           <Sparkline key={(p.player_id || i) + ':' + i} values={spark} h={48} dots stroke="var(--pb-accent)" />
         </div>
 
-        {/* analyst read */}
+        {/* analyst read — generated prose, marked as such (it used to render
+            with no provenance marker at all) */}
         {(p.key_note || p.plan || p.risk || p.confidence) && (
           <div className="mt-4 pt-4" style={{ borderTop: '1px solid color-mix(in srgb, var(--pb-accent) 16%, transparent)' }}>
+            <div className="iq-mono uppercase text-pb-faint mb-1.5" style={{ fontSize: 8.5, letterSpacing: '0.14em' }}>Synthesised from scorecards</div>
             {p.key_note && <div className="text-[13.5px] leading-snug">{p.key_note}</div>}
             {p.plan && (
               <div className="text-[12.5px] mt-2.5 leading-snug">
