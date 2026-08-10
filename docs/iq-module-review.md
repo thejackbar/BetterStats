@@ -26,11 +26,35 @@ per-club season row).
 
 Most of P2 landed alongside P1 (migration-228 scope integration in
 `player_trend`, selection clash-awareness, Ask IQ season args + name
-disambiguation + prompt caching, the statistical-hygiene fixes). Not done:
-P3 (persisting true innings totals at sync, the ~11→5 nav consolidation,
-a dedicated mobile pass) — each is a larger, more invasive change (sync.py
-rewrites, a navigation IA redesign) that wasn't undertaken in this pass and
-should get its own scoping discussion before starting.
+disambiguation + prompt caching, the statistical-hygiene fixes).
+
+P3 status, after a scoping discussion on the three items:
+
+- **Persisting true innings totals at sync** — done (`677fe0e`, migration 230).
+  `games.innings_totals` (JSONB, prospective-only, no forced backfill) stores
+  the real per-innings total straight from Grassroots
+  (`runsScored`/`numberOfWicketsFallen`/`totalExtras`); `_per_game` prefers it
+  over the bat-only `SUM(batting_innings.runs)` approximation whenever every
+  innings we batted in has a stored figure, all-or-nothing. Verified against
+  a real Postgres instance (4 more checks on top of the earlier 24: exact
+  total preferred, NULL fallback, a stored-but-null entry never flipping
+  exact, the par payload's new `exact_total_games` count).
+- **Nav consolidation** — written up as a design proposal, not implemented
+  (`docs/iq-nav-consolidation-proposal.md`, `7f18220`). The closer read for
+  the proposal found less real duplication than the original audit assumed —
+  Match preview/Opposition club turned out to be a deliberate, already
+  cross-linked summary→detail pair, and the two opposition-player search
+  entry points already share their render component. The one genuine overlap
+  (Player search vs Form & trends) is proposed as a fold-in, pending review of
+  the doc's open questions — not implemented.
+- **Mobile pass** — done (`7f18220`) on the three matchday pages (Cheat sheet,
+  Match preview, Selection analysis). Fixed two confirmed overflow sources
+  (Cheat sheet's three-column row had no wrap with `nowrap` text inside,
+  guaranteed to overflow a 390px screen) plus several borderline
+  action-button/filter rows. Not live-browser-verified at 390px — this
+  environment has no fully seeded, authenticated club to screenshot against,
+  so the fixes are grounded in reading the actual flex/width math rather than
+  a visual check.
 
 ---
 
