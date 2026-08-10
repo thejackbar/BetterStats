@@ -2,6 +2,7 @@ import { useParams, useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useClub } from '../hooks/useClub'
 import { useClubData } from '../hooks/useClubData'
+import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
 import { api } from '../lib/api'
 import Dropdown from '../components/Dropdown'
@@ -1062,6 +1063,7 @@ function SaveReportModal({ open, onClose, onSave, defaultTitle, initial }) {
 export default function StatLab() {
   const { clubSlug, reportSlug } = useParams()
   const { club, orgId, inactive, notFound, locked, unlock, requestAccess } = useClub(clubSlug)
+  useClubTheme(club) // every other club-slug page wears the club's colours + fonts; StatLab was the one that didn't
   const { org, seasons, loading: clubLoading } = useClubData(orgId)
   const { user } = useAuth()
   const navigate = useNavigate()

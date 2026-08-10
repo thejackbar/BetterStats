@@ -364,6 +364,9 @@ async def _gr_scorecard_response(game_id: str) -> Optional[dict]:
         "played_at": played_at,
         "result": None,
         "winning_team": None,
+        # A live/unsynced Grassroots game isn't in our DB, so there's no org to
+        # resolve — the page just keeps the default theme.
+        "organisation_id": None,
         "result_text": (gr.get("matchSummary") or {}).get("resultText"),
         "grade": {"id": grade.get("id"), "name": grade.get("name"), "raw_name": grade.get("name")} if grade.get("id") else None,
         "season": None,
@@ -463,6 +466,13 @@ async def get_scorecard(
     grade = await db.get(Grade, game.grade_id) if game.grade_id else None
     season = await db.get(Season, grade.season_id) if grade else None
     org = await db.get(Organisation, season.organisation_id) if season else None
+    if org is None and is_manual and game.organisation_id:
+        # A manual game can legitimately have no grade (Grade is optional on
+        # Upload Scorecard) but always carries its own organisation_id — don't
+        # derive the org through grade_id for one (see the v_effective_games
+        # note in CLAUDE.md). Resolving it here also themes the page and honours
+        # the club's fill-in setting for grade-less uploads.
+        org = await db.get(Organisation, game.organisation_id)
     # A fill-in's runs/wickets always show on the batting/bowling card (no
     # toggle). Whether their name also shows in the lower-stakes partnerships
     # and fielding cards is the club's own call (migration 147) — default on.
@@ -1024,6 +1034,9 @@ async def get_scorecard(
         "played_at": game.played_at.isoformat() if game.played_at else None,
         "result": game.result,
         "winning_team": game.winning_team,
+        # Lets the scorecard page fetch the owning club and wear its theme
+        # (colours + fonts) without needing an ?org= query param on the link.
+        "organisation_id": str(org.id) if org else None,
         "grade": {"id": str(grade.id), "name": grade.display_name, "raw_name": grade.name} if grade else None,
         "season": {"id": str(season.id), "name": season.name} if season else None,
         "innings_totals": innings_totals,

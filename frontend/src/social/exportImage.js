@@ -18,14 +18,53 @@
 // `font.cssText` option. Cached after the first successful build.
 // ─────────────────────────────────────────────────────────────────────────────
 let _embeddedFontCssPromise = null
-export function getEmbeddedFontCss() {
+export async function getEmbeddedFontCss() {
   if (!_embeddedFontCssPromise) {
     _embeddedFontCssPromise = buildEmbeddedFontCss().catch(e => {
       _embeddedFontCssPromise = null // let the next export retry
       throw e
     })
   }
-  return _embeddedFontCssPromise
+  // Passing font.cssText REPLACES the exporter's own stylesheet scan, so a
+  // club's UPLOADED font (@font-face injected at runtime by useClubTheme /
+  // AdminSocialPost, src on our own domain) has to be inlined here too or the
+  // export silently falls back to the stack. Rebuilt per export (the style
+  // tags are cheap to re-read; the font bytes themselves are cached) so a
+  // font uploaded mid-session is picked up.
+  return (await _embeddedFontCssPromise) + (await buildLocalFontFaceCss())
+}
+
+// Same-origin font files already fetched, keyed by URL → data URI.
+const _localFontData = new Map()
+
+async function buildLocalFontFaceCss() {
+  const styleText = Array.from(document.querySelectorAll('style'))
+    .map(s => s.textContent || '')
+    .join('\n')
+  const faces = styleText.match(/@font-face\s*\{[^}]*\}/g) || []
+  let css = ''
+  for (const face of faces) {
+    const m = face.match(/url\(['"]?([^'")]+)['"]?\)/)
+    if (!m) continue
+    const url = m[1]
+    // Only our own uploads need inlining; Google files are handled above and
+    // an already-inlined data: URI can pass through as-is.
+    if (/^https?:/i.test(url)) continue
+    if (url.startsWith('data:')) { css += face + '\n'; continue }
+    try {
+      if (!_localFontData.has(url)) {
+        const blob = await (await fetch(url)).blob()
+        _localFontData.set(url, await new Promise((resolve, reject) => {
+          const fr = new FileReader()
+          fr.onload = () => resolve(fr.result)
+          fr.onerror = reject
+          fr.readAsDataURL(blob)
+        }))
+      }
+      css += face.split(url).join(_localFontData.get(url)) + '\n'
+    } catch { /* unreachable file — the export just falls back for this face */ }
+  }
+  return css
 }
 
 async function buildEmbeddedFontCss() {

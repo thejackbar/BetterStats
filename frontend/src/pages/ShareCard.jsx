@@ -2,8 +2,19 @@ import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { api } from '../lib/api'
 import { PbSpinner } from '../lib/presskit'
+import { useClubTheme } from '../hooks/useClubTheme'
+import { resolveClubFonts } from '../lib/theme'
 import { fmt2, fmtCount, formatSeason } from '../lib/cricketFormat'
 import betterStatsLogo from '../assets/bettercricket-white.svg'
+
+// The card's display face follows the club's chosen display font (useClubTheme
+// injects any uploaded @font-face); Barlow Condensed stays the default so a
+// club with no typography choice sees the card it always had.
+const DEFAULT_DISPLAY = "'Barlow Condensed', sans-serif"
+function clubDisplayFamily(org) {
+  if (!org) return DEFAULT_DISPLAY
+  return resolveClubFonts(org).display.cssFamily || DEFAULT_DISPLAY
+}
 
 function hexWithAlpha(hex, alpha) {
   if (!hex || hex[0] !== '#' || hex.length !== 7) return `rgba(22,199,132,${alpha})`
@@ -46,7 +57,10 @@ function RankBadge({ rank, label, accent }) {
 
 function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl }) {
   const isMobile = useIsMobile()
-  const accent = org?.accent_color || '#16c784'
+  // theme_config.accent is what actually themes the club's site; the legacy
+  // accent_color column is the fallback for a club that never opened Branding.
+  const accent = org?.theme_config?.accent || org?.accent_color || '#16c784'
+  const displayFamily = clubDisplayFamily(org)
 
   // Fallback chain: player photo → club logo → BetterStats logo.
   // Rebuild when props change (org loads async after first render).
@@ -97,7 +111,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
       {/* Watermark */}
       <div style={{
         position: 'absolute', bottom: isMobile ? 14 : 20, right: isMobile ? 16 : 24,
-        fontFamily: "'Barlow Condensed', sans-serif",
+        fontFamily: displayFamily,
         fontSize: 12, color: hexWithAlpha(accent, 0.3),
         letterSpacing: 2, textTransform: 'uppercase',
       }}>
@@ -112,7 +126,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
           )}
           <div style={{ minWidth: 0 }}>
             {org && (
-              <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: isMobile ? 11 : 13, color: accent, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
+              <p style={{ fontFamily: displayFamily, fontSize: isMobile ? 11 : 13, color: accent, letterSpacing: 2, textTransform: 'uppercase', margin: 0 }}>
                 {org.name}
               </p>
             )}
@@ -140,7 +154,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
 
       {/* Player name */}
       <h1 style={{
-        fontFamily: "'Barlow Condensed', sans-serif",
+        fontFamily: displayFamily,
         fontSize: isMobile ? 36 : 52, fontWeight: 800, lineHeight: 1,
         color: '#fff', margin: isMobile ? '0 0 8px' : '0 0 10px', textTransform: 'uppercase',
         letterSpacing: 1,
@@ -160,7 +174,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
       {/* Batting stats row */}
       {cb && (
         <div style={{ marginBottom: isMobile ? 14 : 20 }}>
-          <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
+          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
             Batting
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: isMobile ? 6 : 10 }}>
@@ -207,7 +221,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
       {/* Bowling stats row */}
       {cbw && cbw.total_wickets > 0 && (
         <div style={{ borderTop: '1px solid rgba(30,41,59,0.8)', paddingTop: isMobile ? 12 : 16, marginBottom: isMobile ? 14 : 20 }}>
-          <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
+          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
             Bowling
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
@@ -246,7 +260,7 @@ function ShareCardVisual({ player, cb, cbw, cf, season, org, rankings, photoUrl 
       {/* Fielding — same 4-col grid layout as Bowling so all three disciplines sit at the same visual weight */}
       {fieldingHasData && (
         <div style={{ borderTop: '1px solid rgba(30,41,59,0.8)', paddingTop: isMobile ? 12 : 16 }}>
-          <p style={{ fontFamily: "'Barlow Condensed', sans-serif", fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
+          <p style={{ fontFamily: displayFamily, fontSize: 11, color: '#64748b', letterSpacing: 3, textTransform: 'uppercase', margin: '0 0 10px' }}>
             Fielding
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: isMobile ? 8 : 12 }}>
@@ -288,6 +302,9 @@ export default function ShareCard() {
   const [loading, setLoading] = useState(true)
   const [statsLoading, setStatsLoading] = useState(false)
   const [copied, setCopied] = useState(false)
+  // Wear the club's white-label theme (palette + fonts, incl. any uploaded
+  // @font-face) the same way the player profile behind this card does.
+  useClubTheme(org)
 
   useEffect(() => {
     api.getPlayerStats(playerId)

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import ImageEditorModal from '../../components/ImageEditorModal'
 import Dropdown from '../../components/Dropdown'
@@ -39,6 +39,7 @@ import { useEditHistory } from '../../social/useEditHistory'
 import { usePages } from '../../social/usePages'
 import PageStrip from '../../components/admin/socialpost/PageStrip'
 import { templateToBlocks, CUSTOM_EDITABLE } from '../../social/templateToBlocks'
+import { resolveClubFonts, fontWeightFor, buildFontFaceCss } from '../../lib/theme'
 
 // Stable initial value for the (empty) Custom Edit overlay layer.
 const EMPTY_LAYER = () => []
@@ -739,6 +740,36 @@ export default function AdminSocialPost() {
   const [fontKey, setFontKey] = useState(() =>
     localStorage.getItem('bs_social_font') || 'barlow'
   )
+  // The club's own display font (Typography settings — a preset or an uploaded
+  // file) offered as one more entry in the font picker, key 'club_font'. Null
+  // when the club hasn't chosen one; picking it then falls back to Barlow via
+  // the displayFont lookup below, so a stale saved style can't break a post.
+  const clubFont = useMemo(() => {
+    if (!settings) return null
+    const fonts = resolveClubFonts(settings)
+    const d = fonts.display
+    if (!d?.cssFamily) return null
+    // A single-weight face renders at its real weight — asking for heavier
+    // only synthesises a smeared bold (see lib/theme.js). Multi-weight
+    // families use the club's chosen weight.
+    const weight = d.oneWeight
+      ? (typeof d.fontFace?.weight === 'number' ? d.fontFace.weight : 400)
+      : fontWeightFor(fonts, 'display')
+    const label = (d.cssFamily.split(',')[0] || '').replace(/'/g, '').trim()
+    return { key: 'club_font', name: `Club font — ${label}`, family: d.cssFamily, weight, fontFace: d.fontFace }
+  }, [settings])
+  // This page renders standalone (no ModuleLayout, so no club-theme style
+  // tag) — an UPLOADED club font needs its @font-face injected here or the
+  // preview falls back to the stack. Presets are Google families already
+  // loaded site-wide via index.html.
+  useEffect(() => {
+    if (!clubFont?.fontFace) return undefined
+    const style = document.createElement('style')
+    style.id = 'social-club-font'
+    style.textContent = buildFontFaceCss({ display: { fontFace: clubFont.fontFace } })
+    document.head.appendChild(style)
+    return () => style.remove()
+  }, [clubFont])
   // Background texture, layered over any template — persisted like the other
   // Style controls so a club's preferred "finish" carries between posts.
   const [bgStyle, setBgStyle] = useState(() =>
@@ -1516,7 +1547,9 @@ export default function AdminSocialPost() {
     }
   }, [sourceFixtures, pcFixtures])
   const tabTemplates = TEMPLATES.filter(t => TAB_MAP[t.id] === activeTab)
-  const displayFont = DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0]
+  const displayFont = (fontKey === 'club_font' && clubFont)
+    ? clubFont
+    : (DISPLAY_FONTS.find(f => f.key === fontKey) || DISPLAY_FONTS[0])
 
   const team = settings ? {
     name: (settings.name || 'CLUB').toUpperCase(),
@@ -2366,6 +2399,7 @@ export default function AdminSocialPost() {
                     onChange={e => setFontKey(e.target.value)}
                     className="bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[11px] font-mono text-pb-text"
                   >
+                    {clubFont && <option value="club_font">{clubFont.name}</option>}
                     {DISPLAY_FONTS.map(f => <option key={f.key} value={f.key}>{f.name}</option>)}
                   </select>
                 </div>

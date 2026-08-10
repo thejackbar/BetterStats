@@ -6,6 +6,7 @@ import { useNameFormat } from '../lib/nameFormat'
 import { fmtOvers } from '../lib/cricketFormat'
 import { useAuth } from '../contexts/AuthContext'
 import { CAP } from '../lib/capabilities'
+import { useClubTheme } from '../hooks/useClubTheme'
 import TeamBadge from '../components/TeamBadge'
 
 // Cricket overs are base-6: 3.4 + 2.3 = 6.1 (3 ov 4 balls + 2 ov 3 balls = 6 ov 1 ball)
@@ -653,9 +654,16 @@ export default function MatchScorecard() {
       .finally(() => setLoading(false))
   }, [gameId])
 
+  // The owning club: from the scorecard payload itself when the game is ours
+  // in the DB, else the legacy ?org= param some links still carry. Drives name
+  // formatting AND the club's white-label theme (colours + fonts) — scorecard
+  // links rarely carry ?org=, so without the payload id this page always wore
+  // the default BetterStats look even for a fully-themed club.
+  const effectiveOrgId = game?.organisation_id || orgId
   useEffect(() => {
-    if (orgId) api.getOrg(orgId).then(setOrgData).catch(() => {})
-  }, [orgId])
+    if (effectiveOrgId) api.getOrg(effectiveOrgId).then(setOrgData).catch(() => {})
+  }, [effectiveOrgId])
+  useClubTheme(orgData)
 
   useEffect(() => {
     // Only a club admin can even open the claim modal, and the roster list is

@@ -329,8 +329,11 @@ export function resolveTheme(config) {
   }
 }
 
-/** Build the @font-face rule(s) for a club's uploaded font(s), if any. */
-function buildFontFaceCss(fonts) {
+/** Build the @font-face rule(s) for a club's uploaded font(s), if any.
+ * Exported for surfaces that need the face without the whole theme —
+ * AdminSocialPost renders standalone (no ModuleLayout, so no club-theme
+ * style tag) and injects just this when the club font is picked. */
+export function buildFontFaceCss(fonts) {
   if (!fonts) return ''
   return FONT_ROLES
     .map(role => fonts[role]?.fontFace)

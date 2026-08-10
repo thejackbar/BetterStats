@@ -10,6 +10,7 @@ import uuid
 
 from app.models.db import Organisation, Season, Grade, User, ClubMembership, MarketingClub, get_db
 from app.services import playhq_client
+from app.services import fonts as font_service
 from app.services import grade_scope
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
@@ -58,6 +59,19 @@ class OrganisationOut(BaseModel):
     theme_mode: str | None = None
     theme_config: dict | None = None
     player_name_format: str | None = None
+    # Typography — font_config comes straight off the row; the resolved
+    # upload URL/format fields are computed by font_service.public_font_fields
+    # and only populated by get_organisation (the list endpoint returns None).
+    # Without these, a page that resolves its club through /organisations/{id}
+    # (the player profile, the scorecard) themes the club's colours but
+    # silently drops its fonts — the club-slug pages get them via /clubs/{slug}.
+    font_config: dict | None = None
+    font_display_url: str | None = None
+    font_display_format: str | None = None
+    font_body_url: str | None = None
+    font_body_format: str | None = None
+    font_mono_url: str | None = None
+    font_mono_format: str | None = None
 
     class Config:
         from_attributes = True
@@ -195,7 +209,11 @@ async def get_organisation(org_id: str, db: AsyncSession = Depends(get_db)):
     org = await db.get(Organisation, uuid.UUID(org_id))
     if not org:
         raise HTTPException(status_code=404, detail="Organisation not found")
-    return org
+    payload = OrganisationOut.model_validate(org).model_dump()
+    # Same resolver the public club payload (clubs.py) uses, so a club's fonts
+    # read identically whether the frontend found it by slug or by id.
+    payload.update(font_service.public_font_fields(org))
+    return payload
 
 
 def _season_sort_key(s):
