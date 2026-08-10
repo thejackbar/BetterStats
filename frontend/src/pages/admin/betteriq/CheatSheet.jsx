@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import './iq-theme.css'
-import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Empty, a2, surname, LoadingBar, runsPhrase, wktsPhrase } from './ui'
+import { Icon, CountUp, ResultPills, SplitBar, Tag, Btn, Search, Empty, PageIntro, a2, surname, LoadingBar, runsPhrase, wktsPhrase } from './ui'
 import { api } from '../../../lib/api'
 
 /* BetterIQ — Captain's Cheat Sheet (analytics brief §16.6).
@@ -72,12 +72,77 @@ function PlayerRow({ name, line, note }) {
   )
 }
 
+/* Picker — shown when the sheet is opened cold from the nav (no opponent or
+   fixture in the URL yet), rather than the button-driven deep links from
+   Match preview / Opposition scout. Deliberately lightweight (this page has
+   no IQLayout chrome to lean on): upcoming fixtures first, a club search as
+   the fallback, same data source (`list_opponents`) the other pickers use. */
+function CheatSheetPicker({ onPick }) {
+  const [opp, setOpp] = useState(null)
+  const [q, setQ] = useState('')
+  useEffect(() => { api.iqListOpponents().then(setOpp).catch(() => setOpp({ opponents: [], upcoming: [] })) }, [])
+  const upcoming = opp?.upcoming || []
+  const oppList = opp?.opponents || []
+  const ql = q.trim().toLowerCase()
+  const matches = (ql ? oppList.filter(o => (o.name || '').toLowerCase().includes(ql)) : oppList).slice(0, 20)
+
+  return (
+    <div className="iq-print-area iq-rise" style={{ maxWidth: 720, margin: '0 auto', background: 'var(--pb-surface)', color: 'var(--pb-text)', borderRadius: 14, padding: '26px', boxShadow: '0 30px 80px -30px rgba(0,0,0,0.7)' }}>
+      <Eyebrow className="text-pb-accent">Captain&rsquo;s cheat sheet</Eyebrow>
+      <div className="iq-display font-bold mt-1" style={{ fontSize: 'clamp(20px, 5vw, 26px)' }}>Pick a match</div>
+      <PageIntro>One printable page for the toss. Choose an upcoming fixture, or search an opponent you've scouted before.</PageIntro>
+
+      {opp === null ? <LoadingBar label="Loading fixtures…" expectedMs={3500} /> : (
+        <div className="space-y-6">
+          {upcoming.length > 0 && (
+            <div>
+              <div className="iq-eyebrow mb-2.5">Upcoming fixtures</div>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {upcoming.map(f => (
+                  <button key={f.fixture_id} onClick={() => onPick({ fixtureId: f.fixture_id, opponent: f.opp_key })}
+                    className="text-left transition hover:brightness-95" style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 10, padding: '10px 12px' }}>
+                    <div className="font-semibold truncate">vs {f.opponent_name}</div>
+                    <div className="text-pb-faint text-[12px] mt-0.5 flex flex-wrap gap-x-2">
+                      {f.played_on && <span>{f.played_on}</span>}
+                      {f.grade_name && <span className="iq-mono truncate">{f.grade_name}</span>}
+                      {!f.opp_key && <span className="text-pb-faintest">no history yet</span>}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div>
+            <div className="iq-eyebrow mb-2.5">{upcoming.length > 0 ? 'Or search an opponent' : 'Search an opponent'}</div>
+            <Search value={q} onChange={setQ} placeholder="Search an opponent club…" className="w-full" />
+            {q && (
+              <div className="mt-2 max-h-72 overflow-auto iq-scroll" style={{ border: '1px solid var(--pb-hairline)', borderRadius: 10, padding: 6 }}>
+                {matches.length === 0 ? <div className="px-2.5 py-2 text-pb-faint text-sm">No match.</div>
+                  : matches.map(o => (
+                    <button key={o.opp_key} onClick={() => onPick({ opponent: o.opp_key })}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-left transition hover:bg-pb-surface2">
+                      <span className="font-medium truncate">{o.name}</span>
+                      <span className="iq-mono text-pb-faint text-[11px]">{o.meetings ?? 0} mtgs</span>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </div>
+          {upcoming.length === 0 && !q && <Empty>Search a club above to build a cheat sheet for them.</Empty>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function CheatSheet() {
-  const [params] = useSearchParams()
+  const navigate = useNavigate()
+  const [params, setSearchParams] = useSearchParams()
   const opponent = params.get('opponent') || undefined
   const fixtureId = params.get('fixture') || undefined
   const team = params.get('team') || undefined
   const grade = params.get('grade') || undefined
+  const hasSelection = !!(opponent || fixtureId)
 
   const [report, setReport] = useState(null)
   const [dossier, setDossier] = useState(null)
@@ -89,6 +154,7 @@ export default function CheatSheet() {
   useEffect(() => { api.adminGetSettings().then(setClub).catch(() => setClub(null)) }, [])
 
   useEffect(() => {
+    if (!hasSelection) return
     api.iqOppositionReport({ opponent, fixtureId, grade }).then(setReport).catch(() => setReport({ error: true }))
     let tries = 0
     const poll = () => {
@@ -99,7 +165,7 @@ export default function CheatSheet() {
     }
     poll()
     return () => { if (pollRef.current) clearTimeout(pollRef.current) }
-  }, [opponent, fixtureId, team, grade])
+  }, [hasSelection, opponent, fixtureId, team, grade])
 
   const clubName = club?.short_name || club?.name || 'Us'
   const oppName = dossier?.opponent?.name || report?.opponent?.name || 'Opponent'
@@ -141,6 +207,13 @@ export default function CheatSheet() {
   const lmResult = lm?.result ? lm.result.toUpperCase() : null
   const lmColor = lmResult === 'WIN' ? 'var(--pb-brand)' : lmResult === 'LOSS' ? 'var(--pb-red)' : 'var(--pb-amber)'
 
+  const pick = (sel) => {
+    const sp = {}
+    if (sel.fixtureId) sp.fixture = sel.fixtureId
+    else if (sel.opponent) sp.opponent = sel.opponent
+    setSearchParams(sp, { replace: true })
+  }
+
   return (
     <div className="iq-root iq-cs-overlay" data-theme="light" data-card="hairline"
       style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(4,5,10,0.72)', backdropFilter: 'blur(6px)', overflow: 'auto', padding: '28px 18px' }}>
@@ -151,12 +224,19 @@ export default function CheatSheet() {
           <div className="iq-display font-bold" style={{ fontSize: 16 }}>Match cheat sheet</div>
           <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>One page for the toss — prints clean on paper.</div>
         </div>
-        <div className="flex" style={{ gap: 10 }}>
-          <Btn variant="primary" icon="print" onClick={() => window.print()}>Print / Save PDF</Btn>
+        <div className="flex flex-wrap" style={{ gap: 10 }}>
+          {hasSelection && (
+            <Btn variant="ghost" icon="back" onClick={() => setSearchParams({}, { replace: true })}>All fixtures</Btn>
+          )}
+          <Btn variant="ghost" onClick={() => navigate('/admin/betteriq')}>Close</Btn>
+          {hasSelection && <Btn variant="primary" icon="print" onClick={() => window.print()}>Print / Save PDF</Btn>}
         </div>
       </div>
 
+      {!hasSelection && <CheatSheetPicker onPick={pick} />}
+
       {/* the printable sheet */}
+      {hasSelection && (
       <div className="iq-print-area iq-rise"
         style={{ maxWidth: 1040, margin: '0 auto', background: 'var(--pb-surface)', color: 'var(--pb-text)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 30px 80px -30px rgba(0,0,0,0.7)' }}>
         <div style={{ padding: '22px 26px' }}>
@@ -339,6 +419,7 @@ export default function CheatSheet() {
           </div>
         </div>
       </div>
+      )}
     </div>
   )
 }
