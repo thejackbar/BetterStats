@@ -325,6 +325,18 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "stats_auto_show_played_grades BOOLEAN NOT NULL DEFAULT true"
         ))
+        # Migration 230 — the TRUE per-innings total (bat runs + extras) straight
+        # from GR's own `innings[].runsScored`/`numberOfWicketsFallen`/
+        # `totalExtras`, which sync previously discarded in favour of an
+        # approximate SUM(batting_innings.runs) that undercounts every total by
+        # its extras. Prospective-only (populated at sync time going forward,
+        # see sync.py) — nothing here backfills an already-synced game. JSONB
+        # array (not scalar columns) since a two-day game can carry more than
+        # one innings per side. See services/iq_team.py's `_per_game` for the
+        # read-side preference over the bat-only sum.
+        await conn.execute(text(
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"
+        ))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).

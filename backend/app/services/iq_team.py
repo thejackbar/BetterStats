@@ -282,10 +282,18 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
                            ELSE g.result
                        END AS result,
                        CASE WHEN g.away_club = g.opp_club_name THEN 'HOME'
-                            WHEN g.home_club = g.opp_club_name THEN 'AWAY' ELSE NULL END AS our_venue
+                            WHEN g.home_club = g.opp_club_name THEN 'AWAY' ELSE NULL END AS our_venue,
+                       gg.innings_totals
                 FROM v_effective_games g
                 LEFT JOIN grades gr ON gr.id = g.grade_id
                 LEFT JOIN seasons s ON s.id = g.season_id
+                -- migration 230's true per-innings totals live on the base
+                -- `games` table only (a raw ALTER, not on the view — a manual
+                -- game can never have one). LEFT JOIN so a manual-sourced
+                -- effective row (whose id never matches a `games` row) simply
+                -- carries innings_totals = NULL, same as an old api-sourced
+                -- game synced before this column existed.
+                LEFT JOIN games gg ON gg.id = g.id
                 WHERE (
                     g.organisation_id = CAST(:org AS UUID)
                     OR g.home_org_id = CAST(:org AS UUID)
@@ -313,7 +321,8 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
                        COALESCE(SUM(bi.runs) FILTER (WHERE bi.batting_position BETWEEN 1 AND 3), 0) AS top3,
                        COALESCE(SUM(bi.runs) FILTER (WHERE bi.batting_position BETWEEN 4 AND 7), 0) AS mid,
                        COALESCE(SUM(bi.runs) FILTER (WHERE bi.batting_position >= 8), 0) AS low,
-                       BOOL_OR(bi.innings_number = 1) AS batted_first
+                       BOOL_OR(bi.innings_number = 1) AS batted_first,
+                       ARRAY_AGG(DISTINCT bi.innings_number) AS our_innings_nums
                 FROM v_effective_batting_innings bi
                 JOIN our_games og ON og.id = bi.game_id
                 JOIN players p ON p.id = bi.player_id AND p.organisation_id = CAST(:org AS UUID)
@@ -333,10 +342,28 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
                    og.result, og.venue, og.our_venue,
                    b.our_runs, b.our_balls, b.boundary_runs, b.wkts_lost, b.bat_rows,
                    b.top3, b.mid, b.low, b.batted_first,
-                   bw.opp_runs, bw.wkts_taken
+                   bw.opp_runs, bw.wkts_taken,
+                   it.exact_runs, it.exact_ok
             FROM our_games og
             LEFT JOIN bat b ON b.game_id = og.id
             LEFT JOIN bowl bw ON bw.game_id = og.id
+            -- Prefer GR's own true per-innings total (bat runs + extras) over
+            -- the bat-only SUM(bi.runs) above, but ONLY when every innings we
+            -- batted in has a stored, non-null runs_scored entry — a partial
+            -- match (e.g. a two-innings two-day game with just one innings
+            -- backfilled) would mix an exact figure with an approximate one
+            -- into something that reconciles with neither, so it's all or
+            -- nothing. `exact_ok` is NULL (never true) whenever innings_totals
+            -- or our_innings_nums is NULL, which is exactly the fall-back-to-
+            -- SUM(bi.runs) case this must never regress.
+            LEFT JOIN LATERAL (
+                SELECT
+                    SUM((elem->>'runs_scored')::numeric) AS exact_runs,
+                    (COUNT(*) = COALESCE(array_length(b.our_innings_nums, 1), 0)
+                     AND BOOL_AND(elem->>'runs_scored' IS NOT NULL)) AS exact_ok
+                FROM jsonb_array_elements(og.innings_totals) elem
+                WHERE (elem->>'innings_number')::int = ANY(b.our_innings_nums)
+            ) it ON og.innings_totals IS NOT NULL AND b.our_innings_nums IS NOT NULL
             """
         ),
         {"org": org_id, "season": season_id, "grade": grade_id},
@@ -345,6 +372,13 @@ async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, g
     for r in res.mappings():
         d = dict(r)
         d["fmt"] = _fmt_of(d.pop("match_format", None), d.pop("fee_format", None))
+        exact_runs = d.pop("exact_runs", None)
+        exact_ok = d.pop("exact_ok", None)
+        if exact_ok and exact_runs is not None:
+            d["our_runs"] = int(exact_runs)
+            d["exact_total"] = True
+        else:
+            d["exact_total"] = False
         rows.append(d)
     return rows
 
@@ -1692,6 +1726,11 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
         "excluded_incomplete": len(bf_wins) - len(bf_wins_q),
         "format": dominant_fmt,
         "format_mixed": len(fmt_counts) > 1,
+        # How many of the qualifying games above used GR's own true innings
+        # total (migration 230) rather than the bat-only SUM(bi.runs)
+        # approximation — 0 until a club's next ordinary sync pass starts
+        # filling the new column in for the games it revisits.
+        "exact_total_games": sum(1 for g in par_wins if g.get("exact_total")),
     }
 
     # Band edges are format-relative — quartiles of the scope's own qualifying

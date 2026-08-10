@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -1447,6 +1448,42 @@ def _dismissed_pids_grassroots(batting_rows: list) -> set:
     return pids
 
 
+def _extract_innings_totals(scorecard: dict) -> Optional[list]:
+    """Per-innings TRUE totals straight from GR's own `innings[]` objects.
+
+    `runsScored` is the innings' full team total (batters' runs + extras —
+    confirmed against `routers/games.py`'s live-merge, which explicitly does
+    NOT substitute it into the bat-only `runs` field it builds for exactly
+    this reason: it would double-count extras once the frontend adds them on
+    top of a bat-only sum). `numberOfWicketsFallen` and `totalExtras` are the
+    same authoritative per-innings fields that live-merge already prefers
+    over anything derived from individual rows. There is no clean
+    byes/leg-byes/wides/no-balls breakdown at the innings level in this
+    payload (only a single `totalExtras`) — the ball-by-ball `/balls`
+    endpoint carries that breakdown but is live-scored-matches-only and not
+    fetched here, so `extras` below is the combined total, not a breakdown.
+
+    Returns None when the scorecard carries no innings at all (nothing to
+    store); otherwise one dict per innings, keyed by GR's own `inningsOrder`
+    (falling back to `inningsNumber`, matching every other reader in this
+    file — see the `inningsOrder` comment elsewhere in this module for why
+    `inningsNumber` alone can't be trusted).
+    """
+    innings = scorecard.get("innings") or []
+    if not innings:
+        return None
+    out = []
+    for inn in innings:
+        inn_num = inn.get("inningsOrder") or inn.get("inningsNumber") or 1
+        out.append({
+            "innings_number": inn_num,
+            "runs_scored": inn.get("runsScored"),
+            "wickets": inn.get("numberOfWicketsFallen"),
+            "extras": inn.get("totalExtras"),
+        })
+    return out or None
+
+
 # Most extras a single partnership could plausibly add on top of the two batters'
 # own runs. Used to sanity-check FOW-derived stands against corrupt cumulative
 # scores — generous enough never to reject a real stand.
@@ -1838,7 +1875,7 @@ async def sync_grassroots_game_level_data(
                 # never land, even across a Full Rebuild (the same
                 # row-exists check would keep short-circuiting first).
                 existing = await session.execute(
-                    text("SELECT venue, result FROM games WHERE id=:gid LIMIT 1"),
+                    text("SELECT venue, result, innings_totals FROM games WHERE id=:gid LIMIT 1"),
                     {"gid": match_id_str},
                 )
                 existing_row = existing.fetchone()
@@ -1876,7 +1913,7 @@ async def sync_grassroots_game_level_data(
                     our_appearances_done = our_appear_check.first() is not None
 
                 if game_exists:
-                    existing_venue, existing_result = existing_row
+                    existing_venue, existing_result, existing_innings_totals = existing_row
                     updates: dict[str, str] = {}
                     if existing_venue is None:
                         venue_name = (scorecard.get("venue") or {}).get("name")
@@ -1891,8 +1928,19 @@ async def sync_grassroots_game_level_data(
                         new_result = classify_match_result(scorecard, org_id_str)
                         if new_result:
                             updates["result"] = new_result
+                    if existing_innings_totals is None:
+                        # Prospective-only self-heal, same idiom as venue/result
+                        # above: a pre-migration-230 game has no stored totals,
+                        # and the next time an ordinary sync pass revisits it
+                        # (not a forced backfill) fills it in from this fetch.
+                        _totals = _extract_innings_totals(scorecard)
+                        if _totals is not None:
+                            updates["innings_totals"] = json.dumps(_totals)
                     if updates:
-                        set_clause = ", ".join(f"{k}=:{k}" for k in updates)
+                        set_clause = ", ".join(
+                            (f"{k}=CAST(:{k} AS JSONB)" if k == "innings_totals" else f"{k}=:{k}")
+                            for k in updates
+                        )
                         await session.execute(
                             text(f"UPDATE games SET {set_clause} WHERE id=:gid"),
                             {**updates, "gid": match_id_str},
@@ -2254,6 +2302,24 @@ async def sync_grassroots_game_level_data(
                 # merged_away. Reused by app.scripts.rebuild_bowler_wickets.
                 for bw in extract_bowler_wickets(scorecard, match_uuid, our_team_pids, pid_by_guid, merged_away):
                     session.add(bw)
+
+                # innings_totals isn't on the Game ORM model (migration 230 is a
+                # raw ALTER, matching match_format/opp_org_id's own pattern) —
+                # written via a follow-up raw UPDATE rather than the Game()
+                # constructor above, guarded on IS NULL so it never clobbers a
+                # value the game_exists self-heal block already set earlier in
+                # this same per-game session. Covers both the brand-new-game
+                # path (which never runs that self-heal block at all) and the
+                # second-club-attaches-its-own-stats path (which does, but may
+                # not have found the row NULL yet if this is that game's very
+                # first sync from either club).
+                _totals = _extract_innings_totals(scorecard)
+                if _totals is not None:
+                    await session.execute(
+                        text("UPDATE games SET innings_totals = CAST(:it AS JSONB) "
+                             "WHERE id = :gid AND innings_totals IS NULL"),
+                        {"it": json.dumps(_totals), "gid": match_id_str},
+                    )
 
                 if bat_count == 0 and bowl_count == 0 and appear_count == 0:
                     stats["gr_games_skipped_no_data"] += 1
