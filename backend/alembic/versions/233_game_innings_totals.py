@@ -31,13 +31,13 @@ re-synced) after this ships gets the real figure; an older, not-yet-revisited
 game keeps NULL, and every reader falls back to the existing bat-only sum for
 exactly that case (see services/iq_team.py's `_per_game`).
 
-Revision ID: 230
-Revises: 229
+Revision ID: 233
+Revises: 232
 """
 from alembic import op
 
-revision = "230"
-down_revision = "229"
+revision = "233"
+down_revision = "232"
 branch_labels = None
 depends_on = None
 
