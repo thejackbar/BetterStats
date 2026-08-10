@@ -1160,6 +1160,12 @@ class Player(Base):
     # real player (migration 147) — e.g. a pasted PlayHQ profile URL for their
     # own future reference. Not parsed or verified; see claim-fill-in.
     claim_note = Column(Text, nullable=True)
+    # The BetterImport batch that minted this player (migration 234) — set only
+    # when the import commit itself creates the row, NULL for synced or
+    # hand-added players. Undoing that batch deletes the player again if the
+    # undo leaves them with nothing attached (services/import_cleanup.py);
+    # a later re-import moves the marker to the newer batch.
+    import_batch_id = Column(UUID(as_uuid=True), ForeignKey("import_batches.id", ondelete="SET NULL"), nullable=True)
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)

@@ -271,7 +271,8 @@ export default function AdminImport() {
     if (!window.confirm('Remove this import and rebuild the affected players’ stats?')) return
     try {
       const r = await api.importUndo(batchId)
-      toast.success(`Removed ${r.rows_removed} imported rows`)
+      toast.success(`Removed ${r.rows_removed} imported rows`
+        + (r.players_deleted ? ` and ${r.players_deleted} player record${r.players_deleted === 1 ? '' : 's'} this import created` : ''))
       loadHistory()
     } catch (e) { toast.error(e.message) }
   }
@@ -296,7 +297,8 @@ export default function AdminImport() {
     if (!window.confirm(`Remove ${playerName}'s imported rows from this import and rebuild their stats? Other players in this import are untouched.`)) return
     try {
       const r = await api.importUndoPlayer(batchId, playerId)
-      toast.success(`Removed ${r.rows_removed} imported rows for ${playerName}`)
+      toast.success(`Removed ${r.rows_removed} imported rows for ${playerName}`
+        + (r.player_deleted ? ' and deleted the player record this import created' : ''))
       setBatchPlayers(b => ({ ...b, [batchId]: (b[batchId] || []).filter(p => p.player_id !== playerId) }))
       loadHistory()
     } catch (e) { toast.error(e.message) }

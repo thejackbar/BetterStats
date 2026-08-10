@@ -1,5 +1,46 @@
 # BetterStats — Claude Session Notes
 
+## Undoing a stats import deletes the players it minted (migration 234, v9.19.4.1, Aug 2026)
+
+Reported from the Leeming Spartans demo: a mis-mapped BetterImport upload
+created dozens of surname-only players, and undoing the import left every one
+of them behind — `/undo` only ever deleted `imported_stats`, and nothing
+recorded WHICH players a batch had created, so it couldn't have known.
+
+- **`players.import_batch_id` (migration 234) is the marker** — set only when
+  the import commit itself mints the row, NULL for every synced or hand-added
+  player, `ON DELETE SET NULL` so a deleted batch never takes a player with
+  it. **A re-import moves the marker forward**: latest-upload-wins re-homes the
+  player's rows onto the new batch, so undoing THAT batch is what would leave
+  them empty, and the marker has to follow (only where it was already non-NULL
+  — a synced player is never stamped).
+- **`services/import_cleanup.py` is the one deletability rule**, shared by both
+  undo endpoints and the retroactive script. A batch-created player is deleted
+  by the undo ONLY when nothing real has attached since: ~40 `BLOCKING_REFS`
+  (stats from any source, membership, votes, lineups, achievements, merge
+  history…) plus a profile check (photo, contact details, squad, skill
+  positions) and a hard stop on any synced identity (`grassroots_id` /
+  `playhq_id`). Derivative rows (`import_effective_deltas`, `milestones`,
+  aliases) are deliberately NOT blocking — they cascade away with the player.
+  Kept players are reported with the reasons, and the undo's audit row names
+  both the deleted and the kept.
+- **The emptiness check runs after `db.flush()`** — it must not see the
+  imported rows the same transaction just deleted, or every player reads as
+  still holding data and nothing is ever cleaned up.
+- **`python -m app.scripts.purge_import_only_players <org-id-or-slug>`** is the
+  retroactive cleanup for batches undone before the marker existed (Leeming's
+  case). Candidates are never-synced players only; the same `deletable_players`
+  check decides; dry-run by default, `--apply` to act; one club at a time on
+  purpose — a hand-added player with genuinely nothing recorded yet is
+  indistinguishable from import residue by data alone, so a person reads the
+  list first.
+- **Verified against a real Postgres** (23 checks: the migration applied three
+  times, commit stamping + the pre-existing player NOT stamped, the re-import
+  marker move, whole-batch and per-player undo deleting the empty player and
+  keeping the one with an achievement, the audit naming both, a synced player
+  never deletable, and the script's dry-run/apply against marker-less
+  leftovers).
+
 ## Themes, a seat that owns work, and a plan to start from (migration 232, v9.19.3, Aug 2026)
 
 The reference a club gave for a real strategic plan has four **pillars**

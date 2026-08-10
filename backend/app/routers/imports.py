@@ -29,7 +29,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import select, delete as sa_delete, func, text
+from sqlalchemy import select, delete as sa_delete, func, text, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
@@ -38,6 +38,7 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.routers.manual_entries import _log_edit, _recompute_milestones
+from app.services import import_cleanup as cleanup
 from app.services import import_ingest as ingest
 from app.services import import_reconcile as recon
 
@@ -513,7 +514,11 @@ async def commit(
         # map raw name → new player id, then redirect its items
         new_pid_by_name: dict = {}
         for nm in new_names:
-            p = Player(id=uuid.uuid4(), name=nm, organisation_id=club.id)
+            # import_batch_id marks the player as minted by THIS import
+            # (migration 234) — it's what lets /undo delete them again when
+            # the undo leaves them with nothing attached.
+            p = Player(id=uuid.uuid4(), name=nm, organisation_id=club.id,
+                       import_batch_id=batch.id)
             db.add(p)
             new_pid_by_name[nm] = str(p.id)
             created_players += 1
@@ -554,6 +559,16 @@ async def commit(
     await db.execute(
         sa_delete(ImportedStat).where(
             ImportedStat.organisation_id == club.id, ImportedStat.player_id.in_(pids))
+    )
+    # A re-imported player minted by an EARLIER batch now holds rows only from
+    # this one, so move the created-by marker forward — undoing THIS batch is
+    # what would leave them empty. Players the import didn't create (marker
+    # NULL: synced or hand-added) are never stamped.
+    await db.execute(
+        sa_update(Player).where(
+            Player.organisation_id == club.id, Player.id.in_(pids),
+            Player.import_batch_id.isnot(None),
+        ).values(import_batch_id=batch.id)
     )
 
     inserted = 0
@@ -661,9 +676,13 @@ async def undo_import(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove a batch's uploaded truth and re-reconcile. Players created during
-    the import are left in place (they may hold other data); only their imported
-    figures are removed."""
+    """Remove a batch's uploaded truth and re-reconcile. Players THIS batch
+    created (``players.import_batch_id``) are deleted too when the undo leaves
+    them with nothing attached — a mis-mapped upload (e.g. surname-only names
+    imported as new players) must not survive its own undo and clog the
+    Players page. A created player who has since gained anything real (another
+    batch's rows, synced or manual stats, a membership, votes, an edited
+    profile…) is kept, with the reasons audit-logged."""
     try:
         bid = uuid.UUID(batch_id)
     except ValueError:
@@ -680,18 +699,38 @@ async def undo_import(
         select(ImportedStat.id).where(ImportedStat.import_batch_id == bid)
     )).scalars().all()
     await db.execute(sa_delete(ImportedStat).where(ImportedStat.import_batch_id == bid))
+    await db.flush()  # the emptiness check below must not see the rows just deleted
+
+    candidates = (await db.execute(
+        select(Player.id, Player.name).where(
+            Player.organisation_id == club.id, Player.import_batch_id == bid)
+    )).all()
+    name_by_pid = {pid: name for pid, name in candidates}
+    deletable, kept = await cleanup.deletable_players(db, club.id, list(name_by_pid))
+    if deletable:
+        await cleanup.delete_players(db, club.id, deletable)
+
     batch.undone_at = datetime.now(timezone.utc)
     batch.status = "undone"
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="undo",
         target_table="imported_stats", target_id=f"batch:{bid}",
-        summary=f"Undo BetterImport — removed {len(removed)} imported rows",
-        before={"batch_id": str(bid), "rows": len(removed)}, after=None,
+        summary=f"Undo BetterImport — removed {len(removed)} imported rows"
+                + (f", deleted {len(deletable)} players this import created" if deletable else ""),
+        before={
+            "batch_id": str(bid), "rows": len(removed),
+            "players_deleted": sorted(name_by_pid[p] for p in deletable),
+            "players_kept": {name_by_pid[p]: why for p, why in kept.items() if p in name_by_pid},
+        },
+        after=None,
     )
     await db.commit()
 
     written = await recon.reconcile_imported_totals(str(club.id))
-    return {"undone": True, "rows_removed": len(removed), "deltas_rebuilt": written}
+    return {
+        "undone": True, "rows_removed": len(removed), "deltas_rebuilt": written,
+        "players_deleted": len(deletable), "players_kept": len(kept),
+    }
 
 
 @router.post("/{batch_id}/undo-player/{player_id}")
@@ -745,6 +784,18 @@ async def undo_import_for_player(
     await db.execute(sa_delete(ImportedStat).where(
         ImportedStat.import_batch_id == bid, ImportedStat.player_id == pid,
     ))
+    await db.flush()  # the emptiness check below must not see the rows just deleted
+
+    # If this batch minted the player, deleting their rows may leave an empty
+    # record — remove it too, same rule as the whole-batch undo above.
+    player_name = player.name
+    player_deleted = False
+    if player.import_batch_id == bid:
+        deletable, _kept = await cleanup.deletable_players(db, club.id, [pid])
+        if deletable:
+            db.expunge(player)  # the ORM instance is about to be a dead row
+            await cleanup.delete_players(db, club.id, deletable)
+            player_deleted = True
 
     remaining = (await db.execute(
         select(ImportedStat.id).where(ImportedStat.import_batch_id == bid)
@@ -757,9 +808,11 @@ async def undo_import_for_player(
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="undo",
         target_table="imported_stats", target_id=f"batch:{bid}:player:{pid}",
-        summary=f"Undo BetterImport for {player.name} — removed {len(removed)} imported rows"
+        summary=f"Undo BetterImport for {player_name} — removed {len(removed)} imported rows"
+                + (", deleted the player record this import created" if player_deleted else "")
                 + (" (batch now fully undone)" if batch_fully_undone else ""),
-        before={"batch_id": str(bid), "player_id": str(pid), "rows": len(removed)}, after=None,
+        before={"batch_id": str(bid), "player_id": str(pid), "rows": len(removed),
+                "player_deleted": player_deleted}, after=None,
     )
     await db.commit()
 
@@ -768,6 +821,7 @@ async def undo_import_for_player(
         "undone": True,
         "player_id": str(pid),
         "rows_removed": len(removed),
+        "player_deleted": player_deleted,
         "batch_fully_undone": batch_fully_undone,
         "deltas_rebuilt": written,
     }

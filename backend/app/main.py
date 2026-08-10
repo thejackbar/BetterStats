@@ -337,6 +337,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE games ADD COLUMN IF NOT EXISTS innings_totals JSONB"
         ))
+        # Migration 234 — which BetterImport batch minted a player. Set only
+        # when the import commit creates the row; undo uses it to delete the
+        # batch's own players once the undo leaves them empty (see
+        # services/import_cleanup.py). SET NULL so a deleted batch never takes
+        # a player with it.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS import_batch_id UUID "
+            "REFERENCES import_batches(id) ON DELETE SET NULL"
+        ))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).
