@@ -26,7 +26,20 @@ per-club season row).
 
 Most of P2 landed alongside P1 (migration-228 scope integration in
 `player_trend`, selection clash-awareness, Ask IQ season args + name
-disambiguation + prompt caching, the statistical-hygiene fixes).
+disambiguation + prompt caching, the statistical-hygiene fixes, and —
+separately, `4cfb38f` — the cheat sheet's nav entry and cold-nav picker).
+
+Two P2 items remain open, found by checking the roadmap against the code
+rather than memory: **"Seniors only" is still an include-list, not the
+exclusion semantics `grade_scope.py` exists to provide** (`Context.jsx:250-275`)
+— converting it means every IQ backend query with a grade filter supporting
+an exclude mode alongside the current include-only `grade_match_clause`,
+closer to another P1-scale backend pass than a quick fix, not undertaken here.
+The Opposition grade-control split (item 15) turned out NOT to need doing —
+now that the dossier resolves grade filters by canonical name against the
+opponent's own grades, one "Grade" control correctly means the same thing on
+both sides, so the single relabelled control is the right outcome, not a
+shortcut.
 
 P3 status, after a scoping discussion on the three items:
 
