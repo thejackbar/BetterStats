@@ -283,7 +283,11 @@ export default function MatchPreview() {
                   : <Tag tone="faint">all grades</Tag>}
               </div>
             </div>
-            <div className="flex items-center gap-2.5">
+            {/* Three action buttons at their full labelled width don't fit a
+                phone screen alongside the fixture headline above — wrap
+                rather than force horizontal scroll on the page a captain
+                actually opens on match day. */}
+            <div className="flex flex-wrap items-center gap-2.5">
               <Btn variant="ghost" sm icon={copied ? 'check' : 'share'} onClick={copyTeamTalk} disabled={!teamTalk}>{copied ? 'Copied' : 'Copy team talk'}</Btn>
               <Btn variant="ghost" sm icon="print" onClick={goCheatSheet} disabled={!sel.opponent}>Cheat sheet</Btn>
               <Btn variant="primary" sm icon="search" onClick={goScout}>Full scout</Btn>
@@ -335,7 +339,7 @@ export default function MatchPreview() {
                 {report === null ? <LoadingBar label="Loading…" expectedMs={4500} />
                   : h2h && h2h.meetings > 0 ? (
                     <>
-                      <div className="flex items-end gap-6">
+                      <div className="flex flex-wrap items-end gap-6">
                         <div>
                           <div className="iq-headline iq-num" style={{ fontSize: 40, color: 'var(--pb-brand)' }}><CountUp value={h2h.wins} /></div>
                           <div className="iq-eyebrow mt-1.5">Won</div>
@@ -345,7 +349,7 @@ export default function MatchPreview() {
                           <div className="iq-eyebrow mt-1.5">Lost</div>
                         </div>
                         {h2h.recent_form?.length > 0 && (
-                          <div className="ml-auto flex flex-col items-end gap-1.5">
+                          <div className="sm:ml-auto flex flex-col items-end gap-1.5">
                             <div className="iq-eyebrow">Recent</div>
                             <ResultPills form={h2h.recent_form.slice(0, 6)} size={20} />
                           </div>

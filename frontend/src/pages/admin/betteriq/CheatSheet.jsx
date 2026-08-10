@@ -58,10 +58,14 @@ function Column({ title, accent, children }) {
 
 function PlayerRow({ name, line, note }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="flex items-baseline justify-between" style={{ gap: 10 }}>
-        <span className="iq-display font-bold text-pb-text" style={{ fontSize: 13, whiteSpace: 'nowrap' }}>{name}</span>
-        <span className="iq-mono text-pb-dim" style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{line}</span>
+        {/* Name truncates rather than forcing the row wider than its column —
+            nowrap with no overflow handling let a long name blow out a
+            squashed mobile column; the stat line is always short, so it
+            keeps nowrap and never shrinks. */}
+        <span className="iq-display font-bold text-pb-text truncate" style={{ fontSize: 13 }}>{name}</span>
+        <span className="iq-mono text-pb-dim shrink-0" style={{ fontSize: 10.5, whiteSpace: 'nowrap' }}>{line}</span>
       </div>
       {note && <div className="text-pb-dim" style={{ fontSize: 10.5, lineHeight: 1.35, marginTop: 2 }}>{note}</div>}
     </div>
@@ -142,7 +146,7 @@ export default function CheatSheet() {
       style={{ position: 'fixed', inset: 0, zIndex: 80, background: 'rgba(4,5,10,0.72)', backdropFilter: 'blur(6px)', overflow: 'auto', padding: '28px 18px' }}>
 
       {/* toolbar — screen only */}
-      <div className="iq-no-print flex items-center justify-between" style={{ maxWidth: 1040, margin: '0 auto 14px', gap: 12 }}>
+      <div className="iq-no-print flex flex-wrap items-center justify-between" style={{ maxWidth: 1040, margin: '0 auto 14px', gap: 12 }}>
         <div className="text-white">
           <div className="iq-display font-bold" style={{ fontSize: 16 }}>Match cheat sheet</div>
           <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>One page for the toss — prints clean on paper.</div>
@@ -157,16 +161,17 @@ export default function CheatSheet() {
         style={{ maxWidth: 1040, margin: '0 auto', background: 'var(--pb-surface)', color: 'var(--pb-text)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 30px 80px -30px rgba(0,0,0,0.7)' }}>
         <div style={{ padding: '22px 26px' }}>
 
-          {/* header */}
-          <div className="flex items-start justify-between border-b border-pb-hairline" style={{ gap: 16, paddingBottom: 14 }}>
-            <div>
+          {/* header — stacks on a narrow screen; print is always landscape so
+              @media print pins it back to a row (iq-theme.css). */}
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between border-b border-pb-hairline iq-cs-header" style={{ gap: 12, paddingBottom: 14 }}>
+            <div className="min-w-0">
               <Eyebrow className="text-pb-accent">Captain&rsquo;s cheat sheet</Eyebrow>
-              <div className="iq-display" style={{ fontWeight: 800, fontSize: 28, letterSpacing: '-0.01em', marginTop: 4 }}>
+              <div className="iq-display" style={{ fontWeight: 800, fontSize: 'clamp(20px, 6vw, 28px)', letterSpacing: '-0.01em', marginTop: 4, lineHeight: 1.15 }}>
                 {clubName} <span className="text-pb-faint" style={{ fontWeight: 600 }}>vs</span> {oppName}
               </div>
             </div>
-            <div className="text-right">
-              {team && <div className="text-pb-dim" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{dossier?.selected_team_name || team}</div>}
+            <div className="sm:text-right shrink-0">
+              {team && <div className="text-pb-dim" style={{ fontSize: 12 }}>{dossier?.selected_team_name || team}</div>}
               {lm?.grade && <div className="iq-mono text-pb-faint" style={{ fontSize: 11, marginTop: 3 }}>{lm.grade}</div>}
               <div className="iq-display font-bold" style={{ fontSize: 13, marginTop: 6 }}>Better<span className="text-pb-accent">IQ</span></div>
               <div className="text-pb-faint" style={{ fontSize: 10.5, marginTop: 1 }}>{new Date().toLocaleDateString()}</div>
@@ -246,8 +251,12 @@ export default function CheatSheet() {
             </div>
           )}
 
-          {/* three columns */}
-          <div className="flex" style={{ gap: 22 }}>
+          {/* three columns. Squashed to ~1/3 of a 390px screen with nowrap text
+              inside, this used to force a horizontal scroll on the ONE surface
+              in the module a captain actually opens on a phone. Stacks full-width
+              below sm; iq-theme.css pins it back to a fixed 3-col row for print,
+              which is always landscape and has the room. */}
+          <div className="flex flex-col sm:flex-row iq-cs-columns" style={{ gap: 16 }}>
             <Column title="Get these out" accent="var(--pb-red)">
               {dangerBat.length
                 ? dangerBat.slice(0, 3).map((b, i) => (
@@ -259,7 +268,7 @@ export default function CheatSheet() {
                   : <Empty className="text-pb-faint text-[11.5px]">No standout batters identified.</Empty>}
             </Column>
 
-            <div style={{ width: 1, background: 'var(--pb-hairline)' }} />
+            <div className="iq-cs-divider" />
 
             <Column title="New-ball threat" accent="var(--pb-accent)">
               {dangerBowl.length
@@ -272,7 +281,7 @@ export default function CheatSheet() {
                   : <Empty className="text-pb-faint text-[11.5px]">No standout bowlers identified.</Empty>}
             </Column>
 
-            <div style={{ width: 1, background: 'var(--pb-hairline)' }} />
+            <div className="iq-cs-divider" />
 
             <Column title="Our edge" accent="var(--pb-brand)">
               {(ourBat.length || ourBowl.length)

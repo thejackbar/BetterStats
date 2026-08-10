@@ -280,7 +280,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
           <h2 className="iq-headline mt-2" style={{ fontSize: 'clamp(22px,2.6vw,30px)' }}>{fx.team_name || 'Team'} vs {fx.opponent_name || 'TBC'}</h2>
           <div className="text-pb-faint text-[12px] mt-1 iq-mono flex flex-wrap gap-x-2">{[fx.played_on, fx.home_away, fx.grade_name, fx.venue].filter(Boolean).join(' · ')}</div>
         </div>
-        <div className="flex items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <Btn variant="ghost" sm icon="fixtures" onClick={() => onNavigate('/admin/betteriq/preview' + (fixtureId ? `?fixture=${fixtureId}` : ''))}>Match preview</Btn>
           <Btn variant="primary" sm icon={sent ? 'check' : 'share'} disabled={sending} onClick={send}>{sent ? 'Sent to BetterSelect' : sending ? 'Sending…' : 'Send XI to BetterSelect'}</Btn>
         </div>
@@ -367,7 +367,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
 
       <div className="flex flex-wrap items-center justify-between gap-3 mt-9 mb-3">
         <h2 className="iq-display font-bold text-[19px]" style={{ letterSpacing: '-0.01em' }}>Squad availability <span className="text-pb-faint text-[14px] font-normal">({poolView.length}{(squadSel.length || pq) ? ` / ${pool.length}` : ''})</span></h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Search value={poolQ} onChange={setPoolQ} placeholder="Find a player…" className="max-w-[200px]" />
           <label className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer select-none whitespace-nowrap">
             <input type="checkbox" checked={confirmedOnly} onChange={e => setConfirmedOnly(e.target.checked)} style={{ accentColor: 'var(--pb-accent)', width: 15, height: 15 }} />
