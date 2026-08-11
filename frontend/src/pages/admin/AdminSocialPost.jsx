@@ -511,8 +511,17 @@ function topBatters(t) {
 // Sensible grade ordering for roundup posts: senior numbered grades first
 // (1st, 2nd, 3rd…), then one-day/limited grades, then the rest — each by number.
 const _WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
-function gradeSortKey(grade) {
-  const s = (grade || '').toUpperCase().trim()
+// A row's grade may carry its own gradeOrder from the club's Merge Grades →
+// Order setting (backend-resolved, see social_rounds.py). That always wins —
+// it's a considered choice the club made, not a guess from the grade's name —
+// and sorts before every un-ordered grade, matching the Merge Grades screen's
+// own "anything you haven't ordered sits below the ones you have" rule. Only
+// grades with no order set fall back to this name heuristic among themselves.
+function gradeSortKey(row) {
+  const grade = typeof row === 'string' ? row : (row?.grade || '')
+  const order = typeof row === 'object' && row ? row.gradeOrder : null
+  const s = grade.toUpperCase().trim()
+  if (order != null) return [-1, order, s]
   const ord = s.match(/(\d+)\s*(ST|ND|RD|TH)\b/)
   if (ord) return [0, parseInt(ord[1], 10), s]
   const firstWord = (s.split(/\s+/)[0] || '').toLowerCase()
@@ -526,7 +535,7 @@ function gradeSortKey(grade) {
 }
 function sortByGrade(rows) {
   return [...rows].sort((a, b) => {
-    const ka = gradeSortKey(a.grade), kb = gradeSortKey(b.grade)
+    const ka = gradeSortKey(a), kb = gradeSortKey(b)
     return (ka[0] - kb[0]) || (ka[1] - kb[1]) || ka[2].localeCompare(kb[2])
   })
 }

@@ -217,7 +217,81 @@ def _club_dict(org) -> dict:
     return {"name": name.upper(), "full": name.upper(), "mono": _mono(name), "logo": logo}
 
 
-def _result_row(sc: dict, org, keys: list[str], grade_name: str) -> dict | None:
+async def _grade_display_orders(db: AsyncSession, org_id) -> dict[str, int]:
+    """``{grade guid -> display_order}`` for the org's own reading order (Merge
+    Grades → Order), keyed by the raw CA grade guid — the same key every row
+    in this module already carries, so no name/merge-alias reconciliation is
+    needed (unlike a name-keyed lookup, which would have to account for
+    display_name_override and grade_merge_logs separately). A guid with no
+    order set is simply absent; callers fall back to their own default sort
+    for those rows."""
+    res = await db.execute(text("""
+        SELECT COALESCE(g.grassroots_id, g.id::text) AS guid, g.display_order
+        FROM grades g JOIN seasons s ON s.id = g.season_id
+        WHERE s.organisation_id = :org AND g.display_order IS NOT NULL
+    """), {"org": str(org_id)})
+    return {r["guid"]: r["display_order"] for r in res.mappings().all()}
+
+
+async def _org_logo_by_ca_id(db: AsyncSession, ca_ids: list[str]) -> dict[str, str]:
+    """Our own hosted crest for whichever of these CA org ids are also one of
+    our own registered clubs — ``organisations.id`` IS the CA org guid, the
+    same identity the Lineups page already keys on. One batched query rather
+    than one per row, and this URL is same-origin so it survives the PNG
+    export canvas (a raw Cloudinary/PlayHQ CDN url doesn't reliably)."""
+    ids = list({(i or "").lower() for i in ca_ids if i})
+    if not ids:
+        return {}
+    rows = await db.execute(text("""
+        SELECT id, logo_url, (logo_data IS NOT NULL) AS has_data
+        FROM organisations WHERE LOWER(id::text) = ANY(:ids)
+    """), {"ids": ids})
+    out: dict[str, str] = {}
+    for r in rows.mappings().all():
+        oid = str(r["id"])
+        logo = r["logo_url"] or (f"/api/images/organisations/{oid}/logo" if r["has_data"] else None)
+        if logo:
+            out[oid.lower()] = logo
+    return out
+
+
+async def _resolve_opp_logos(db: AsyncSession, entries: list[tuple[str | None, str | None]]) -> list[str | None]:
+    """Final ``oppLogo`` per row, in order: our own hosted crest when the
+    opponent is also a club here, else the raw CDN url Grassroots itself
+    returned — the same fallback order the manual opponent-search picker
+    already uses (``resolveClubLogo`` in AdminSocialPost.jsx), just resolved
+    server-side and batched across the whole round instead of one search per
+    row the admin has to trigger by hand."""
+    own = await _org_logo_by_ca_id(db, [oid for oid, _ in entries])
+    return [own.get((oid or "").lower()) or raw for oid, raw in entries]
+
+
+async def _finalize_opp_logos(db: AsyncSession, rows: list[dict]) -> None:
+    """In place: resolve every row's transient ``_oppOrgId``/``_oppLogoRaw``
+    into a final ``oppLogo`` and drop the transients, via one batched lookup
+    for the whole list rather than one per row."""
+    entries = [(r.pop("_oppOrgId", None), r.pop("_oppLogoRaw", None)) for r in rows]
+    logos = await _resolve_opp_logos(db, entries)
+    for row, logo in zip(rows, logos):
+        if logo:
+            row["oppLogo"] = logo
+
+
+def _match_logos(m: dict) -> tuple[str | None, str | None, str | None, str | None]:
+    """(home_org_id, home_logo, away_org_id, away_logo) from a raw match's
+    team list — same dual-shape read as _match_home_away (matchSummary.teams
+    when present, else the top-level array), since owningOrganisation lives
+    on whichever shape is there."""
+    ms_teams = (m.get("matchSummary") or {}).get("teams") or []
+    teams = ms_teams or (m.get("teams") or [])
+    home_t = next((t for t in teams if t.get("isHome")), None)
+    away_t = next((t for t in teams if not t.get("isHome")), None)
+    home_org = (home_t or {}).get("owningOrganisation") or {}
+    away_org = (away_t or {}).get("owningOrganisation") or {}
+    return home_org.get("id"), home_org.get("logoUrl"), away_org.get("id"), away_org.get("logoUrl")
+
+
+def _result_row(sc: dict, org, keys: list[str], grade_name: str, grade_order: int | None = None) -> dict | None:
     """One results-roundup row from a raw Grassroots scorecard, from the club's
     perspective (us / them / W·L·T / margin)."""
     ms = sc.get("matchSummary") or {}
@@ -266,10 +340,11 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str) -> dict | None:
             outcome = "T"
         break
 
-    opp_name = (opp_team.get("displayName") if opp_team else None) \
-        or ((opp_team or {}).get("owningOrganisation") or {}).get("name") or "OPPONENT"
+    opp_org = (opp_team or {}).get("owningOrganisation") or {}
+    opp_name = (opp_team.get("displayName") if opp_team else None) or opp_org.get("name") or "OPPONENT"
     return {
         "grade": (grade_name or "").upper(),
+        "gradeOrder": grade_order,
         "opp": strip_team_suffix(opp_name).upper(),
         "oppMono": _mono(opp_name),
         "us": us,
@@ -278,6 +353,10 @@ def _result_row(sc: dict, org, keys: list[str], grade_name: str) -> dict | None:
         "margin": _margin_from_text(ms.get("result") or ms.get("statusText")),
         "topBat": top_bat,
         "topBowl": top_bowl,
+        # Transient — resolved into "oppLogo" (and dropped) by the caller,
+        # once every row's crest is known, via one batched org lookup.
+        "_oppOrgId": opp_org.get("id"),
+        "_oppLogoRaw": opp_org.get("logoUrl"),
     }
 
 
@@ -286,6 +365,7 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
     Fixtures roundup posts."""
     fixtures = await org_grassroots_fixtures(db, org)
     keys = club_match_keys(org)
+    grade_orders = await _grade_display_orders(db, org.id)
     season = next((fx.get("season_name") for fx in fixtures if fx.get("season_name")), None)
     by_date: dict[str, dict] = {}
     for fx in fixtures:
@@ -300,15 +380,21 @@ async def social_fixtures(db: AsyncSession, org) -> dict:
         bucket = by_date.setdefault(day, {"date": day, "label": _label(day), "round": "", "fixtures": []})
         if not bucket["round"]:
             bucket["round"] = _round_label(fx.get("round"))
+        opp_org_id, opp_logo_raw = (fx.get("away_org_id"), fx.get("away_logo")) if ha == "H" \
+            else (fx.get("home_org_id"), fx.get("home_logo"))
         bucket["fixtures"].append({
             "grade": (fx.get("grade_name") or "").upper(),
+            "gradeOrder": grade_orders.get(fx.get("grade_id")),
             "opp": strip_team_suffix(opp).upper(),
             "oppMono": _mono(opp),
             "ha": ha,
             "time": _to_12h(fx.get("time")),
             "venue": (fx.get("venue") or "").upper(),
+            "_oppOrgId": opp_org_id,
+            "_oppLogoRaw": opp_logo_raw,
         })
     dates = sorted(by_date.values(), key=lambda d: d["date"])
+    await asyncio.gather(*[_finalize_opp_logos(db, d["fixtures"]) for d in dates])
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
 
@@ -323,6 +409,7 @@ async def social_results(db: AsyncSession, org) -> dict:
     # Keyed on the raw CA grade guid, which is what a discovered match carries,
     # NOT our own grades.id (the second column). See _current_grade_rows.
     grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
+    grade_orders = await _grade_display_orders(db, org.id)
     season = next((sname for *_, sname in rows if sname), None)
     since = (date.today() - timedelta(days=_RESULT_WINDOW_DAYS)).isoformat()
 
@@ -367,7 +454,8 @@ async def social_results(db: AsyncSession, org) -> dict:
     for m, sc in zip(kept, cards):
         if not isinstance(sc, dict):
             continue
-        row = _result_row(sc, org, keys, grade_name_by_guid.get(m.get("grade_id")) or "")
+        gid = m.get("grade_id")
+        row = _result_row(sc, org, keys, grade_name_by_guid.get(gid) or "", grade_orders.get(gid))
         if not row:
             continue
         day = m.get("played_at") or ""
@@ -376,6 +464,7 @@ async def social_results(db: AsyncSession, org) -> dict:
             bucket["round"] = _round_label(m.get("round"))
         bucket["results"].append(row)
     dates = sorted(by_date.values(), key=lambda d: d["date"], reverse=True)
+    await asyncio.gather(*[_finalize_opp_logos(db, d["results"]) for d in dates])
     return {"season": season, "club": _club_dict(org), "dates": dates}
 
 
@@ -575,6 +664,7 @@ async def _reference_round(db: AsyncSession, org, raw: str):
         "anchor_round": _match_round_name(anchor),
         "matches": kept,
         "grade_name_by_guid": grade_name_by_guid,
+        "grade_orders": await _grade_display_orders(db, org.id),
         "season": season,
         "keys": keys,
     }
@@ -600,21 +690,28 @@ async def social_fixtures_for_reference(db: AsyncSession, org, raw: str) -> dict
             ha, opp = "A", home
         else:
             ha, opp = "H", away
+        home_org_id, home_logo, away_org_id, away_logo = _match_logos(m)
+        opp_org_id, opp_logo_raw = (away_org_id, away_logo) if ha == "H" else (home_org_id, home_logo)
         day, tm = _match_day_time(m)
         rows.append((day, tm, {
             "grade": (ctx["grade_name_by_guid"].get(guid) or "").upper(),
+            "gradeOrder": ctx["grade_orders"].get(guid),
             "opp": strip_team_suffix(opp).upper(),
             "oppMono": _mono(opp),
             "ha": ha,
             "time": _to_12h(tm),
             "venue": (((m.get("venue") or {}).get("name")) or "").upper(),
+            "_oppOrgId": opp_org_id,
+            "_oppLogoRaw": opp_logo_raw,
         }))
     rows.sort(key=lambda r: (r[0], r[1]))
+    fixtures = [r[2] for r in rows]
+    await _finalize_opp_logos(db, fixtures)
     bucket = {
         "date": ctx["anchor_day"],
         "label": _label(ctx["anchor_day"]),
         "round": _round_label(ctx["anchor_round"]),
-        "fixtures": [r[2] for r in rows],
+        "fixtures": fixtures,
     }
     return {"kind": "round", "season": ctx["season"], "club": _club_dict(org), "dates": [bucket]}
 
@@ -643,12 +740,13 @@ async def social_results_for_reference(db: AsyncSession, org, raw: str) -> dict:
     for (guid, m), sc in zip(completed, cards):
         if not isinstance(sc, dict):
             continue
-        row = _result_row(sc, org, ctx["keys"], ctx["grade_name_by_guid"].get(guid) or "")
+        row = _result_row(sc, org, ctx["keys"], ctx["grade_name_by_guid"].get(guid) or "", ctx["grade_orders"].get(guid))
         if row:
             results.append(row)
     if not results:
         return {"kind": "no_results", "message": "No completed matches found for that round yet."}
     results.sort(key=lambda r: r["grade"])
+    await _finalize_opp_logos(db, results)
     bucket = {
         "date": ctx["anchor_day"],
         "label": _label(ctx["anchor_day"]),

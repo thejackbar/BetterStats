@@ -358,9 +358,16 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
     """Upcoming (and optionally live) fixtures for one grade, normalised.
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
-    ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id}``
-    dicts for matches that haven't reached a terminal state and are scheduled
-    today-or-later.
+    ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id,
+    home_org_id, away_org_id, home_logo, away_logo}`` dicts for matches that
+    haven't reached a terminal state and are scheduled today-or-later.
+
+    ``*_org_id``/``*_logo`` come from each team's ``owningOrganisation`` — the
+    actual club, which holds the crest (a grade "team" is often a sponsor
+    name, not the club). Same field the scorecard/lineups team-logo lookups
+    already read (see the CLAUDE.md "Club crests, live from Grassroots"
+    note) — pulled here too since a fixtures/results round pull is otherwise
+    the one surface with no crest at all.
     """
     matches = await get_grade_matches(grade_id)
     today = date.today().isoformat()
@@ -381,18 +388,24 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
         if not day or day < today:
             continue
         teams = m.get("teams") or []
-        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
-        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        home_t = next((t for t in teams if t.get("isHome")), None)
+        away_t = next((t for t in teams if not t.get("isHome")), None)
+        home_org = (home_t or {}).get("owningOrganisation") or {}
+        away_org = (away_t or {}).get("owningOrganisation") or {}
         out.append({
             "id": m.get("id"),
-            "home_team": home,
-            "away_team": away,
+            "home_team": (home_t or {}).get("displayName"),
+            "away_team": (away_t or {}).get("displayName"),
             "played_at": day,
             "time": dt[11:16] if len(dt) >= 16 else None,
             "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
             "grade_id": grade_id,
+            "home_org_id": home_org.get("id"),
+            "away_org_id": away_org.get("id"),
+            "home_logo": home_org.get("logoUrl"),
+            "away_logo": away_org.get("logoUrl"),
         })
     return out
 
