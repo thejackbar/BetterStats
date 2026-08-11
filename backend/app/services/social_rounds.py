@@ -391,8 +391,8 @@ _PLAYHQ_REF_MESSAGE = (
     "and paste that link instead."
 )
 _NOT_FOUND_MESSAGE = (
-    "That match isn't in your club's current-season grades. Check the link is "
-    "one of your club's matches."
+    "We couldn't match that to one of your club's matches. Check the link is "
+    "for a game your club played."
 )
 
 
@@ -404,7 +404,14 @@ def _match_day_time(m: dict) -> tuple[str, str]:
 
 
 def _match_home_away(m: dict) -> tuple[str, str]:
-    teams = m.get("teams") or []
+    """Prefers ``matchSummary.teams`` (the plain ``/scores/matches/{id}``
+    detail carries ``displayName``/``isHome`` only there — its top-level
+    ``teams`` is the roster/team-list shape, no names at all) and falls back
+    to the top-level array, which is where a grade-matches LIST item (from
+    ``/scores/grades/{id}/matches``) carries them instead. One function reads
+    both shapes this module deals with."""
+    ms_teams = (m.get("matchSummary") or {}).get("teams") or []
+    teams = ms_teams or (m.get("teams") or [])
     home = next((t.get("displayName") for t in teams if t.get("isHome")), None) or ""
     away = next((t.get("displayName") for t in teams if not t.get("isHome")), None) or ""
     return home, away
@@ -414,12 +421,66 @@ def _match_round_name(m: dict) -> str:
     return ((m.get("round") or {}).get("name") or "").strip()
 
 
+async def _grade_season(db: AsyncSession, org_id, grade_guid: str):
+    """``(season_id, season_name)`` for the org's own season owning a grade
+    guid — searched across the org's WHOLE grade history, not just the
+    latest-by-year season. Returns ``None`` when the guid isn't one of this
+    org's grades at all."""
+    res = await db.execute(
+        text(
+            """
+            SELECT s.id, s.name
+            FROM grades g
+            JOIN seasons s ON s.id = g.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID)
+              AND COALESCE(g.grassroots_id, g.id::text) = :guid
+            LIMIT 1
+            """
+        ),
+        {"org": str(org_id), "guid": grade_guid},
+    )
+    row = res.first()
+    return (row.id, row.name) if row else None
+
+
+async def _grade_rows_for_season(db: AsyncSession, org_id, season_id) -> list[tuple]:
+    """``[(grade_guid, grade_id, grade_name, season_name)]`` for one EXPLICIT
+    season — the round-anchored sibling of ``_current_grade_rows``, which
+    always means "the org's latest season by year". A pasted link may anchor
+    an older season (that's the whole point of the link path — the no-link
+    pulls already cover "latest"), so this looks the season up by id
+    instead of assuming it's the newest one."""
+    res = await db.execute(
+        text(
+            """
+            SELECT DISTINCT COALESCE(g.grassroots_id, g.id::text) AS guid,
+                   g.id AS grade_id,
+                   COALESCE(g.display_name_override, g.name) AS grade_name,
+                   s.name AS season_name
+            FROM grades g
+            JOIN seasons s ON s.id = g.season_id
+            WHERE s.organisation_id = CAST(:org AS UUID) AND s.id = CAST(:season AS UUID)
+            """
+        ),
+        {"org": str(org_id), "season": str(season_id)},
+    )
+    return [(r.guid, r.grade_id, r.grade_name, r.season_name) for r in res]
+
+
 async def _reference_round(db: AsyncSession, org, raw: str):
     """Resolve a pasted match reference into the anchor match plus every club
     match in the same round.
 
+    The anchor is fetched DIRECTLY by id (``gr.get_match_detail``) rather than
+    found by fanning out across the org's "current" (latest-by-year) season's
+    grades — a pasted link is exactly for the case the no-link pulls can't
+    reach: an off-season or a past round, which by definition may belong to
+    an OLDER season than whatever's currently "latest". The anchor's own
+    grade tells us which season it's actually in, and that season's grades
+    (not "the latest one") are what get searched for the rest of the round.
+
     Returns ``(payload, None)`` when the reference can't anchor a round (the
-    payload is the invalid/playhq/not_found/empty dict to return as-is), or
+    payload is the invalid/playhq/not_found dict to return as-is), or
     ``(None, ctx)`` where ctx carries the anchor, the round's club matches
     (each ``(grade_guid, raw_match)``), the grade-name map and the season.
     """
@@ -429,12 +490,28 @@ async def _reference_round(db: AsyncSession, org, raw: str):
     if ref.get("playhq_code"):
         return {"kind": "playhq", "message": _PLAYHQ_REF_MESSAGE}, None
 
-    rows = await _current_grade_rows(db, org.id)
-    if not rows:
-        return {"kind": "round", "season": None, "club": _club_dict(org), "dates": []}, None
-    grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
-    season = next((sname for *_, sname in rows if sname), None)
+    match_id = ref.get("match_id") or ""
+    anchor = await gr.get_match_detail(match_id)
+    if not anchor:
+        return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
+
+    grade_guid = (anchor.get("grade") or {}).get("id")
+    season_row = await _grade_season(db, org.id, grade_guid) if grade_guid else None
+    if not season_row:
+        return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
+    season_id, season = season_row
+
     keys = club_match_keys(org)
+    anchor_home, anchor_away = _match_home_away(anchor)
+    if not any(k in anchor_home.lower() or k in anchor_away.lower() for k in keys):
+        # A real match, in one of our grades, but not one of our sides — a
+        # grade is a whole competition, not club-exclusive.
+        return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
+
+    rows = await _grade_rows_for_season(db, org.id, season_id)
+    if not rows:
+        return {"kind": "round", "season": season, "club": _club_dict(org), "dates": []}, None
+    grade_name_by_guid = {guid: gname for guid, _, gname, _ in rows}
 
     # Full grade match lists (any status, any date) — the same endpoint the
     # fixtures/results discovery reads, minus their status/date windows, so an
@@ -449,11 +526,6 @@ async def _reference_round(db: AsyncSession, org, raw: str):
             continue
         for m in lst:
             all_matches.append((guid, m))
-
-    target = (ref.get("match_id") or "").lower()
-    anchor = next((m for _, m in all_matches if (m.get("id") or "").lower() == target), None)
-    if not anchor:
-        return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
 
     anchor_day, _ = _match_day_time(anchor)
     try:
