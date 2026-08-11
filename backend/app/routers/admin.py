@@ -1097,12 +1097,18 @@ async def social_match_lookup(q: str = "", db: AsyncSession = Depends(get_db), c
 
 
 @router.get("/social/fixtures", dependencies=[Depends(require_module("socials"))])
-async def get_social_fixtures(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+async def get_social_fixtures(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Upcoming/live fixtures across the club's grades, grouped by match-day, for
     the BetterSocials Fixtures roundup posts (the multi-match analogue of the
-    single-scorecard import)."""
-    from app.services.social_rounds import social_fixtures
+    single-scorecard import).
+
+    ``q`` (optional) is a pasted match link/ID that anchors the pull on that
+    match's round instead — every club grade's match that weekend, whatever
+    its status, so an off-season or already-started round is still buildable."""
+    from app.services.social_rounds import social_fixtures, social_fixtures_for_reference
     try:
+        if q.strip():
+            return await social_fixtures_for_reference(db, club, q)
         return await social_fixtures(db, club)
     except HTTPException:
         raise
@@ -1112,18 +1118,39 @@ async def get_social_fixtures(db: AsyncSession = Depends(get_db), club=Depends(g
 
 
 @router.get("/social/results", dependencies=[Depends(require_module("socials"))])
-async def get_social_results(db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+async def get_social_results(q: str = "", db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
     """Recent completed results across the club's grades, grouped by match-day,
     for the BetterSocials Results roundup posts. Scores come from each match's
-    scorecard — the same Grassroots source as the single-scorecard import."""
-    from app.services.social_rounds import social_results
+    scorecard — the same Grassroots source as the single-scorecard import.
+
+    ``q`` (optional) is a pasted match link/ID that anchors the pull on that
+    match's round instead — the whole round's completed club matches, however
+    far back, not just the last 90 days."""
+    from app.services.social_rounds import social_results, social_results_for_reference
     try:
+        if q.strip():
+            return await social_results_for_reference(db, club, q)
         return await social_results(db, club)
     except HTTPException:
         raise
     except Exception as exc:
         log.exception("social results import failed for %s", getattr(club, "id", "?"))
         raise HTTPException(500, f"Results import error: {exc}") from exc
+
+
+@router.get("/social/potm/{match_id}", dependencies=[Depends(require_module("socials"))])
+async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), club=Depends(get_current_club)):
+    """Player-of-the-match shortlist for one match — our side's batting, bowling
+    and fielding lines from the Grassroots scorecard, ranked by a simple points
+    blend, for the BetterSocials POTM post."""
+    from app.services.social_rounds import social_potm
+    try:
+        return await social_potm(db, club, match_id)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.exception("social potm %s failed for %s", match_id, getattr(club, "id", "?"))
+        raise HTTPException(500, f"Player of the match error: {exc}") from exc
 
 
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
