@@ -1527,8 +1527,12 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         total_wkts = int(wkts_raw) if wkts_raw is not None else sum(
             1 for b in batting if not b["notOut"] and not b["didNotBat"]
         )
-        overs_raw = inn.get("totalOvers") or inn.get("overs")
-        overs = _overs_str(overs_raw) if overs_raw else "0"
+        # The innings' own total-overs field is "oversBowled" (confirmed live:
+        # 39.3 / 39.0) — "totalOvers"/"overs" don't exist on this payload at
+        # all, so this always fell back to "0". Same field the overs-allotment
+        # guess below already reads correctly off each innings.
+        overs_raw = inn.get("oversBowled")
+        overs = _overs_str(overs_raw) if overs_raw is not None else "0"
         try:
             o_float = float(str(overs_raw or 0))
             whole = int(o_float)
