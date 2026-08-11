@@ -750,13 +750,21 @@ async def query_player_career(
                     COALESCE(SUM(pss.catches_non_wk), 0)                                         AS catches_non_wk,
                     COALESCE(SUM(pss.run_outs), 0)                                               AS run_outs,
                     COALESCE(SUM(pss.stumpings), 0)                                              AS stumpings
-                FROM player_season_stats pss
+                -- The effective view, not the base table: imported history
+                -- (BetterImport deltas) and manual season/career adjustments
+                -- only exist as view branches, and reading the base table
+                -- left every one of them out of StatLab (the reported
+                -- 1970/71-import case). The view's api branch already carries
+                -- the migration-060 cross-club guard.
+                FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
-                JOIN seasons s ON s.id = pss.season_id
-                -- Scope to this org's seasons: a CA participant GUID shared
-                -- across clubs can attach another club's season rows to the
-                -- same player (see migration 060).
-                WHERE p.organisation_id = :org_id AND s.organisation_id = :org_id
+                -- LEFT: career-level rows (a manual career adjustment, an
+                -- import career residual) have no season and must still count
+                -- toward career totals, exactly as the player profile counts
+                -- them. Season-keyed rows stay scoped to this org's seasons.
+                LEFT JOIN seasons s ON s.id = pss.season_id
+                WHERE p.organisation_id = :org_id
+                  AND (pss.season_id IS NULL OR s.organisation_id = :org_id)
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             )
             SELECT * FROM agg
@@ -877,7 +885,23 @@ async def query_player_season(
             )
             params["ctx_season_id"] = context["season_id"]
         sql = f"""
-            WITH agg AS (
+            WITH per_pss AS (
+                -- The effective view, not the base table: an imported season
+                -- delta or manual season adjustment only exists as a view
+                -- branch (see query_player_career's own note above). Season
+                -- aliasing is applied here too, so a merged season sums every
+                -- source under its one canonical row, matching
+                -- get_season_by_season's own merge-aware behaviour.
+                SELECT
+                    pss.*,
+                    COALESCE(sa.canonical_season_id, pss.season_id) AS canonical_season_id
+                FROM v_effective_player_season_stats pss
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = pss.season_id
+                 AND sa.undone_at IS NULL
+                WHERE pss.season_id IS NOT NULL
+            ),
+            agg AS (
                 SELECT
                     p.id::text                                                                    AS player_id,
                     COALESCE(p.display_name_override, p.name)                                    AS player_name,
@@ -885,40 +909,41 @@ async def query_player_season(
                     s.name                                                                        AS season_name,
                     COALESCE(s.year, 0)                                                           AS season_year,
                     1                                                                             AS seasons_played,
-                    COALESCE(pss.matches, 0)                                                      AS matches,
-                    COALESCE(pss.batting_innings, 0)                                              AS batting_innings,
-                    COALESCE(pss.runs, 0)                                                         AS runs,
-                    COALESCE(pss.not_outs, 0)                                                     AS not_outs,
-                    COALESCE(pss.balls_faced, 0)                                                  AS balls_faced,
-                    pss.batting_average                                                            AS batting_average,
-                    pss.batting_strike_rate                                                        AS batting_strike_rate,
-                    pss.high_score                                                                 AS high_score,
-                    COALESCE(pss.fifties, 0)                                                      AS fifties,
-                    COALESCE(pss.hundreds, 0)                                                     AS hundreds,
-                    COALESCE(pss.ducks, 0)                                                        AS ducks,
-                    COALESCE(pss.fours, 0)                                                        AS fours,
-                    COALESCE(pss.sixes, 0)                                                        AS sixes,
-                    COALESCE(pss.bowling_innings, 0)                                              AS bowling_innings,
-                    COALESCE(pss.wickets, 0)                                                      AS wickets,
-                    COALESCE(pss.overs, 0)                                                        AS overs,
-                    COALESCE(pss.runs_conceded, 0)                                                AS runs_conceded,
-                    pss.bowling_average                                                            AS bowling_average,
-                    pss.bowling_economy                                                            AS bowling_economy,
-                    pss.bowling_strike_rate                                                        AS bowling_strike_rate,
-                    COALESCE(pss.five_wicket_innings, 0)                                          AS five_wicket_innings,
-                    COALESCE(pss.maidens, 0)                                                      AS maidens,
-                    pss.best_bowling_wickets                                                       AS best_bowling_wickets,
-                    COALESCE(pss.wides, 0)    AS wides,
-                    COALESCE(pss.no_balls, 0) AS no_balls,
-                    COALESCE(pss.catches, 0)                                                      AS catches,
-                    COALESCE(pss.catches_wk, 0)                                                    AS catches_wk,
-                    COALESCE(pss.catches_non_wk, 0)                                                AS catches_non_wk,
-                    COALESCE(pss.run_outs, 0)                                                     AS run_outs,
-                    COALESCE(pss.stumpings, 0)                                                    AS stumpings
-                FROM player_season_stats pss
+                    COALESCE(SUM(pss.matches), 0)                                                 AS matches,
+                    COALESCE(SUM(pss.batting_innings), 0)                                         AS batting_innings,
+                    COALESCE(SUM(pss.runs), 0)                                                    AS runs,
+                    COALESCE(SUM(pss.not_outs), 0)                                                AS not_outs,
+                    COALESCE(SUM(pss.balls_faced), 0)                                             AS balls_faced,
+                    ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+                    ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)     AS batting_strike_rate,
+                    MAX(pss.high_score)                                                            AS high_score,
+                    COALESCE(SUM(pss.fifties), 0)                                                 AS fifties,
+                    COALESCE(SUM(pss.hundreds), 0)                                                AS hundreds,
+                    COALESCE(SUM(pss.ducks), 0)                                                   AS ducks,
+                    COALESCE(SUM(pss.fours), 0)                                                   AS fours,
+                    COALESCE(SUM(pss.sixes), 0)                                                   AS sixes,
+                    COALESCE(SUM(pss.bowling_innings), 0)                                         AS bowling_innings,
+                    COALESCE(SUM(pss.wickets), 0)                                                 AS wickets,
+                    COALESCE(SUM(pss.overs), 0)                                                   AS overs,
+                    COALESCE(SUM(pss.runs_conceded), 0)                                           AS runs_conceded,
+                    ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)       AS bowling_average,
+                    ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS bowling_economy,
+                    ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)       AS bowling_strike_rate,
+                    COALESCE(SUM(pss.five_wicket_innings), 0)                                     AS five_wicket_innings,
+                    COALESCE(SUM(pss.maidens), 0)                                                 AS maidens,
+                    MAX(pss.best_bowling_wickets)                                                  AS best_bowling_wickets,
+                    COALESCE(SUM(pss.wides), 0)    AS wides,
+                    COALESCE(SUM(pss.no_balls), 0) AS no_balls,
+                    COALESCE(SUM(pss.catches), 0)                                                 AS catches,
+                    COALESCE(SUM(pss.catches_wk), 0)                                               AS catches_wk,
+                    COALESCE(SUM(pss.catches_non_wk), 0)                                           AS catches_non_wk,
+                    COALESCE(SUM(pss.run_outs), 0)                                                AS run_outs,
+                    COALESCE(SUM(pss.stumpings), 0)                                               AS stumpings
+                FROM per_pss pss
                 JOIN players p ON p.id = pss.player_id
-                JOIN seasons s ON s.id = pss.season_id
+                JOIN seasons s ON s.id = pss.canonical_season_id
                 WHERE p.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
+                GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
             )
             SELECT * FROM agg
             {where_sql}
@@ -1100,12 +1125,16 @@ async def query_family_career(
             FROM families f
             JOIN family_members fm ON fm.family_id = f.id
             JOIN players p ON p.id = fm.player_id
-            LEFT JOIN player_season_stats pss ON pss.player_id = p.id
+            -- The effective view, not the base table: an imported career/
+            -- season delta or manual adjustment only exists as a view branch
+            -- (see query_player_career's own note). A career-level residual
+            -- has no season_id at all and must still be kept.
+            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
                 -- Only this org's seasons (shared cross-club GUID guard, migration 060)
-                AND EXISTS (
+                AND (pss.season_id IS NULL OR EXISTS (
                     SELECT 1 FROM seasons s
                     WHERE s.id = pss.season_id AND s.organisation_id = :org_id
-                )
+                ))
             WHERE f.organisation_id = :org_id
             GROUP BY f.id, f.name
         )
@@ -1159,7 +1188,10 @@ async def query_family_season(
             FROM families f
             JOIN family_members fm ON fm.family_id = f.id
             JOIN players p ON p.id = fm.player_id
-            JOIN player_season_stats pss ON pss.player_id = p.id
+            -- The effective view: see query_family_career's own note. A
+            -- career-level residual has no season_id and is naturally
+            -- excluded by the INNER JOIN to seasons below, same as before.
+            JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id
             WHERE f.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
             GROUP BY f.id, f.name, s.id, s.name, s.year
