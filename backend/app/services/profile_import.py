@@ -21,6 +21,7 @@ from difflib import SequenceMatcher
 from typing import Optional
 
 from app.services.import_ingest import _norm  # shared header normaliser
+from app.services.import_ingest import NAME_FORMAT_LABELS, resolve_row_name  # noqa: F401 — re-exported for callers
 
 
 # ── importable profile fields ────────────────────────────────────────────────
@@ -40,6 +41,8 @@ PLAYER_FIELDS = ("email", "phone", "gender", "player_role", "batting_hand",
 
 FIELD_LABELS = {
     "player_name": "Player name",
+    "player_first_name": "First name",
+    "player_last_name": "Surname",
     "email": "Email",
     "phone": "Phone / mobile",
     "squad": "Squad (selection pool)",
@@ -65,7 +68,9 @@ GENDER_VALUES = ["Male", "Female"]
 # Lower-cased, punctuation-normalised header synonyms for auto-mapping. The
 # wizard always lets the user confirm/override, so a near miss is cheap.
 SYNONYMS = {
-    "player_name": ["player", "name", "player name", "full name", "member", "members", "first last", "surname"],
+    "player_name": ["player", "name", "player name", "full name", "member", "members", "first last"],
+    "player_first_name": ["first name", "given name", "christian name", "forename", "firstname", "fname"],
+    "player_last_name": ["surname", "last name", "family name", "lastname", "lname"],
     "email": ["email", "email address", "e mail", "mail", "contact email", "emails"],
     "phone": ["phone", "mobile", "mobile number", "phone number", "contact number", "contact",
               "cell", "cell phone", "ph", "telephone", "tel", "mob", "mobile phone"],
