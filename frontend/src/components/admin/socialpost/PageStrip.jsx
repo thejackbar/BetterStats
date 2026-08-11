@@ -4,7 +4,10 @@
 //   count, index, onGoTo(i), onAdd(), onDuplicate(), onRemove(i)
 // onDuplicate is optional — derived-page modes (fixtures/results roundups
 // spread over N pages) have nothing to duplicate, so the DUP button hides.
-export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, onRemove }) {
+// `fixed` (e.g. the scorecard's home/away split) means the page count can
+// never change — no ADD button, no per-page delete badge, just the numbered
+// tabs to switch between. onAdd/onRemove are unused in that mode.
+export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, onRemove, fixed = false }) {
   return (
     <div className="absolute -left-[84px] top-0 flex flex-col items-center gap-1.5">
       <span className="font-mono text-[8px] tracking-wide2 text-pb-faintest mb-0.5">PAGES</span>
@@ -21,7 +24,7 @@ export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, on
             style={active ? { borderColor: 'var(--pb-accent)' } : undefined}
           >
             {i + 1}
-            {count > 1 && (
+            {!fixed && count > 1 && (
               <span
                 role="button"
                 title="Delete page"
@@ -33,11 +36,13 @@ export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, on
         )
       })}
 
-      <button
-        onClick={onAdd}
-        title="Add a page"
-        className="w-[46px] h-[30px] rounded-md border border-dashed border-pb-hairline2 text-pb-faint hover:text-pb-text hover:border-pb-accent text-[13px] transition-colors"
-      >+</button>
+      {!fixed && (
+        <button
+          onClick={onAdd}
+          title="Add a page"
+          className="w-[46px] h-[30px] rounded-md border border-dashed border-pb-hairline2 text-pb-faint hover:text-pb-text hover:border-pb-accent text-[13px] transition-colors"
+        >+</button>
+      )}
       {onDuplicate && (
         <button
           onClick={onDuplicate}
