@@ -1,5 +1,37 @@
 # BetterStats — Claude Session Notes
 
+## Season list tidy-up script (v9.19.4.2, Aug 2026)
+
+Reported for Yarraville: the seasons page was a mix of synced "Summer 1968/69"
+rows and bare "1968/69" rows the historical import created (grassroots_id NULL,
+no year), interleaved and duplicated. **`python -m app.scripts.cleanup_seasons
+<org-id-or-slug>`** (dry-run by default, `--apply` to act) makes the list
+uniform:
+
+- **Only manually-created seasons are ever written** (`grassroots_id IS NULL` —
+  the documented "not from a sync" marker). A synced season is never renamed,
+  re-yeared or aliased, and the merge target is chosen among synced siblings
+  first.
+- **A duplicate is MERGED, not renamed** — an alias row through the club's own
+  Merge Seasons machinery (`season_aliases`), so stats aggregate under the
+  canonical season and the merge is undoable from Admin → Seasons. The script
+  mirrors the endpoint's chain rule: anything previously merged INTO the manual
+  season is re-pointed at the new canonical so resolution stays single-hop.
+- **A manual season with no synced sibling is renamed** to "Summer YYYY/YY" and
+  given its `year` (which is what fixes the sort order — `_season_sort_key`
+  reads the 4-digit year out of the name, and `resolve_season_filter` expands
+  year siblings). Two manual seasons for one year: the exact-named or fullest
+  one becomes canonical, the other is aliased into it.
+- **Two things it refuses to guess**: a year with several synced seasons and
+  none named plain "Summer YYYY/YY" (e.g. a masters comp under its own CA
+  season id — merging into the wrong one would co-mingle comps), and a manual
+  name with no recognisable "YYYY/YY" token. Both are reported and left alone.
+- **Verified against a real Postgres** (13 checks: the merge with data counts,
+  the rename+year, `1960-61` dash form, year-fill on an already-right name,
+  two-manual collapse, the ambiguous-synced skip, exact-name preference among
+  two synced, the chain re-point, a pre-existing alias untouched, another
+  club untouched, idempotent re-run, slug and org-id resolution).
+
 ## Undoing a stats import deletes the players it minted (migration 234, v9.19.4.1, Aug 2026)
 
 Reported from the Leeming Spartans demo: a mis-mapped BetterImport upload
