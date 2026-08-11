@@ -370,7 +370,7 @@ export default function Directory({ st, patch, narrow }) {
                 The panels below cover the everyday case (add a role, log hours,
                 record a qualification, link a family); these are where the
                 catalogues and bulk work live. */}
-            <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
+            <Link to="/admin/families" style={btnS}>Families</Link>
             <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
             <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
           </div>

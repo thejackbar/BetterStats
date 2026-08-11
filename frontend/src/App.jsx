@@ -347,7 +347,9 @@ export default function App() {
           <Route path="/admin/clubhouse/events/manage" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/directory/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
+          {/* Families moved back into BetterStats (/admin/families); the old
+              Clubhouse URL redirects so bookmarks and links still land. */}
+          <Route path="/admin/clubhouse/directory/families" element={<Navigate to="/admin/families" replace />} />
           <Route path="/admin/clubhouse/directory/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/directory/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
           {/* Old entry points, kept so bookmarks and links still land somewhere. */}
@@ -366,7 +368,7 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute requireCore><AdminFamilies /></ProtectedRoute>} />
           <Route path="/admin/committee" element={<ProtectedRoute><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />

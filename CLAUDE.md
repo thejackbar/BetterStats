@@ -1,5 +1,44 @@
 # BetterStats — Claude Session Notes
 
+## Families is a BetterStats tool again, and a suggestion is opted INTO (v9.19.7, Aug 2026)
+
+Families moved into BetterClubhouse with the v9.3.0 merge, which put it behind a
+module a club may not hold — but a family grouping is Core data (it is a StatLab
+player filter, `PLAYER_CONTEXT_FILTERS` in `services/statlab.py`), so it belongs
+with Players and Seasons.
+
+- **`/admin/families` is the screen again**, under BetterStats → Club Data.
+  `AdminFamilies.jsx` renders in `BetterStatsLayout` and the route is
+  `requireCore`, matching every other Core tool. That URL previously mounted the
+  Clubhouse Directory; **`/admin/clubhouse/directory/families` now redirects to
+  it**, so the Directory's own Families button and any bookmark still land.
+  `BetterStatsLayout` had to start forwarding `caption` to `ModuleLayout` — it
+  accepted only `title`, so the screen's mono subtitle was being dropped.
+- **The nav item carries `MANAGE_FAMILIES`, the same capability
+  `routers/families.py` enforces** — the rule the Clubhouse note below sets, and
+  it holds across modules.
+- **The Directory keeps its per-person family panel.** Only the setup screen
+  moved; `dirCreateFamily`/`dirAddToFamily` are untouched, and a person's family
+  is still read and edited where that person is.
+- **A suggestion now starts with NOBODY selected.** It used to select every
+  player sharing the surname and ask the admin to deselect the strangers, which
+  makes the destructive reading ("these people are a family") the default and
+  the correct one an act of removal. Two unrelated Matthews households are
+  ordinary, so **opting a player IN is the deliberate act** and the confirm
+  button is dead until someone is picked ("Select players above" → "Confirm —
+  create with N"). An unselected player is drawn plain, not struck through — it
+  means "not chosen yet", not "excluded".
+- **Anyone left unselected stays in the suggestion list** and comes back on the
+  next refresh, which is what lets one surname be split into two families across
+  two passes. That behaviour is unchanged; the card now says so in place of the
+  old "N will be re-suggested".
+- **No backend change** — same endpoints, same payloads, same capability.
+- **Driven in Chromium** (18 checks: the BetterStats shell and sidebar item, the
+  old URL redirecting, the confirm button disabled with nothing selected and its
+  label at each count, select-all/clear, the not-selected hint's singular and
+  plural, both create and add-to-existing paths, no page errors, no overflow at
+  390px).
+
 ## Season list tidy-up script (v9.19.4.2, Aug 2026)
 
 Reported for Yarraville: the seasons page was a mix of synced "Summer 1968/69"

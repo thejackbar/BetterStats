@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import { api } from '../../lib/api'
-import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
+import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import { FilterPill } from '../../components/admin/ui'
 import Dropdown from '../../components/Dropdown'
 
@@ -541,13 +541,12 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
   const [adding, setAdding] = useState(false)
   const [familyName, setFamilyName] = useState(`${suggestion.surname_display} Family`)
   const [chosenFamilyId, setChosenFamilyId] = useState('')
-  // All players selected by default — toggling lets the admin split a
-  // mixed surname group (e.g. two unrelated Matthews families) into one
-  // family at a time. Unselected players stay in the suggestion list and
-  // come back on the next refresh.
-  const [selectedIds, setSelectedIds] = useState(
-    () => new Set(suggestion.players.map(p => p.id))
-  )
+  // Nobody is selected up front — the admin picks who actually belongs to
+  // the family, then confirms. A shared surname is only a hint (two
+  // unrelated Matthews households are common), so opting people IN is the
+  // deliberate act; anyone left unselected stays in the suggestion list and
+  // comes back on the next refresh.
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
 
   function toggle(id) {
     setSelectedIds(prev => {
@@ -609,7 +608,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
   }
 
   const playerCount = suggestion.players.length
-  const partialSelection = selectedCount > 0 && selectedCount < playerCount
+  const leftBehind = playerCount - selectedCount
 
   return (
     <div className="pb-card p-4">
@@ -619,14 +618,14 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           <div className="text-pb-text font-semibold text-base">{suggestion.surname_display}</div>
         </div>
         <span className="font-mono text-[10px] text-pb-faint">
-          {selectedCount === playerCount
+          {selectedCount === 0
             ? `${playerCount} PLAYERS`
             : `${selectedCount} / ${playerCount} SELECTED`}
         </span>
       </div>
 
       <div className="font-mono text-[10px] text-pb-faintest mb-1.5">
-        Click a player to toggle. Unselected players stay in the suggestion list.
+        Select who belongs to this family, then confirm below. Anyone not selected stays in the suggestion list.
       </div>
       <div className="flex flex-wrap gap-1.5 mb-2">
         {suggestion.players.map(p => {
@@ -638,12 +637,12 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
               onClick={() => toggle(p.id)}
               className={`font-mono text-[10px] px-2 py-1 rounded border transition ${
                 on
-                  ? 'pb-hairline text-pb-text bg-pb-surface2'
-                  : 'border-dashed border-pb-faintest text-pb-faintest line-through bg-transparent hover:text-pb-faint'
+                  ? 'border-pb-accent/60 text-pb-text bg-pb-surface2'
+                  : 'pb-hairline text-pb-faint bg-transparent hover:text-pb-text hover:bg-pb-surface2'
               }`}
-              title={on ? 'Click to exclude from this family' : 'Click to include in this family'}
+              title={on ? 'Click to remove from this family' : 'Click to add to this family'}
             >
-              {p.name}
+              {on ? '✓ ' : ''}{p.name}
             </button>
           )
         })}
@@ -664,11 +663,11 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
           disabled={selectedCount === 0}
           className="font-mono text-[10px] text-pb-faint hover:text-pb-text disabled:opacity-30 disabled:hover:text-pb-faint"
         >
-          Select none
+          Clear selection
         </button>
-        {partialSelection && (
+        {selectedCount > 0 && leftBehind > 0 && (
           <span className="font-mono text-[10px] text-pb-accent ml-auto">
-            {playerCount - selectedCount} will be re-suggested
+            {leftBehind} not selected — {leftBehind === 1 ? 'stays' : 'stay'} suggested
           </span>
         )}
       </div>
@@ -688,7 +687,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
             className="w-full py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40"
             style={{ background: 'var(--pb-accent)' }}
           >
-            {creating ? 'Creating…' : `Create + add ${selectedCount}`}
+            {creating ? 'Creating…' : selectedCount === 0 ? 'Select players above' : `Confirm — create with ${selectedCount}`}
           </button>
         </div>
 
@@ -707,7 +706,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
             disabled={adding || !chosenFamilyId || selectedCount === 0}
             className="w-full py-1.5 rounded text-[12.5px] font-semibold border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
           >
-            {adding ? 'Adding…' : `Add ${selectedCount}`}
+            {adding ? 'Adding…' : selectedCount === 0 ? 'Select players above' : `Confirm — add ${selectedCount}`}
           </button>
         </div>
       </div>
@@ -792,13 +791,13 @@ export default function AdminFamilies() {
   }
 
   if (!orgId) return (
-    <BetterClubManagerLayout title="Families" caption="Players grouped into households">
+    <BetterStatsLayout title="Families" caption="Players grouped into households">
       <div className="font-mono text-[11px] text-pb-faint">Loading…</div>
-    </BetterClubManagerLayout>
+    </BetterStatsLayout>
   )
 
   return (
-    <BetterClubManagerLayout title="Families" caption="Players grouped into households">
+    <BetterStatsLayout title="Families" caption="Players grouped into households">
       <div className="max-w-4xl">
         <div className="flex flex-wrap items-end justify-between gap-3 mb-1">
           {seasons.length > 0 && (
@@ -895,7 +894,7 @@ export default function AdminFamilies() {
             ) : (
               <>
                 <div className="font-mono text-[10px] text-pb-faint mb-2">
-                  Players grouped by shared surname. These aren't guaranteed to be related — review and choose.
+                  Players grouped by shared surname. They aren't guaranteed to be related — select the ones who are, then confirm.
                 </div>
                 {suggestions.map(s => (
                   <SuggestionCard
@@ -911,6 +910,6 @@ export default function AdminFamilies() {
           </div>
         )}
       </div>
-    </BetterClubManagerLayout>
+    </BetterStatsLayout>
   )
 }

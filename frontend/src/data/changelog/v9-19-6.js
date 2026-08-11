@@ -1,7 +1,10 @@
 export default {
   version: 'v9.19.6',
   date: '2026-08-11',
-  sortKey: '2026-08-11T08:00:00Z',
+  // Must sort above v9.19.5's (future-dated) 2026-08-15T21:00:00Z key. The
+  // real 2026-08-11 timestamp sorted this release BELOW v9.19.5, so it read
+  // as older than the release it follows and SITE_VERSION stayed on v9.19.5.
+  sortKey: '2026-08-15T22:00:00Z',
   title: 'BetterPosts: build a whole round from one match link',
   items: [
     'Fixtures and Results posts can now be filled from any one match link. Paste a link from the round and every grade\'s game that weekend comes in, even off-season or for a past round where the live feed has nothing.',
