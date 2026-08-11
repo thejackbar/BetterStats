@@ -190,7 +190,7 @@ function RolloverModal({ seasonId, fromSeason, onClose, onDone }) {
     <Modal
       onClose={onClose}
       title={`Roll over from ${fromSeason.name}`}
-      subtitle={`Opens this season for every member that was in ${fromSeason.name}. Each member's tier is carried across, matched by name against this season's rate card, so seed or copy the rate card first.`}
+      subtitle={`Opens this season for every member that was in ${fromSeason.name}. Each member's tier is carried across, matched by name against this season's membership tiers, so seed or copy the tiers first.`}
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={go} disabled={busy}>{busy ? 'Rolling over…' : 'Roll over'}</Button>
@@ -354,7 +354,7 @@ export default function AdminFeesMembers() {
                   </p>
                   {data.members.length === 0 && (
                     <p className="font-mono text-[11px] text-pb-faint">
-                      Set up the <Link to="/admin/fees/schedule" className="text-pb-accent underline">Fee Schedule</Link>, then hit “Sync Match Days”.
+                      Set up the <Link to="/admin/fees/schedule" className="text-pb-accent underline">membership tiers</Link>, then hit “Sync Match Days”.
                     </p>
                   )}
                 </div>

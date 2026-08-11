@@ -27,7 +27,7 @@ function sortSeasons(seasons) {
   return seasons.filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0) || (b.name > a.name ? 1 : -1))
 }
 
-// ── Rate card ────────────────────────────────────────────────────────────────
+// ── Membership tiers (the per-season rate card) ──────────────────────────────
 function ScheduleRow({ row, onSaved, onDeleted }) {
   const toast = useToast()
   const [draft, setDraft] = useState(row)
@@ -212,13 +212,13 @@ export default function AdminFeeSchedule() {
 
   return (
     <BetterFeesLayout
-      title="Rate card"
+      title="Membership tiers"
       caption="What each kind of member pays"
       actions={<Button as={Link} to="/admin/fees/membership-types">Membership types</Button>}
     >
       <div className="max-w-4xl">
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
-          The membership rate card for a season. Each tier sets a one-off membership fee and a per-day match fee
+          The membership tiers for a season. Each tier sets a one-off membership fee and a per-day match fee
           (set match fee to 0 for Upfront tiers who prepay). Match fee owed = days played × the tier's per-day rate.
         </p>
 
@@ -232,7 +232,7 @@ export default function AdminFeeSchedule() {
         </div>
 
         {schedule === null ? (
-          <PbSpinner message="Loading rate card…" />
+          <PbSpinner message="Loading membership tiers…" />
         ) : (
           <>
             <div className="pb-card overflow-hidden mb-4">
@@ -257,7 +257,7 @@ export default function AdminFeeSchedule() {
 
             {schedule.length === 0 && (
               <div className="pb-card p-5 mb-8 flex flex-wrap items-center gap-3">
-                <span className="text-pb-dim text-sm flex-1 min-w-[200px]">No tiers yet. Seed the default Applecross rate card, or copy from another season.</span>
+                <span className="text-pb-dim text-sm flex-1 min-w-[200px]">No tiers yet. Seed the default tiers, or copy from another season.</span>
                 <Button variant="primary" onClick={seed}>Seed defaults</Button>
                 <Select defaultValue="" onChange={e => copyFrom(e.target.value)} className="!w-auto max-w-[220px]">
                   <option value="">Copy from season…</option>

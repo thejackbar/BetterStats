@@ -82,7 +82,7 @@ export default function ClubhouseToday() {
     rows.push({
       key: 'tier', tone: 'calm', count: counts.needsTier, area: 'Money',
       title: `${counts.needsTier === 1 ? 'A member has' : `${counts.needsTier} members have`} no tier`,
-      detail: 'Nothing is charged to a member until they sit on a rate-card tier.',
+      detail: 'Nothing is charged to a member until they sit on a membership tier.',
       actions: [{ label: 'Open accounts', to: '/admin/fees' }],
     })
   }

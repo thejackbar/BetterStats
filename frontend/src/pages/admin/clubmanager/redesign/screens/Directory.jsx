@@ -10,9 +10,16 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // player gets a member row lazily the first time ClubManager assigns them a
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
-// The segments list_people computes, each as a filter. Life member / Official /
-// Honorary were already worked out per person and simply had nowhere to be
-// filtered on, so a club could not pull up its life members.
+// The segments list_people computes, each as a filter.
+//
+// Honorary is deliberately NOT a pill. It is a BetterFees membership status
+// (fee_members.is_honorary — comped membership, optionally with an expiry),
+// not an honour, and nothing in the club's own awards has ever carried the
+// word. A club that does not run BetterFees cannot set it at all, so the pill
+// was permanently empty for most clubs while reading as a near-duplicate of
+// Life members. Someone who tracks it can still filter on the "Honorary
+// Member" membership type in the dropdown beside these, and the segment is
+// still shown as a chip on the person.
 const DIR_SEGS = [
   { seg: 'All', label: 'Everyone' },
   { seg: 'Player', label: 'Players' },
@@ -22,7 +29,6 @@ const DIR_SEGS = [
   { seg: 'External contact', label: 'External contacts' },
   { seg: 'Official', label: 'Officials' },
   { seg: 'Life member', label: 'Life members' },
-  { seg: 'Honorary', label: 'Honorary' },
 ]
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.

@@ -38,7 +38,7 @@ function buildNav({ modules, counts, storefront }) {
     { heading: 'Money' },
     { to: '/admin/fees', label: 'Accounts', icon: 'money', cap: CAP.MANAGE_FEES, module: 'fees', exact: true, badge: counts.owing },
     { to: '/admin/fees/payments', label: 'Payments', icon: 'list', cap: CAP.MANAGE_FEES, module: 'fees' },
-    { to: '/admin/fees/schedule', label: 'Rate card', icon: 'sheet', cap: CAP.MANAGE_FEES, module: 'fees' },
+    { to: '/admin/fees/schedule', label: 'Membership tiers', icon: 'sheet', cap: CAP.MANAGE_FEES, module: 'fees' },
 
     { heading: 'Stock' },
     { to: '/admin/merch/stock', label: 'Inventory', icon: 'list', cap: CAP.MANAGE_MERCH, module: 'merch', badge: counts.reorder },
