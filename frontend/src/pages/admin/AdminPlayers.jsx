@@ -204,7 +204,7 @@ export default function AdminPlayers() {
   const [teams, setTeams] = useState([])
   const [filter, setFilter] = useState('')
   const [scope, setScope] = useState('all') // all | local | overseas
-  const [range, setRange] = useState(RANGES[0].key)
+  const [range, setRange] = useState('ALL')
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
   const [showCreate, setShowCreate] = useState(false)
@@ -252,7 +252,7 @@ export default function AdminPlayers() {
 
   // What's actually shown — range slice unless searching (then all matches).
   const shown = useMemo(() => {
-    if (searching) return base
+    if (searching || range === 'ALL') return base
     return base.filter((p) => rangeOfName(nameOf(p)) === range)
   }, [base, searching, range])
 
@@ -271,7 +271,7 @@ export default function AdminPlayers() {
   }, [range, shown, scrollToLetter])
 
   const jumpTo = useCallback((letter) => {
-    if (!searching) {
+    if (!searching && range !== 'ALL') {
       const r = RANGES.find((rg) => letter >= rg.from && letter <= rg.to)
       if (r && r.key !== range) { pendingJump.current = letter; setRange(r.key); return }
     }
@@ -435,6 +435,11 @@ export default function AdminPlayers() {
           </div>
           {!searching && (
             <div className="pl-ranges">
+              <button
+                className={`pl-rangetab${range === 'ALL' ? ' on' : ''}`}
+                onClick={() => { setRange('ALL'); if (scrollRef.current) scrollRef.current.scrollTop = 0 }}>
+                All<i>{base.length}</i>
+              </button>
               {RANGES.map((r) => (
                 <button key={r.key}
                   className={`pl-rangetab${range === r.key ? ' on' : ''}${!rangeCounts[r.key] ? ' empty' : ''}`}
