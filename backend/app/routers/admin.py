@@ -1282,10 +1282,6 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     teams_raw = raw.get("teams") or []
     innings_list = raw.get("innings") or []
 
-    # Identify home team from matchSummary.teams[].isHome
-    summary_teams = match_summary.get("teams") or []
-    home_id = next((str(t.get("id", "")).lower() for t in summary_teams if t.get("isHome")), None)
-
     def find_team(tid):
         if tid:
             t = next((t for t in teams_raw if str(t.get("id", "")).lower() == tid), None)
@@ -1293,13 +1289,25 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
                 return t
         return teams_raw[0] if teams_raw else {}
 
+    # "home"/"away" below means "batted first" / "batted second", not the
+    # ground's literal home/away designation — which side has home ground is
+    # unrelated to who bats first (a team can win the toss and bat first away
+    # from home; the reported match had the away side batting first), and a
+    # proper scorebook reads left to right in batting order regardless of
+    # whose home ground it was. The frontend template already renders `home`
+    # on the left labelled "1ST INNINGS" and `away` on the right labelled
+    # "2ND INNINGS", so this is the one place that mapping has to be correct.
+    sorted_innings = sorted(
+        innings_list, key=lambda i: i.get("inningsOrder") or i.get("inningsNumber") or 1
+    )
+    home_inn = sorted_innings[0] if sorted_innings else {}
+    away_inn = sorted_innings[1] if len(sorted_innings) > 1 else {}
+    home_id = _team_id_from_inn(home_inn)
+    away_id = _team_id_from_inn(away_inn) or next(
+        (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None
+    )
     home_team_raw = find_team(home_id)
-    away_id = next((str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None)
     away_team_raw = find_team(away_id)
-
-    # Map innings to teams: home team batting = innings where battingTeamId == home_id
-    home_inn = next((i for i in innings_list if _team_id_from_inn(i) == home_id), innings_list[0] if innings_list else {})
-    away_inn = next((i for i in innings_list if _team_id_from_inn(i) != home_id), innings_list[1] if len(innings_list) > 1 else {})
 
     # Collect all participantIds to look up names from DB
     all_pids: set[str] = set()
@@ -1531,14 +1539,20 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         rr = round(total_runs / o_real, 2) if o_real > 0 else 0
         return str(total_runs), total_wkts, overs, str(rr)
 
-    def build_team(team_raw: dict, bat_inn: dict, bowl_inn: dict, default_color: str) -> dict:
-        # bat_inn  = innings where THIS team batted  → use for batting rows + extras + totals
-        # bowl_inn = innings where OPPONENT batted   → use for bowling rows (team bowled in opp innings)
-        batting = parse_batting(bat_inn.get("batting") or [])
-        bowling = parse_bowling(bowl_inn.get("bowling") or [])
+    def build_team(team_raw: dict, inn: dict, default_color: str) -> dict:
+        # inn = the innings THIS team batted — its own "batting" array is this
+        # team's card; its "bowling" array records whoever bowled THAT
+        # innings, i.e. the OPPONENT, which is exactly what a proper
+        # scorebook nests directly below a team's batting: not their own
+        # figures from the other innings, but the bowling that dismissed
+        # them. (Previously each side's card carried its OWN bowling from the
+        # innings it bowled, contradicting the "{OPPONENT} BOWLING" heading
+        # the template already renders above it.)
+        batting = parse_batting(inn.get("batting") or [])
+        bowling = parse_bowling(inn.get("bowling") or [])
         name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
         short = "".join(w[0] for w in name.split()[:3])
-        total, wickets, overs, rr = team_totals(bat_inn, batting)
+        total, wickets, overs, rr = team_totals(inn, batting)
         logo_url = (team_raw.get("logoUrl") or team_raw.get("logo") or
                     team_raw.get("imageUrl") or team_raw.get("image") or None)
         return {
@@ -1553,11 +1567,11 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
             "runRate": rr,
             "batting": batting,
             "bowling": bowling,
-            "extras": parse_extras(bat_inn),
+            "extras": parse_extras(inn),
         }
 
-    home = build_team(home_team_raw, bat_inn=home_inn, bowl_inn=away_inn, default_color="#1a4eb8")
-    away = build_team(away_team_raw, bat_inn=away_inn, bowl_inn=home_inn, default_color="#cc1f2c")
+    home = build_team(home_team_raw, inn=home_inn, default_color="#1a4eb8")
+    away = build_team(away_team_raw, inn=away_inn, default_color="#cc1f2c")
 
     # Fallback logo lookup: if GR didn't provide a logo, match against orgs in our DB
     if not home.get("logo"):
