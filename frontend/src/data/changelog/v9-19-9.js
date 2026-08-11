@@ -1,7 +1,8 @@
 export default {
-  version: 'v9.19.7',
+  version: 'v9.19.9',
   date: '2026-08-11',
-  sortKey: '2026-08-11T10:00:00Z',
+  // Must sort above v9.19.8's 2026-08-16T00:00:00Z key.
+  sortKey: '2026-08-16T00:30:00Z',
   title: 'BetterPosts fixtures/results order the grades your way, and crests fill in automatically',
   items: [
     'Grades → Order (Admin → Grades) is a new club-set reading order for your grades, moved with the same up/down arrows as BetterFootball\'s. Set it once and it drives the row order on BetterPosts\' Fixtures and Results roundup posts, instead of a best-guess reading of each grade\'s name.',
