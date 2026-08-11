@@ -1282,12 +1282,18 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     teams_raw = raw.get("teams") or []
     innings_list = raw.get("innings") or []
 
-    def find_team(tid):
+    def find_team(tid, exclude=None):
         if tid:
             t = next((t for t in teams_raw if str(t.get("id", "")).lower() == tid), None)
             if t:
                 return t
-        return teams_raw[0] if teams_raw else {}
+        # Unresolvable id (or none at all, e.g. an innings that carries no
+        # battingTeamId) — fall back to a team, but never the one already
+        # claimed by the other side. Without `exclude`, a failure to resolve
+        # BOTH sides' ids used to make this return the exact same object
+        # twice, rendering one team's name on both cards with the other
+        # side's data silently dropped.
+        return next((t for t in teams_raw if t is not exclude), (teams_raw[0] if teams_raw else {}))
 
     # "home"/"away" below means "batted first" / "batted second", not the
     # ground's literal home/away designation — which side has home ground is
@@ -1303,11 +1309,21 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     home_inn = sorted_innings[0] if sorted_innings else {}
     away_inn = sorted_innings[1] if len(sorted_innings) > 1 else {}
     home_id = _team_id_from_inn(home_inn)
-    away_id = _team_id_from_inn(away_inn) or next(
-        (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None
-    )
+    away_id = _team_id_from_inn(away_inn)
+    # Cross-fill from whichever side DID resolve, so a one-sided miss (the
+    # common case — one innings object missing battingTeamId) still lands the
+    # other side on the correct, different team rather than the `find_team`
+    # exclude fallback's blunter "just pick a different team" guess below.
+    if not home_id and away_id:
+        home_id = next(
+            (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != away_id), None
+        )
+    if not away_id and home_id:
+        away_id = next(
+            (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None
+        )
     home_team_raw = find_team(home_id)
-    away_team_raw = find_team(away_id)
+    away_team_raw = find_team(away_id, exclude=home_team_raw)
 
     # Collect all participantIds to look up names from DB
     all_pids: set[str] = set()
