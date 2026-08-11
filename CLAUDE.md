@@ -32,6 +32,38 @@ uniform:
   two synced, the chain re-point, a pre-existing alias untouched, another
   club untouched, idempotent re-run, slug and org-id resolution).
 
+## Seasons are editable and deletable from the Seasons page (v9.19.5, Aug 2026)
+
+Follow-up to the cleanup script: Admin → Seasons only ever offered reorder and
+merge, so fixing one season's name or year meant a script or SQL.
+
+- **`PATCH /club-admin/seasons/{id}`** (`manual_entries.update_season`, cap
+  `MANAGE_MANUAL_ENTRIES`, mirrors AFL's `rename_season`) edits name and/or
+  year, with a case-insensitive org-scoped duplicate-name 409. **Deliberately
+  not restricted to manual seasons** — the sync never overwrites an existing
+  season's name (it only backfills a NULL year, see `sync.py`'s season upsert),
+  so a tidied name on a synced season sticks. Audited via `_log_edit`.
+- **Delete reuses the existing `delete_manual_season`** (manual-only + empty-
+  only), now surfaced as a per-row button. **`_season_in_use` gained
+  `player_season_stats` and `imported_stats`** — the deletable seasons are
+  exactly the ones BetterImport writes aggregate rows against, both FKs
+  cascade, and neither table was checked, so a season full of imported history
+  deleted straight through before this.
+- **`GET /club-admin/seasons` now returns `synced`** (`grassroots_id IS NOT
+  NULL`) so the page only offers Delete on rows the endpoint could ever
+  accept. `synced_at` alone was the wrong proxy for this — it's a display
+  field.
+- **Frontend**: `AdminSeasons.jsx`'s row became `SeasonRow` — inline name/year
+  edit (Enter saves, Escape cancels, only changed fields are sent), Delete
+  behind a `window.confirm` with the server's refusal reason shown inline.
+- **Verified against a real Postgres** (20 route-level checks: rename+audit,
+  synced rename persisting, year-only patch, dup/blank/foreign/junk-id
+  rejections, cross-club name reuse allowed, the two new in-use guards, all
+  three delete refusals, the actual delete, and the `synced` flag) **and
+  driven in Chromium** (14 checks: the exact PATCH payload on the wire,
+  no-change save sending nothing, confirm dismiss/accept, a refused delete's
+  reason rendered, Delete absent on synced rows, no overflow at 390px).
+
 ## Undoing a stats import deletes the players it minted (migration 234, v9.19.4.1, Aug 2026)
 
 Reported from the Leeming Spartans demo: a mis-mapped BetterImport upload

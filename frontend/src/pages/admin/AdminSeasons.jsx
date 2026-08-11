@@ -140,6 +140,163 @@ function MergeHistory({ refreshKey, onChanged }) {
   )
 }
 
+function SeasonRow({ s, i, count, allSeasons, onMove, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(s.name)
+  const [year, setYear] = useState(s.year ?? '')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  function startEdit() {
+    setName(s.name)
+    setYear(s.year ?? '')
+    setError(null)
+    setEditing(true)
+  }
+
+  async function save() {
+    const body = {}
+    if (name.trim() !== s.name) body.name = name.trim()
+    const y = String(year).trim()
+    if (y !== '' && Number(y) !== s.year) body.year = Number(y)
+    if (Object.keys(body).length === 0) {
+      setEditing(false)
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await api.adminUpdateSeason(s.id, body)
+      setEditing(false)
+      onChanged()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete season "${s.name}"? Only an empty, manually-created season can be deleted — anything with data recorded against it is refused.`)) return
+    setBusy(true)
+    setError(null)
+    try {
+      await api.adminDeleteManualSeason(s.id)
+      onChanged()
+    } catch (e) {
+      setError(e.message)
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className={`px-5 py-3 ${i > 0 ? 'pb-hairline-t' : ''}`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div className="flex flex-col gap-0.5 shrink-0">
+            <button
+              onClick={() => onMove(i, -1)}
+              disabled={i === 0 || editing}
+              className="text-pb-faint hover:text-pb-text disabled:opacity-20 leading-none"
+              aria-label="Move up"
+            >
+              ▲
+            </button>
+            <button
+              onClick={() => onMove(i, 1)}
+              disabled={i === count - 1 || editing}
+              className="text-pb-faint hover:text-pb-text disabled:opacity-20 leading-none"
+              aria-label="Move down"
+            >
+              ▼
+            </button>
+          </div>
+          {editing ? (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <input
+                value={name}
+                onChange={e => setName(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+                className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent"
+                placeholder="Season name"
+                autoFocus
+              />
+              <input
+                value={year}
+                onChange={e => setYear(e.target.value.replace(/[^0-9]/g, ''))}
+                onKeyDown={e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') setEditing(false) }}
+                className="w-20 bg-pb-surface2 border pb-hairline text-pb-text text-sm rounded px-2 py-1 focus:outline-none focus:border-pb-accent font-mono"
+                placeholder="Year"
+                inputMode="numeric"
+              />
+            </div>
+          ) : (
+            <div className="min-w-0">
+              <span className={`text-sm ${s.alias_of ? 'text-pb-faint italic' : 'text-pb-text'}`}>{s.name}</span>
+              {s.year && <span className="font-mono text-[10px] text-pb-faintest ml-2">{s.year}</span>}
+              {s.alias_of && (
+                <div className="font-mono text-[10px] text-pb-amber mt-0.5 truncate">
+                  → merged into {allSeasons.find(x => x.id === s.alias_of)?.name || '(unknown)'}
+                </div>
+              )}
+              {s.aliases?.length > 0 && (
+                <div className="font-mono text-[10px] text-pb-faintest mt-0.5 truncate">
+                  Includes: {s.aliases.map(a => a.name).join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          {editing ? (
+            <>
+              <button
+                onClick={save}
+                disabled={busy || !name.trim()}
+                className="font-mono text-[10px] rounded px-3 py-1 text-pb-bg disabled:opacity-50"
+                style={{ background: 'var(--pb-accent)' }}
+              >
+                {busy ? 'Saving…' : 'Save'}
+              </button>
+              <button
+                onClick={() => setEditing(false)}
+                disabled={busy}
+                className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <span className="font-mono text-[10px] text-pb-faint hidden sm:inline">
+                {s.synced_at ? `Synced ${new Date(s.synced_at).toLocaleDateString('en-AU')}` : 'Not synced'}
+              </span>
+              <button
+                onClick={startEdit}
+                className="font-mono text-[10px] border pb-hairline rounded px-3 py-1 text-pb-faint hover:text-pb-text transition-colors"
+              >
+                Edit
+              </button>
+              {!s.synced && (
+                <button
+                  onClick={handleDelete}
+                  disabled={busy}
+                  className="font-mono text-[10px] border border-pb-red/30 rounded px-3 py-1 text-pb-red/70 hover:text-pb-red transition-colors disabled:opacity-50"
+                >
+                  {busy ? '…' : 'Delete'}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {error && (
+        <div className="mt-2 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
+      )}
+    </div>
+  )
+}
+
 export default function AdminSeasons() {
   const [seasons, setSeasons] = useState([])
   const [mergeRefresh, setMergeRefresh] = useState(0)
@@ -195,7 +352,7 @@ export default function AdminSeasons() {
           )}
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Seasons are created automatically when data is synced automatically. Use the arrows to change the display order.
+          Seasons are created automatically when data is synced. Use the arrows to change the display order, Edit to fix a name or year, and Delete to remove an empty manually-created season.
         </p>
         {saveError && (
           <p className="text-red-500 text-sm mb-4">{saveError}</p>
@@ -205,45 +362,15 @@ export default function AdminSeasons() {
             <div className="px-4 py-8 text-center font-mono text-[11px] text-pb-faint">No seasons found</div>
           )}
           {seasons.map((s, i) => (
-            <div key={s.id} className={`flex items-center justify-between px-5 py-3 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="flex flex-col gap-0.5 shrink-0">
-                  <button
-                    onClick={() => move(i, -1)}
-                    disabled={i === 0}
-                    className="text-pb-faint hover:text-pb-text disabled:opacity-20 leading-none"
-                    aria-label="Move up"
-                  >
-                    ▲
-                  </button>
-                  <button
-                    onClick={() => move(i, 1)}
-                    disabled={i === seasons.length - 1}
-                    className="text-pb-faint hover:text-pb-text disabled:opacity-20 leading-none"
-                    aria-label="Move down"
-                  >
-                    ▼
-                  </button>
-                </div>
-                <div className="min-w-0">
-                  <span className={`text-sm ${s.alias_of ? 'text-pb-faint italic' : 'text-pb-text'}`}>{s.name}</span>
-                  {s.year && <span className="font-mono text-[10px] text-pb-faintest ml-2">{s.year}</span>}
-                  {s.alias_of && (
-                    <div className="font-mono text-[10px] text-pb-amber mt-0.5 truncate">
-                      → merged into {seasons.find(x => x.id === s.alias_of)?.name || '(unknown)'}
-                    </div>
-                  )}
-                  {s.aliases?.length > 0 && (
-                    <div className="font-mono text-[10px] text-pb-faintest mt-0.5 truncate">
-                      Includes: {s.aliases.map(a => a.name).join(', ')}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <span className="font-mono text-[10px] text-pb-faint shrink-0">
-                {s.synced_at ? `Synced ${new Date(s.synced_at).toLocaleDateString('en-AU')}` : 'Not synced'}
-              </span>
-            </div>
+            <SeasonRow
+              key={s.id}
+              s={s}
+              i={i}
+              count={seasons.length}
+              allSeasons={seasons}
+              onMove={move}
+              onChanged={refresh}
+            />
           ))}
         </div>
 

@@ -1599,6 +1599,8 @@ export const api = {
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
   adminCreateManualSeason: (data) =>
     request('/club-admin/manual-entries/seasons', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateSeason: (id, data) =>
+    request(`/club-admin/manual-entries/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualSeason: (id) =>
     request(`/club-admin/manual-entries/seasons/${id}`, { method: 'DELETE' }),
   adminCreateManualGrade: (data) =>
