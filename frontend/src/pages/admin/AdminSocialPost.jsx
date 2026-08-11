@@ -1006,6 +1006,11 @@ export default function AdminSocialPost() {
     next.idx = Math.max(0, Math.min(next.count - 1, next.idx))
     return { ...rp, [tab]: next }
   })
+  // Scorecard as two square (1080×1080) Instagram posts instead of one wide
+  // 1920×1080 canvas — always exactly 2 pages (batted-first team, then the
+  // chasing team), no page-count picker needed.
+  const [scSplit, setScSplit] = useState(false)
+  const [scSplitIdx, setScSplitIdx] = useState(0)
 
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
@@ -1038,6 +1043,7 @@ export default function AdminSocialPost() {
   // Separate ref array for the derived fixtures/results carousel pages, so the
   // blank-tab carousel's own refs are never clashed with.
   const roundPageRefs = useRef([])
+  const scSplitPageRefs = useRef([])
   // Coalesces a burst of same-label edits (e.g. slider ticks) into one snapshot.
   const lastRec = useRef({ label: '', t: 0 })
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
@@ -1731,8 +1737,9 @@ export default function AdminSocialPost() {
     setExporting(true)
     setExportError(null)
     try {
-      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
-      const H = tmpl.h || 1080
+      const splitOn = isScorecard && scSplit
+      const W = splitOn ? 1080 : (tmpl.w || (tmpl.isScorecard ? 1920 : 1080))
+      const H = splitOn ? 1080 : (tmpl.h || 1080)
       const stamp = Date.now()
       // A Blank-tab carousel exports every page as its own PNG (slideN).
       const roundCount = (tmpl.kind === 'fixtures' || tmpl.kind === 'results') ? roundPages[tmpl.kind].count : 1
@@ -1747,6 +1754,13 @@ export default function AdminSocialPost() {
         // page as its own PNG (slideN), same as the blank carousel.
         for (let i = 0; i < roundCount; i++) {
           const node = roundPageRefs.current[i]
+          if (!node) continue
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
+        }
+      } else if (splitOn) {
+        // Scorecard split into 2 square posts — one team per slide.
+        for (let i = 0; i < 2; i++) {
+          const node = scSplitPageRefs.current[i]
           if (!node) continue
           await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
         }
@@ -1861,6 +1875,9 @@ export default function AdminSocialPost() {
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
+  // Scorecard split into 2 square Instagram posts (batted-first team, then
+  // the chasing team) instead of 1 wide 1920×1080 canvas.
+  const scSplitOn = isScorecard && scSplit
 
   // Which freeform layer is being edited, and whether the freeform tools show.
   // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
@@ -1994,7 +2011,10 @@ export default function AdminSocialPost() {
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
   }
-  if (isScorecard) extraProps.match = scorecardMatch
+  if (isScorecard) {
+    extraProps.match = scorecardMatch
+    if (scSplitOn) { extraProps.square = true; extraProps.only = scSplitIdx === 0 ? 'home' : 'away' }
+  }
 
   const templatePlayers = selectedPlayers.map((sp, i) => {
     const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
@@ -2162,6 +2182,8 @@ export default function AdminSocialPost() {
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
     setScUrlStatus(null)
+    setScSplit(false)
+    setScSplitIdx(0)
     setEvent(DEFAULT_EVENT)
     setEventPreset('curry')
     setEventMotifKey('star')
@@ -2180,8 +2202,8 @@ export default function AdminSocialPost() {
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
-  const W = tmpl.w || (isScorecard ? 1920 : 1080)
-  const H = tmpl.h || 1080
+  const W = scSplitOn ? 1080 : (tmpl.w || (isScorecard ? 1920 : 1080))
+  const H = scSplitOn ? 1080 : (tmpl.h || 1080)
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
@@ -2413,7 +2435,7 @@ export default function AdminSocialPost() {
         className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
       <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
-      {!((isBlankTab && pages.count > 1) || roundPagesOn) && (
+      {!((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
         <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
           className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
           {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
@@ -2421,7 +2443,7 @@ export default function AdminSocialPost() {
       )}
       <button onClick={handleExport} disabled={exporting}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
-        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : roundPagesOn ? `↓ ${roundPage.count} SLIDES` : '↓ DOWNLOAD PNG')}</button>
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : roundPagesOn ? `↓ ${roundPage.count} SLIDES` : scSplitOn ? '↓ 2 SLIDES' : '↓ DOWNLOAD PNG')}</button>
     </>
   )
 
@@ -2449,6 +2471,11 @@ export default function AdminSocialPost() {
             onAdd={() => patchRoundPages(tmpl.kind, { count: roundPage.count + 1 })}
             onRemove={() => patchRoundPages(tmpl.kind, { count: roundPage.count - 1 })} />
         )}
+        {scSplitOn && (
+          // Always exactly 2 pages — the batted-first team, then the chasing
+          // team — so nothing to add or remove, just switch between them.
+          <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
+        )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
             {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
@@ -2470,7 +2497,7 @@ export default function AdminSocialPost() {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
-          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : roundPagesOn ? `PAGE ${roundPage.idx + 1} OF ${roundPage.count} · CAROUSEL` : 'SINGLE POST'}</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : roundPagesOn ? `PAGE ${roundPage.idx + 1} OF ${roundPage.count} · CAROUSEL` : scSplitOn ? `PAGE ${scSplitIdx + 1} OF 2 · INSTAGRAM SQUARES` : 'SINGLE POST'}</span>
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
         </div>
       </div>
@@ -3652,6 +3679,23 @@ export default function AdminSocialPost() {
                   <MatchPickList picks={scPicks} onPick={loadScorecardMatch} onDismiss={() => setScPicks(null)} />
                 </div>
 
+                {/* Layout: one wide post, or two square Instagram posts */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Layout</p>
+                  <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface border pb-hairline">
+                    {[{ key: false, label: 'One wide post' }, { key: true, label: '2 Instagram squares' }].map((opt) => (
+                      <button key={String(opt.key)}
+                        onClick={() => { setScSplit(opt.key); setScSplitIdx(0) }}
+                        className={`flex-1 py-1.5 rounded-md font-mono text-[9px] tracking-wide2 uppercase transition-colors ${
+                          scSplit === opt.key ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+                        }`}>{opt.label}</button>
+                    ))}
+                  </div>
+                  {scSplit && (
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">One square per team — the side that batted first, then the side that chased. Downloads as 2 PNGs.</p>
+                  )}
+                </div>
+
                 {/* Meta fields */}
                 <div className="grid grid-cols-2 gap-2 mb-3">
                   <Field label="Result"><TextInput value={scorecardMatch.meta.result} onChange={v => patchScMeta({ result: v })} placeholder="HOME WON BY 6 WICKETS" /></Field>
@@ -3881,6 +3925,16 @@ export default function AdminSocialPost() {
               {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
                 {...extraProps} {...(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })} />
+            </div>
+          ))
+        ) : scSplitOn ? (
+          // One 1080×1080 node per team — the batted-first side, then the
+          // chasing side — regardless of which page is currently previewed.
+          ['home', 'away'].map((side, i) => (
+            <div key={side} ref={(el) => { scSplitPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
+                {...extraProps} only={side} />
             </div>
           ))
         ) : (
