@@ -536,6 +536,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
                 COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
                 MAX(gr.category) AS category,
                 bool_and(COALESCE(gr.is_public, true)) AS is_public,
+                MAX(gr.display_order) AS display_order,
                 COUNT(DISTINCT g.id) AS games,
                 COUNT(DISTINCT bi.player_id) AS players,
                 COALESCE(SUM(bi.runs), 0) AS runs
@@ -582,6 +583,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             "aliases": [],
             "category": None,
             "is_public": True,
+            "display_order": None,
         })
         slot["games"] += int(row["games"] or 0)
         slot["runs"] += int(row["runs"] or 0)
@@ -591,6 +593,11 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             slot["category"] = normalise_category(row["category"])
         # A merged group is public only if every grade in it is public.
         slot["is_public"] = slot["is_public"] and bool(row["is_public"])
+        # display_order is written identically across a merged group, but take
+        # the lowest seen defensively rather than assume that always holds.
+        if row["display_order"] is not None and (
+                slot["display_order"] is None or row["display_order"] < slot["display_order"]):
+            slot["display_order"] = row["display_order"]
         if name != canonical:
             slot["aliases"].append(name)
             aliases_by_canonical.setdefault(canonical, []).append(name)
@@ -605,7 +612,10 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
         slot["category"] = slot["category"] or slot["suggested_category"]
 
     out = list(bucket.values())
-    out.sort(key=lambda r: r["display_name"].lower())
+    # The club's own reading order first (unordered sorts after every ordered
+    # grade, not interleaved at position 0), alphabetical within that — same
+    # shown-order rule as the AFL Merge Grades screen.
+    out.sort(key=lambda r: (r["display_order"] is None, r["display_order"] or 0, r["display_name"].lower()))
     return out
 
 
@@ -686,6 +696,10 @@ class GradeClassifyRequest(BaseModel):
     grade_name: str                 # canonical grade name (as shown in grades-with-stats)
     category: str | None = None     # omit to leave unchanged; one of GRADE_CATEGORIES
     is_public: bool | None = None   # omit to leave unchanged
+    # The club's reading order for this grade — 1 = first. Pass -1 to clear it
+    # back to unordered (a plain None can't mean "clear" here, since None is
+    # already what "leave unchanged" means for every other field on this model).
+    display_order: int | None = None
 
 
 def _grade_name_group(chain: dict[str, str], target: str) -> set[str]:
@@ -732,6 +746,9 @@ async def classify_grade(
     if req.is_public is not None:
         sets.append("is_public = :is_public")
         params["is_public"] = req.is_public
+    if req.display_order is not None:
+        sets.append("display_order = :display_order")
+        params["display_order"] = None if req.display_order < 0 else req.display_order
     if not sets:
         return {"updated": 0, "grade_name": req.grade_name}
 
@@ -753,6 +770,109 @@ async def classify_grade(
         "category": params.get("category"),
         "is_public": params.get("is_public"),
     }
+
+
+class GradeReorderRequest(BaseModel):
+    # Canonical grade names, in the order the club wants them read.
+    grade_names: list[str]
+
+
+@router.post("/grades/reorder")
+async def reorder_grades(
+    req: GradeReorderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Set the whole reading order in one write — Seniors 1, Reserves 2,
+    Under 19s 3 — rather than one number at a time.
+
+    Numbering is assigned from the submitted order (1..N) instead of trusting
+    numbers from the browser, so the stored orders can never collide or leave
+    gaps however the list was dragged about. A name that isn't a grade in this
+    club is skipped without consuming a position, rather than failing the save:
+    the list comes from a browser and may be a page-load behind a merge.
+
+    The submitted list is the WHOLE ordering, so a grade left out of it is
+    reset to unordered rather than keeping a stale number. The admin screen
+    always submits every grade it is showing, so "left out" in practice means
+    a grade created since the page loaded — and letting that one keep an old
+    position is how two grades end up both claiming position 1.
+    """
+    org_id = str(club.id)
+    logs = await db.execute(
+        text("""
+            SELECT alias_name, canonical_name FROM grade_merge_logs
+            WHERE org_id = :org AND undone_at IS NULL
+        """),
+        {"org": org_id},
+    )
+    chain = {r["alias_name"]: r["canonical_name"] for r in logs.mappings().all()}
+
+    updated = 0
+    seen: set[str] = set()
+    position = 0
+    for raw_name in req.grade_names:
+        canonical = _resolve_canonical_grade(chain, (raw_name or "").strip())
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        # Applies to the canonical name AND every alias merged into it, so a
+        # merged grade orders as one competition however its rows are spelt.
+        names = list(_grade_name_group(chain, canonical))
+        res = await db.execute(
+            text("""
+                UPDATE grades gr SET display_order = :pos
+                FROM seasons s
+                WHERE gr.season_id = s.id AND s.organisation_id = :org AND gr.name = ANY(:names)
+            """),
+            {"pos": position + 1, "org": org_id, "names": names},
+        )
+        # The position is only consumed once a real grade has taken it — a
+        # name that matched nothing would otherwise burn a number and leave a
+        # gap in the sequence.
+        if res.rowcount:
+            position += 1
+            updated += res.rowcount
+
+    # Anything the list didn't name goes back to unordered, so the stored
+    # sequence is exactly 1..N with nothing stale alongside it.
+    if seen:
+        all_named: set[str] = set()
+        for canonical in seen:
+            all_named |= _grade_name_group(chain, canonical)
+        await db.execute(
+            text("""
+                UPDATE grades gr SET display_order = NULL
+                FROM seasons s
+                WHERE gr.season_id = s.id AND s.organisation_id = :org
+                  AND gr.display_order IS NOT NULL AND NOT (gr.name = ANY(:names))
+            """),
+            {"org": org_id, "names": list(all_named)},
+        )
+
+    await db.commit()
+    return {"updated": updated, "ordered": position}
+
+
+@router.post("/grades/clear-order")
+async def clear_grade_order(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Drop the club's ordering entirely, back to the app's own default
+    (alphabetical)."""
+    res = await db.execute(
+        text("""
+            UPDATE grades gr SET display_order = NULL
+            FROM seasons s
+            WHERE gr.season_id = s.id AND s.organisation_id = :org AND gr.display_order IS NOT NULL
+        """),
+        {"org": str(club.id)},
+    )
+    await db.commit()
+    return {"updated": res.rowcount or 0}
 
 
 @router.post("/grades/apply-suggestions")

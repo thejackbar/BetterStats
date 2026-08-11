@@ -331,13 +331,19 @@ export const api = {
     }),
 
   // Grade category label + public visibility
-  classifyGrade: (gradeName, { category, is_public } = {}) =>
+  classifyGrade: (gradeName, { category, is_public, display_order } = {}) =>
     request('/admin/grades/classify', {
       method: 'PATCH',
-      body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+      body: JSON.stringify({ grade_name: gradeName, category, is_public, display_order }),
     }),
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
+  // The club's own reading order for its grades — drives Merge Grades' Order
+  // column AND, via each grade's stored display_order, the row order of
+  // BetterPosts' Fixtures/Results roundup posts.
+  reorderGrades: (gradeNames) =>
+    request('/admin/grades/reorder', { method: 'POST', body: JSON.stringify({ grade_names: gradeNames }) }),
+  clearGradeOrder: () => request('/admin/grades/clear-order', { method: 'POST' }),
 
   // Committee Administration (core capability, not a paid module)
   committeeListPositions: (includeInactive) =>
