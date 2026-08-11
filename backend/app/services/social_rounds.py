@@ -496,6 +496,7 @@ async def _reference_round(db: AsyncSession, org, raw: str):
         return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
 
     grade_guid = (anchor.get("grade") or {}).get("id")
+    anchor_grade_guid = (grade_guid or "").lower()
     season_row = await _grade_season(db, org.id, grade_guid) if grade_guid else None
     if not season_row:
         return {"kind": "not_found", "message": _NOT_FOUND_MESSAGE}, None
@@ -547,7 +548,19 @@ async def _reference_round(db: AsyncSession, org, raw: str):
                 in_window = abs((date.fromisoformat(day) - anchor_date).days) <= _ROUND_WINDOW_DAYS
             except ValueError:
                 in_window = False
-        same_round = bool(anchor_round) and _match_round_name(m).lower() == anchor_round
+        # Round NAMES aren't synchronised across grades — two different
+        # competitions each have their own "Round 3", on their own calendar
+        # weekend, with no relation to each other (confirmed live: Applecross's
+        # "1st Grade" Round 3 fell a full week before "One Day Grade 4"'s
+        # Round 3). So this can only ever widen the anchor's OWN grade (its
+        # real purpose is catching day 2 of a multi-day match, which can land
+        # outside the date window) — never used to pull in an unrelated
+        # grade's same-numbered-but-different-weekend round.
+        same_round = (
+            (guid or "").lower() == anchor_grade_guid
+            and bool(anchor_round)
+            and _match_round_name(m).lower() == anchor_round
+        )
         if not (in_window or same_round):
             continue
         mid = m.get("id")
