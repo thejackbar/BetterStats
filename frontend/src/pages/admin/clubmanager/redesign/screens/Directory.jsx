@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
@@ -17,9 +17,9 @@ const DIR_SEGS = [
   { seg: 'All', label: 'Everyone' },
   { seg: 'Player', label: 'Players' },
   { seg: 'Volunteer', label: 'Volunteers' },
-  { seg: 'Committee', label: 'Committees' },
+  { seg: 'Committee', label: 'Committee' },
   { seg: 'Parent', label: 'Parents' },
-  { seg: 'Third party', label: 'Third parties' },
+  { seg: 'External contact', label: 'External contacts' },
   { seg: 'Official', label: 'Officials' },
   { seg: 'Life member', label: 'Life members' },
   { seg: 'Honorary', label: 'Honorary' },
@@ -31,7 +31,7 @@ const CATS = [
   { value: 'volunteer', label: 'Volunteer' },
   { value: 'parent', label: 'Parent' },
   { value: 'committee', label: 'Committee' },
-  { value: 'third_party', label: 'Third party' },
+  { value: 'third_party', label: 'External contact' },
   { value: 'official', label: 'Official (umpire, scorer…)', short: 'Official' },
   { value: 'life_member', label: 'Life member' },
   { value: 'other', label: 'Other' },
@@ -347,7 +347,17 @@ export default function Directory({ st, patch, narrow }) {
               share the line, the filters wrap within their own column, and
               the actions stay pinned top-right. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: '1 1 0', minWidth: 0 }}>
-            {DIR_SEGS.map(s => <button key={s.seg} onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>)}
+            {/* Families and Qualifications are NOT filters — they open their own
+                pages — so they render as buttons, not pills, placed beside the
+                filters they relate to: Qualifications after Volunteers, Families
+                before Parents. */}
+            {DIR_SEGS.map(s => (
+              <Fragment key={s.seg}>
+                {s.seg === 'Parent' && <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>}
+                <button onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
+                {s.seg === 'Volunteer' && <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>}
+              </Fragment>
+            ))}
             {/* Playing status is the Stats active/inactive flag, so a club can
                 tell this season's players from the ones who have stopped without
                 losing either from the directory. */}
@@ -366,12 +376,6 @@ export default function Directory({ st, patch, narrow }) {
             <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
             <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
             {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
-            {/* The dedicated editors for the three overlays this record shows.
-                The panels below cover the everyday case (add a role, log hours,
-                record a qualification, link a family); these are where the
-                catalogues and bulk work live. */}
-            <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>
-            <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>
             <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
           </div>
           {/* No flexShrink:0 here on purpose — pinning this group at its
@@ -659,7 +663,7 @@ export default function Directory({ st, patch, narrow }) {
         <div onClick={() => setModal(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 20 }}>
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(460px, 100%)', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>{modal.editId ? 'Edit person' : 'Add a person'}</div>
-            <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>{modal.editId ? 'Update this person’s details.' : 'Add a non-playing member or third party. Players are managed in Stats.'}</div>
+            <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>{modal.editId ? 'Update this person’s details.' : 'Add a non-playing member or external contact. Players are managed in Stats.'}</div>
             <div style={{ display: 'grid', gap: 11 }}>
               <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>NAME *<input value={modal.form.full_name} onChange={e => setForm('full_name', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11 }}>
@@ -732,7 +736,7 @@ export default function Directory({ st, patch, narrow }) {
           <div onClick={e => e.stopPropagation()} style={{ width: 'min(560px, 100%)', maxHeight: '86vh', overflowY: 'auto', background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 12, padding: 20 }}>
             <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Import people from CSV</div>
             <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 14, lineHeight: 1.5 }}>
-              Non-players and third parties. Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span> (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates. Players are imported in Stats.
+              Non-players and external contacts. Columns: <span style={{ fontFamily: MONO, fontSize: 11 }}>name, email, mobile, category, roles</span> (only <span style={{ fontFamily: MONO, fontSize: 11 }}>name</span> required; <span style={{ fontFamily: MONO, fontSize: 11 }}>roles</span> is a comma-separated list of role titles). Matched to existing people by name, so a re-run tops up rather than duplicates. Players are imported in Stats.
             </div>
             {imp.result ? (
               <div style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: 14, fontSize: 13, color: C.text }}>

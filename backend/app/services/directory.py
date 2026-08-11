@@ -27,8 +27,15 @@ from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported f
 async def list_people(db: AsyncSession, org_id, include_archived: bool = False) -> list[dict]:
     """One row per person: every active fee_members row, unioned with the club's
     players that don't yet have a member row. Each person carries its computed
-    segments (Player / Volunteer / Committee / Parent / Third party / Life
-    member), assigned roles, hours and a quals-to-renew count.
+    segments (Player / Volunteer / Committee / Parent / External contact / Life
+    member / Official), assigned roles, hours and a quals-to-renew count.
+
+    Segments are derived from what the club has actually recorded, not just the
+    member_category tag: Official = holds a role whose TYPE is Official
+    (umpires, scorers…); Parent = recorded as a parent/guardian in any family
+    (whether the family links them as a member or as a player); Life member =
+    the fee_members flag OR a recorded Life Membership award. The category tag
+    still counts towards each, so a hand-tagged person is never dropped.
 
     A person's KIND is three separate things, and all three are returned rather
     than flattened into one: `membership_type` (the club's own cross-season
@@ -89,11 +96,49 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         WHERE ct.organisation_id = :org AND ct.member_id IS NOT NULL AND ct.ended_at IS NULL AND cp.is_office_bearer = TRUE
     """), {"org": org_id})).scalars().all()}
 
-    guardians = {str(m) for m in (await db.execute(text("""
+    # "Recorded as a parent" in any family: the guardian flag, or a relationship
+    # that names them one. Family rows link a person EITHER as a member
+    # (fee_member_id — what the Directory writes) OR as a player (player_id —
+    # what the Families editor has always written for players), so both links
+    # are read or a parent recorded against their player record never shows.
+    _parentish = """(fmb.is_guardian = TRUE
+          OR lower(coalesce(fmb.relationship, '')) LIKE '%parent%'
+          OR lower(coalesce(fmb.relationship, '')) IN
+              ('mother', 'father', 'mum', 'dad', 'mom', 'guardian', 'stepmother', 'stepfather'))"""
+    guardians = {str(m) for m in (await db.execute(text(f"""
         SELECT DISTINCT fmb.fee_member_id
         FROM family_members fmb JOIN families f ON f.id = fmb.family_id
         WHERE f.organisation_id = :org AND fmb.fee_member_id IS NOT NULL
-          AND (fmb.is_guardian = TRUE OR lower(coalesce(fmb.relationship, '')) LIKE '%parent%')
+          AND {_parentish}
+    """), {"org": org_id})).scalars().all()}
+    guardian_players = {str(m) for m in (await db.execute(text(f"""
+        SELECT DISTINCT fmb.player_id
+        FROM family_members fmb JOIN families f ON f.id = fmb.family_id
+        WHERE f.organisation_id = :org AND fmb.player_id IS NOT NULL
+          AND {_parentish}
+    """), {"org": org_id})).scalars().all()}
+
+    # Holds a role whose TYPE is Official (umpire, scorer…). The type's own
+    # category is the signal, with the type NAME as a fallback for a club that
+    # made an "Official" type by hand without categorising it.
+    officials = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT vr.member_id
+        FROM volunteer_roles vr
+        JOIN club_roles cr ON cr.id = vr.role_id AND cr.organisation_id = vr.organisation_id
+        LEFT JOIN club_role_types t ON t.id = cr.role_type_id AND t.organisation_id = cr.organisation_id
+        WHERE vr.organisation_id = :org
+          AND (lower(coalesce(t.category, '')) = 'official' OR lower(coalesce(t.name, '')) = 'official')
+    """), {"org": org_id})).scalars().all()}
+
+    # Awarded Life Membership on the honour board. The players join is
+    # org-scoped on both sides (the shared-game rule) so an award row can never
+    # tag another club's player through a stray id.
+    life_award_players = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT pa.player_id
+        FROM player_achievements pa
+        JOIN players p ON p.id = pa.player_id AND p.organisation_id = pa.org_id
+        WHERE pa.org_id = :org AND pa.player_id IS NOT NULL
+          AND (lower(pa.category) = 'life membership' OR lower(pa.achievement) LIKE 'life member%')
     """), {"org": org_id})).scalars().all()}
 
     hours_by = {str(k): float(v or 0) for k, v in (await db.execute(text(
@@ -126,13 +171,13 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             segs.append("Office Bearer")
         if mid in committee or cat == "committee":
             segs.append("Committee")
-        if cat == "parent" or mid in guardians:
+        if cat == "parent" or mid in guardians or (our_pid and our_pid in guardian_players):
             segs.append("Parent")
         if cat == "third_party":
-            segs.append("Third party")
-        if m["is_life_member"] or cat == "life_member":
+            segs.append("External contact")
+        if m["is_life_member"] or cat == "life_member" or (our_pid and our_pid in life_award_players):
             segs.append("Life member")
-        if cat == "official":
+        if cat == "official" or mid in officials:
             segs.append("Official")
         if m["is_honorary"]:
             segs.append("Honorary")
@@ -171,13 +216,21 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         pid = str(p["id"])
         if pid in seen_players:
             continue
+        # A player-linked family row or a Life Membership award belongs to the
+        # person, member row or not — a read-through player carries those
+        # segments the same way a member does.
+        psegs = ["Player"]
+        if pid in guardian_players:
+            psegs.append("Parent")
+        if pid in life_award_players:
+            psegs.append("Life member")
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
             "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
             "player_status": p["status"] or "active",
             "membership_type_id": None, "membership_type": None, "membership_type_playing": None,
             "is_life_member": False, "is_honorary": False, "honorary_expires_at": None,
-            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
+            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
 
     people.sort(key=lambda x: (x["name"] or "").lower())
