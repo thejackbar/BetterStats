@@ -2,6 +2,8 @@
 //
 // Props (all from usePages):
 //   count, index, onGoTo(i), onAdd(), onDuplicate(), onRemove(i)
+// onDuplicate is optional — derived-page modes (fixtures/results roundups
+// spread over N pages) have nothing to duplicate, so the DUP button hides.
 export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, onRemove }) {
   return (
     <div className="absolute -left-[84px] top-0 flex flex-col items-center gap-1.5">
@@ -36,11 +38,13 @@ export default function PageStrip({ count, index, onGoTo, onAdd, onDuplicate, on
         title="Add a page"
         className="w-[46px] h-[30px] rounded-md border border-dashed border-pb-hairline2 text-pb-faint hover:text-pb-text hover:border-pb-accent text-[13px] transition-colors"
       >+</button>
-      <button
-        onClick={onDuplicate}
-        title="Duplicate this page"
-        className="w-[46px] h-6 rounded-md border pb-hairline font-mono text-[8px] text-pb-faint hover:text-pb-text transition-colors"
-      >DUP</button>
+      {onDuplicate && (
+        <button
+          onClick={onDuplicate}
+          title="Duplicate this page"
+          className="w-[46px] h-6 rounded-md border pb-hairline font-mono text-[8px] text-pb-faint hover:text-pb-text transition-colors"
+        >DUP</button>
+      )}
     </div>
   )
 }

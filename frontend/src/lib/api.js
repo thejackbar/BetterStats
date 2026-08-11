@@ -113,8 +113,9 @@ export const api = {
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
-  getSocialFixtures: () => request('/admin/social/fixtures'),
-  getSocialResults: () => request('/admin/social/results'),
+  getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
 
   // BetterSocials — media library
   listSocialMedia: () => request('/admin/social/media'),
