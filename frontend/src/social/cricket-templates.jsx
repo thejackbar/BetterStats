@@ -1468,7 +1468,7 @@ function ScSponsorFooter({ bg, ink, dim, dimmer, rule, style = {}, sponsors = []
 }
 
 // ─── SC1: Broadcast ───────────────────────────────────────────────────────────
-export function SC1_Broadcast({ match, palette = {} }) {
+export function SC1_Broadcast({ match, palette = {}, square = false, only = 'home' }) {
   const m = match
   const dark   = _scIsDark(palette.primary)
   const bg     = palette.primary   || (dark ? '#0a1224' : '#f4f3ee')
@@ -1555,6 +1555,40 @@ export function SC1_Broadcast({ match, palette = {} }) {
     </div>
   )}
 
+  if (square) {
+    const side = only === 'away' ? 'away' : 'home'
+    const team = m[side] || {}
+    return (
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+        <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
+        <div style={{ padding: '18px 20px 10px' }}>
+          <div style={{ padding: '14px 20px', background: panel, border: `1px solid ${rule}`, display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
+            <div>
+              <div style={{ display: 'inline-block', padding: '4px 10px', background: accent, color: '#0a0a0a', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 12, letterSpacing: 3 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
+              <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 32, letterSpacing: 1, lineHeight: 1.05, color: ink, marginTop: 8 }}>{m.meta?.result}</div>
+              <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 1.5, color: dim, marginTop: 4 }}>{m.meta?.date} · {m.meta?.venue}</div>
+            </div>
+            {m.meta?.motm?.last && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', background: `${accent}1a`, border: `1px solid ${accent}66` }}>
+                <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 22, color: accent, lineHeight: 1 }}>★</div>
+                <div>
+                  <div style={{ fontFamily: SC_MONO, fontSize: 9, color: accent, letterSpacing: 2, fontWeight: 600 }}>PLAYER OF THE MATCH</div>
+                  <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 18, color: ink, letterSpacing: 1, lineHeight: 1, marginTop: 3 }}>{(m.meta?.motm?.first || '').toUpperCase()} {m.meta?.motm?.last}</div>
+                  <div style={{ fontFamily: SC_MONO, fontSize: 10, color: dim, marginTop: 3 }}>{m.meta?.motm?.line}</div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        <div style={{ padding: '0 20px', height: 880 }}>
+          <TeamPanel team={team} accentC={team.color || (side === 'home' ? '#1a4eb8' : '#cc1f2c')} side={side} />
+        </div>
+        <ScSponsorFooter bg={panel} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
+        <GrainSVG opacity={dark ? 0.22 : 0.16} id={`sc1g-${side}`} />
+      </div>
+    )
+  }
+
   return (
     <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <Halftone color={ink} opacity={dark ? 0.04 : 0.05} size={12} />
@@ -1591,7 +1625,7 @@ export function SC1_Broadcast({ match, palette = {} }) {
 }
 
 // ─── SC2: Brutalist ───────────────────────────────────────────────────────────
-export function SC2_Brutalist({ match, palette = {} }) {
+export function SC2_Brutalist({ match, palette = {}, square = false, only = 'home' }) {
   const m = match
   const dark     = _scIsDark(palette.primary)
   const bg       = palette.primary   || (dark ? '#0a0a0c' : '#f0ece2')
@@ -1675,6 +1709,36 @@ export function SC2_Brutalist({ match, palette = {} }) {
     </div>
   )}
 
+  if (square) {
+    const side = only === 'away' ? 'away' : 'home'
+    return (
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+        <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
+        <Halftone color={ink} opacity={dark ? 0.05 : 0.06} size={12} />
+        <div style={{ position: 'absolute', right: -30, top: 200, fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 200, lineHeight: 0.8, color: ink, opacity: 0.04, letterSpacing: -10, userSelect: 'none' }}>FINAL</div>
+        <div style={{ background: accent, color: dark ? '#0a0a0c' : '#f0ece2', padding: '16px 24px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 24, borderBottom: `2px solid ${ruleStrong}` }}>
+          <div>
+            <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.85 }}>// {m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
+            <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 38, letterSpacing: 1, lineHeight: 1.02, marginTop: 4 }}>{m.meta?.result}</div>
+            <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 2, opacity: 0.85, marginTop: 4 }}>{m.meta?.date} · {(m.meta?.venue || '').toUpperCase()}</div>
+          </div>
+          {m.meta?.motm?.last && (
+            <div style={{ padding: '8px 14px', background: bg, color: accent, border: `2px solid ${ruleStrong}` }}>
+              <div style={{ fontFamily: SC_MONO, fontSize: 9, letterSpacing: 2, fontWeight: 700, color: ink }}>★ PLAYER OF THE MATCH</div>
+              <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 22, color: ink, letterSpacing: 1, lineHeight: 1, marginTop: 3 }}>{(m.meta?.motm?.first || '').toUpperCase()} {m.meta?.motm?.last}</div>
+              <div style={{ fontFamily: SC_MONO, fontSize: 10, color: ink, opacity: 0.7, marginTop: 3 }}>{m.meta?.motm?.line}</div>
+            </div>
+          )}
+        </div>
+        <div style={{ height: 850 }}>
+          <TeamCol team={m[side] || {}} side={side} />
+        </div>
+        <ScSponsorFooter bg={ink} ink={bg} dim={_toRgba(bg, 0.55)} dimmer={_toRgba(bg, 0.35)} rule={ruleStrong} sponsors={m.meta?.sponsors} style={{ borderRadius: 0, borderTop: `3px solid ${accent}` }} />
+        <GrainSVG opacity={dark ? 0.28 : 0.18} id={`sc2g-${side}`} />
+      </div>
+    )
+  }
+
   return (
     <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
       <Stripes color={ink} opacity={0.04} gap={6} angle={0} />
@@ -1708,7 +1772,7 @@ export function SC2_Brutalist({ match, palette = {} }) {
 }
 
 // ─── SC3: Dashboard ───────────────────────────────────────────────────────────
-export function SC3_Dashboard({ match, palette = {} }) {
+export function SC3_Dashboard({ match, palette = {}, square = false, only = 'home' }) {
   const m = match
   const dark   = _scIsDark(palette.primary)
   const bg     = palette.primary   || (dark ? '#0e1116' : '#f3f4f6')
@@ -1797,6 +1861,38 @@ export function SC3_Dashboard({ match, palette = {} }) {
       </div>
     </Card>
   )}
+
+  if (square) {
+    const side = only === 'away' ? 'away' : 'home'
+    const team = m[side] || {}
+    return (
+      <div style={{ width: 1080, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>
+        <div style={{ padding: '20px 24px 10px' }}>
+          <Card style={{ padding: '14px 20px', display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 20 }}>
+            <div>
+              <div style={{ fontFamily: SC_BODY, fontSize: 11, letterSpacing: 2, color: dim, fontWeight: 600 }}>{m.meta?.competition} · {m.meta?.round} · {m.meta?.format}</div>
+              <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 32, letterSpacing: 0.5, lineHeight: 1.05, color: ink, marginTop: 4 }}>{m.meta?.result}</div>
+              <div style={{ fontFamily: SC_BODY, fontSize: 12, color: dim, marginTop: 4 }}>{m.meta?.date} · {m.meta?.venue}</div>
+            </div>
+            {m.meta?.motm?.last && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderRadius: 12, background: `${win}14`, border: `1px solid ${win}55` }}>
+                <div style={{ fontSize: 18, lineHeight: 1, color: win }}>★</div>
+                <div>
+                  <div style={{ fontFamily: SC_BODY, fontSize: 9, letterSpacing: 2, color: win, fontWeight: 700 }}>PLAYER OF THE MATCH</div>
+                  <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 18, color: ink, letterSpacing: 0.5, lineHeight: 1, marginTop: 3 }}>{(m.meta?.motm?.first || '').toUpperCase()} {m.meta?.motm?.last}</div>
+                  <div style={{ fontFamily: SC_BODY, fontSize: 10, color: dim, marginTop: 3 }}>{m.meta?.motm?.line}</div>
+                </div>
+              </div>
+            )}
+          </Card>
+        </div>
+        <div style={{ padding: '0 24px', height: 880 }}>
+          <TeamCard team={team} accentC={team.color || (side === 'home' ? '#2563eb' : '#10b981')} side={side} />
+        </div>
+        <ScSponsorFooter bg={card} ink={ink} dim={dim} dimmer={dimmer} rule={rule} sponsors={m.meta?.sponsors} />
+      </div>
+    )
+  }
 
   return (
     <div style={{ width: 1920, height: 1080, position: 'relative', overflow: 'hidden', background: bg, color: ink, fontFamily: SC_BODY }}>

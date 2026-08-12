@@ -53,6 +53,10 @@ class ResolveRequest(BaseModel):
     rows: list[dict] = []
     mapping: dict = {}                  # field -> column header (or {"column": ...})
     granularity: str = "career"         # career | season
+    # Only used when the name arrives as one combined column (mapping.player_name) —
+    # ignored once mapping.player_first_name/player_last_name are mapped instead,
+    # since separate columns need no word-order guess. See ingest.resolve_row_name.
+    name_format: str = "auto"           # auto | first_last | last_first
     player_overrides: dict = {}         # raw_name -> player_id | "__new__" | "__skip__"
     season_overrides: dict = {}         # raw_label -> season_id | "__prior__"
     grade_overrides: dict = {}          # raw_label -> grade_name | "__none__"
@@ -204,16 +208,22 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     preview. Returns everything the wizard's review screen needs, plus an
     internal ``_assignments`` list the commit step writes from."""
     name_col = _col(req.mapping, "player_name")
+    first_col = _col(req.mapping, "player_first_name")
+    last_col = _col(req.mapping, "player_last_name")
     season_col = _col(req.mapping, "season_label")
     grade_col = _col(req.mapping, "grade_label")
-    if not name_col:
+    if not name_col and not (first_col or last_col):
         raise HTTPException(422, "No column is mapped to the player name.")
+
+    def row_name(r):
+        return ingest.resolve_row_name(r, name_col=name_col, first_col=first_col,
+                                        last_col=last_col, name_format=req.name_format)
 
     names = []
     labels = []
     raw_grade_labels = []
     for r in req.rows:
-        nm = str(r.get(name_col, "")).strip()
+        nm = row_name(r)
         if nm and nm not in names:
             names.append(nm)
         if season_col:
@@ -277,7 +287,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         }
 
     for r in req.rows:
-        nm = str(r.get(name_col, "")).strip()
+        nm = row_name(r)
         if not nm:
             continue
         if nm in need_sheet:
@@ -511,6 +521,8 @@ async def commit(
     created_players = 0
     if new_names:
         name_col = _col(req.mapping, "player_name")
+        first_col = _col(req.mapping, "player_first_name")
+        last_col = _col(req.mapping, "player_last_name")
         # map raw name → new player id, then redirect its items
         new_pid_by_name: dict = {}
         for nm in new_names:
@@ -525,7 +537,8 @@ async def commit(
         await db.flush()
         # _resolve skipped 'new' players (no player_id yet) — re-bucket their rows.
         for r in req.rows:
-            nm = str(r.get(name_col, "")).strip()
+            nm = ingest.resolve_row_name(r, name_col=name_col, first_col=first_col,
+                                          last_col=last_col, name_format=req.name_format)
             if nm not in new_pid_by_name:
                 continue
             truth, _notes = ingest.row_to_truth(_row_values(r, req.mapping))

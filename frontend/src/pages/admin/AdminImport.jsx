@@ -11,7 +11,7 @@ import { formatSeason } from '../../lib/cricketFormat'
 // Season is handled on its own (below Identity) because it only applies to a
 // season-by-season sheet — for career totals there's no season column to map.
 const FIELD_GROUPS = [
-  ['Identity', ['player_name', 'grade_label']],
+  ['Identity', ['grade_label']],
   ['Batting', ['games_played', 'batting_innings', 'batting_runs', 'batting_not_outs', 'batting_balls',
     'batting_high_score', 'batting_average', 'batting_strike_rate', 'batting_fours', 'batting_sixes',
     'batting_fifties', 'batting_hundreds', 'batting_ducks']],
@@ -23,7 +23,8 @@ const FIELD_GROUPS = [
 // Full, spelled-out names — the dropdown is hard to scan with abbreviations, so a
 // short code is only ever kept in parentheses to make the column match obvious.
 const FIELD_LABEL = {
-  player_name: 'Player name', season_label: 'Season', grade_label: 'Grade / Team',
+  player_name: 'Player name', player_first_name: 'First name', player_last_name: 'Surname',
+  season_label: 'Season', grade_label: 'Grade / Team',
   games_played: 'Games played', batting_innings: 'Batting innings', batting_runs: 'Runs scored',
   batting_not_outs: 'Not outs', batting_balls: 'Balls faced', batting_high_score: 'High score',
   batting_average: 'Batting average', batting_strike_rate: 'Strike rate',
@@ -37,6 +38,15 @@ const FIELD_LABEL = {
   fielding_catches: 'Catches (outfield)', fielding_catches_wk: 'Catches (wicketkeeper)',
   fielding_run_outs: 'Run outs', fielding_stumpings: 'Stumpings',
 }
+
+// A sheet's name can arrive as one combined column in either word order, or as
+// separate first-name/surname columns (unambiguous by construction — no format
+// guess needed). Mirrors import_ingest.NAME_FORMAT_LABELS on the backend.
+const NAME_FORMAT_OPTIONS = [
+  ['auto', 'Auto-detect (recommended)'],
+  ['first_last', 'First name then Surname — e.g. "Jack Barendse"'],
+  ['last_first', 'Surname then First name — e.g. "Barendse Jack" or "Barendse, Jack"'],
+]
 
 const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
@@ -117,6 +127,56 @@ function FieldRow({ field, label, required, value, headers, conf, onMap, cell })
   )
 }
 
+// Player name mapping: one combined column (with an explicit word-order format
+// so "Surname Firstname" isn't silently misread) or two separate first/surname
+// columns (unambiguous by construction, since the sheet already tells us which
+// part is which). Toggling mode clears the other mode's mapping so a stale
+// player_name/first+last combination can't linger and confuse the resolver.
+function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, mapping, setMap, headers, confByField }) {
+  return (
+    <div className="mb-3">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-[11px] font-semibold text-green-300 shrink-0 leading-tight">
+          Player name<span className="text-pb-red/70 ml-0.5">*</span>
+        </span>
+        <div className="flex gap-1">
+          {[['single', 'ONE COLUMN'], ['split', 'FIRST NAME + SURNAME']].map(([m, label]) => (
+            <button key={m} type="button" onClick={() => setNameMode(m)}
+              className={`font-mono text-[9px] tracking-wide2 px-2.5 py-1 rounded border ${nameMode === m ? 'text-pb-bg border-transparent' : 'text-pb-faint pb-hairline hover:text-pb-text'}`}
+              style={nameMode === m ? { background: 'var(--pb-accent)' } : undefined}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {nameMode === 'single' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+          <FieldRow field="player_name" label={FIELD_LABEL.player_name} required
+            value={mapping.player_name} headers={headers} conf={confByField.player_name} onMap={setMap} cell={cell} />
+          <div className="flex items-center gap-2 rounded px-2 py-1.5 border pb-hairline">
+            <span className="text-[11px] font-semibold text-pb-faint w-16 shrink-0 leading-tight">Format</span>
+            <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={nameFormat} onChange={e => setNameFormat(e.target.value)}>
+              {NAME_FORMAT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+          <FieldRow field="player_first_name" label={FIELD_LABEL.player_first_name}
+            value={mapping.player_first_name} headers={headers} conf={confByField.player_first_name} onMap={setMap} cell={cell} />
+          <FieldRow field="player_last_name" label={FIELD_LABEL.player_last_name} required
+            value={mapping.player_last_name} headers={headers} conf={confByField.player_last_name} onMap={setMap} cell={cell} />
+        </div>
+      )}
+      <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed max-w-2xl">
+        {nameMode === 'single'
+          ? 'One name column — pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
+          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works — just leave First name unmapped.'}
+      </p>
+    </div>
+  )
+}
+
 export default function AdminImport() {
   const toast = useToast()
 
@@ -127,6 +187,8 @@ export default function AdminImport() {
   const [mapping, setMapping] = useState({})          // field -> column header
   const [confByField, setConfByField] = useState({})  // field -> confidence (display only)
   const [granularity, setGranularity] = useState('career')
+  const [nameMode, setNameModeRaw] = useState('single')   // single column vs first+surname
+  const [nameFormat, setNameFormat] = useState('auto')     // word order, single-column mode only
   const [playerOverrides, setPlayerOverrides] = useState({})
   const [seasonOverrides, setSeasonOverrides] = useState({})
   const [gradeOverrides, setGradeOverrides] = useState({})
@@ -165,7 +227,7 @@ export default function AdminImport() {
     let cancelled = false
     setResolving(true)
     const payload = {
-      rows: parsed.rows, mapping, granularity,
+      rows: parsed.rows, mapping, granularity, name_format: nameFormat,
       player_overrides: playerOverrides, season_overrides: seasonOverrides,
       grade_overrides: gradeOverrides,
     }
@@ -177,7 +239,7 @@ export default function AdminImport() {
     }, 200)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, JSON.stringify(mapping), granularity, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides), JSON.stringify(gradeOverrides)])
+  }, [parsed, JSON.stringify(mapping), granularity, nameFormat, JSON.stringify(playerOverrides), JSON.stringify(seasonOverrides), JSON.stringify(gradeOverrides)])
 
   // No-match names default to "create new player" — so the No-match bucket is
   // pre-filled and you never scroll past 1,000 players to add one.
@@ -213,10 +275,15 @@ export default function AdminImport() {
     if (!file) return
     setParsing(true); setParsed(null); setResolved(null); setCommitted(null)
     setPlayerOverrides({}); setSeasonOverrides({}); setGradeOverrides({})
+    setNameModeRaw('single'); setNameFormat('auto')
     try {
       const p = await api.importPreview(file)
       const m = {}, c = {}
       Object.entries(p.mapping_suggestions || {}).forEach(([f, v]) => { m[f] = v.column; c[f] = v.confidence })
+      // A sheet with separate first-name/surname columns auto-suggests both —
+      // switch straight to split mode so the user isn't left looking at an
+      // empty single-column picker with the real match sitting one tab over.
+      if ((m.player_first_name || m.player_last_name) && !m.player_name) setNameModeRaw('split')
       setParsed(p); setMapping(m); setConfByField(c); setGranularity(p.granularity_guess || 'career')
       setStep('map')
       toast.success(`Parsed ${p.row_count} row${p.row_count === 1 ? '' : 's'}`)
@@ -226,6 +293,14 @@ export default function AdminImport() {
   function setMap(field, col) {
     setMapping(m => { const n = { ...m }; if (col) n[field] = col; else delete n[field]; return n })
     setConfByField(c => ({ ...c, [field]: undefined }))
+  }
+  // Switching name mode clears the OTHER mode's mapping, so a stale player_name
+  // (or first/last) mapping from before the switch can't linger and silently
+  // win server-side (resolve_row_name prefers first/last whenever either is set).
+  function setNameMode(mode) {
+    setNameModeRaw(mode)
+    if (mode === 'split') { setMap('player_name', ''); }
+    else { setMap('player_first_name', ''); setMap('player_last_name', '') }
   }
   function setPOverride(name, val) {
     setPlayerOverrides(o => { const n = { ...o }; if (val === '' ) delete n[name]; else n[name] = val; return n })
@@ -249,15 +324,20 @@ export default function AdminImport() {
 
   // Season is only required when the sheet is season-by-season — career totals
   // have no season column to map.
-  const required = useMemo(() => granularity === 'season' ? ['player_name', 'season_label'] : ['player_name'], [granularity])
-  const mapReady = required.every(f => mapping[f])
+  // Name readiness is handled separately from the generic `required` list — its
+  // required column(s) depend on nameMode (a surname-only split-mode sheet is
+  // valid, matching the "surname-only historical row" case the matcher already
+  // documents; single mode needs the one player_name column).
+  const required = useMemo(() => granularity === 'season' ? ['season_label'] : [], [granularity])
+  const nameReady = nameMode === 'split' ? !!mapping.player_last_name : !!mapping.player_name
+  const mapReady = nameReady && required.every(f => mapping[f])
   const unresolved = (resolved?.totals?.players_unresolved) || 0
 
   async function commit() {
     setCommitting(true)
     try {
       const res = await api.importCommit({
-        rows: parsed.rows, mapping, granularity, filename: file?.name,
+        rows: parsed.rows, mapping, granularity, name_format: nameFormat, filename: file?.name,
         player_overrides: playerOverrides, season_overrides: seasonOverrides,
         grade_overrides: gradeOverrides,
       })
@@ -307,6 +387,7 @@ export default function AdminImport() {
   function reset() {
     setStep('upload'); setFile(null); setParsed(null); setResolved(null); setCommitted(null)
     setMapping({}); setPlayerOverrides({}); setSeasonOverrides({}); setGradeOverrides({})
+    setNameModeRaw('single'); setNameFormat('auto')
   }
 
   return (
@@ -398,6 +479,10 @@ export default function AdminImport() {
               {FIELD_GROUPS.map(([group, fields]) => (
                 <div key={group} className="mb-5">
                   <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">{group.toUpperCase()}</div>
+                  {group === 'Identity' && (
+                    <NameColumnFields nameMode={nameMode} setNameMode={setNameMode} nameFormat={nameFormat} setNameFormat={setNameFormat}
+                      mapping={mapping} setMap={setMap} headers={parsed.headers} confByField={confByField} />
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
                     {fields.map(f => (
                       <FieldRow key={f} field={f} label={FIELD_LABEL[f]} required={required.includes(f)}
@@ -437,7 +522,10 @@ export default function AdminImport() {
             <div className="flex items-center gap-3">
               {!mapReady && (
                 <span className="font-mono text-[10px] text-pb-red/70">
-                  Map the {required.filter(f => !mapping[f]).map(f => FIELD_LABEL[f]).join(' & ')} column to continue.
+                  Map the {[
+                    !nameReady && (nameMode === 'split' ? FIELD_LABEL.player_last_name : FIELD_LABEL.player_name),
+                    ...required.filter(f => !mapping[f]).map(f => FIELD_LABEL[f]),
+                  ].filter(Boolean).join(' & ')} column to continue.
                 </span>
               )}
               <button onClick={() => setStep('players')} disabled={!mapReady}

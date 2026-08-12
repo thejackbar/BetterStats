@@ -536,6 +536,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
                 COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
                 MAX(gr.category) AS category,
                 bool_and(COALESCE(gr.is_public, true)) AS is_public,
+                MAX(gr.display_order) AS display_order,
                 COUNT(DISTINCT g.id) AS games,
                 COUNT(DISTINCT bi.player_id) AS players,
                 COALESCE(SUM(bi.runs), 0) AS runs
@@ -582,6 +583,7 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             "aliases": [],
             "category": None,
             "is_public": True,
+            "display_order": None,
         })
         slot["games"] += int(row["games"] or 0)
         slot["runs"] += int(row["runs"] or 0)
@@ -591,6 +593,11 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             slot["category"] = normalise_category(row["category"])
         # A merged group is public only if every grade in it is public.
         slot["is_public"] = slot["is_public"] and bool(row["is_public"])
+        # display_order is written identically across a merged group, but take
+        # the lowest seen defensively rather than assume that always holds.
+        if row["display_order"] is not None and (
+                slot["display_order"] is None or row["display_order"] < slot["display_order"]):
+            slot["display_order"] = row["display_order"]
         if name != canonical:
             slot["aliases"].append(name)
             aliases_by_canonical.setdefault(canonical, []).append(name)
@@ -605,7 +612,10 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
         slot["category"] = slot["category"] or slot["suggested_category"]
 
     out = list(bucket.values())
-    out.sort(key=lambda r: r["display_name"].lower())
+    # The club's own reading order first (unordered sorts after every ordered
+    # grade, not interleaved at position 0), alphabetical within that — same
+    # shown-order rule as the AFL Merge Grades screen.
+    out.sort(key=lambda r: (r["display_order"] is None, r["display_order"] or 0, r["display_name"].lower()))
     return out
 
 
@@ -686,6 +696,10 @@ class GradeClassifyRequest(BaseModel):
     grade_name: str                 # canonical grade name (as shown in grades-with-stats)
     category: str | None = None     # omit to leave unchanged; one of GRADE_CATEGORIES
     is_public: bool | None = None   # omit to leave unchanged
+    # The club's reading order for this grade — 1 = first. Pass -1 to clear it
+    # back to unordered (a plain None can't mean "clear" here, since None is
+    # already what "leave unchanged" means for every other field on this model).
+    display_order: int | None = None
 
 
 def _grade_name_group(chain: dict[str, str], target: str) -> set[str]:
@@ -732,6 +746,9 @@ async def classify_grade(
     if req.is_public is not None:
         sets.append("is_public = :is_public")
         params["is_public"] = req.is_public
+    if req.display_order is not None:
+        sets.append("display_order = :display_order")
+        params["display_order"] = None if req.display_order < 0 else req.display_order
     if not sets:
         return {"updated": 0, "grade_name": req.grade_name}
 
@@ -753,6 +770,109 @@ async def classify_grade(
         "category": params.get("category"),
         "is_public": params.get("is_public"),
     }
+
+
+class GradeReorderRequest(BaseModel):
+    # Canonical grade names, in the order the club wants them read.
+    grade_names: list[str]
+
+
+@router.post("/grades/reorder")
+async def reorder_grades(
+    req: GradeReorderRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Set the whole reading order in one write — Seniors 1, Reserves 2,
+    Under 19s 3 — rather than one number at a time.
+
+    Numbering is assigned from the submitted order (1..N) instead of trusting
+    numbers from the browser, so the stored orders can never collide or leave
+    gaps however the list was dragged about. A name that isn't a grade in this
+    club is skipped without consuming a position, rather than failing the save:
+    the list comes from a browser and may be a page-load behind a merge.
+
+    The submitted list is the WHOLE ordering, so a grade left out of it is
+    reset to unordered rather than keeping a stale number. The admin screen
+    always submits every grade it is showing, so "left out" in practice means
+    a grade created since the page loaded — and letting that one keep an old
+    position is how two grades end up both claiming position 1.
+    """
+    org_id = str(club.id)
+    logs = await db.execute(
+        text("""
+            SELECT alias_name, canonical_name FROM grade_merge_logs
+            WHERE org_id = :org AND undone_at IS NULL
+        """),
+        {"org": org_id},
+    )
+    chain = {r["alias_name"]: r["canonical_name"] for r in logs.mappings().all()}
+
+    updated = 0
+    seen: set[str] = set()
+    position = 0
+    for raw_name in req.grade_names:
+        canonical = _resolve_canonical_grade(chain, (raw_name or "").strip())
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        # Applies to the canonical name AND every alias merged into it, so a
+        # merged grade orders as one competition however its rows are spelt.
+        names = list(_grade_name_group(chain, canonical))
+        res = await db.execute(
+            text("""
+                UPDATE grades gr SET display_order = :pos
+                FROM seasons s
+                WHERE gr.season_id = s.id AND s.organisation_id = :org AND gr.name = ANY(:names)
+            """),
+            {"pos": position + 1, "org": org_id, "names": names},
+        )
+        # The position is only consumed once a real grade has taken it — a
+        # name that matched nothing would otherwise burn a number and leave a
+        # gap in the sequence.
+        if res.rowcount:
+            position += 1
+            updated += res.rowcount
+
+    # Anything the list didn't name goes back to unordered, so the stored
+    # sequence is exactly 1..N with nothing stale alongside it.
+    if seen:
+        all_named: set[str] = set()
+        for canonical in seen:
+            all_named |= _grade_name_group(chain, canonical)
+        await db.execute(
+            text("""
+                UPDATE grades gr SET display_order = NULL
+                FROM seasons s
+                WHERE gr.season_id = s.id AND s.organisation_id = :org
+                  AND gr.display_order IS NOT NULL AND NOT (gr.name = ANY(:names))
+            """),
+            {"org": org_id, "names": list(all_named)},
+        )
+
+    await db.commit()
+    return {"updated": updated, "ordered": position}
+
+
+@router.post("/grades/clear-order")
+async def clear_grade_order(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Drop the club's ordering entirely, back to the app's own default
+    (alphabetical)."""
+    res = await db.execute(
+        text("""
+            UPDATE grades gr SET display_order = NULL
+            FROM seasons s
+            WHERE gr.season_id = s.id AND s.organisation_id = :org AND gr.display_order IS NOT NULL
+        """),
+        {"org": str(club.id)},
+    )
+    await db.commit()
+    return {"updated": res.rowcount or 0}
 
 
 @router.post("/grades/apply-suggestions")
@@ -1162,24 +1282,48 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     teams_raw = raw.get("teams") or []
     innings_list = raw.get("innings") or []
 
-    # Identify home team from matchSummary.teams[].isHome
-    summary_teams = match_summary.get("teams") or []
-    home_id = next((str(t.get("id", "")).lower() for t in summary_teams if t.get("isHome")), None)
-
-    def find_team(tid):
+    def find_team(tid, exclude=None):
         if tid:
             t = next((t for t in teams_raw if str(t.get("id", "")).lower() == tid), None)
             if t:
                 return t
-        return teams_raw[0] if teams_raw else {}
+        # Unresolvable id (or none at all, e.g. an innings that carries no
+        # battingTeamId) — fall back to a team, but never the one already
+        # claimed by the other side. Without `exclude`, a failure to resolve
+        # BOTH sides' ids used to make this return the exact same object
+        # twice, rendering one team's name on both cards with the other
+        # side's data silently dropped.
+        return next((t for t in teams_raw if t is not exclude), (teams_raw[0] if teams_raw else {}))
 
+    # "home"/"away" below means "batted first" / "batted second", not the
+    # ground's literal home/away designation — which side has home ground is
+    # unrelated to who bats first (a team can win the toss and bat first away
+    # from home; the reported match had the away side batting first), and a
+    # proper scorebook reads left to right in batting order regardless of
+    # whose home ground it was. The frontend template already renders `home`
+    # on the left labelled "1ST INNINGS" and `away` on the right labelled
+    # "2ND INNINGS", so this is the one place that mapping has to be correct.
+    sorted_innings = sorted(
+        innings_list, key=lambda i: i.get("inningsOrder") or i.get("inningsNumber") or 1
+    )
+    home_inn = sorted_innings[0] if sorted_innings else {}
+    away_inn = sorted_innings[1] if len(sorted_innings) > 1 else {}
+    home_id = _team_id_from_inn(home_inn)
+    away_id = _team_id_from_inn(away_inn)
+    # Cross-fill from whichever side DID resolve, so a one-sided miss (the
+    # common case — one innings object missing battingTeamId) still lands the
+    # other side on the correct, different team rather than the `find_team`
+    # exclude fallback's blunter "just pick a different team" guess below.
+    if not home_id and away_id:
+        home_id = next(
+            (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != away_id), None
+        )
+    if not away_id and home_id:
+        away_id = next(
+            (str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None
+        )
     home_team_raw = find_team(home_id)
-    away_id = next((str(t.get("id", "")).lower() for t in teams_raw if str(t.get("id", "")).lower() != home_id), None)
-    away_team_raw = find_team(away_id)
-
-    # Map innings to teams: home team batting = innings where battingTeamId == home_id
-    home_inn = next((i for i in innings_list if _team_id_from_inn(i) == home_id), innings_list[0] if innings_list else {})
-    away_inn = next((i for i in innings_list if _team_id_from_inn(i) != home_id), innings_list[1] if len(innings_list) > 1 else {})
+    away_team_raw = find_team(away_id, exclude=home_team_raw)
 
     # Collect all participantIds to look up names from DB
     all_pids: set[str] = set()
@@ -1399,8 +1543,12 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         total_wkts = int(wkts_raw) if wkts_raw is not None else sum(
             1 for b in batting if not b["notOut"] and not b["didNotBat"]
         )
-        overs_raw = inn.get("totalOvers") or inn.get("overs")
-        overs = _overs_str(overs_raw) if overs_raw else "0"
+        # The innings' own total-overs field is "oversBowled" (confirmed live:
+        # 39.3 / 39.0) — "totalOvers"/"overs" don't exist on this payload at
+        # all, so this always fell back to "0". Same field the overs-allotment
+        # guess below already reads correctly off each innings.
+        overs_raw = inn.get("oversBowled")
+        overs = _overs_str(overs_raw) if overs_raw is not None else "0"
         try:
             o_float = float(str(overs_raw or 0))
             whole = int(o_float)
@@ -1411,14 +1559,20 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
         rr = round(total_runs / o_real, 2) if o_real > 0 else 0
         return str(total_runs), total_wkts, overs, str(rr)
 
-    def build_team(team_raw: dict, bat_inn: dict, bowl_inn: dict, default_color: str) -> dict:
-        # bat_inn  = innings where THIS team batted  → use for batting rows + extras + totals
-        # bowl_inn = innings where OPPONENT batted   → use for bowling rows (team bowled in opp innings)
-        batting = parse_batting(bat_inn.get("batting") or [])
-        bowling = parse_bowling(bowl_inn.get("bowling") or [])
+    def build_team(team_raw: dict, inn: dict, default_color: str) -> dict:
+        # inn = the innings THIS team batted — its own "batting" array is this
+        # team's card; its "bowling" array records whoever bowled THAT
+        # innings, i.e. the OPPONENT, which is exactly what a proper
+        # scorebook nests directly below a team's batting: not their own
+        # figures from the other innings, but the bowling that dismissed
+        # them. (Previously each side's card carried its OWN bowling from the
+        # innings it bowled, contradicting the "{OPPONENT} BOWLING" heading
+        # the template already renders above it.)
+        batting = parse_batting(inn.get("batting") or [])
+        bowling = parse_bowling(inn.get("bowling") or [])
         name = (team_raw.get("displayName") or team_raw.get("name") or "TEAM").upper()
         short = "".join(w[0] for w in name.split()[:3])
-        total, wickets, overs, rr = team_totals(bat_inn, batting)
+        total, wickets, overs, rr = team_totals(inn, batting)
         logo_url = (team_raw.get("logoUrl") or team_raw.get("logo") or
                     team_raw.get("imageUrl") or team_raw.get("image") or None)
         return {
@@ -1433,11 +1587,11 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
             "runRate": rr,
             "batting": batting,
             "bowling": bowling,
-            "extras": parse_extras(bat_inn),
+            "extras": parse_extras(inn),
         }
 
-    home = build_team(home_team_raw, bat_inn=home_inn, bowl_inn=away_inn, default_color="#1a4eb8")
-    away = build_team(away_team_raw, bat_inn=away_inn, bowl_inn=home_inn, default_color="#cc1f2c")
+    home = build_team(home_team_raw, inn=home_inn, default_color="#1a4eb8")
+    away = build_team(away_team_raw, inn=away_inn, default_color="#cc1f2c")
 
     # Fallback logo lookup: if GR didn't provide a logo, match against orgs in our DB
     if not home.get("logo"):

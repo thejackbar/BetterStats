@@ -212,14 +212,15 @@ async def get_match_scorecard(match_id: str, *, force: bool = False) -> Optional
                 return hit[1]
             return None
         data = r.json()
-        if _scorecard_looks_incomplete(data):
+        if _scorecard_looks_incomplete(data, prior=hit[1] if hit else None):
             # Caught mid-edit — a scorer correcting the match on Grassroots'
             # side can momentarily save an innings with its totals intact but
-            # its per-row batting wiped. Don't pin that snapshot; return it
-            # for this one call (or the last good one, if we have it) but let
-            # the next request try again instead of caching a broken card for
-            # the full TTL.
-            logger.warning(f"GR scores: /matches/{match_id} looks incomplete (innings totals present, batting rows missing) — not caching")
+            # its per-row batting wiped, or reset the whole match to no
+            # innings at all. Don't pin that snapshot; return it for this one
+            # call (or the last good one, if we have it) but let the next
+            # request try again instead of caching a broken card for the
+            # full TTL.
+            logger.warning(f"GR scores: /matches/{match_id} looks incomplete — not caching")
             return hit[1] if hit else data
         _scorecard_cache[match_id] = (now, data)
         return data
@@ -289,12 +290,36 @@ async def get_matches_detail(match_ids: list[str]) -> dict[str, dict]:
     return out
 
 
-def _scorecard_looks_incomplete(data: dict) -> bool:
-    """True when an innings reports real totals but has no batting rows to
-    back them up — the signature of catching Grassroots mid-correction."""
-    for inn in (data.get("innings") or []):
+def _scorecard_looks_incomplete(data: dict, prior: Optional[dict] = None) -> bool:
+    """True when this response looks like a bad in-flight snapshot rather than
+    a real state of the match — the signature of catching Grassroots
+    mid-correction, when a scorer's edit is saved in two steps and we land on
+    the gap between them.
+
+    Two signals, neither of which alone was enough:
+    - An innings reports real totals but has no batting rows to back them up
+      (covers a wipe that leaves the scoreline behind).
+    - Comparing against the last good response (`prior`): an innings, or the
+      whole match, that HAD batting rows/innings before and now has none.
+      Needed because a full reset can zero the totals too (0 runs, 0
+      wickets), which the totals-only check above can't tell apart from an
+      innings that simply hasn't started yet — but a genuine "hasn't started"
+      innings was never in `prior` with rows in the first place, so the
+      regression check only fires on an actual loss of data.
+    """
+    innings = data.get("innings") or []
+    prior_innings = {i.get("id"): i for i in ((prior or {}).get("innings") or []) if i.get("id")}
+
+    if prior_innings and not innings:
+        return True
+
+    for inn in innings:
         has_totals = bool(inn.get("numberOfWicketsFallen") or inn.get("runsScored"))
-        if has_totals and not (inn.get("batting") or []):
+        has_batting = bool(inn.get("batting") or [])
+        if has_totals and not has_batting:
+            return True
+        prior_inn = prior_innings.get(inn.get("id"))
+        if prior_inn and (prior_inn.get("batting") or []) and not has_batting:
             return True
     return False
 
@@ -358,9 +383,16 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
     """Upcoming (and optionally live) fixtures for one grade, normalised.
 
     Reuses ``get_grade_matches`` (same in-process cache). Returns a list of
-    ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id}``
-    dicts for matches that haven't reached a terminal state and are scheduled
-    today-or-later.
+    ``{id, home_team, away_team, played_at, time, status, round, venue, grade_id,
+    home_org_id, away_org_id, home_logo, away_logo}`` dicts for matches that
+    haven't reached a terminal state and are scheduled today-or-later.
+
+    ``*_org_id``/``*_logo`` come from each team's ``owningOrganisation`` — the
+    actual club, which holds the crest (a grade "team" is often a sponsor
+    name, not the club). Same field the scorecard/lineups team-logo lookups
+    already read (see the CLAUDE.md "Club crests, live from Grassroots"
+    note) — pulled here too since a fixtures/results round pull is otherwise
+    the one surface with no crest at all.
     """
     matches = await get_grade_matches(grade_id)
     today = date.today().isoformat()
@@ -381,18 +413,24 @@ async def get_grade_fixtures(grade_id: str, *, include_live: bool = True) -> lis
         if not day or day < today:
             continue
         teams = m.get("teams") or []
-        home = next((t.get("displayName") for t in teams if t.get("isHome")), None)
-        away = next((t.get("displayName") for t in teams if not t.get("isHome")), None)
+        home_t = next((t for t in teams if t.get("isHome")), None)
+        away_t = next((t for t in teams if not t.get("isHome")), None)
+        home_org = (home_t or {}).get("owningOrganisation") or {}
+        away_org = (away_t or {}).get("owningOrganisation") or {}
         out.append({
             "id": m.get("id"),
-            "home_team": home,
-            "away_team": away,
+            "home_team": (home_t or {}).get("displayName"),
+            "away_team": (away_t or {}).get("displayName"),
             "played_at": day,
             "time": dt[11:16] if len(dt) >= 16 else None,
             "status": "LIVE" if sid == _FIXTURE_STATUS_LIVE else "UPCOMING",
             "round": (m.get("round") or {}).get("name"),
             "venue": (m.get("venue") or {}).get("name"),
             "grade_id": grade_id,
+            "home_org_id": home_org.get("id"),
+            "away_org_id": away_org.get("id"),
+            "home_logo": home_org.get("logoUrl"),
+            "away_logo": away_org.get("logoUrl"),
         })
     return out
 
