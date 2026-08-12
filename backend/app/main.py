@@ -22,7 +22,11 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
 # avoid colliding with the `auth` (club-admin) import above.
-from app.routers.scout import auth as scout_auth_router, discovery as scout_discovery_router
+from app.routers.scout import (
+    auth as scout_auth_router,
+    discovery as scout_discovery_router,
+    watchlist as scout_watchlist_router,
+)
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -4830,6 +4834,66 @@ async def lifespan(app: FastAPI):
             "ON scout_tracked_players(scout_org_id)"
         ))
 
+        # Migration 238: BetterScout watchlists — replaces the phase-2
+        # scout_tracked_players bookmark with real Kanban boards (multiple
+        # per org, renameable columns, cards carrying tags + recruiting
+        # fields). Byte-identical to alembic/versions/238_scout_watchlists.py.
+        await conn.execute(text("DROP TABLE IF EXISTS scout_tracked_players"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_watchlists (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_watchlists_org ON scout_watchlists(scout_org_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_watchlist_columns (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                watchlist_id UUID NOT NULL REFERENCES scout_watchlists(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_watchlist_columns_watchlist "
+            "ON scout_watchlist_columns(watchlist_id, position)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_watchlist_cards (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                watchlist_id UUID NOT NULL REFERENCES scout_watchlists(id) ON DELETE CASCADE,
+                column_id UUID NOT NULL REFERENCES scout_watchlist_columns(id) ON DELETE CASCADE,
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL DEFAULT 0,
+                tags JSONB NOT NULL DEFAULT '[]',
+                role TEXT,
+                batting_hand TEXT,
+                bowling_action TEXT,
+                bowling_type TEXT,
+                region TEXT,
+                level TEXT,
+                transfer_preference TEXT,
+                visa_status TEXT,
+                agent_contact TEXT,
+                availability_window TEXT,
+                fee_expectations TEXT,
+                notes TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scout_watchlist_card UNIQUE (watchlist_id, scouted_player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_watchlist_cards_column "
+            "ON scout_watchlist_cards(column_id, position)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5086,6 +5150,7 @@ app.include_router(wizard_analytics.router)  # Setup Wizard analytics (super-adm
 app.include_router(backup_admin.router)  # Backup/restore task history + DB size stats (super-admin)
 app.include_router(scout_auth_router.router)  # BetterScout — Scout Org login (own tenant type, own cookie; no require_module — unrelated to club entitlements)
 app.include_router(scout_discovery_router.router)  # BetterScout — player discovery (club search/roster, add/track a player)
+app.include_router(scout_watchlist_router.router)  # BetterScout — watchlists (Kanban boards, tags, recruiting fields)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

@@ -11,11 +11,12 @@ Deliberately NOT a separate database/silo (unlike AFL) — BetterScout lives in
 the same app process and the same database as the rest of BetterCricket, so
 a normal deploy (which already runs `alembic upgrade head` on boot) picks it
 up with no extra server setup. Registered on the same `Base` as every other
-model (imported from app.models.db) purely so the ORM knows about these two
-tables; the real DDL lives in alembic/versions/236_scout_org_tenant.py (+ its
-idempotent mirror in main.py's lifespan), same as every other table in this
-app. Isolation from club/player data is enforced by having zero foreign keys
-in or out of these two tables and a completely separate login (see
+model (imported from app.models.db) purely so the ORM knows about these
+tables; the real DDL lives in alembic/versions/236_scout_org_tenant.py,
+237_scout_discovery.py and 238_scout_watchlists.py (+ their idempotent
+mirrors in main.py's lifespan), same as every other table in this app.
+Isolation from club/player data is enforced by having zero foreign keys in
+or out of any table in this file and a completely separate login (see
 services/scout_auth.py), not by a separate database.
 """
 import uuid
@@ -106,10 +107,10 @@ class ScoutClubCache(Base):
 
 class ScoutedPlayer(Base):
     """A real person BetterScout knows about — platform-wide, not owned by
-    any one Scout Org (see ScoutTrackedPlayer for the per-org fact "this org
-    has added this player"). Created only when a scout explicitly adds
-    someone, never just from browsing a search. `stats_payload` is a
-    SNAPSHOT sliced from ScoutClubCache at add/refresh time, not
+    any one Scout Org (see ScoutWatchlistCard for the per-org, per-watchlist
+    fact "this org is tracking this player here"). Created only when a scout
+    explicitly adds someone, never just from browsing a search. `stats_payload`
+    is a SNAPSHOT sliced from ScoutClubCache at add/refresh time, not
     recomputed live on every profile view."""
     __tablename__ = "scouted_players"
     __table_args__ = (
@@ -134,18 +135,83 @@ class ScoutedPlayer(Base):
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
-class ScoutTrackedPlayer(Base):
-    """The minimal per-tenant fact: this Scout Org has added this player.
-    Deliberately not the watchlist itself (no tags/stage/notes) — a later
-    phase's watchlist board extends this same join rather than inventing a
-    second, competing "which players does this org care about" model."""
-    __tablename__ = "scout_tracked_players"
-    __table_args__ = (
-        UniqueConstraint("scout_org_id", "scouted_player_id", name="uq_scout_tracked_player"),
-    )
+class ScoutWatchlist(Base):
+    """A Kanban-style board, scoped to one Scout Org. Multiple per org — a
+    recruiting agency might run one per client, a feeder club one per
+    parent-club relationship. Deliberately NOT a sales funnel: the default
+    columns (seeded by services.scout_watchlist.create_watchlist) are
+    neutral (Watching/Shortlisted/Under Review/Archived), because not every
+    Scout Org is trying to sign someone — a feeder club just wants to
+    monitor progress."""
+    __tablename__ = "scout_watchlists"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
-    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutWatchlistColumn(Base):
+    """One Kanban column on a watchlist. Fully renameable/addable/removable
+    by the Scout Org — this is a label, not a workflow state the backend has
+    any opinion about."""
+    __tablename__ = "scout_watchlist_columns"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    watchlist_id = Column(UUID(as_uuid=True), ForeignKey("scout_watchlists.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutWatchlistCard(Base):
+    """A player's card on one watchlist — supersedes the phase-2
+    ScoutTrackedPlayer bookmark (this table's own note there flagged exactly
+    this extension). A real person (ScoutedPlayer) can have a card on
+    several different watchlists, never two cards on the same one (see the
+    unique constraint). Everything past `position` is scout-entered
+    recruiting detail: the four "fixed core" fields reuse the exact same
+    vocab `players.*` already uses (validated against
+    frontend/src/lib/playerAttributes.js's option lists), region/level are
+    fixed picklists, and the five recruiting fields are free text with a
+    label — a note, not a workflow the backend enforces."""
+    __tablename__ = "scout_watchlist_cards"
+    __table_args__ = (
+        UniqueConstraint("watchlist_id", "scouted_player_id", name="uq_scout_watchlist_card"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    watchlist_id = Column(UUID(as_uuid=True), ForeignKey("scout_watchlists.id", ondelete="CASCADE"), nullable=False)
+    column_id = Column(UUID(as_uuid=True), ForeignKey("scout_watchlist_columns.id", ondelete="CASCADE"), nullable=False)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+
+    tags = Column(JSONB, nullable=False, default=list, server_default="[]")
+
+    # Fixed core fields — same columns/vocab as players.* (role/batting_hand/
+    # bowling_action/bowling_type), so a value here means the same thing it
+    # means everywhere else in the app.
+    role = Column(Text, nullable=True)
+    batting_hand = Column(Text, nullable=True)
+    bowling_action = Column(Text, nullable=True)
+    bowling_type = Column(Text, nullable=True)
+
+    # Fixed picklists — validated against REGION_OPTS/LEVEL_OPTS in
+    # services/scout_watchlist.py.
+    region = Column(Text, nullable=True)
+    level = Column(Text, nullable=True)
+
+    # Recruiting fields — free text, a labelled note each.
+    transfer_preference = Column(Text, nullable=True)
+    visa_status = Column(Text, nullable=True)
+    agent_contact = Column(Text, nullable=True)
+    availability_window = Column(Text, nullable=True)
+    fee_expectations = Column(Text, nullable=True)
+
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

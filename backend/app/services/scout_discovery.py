@@ -23,8 +23,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import async_session_maker
-from app.models.scout import ScoutClubCache, ScoutedPlayer, ScoutTrackedPlayer
-from app.services import iq_scout
+from app.models.scout import ScoutClubCache, ScoutWatchlist, ScoutWatchlistCard, ScoutedPlayer
+from app.services import iq_scout, scout_watchlist
 from app.services.iq_opponent import BUILD_STALE_AFTER, TTL, _BUILD_TASKS  # noqa: F401 — shared build-task bookkeeping
 
 logger = logging.getLogger(__name__)
@@ -136,14 +136,7 @@ async def add_player(
     player.stats_built_at = datetime.now(timezone.utc)
     await session.flush()
 
-    res = await session.execute(
-        select(ScoutTrackedPlayer).where(
-            ScoutTrackedPlayer.scout_org_id == scout_org_id,
-            ScoutTrackedPlayer.scouted_player_id == player.id,
-        )
-    )
-    if res.scalar_one_or_none() is None:
-        session.add(ScoutTrackedPlayer(scout_org_id=scout_org_id, scouted_player_id=player.id))
+    await scout_watchlist.ensure_card_on_default_watchlist(session, scout_org_id, player.id)
     await session.commit()
     return player_out(player)
 
@@ -156,7 +149,7 @@ async def add_manual_player(
     player = ScoutedPlayer(source="manual", name=name, club_name=club_name, notes=notes)
     session.add(player)
     await session.flush()
-    session.add(ScoutTrackedPlayer(scout_org_id=scout_org_id, scouted_player_id=player.id))
+    await scout_watchlist.ensure_card_on_default_watchlist(session, scout_org_id, player.id)
     await session.commit()
     return player_out(player)
 
@@ -179,10 +172,15 @@ async def refresh_player(session: AsyncSession, scouted_player_id: str) -> dict:
 
 
 async def list_tracked_players(session: AsyncSession, scout_org_id: str) -> list[dict]:
+    """Every distinct player with at least one card on any of this org's
+    watchlists — the flat "My players" directory, now derived from the real
+    watchlist model instead of the phase-2 bookmark table."""
     res = await session.execute(
         select(ScoutedPlayer)
-        .join(ScoutTrackedPlayer, ScoutTrackedPlayer.scouted_player_id == ScoutedPlayer.id)
-        .where(ScoutTrackedPlayer.scout_org_id == scout_org_id)
+        .join(ScoutWatchlistCard, ScoutWatchlistCard.scouted_player_id == ScoutedPlayer.id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id)
+        .distinct()
         .order_by(ScoutedPlayer.name)
     )
     return [player_out(p) for p in res.scalars().all()]

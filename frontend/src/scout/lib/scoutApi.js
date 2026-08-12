@@ -29,4 +29,20 @@ export const scoutApi = {
   listPlayers: () => request('/scout/players'),
   getPlayer: (id) => request(`/scout/players/${id}`),
   refreshPlayer: (id) => request(`/scout/players/${id}/refresh`, { method: 'POST' }),
+
+  listWatchlists: () => request('/scout/watchlists'),
+  createWatchlist: (name) => request('/scout/watchlists', { method: 'POST', body: JSON.stringify({ name }) }),
+  getBoard: (watchlistId) => request(`/scout/watchlists/${watchlistId}/board`),
+  createColumn: (watchlistId, name) =>
+    request(`/scout/watchlists/${watchlistId}/columns`, { method: 'POST', body: JSON.stringify({ name }) }),
+  renameColumn: (columnId, name) =>
+    request(`/scout/watchlists/columns/${columnId}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
+  deleteColumn: (columnId) => request(`/scout/watchlists/columns/${columnId}`, { method: 'DELETE' }),
+  reorderColumns: (watchlistId, columnIds) =>
+    request(`/scout/watchlists/${watchlistId}/columns/reorder`, { method: 'POST', body: JSON.stringify({ column_ids: columnIds }) }),
+  moveCard: (cardId, columnId, position) =>
+    request(`/scout/watchlists/cards/${cardId}/move`, { method: 'POST', body: JSON.stringify({ column_id: columnId, position }) }),
+  updateCard: (cardId, fields) =>
+    request(`/scout/watchlists/cards/${cardId}`, { method: 'PATCH', body: JSON.stringify(fields) }),
+  removeCard: (cardId) => request(`/scout/watchlists/cards/${cardId}`, { method: 'DELETE' }),
 }
