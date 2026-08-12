@@ -4,6 +4,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
+import TrustedByStrip from '../../components/marketing/TrustedByStrip'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -476,6 +477,8 @@ export default function Trial() {
             ) : null}
           </div>
         </section>
+
+        <TrustedByStrip compact />
 
         {/* Modules — visitors can see everything BetterCricket does right after
             the search. Same cards as the homepage, each clicking through. */}
