@@ -213,5 +213,12 @@ class ScoutWatchlistCard(Base):
 
     notes = Column(Text, nullable=True)
 
+    # Read-only public share link — NULL means not shared, that's the only
+    # state that matters. The token itself is the credential (see
+    # services.scout_watchlist.get_shared_card): no PIN, no session cookie,
+    # unlike every *_link_token in the rest of the app, because this gates
+    # one record's low-sensitivity cricket data, not a whole tenant.
+    share_token = Column(Text, nullable=True, unique=True)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

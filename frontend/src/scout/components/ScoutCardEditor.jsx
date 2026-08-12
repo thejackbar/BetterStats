@@ -9,7 +9,7 @@ const RECRUITING_FIELDS = [
   ['fee_expectations', 'Fee expectations', 'e.g. £400/week + accommodation'],
 ]
 
-export default function ScoutCardEditor({ card, onClose, onSave, onRemove }) {
+export default function ScoutCardEditor({ card, onClose, onSave, onRemove, onShare, onUnshare }) {
   const [form, setForm] = useState({
     tags: card.tags || [],
     role: card.role || '',
@@ -23,6 +23,43 @@ export default function ScoutCardEditor({ card, onClose, onSave, onRemove }) {
   const [tagInput, setTagInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [shareToken, setShareToken] = useState(card.share_token || null)
+  const [shareBusy, setShareBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const shareUrl = shareToken ? `${window.location.origin}/betterscout/share/${shareToken}` : null
+
+  const doShare = async () => {
+    setShareBusy(true)
+    setError(null)
+    try {
+      const res = await onShare()
+      setShareToken(res.share_token)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  const doUnshare = async () => {
+    setShareBusy(true)
+    setError(null)
+    try {
+      await onUnshare()
+      setShareToken(null)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
+  const copyLink = () => {
+    navigator.clipboard?.writeText(shareUrl)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
 
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
 
@@ -58,6 +95,40 @@ export default function ScoutCardEditor({ card, onClose, onSave, onRemove }) {
         </div>
 
         {error && <p className="text-sm text-[var(--pb-negative)]">{error}</p>}
+
+        <div className="rounded border border-pb-hairline p-3 space-y-2">
+          <div className="text-xs text-pb-dim uppercase font-mono">Share</div>
+          {!shareToken && (
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs text-pb-dim">
+                Create a read-only link with this player's stats, tags and notes — never the recruiting fields below.
+              </p>
+              <button onClick={doShare} disabled={shareBusy}
+                      className="shrink-0 text-sm px-3 py-1.5 rounded border border-pb-hairline hover:bg-pb-surface2 disabled:opacity-50">
+                {shareBusy ? 'Creating…' : 'Create share link'}
+              </button>
+            </div>
+          )}
+          {shareToken && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <input readOnly value={shareUrl}
+                       className="flex-1 bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-xs font-mono" />
+                <button onClick={copyLink} className="shrink-0 text-xs px-2 py-1.5 rounded border border-pb-hairline hover:bg-pb-surface2">
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <div className="flex gap-3 text-xs">
+                <button onClick={doShare} disabled={shareBusy} className="text-pb-dim hover:text-pb-text disabled:opacity-50">
+                  Regenerate
+                </button>
+                <button onClick={doUnshare} disabled={shareBusy} className="text-[var(--pb-negative)] hover:underline disabled:opacity-50">
+                  Turn off sharing
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div>
           <label className="block text-xs text-pb-dim uppercase font-mono mb-1">Tags</label>

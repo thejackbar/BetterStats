@@ -178,3 +178,28 @@ async def remove_card(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "ok"}
+
+
+@router.post("/cards/{card_id}/share")
+async def create_share_link(
+    card_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scout_watchlist.create_share_link(db, card_id, _current_org(current).id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.delete("/cards/{card_id}/share")
+async def revoke_share_link(
+    card_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await scout_watchlist.revoke_share_link(db, card_id, _current_org(current).id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "ok"}

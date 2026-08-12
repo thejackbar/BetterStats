@@ -12,6 +12,7 @@ import ScoutPlayerProfile from './scout/pages/ScoutPlayerProfile'
 import ScoutWatchlists from './scout/pages/ScoutWatchlists'
 import ScoutWatchlistBoard from './scout/pages/ScoutWatchlistBoard'
 import ScoutCompare from './scout/pages/ScoutCompare'
+import ScoutPublicShare from './scout/pages/ScoutPublicShare'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -311,6 +312,11 @@ export default function App() {
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />
+
+          {/* BetterScout's read-only public share link — no login, no
+              ScoutAuthProvider, deliberately NOT nested inside ScoutApp
+              below. The token itself is the credential. */}
+          <Route path="/betterscout/share/:token" element={<ScoutPublicShare />} />
 
           {/* BetterScout — a completely separate tenant type/login (Scout
               Org, not a club Organisation), living inside this same app.

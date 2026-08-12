@@ -12,6 +12,8 @@ monitor its own juniors), so nothing here implies an outcome.
 """
 from __future__ import annotations
 
+import secrets
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -155,6 +157,7 @@ def _card_out(card: ScoutWatchlistCard, player: ScoutedPlayer) -> dict:
         "availability_window": card.availability_window,
         "fee_expectations": card.fee_expectations,
         "notes": card.notes,
+        "share_token": card.share_token,
     }
 
 
@@ -260,6 +263,56 @@ async def remove_card(session: AsyncSession, card_id: str, scout_org_id: str) ->
     card = await _get_owned_card(session, card_id, scout_org_id)
     await session.delete(card)
     await session.commit()
+
+
+# ─── read-only public share link ───────────────────────────────────────────
+
+# Fields excluded from a shared card view — the recruiting-CRM detail is
+# commercially sensitive negotiation material that must never ride on a link
+# that could be forwarded anywhere. Kept as an explicit list (not "everything
+# _card_out returns minus a blocklist") so a future field added to the card
+# doesn't leak onto a public page just because nobody remembered to exclude it.
+_SHARED_CARD_FIELDS = {
+    "tags", "role", "batting_hand", "bowling_action", "bowling_type", "region", "level", "notes",
+}
+
+
+async def create_share_link(session: AsyncSession, card_id: str, scout_org_id: str) -> dict:
+    """Mints (or, on an already-shared card, ROTATES — the old link dies the
+    moment a new one is minted) a share token. One action covers both
+    'share' and 'regenerate'."""
+    card = await _get_owned_card(session, card_id, scout_org_id)
+    card.share_token = secrets.token_urlsafe(24)
+    await session.commit()
+    return {"share_token": card.share_token}
+
+
+async def revoke_share_link(session: AsyncSession, card_id: str, scout_org_id: str) -> None:
+    card = await _get_owned_card(session, card_id, scout_org_id)
+    card.share_token = None
+    await session.commit()
+
+
+async def get_shared_card(session: AsyncSession, token: str) -> dict | None:
+    """The one unscoped lookup in this module, by design — the token itself
+    IS the credential, there's no Scout Org to check ownership against from
+    the public side. Returns a deliberately narrow shape: never the five
+    recruiting fields, whatever _card_out otherwise carries."""
+    res = await session.execute(
+        select(ScoutWatchlistCard, ScoutedPlayer)
+        .join(ScoutedPlayer, ScoutedPlayer.id == ScoutWatchlistCard.scouted_player_id)
+        .where(ScoutWatchlistCard.share_token == token)
+    )
+    row = res.first()
+    if not row:
+        return None
+    card, player = row
+    full = _card_out(card, player)
+    return {
+        "player": full["player"],
+        "stats": player.stats_payload,
+        **{k: full[k] for k in _SHARED_CARD_FIELDS},
+    }
 
 
 async def ensure_card_on_default_watchlist(

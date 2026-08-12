@@ -83,6 +83,17 @@ export default function ScoutWatchlistBoard() {
     setEditingCard(null)
   }
 
+  const shareCard = async () => {
+    const res = await scoutApi.createShareLink(editingCard.id)
+    setBoard((b) => ({ ...b, cards: b.cards.map((c) => (c.id === editingCard.id ? { ...c, share_token: res.share_token } : c)) }))
+    return res
+  }
+
+  const unshareCard = async () => {
+    await scoutApi.revokeShareLink(editingCard.id)
+    setBoard((b) => ({ ...b, cards: b.cards.map((c) => (c.id === editingCard.id ? { ...c, share_token: null } : c)) }))
+  }
+
   if (error && !board) return <p className="text-sm text-[var(--pb-negative)]">{error}</p>
   if (board === undefined) return <p className="text-sm text-pb-dim">Loading…</p>
 
@@ -120,6 +131,8 @@ export default function ScoutWatchlistBoard() {
           onClose={() => setEditingCard(null)}
           onSave={saveCard}
           onRemove={removeCard}
+          onShare={shareCard}
+          onUnshare={unshareCard}
         />
       )}
     </div>

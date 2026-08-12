@@ -45,4 +45,11 @@ export const scoutApi = {
   updateCard: (cardId, fields) =>
     request(`/scout/watchlists/cards/${cardId}`, { method: 'PATCH', body: JSON.stringify(fields) }),
   removeCard: (cardId) => request(`/scout/watchlists/cards/${cardId}`, { method: 'DELETE' }),
+
+  createShareLink: (cardId) => request(`/scout/watchlists/cards/${cardId}/share`, { method: 'POST' }),
+  revokeShareLink: (cardId) => request(`/scout/watchlists/cards/${cardId}/share`, { method: 'DELETE' }),
+  // Public — no scout session needed, but the shared request() helper works
+  // fine either way (it just sends credentials:'include', harmless with no
+  // cookie present).
+  getSharedCard: (token) => request(`/public/scout/share/${token}`),
 }

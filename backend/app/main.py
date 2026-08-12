@@ -25,6 +25,7 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
 from app.routers.scout import (
     auth as scout_auth_router,
     discovery as scout_discovery_router,
+    public_share as scout_public_share_router,
     watchlist as scout_watchlist_router,
 )
 from app.jobs.scheduler import start_scheduler, stop_scheduler
@@ -4894,6 +4895,16 @@ async def lifespan(app: FastAPI):
             "ON scout_watchlist_cards(column_id, position)"
         ))
 
+        # Migration 239: BetterScout read-only per-card share link. NULL =
+        # not shared. Byte-identical to alembic/versions/239_scout_share_link.py.
+        await conn.execute(text(
+            "ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS share_token TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scout_watchlist_cards_share_token "
+            "ON scout_watchlist_cards(share_token) WHERE share_token IS NOT NULL"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5151,6 +5162,7 @@ app.include_router(backup_admin.router)  # Backup/restore task history + DB size
 app.include_router(scout_auth_router.router)  # BetterScout — Scout Org login (own tenant type, own cookie; no require_module — unrelated to club entitlements)
 app.include_router(scout_discovery_router.router)  # BetterScout — player discovery (club search/roster, add/track a player)
 app.include_router(scout_watchlist_router.router)  # BetterScout — watchlists (Kanban boards, tags, recruiting fields)
+app.include_router(scout_public_share_router.router)  # BetterScout — unauthenticated read-only per-card share link
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers
