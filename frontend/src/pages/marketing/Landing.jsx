@@ -8,6 +8,7 @@ import Comparison3Way from '../../components/marketing/Comparison3Way'
 import ScreenshotOrMock from '../../components/marketing/ScreenshotOrMock'
 import DotField from '../../components/marketing/DotField'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
+import TrustedByStrip from '../../components/marketing/TrustedByStrip'
 import {
   MockHeritageCard,
   MockLeaderboard,
@@ -112,38 +113,6 @@ function Hero({ onCta }) {
             </div>
           </div>
         </Reveal>
-      </div>
-    </section>
-  )
-}
-
-// ─── Logo strip ──────────────────────────────────────────────────────────
-const TRUST_CLUBS = [
-  { slug: 'applecross', name: 'Applecross Cricket Club', logo: '/marketing/applecross-cc.webp' },
-  { slug: 'kalamunda-cricket-club', name: 'Kalamunda Cricket Club', logo: '/marketing/kalamunda-cc.webp' },
-  { slug: 'gosnells-cricket-club', name: 'Gosnells Cricket Club', logo: '/marketing/gosnells-cc.webp' },
-  { slug: 'leeming-spartan-cricket-club', name: 'Leeming Spartan Cricket Club', logo: '/marketing/leeming-spartan-cc.webp' },
-]
-
-function Logos() {
-  return (
-    <section className="px-4 sm:px-6 lg:px-10 py-12 border-y pb-hairline bg-black/20">
-      <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-10 gap-y-5">
-        <p className="text-xs text-pb-faint uppercase tracking-wide3 font-medium shrink-0">Trusted by clubs at</p>
-        <div className="logo-marquee">
-          <div className="logo-marquee-track">
-            {[...TRUST_CLUBS, ...TRUST_CLUBS].map((c, i) => (
-              <Link
-                key={`${c.slug}-${i}`}
-                to={`/${c.slug}`}
-                className="flex items-center gap-3 text-base font-semibold text-pb-text/80 hover:text-accent transition-colors shrink-0"
-              >
-                <img src={c.logo} alt={c.name} className="w-9 h-9 object-contain" loading="lazy" />
-                {c.name}
-              </Link>
-            ))}
-          </div>
-        </div>
       </div>
     </section>
   )
@@ -574,7 +543,7 @@ export default function Landing() {
       <MarketingNav />
       <div id="main-content" tabIndex="-1">
         <Hero onCta={triggerTrial} />
-        <Logos />
+        <TrustedByStrip />
         <ValueProps />
         <StatBanner />
         <Showcase />

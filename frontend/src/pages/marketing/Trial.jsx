@@ -4,6 +4,7 @@ import MarketingNav from '../../components/MarketingNav'
 import MarketingFooter from '../../components/marketing/MarketingFooter'
 import Reveal from '../../components/marketing/Reveal'
 import SelfServeTrialModal from '../../components/admin/SelfServeTrialModal'
+import TrustedByStrip from '../../components/marketing/TrustedByStrip'
 import { api } from '../../lib/api'
 import { SUPPORT_EMAIL } from '../../data/marketing'
 import { usePageMeta } from '../../hooks/usePageMeta'
@@ -365,7 +366,7 @@ export default function Trial() {
             and most obvious thing to do. An animated placeholder demonstrates
             the action; a one-line instruction spells out the two steps. No
             image (removed as a distraction), no trial/credit-card framing. */}
-        <section className="relative pt-20 sm:pt-28 pb-12 sm:pb-16 px-4 sm:px-6 lg:px-10 overflow-hidden">
+        <section className="relative pt-20 sm:pt-28 pb-6 sm:pb-8 px-4 sm:px-6 lg:px-10 overflow-hidden">
           <div className="absolute inset-0 hero-glow opacity-60 pointer-events-none" />
           <div className="max-w-2xl mx-auto relative text-center">
             <h1 className="font-display font-bold text-[32px] sm:text-[46px] lg:text-[54px] tracking-tight leading-[1.03] mb-4">
@@ -477,9 +478,11 @@ export default function Trial() {
           </div>
         </section>
 
+        <TrustedByStrip compact />
+
         {/* Modules — visitors can see everything BetterCricket does right after
             the search. Same cards as the homepage, each clicking through. */}
-        <section className="px-4 sm:px-6 lg:px-10 pb-16">
+        <section className="px-4 sm:px-6 lg:px-10 pt-6 sm:pt-8 pb-16">
           <div className="max-w-[1200px] mx-auto">
             <h2 className="font-display font-bold text-2xl mb-6 text-center">
               Everything BetterCricket does for your club
