@@ -1,0 +1,120 @@
+# bs-scout-* service definitions — BetterScout, a separate PRODUCT (not
+# another sport) living on the existing betterat.cricket domain under the
+# /betterscout path prefix.
+#
+# These entries are meant to be merged into the central
+# /srv/docker/docker-compose.yaml (project bltbox_docker_app), same as the
+# betterstats-* and bs-afl-* services — NOT run as their own compose project
+# (see the June 2026 compose-project-split post-mortem in CLAUDE.md). Written
+# to match the central file's conventions (absolute build paths,
+# container_name, docker-shared-net, healthchecked db + service_healthy
+# dependency) — mirrors ops/afl/docker-compose.afl.yml's shape exactly.
+#
+# New vars for /srv/docker/.env — generate with:
+#   SCOUT_DB_PASSWORD:  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32; echo
+#     (alphanumeric-only on purpose — the value is interpolated into the
+#      postgresql:// URLs, where @ : / # ? would break the DSN)
+#   SCOUT_SECRET_KEY:   openssl rand -hex 32
+#     (do NOT reuse BETTERSTATS_SECRET_KEY or AFL_SECRET_KEY — distinct keys
+#      keep the three products' session cookies from validating across silos)
+#
+# Also add `bs_scout_pgdata:` to the central file's top-level volumes: block.
+#
+# First bring-up (git pull FIRST, and set the two .env vars above, or
+# postgres won't initialise):
+#   git -C /srv/docker/betterstats pull origin main
+#   cd /srv/docker
+#   export COMPOSE_PROJECT_NAME=bltbox_docker_app   # load-bearing, as always
+#   export COMPOSE_IGNORE_ORPHANS=1                 # silences other apps' noise
+#   docker compose build bs-scout-backend bs-scout-frontend
+#   docker compose up -d bs-scout-database bs-scout-backend bs-scout-frontend
+#   docker compose logs --tail=20 bs-scout-backend  # want "Application startup complete."
+#   docker compose exec bs-scout-backend python -m app.scripts.scout_bootstrap \
+#     "Jack's Scouting" jack '<pick-a-real-password-here>'
+#
+# NOTE: no --no-deps on the FIRST bring-up. The dependency closure of these
+# three services is exactly these three, so the flag protects nothing here,
+# while omitting it guarantees bs-scout-backend waits for the database's
+# service_healthy gate (it exits on a refused connection otherwise; it would
+# recover via restart: unless-stopped, but with an alarming first-run
+# traceback). DO use --no-deps on later redeploys of just the backend/
+# frontend, where it stops bs-scout-database being recreated — same
+# reasoning as deploy.sh (which this fragment is deliberately NOT wired
+# into — deploy.sh is cricket-only, same as it's always been for AFL).
+#
+# First boot creates the schema in the empty database automatically (no
+# init.sql, no alembic — the scout lifespan owns its schema, same as AFL).
+#
+# nginx-proxy-manager: on the EXISTING betterat.cricket proxy host entry
+# (the one already pointing at betterstats-frontend), add ONE CUSTOM
+# LOCATION on that same entry:
+#   /betterscout -> http://bs-scout-frontend:80
+# (path passed through with the /betterscout prefix intact — the scout
+# nginx expects it, same as AFL's /afl custom location). No DNS change
+# needed — same apex domain, no subdomain.
+
+services:
+  bs-scout-database:
+    image: postgres:15
+    container_name: bs-scout-database
+    environment:
+      POSTGRES_DB: betterstats_scout
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: ${SCOUT_DB_PASSWORD}
+    volumes:
+      - bs_scout_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scout -d betterstats_scout"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+  bs-scout-backend:
+    build: /srv/docker/betterstats/backend
+    container_name: bs-scout-backend
+    # Same image source as betterstats-backend; the scout silo differs only
+    # by entrypoint + env. The command override is LOAD-BEARING — the
+    # Dockerfile's default CMD runs cricket's alembic + app.main.
+    # app.scout_main also refuses to boot unless PRODUCT=scout, so a
+    # mis-wiring fails loudly.
+    command: uvicorn app.scout_main:app --host 0.0.0.0 --port 8000
+    environment:
+      PRODUCT: scout
+      DATABASE_URL: postgresql+asyncpg://scout:${SCOUT_DB_PASSWORD}@bs-scout-database/betterstats_scout
+      SYNC_DATABASE_URL: postgresql://scout:${SCOUT_DB_PASSWORD}@bs-scout-database/betterstats_scout
+      SECRET_KEY: ${SCOUT_SECRET_KEY}
+      PUBLIC_BASE_URL: https://betterat.cricket/betterscout
+      CORS_ORIGINS: https://betterat.cricket
+    expose:
+      - "8000"
+    depends_on:
+      bs-scout-database:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+  bs-scout-frontend:
+    build:
+      context: /srv/docker/betterstats/frontend
+      args:
+        VITE_PRODUCT: scout
+        VITE_BASE: /betterscout/
+        NGINX_CONF: nginx.scout.conf
+        WEB_ROOT: /usr/share/nginx/html/betterscout
+    container_name: bs-scout-frontend
+    expose:
+      - "80"
+    depends_on:
+      - bs-scout-backend
+    restart: unless-stopped
+    networks:
+      - docker-shared-net
+
+# Merge into the central file's existing top-level blocks:
+#
+# volumes:
+#   bs_scout_pgdata:

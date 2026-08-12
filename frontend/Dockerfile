@@ -9,6 +9,12 @@ FROM node:20-alpine AS builder
 ARG VITE_SPORT=cricket
 ARG VITE_BASE=
 
+# BetterScout is a separate PRODUCT, not another sport (see App.jsx's
+# VITE_PRODUCT check) — the bs-scout-frontend silo builds with
+#   --build-arg VITE_PRODUCT=scout --build-arg VITE_BASE=/betterscout/ \
+#   --build-arg NGINX_CONF=nginx.scout.conf --build-arg WEB_ROOT=/usr/share/nginx/html/betterscout
+ARG VITE_PRODUCT=cricket
+
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -17,6 +23,7 @@ RUN npm ci
 COPY . .
 ENV VITE_SPORT=$VITE_SPORT
 ENV VITE_BASE=$VITE_BASE
+ENV VITE_PRODUCT=$VITE_PRODUCT
 RUN npm run build
 
 FROM nginx:alpine
