@@ -346,6 +346,49 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS import_batch_id UUID "
             "REFERENCES import_batches(id) ON DELETE SET NULL"
         ))
+        # Migration 235 — membership is multi-valued and scoped; roles and
+        # honours are separate axes. A person is several kinds of member at once
+        # (Senior Player AND Parent), the catalogue splits internal from
+        # external (a sponsor's contact is not a member the club counts), and
+        # Life Membership is an honour on the person spine rather than a type.
+        # fee_members.membership_type_id stays as the PRIMARY type, since
+        # BetterFees has to bill one tier.
+        await conn.execute(text(
+            "ALTER TABLE membership_types ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'internal'"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS member_membership_types (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                member_id UUID NOT NULL REFERENCES fee_members(id) ON DELETE CASCADE,
+                membership_type_id UUID NOT NULL REFERENCES membership_types(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE (member_id, membership_type_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_member_membership_types_org "
+            "ON member_membership_types(organisation_id, membership_type_id)"
+        ))
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS life_member_since DATE"))
+        await conn.execute(text("""
+            UPDATE membership_types SET scope = 'external'
+            WHERE lower(name) IN ('sponsor contact', 'external contact', 'third party', 'contractor')
+              AND scope <> 'external'
+        """))
+        # Guarded on the member holding no rows yet, NOT on the pair — this
+        # re-runs every boot and a per-pair guard would re-add a type the club
+        # has since unticked.
+        await conn.execute(text("""
+            INSERT INTO member_membership_types (organisation_id, member_id, membership_type_id)
+            SELECT fm.organisation_id, fm.id, fm.membership_type_id
+            FROM fee_members fm
+            WHERE fm.membership_type_id IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM member_membership_types a WHERE a.member_id = fm.id
+              )
+            ON CONFLICT (member_id, membership_type_id) DO NOTHING
+        """))
         # BetterIQ scouting cards (migration 094): manual batting/bowling intel —
         # the ball-level read CA can't give us (vulnerable-to bowler types, a
         # length×line weakness grid, favoured shots, stock ball + variations).

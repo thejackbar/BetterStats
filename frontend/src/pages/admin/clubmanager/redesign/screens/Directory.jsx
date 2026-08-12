@@ -10,53 +10,71 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // player gets a member row lazily the first time ClubManager assigns them a
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
-// The segments list_people computes, each as a filter.
+// THREE AXES, drawn as three labelled groups rather than one undifferentiated
+// row of pills — which is what made a single-valued member type look reasonable
+// in the first place. See services/directory.py for the same split server-side.
 //
-// Honorary is deliberately NOT a pill. It is a BetterFees membership status
-// (fee_members.is_honorary — comped membership, optionally with an expiry),
-// not an honour, and nothing in the club's own awards has ever carried the
-// word. A club that does not run BetterFees cannot set it at all, so the pill
-// was permanently empty for most clubs while reading as a near-duplicate of
-// Life members. Someone who tracks it can still filter on the "Honorary
-// Member" membership type in the dropdown beside these, and the segment is
-// still shown as a chip on the person.
-const DIR_SEGS = [
-  { seg: 'All', label: 'Everyone' },
-  { seg: 'Player', label: 'Players' },
+//   MEMBERSHIP — what kind of member. Built from the club's OWN catalogue, so a
+//     club that adds "Country Member" gets a chip with no deploy. Players is
+//     derived from the Stats record rather than the catalogue, so it still
+//     works for a club that has adopted no catalogue at all.
+//   ROLES      — what they do. Several at once, and independent of membership:
+//     an umpire may hold the role and no membership whatsoever.
+//   HONOURS    — Life membership, bestowed on a member of any type.
+//
+// A membership type arrives prefixed `type:` so a club that named a type
+// "Volunteer" (every club that adopted the pre-235 starter set has one) cannot
+// collide with the Volunteer ROLE.
+const TYPE_PREFIX = 'type:'
+const ROLE_SEGS = [
   { seg: 'Volunteer', label: 'Volunteers' },
   { seg: 'Committee', label: 'Committee' },
-  { seg: 'Parent', label: 'Parents' },
-  { seg: 'External contact', label: 'External contacts' },
   { seg: 'Official', label: 'Officials' },
+]
+const HONOUR_SEGS = [
   { seg: 'Life member', label: 'Life members' },
 ]
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-const CATS = [
-  { value: 'volunteer', label: 'Volunteer' },
-  { value: 'parent', label: 'Parent' },
-  { value: 'committee', label: 'Committee' },
-  { value: 'third_party', label: 'External contact' },
-  { value: 'official', label: 'Official (umpire, scorer…)', short: 'Official' },
-  { value: 'life_member', label: 'Life member' },
-  { value: 'other', label: 'Other' },
-]
-const CAT_SHORT = Object.fromEntries(CATS.map(c => [c.value, c.short || c.label]))
+// The pre-235 single-valued tag. No longer written here — membership is the
+// catalogue and roles are roles — but still READ, so a club that tagged people
+// before the split keeps a sensible label until it types them properly.
+const CAT_SHORT = {
+  volunteer: 'Volunteer', parent: 'Parent', committee: 'Committee',
+  third_party: 'External contact', official: 'Official',
+  life_member: 'Life member', other: 'Member',
+}
 // Filter value for "nobody has said what kind of member this is" — the gap a
 // club works through when it first fills the catalogue in.
 const NO_TYPE = '__none__'
 
-// One line answering "what kind of member is this?". A club may keep the
-// membership-type catalogue (Senior Player, Social Member, Sponsor Contact…),
-// or just the category this module tags a non-player with, or neither and only
-// play cricket — so this reads whichever they actually keep rather than
-// insisting on one.
+// One line answering "what kind of member is this?". Every type they hold, not
+// just the primary — a Senior Player who is also a Parent is both, and showing
+// one of them was the whole problem. A club may keep no catalogue at all, so
+// this falls back to the pre-235 category tag and then to the Stats record.
 function typeLabel(p) {
-  if (p.membership_type) return p.membership_type
+  const held = (p.membership_types || []).map(t => t.name)
+  if (held.length) return held.join(' · ')
   if (p.category) return CAT_SHORT[p.category] || p.category
   if (p.player_id) return p.player_status === 'inactive' ? 'Former player' : 'Player'
-  return 'Member'
+  // NULL, not "Member" — someone with no membership type may genuinely not be
+  // one. A panel umpire holds an Official role and joined nothing, and calling
+  // them a member on the strength of having a record is the assertion this
+  // whole split exists to stop.
+  return null
+}
+
+// One axis of filters, named. The label is what stops the three groups reading
+// as one long undifferentiated row — which is how membership, roles and honours
+// got conflated in the first place.
+function FilterGroup({ label, children }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', color: C.faintest, marginRight: 1 }}>{label}</span>
+      {children}
+    </div>
+  )
 }
 
 function qualStatus(expiryISO) {
@@ -111,13 +129,19 @@ export default function Directory({ st, patch, narrow }) {
   const typeFilter = st.dirType || ''          // '' = any membership type
   const playing = st.dirPlaying || 'all'       // all | active | inactive
 
+  // The catalogue, split by scope. Internal types are the club's own members;
+  // external ones are people it records but has not gained as members.
+  const internalTypes = memberTypes.filter(t => (t.scope || 'internal') !== 'external')
+  const externalTypes = memberTypes.filter(t => (t.scope || 'internal') === 'external')
+
   const roleTitles = (p) => (p.roles || []).map(r => r.title)
   const emailFilter = st.dirEmail || null   // null | 'has' | 'none'
   const hasEmail = (p) => !!(p.email || '').trim()
   const list = (people || []).filter(p => {
     if (seg !== 'All' && !p.segs.includes(seg)) return false
-    if (typeFilter === NO_TYPE && p.membership_type_id) return false
-    if (typeFilter && typeFilter !== NO_TYPE && p.membership_type_id !== typeFilter) return false
+    // "No type set" is about the whole set now, not the primary — someone
+    // holding two types and no primary is plainly typed.
+    if (typeFilter === NO_TYPE && (p.membership_types || []).length) return false
     // Playing status comes from Stats and only means something for someone with
     // a player record, so both filters exclude non-players rather than lumping
     // them in with the inactive.
@@ -127,7 +151,7 @@ export default function Directory({ st, patch, narrow }) {
     if (expiringOnly && !p.flagged) return false
     if (emailFilter === 'has' && !hasEmail(p)) return false
     if (emailFilter === 'none' && hasEmail(p)) return false
-    if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q) || typeLabel(p).toLowerCase().includes(q))) return false
+    if (q && !(p.name.toLowerCase().includes(q) || roleTitles(p).join(' ').toLowerCase().includes(q) || (typeLabel(p) || '').toLowerCase().includes(q))) return false
     return true
   })
   // How much of the current filter is actually reachable. Shown on the header
@@ -182,18 +206,62 @@ export default function Directory({ st, patch, narrow }) {
   const refreshMember = async (mid) => { await Promise.all([loadDetail(mid), reload()]) }
 
   // ── mutations ──────────────────────────────────────────────────────────────
-  const openAdd = () => setModal({ editId: null, form: { full_name: '', email: '', mobile: '', member_category: 'volunteer', membership_type_id: '', notes: '' } })
-  const openEdit = (p) => setModal({ editId: p.member_id, form: { full_name: p.name, email: p.email, mobile: p.phone, member_category: p.category || 'other', membership_type_id: p.membership_type_id || '', notes: '' } })
+  const openAdd = () => setModal({ editId: null, playerId: null, form: { full_name: '', email: '', mobile: '', notes: '' }, types: [] })
+  const openEdit = (p) => setModal({ editId: p.member_id, playerId: p.player_id, form: { full_name: p.name, email: p.email, mobile: p.phone, notes: '' }, types: (p.membership_types || []).map(t => t.id) })
   const setForm = (k, v) => setModal(m => ({ ...m, form: { ...m.form, [k]: v } }))
+  const toggleModalType = (id) => setModal(m => ({ ...m, types: m.types.includes(id) ? m.types.filter(x => x !== id) : [...m.types, id] }))
   const saveMember = async () => {
     const f = modal.form
     if (!(f.full_name || '').trim()) return
     setBusy(true)
     try {
-      if (modal.editId) { await api.dirUpdateMember(modal.editId, f); await reload() }
-      else { const r = await api.dirCreateMember(f); await reload(); patch({ dirSel: r.member_id }) }
+      // Resolve the person row FIRST, three ways: an existing member, a
+      // read-through player whose row is minted on demand (never create — that
+      // would leave two records for one person), or somebody genuinely new.
+      let mid = modal.editId
+      if (!mid && modal.playerId) mid = (await api.dirEnsureMemberForPlayer(modal.playerId)).member_id
+      if (!mid) mid = (await api.dirCreateMember(f)).member_id
+      else await api.dirUpdateMember(mid, f)
+      await api.dirSetMemberTypes(mid, { type_ids: modal.types })
+      await reload()
+      patch({ dirSel: mid })
       setModal(null)
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // Membership types. A read-through player has no person row until something
+  // is recorded about them, so the player endpoint mints one — same as
+  // assigning a role.
+  const toggleType = async (p, typeId) => {
+    const held = (p.membership_types || []).map(t => t.id)
+    const next = held.includes(typeId) ? held.filter(x => x !== typeId) : [...held, typeId]
+    setBusy(true)
+    try {
+      if (p.member_id) await api.dirSetMemberTypes(p.member_id, { type_ids: next })
+      else { const r = await api.dirSetPlayerTypes(p.player_id, { type_ids: next }); patch({ dirSel: r.member_id }) }
+      await reload()
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const setPrimaryType = async (p, typeId) => {
+    if (!p.member_id) return
+    setBusy(true)
+    try {
+      await api.dirSetMemberTypes(p.member_id, { type_ids: (p.membership_types || []).map(t => t.id), primary_id: typeId })
+      await reload()
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const setLifeMember = async (p, on, since) => {
+    setBusy(true)
+    try {
+      const body = { is_life_member: on, ...(since === undefined ? {} : { since }) }
+      if (p.member_id) await api.dirSetLifeMembership(p.member_id, body)
+      else { const r = await api.dirSetPlayerLifeMembership(p.player_id, body); patch({ dirSel: r.member_id }) }
+      await reload()
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const seedTypes = async () => {
+    setBusy(true)
+    try { const r = await api.dirSeedMembershipTypes(); setMemberTypes(r?.membership_types || []) }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
   const archive = async (p) => {
     if (!p.member_id) return
@@ -300,11 +368,15 @@ export default function Directory({ st, patch, narrow }) {
   // filters are actually set to rather than a generic "Directory list".
   const filterName = () => {
     const bits = []
-    bits.push((DIR_SEGS.find(s => s.seg === seg) || {}).label || 'Everyone')
+    // A membership-type segment carries its own name, so it reads as the club
+    // wrote it ("Senior Player") rather than through a lookup table.
+    bits.push(seg === 'All' ? 'Everyone'
+      : seg.startsWith(TYPE_PREFIX) ? seg.slice(TYPE_PREFIX.length)
+      : seg === 'External' ? 'Not members'
+      : ([...ROLE_SEGS, ...HONOUR_SEGS].find(s => s.seg === seg) || {}).label || seg)
     if (playing === 'active') bits.push('playing')
     if (playing === 'inactive') bits.push('former players')
-    if (typeFilter) bits.push(typeFilter === NO_TYPE ? 'no type set'
-      : (memberTypes.find(t => t.id === typeFilter) || {}).name || 'membership type')
+    if (typeFilter === NO_TYPE) bits.push('no type set')
     if (roleFilter) bits.push(roleFilter)
     if (expiringOnly) bits.push('quals to renew')
     if (q) bits.push(`matching “${st.dirQuery.trim()}”`)
@@ -353,36 +425,67 @@ export default function Directory({ st, patch, narrow }) {
               share the line, the filters wrap within their own column, and
               the actions stay pinned top-right. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: '1 1 0', minWidth: 0 }}>
-            {/* Families and Qualifications are NOT filters — they open their own
-                pages — so they render as buttons, not pills, placed beside the
-                filters they relate to: Qualifications after Volunteers, Families
-                before Parents. */}
-            {DIR_SEGS.map(s => (
-              <Fragment key={s.seg}>
-                {s.seg === 'Parent' && <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>}
-                <button onClick={() => patch({ dirSeg: s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
-                {s.seg === 'Volunteer' && <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>}
-              </Fragment>
-            ))}
-            {/* Playing status is the Stats active/inactive flag, so a club can
-                tell this season's players from the ones who have stopped without
-                losing either from the directory. */}
-            <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
-            <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
-            {memberTypes.length > 0 && (
-              <select value={typeFilter} onChange={e => patch({ dirType: e.target.value })}
-                title="Filter by membership type"
-                style={{ background: C.surface2, border: `1px solid ${typeFilter ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, borderRadius: 999, padding: '5px 11px', color: typeFilter ? C.accent : C.dim, fontSize: 12, outline: 'none', cursor: 'pointer' }}>
-                <option value="">Any membership type</option>
-                {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                <option value={NO_TYPE}>No type set</option>
-              </select>
-            )}
-            <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
-            <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
-            <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
-            {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
-            <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
+            {/* MEMBERSHIP — what kind of member. Chips come from the club's own
+                catalogue, so adding "Country Member" gets one for free. Players
+                is derived from the Stats record, not the catalogue, so this
+                group is never empty for a club that keeps no catalogue. */}
+            <FilterGroup label="MEMBERSHIP">
+              <button onClick={() => patch({ dirSeg: 'All' })} style={pill(seg === 'All')}>Everyone</button>
+              <button onClick={() => patch({ dirSeg: 'Player' })} style={pill(seg === 'Player')}>Players</button>
+              {internalTypes.map(t => (
+                <Fragment key={t.id}>
+                  <button onClick={() => patch({ dirSeg: TYPE_PREFIX + t.name })} style={pill(seg === TYPE_PREFIX + t.name)}>{t.name}</button>
+                  {/* Families is a page, not a filter, and belongs beside the
+                      type it relates to. */}
+                  {/^parent/i.test(t.name) && <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>}
+                </Fragment>
+              ))}
+              {externalTypes.map(t => (
+                <button key={t.id} onClick={() => patch({ dirSeg: TYPE_PREFIX + t.name })} style={pill(seg === TYPE_PREFIX + t.name)}>{t.name}</button>
+              ))}
+              {externalTypes.length > 0 && (
+                <button onClick={() => patch({ dirSeg: seg === 'External' ? 'All' : 'External' })} style={pill(seg === 'External')}
+                  title="Everyone whose only membership types are external — recorded by the club, not counted as members">Not a member</button>
+              )}
+              <button onClick={() => patch({ dirType: typeFilter === NO_TYPE ? '' : NO_TYPE })} style={pill(typeFilter === NO_TYPE, 'amber')}>No type set</button>
+              {!internalTypes.length && !externalTypes.length && (
+                <button onClick={seedTypes} disabled={busy} style={{ ...btnS, opacity: busy ? 0.6 : 1 }}
+                  title="Senior Player, Junior Player, Parent, Social Member, Honorary Member, plus Sponsor Contact and External Contact">
+                  + Set up membership types
+                </button>
+              )}
+            </FilterGroup>
+
+            {/* ROLES — what they do. Independent of membership: an umpire may
+                hold the role and no membership at all. */}
+            <FilterGroup label="ROLES">
+              {ROLE_SEGS.map(s => (
+                <Fragment key={s.seg}>
+                  <button onClick={() => patch({ dirSeg: seg === s.seg ? 'All' : s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
+                  {s.seg === 'Volunteer' && <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>}
+                </Fragment>
+              ))}
+              <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
+            </FilterGroup>
+
+            {/* HONOURS — bestowed on a member of any type. */}
+            <FilterGroup label="HONOURS">
+              {HONOUR_SEGS.map(s => (
+                <button key={s.seg} onClick={() => patch({ dirSeg: seg === s.seg ? 'All' : s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
+              ))}
+            </FilterGroup>
+
+            <FilterGroup label="ALSO">
+              {/* Playing status is the Stats active/inactive flag, so a club can
+                  tell this season's players from the ones who have stopped
+                  without losing either from the directory. */}
+              <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
+              <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
+              <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
+              <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
+              <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
+              {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
+            </FilterGroup>
           </div>
           {/* No flexShrink:0 here on purpose — pinning this group at its
               max-content width stops its own flexWrap from ever firing, and a
@@ -412,7 +515,8 @@ export default function Directory({ st, patch, narrow }) {
                       the roles used to be the only line, so a person with no
                       role read as a blank "Member" whatever they actually are. */}
                   <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    <span style={{ color: C.dim }}>{typeLabel(p)}</span>
+                    {typeLabel(p) ? <span style={{ color: C.dim }}>{typeLabel(p)}</span>
+                      : <span style={{ color: C.faintest }}>No membership type</span>}
                     {p.player_status === 'inactive' && <span style={{ color: C.faintest }}> · inactive</span>}
                     {p.is_life_member && <span style={{ color: C.accent }}> · life</span>}
                     {roleTitles(p).length > 0 && ' · ' + roleTitles(p).join(' · ')}
@@ -434,16 +538,23 @@ export default function Directory({ st, patch, narrow }) {
                 <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: '-0.01em' }}>{sel.name}</div>
                 <div style={{ fontSize: 12.5, color: C.faint, marginTop: 3 }}>{[sel.email, sel.phone].filter(Boolean).join('  ·  ') || 'No contact details recorded'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
-                  {/* The membership type leads, accented, because it is the
-                      club's own answer for this person; the segments after it
-                      are what the rest of the module worked out about them. */}
-                  <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent }}>{typeLabel(sel)}</span>
+                  {/* Membership types lead, accented, because they are the
+                      club's own answer for this person. Then what the module
+                      worked out: roles, honours, playing status. The `type:`
+                      segments are already shown as the accented chips, so they
+                      are stripped here rather than repeated raw. */}
+                  {typeLabel(sel) && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent }}>{typeLabel(sel)}</span>}
+                  {sel.is_external && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.hair2}`, color: C.faint }} title="Recorded by the club, not counted as a member">NOT A MEMBER</span>}
                   {sel.player_status === 'inactive' && <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, border: `1px solid ${C.warn}66`, color: C.warn }}>NOT PLAYING</span>}
-                  {sel.segs.map(s => <span key={s} style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.dim }}>{s}</span>)}
+                  {sel.segs.filter(s => !s.startsWith(TYPE_PREFIX) && s !== 'External').map(s => <span key={s} style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '3px 7px', borderRadius: 4, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.dim }}>{s}</span>)}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                {sel.member_id && !sel.archived && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
+                {/* Editable whether or not they already have a person row —
+                    saving mints one. A read-through player used to have no Edit
+                    button at all, which in a stats-first club meant most of the
+                    Directory could not be edited. */}
+                {!sel.archived && <button onClick={() => openEdit(sel)} style={btnS}>Edit</button>}
                 {sel.member_id && (sel.archived
                   ? <button onClick={() => restore(sel)} disabled={busy} style={{ ...btnP, opacity: busy ? 0.6 : 1 }}>Restore</button>
                   : <button onClick={() => archive(sel)} style={{ ...btnS, color: C.faint }}>Archive</button>)}
@@ -465,6 +576,91 @@ export default function Directory({ st, patch, narrow }) {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '22px 28px' }}>
+              {/* AXIS 1 — what kind of member. Several at once, ticked straight
+                  on the person; no dialog, because this is the thing most often
+                  wrong and a dialog is what stops anyone fixing it. */}
+              <section>
+                <div style={cap}>MEMBERSHIP</div>
+                {memberTypes.length === 0 ? (
+                  <div style={{ fontSize: 13, color: C.faint }}>
+                    Your club has no membership types yet.
+                    <button onClick={seedTypes} disabled={busy} style={{ ...btnS, marginLeft: 8, opacity: busy ? 0.6 : 1 }}>Set up the starter types</button>
+                  </div>
+                ) : (
+                  <>
+                    {[['MEMBERS', internalTypes], ['NOT MEMBERS', externalTypes]].map(([heading, opts]) => opts.length === 0 ? null : (
+                      <div key={heading} style={{ marginBottom: 10 }}>
+                        <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faintest, marginBottom: 5 }}>{heading}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                          {opts.map(t => {
+                            const on = (sel.membership_types || []).some(x => x.id === t.id)
+                            const primary = sel.membership_type_id === t.id
+                            return (
+                              <button key={t.id} disabled={busy} onClick={() => toggleType(sel, t.id)}
+                                title={on ? (primary ? 'Held, and the type BetterFees bills' : 'Held — click to remove') : 'Click to add'}
+                                style={{ ...pill(on), display: 'inline-flex', alignItems: 'center', gap: 5, opacity: busy ? 0.6 : 1 }}>
+                                {t.name}
+                                {primary && <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em' }}>★</span>}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                    {/* Which one the money hangs off. Only worth asking once
+                        they hold more than one, and only answerable for a
+                        person who already has a row. */}
+                    {(sel.membership_types || []).length > 1 && sel.member_id && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 }}>
+                        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>★ BILLED AS</span>
+                        <select value={sel.membership_type_id || ''} disabled={busy} onChange={e => setPrimaryType(sel, e.target.value)}
+                          style={{ ...inp, width: 'auto', maxWidth: 200, opacity: busy ? 0.6 : 1 }}>
+                          {(sel.membership_types || []).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                        </select>
+                      </div>
+                    )}
+                    {(sel.membership_types || []).length === 0 && (
+                      <div style={{ fontSize: 12.5, color: C.faint, marginTop: 2 }}>
+                        No membership type recorded{sel.player_id ? '. They have a record in Stats, so they play — the club still decides whether that is a Senior or a Junior Player.' : '.'}
+                      </div>
+                    )}
+                    {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Ticking a type adds this player to the member directory.</div>}
+                  </>
+                )}
+              </section>
+
+              {/* AXIS 3 — honours. Sits beside membership because "what are
+                  they to the club" is one question; roles are the other. */}
+              <section>
+                <div style={cap}>HONOURS</div>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: busy ? 'default' : 'pointer', fontSize: 13, color: C.dim }}>
+                  <input type="checkbox" disabled={busy} checked={!!sel.life_member_flag}
+                    onChange={e => setLifeMember(sel, e.target.checked)} />
+                  Life member
+                </label>
+                {sel.life_member_flag && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>SINCE</span>
+                    <input type="date" disabled={busy} value={sel.life_member_since || ''}
+                      onChange={e => setLifeMember(sel, true, e.target.value)}
+                      style={{ ...inp, width: 'auto' }} />
+                  </div>
+                )}
+                {/* The honour board is the ceremonial record and the Awards
+                    screen owns it, so this says where the answer came from
+                    rather than pretending the tick is the only truth. */}
+                {sel.life_member_award && (
+                  <div style={{ fontSize: 12.5, color: C.faint, marginTop: 8, lineHeight: 1.5 }}>
+                    Life membership is on their honour board, so they read as a life member whether or not this is ticked.
+                    Remove it on the Awards screen if that is wrong.
+                  </div>
+                )}
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 8 }}>
+                  An honour, not a membership type — a life member is still whatever kind of member they already were.
+                </div>
+              </section>
+
+              {/* AXIS 2 — what they do. */}
               <section>
                 <div style={cap}>ROLES</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
@@ -676,16 +872,24 @@ export default function Directory({ st, patch, narrow }) {
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>EMAIL<input value={modal.form.email} onChange={e => setForm('email', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MOBILE<input value={modal.form.mobile} onChange={e => setForm('mobile', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
               </div>
-              <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>TYPE<select value={modal.form.member_category} onChange={e => setForm('member_category', e.target.value)} style={{ ...inp, marginTop: 4 }}>{CATS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
-              {/* The club's own catalogue, shared with BetterFees — only offered
-                  when they keep one, since nothing seeds it automatically. */}
+              {/* The club's own catalogue, several at once. Only offered when
+                  they keep one, since nothing seeds it automatically — a club
+                  with none can still add the person and type them after. */}
               {memberTypes.length > 0 && (
-                <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MEMBERSHIP TYPE
-                  <select value={modal.form.membership_type_id} onChange={e => setForm('membership_type_id', e.target.value)} style={{ ...inp, marginTop: 4 }}>
-                    <option value="">— none —</option>
-                    {memberTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
-                </label>
+                <div>
+                  <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginBottom: 5 }}>MEMBERSHIP TYPES</div>
+                  {[['MEMBERS', internalTypes], ['NOT MEMBERS', externalTypes]].map(([heading, opts]) => opts.length === 0 ? null : (
+                    <div key={heading} style={{ marginBottom: 7 }}>
+                      <div style={{ fontFamily: MONO, fontSize: 8.5, letterSpacing: '0.1em', color: C.faintest, marginBottom: 4 }}>{heading}</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                        {opts.map(t => (
+                          <button key={t.id} type="button" onClick={() => toggleModalType(t.id)} style={pill(modal.types.includes(t.id))}>{t.name}</button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest }}>Pick as many as apply. Roles and life membership are recorded on the person after this.</div>
+                </div>
               )}
             </div>
             <div style={{ display: 'flex', gap: 8, marginTop: 18, justifyContent: 'flex-end' }}>

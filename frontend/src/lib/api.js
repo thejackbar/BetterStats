@@ -478,6 +478,13 @@ export const api = {
   dirArchiveMember: (id) => request(`/club-admin/directory/people/${id}/archive`, { method: 'POST' }),
   dirRestoreMember: (id) => request(`/club-admin/directory/people/${id}/restore`, { method: 'POST' }),
   dirEnsureMemberForPlayer: (playerId) => request(`/club-admin/directory/players/${playerId}/ensure-member`, { method: 'POST' }),
+  // Membership types: the WHOLE set, not a delta. The player variants mint the
+  // member row server-side, so a read-through player can be typed in one call.
+  dirSetMemberTypes: (memberId, body) => request(`/club-admin/directory/people/${memberId}/membership-types`, { method: 'PUT', body: JSON.stringify(body) }),
+  dirSetPlayerTypes: (playerId, body) => request(`/club-admin/directory/players/${playerId}/membership-types`, { method: 'POST', body: JSON.stringify(body) }),
+  dirSetLifeMembership: (memberId, body) => request(`/club-admin/directory/people/${memberId}/life-membership`, { method: 'PUT', body: JSON.stringify(body) }),
+  dirSetPlayerLifeMembership: (playerId, body) => request(`/club-admin/directory/players/${playerId}/life-membership`, { method: 'POST', body: JSON.stringify(body) }),
+  dirSeedMembershipTypes: () => request('/club-admin/directory/membership-types/seed', { method: 'POST' }),
   dirAddRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) }),
   dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
   dirImportPreview: (csvText) => request('/club-admin/directory/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),

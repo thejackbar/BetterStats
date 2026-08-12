@@ -53,6 +53,20 @@ class RoleBody(BaseModel):
     role_id: str
 
 
+class MemberTypesBody(BaseModel):
+    """The WHOLE set the screen is showing, not a delta — see
+    services/directory.set_member_types. `primary_id` is what BetterFees bills;
+    omit it to leave the existing primary alone."""
+    type_ids: list[str] = []
+    primary_id: Optional[str] = "__keep__"
+
+
+class LifeMembershipBody(BaseModel):
+    is_life_member: bool
+    # Omit to leave the recorded date alone; "" clears it.
+    since: Optional[str] = "__keep__"
+
+
 @router.get("/people")
 async def list_people(include_archived: bool = False, _: User = _read, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     # The membership-type catalogue rides along with the people. Its own CRUD
@@ -127,6 +141,66 @@ async def ensure_member(player_id: str, _: User = _write, club: Organisation = D
         raise HTTPException(status_code=404, detail=str(e))
     await db.commit()
     return {"member_id": mid}
+
+
+@router.put("/people/{member_id}/membership-types")
+async def set_member_types(member_id: str, data: MemberTypesBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        res = await svc.set_member_types(db, club.id, _uuid(member_id), data.type_ids, data.primary_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return res
+
+
+@router.post("/players/{player_id}/membership-types")
+async def set_player_types(player_id: str, data: MemberTypesBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Same, for a player who has no member row yet — mints one first.
+
+    Membership is recorded against the person spine, and a read-through player
+    has no row on it until something is recorded about them. Doing it here keeps
+    ticking a box one request, the way assigning a role already is."""
+    try:
+        mid = await members_svc.ensure_for_player(db, club.id, _uuid(player_id))
+        res = await svc.set_member_types(db, club.id, _uuid(mid), data.type_ids, data.primary_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"member_id": mid, **res}
+
+
+@router.put("/people/{member_id}/life-membership")
+async def set_life_membership(member_id: str, data: LifeMembershipBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        await svc.set_life_membership(db, club.id, _uuid(member_id), data.is_life_member, data.since)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/players/{player_id}/life-membership")
+async def set_player_life_membership(player_id: str, data: LifeMembershipBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        mid = await members_svc.ensure_for_player(db, club.id, _uuid(player_id))
+        await svc.set_life_membership(db, club.id, _uuid(mid), data.is_life_member, data.since)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"member_id": mid}
+
+
+@router.post("/membership-types/seed")
+async def seed_membership_types(_: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Adopt the starter membership-type catalogue.
+
+    Nothing seeds it automatically, so a club that has never opened BetterFees
+    has no types to tick. Skip-don't-replace by name, like the starter committee
+    positions and agenda templates, so pressing it twice can never overwrite a
+    catalogue the club has edited."""
+    seeded = await membership_types_svc.seed_starter_types(db, club.id)
+    await db.commit()
+    return {"seeded": seeded, "membership_types": await membership_types_svc.list_types(db, club.id)}
 
 
 @router.post("/people/{member_id}/roles")

@@ -2454,6 +2454,11 @@ class MembershipType(Base):
     comms_group = Column(Text, nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
+    # 'internal' | 'external' (migration 235). Internal = a member the club
+    # counts; external = someone it records but has not gained as a member (a
+    # sponsor's contact, a contractor, an association officer). What makes a
+    # membership count answerable.
+    scope = Column(Text, nullable=False, server_default="internal", default="internal")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
