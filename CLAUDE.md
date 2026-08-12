@@ -1,5 +1,47 @@
 # BetterStats — Claude Session Notes
 
+## BetterFees season rollover: undo, find-and-add, and remove (v9.19.13, Aug 2026)
+
+Reported from Applecross getting 26/27 ready: rolling players over before the
+new season's fee schedule is set up leaves everyone mismatched (rollover
+resolves each member's tier by name against the DESTINATION season's rate
+card, so an empty rate card means everyone lands "needs tier" with no way
+back short of SQL), there was no way to add a player who sat out last season
+or one new to the club without minting a duplicate manual entry, and no way
+to drop a player who isn't returning.
+
+- **`POST /club-admin/fees/rollover/undo`** clears every `FeeMemberSeason`
+  row for a season in one go — "Remove all" on the Accounts page, for
+  exactly the mismatched-rollover case above. A member with a payment
+  already recorded this season is kept, never deleted (`fee_member_seasons`
+  → `fee_payments` is `ON DELETE CASCADE`, so removing the row would take
+  real money with it). Deliberately a season-wide reset, not "undo only what
+  the last rollover added" — by the time someone reaches for this, sorting
+  rollover-added rows from anyone else added since isn't a distinction worth
+  making.
+- **`RolloverModal` warns up front** when the destination season has no fee
+  schedule yet, with a link straight to Fee Schedule, rather than letting the
+  admin discover the mismatch after the fact.
+- **`POST /club-admin/fees/members/enroll`** is the search-driven
+  counterpart to the existing `create_member` (which only ever makes a
+  brand-new non-playing person): finds an existing `fee_members` row OR a
+  Stats player with none yet (`needs_member: true` off the existing
+  `GET /people/search` / `PersonSearch` picker, the same one Committee's
+  "start term" already uses), enrols them into the season via
+  `members_svc.ensure_for_player` when needed, and is idempotent — enrolling
+  someone already in the season just returns their row. "Add member" on the
+  Accounts page is now two tabs, **Find in club** (this) and **New person**
+  (the old manual-create form).
+- **`DELETE /club-admin/fees/members/{member_id}/season`** removes one
+  member's line from one season — a Remove action on every row and on the
+  existing bulk-select bar, for "I know they're not coming back this
+  season". Only clears that season's row; the person record and every other
+  season are untouched. Refused (409) once a payment is recorded against
+  them this season, for the same cascade-delete-real-money reason the undo
+  above guards against.
+- **No schema change** — all three read/write the existing `fee_members` /
+  `fee_member_seasons` / `fee_payments` tables.
+
 ## Families is a BetterStats tool again, and a suggestion is opted INTO (v9.19.7, Aug 2026)
 
 Families moved into BetterClubhouse with the v9.3.0 merge, which put it behind a

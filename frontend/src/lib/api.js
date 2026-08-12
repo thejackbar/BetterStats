@@ -873,12 +873,16 @@ export const api = {
   feeListMembers: (seasonId) => request(`/club-admin/fees/members?season_id=${seasonId}`),
   feeCreateMember: (data) =>
     request('/club-admin/fees/members', { method: 'POST', body: JSON.stringify(data) }),
+  feeEnrollMember: (data) =>
+    request('/club-admin/fees/members/enroll', { method: 'POST', body: JSON.stringify(data) }),
   feeGetMember: (memberId, seasonId) =>
     request(`/club-admin/fees/members/${memberId}?season_id=${seasonId}`),
   feePatchMember: (memberId, data) =>
     request(`/club-admin/fees/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   feePatchMemberSeason: (memberId, data) =>
     request(`/club-admin/fees/members/${memberId}/season`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeRemoveMemberSeason: (memberId, seasonId) =>
+    request(`/club-admin/fees/members/${memberId}/season?season_id=${seasonId}`, { method: 'DELETE' }),
   feePatchMatchDay: (entryId, data) =>
     request(`/club-admin/fees/match-days/${entryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   feeRecompute: (seasonId) =>
@@ -911,6 +915,11 @@ export const api = {
     request('/club-admin/fees/rollover', {
       method: 'POST',
       body: JSON.stringify({ season_id: seasonId, from_season_id: fromSeasonId, include_left_club: includeLeftClub }),
+    }),
+  feeRolloverUndo: (seasonId) =>
+    request('/club-admin/fees/rollover/undo', {
+      method: 'POST',
+      body: JSON.stringify({ season_id: seasonId }),
     }),
   feeBulkSetTier: (seasonId, memberIds, feeScheduleId) =>
     request('/club-admin/fees/members/bulk-tier', {
