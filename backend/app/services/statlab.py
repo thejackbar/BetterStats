@@ -30,6 +30,12 @@ from typing import Optional
 from datetime import date
 import uuid
 
+# The one list of "aggregate-only, no per-game rows behind it" sources
+# (an imported season, a manual season/career adjustment) — see its own
+# docstring in aggregations.py. Shared so the two modules can't drift on
+# what counts as a residual.
+from app.services.aggregations import _RESIDUAL_SOURCES
+
 # ─── Operators ─────────────────────────────────────────────────────────────────
 
 OPERATOR_MAP: dict[str, str] = {
@@ -227,6 +233,227 @@ PLAYER_CONTEXT_FILTERS: dict[str, dict] = {
 
 # Combined view for schema introspection.
 CONTEXT_FILTERS: dict[str, dict] = {**MATCH_CONTEXT_FILTERS, **INNINGS_CONTEXT_FILTERS, **PLAYER_CONTEXT_FILTERS}
+
+# A residual row (an imported season, a manual season/career adjustment — see
+# import_reconcile.py) has no per-game rows behind it at all: no date, no
+# opposition, no result, no dismissal, no batting position, no per-appearance
+# captain/keeper flag. So the moment ANY of these are in play, "live"
+# per-innings aggregation is the only honest answer and a residual simply
+# can't be evaluated against the filter — same reasoning as _RESIDUAL_SOURCES
+# in aggregations.py, applied to whichever filters make it unanswerable.
+# What a residual DOES carry: its own season_id, grade_id (when the upload
+# named one) and the player it belongs to — so season/grade/year filters and
+# player-attribute filters (gender, role, overseas, family, awards) can still
+# be answered and are deliberately NOT in this disqualifying set.
+_RESIDUAL_DISQUALIFYING_MATCH_KEYS = (
+    "date_from", "date_to", "opposition", "finals_only", "result", "on_this_day", "grade_name",
+)
+_RESIDUAL_DISQUALIFYING_PLAYER_KEYS = ("captain_only", "keeper_only")
+
+# The player-level filters a residual row CAN be tested against — everything
+# except captain_only/keeper_only, which are per-appearance (game_appearances)
+# facts a residual has no row to carry.
+_RESIDUAL_PLAYER_FILTERS = {
+    k: v for k, v in PLAYER_CONTEXT_FILTERS.items() if k not in _RESIDUAL_DISQUALIFYING_PLAYER_KEYS
+}
+
+
+def _residual_disqualified(context: dict, ic: list[str]) -> bool:
+    """True when a filter is active that a residual (no-per-game-data) row
+    simply cannot be tested against — see the block comment above."""
+    if ic:  # any INNINGS_CONTEXT_FILTERS (dismissal, batting position) in play
+        return True
+    for key in _RESIDUAL_DISQUALIFYING_MATCH_KEYS:
+        if key in context and context[key] not in (None, "", []):
+            coerced = _coerce_value(MATCH_CONTEXT_FILTERS[key]["value_kind"], context[key])
+            if coerced not in (None, False):
+                return True
+    for key in _RESIDUAL_DISQUALIFYING_PLAYER_KEYS:
+        if key in context and context[key] not in (None, "", []):
+            coerced = _coerce_value(PLAYER_CONTEXT_FILTERS[key]["value_kind"], context[key])
+            if coerced not in (None, False):
+                return True
+    return False
+
+
+def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
+    """Season/year/grade clauses for a residual query, using the `pss`/`s`
+    aliases a residual CTE joins (not `g`/`gr`/`gu` — a residual has no game
+    row). Covers the same dimensions MATCH_CONTEXT_FILTERS' season_id/
+    season_ids/min_year/max_year/grade_id/grade_ids already validate; reusing
+    those functions isn't possible since the SQL text differs by alias.
+    """
+    clauses: list[str] = []
+
+    season_id = context.get("season_id")
+    if season_id:
+        coerced = _coerce_value("uuid", season_id)
+        if coerced:
+            clauses.append(
+                f"(s.id = CAST(:{prefix}season_id AS UUID) OR s.id IN "
+                f"(SELECT alias_season_id FROM season_aliases "
+                f"WHERE canonical_season_id = CAST(:{prefix}season_id AS UUID) AND undone_at IS NULL))"
+            )
+            params[f"{prefix}season_id"] = coerced
+
+    season_ids_raw = context.get("season_ids")
+    if isinstance(season_ids_raw, str):
+        season_ids_raw = [x.strip() for x in season_ids_raw.split(",") if x.strip()]
+    season_ids = [v for v in (_coerce_value("uuid", x) for x in (season_ids_raw or [])) if v]
+    if season_ids:
+        ph = ", ".join(f"CAST(:{prefix}season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        clauses.append(
+            f"(s.id IN ({ph}) OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+        for i, v in enumerate(season_ids):
+            params[f"{prefix}season_ids_{i}"] = v
+
+    min_year = context.get("min_year")
+    if min_year not in (None, ""):
+        coerced = _coerce_value("int", min_year)
+        if coerced is not None:
+            clauses.append(f"COALESCE(s.year, 0) >= :{prefix}min_year")
+            params[f"{prefix}min_year"] = coerced
+
+    max_year = context.get("max_year")
+    if max_year not in (None, ""):
+        coerced = _coerce_value("int", max_year)
+        if coerced is not None:
+            clauses.append(f"COALESCE(s.year, 9999) <= :{prefix}max_year")
+            params[f"{prefix}max_year"] = coerced
+
+    grade_id = context.get("grade_id")
+    if grade_id:
+        coerced = _coerce_value("uuid", grade_id)
+        if coerced:
+            clauses.append(f"pss.grade_id = CAST(:{prefix}grade_id AS UUID)")
+            params[f"{prefix}grade_id"] = coerced
+
+    grade_ids_raw = context.get("grade_ids")
+    if isinstance(grade_ids_raw, str):
+        grade_ids_raw = [x.strip() for x in grade_ids_raw.split(",") if x.strip()]
+    grade_ids = [v for v in (_coerce_value("uuid", x) for x in (grade_ids_raw or [])) if v]
+    if grade_ids:
+        ph = ", ".join(f"CAST(:{prefix}grade_ids_{i} AS UUID)" for i in range(len(grade_ids)))
+        clauses.append(f"pss.grade_id IN ({ph})")
+        for i, v in enumerate(grade_ids):
+            params[f"{prefix}grade_ids_{i}"] = v
+
+    return (" AND " + " AND ".join(clauses)) if clauses else ""
+
+
+# Column list a residual CTE sums, shared by the career- and season-grouped
+# builders below — every column the live per-game bat/bowl/field CTEs also
+# produce, so the two sides COALESCE together cleanly.
+_RESIDUAL_AGG_COLS_SQL = """
+    COALESCE(SUM(pss.matches), 0)         AS matches,
+    COALESCE(SUM(pss.batting_innings), 0) AS batting_innings,
+    COALESCE(SUM(pss.runs), 0)            AS runs,
+    COALESCE(SUM(pss.not_outs), 0)        AS not_outs,
+    COALESCE(SUM(pss.balls_faced), 0)     AS balls_faced,
+    MAX(pss.high_score)                   AS high_score,
+    COALESCE(SUM(pss.fifties), 0)         AS fifties,
+    COALESCE(SUM(pss.hundreds), 0)        AS hundreds,
+    COALESCE(SUM(pss.ducks), 0)           AS ducks,
+    COALESCE(SUM(pss.fours), 0)           AS fours,
+    COALESCE(SUM(pss.sixes), 0)           AS sixes,
+    COALESCE(SUM(pss.bowling_innings), 0) AS bowling_innings,
+    COALESCE(SUM(pss.wickets), 0)         AS wickets,
+    COALESCE(SUM(pss.overs), 0)           AS overs,
+    COALESCE(SUM(pss.runs_conceded), 0)   AS runs_conceded,
+    COALESCE(SUM(pss.maidens), 0)         AS maidens,
+    MAX(pss.best_bowling_wickets)         AS best_bowling_wickets,
+    COALESCE(SUM(pss.five_wicket_innings), 0) AS five_wicket_innings,
+    COALESCE(SUM(pss.wides), 0)           AS wides,
+    COALESCE(SUM(pss.no_balls), 0)        AS no_balls,
+    COALESCE(SUM(pss.catches), 0)         AS catches,
+    COALESCE(SUM(pss.catches_wk), 0)      AS catches_wk,
+    COALESCE(SUM(pss.catches_non_wk), 0)  AS catches_non_wk,
+    COALESCE(SUM(pss.run_outs), 0)        AS run_outs,
+    COALESCE(SUM(pss.stumpings), 0)       AS stumpings
+"""
+
+
+def _residual_career_cte(context: dict, params: dict) -> str:
+    """A `resid` CTE (one row per player) for query_player_career's live
+    branch — the residual-sources union of v_effective_player_season_stats,
+    scoped to whatever season/grade/year/player filters a residual row can
+    actually answer (see _residual_scope_clause / _RESIDUAL_PLAYER_FILTERS).
+    Career-level rows (season_id NULL — a manual career adjustment, an
+    import career residual) are kept via the LEFT JOIN, same as the fast
+    path above.
+    """
+    params["residual_sources"] = list(_RESIDUAL_SOURCES)
+    scope_clause = _residual_scope_clause(context, params, "rc_")
+    player_clauses, player_params, _ = _build_filter_block(context, _RESIDUAL_PLAYER_FILTERS)
+    params.update(player_params)
+    player_clause = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
+    return f"""
+        resid AS (
+            SELECT
+                -- Native UUID (not ::text) to match bat/bowl/field/appear's
+                -- player_id — they COALESCE and join together in
+                -- query_player_career, and mixing UUID/text there is a type
+                -- error, not a silent cast. Cast happens once, in the
+                -- caller's outer SELECT.
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                {_RESIDUAL_AGG_COLS_SQL}
+            FROM v_effective_player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            LEFT JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id
+              AND pss.source = ANY(:residual_sources)
+              {scope_clause}
+              {player_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name)
+        )
+    """
+
+
+def _residual_season_cte(context: dict, params: dict) -> str:
+    """The season-grouped mirror of `_residual_career_cte`, for
+    query_player_season's live branch. A career-level row (season_id NULL)
+    has no season to sit in and is naturally dropped by the INNER JOIN —
+    matching how the live per-game side has no career-level row either.
+    Grouped on the residual's OWN season_id (not canonicalised through
+    season_aliases) to match `gu.season_id`, which the live per-game side
+    also leaves un-canonicalised — a pre-existing StatLab limitation, not
+    something introduced here.
+    """
+    params["residual_sources"] = list(_RESIDUAL_SOURCES)
+    scope_clause = _residual_scope_clause(context, params, "rs_")
+    player_clauses, player_params, _ = _build_filter_block(context, _RESIDUAL_PLAYER_FILTERS)
+    params.update(player_params)
+    player_clause = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
+    return f"""
+        resid AS (
+            SELECT
+                -- Native UUID (not ::text) on both id columns to match
+                -- bat/bowl/field/appear's player_id and gu.season_id's
+                -- types — they COALESCE and join together in
+                -- query_player_season, and mixing UUID/text there is a type
+                -- error, not a silent cast. Casts happen once, in the
+                -- caller's outer SELECT.
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                pss.season_id AS season_id,
+                s.name AS season_name,
+                COALESCE(s.year, 0) AS season_year,
+                {_RESIDUAL_AGG_COLS_SQL}
+            FROM v_effective_player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            JOIN seasons s ON s.id = pss.season_id
+            WHERE p.organisation_id = :org_id
+              AND pss.source = ANY(:residual_sources)
+              AND pss.season_id IS NOT NULL
+              {scope_clause}
+              {player_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name), pss.season_id, s.name, s.year
+        )
+    """
+
 
 # Helper SQL functions emitted once at the top of each query that needs them.
 # We define them as inline expressions to avoid creating real DB functions.
@@ -665,47 +892,73 @@ async def query_player_career(
             group_cols="p.id, COALESCE(p.display_name_override, p.name)",
             select_cols="p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name,",
         )
+        # A residual (imported/manual-aggregate) row has no per-game data, so
+        # it can only join in when every active filter is one it can actually
+        # answer — see _residual_disqualified. Without this, the moment ANY
+        # context filter was set (a season, a year range, even just a grade),
+        # an imported season vanished from StatLab even though the unfiltered
+        # fast path above shows it fine (the reported 1970/71 case).
+        residual_ok = not _residual_disqualified(context, ic)
+        resid_with = (",\n" + _residual_career_cte(context, params)) if residual_ok else ""
+        # The join condition's RHS must NOT include resid.player_id — a FULL
+        # OUTER JOIN condition can't reference the table it's joining on both
+        # sides (Postgres rejects it outright: "only supported with
+        # merge-joinable or hash-joinable join conditions"). The outer
+        # SELECT's id, below, is a separate expression that DOES add resid
+        # as the final fallback, for a player whose only row is residual.
+        live_id = "COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id)"
+        resid_id = f"COALESCE({live_id}, resid.player_id)" if residual_ok else live_id
+        resid_name = "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name, resid.player_name)" if residual_ok \
+            else "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name)"
+        resid_join = f"FULL OUTER JOIN resid ON resid.player_id = {live_id}" if residual_ok else ""
+
+        def _r(col: str) -> str:
+            """A live column plus its residual counterpart, or just the live
+            column when a disqualifying filter ruled the residual out."""
+            return f"(COALESCE({col}, 0) + COALESCE(resid.{col.split('.')[-1]}, 0))" if residual_ok else f"COALESCE({col}, 0)"
+
         sql = f"""
-            {cte},
+            {cte}{resid_with},
             agg AS (
                 SELECT
-                    COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id)::text AS player_id,
-                    COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name) AS player_name,
-                    COALESCE(appear.matches, 0)                                       AS matches,
+                    {resid_id}::text AS player_id,
+                    {resid_name} AS player_name,
+                    {_r('appear.matches')}                                            AS matches,
                     1                                                                  AS seasons_played,
-                    COALESCE(bat.batting_innings, 0)                                  AS batting_innings,
-                    COALESCE(bat.runs, 0)                                             AS runs,
-                    COALESCE(bat.not_outs, 0)                                         AS not_outs,
-                    COALESCE(bat.balls_faced, 0)                                      AS balls_faced,
-                    ROUND(bat.runs::numeric / NULLIF(bat.batting_innings - bat.not_outs, 0), 2) AS batting_average,
-                    ROUND(bat.runs::numeric / NULLIF(bat.balls_faced, 0) * 100, 2)     AS batting_strike_rate,
-                    COALESCE(bat.high_score, 0)                                       AS high_score,
-                    COALESCE(bat.fifties, 0)                                          AS fifties,
-                    COALESCE(bat.hundreds, 0)                                         AS hundreds,
-                    COALESCE(bat.ducks, 0)                                            AS ducks,
-                    COALESCE(bat.fours, 0)                                            AS fours,
-                    COALESCE(bat.sixes, 0)                                            AS sixes,
-                    COALESCE(bowl.bowling_innings, 0)                                 AS bowling_innings,
-                    COALESCE(bowl.wickets, 0)                                         AS wickets,
-                    COALESCE(bowl.overs, 0)                                           AS overs,
-                    COALESCE(bowl.runs_conceded, 0)                                   AS runs_conceded,
-                    ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.wickets, 0), 2)   AS bowling_average,
-                    ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.overs * 6, 0) * 6, 2) AS bowling_economy,
-                    ROUND(bowl.overs::numeric * 6 / NULLIF(bowl.wickets, 0), 2)        AS bowling_strike_rate,
-                    COALESCE(bowl.five_wicket_innings, 0)                             AS five_wicket_innings,
-                    COALESCE(bowl.maidens, 0)                                         AS maidens,
-                    bowl.best_bowling_wickets                                          AS best_bowling_wickets,
-                    COALESCE(bowl.wides, 0)    AS wides,
-                    COALESCE(bowl.no_balls, 0) AS no_balls,
-                    COALESCE(field.catches, 0)                                        AS catches,
-                    COALESCE(field.catches_wk, 0)                                     AS catches_wk,
-                    COALESCE(field.catches_non_wk, 0)                                 AS catches_non_wk,
-                    COALESCE(field.run_outs, 0)                                       AS run_outs,
-                    COALESCE(field.stumpings, 0)                                      AS stumpings
+                    {_r('bat.batting_innings')}                                       AS batting_innings,
+                    {_r('bat.runs')}                                                  AS runs,
+                    {_r('bat.not_outs')}                                              AS not_outs,
+                    {_r('bat.balls_faced')}                                           AS balls_faced,
+                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
+                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)     AS batting_strike_rate,
+                    GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
+                    {_r('bat.fifties')}                                               AS fifties,
+                    {_r('bat.hundreds')}                                              AS hundreds,
+                    {_r('bat.ducks')}                                                 AS ducks,
+                    {_r('bat.fours')}                                                 AS fours,
+                    {_r('bat.sixes')}                                                 AS sixes,
+                    {_r('bowl.bowling_innings')}                                      AS bowling_innings,
+                    {_r('bowl.wickets')}                                              AS wickets,
+                    {_r('bowl.overs')}                                                AS overs,
+                    {_r('bowl.runs_conceded')}                                        AS runs_conceded,
+                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
+                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                    ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
+                    {_r('bowl.five_wicket_innings')}                                  AS five_wicket_innings,
+                    {_r('bowl.maidens')}                                              AS maidens,
+                    GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
+                    {_r('bowl.wides')}    AS wides,
+                    {_r('bowl.no_balls')} AS no_balls,
+                    {_r('field.catches')}                                             AS catches,
+                    {_r('field.catches_wk')}                                          AS catches_wk,
+                    {_r('field.catches_non_wk')}                                      AS catches_non_wk,
+                    {_r('field.run_outs')}                                            AS run_outs,
+                    {_r('field.stumpings')}                                           AS stumpings
                 FROM appear
                 FULL OUTER JOIN bat  ON bat.player_id  = appear.player_id
                 FULL OUTER JOIN bowl ON bowl.player_id = COALESCE(appear.player_id, bat.player_id)
                 FULL OUTER JOIN field ON field.player_id = COALESCE(appear.player_id, bat.player_id, bowl.player_id)
+                {resid_join}
             )
             SELECT * FROM agg
             {where_sql}
@@ -809,52 +1062,82 @@ async def query_player_season(
             select_cols=("p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name, "
                          "gu.season_id, gu.season_name, gu.season_year,"),
         )
+        # See query_player_career's own note: a residual row (an imported
+        # season, a manual adjustment) has no per-game data, so it only joins
+        # in when every active filter is one it can actually answer.
+        residual_ok = not _residual_disqualified(context, ic)
+        resid_with = (",\n" + _residual_season_cte(context, params)) if residual_ok else ""
+        # The join condition's RHS must NOT reference resid.* itself — see
+        # query_player_career's own note (Postgres rejects a FULL OUTER JOIN
+        # condition that's circular through the table being joined). The
+        # outer SELECT's id/season columns, below, are separate expressions
+        # that DO add resid as the final fallback.
+        live_pid = "COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id)"
+        live_sid = "COALESCE(appear.season_id, bat.season_id, bowl.season_id, field.season_id)"
+        resid_pid = f"COALESCE({live_pid}, resid.player_id)" if residual_ok else live_pid
+        resid_pname = "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name, resid.player_name)" if residual_ok \
+            else "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name)"
+        resid_sid = f"COALESCE({live_sid}, resid.season_id)" if residual_ok else live_sid
+        resid_sname = "COALESCE(appear.season_name, bat.season_name, bowl.season_name, field.season_name, resid.season_name)" if residual_ok \
+            else "COALESCE(appear.season_name, bat.season_name, bowl.season_name, field.season_name)"
+        resid_syear = "COALESCE(appear.season_year, bat.season_year, bowl.season_year, field.season_year, resid.season_year)" if residual_ok \
+            else "COALESCE(appear.season_year, bat.season_year, bowl.season_year, field.season_year)"
+        resid_join = (
+            f"FULL OUTER JOIN resid ON resid.player_id = {live_pid} AND resid.season_id = {live_sid}"
+        ) if residual_ok else ""
+
+        def _r(col: str) -> str:
+            """A live column plus its residual counterpart, or just the live
+            column when a disqualifying filter ruled the residual out."""
+            return f"(COALESCE({col}, 0) + COALESCE(resid.{col.split('.')[-1]}, 0))" if residual_ok else f"COALESCE({col}, 0)"
+
         sql = f"""
-            {cte},
+            {cte}{resid_with},
             agg AS (
                 SELECT
-                    COALESCE(appear.player_id, bat.player_id)::text   AS player_id,
-                    COALESCE(appear.player_name, bat.player_name)     AS player_name,
-                    COALESCE(appear.season_id, bat.season_id)::text   AS season_id,
-                    COALESCE(appear.season_name, bat.season_name)     AS season_name,
-                    COALESCE(appear.season_year, bat.season_year)     AS season_year,
-                    COALESCE(appear.matches, 0)                       AS matches,
+                    {resid_pid}::text   AS player_id,
+                    {resid_pname}       AS player_name,
+                    {resid_sid}::text   AS season_id,
+                    {resid_sname}       AS season_name,
+                    {resid_syear}       AS season_year,
+                    {_r('appear.matches')}                            AS matches,
                     1                                                  AS seasons_played,
-                    COALESCE(bat.batting_innings, 0)                  AS batting_innings,
-                    COALESCE(bat.runs, 0)                             AS runs,
-                    COALESCE(bat.not_outs, 0)                         AS not_outs,
-                    COALESCE(bat.balls_faced, 0)                      AS balls_faced,
-                    ROUND(bat.runs::numeric / NULLIF(bat.batting_innings - bat.not_outs, 0), 2) AS batting_average,
-                    ROUND(bat.runs::numeric / NULLIF(bat.balls_faced, 0) * 100, 2)             AS batting_strike_rate,
-                    COALESCE(bat.high_score, 0)                       AS high_score,
-                    COALESCE(bat.fifties, 0)                          AS fifties,
-                    COALESCE(bat.hundreds, 0)                         AS hundreds,
-                    COALESCE(bat.ducks, 0)                            AS ducks,
-                    COALESCE(bat.fours, 0)                            AS fours,
-                    COALESCE(bat.sixes, 0)                            AS sixes,
-                    COALESCE(bowl.bowling_innings, 0)                 AS bowling_innings,
-                    COALESCE(bowl.wickets, 0)                         AS wickets,
-                    COALESCE(bowl.overs, 0)                           AS overs,
-                    COALESCE(bowl.runs_conceded, 0)                   AS runs_conceded,
-                    ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.wickets, 0), 2) AS bowling_average,
-                    ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.overs * 6, 0) * 6, 2) AS bowling_economy,
-                    ROUND(bowl.overs::numeric * 6 / NULLIF(bowl.wickets, 0), 2) AS bowling_strike_rate,
-                    COALESCE(bowl.five_wicket_innings, 0)             AS five_wicket_innings,
-                    COALESCE(bowl.maidens, 0)                         AS maidens,
-                    bowl.best_bowling_wickets                         AS best_bowling_wickets,
-                    COALESCE(bowl.wides, 0)    AS wides,
-                    COALESCE(bowl.no_balls, 0) AS no_balls,
-                    COALESCE(field.catches, 0)                        AS catches,
-                    COALESCE(field.catches_wk, 0)                     AS catches_wk,
-                    COALESCE(field.catches_non_wk, 0)                 AS catches_non_wk,
-                    COALESCE(field.run_outs, 0)                       AS run_outs,
-                    COALESCE(field.stumpings, 0)                      AS stumpings
+                    {_r('bat.batting_innings')}                       AS batting_innings,
+                    {_r('bat.runs')}                                  AS runs,
+                    {_r('bat.not_outs')}                              AS not_outs,
+                    {_r('bat.balls_faced')}                           AS balls_faced,
+                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
+                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)             AS batting_strike_rate,
+                    GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
+                    {_r('bat.fifties')}                               AS fifties,
+                    {_r('bat.hundreds')}                              AS hundreds,
+                    {_r('bat.ducks')}                                 AS ducks,
+                    {_r('bat.fours')}                                 AS fours,
+                    {_r('bat.sixes')}                                 AS sixes,
+                    {_r('bowl.bowling_innings')}                      AS bowling_innings,
+                    {_r('bowl.wickets')}                              AS wickets,
+                    {_r('bowl.overs')}                                AS overs,
+                    {_r('bowl.runs_conceded')}                        AS runs_conceded,
+                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_average,
+                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                    ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_strike_rate,
+                    {_r('bowl.five_wicket_innings')}                  AS five_wicket_innings,
+                    {_r('bowl.maidens')}                              AS maidens,
+                    GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
+                    {_r('bowl.wides')}    AS wides,
+                    {_r('bowl.no_balls')} AS no_balls,
+                    {_r('field.catches')}                             AS catches,
+                    {_r('field.catches_wk')}                          AS catches_wk,
+                    {_r('field.catches_non_wk')}                      AS catches_non_wk,
+                    {_r('field.run_outs')}                            AS run_outs,
+                    {_r('field.stumpings')}                           AS stumpings
                 FROM appear
                 FULL OUTER JOIN bat  ON bat.player_id  = appear.player_id AND bat.season_id  = appear.season_id
                 FULL OUTER JOIN bowl ON bowl.player_id = COALESCE(appear.player_id, bat.player_id)
                                      AND bowl.season_id = COALESCE(appear.season_id, bat.season_id)
                 FULL OUTER JOIN field ON field.player_id = COALESCE(appear.player_id, bat.player_id, bowl.player_id)
                                      AND field.season_id = COALESCE(appear.season_id, bat.season_id, bowl.season_id)
+                {resid_join}
             )
             SELECT * FROM agg
             {where_sql}
