@@ -4726,6 +4726,19 @@ async def lifespan(app: FastAPI):
             END $$
         """))
 
+        # Migration 235: a per-season PlayHQ registration checkbox on
+        # fee_member_seasons — playing requires it, and nothing here can read
+        # it back from PlayHQ, so an admin ticks it once sighted. Byte-
+        # identical to alembic/versions/235_fee_member_season_playhq.py.
+        await conn.execute(text(
+            "ALTER TABLE fee_member_seasons ADD COLUMN IF NOT EXISTS "
+            "playhq_registered BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE fee_member_seasons ADD COLUMN IF NOT EXISTS "
+            "playhq_registered_at TIMESTAMPTZ"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
