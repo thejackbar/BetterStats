@@ -142,9 +142,10 @@ function ImportIncluded() {
                 We don't charge for <span className="gradient-text">historical imports.</span>
               </h2>
               <p className="text-lg text-pb-dim max-w-2xl mx-auto leading-relaxed">
-                Bringing your club's old data across is included in your plan, with no setup or import fee.
-                Our easy import tool does most of the work, and BetterCricket support will help you load your
-                full history into BetterStats and get every season looking right.
+                Bringing your club's old data across, spreadsheets, old scorebooks, CSV exports, is included in
+                your plan, with no setup or import fee. Our easy import tool does most of the work, then merges
+                it against your live PlayHQ or Play-Cricket sync, and BetterCricket support will help you get
+                every season looking right.
               </p>
             </div>
           </div>

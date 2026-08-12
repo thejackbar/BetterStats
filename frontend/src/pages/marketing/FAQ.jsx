@@ -44,6 +44,10 @@ const CATEGORIES = [
         a: "As far back as you can go. Every club is different, so we bring across whatever's available and you can layer manually-imported records on top of that.",
       },
       {
+        q: "What's the best way to merge our club's historical stats with PlayHQ or Play-Cricket?",
+        a: "Bring us whatever you have: spreadsheets, old scorebooks, CSV exports, PDFs. BetterCricket reconciles it against the match data already syncing in from PlayHQ or Play-Cricket into one career history per player. The historical import is included in your subscription, with no separate migration fee and no limit on how many seasons or spreadsheet tabs it runs to.",
+      },
+      {
         q: 'What happens to old career averages?',
         a: "We rebuild them, accurately. Many clubs have career stats spread across old aggregates, recent seasons and a spreadsheet. We reconcile them all and flag anything inconsistent so the statistician can sign off.",
       },

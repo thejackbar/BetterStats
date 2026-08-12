@@ -27,6 +27,102 @@ IMAGE_HEIGHT = 1080
 # article and FAQ schema, not just the card. Card-only posts omit them.
 BLOG_POSTS: list[dict] = [
     {
+        "slug": "100-years-of-cricket-history-in-one-spreadsheet",
+        "title": "100 Years of Club History, Sitting in One Spreadsheet",
+        "date": "2026-08-12",
+        "image": "/marketing/blog/club-culture.jpg",
+        "description": (
+            "A club statistician, a sixty-tab spreadsheet and a hundred years of "
+            "history. What it actually takes to get decades of cricket stats into "
+            "one reconciled record, and what changes once it is there."
+        ),
+        "body": [
+            {"type": "p", "text": "Most of the clubs we sit down with have a version of the same spreadsheet. One person built it, usually years ago, and has been quietly keeping it alive ever since. At one of the older clubs in Western Australia, that spreadsheet runs to more than sixty tabs and covers over a hundred years of cricket."},
+            {"type": "h2", "text": "One person, sixty tabs, a hundred years"},
+            {"type": "p", "text": "The club's statistician had done exactly what you would hope someone would do with a century of results: kept it. Season by season, tab by tab, every batting card and bowling figure typed in by hand, going back further than anyone at the club can remember first-hand. It is an enormous piece of work, and it is also a single point of failure."},
+            {"type": "h2", "text": "What a hundred years of history is actually worth"},
+            {"type": "p", "text": "Ask most clubs where their pre-2010 stats live and you tend to get a shrug, a filing cabinet, or the name of someone who left the committee years ago. The spreadsheet at this club was the opposite of that: complete, current and cared for. The problem was never the data. It was that all of it depended on one person continuing to update it by hand, forever."},
+            {"type": "h2", "text": "The part that actually changed the room"},
+            {"type": "p", "text": "We walked the committee and a few volunteers through what happens when that spreadsheet goes into BetterCricket. Not a demo on a blank system, their own hundred years, imported and reconciled against the club's live PlayHQ data, on screen in minutes. Every season, every player, every honour board entry."},
+            {"type": "p", "text": "The reaction in the room was not really about the software. It was relief. The statistician had spent years quietly worried about what happens to all of that history once he is no longer the one keeping it. That is a succession problem, not a stats problem, and it is the one a spreadsheet can never solve on its own."},
+            {"type": "ul", "items": [
+                "No more sitting down every week to update the spreadsheet by hand",
+                "No more auditing old records for typos and duplicate entries",
+                "No more wondering who takes it over when he steps back",
+            ]},
+            {"type": "h2", "text": "It only has to happen once"},
+            {"type": "p", "text": "The import is the effort. Once a club's history is in, it stays in. New games sync automatically after every match, so the job that used to repeat every week becomes something nobody has to think about again. A season's worth of scores does not wait for a volunteer to find a Thursday evening free."},
+            {"type": "h2", "text": "And that was only the stats side"},
+            {"type": "p", "text": "The stats were the headline of that conversation because they were the most obvious hundred-year problem in the room, but they were not the only thing on the table. The same evening covered team selection and availability, vote counts for club awards, the club's social media and match-day posts, general admin, event management and bulk emails. Once a club's data is in one place, most of the jobs a committee does by hand turn out to run off the same information."},
+            {"type": "h2", "text": "What this means if your club has a spreadsheet like this"},
+            {"type": "p", "text": "You do not need to tidy it up before you talk to us. Bring whatever you have, however many tabs it runs to, and however far back it goes. A little bit of work at the start is what secures a club's history for good, instead of leaving it one resignation away from starting again."},
+            {"type": "links", "heading": "Related", "items": [
+                {"label": "Why your club's history keeps getting lost", "href": "/blog/why-your-clubs-history-keeps-getting-lost"},
+                {"label": "5 reasons your cricket club is losing its stats history", "href": "/blog/5-reasons-your-cricket-club-is-losing-its-stats-history"},
+                {"label": "BetterCricket vs ClubStats", "href": "/blog/bettercricket-vs-clubstats"},
+                {"label": "Pricing", "href": "/pricing"},
+                {"label": "Start your free trial", "href": "/trial"},
+            ]},
+            {"type": "callout", "text": "BetterCricket imports a club's full history, however many decades and however many spreadsheet tabs it runs to, then keeps it current automatically after every match. Search for your club at betterat.cricket/trial to get started."},
+        ],
+        "faq": [
+            {"q": "What happens to a cricket club's stats when the volunteer who keeps them steps down?", "a": "Usually nothing good. Most clubs run their history through one person's spreadsheet, and when that person leaves the committee, the updates stop and the record freezes wherever it was left. BetterCricket imports the spreadsheet once, syncs live match data automatically after that, and the record no longer depends on any one volunteer."},
+            {"q": "Can BetterCricket import a spreadsheet with dozens of tabs going back a hundred years?", "a": "Yes. Clubs bring in whatever they have, however it is organised, and BetterCricket reconciles it against the club's synced PlayHQ or Play-Cricket data into one career history per player. The historical import is included in the subscription, not charged as a separate fee."},
+            {"q": "Does moving to BetterCricket mean changing how the club scores or registers matches?", "a": "No. BetterCricket sits on top of however the club already scores and registers. Nothing about match day changes. It reads the data already being generated and reconciles it with whatever historical records the club hands over."},
+            {"q": "How long does it take to bring a club's full history online?", "a": "The import itself typically runs in minutes once the data is handed over. Most of the time in the process is a club gathering what it has, whatever shape that is in, before the sync runs."},
+        ],
+    },
+    {
+        "slug": "bettercricket-vs-clubstats",
+        "title": "BetterCricket vs ClubStats: Which Is Better for Merging Historical Stats?",
+        "date": "2026-08-11",
+        "image": "/marketing/blog/stats-history.jpg",
+        "description": (
+            "ClubStats and BetterCricket both take on a club's historical cricket "
+            "stats. How they compare on the historical import, setup time and what "
+            "a club gets once its history is online."
+        ),
+        "body": [
+            {"type": "p", "text": "ClubStats is one of the first names that comes up when a club goes looking for somewhere to put decades of history alongside its PlayHQ data. It is a fair comparison to make, so here is an honest one."},
+            {"type": "h2", "text": "What each one is"},
+            {"type": "p", "text": "ClubStats is a cricket history and stats site, built to sit next to an official season manager like PlayHQ and hold a club's permanent record, including past-season imports and milestone tracking. BetterCricket is a wider club platform built for Australian cricket: the same job of reconciling and presenting a club's full history, plus a public club website, and modules for team selection, social posts, fees and opposition analysis."},
+            {"type": "h2", "text": "Side by side"},
+            {"type": "table", "headers": ["", "ClubStats", "BetterCricket"], "rows": [
+                ["Main job", "Cricket history and stats site", "Running the club"],
+                ["Decades of historical archive", "Partial, some manual work", "Full, imported on setup"],
+                ["Head-to-head player splits", "No", "Yes"],
+                ["Public, club-branded website", "Partial", "Full branded club site"],
+                ["Auto-generated season yearbook", "No", "Yes"],
+                ["Syncs automatically with PlayHQ", "Partial", "Yes, after every match"],
+                ["Historical import fee", "One-off, from $499 up to about $1,000 for a big club", "Included, no separate charge"],
+                ["Setup time", "Days", "Under an hour"],
+                ["Selection, fees, socials, scouting", "No", "Yes, the modules"],
+            ]},
+            {"type": "h2", "text": "The historical import, specifically"},
+            {"type": "p", "text": "This is the part most clubs are actually asking about when they compare the two. ClubStats charges a one-off migration fee to bring a club's old data in, scaling up to around $1,000 for a larger club's archive, on top of the subscription. BetterCricket's historical import is part of the plan. There is no separate invoice for bringing your history across, whatever shape it is in."},
+            {"type": "p", "text": "What \"whatever shape it is in\" covers matters too. Most clubs hand over a spreadsheet. Some hand over several, built up by different people over different eras. A few hand over scanned or photographed scorebooks going back to before anyone was typing results into a computer at all, and BetterCricket's scorecard reader is built to read those directly, wides, byes, handwriting and all, not just tidy CSV exports."},
+            {"type": "h2", "text": "Where ClubStats is strong"},
+            {"type": "p", "text": "If a club already runs a clean PlayHQ setup and wants a dedicated, focused place to hold its historical archive and milestones alongside it, ClubStats does that specific job and has clubs using it for exactly that."},
+            {"type": "h2", "text": "Where BetterCricket is strong"},
+            {"type": "p", "text": "If a club wants the historical import handled without a separate fee, a full public website built from its own data rather than a partial one, and the rest of the club, selection, fees, social posts, opposition analysis, running off the same history, BetterCricket covers more ground for one flat annual price."},
+            {"type": "links", "heading": "Related", "items": [
+                {"label": "BetterCricket features", "href": "/features"},
+                {"label": "Pricing", "href": "/pricing"},
+                {"label": "The modules", "href": "/modules"},
+                {"label": "100 years of club history, sitting in one spreadsheet", "href": "/blog/100-years-of-cricket-history-in-one-spreadsheet"},
+                {"label": "ClubStats", "href": "https://clubstats.cricket", "external": True},
+                {"label": "PlayHQ", "href": "https://www.playhq.com", "external": True},
+            ]},
+            {"type": "callout", "text": "BetterCricket includes the historical import in every plan, whatever shape your old records are in. Search for your club at betterat.cricket/trial and we'll handle the first full historical sync."},
+        ],
+        "faq": [
+            {"q": "Is ClubStats or BetterCricket better for merging historical cricket stats with PlayHQ?", "a": "Both are built to sit alongside PlayHQ and bring a club's older history in. The practical difference is cost and scope: ClubStats charges a separate one-off migration fee on top of its subscription, while BetterCricket's historical import is included, and it also covers running the rest of the club, selection, fees, socials and opposition analysis, on the same data."},
+            {"q": "Does ClubStats charge extra to import old stats?", "a": "Yes, ClubStats charges a one-off historical-import fee separate from its subscription, from around $499 up to about $1,000 for a larger club's archive. BetterCricket's import is part of the annual plan with no separate charge."},
+            {"q": "How long does it take to bring decades of history into BetterCricket?", "a": "Setup typically takes under an hour once a club's data is handed over, whether that is a live PlayHQ sync, spreadsheets, or both. ClubStats' own onboarding runs to a few days."},
+            {"q": "Can BetterCricket read old scorebooks, not just spreadsheets?", "a": "Yes. BetterCricket's scorecard reader can take a scanned or photographed handwritten scorebook and extract the batting, bowling and fielding figures directly, alongside CSV and spreadsheet imports."},
+        ],
+    },
+    {
         "slug": "how-to-merge-players-in-playhq-cricket",
         "title": "How to Merge Duplicate Players in PlayHQ Cricket",
         "date": "2026-06-21",
