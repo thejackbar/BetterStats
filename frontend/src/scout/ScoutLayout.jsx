@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: '/betterscout/app/discover', label: 'Discover' },
   { to: '/betterscout/app/watchlists', label: 'Watchlists' },
   { to: '/betterscout/app/players', label: 'My players' },
+  { to: '/betterscout/app/compare', label: 'Compare' },
 ]
 
 export default function ScoutLayout() {

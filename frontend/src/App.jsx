@@ -11,6 +11,7 @@ import ScoutPlayers from './scout/pages/ScoutPlayers'
 import ScoutPlayerProfile from './scout/pages/ScoutPlayerProfile'
 import ScoutWatchlists from './scout/pages/ScoutWatchlists'
 import ScoutWatchlistBoard from './scout/pages/ScoutWatchlistBoard'
+import ScoutCompare from './scout/pages/ScoutCompare'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -327,6 +328,7 @@ export default function App() {
               <Route path="players/:id" element={<ScoutPlayerProfile />} />
               <Route path="watchlists" element={<ScoutWatchlists />} />
               <Route path="watchlists/:id" element={<ScoutWatchlistBoard />} />
+              <Route path="compare" element={<ScoutCompare />} />
             </Route>
           </Route>
 
