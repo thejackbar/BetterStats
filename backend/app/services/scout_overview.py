@@ -73,9 +73,6 @@ async def _pipeline_counts(session: AsyncSession, scout_org_id: str) -> dict:
     return {"in_pipeline": total, "final_stage_count": final_count, "final_stage_label": label}
 
 
-_BATTING_HEAVY = lambda t: (t.get("wickets") or 0) <= (t.get("runs") or 0) / 20  # noqa: E731 — a simple, local heuristic
-
-
 def _season_avg(season_rows: list[dict], batting: bool) -> float | None:
     if batting:
         runs = sum(s.get("runs") or 0 for s in season_rows)
@@ -86,19 +83,18 @@ def _season_avg(season_rows: list[dict], batting: bool) -> float | None:
     return round(runs_c / wkts, 2) if wkts > 0 else None
 
 
-def _form_mover(p: ScoutedPlayer) -> dict | None:
-    """Latest active season vs the two before it, on the player's primary
-    discipline — batting average for a batter, bowling average for a
-    bowler (down is good there, so the sign is flipped for the delta before
-    comparing magnitude, but the RAW delta shown to a scout is always
-    "how did their own number move")."""
-    payload = p.stats_payload or {}
-    seasons = sorted((payload.get("seasons") or []), key=lambda s: s.get("year") or 0, reverse=True)
-    active = [s for s in seasons if (s.get("matches") or 0) > 0]
-    if len(active) < 2:
-        return None
-    totals = payload.get("totals") or {}
-    batting = _BATTING_HEAVY(totals)
+def _discipline_mover(identity: dict, active: list[dict], batting: bool) -> dict | None:
+    """Latest active season vs the two before it, on ONE discipline — batting
+    average or bowling average (down is good there, so the sign is flipped
+    for the delta before comparing magnitude, but the RAW delta shown to a
+    scout is always "how did their own number move"). Returns None when the
+    player has no usable average in this discipline (e.g. a pure bowler has
+    no batting mover, and vice versa) rather than forcing a pick between
+    disciplines — see movers_for_seasons, which asks for BOTH per player
+    instead of guessing "batter or bowler" from a career-runs/wickets ratio.
+    `identity` is a plain {id, name, club_name, grade_name} dict rather than
+    a ScoutedPlayer, so this same function serves both Overview's org-tracked
+    movers and services/scout_feed.py's platform-wide hot-form feed."""
     latest, prior = active[0], active[1:3]
     latest_avg = _season_avg([latest], batting)
     prior_avg = _season_avg(prior, batting)
@@ -114,10 +110,7 @@ def _form_mover(p: ScoutedPlayer) -> dict | None:
         for s in sorted(active[:5], key=lambda s: s.get("year") or 0)
     ]
     return {
-        "id": str(p.id),
-        "name": p.name,
-        "club_name": p.club_name,
-        "grade_name": p.grade_name,
+        **identity,
         "metric": "batting average" if batting else "bowling average",
         "delta": raw_delta,
         "improved": improved,
@@ -125,6 +118,24 @@ def _form_mover(p: ScoutedPlayer) -> dict | None:
         "current_value": latest_avg,
         "sparkline": sparkline,
     }
+
+
+def movers_for_seasons(identity: dict, seasons_payload: list[dict] | None) -> list[dict]:
+    """Both a batting mover and a bowling mover for one player's season list,
+    independent of each other — a genuine all-rounder shows up twice rather
+    than being collapsed into whichever discipline a career runs-vs-wickets
+    heuristic happened to pick. Public (not underscored): shared by
+    services/scout_feed.py's platform-wide hot-form scan."""
+    seasons = sorted(seasons_payload or [], key=lambda s: s.get("year") or 0, reverse=True)
+    active = [s for s in seasons if (s.get("matches") or 0) > 0]
+    if len(active) < 2:
+        return []
+    out = []
+    for batting in (True, False):
+        m = _discipline_mover(identity, active, batting)
+        if m:
+            out.append(m)
+    return out
 
 
 async def _form_movers(session: AsyncSession, scout_org_id: str, limit: int = 6) -> tuple[list[dict], int]:
@@ -135,7 +146,10 @@ async def _form_movers(session: AsyncSession, scout_org_id: str, limit: int = 6)
         .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutedPlayer.stats_payload.isnot(None))
         .distinct()
     )).scalars().all()
-    movers = [m for p in players if (m := _form_mover(p))]
+    movers = []
+    for p in players:
+        identity = {"id": str(p.id), "name": p.name, "club_name": p.club_name, "grade_name": p.grade_name}
+        movers.extend(movers_for_seasons(identity, (p.stats_payload or {}).get("seasons")))
     movers.sort(key=lambda m: m["magnitude"], reverse=True)
     return movers[:limit], len(movers)
 

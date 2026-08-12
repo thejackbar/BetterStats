@@ -4,7 +4,6 @@ import { AuthProvider } from './contexts/AuthContext'
 import ScoutApp from './scout/ScoutApp'
 import ScoutProtectedRoute from './scout/components/ScoutProtectedRoute'
 import ScoutLogin from './scout/pages/ScoutLogin'
-import ScoutLayout from './scout/ScoutLayout'
 import ScoutOverview from './scout/pages/ScoutOverview'
 import ScoutDiscover from './scout/pages/ScoutDiscover'
 import ScoutPlayers from './scout/pages/ScoutPlayers'
@@ -14,6 +13,8 @@ import ScoutWatchlistBoard from './scout/pages/ScoutWatchlistBoard'
 import ScoutCompare from './scout/pages/ScoutCompare'
 import ScoutMilestones from './scout/pages/ScoutMilestones'
 import ScoutSettings from './scout/pages/ScoutSettings'
+import ScoutSearch from './scout/pages/ScoutSearch'
+import ScoutHotForm from './scout/pages/ScoutHotForm'
 import ScoutAcceptInvite from './scout/pages/ScoutAcceptInvite'
 import ScoutPublicShare from './scout/pages/ScoutPublicShare'
 import ScoutShareComparison from './scout/pages/ScoutShareComparison'
@@ -332,26 +333,23 @@ export default function App() {
           <Route element={<ScoutApp />}>
             <Route path="/betterscout" element={<Navigate to="/betterscout/app" replace />} />
             <Route path="/betterscout/login" element={<ScoutLogin />} />
-            {/* Discover has been migrated to the flat, self-wrapping-layout
-                pattern every other Better module uses (the page itself wraps
-                <ScoutModuleLayout>, so it can pass its own title/caption/
-                filters/stats/actions) — moved OUT of the nested-Outlet block
-                below. Every other /betterscout/app/* page still mounts
-                through <ScoutLayout>'s <Outlet/>; as each is rebuilt with its
-                own header it moves up here too, and once none are left,
-                ScoutLayout/the wrapper route come out entirely. */}
+            {/* Every /betterscout/app/* screen is now the flat, self-wrapping-
+                layout pattern every other Better module uses — each page
+                wraps <ScoutModuleLayout> itself and passes its own title/
+                caption/filters/stats/actions. ScoutLayout's nested-Outlet
+                wrapper is retired now that nothing mounts through it. */}
             <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutOverview /></ScoutProtectedRoute>} />
             <Route path="/betterscout/app/discover" element={<ScoutProtectedRoute><ScoutDiscover /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/search" element={<ScoutProtectedRoute><ScoutSearch /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/hot-form" element={<ScoutProtectedRoute><ScoutHotForm /></ScoutProtectedRoute>} />
             <Route path="/betterscout/app/settings" element={<ScoutProtectedRoute><ScoutSettings /></ScoutProtectedRoute>} />
             <Route path="/betterscout/app/players/:id" element={<ScoutProtectedRoute><ScoutPlayerProfile /></ScoutProtectedRoute>} />
             <Route path="/betterscout/app/milestones" element={<ScoutProtectedRoute><ScoutMilestones /></ScoutProtectedRoute>} />
             <Route path="/betterscout/app/compare" element={<ScoutProtectedRoute><ScoutCompare /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/players" element={<ScoutProtectedRoute><ScoutPlayers /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/watchlists" element={<ScoutProtectedRoute><ScoutWatchlists /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/watchlists/:id" element={<ScoutProtectedRoute><ScoutWatchlistBoard /></ScoutProtectedRoute>} />
             <Route path="/betterscout/accept-invite/:token" element={<ScoutAcceptInvite />} />
-            <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutLayout /></ScoutProtectedRoute>}>
-              <Route path="players" element={<ScoutPlayers />} />
-              <Route path="watchlists" element={<ScoutWatchlists />} />
-              <Route path="watchlists/:id" element={<ScoutWatchlistBoard />} />
-            </Route>
           </Route>
 
           {/* Public self-service availability (no login — magic link + PIN) */}

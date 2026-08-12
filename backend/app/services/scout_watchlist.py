@@ -28,6 +28,7 @@ from app.models.scout import (
 )
 from app.services import scout_billing  # tracked-player cap check, see ensure_card_on_watchlist
 from app.services import scout_settings  # share-link expiry + include_notes/include_tags defaults
+from app.services.scouting_intel import clean_batting_intel, clean_bowling_intel
 
 DEFAULT_COLUMNS = ["Watching", "Shortlisted", "Under Review", "Archived"]
 DEFAULT_WATCHLIST_NAME = "My Players"
@@ -51,6 +52,8 @@ _CARD_FIELDS = {
     "tags", "role", "batting_hand", "bowling_action", "bowling_type", "region", "level",
     "transfer_preference", "visa_status", "agent_contact", "availability_window",
     "fee_expectations", "notes",
+    "is_opening_batsman", "is_wicket_keeper", "fielding_position",
+    "batting_intel", "bowling_intel",
 }
 
 
@@ -91,6 +94,13 @@ async def create_watchlist(session: AsyncSession, scout_org_id: str, name: str) 
     return wl
 
 
+async def rename_watchlist(session: AsyncSession, watchlist_id: str, scout_org_id: str, name: str) -> dict:
+    wl = await _get_owned_watchlist(session, watchlist_id, scout_org_id)
+    wl.name = name
+    await session.commit()
+    return {"id": str(wl.id), "name": wl.name}
+
+
 async def ensure_default_watchlist(session: AsyncSession, scout_org_id: str) -> ScoutWatchlist:
     res = await session.execute(
         select(ScoutWatchlist).where(
@@ -121,9 +131,16 @@ async def list_watchlists(session: AsyncSession, scout_org_id: str) -> list[dict
         .group_by(ScoutWatchlistCard.watchlist_id)
     )
     last_card_at = {str(wid): ts for wid, ts in res.all()}
+    res = await session.execute(
+        select(ScoutWatchlistCard.watchlist_id, func.count(ScoutWatchlistCard.id))
+        .where(ScoutWatchlistCard.watchlist_id.in_([w.id for w in watchlists]))
+        .group_by(ScoutWatchlistCard.watchlist_id)
+    )
+    card_count = {str(wid): n for wid, n in res.all()}
     return [
         {
             "id": str(w.id), "name": w.name,
+            "card_count": card_count.get(str(w.id), 0),
             "last_used_at": (last_card_at.get(str(w.id)) or w.created_at).isoformat(),
         }
         for w in watchlists
@@ -198,6 +215,11 @@ def _card_out(card: ScoutWatchlistCard, player: ScoutedPlayer) -> dict:
         "bowling_type": card.bowling_type,
         "region": card.region,
         "level": card.level,
+        "is_opening_batsman": card.is_opening_batsman,
+        "is_wicket_keeper": card.is_wicket_keeper,
+        "fielding_position": card.fielding_position,
+        "batting_intel": card.batting_intel,
+        "bowling_intel": card.bowling_intel,
         "transfer_preference": card.transfer_preference,
         "visa_status": card.visa_status,
         "agent_contact": card.agent_contact,
@@ -295,10 +317,22 @@ def _validate_card_fields(fields: dict) -> None:
         raise ValueError("tags must be a list.")
 
 
+def _clean_intel_fields(fields: dict) -> None:
+    """batting_intel/bowling_intel are normalised, not rejected — an unknown
+    code or an all-empty blob is silently dropped down to a clean shape (or
+    None) by services/scouting_intel.py, the same permissive rule BetterIQ's
+    own scouting cards already follow. Mutates `fields` in place."""
+    if "batting_intel" in fields:
+        fields["batting_intel"] = clean_batting_intel(fields["batting_intel"])
+    if "bowling_intel" in fields:
+        fields["bowling_intel"] = clean_bowling_intel(fields["bowling_intel"])
+
+
 async def update_card(session: AsyncSession, card_id: str, scout_org_id: str, **fields) -> dict:
     card = await _get_owned_card(session, card_id, scout_org_id)
     fields = {k: v for k, v in fields.items() if k in _CARD_FIELDS}
     _validate_card_fields(fields)
+    _clean_intel_fields(fields)
     for k, v in fields.items():
         setattr(card, k, v)
     await session.commit()
@@ -321,6 +355,8 @@ async def remove_card(session: AsyncSession, card_id: str, scout_org_id: str) ->
 # doesn't leak onto a public page just because nobody remembered to exclude it.
 _SHARED_CARD_FIELDS = {
     "tags", "role", "batting_hand", "bowling_action", "bowling_type", "region", "level", "notes",
+    "is_opening_batsman", "is_wicket_keeper", "fielding_position",
+    "batting_intel", "bowling_intel",
 }
 
 
@@ -400,7 +436,12 @@ async def get_shared_card(session: AsyncSession, token: str) -> dict | None:
     full = _card_out(card, player)
     shared = {k: full[k] for k in _SHARED_CARD_FIELDS}
     if org and not org.share_include_notes:
+        # Scouting intel is the scout's own analytical commentary, same
+        # sensitivity class as notes — gated on the same toggle rather than
+        # inventing a third sharing switch.
         shared.pop("notes", None)
+        shared.pop("batting_intel", None)
+        shared.pop("bowling_intel", None)
     if org and not org.share_include_tags:
         shared.pop("tags", None)
     return {

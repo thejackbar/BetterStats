@@ -63,7 +63,7 @@ export default function ScoutOverview() {
             {movers.length === 0 && <p className="text-sm text-pb-faint py-4">Not enough season-on-season history to show movers yet.</p>}
             <div className="divide-y divide-pb-hairline -mx-4 mt-1">
               {movers.map((m) => (
-                <div key={m.id} className="flex items-center gap-3 px-4 py-3">
+                <div key={`${m.id}-${m.metric}`} className="flex items-center gap-3 px-4 py-3">
                   <PlayerAvatar name={m.name} size={36} />
                   <div className="min-w-0 flex-1">
                     <Link to={`/betterscout/app/players/${m.id}`} className="text-sm font-medium hover:text-pb-accent truncate block">{m.name}</Link>

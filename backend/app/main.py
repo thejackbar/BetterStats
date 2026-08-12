@@ -26,6 +26,7 @@ from app.routers.scout import (
     auth as scout_auth_router,
     compare as scout_compare_router,
     discovery as scout_discovery_router,
+    feed as scout_feed_router,
     milestones as scout_milestones_router,
     public_share as scout_public_share_router,
     settings as scout_settings_router,
@@ -5044,6 +5045,15 @@ async def lifespan(app: FastAPI):
             "ON scout_shared_comparisons(scout_org_id)"
         ))
 
+        # Migration 247: BetterScout scouting-report attributes + manual
+        # intel on a watchlist card. Byte-identical to
+        # alembic/versions/247_scout_card_intel.py.
+        await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS is_opening_batsman BOOLEAN"))
+        await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS is_wicket_keeper BOOLEAN"))
+        await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS fielding_position TEXT"))
+        await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS batting_intel JSONB"))
+        await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS bowling_intel JSONB"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5305,6 +5315,7 @@ app.include_router(scout_public_share_router.router)  # BetterScout — unauthen
 app.include_router(scout_settings_router.router)  # BetterScout — org settings, people/invites, share-link management
 app.include_router(scout_milestones_router.router)  # BetterScout — the Milestones screen (in reach / reached / seen)
 app.include_router(scout_compare_router.router)  # BetterScout — the Compare screen (side-by-side + share link)
+app.include_router(scout_feed_router.router)  # BetterScout — Player Name Search + Hot Form Feed (platform-wide, across every cached club roster)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { scoutApi } from '../lib/scoutApi'
 import { KanbanDnD, useKanbanDrag } from '../kanbanDnd'
 import ScoutCardEditor from '../components/ScoutCardEditor'
+import ScoutModuleLayout from '../ScoutModuleLayout'
 
 export default function ScoutWatchlistBoard() {
   const { id } = useParams()
@@ -94,14 +95,45 @@ export default function ScoutWatchlistBoard() {
     setBoard((b) => ({ ...b, cards: b.cards.map((c) => (c.id === editingCard.id ? { ...c, share_token: null } : c)) }))
   }
 
-  if (error && !board) return <p className="text-sm text-[var(--pb-negative)]">{error}</p>
-  if (board === undefined) return <p className="text-sm text-pb-dim">Loading…</p>
+  const [renaming, setRenaming] = useState(false)
+  const [boardName, setBoardName] = useState('')
+  const startRename = () => { setBoardName(board.name); setRenaming(true) }
+  const saveRename = async () => {
+    setRenaming(false)
+    const name = boardName.trim()
+    if (!name || name === board.name) return
+    setBoard((b) => ({ ...b, name }))
+    try {
+      await scoutApi.renameWatchlist(id, name)
+    } catch (err) {
+      setError(err.message)
+      load()
+    }
+  }
+
+  if (error && !board) {
+    return <ScoutModuleLayout title="Watchlist"><p className="text-sm text-pb-red">{error}</p></ScoutModuleLayout>
+  }
+  if (board === undefined) {
+    return <ScoutModuleLayout title="Watchlist"><p className="text-sm text-pb-dim">Loading…</p></ScoutModuleLayout>
+  }
 
   return (
-    <div className="space-y-4">
-      <Link to="/betterscout/app/watchlists" className="text-sm text-pb-dim hover:text-pb-text">← Watchlists</Link>
-      <h1 className="text-xl font-bold">{board.name}</h1>
-      {error && <p className="text-sm text-[var(--pb-negative)]">{error}</p>}
+    <ScoutModuleLayout
+      title={board.name}
+      caption={<Link to="/betterscout/app/watchlists" className="hover:text-pb-text">← All watchlists</Link>}
+      filters={renaming ? (
+        <input
+          autoFocus value={boardName} onChange={(e) => setBoardName(e.target.value)}
+          onBlur={saveRename}
+          onKeyDown={(e) => { if (e.key === 'Enter') saveRename(); if (e.key === 'Escape') setRenaming(false) }}
+          className="bg-pb-surface2 border border-pb-hairline rounded-lg px-3 py-2 text-lg font-display font-bold w-64"
+        />
+      ) : (
+        <button onClick={startRename} title="Rename this watchlist" className="text-pb-faint hover:text-pb-accent text-sm">✎ Rename</button>
+      )}
+    >
+      {error && <p className="text-sm text-pb-red mb-3">{error}</p>}
 
       <KanbanDnD onDrop={onDrop} renderGhost={(item) => <CardChip card={item.card} ghost />}>
         <div className="flex gap-4 overflow-x-auto pb-4">
@@ -135,7 +167,7 @@ export default function ScoutWatchlistBoard() {
           onUnshare={unshareCard}
         />
       )}
-    </div>
+    </ScoutModuleLayout>
   )
 }
 

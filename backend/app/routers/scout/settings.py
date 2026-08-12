@@ -24,6 +24,7 @@ async def get_settings(
 
 
 class UpdateSettingsRequest(BaseModel):
+    name: str | None = None
     org_type: str | None = None
     home_region: str | None = None
     refresh_cadence: str | None = None

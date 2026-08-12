@@ -45,6 +45,24 @@ async def create_watchlist(
     return {"id": str(wl.id), "name": wl.name}
 
 
+class RenameWatchlistRequest(BaseModel):
+    name: str
+
+
+@router.patch("/{watchlist_id}")
+async def rename_watchlist(
+    watchlist_id: str, data: RenameWatchlistRequest,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    if not (data.name or "").strip():
+        raise HTTPException(status_code=400, detail="Name is required.")
+    try:
+        return await scout_watchlist.rename_watchlist(db, watchlist_id, _current_org(current).id, data.name.strip())
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 @router.get("/{watchlist_id}/board")
 async def get_board(
     watchlist_id: str,
@@ -148,6 +166,11 @@ class UpdateCardRequest(BaseModel):
     bowling_type: str | None = None
     region: str | None = None
     level: str | None = None
+    is_opening_batsman: bool | None = None
+    is_wicket_keeper: bool | None = None
+    fielding_position: str | None = None
+    batting_intel: dict | None = None
+    bowling_intel: dict | None = None
     transfer_preference: str | None = None
     visa_status: str | None = None
     agent_contact: str | None = None

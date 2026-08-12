@@ -5,7 +5,9 @@ import { WINDOW_OPTIONS, rollupSeasons } from '../lib/seasonRollup'
 import ScoutModuleLayout from '../ScoutModuleLayout'
 import { PlayerAvatar } from '../components/ScoutUi'
 import { Btn, Segmented } from '../../pages/admin/betterselect/ui'
-import { bowlingLabel } from '../lib/watchlistOptions'
+import { bowlingLabel, bowlingFromLabel, BOWLING_OPTS, ROLE_OPTS, BAT_HANDS, REGION_OPTS } from '../lib/watchlistOptions'
+import ScoutingCard from '../../pages/admin/betteriq/ScoutingCard'
+import '../../pages/admin/betteriq/iq-theme.css'
 
 const TABS = ['batting', 'bowling', 'fielding', 'career']
 
@@ -145,7 +147,15 @@ export default function ScoutPlayerProfile() {
           <div className="flex-1 min-w-0 space-y-2">
             {selectedCard && (
               <div className="flex flex-wrap gap-1.5">
-                {[selectedCard.role, selectedCard.batting_hand, bowlingLabel(selectedCard.bowling_action, selectedCard.bowling_type), selectedCard.region]
+                {[
+                  selectedCard.role,
+                  (BAT_HANDS.find(([c]) => c === selectedCard.batting_hand) || [])[1],
+                  bowlingLabel(selectedCard.bowling_action, selectedCard.bowling_type),
+                  selectedCard.region,
+                  selectedCard.is_opening_batsman ? 'Opening bat' : null,
+                  selectedCard.is_wicket_keeper ? 'Wicketkeeper' : null,
+                  selectedCard.fielding_position ? `Fields at ${selectedCard.fielding_position}` : null,
+                ]
                   .filter((v) => v && v !== 'None' && v !== '—')
                   .map((v, i) => <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-pb-surface2 text-pb-dim">{v}</span>)}
                 {(selectedCard.tags || []).map((t) => (
@@ -237,6 +247,7 @@ export default function ScoutPlayerProfile() {
             </div>
 
             <div className="space-y-5">
+              {selectedCard && <AttributesPanel card={selectedCard} onSaved={load} />}
               {selectedCard && <RecruitingPanel card={selectedCard} onSaved={load} />}
               <NotesPanel playerId={id} notes={notes} onChange={setNotes} />
               {player.cards?.length > 0 && (
@@ -256,6 +267,16 @@ export default function ScoutPlayerProfile() {
               )}
             </div>
           </div>
+        )}
+
+        {selectedCard && (
+          <ScoutingCard
+            keyId={selectedCard.id}
+            batting={selectedCard.batting_intel}
+            bowling={selectedCard.bowling_intel}
+            defaultSide={(totals.wickets || 0) > (totals.runs || 0) / 20 ? 'bowl' : 'bat'}
+            onSave={async (body) => { await scoutApi.updateCard(selectedCard.id, body); load() }}
+          />
         )}
       </div>
     </ScoutModuleLayout>
@@ -350,6 +371,102 @@ function StageControl({ card, onMove }) {
       options={board.columns.map((c) => ({ value: c.id, label: c.name.toUpperCase() }))}
       value={card.column_id} onChange={onMove}
     />
+  )
+}
+
+const ATTR_FIELDS = ['role', 'batting_hand', 'bowling_label', 'region', 'is_opening_batsman', 'is_wicket_keeper', 'fielding_position']
+
+function AttributesPanel({ card, onSaved }) {
+  const [form, setForm] = useState({})
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  useEffect(() => {
+    setForm({
+      role: card.role || '',
+      batting_hand: card.batting_hand || '',
+      bowling_label: bowlingLabel(card.bowling_action, card.bowling_type),
+      region: card.region || '',
+      is_opening_batsman: !!card.is_opening_batsman,
+      is_wicket_keeper: !!card.is_wicket_keeper,
+      fielding_position: card.fielding_position || '',
+    })
+  }, [card.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const dirty = form.role !== undefined && ATTR_FIELDS.some((k) => {
+    if (k === 'bowling_label') return form[k] !== bowlingLabel(card.bowling_action, card.bowling_type)
+    if (k === 'is_opening_batsman') return !!form[k] !== !!card.is_opening_batsman
+    if (k === 'is_wicket_keeper') return !!form[k] !== !!card.is_wicket_keeper
+    return (form[k] || '') !== (card[k] || '')
+  })
+
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      const { bowling_action, bowling_type } = bowlingFromLabel(form.bowling_label)
+      await scoutApi.updateCard(card.id, {
+        role: form.role, batting_hand: form.batting_hand, bowling_action, bowling_type,
+        region: form.region, is_opening_batsman: form.is_opening_batsman,
+        is_wicket_keeper: form.is_wicket_keeper, fielding_position: form.fielding_position,
+      })
+      onSaved()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Scouting attributes</div>
+      {error && <p className="text-xs text-pb-red">{error}</p>}
+      <div className="grid grid-cols-2 gap-2.5">
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Role</div>
+          <select value={form.role || ''} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))} className={inputCls}>
+            {ROLE_OPTS.map((r) => <option key={r} value={r}>{r || '—'}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Batting hand</div>
+          <select value={form.batting_hand || ''} onChange={(e) => setForm((f) => ({ ...f, batting_hand: e.target.value }))} className={inputCls}>
+            {BAT_HANDS.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
+          </select>
+        </label>
+        <label className="block col-span-2">
+          <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Bowling style</div>
+          <select value={form.bowling_label || '—'} onChange={(e) => setForm((f) => ({ ...f, bowling_label: e.target.value }))} className={inputCls}>
+            {BOWLING_OPTS.map(([label]) => <option key={label} value={label}>{label}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Origin / region</div>
+          <select value={form.region || ''} onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} className={inputCls}>
+            {REGION_OPTS.map((r) => <option key={r} value={r}>{r || '— none —'}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Usual fielding position</div>
+          <input value={form.fielding_position || ''} onChange={(e) => setForm((f) => ({ ...f, fielding_position: e.target.value }))} placeholder="e.g. Gully, Cover" className={inputCls} />
+        </label>
+      </div>
+      <div className="flex items-center gap-4 pt-1">
+        <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+          <input type="checkbox" checked={!!form.is_opening_batsman} onChange={(e) => setForm((f) => ({ ...f, is_opening_batsman: e.target.checked }))} />
+          Opening batsman
+        </label>
+        <label className="flex items-center gap-1.5 text-sm cursor-pointer select-none">
+          <input type="checkbox" checked={!!form.is_wicket_keeper} onChange={(e) => setForm((f) => ({ ...f, is_wicket_keeper: e.target.checked }))} />
+          Wicketkeeper
+        </label>
+      </div>
+      {dirty && (
+        <Btn variant="primary" sm onClick={save} disabled={saving} className="w-full justify-center">
+          {saving ? 'Saving…' : 'Save'}
+        </Btn>
+      )}
+    </div>
   )
 }
 

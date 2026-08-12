@@ -19,7 +19,7 @@ DEFAULT_WINDOWS = {"1", "2", "5", "full"}
 ALERT_SCOPES = {"all_tracked", "watchlisted_only"}
 
 _SETTINGS_FIELDS = {
-    "org_type", "home_region", "refresh_cadence", "stale_after_weeks", "default_window",
+    "name", "org_type", "home_region", "refresh_cadence", "stale_after_weeks", "default_window",
     "share_include_notes", "share_include_tags", "share_expiry_days",
     "digest_enabled", "alert_scope",
 }
@@ -44,6 +44,8 @@ def settings_out(org: ScoutOrg) -> dict:
 
 
 def _validate(fields: dict) -> None:
+    if "name" in fields and not (fields["name"] or "").strip():
+        raise ValueError("Organisation name can't be blank.")
     if "org_type" in fields and (fields["org_type"] or "") not in ORG_TYPES:
         raise ValueError("Unknown org type.")
     if "refresh_cadence" in fields and fields["refresh_cadence"] not in REFRESH_CADENCES:
@@ -64,6 +66,8 @@ async def update_settings(session, org: ScoutOrg, **fields) -> dict:
     for k, v in fields.items():
         if k in ("org_type", "home_region") and v == "":
             v = None
+        if k == "name":
+            v = v.strip()
         setattr(org, k, v)
     await session.commit()
     return settings_out(org)

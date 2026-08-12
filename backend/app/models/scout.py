@@ -241,6 +241,23 @@ class ScoutWatchlistCard(Base):
     region = Column(Text, nullable=True)
     level = Column(Text, nullable=True)
 
+    # Scouting-report attributes — same shape BetterSelect/BetterIQ use for
+    # our own players (players.is_opening_batsman is the exact precedent for
+    # the first field). fielding_position has no canonical vocab elsewhere in
+    # the app, so it's plain free text like agent_contact below.
+    is_opening_batsman = Column(Boolean, nullable=True)
+    is_wicket_keeper = Column(Boolean, nullable=True)
+    fielding_position = Column(Text, nullable=True)
+
+    # Manual scouting intel — byte-for-byte the same shape
+    # services/scouting_intel.py already validates for BetterIQ's own
+    # player_scouting_cards/opponent_player_tags (strengths/weaknesses/plan,
+    # vuln/fav bowling, risky/fav shots, zones for a batter; stock/
+    # variations/danger/zones for a bowler). Reused rather than re-invented
+    # so a scout's read of a player looks the same everywhere in the app.
+    batting_intel = Column(JSONB, nullable=True)
+    bowling_intel = Column(JSONB, nullable=True)
+
     # Recruiting fields — free text, a labelled note each.
     transfer_preference = Column(Text, nullable=True)
     visa_status = Column(Text, nullable=True)

@@ -27,16 +27,13 @@ import ModuleLockup from '../components/ModuleLockup'
 const NAV = [
   { to: '/betterscout/app', label: 'Overview', icon: 'overview', exact: true },
   { to: '/betterscout/app/discover', label: 'Discover clubs', icon: 'search' },
+  { to: '/betterscout/app/search', label: 'Player search', icon: 'player' },
+  { to: '/betterscout/app/hot-form', label: 'Hot form feed', icon: 'bolt' },
   { to: '/betterscout/app/watchlists', label: 'Watchlists', icon: 'cols' },
   { to: '/betterscout/app/players', label: 'My players', icon: 'teams', badgeKey: 'tracked' },
   { to: '/betterscout/app/compare', label: 'Compare', icon: 'ladders' },
   { to: '/betterscout/app/milestones', label: 'Milestones', icon: 'selection', badgeKey: 'milestones' },
   { to: '/betterscout/app/settings', label: 'Settings', icon: 'settings' },
-]
-
-const NOT_BUILT = [
-  { label: 'Player name search', icon: 'search' },
-  { label: 'Hot form feed', icon: 'bolt' },
 ]
 
 // "2026/27" from today — cricket season rolls in July. Same rule
@@ -98,18 +95,6 @@ export default function ScoutModuleLayout({
           </Link>
         )
       })}
-      <div className="px-4 pt-[15px] pb-1 font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase">Not built yet</div>
-      {NOT_BUILT.map(item => (
-        <div
-          key={item.label}
-          aria-disabled="true"
-          title="Needs a country-wide crawl of every club's roster — see the BetterScout build notes."
-          className="flex items-center gap-[11px] w-full px-4 py-[9px] text-[13.5px] text-pb-faintest cursor-not-allowed select-none"
-        >
-          <Icon name={item.icon} size={17} className="shrink-0" />
-          <span className="truncate">{item.label}</span>
-        </div>
-      ))}
     </>
   )
 

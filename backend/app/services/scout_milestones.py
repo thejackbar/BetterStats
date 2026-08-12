@@ -16,6 +16,11 @@ Two-tier dating, the load-bearing honesty rule from the design brief:
     ONLY". Same simulate-cumulative-totals technique
     aggregations.get_recently_achieved_milestones_for_org uses, just walking
     ScoutedPlayer.stats_payload's seasons instead of DB rows.
+
+Both the career-threshold "reached" list AND the "recent notable
+performances" list (100+ / 5-fors within the last N seasons) read from the
+SAME per-player source rows (`_player_source`) — one internal_match_log
+fetch or one stats_payload.seasons read per player, not two.
 """
 from __future__ import annotations
 
@@ -29,6 +34,10 @@ from app.services.milestone_rules import crossed_thresholds, is_displayable, nex
 
 CATEGORY_MAP = {"runs": "batting", "wickets": "bowling", "matches": "matches", "catches": "fielding"}
 STATS = ("runs", "wickets", "matches", "catches")
+
+DEFAULT_SEASONS_WINDOW = 2
+CENTURY_RUNS = 100
+FIVE_FOR_WICKETS = 5
 
 
 async def _tracked_players(session: AsyncSession, scout_org_id: str) -> list[ScoutedPlayer]:
@@ -67,44 +76,40 @@ def _in_reach_for(player: ScoutedPlayer) -> list[dict]:
     return out
 
 
-def _reached_via_seasons(player: ScoutedPlayer) -> dict[str, list[dict]]:
-    """SEASON ONLY dating — simulate cumulative career totals oldest to
-    newest across the player's stats_payload seasons, and record which
-    season's step first carried each stat past a threshold."""
+async def _player_source(session: AsyncSession, player: ScoutedPlayer) -> tuple[str, list[dict]]:
+    """The one per-player fetch both the reached-thresholds simulation and
+    the recent-performances scan read from. 'match' = internal_match_log's
+    real per-game rows (bat_runs/bowl_wickets/played_at/year/grade_name),
+    oldest first. 'season' = stats_payload.seasons (year/grade/hundreds/
+    five_fors/…), oldest first — the public season-aggregate fallback."""
+    if player.internal_player_id and player.internal_org_id:
+        org = await session.get(Organisation, player.internal_org_id)
+        if org and org.is_active and org.archived_at is None:
+            log = await scout_internal_link.internal_match_log(session, org, player.internal_player_id)
+            if log:
+                return "match", log
     seasons = sorted((player.stats_payload or {}).get("seasons") or [], key=lambda s: s.get("year") or 0)
-    running = dict.fromkeys(STATS, 0)
-    out: dict[str, list[dict]] = {s: [] for s in STATS}
-    for season in seasons:
-        for stat in STATS:
-            before = running[stat]
-            after = before + int(season.get(stat) or 0)
-            newly = set(crossed_thresholds(stat, after)) - set(crossed_thresholds(stat, before))
-            for value in sorted(newly):
-                out[stat].append({
-                    "value": value,
-                    "achieved_at": None,
-                    "season_year": season.get("year"),
-                    "grade_name": season.get("grade"),
-                })
-            running[stat] = after
-    return out
+    return "season", seasons
 
 
-async def _reached_via_match_log(session: AsyncSession, org: Organisation, player: ScoutedPlayer) -> dict[str, list[dict]]:
-    """MATCH DATED — walk the real per-game log (services/
-    scout_internal_link.internal_match_log) in order and record the exact
-    game each threshold was first crossed on."""
-    log = await scout_internal_link.internal_match_log(session, org, player.internal_player_id)
+def _reached_from_rows(dated: str, rows: list[dict]) -> dict[str, list[dict]]:
+    """Simulate cumulative totals oldest→newest over `rows` (either source)
+    to find which row first carried each stat past a threshold."""
     running = dict.fromkeys(STATS, 0)
     out: dict[str, list[dict]] = {s: [] for s in STATS}
-    for row in log:
-        deltas = {
-            "runs": int(row.get("bat_runs") or 0),
-            "wickets": int(row.get("bowl_wickets") or 0),
-            "matches": 1,
-            "catches": int(row.get("fielding_catches") or 0),
-        }
-        played_at = row.get("played_at")
+    for row in rows:
+        if dated == "match":
+            deltas = {
+                "runs": int(row.get("bat_runs") or 0),
+                "wickets": int(row.get("bowl_wickets") or 0),
+                "matches": 1,
+                "catches": int(row.get("fielding_catches") or 0),
+            }
+            achieved_at = row.get("played_at")
+            achieved_at = achieved_at.isoformat() if achieved_at else None
+        else:
+            deltas = {stat: int(row.get(stat) or 0) for stat in STATS}
+            achieved_at = None
         for stat in STATS:
             before = running[stat]
             after = before + deltas[stat]
@@ -112,9 +117,9 @@ async def _reached_via_match_log(session: AsyncSession, org: Organisation, playe
             for value in sorted(newly):
                 out[stat].append({
                     "value": value,
-                    "achieved_at": played_at.isoformat() if played_at else None,
+                    "achieved_at": achieved_at,
                     "season_year": row.get("year"),
-                    "grade_name": row.get("grade_name"),
+                    "grade_name": row.get("grade_name") if dated == "match" else row.get("grade"),
                 })
             running[stat] = after
     return out
@@ -142,15 +147,54 @@ def _flatten(per_stat: dict[str, list[dict]], player: ScoutedPlayer, dated: str,
     return out
 
 
-async def _reached_for(session: AsyncSession, player: ScoutedPlayer, seen: set) -> list[dict]:
-    if player.internal_player_id and player.internal_org_id:
-        org = await session.get(Organisation, player.internal_org_id)
-        if org and org.is_active and org.archived_at is None:
-            per_stat = await _reached_via_match_log(session, org, player)
-            if any(per_stat.values()):
-                return _flatten(per_stat, player, "match", seen)
-    per_stat = _reached_via_seasons(player)
-    return _flatten(per_stat, player, "season", seen)
+def _recent_years(rows: list[dict], seasons_window: int) -> set:
+    years = sorted({r.get("year") for r in rows if r.get("year") is not None}, reverse=True)
+    return set(years[:seasons_window])
+
+
+def _recent_performances_from_rows(player: ScoutedPlayer, dated: str, rows: list[dict], seasons_window: int) -> list[dict]:
+    """Individual big performances — 100+ runs / 5+ wickets — within the
+    player's most recent `seasons_window` active seasons. Distinct from the
+    "reached" list above: that's a cumulative CAREER crossing, this is a
+    single innings or spell being notable on its own. 'match' dating lists
+    each qualifying game exactly; 'season' dating can only report the
+    season's own hundreds/five_fors COUNT (CA's aggregate feed has no
+    per-innings detail), so an external player's row reads "N centuries"
+    rather than naming a specific game."""
+    recent_years = _recent_years(rows, seasons_window)
+    out = []
+    for row in rows:
+        yr = row.get("year")
+        if yr not in recent_years:
+            continue
+        if dated == "match":
+            runs = int(row.get("bat_runs") or 0)
+            wkts = int(row.get("bowl_wickets") or 0)
+            played_at = row.get("played_at")
+            achieved_at = played_at.isoformat() if played_at else None
+            grade_name = row.get("grade_name")
+            if runs >= CENTURY_RUNS:
+                out.append({"type": "century", "value": runs, "achieved_at": achieved_at, "season_year": yr, "grade_name": grade_name, "dated": "match"})
+            if wkts >= FIVE_FOR_WICKETS:
+                out.append({"type": "five_for", "value": wkts, "achieved_at": achieved_at, "season_year": yr, "grade_name": grade_name, "dated": "match"})
+        else:
+            hundreds = int(row.get("hundreds") or 0)
+            five_fors = int(row.get("five_fors") or 0)
+            grade_name = row.get("grade")
+            if hundreds > 0:
+                out.append({"type": "century", "value": hundreds, "achieved_at": None, "season_year": yr, "grade_name": grade_name, "dated": "season"})
+            if five_fors > 0:
+                out.append({"type": "five_for", "value": five_fors, "achieved_at": None, "season_year": yr, "grade_name": grade_name, "dated": "season"})
+    return [
+        {
+            "player_id": str(player.id),
+            "name": player.name,
+            "club_name": player.club_name,
+            "category": "batting" if p["type"] == "century" else "bowling",
+            **p,
+        }
+        for p in out
+    ]
 
 
 def _season_counters(players: list[ScoutedPlayer], in_reach: list[dict]) -> dict:
@@ -180,7 +224,7 @@ async def unseen_reached_count(session: AsyncSession, scout_org_id: str) -> int:
     return sum(1 for r in data["reached"] if not r["seen"])
 
 
-async def build_milestones(session: AsyncSession, scout_org_id: str) -> dict:
+async def build_milestones(session: AsyncSession, scout_org_id: str, seasons_window: int = DEFAULT_SEASONS_WINDOW) -> dict:
     players = await _tracked_players(session, scout_org_id)
     seen_rows = (await session.execute(
         select(ScoutMilestoneSeen).where(ScoutMilestoneSeen.scout_org_id == scout_org_id)
@@ -189,17 +233,23 @@ async def build_milestones(session: AsyncSession, scout_org_id: str) -> dict:
 
     in_reach: list[dict] = []
     reached: list[dict] = []
+    recent_performances: list[dict] = []
     for p in players:
         in_reach.extend(_in_reach_for(p))
-        reached.extend(await _reached_for(session, p, seen))
+        dated, rows = await _player_source(session, p)
+        reached.extend(_flatten(_reached_from_rows(dated, rows), p, dated, seen))
+        recent_performances.extend(_recent_performances_from_rows(p, dated, rows, seasons_window))
 
     in_reach.sort(key=lambda r: r["needed"])
     reached.sort(key=lambda r: (r["achieved_at"] or "", r["season_year"] or 0), reverse=True)
+    recent_performances.sort(key=lambda r: (r["achieved_at"] or "", r["season_year"] or 0), reverse=True)
 
     return {
         "season_counters": _season_counters(players, in_reach),
         "in_reach": in_reach,
         "reached": reached,
+        "recent_performances": recent_performances,
+        "seasons_window": seasons_window,
     }
 
 

@@ -70,6 +70,7 @@ export default function ScoutDiscover() {
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [visibleFilterKeys, setVisibleFilterKeys] = useState(new Set())
   const [windowN, setWindowN] = useState(null) // null = full window
+  const [selectedGrades, setSelectedGrades] = useState(new Set()) // empty = every grade
   const [clientSort, setClientSort] = useState({ col: 'matches', dir: 'desc' })
   const [error, setError] = useState(null)
   const [watchlists, setWatchlists] = useState([])
@@ -104,6 +105,7 @@ export default function ScoutDiscover() {
     setFilters(EMPTY_FILTERS)
     setVisibleFilterKeys(new Set())
     setWindowN(null)
+    setSelectedGrades(new Set())
     setClientSort({ col: 'matches', dir: 'desc' })
     setError(null)
     poll(c)
@@ -243,13 +245,32 @@ export default function ScoutDiscover() {
     return s
   }, [cutoffYear, latestActiveYear])
 
+  // Per-season grade only exists when the roster was built via the internal
+  // (already-onboarded-club) link — see services/scout_internal_link.py.
+  // iq_scout's public-API path has no per-season grade to filter by, so the
+  // chips stay informational-only there rather than silently no-op-ing.
+  const gradeFilterAvailable = roster?.source === 'internal'
+
+  const toggleGrade = (name) => {
+    if (!gradeFilterAvailable) return
+    setSelectedGrades((s) => {
+      const n = new Set(s)
+      if (n.has(name)) n.delete(name)
+      else n.add(name)
+      return n
+    })
+  }
+
   const windowedPlayers = useMemo(() => {
-    if (cutoffYear == null) return allPlayers
+    if (cutoffYear == null && selectedGrades.size === 0) return allPlayers
     return allPlayers.map((p) => ({
       ...p,
-      totals: rollupSeasons((p.seasons || []).filter((s) => s.year >= cutoffYear)),
+      totals: rollupSeasons((p.seasons || []).filter((s) =>
+        (cutoffYear == null || s.year >= cutoffYear) &&
+        (selectedGrades.size === 0 || selectedGrades.has(s.grade))
+      )),
     }))
-  }, [allPlayers, cutoffYear])
+  }, [allPlayers, cutoffYear, selectedGrades])
 
   const filteredPlayers = useMemo(() => {
     return windowedPlayers.filter((p) => {
@@ -351,11 +372,33 @@ export default function ScoutDiscover() {
             {grades.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Grades</span>
-                {grades.map((g) => (
-                  <span key={g.grade_id} className="px-2 py-0.5 rounded-full bg-pb-surface2 text-pb-dim text-[11.5px]" title={(g.years || []).join(', ')}>
-                    {g.grade_name || g.team_name}
-                  </span>
-                ))}
+                {grades.map((g) => {
+                  const name = g.grade_name || g.team_name
+                  const active = selectedGrades.has(name)
+                  return (
+                    <button
+                      key={g.grade_id}
+                      onClick={() => toggleGrade(name)}
+                      disabled={!gradeFilterAvailable}
+                      title={gradeFilterAvailable
+                        ? `${active ? 'Showing' : 'Click to show'} only ${name} (${(g.years || []).join(', ')})`
+                        : `Per-season grade isn't available for this club — ${(g.years || []).join(', ')}`}
+                      className={`px-2 py-0.5 rounded-full text-[11.5px] transition-colors ${
+                        gradeFilterAvailable ? 'cursor-pointer' : 'cursor-default'
+                      } ${active ? 'bg-[var(--pb-accent)] text-[var(--pb-on-accent)]' : 'bg-pb-surface2 text-pb-dim hover:text-pb-text'}`}
+                    >
+                      {name}
+                    </button>
+                  )
+                })}
+                {selectedGrades.size > 0 && (
+                  <button onClick={() => setSelectedGrades(new Set())} className="text-[11px] text-pb-faint hover:text-pb-text underline">
+                    Clear
+                  </button>
+                )}
+                {!gradeFilterAvailable && (
+                  <span className="text-[11px] text-pb-faintest">— not filterable for this club (no per-season grade in the public data)</span>
+                )}
               </div>
             )}
 

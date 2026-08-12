@@ -6,7 +6,7 @@ deliberately left open to EITHER role, not gated behind require_scout_owner
 — it's a personal "I've reviewed this" acknowledgement with no effect on the
 org's actual tracked-player data, closer to a read receipt than a write a
 viewer shouldn't be trusted with."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,11 +20,12 @@ router = APIRouter(prefix="/scout/milestones", tags=["scout-milestones"])
 
 @router.get("")
 async def get_milestones(
+    seasons: int = Query(scout_milestones.DEFAULT_SEASONS_WINDOW, ge=1, le=10),
     current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
     db: AsyncSession = Depends(get_db),
 ):
     _, org = current
-    return await scout_milestones.build_milestones(db, org.id)
+    return await scout_milestones.build_milestones(db, org.id, seasons_window=seasons)
 
 
 class MarkSeenRequest(BaseModel):

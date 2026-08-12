@@ -45,6 +45,7 @@ export const scoutApi = {
 
   listWatchlists: () => request('/scout/watchlists'),
   createWatchlist: (name) => request('/scout/watchlists', { method: 'POST', body: JSON.stringify({ name }) }),
+  renameWatchlist: (watchlistId, name) => request(`/scout/watchlists/${watchlistId}`, { method: 'PATCH', body: JSON.stringify({ name }) }),
   getBoard: (watchlistId) => request(`/scout/watchlists/${watchlistId}/board`),
   createColumn: (watchlistId, name) =>
     request(`/scout/watchlists/${watchlistId}/columns`, { method: 'POST', body: JSON.stringify({ name }) }),
@@ -71,8 +72,13 @@ export const scoutApi = {
   shareComparison: (playerIds) => request('/scout/compare/share', { method: 'POST', body: JSON.stringify({ player_ids: playerIds }) }),
   getSharedComparison: (token) => request(`/public/scout/compare/${token}`),
 
+  // Player search + hot form feed — platform-wide, across every cached club
+  // roster (see services/scout_feed.py's docstring for the exact scope).
+  searchFeed: (q) => request(`/scout/feed/search?q=${encodeURIComponent(q)}`),
+  getHotForm: () => request('/scout/feed/hot-form'),
+
   // Milestones
-  getMilestones: () => request('/scout/milestones'),
+  getMilestones: (seasons) => request(`/scout/milestones${seasons ? `?seasons=${seasons}` : ''}`),
   markMilestoneSeen: (scoutedPlayerId, milestoneType, milestoneValue) =>
     request('/scout/milestones/seen', { method: 'POST', body: JSON.stringify({ scouted_player_id: scoutedPlayerId, milestone_type: milestoneType, milestone_value: milestoneValue }) }),
   markAllMilestonesSeen: () => request('/scout/milestones/seen-all', { method: 'POST' }),

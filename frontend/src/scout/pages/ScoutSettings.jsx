@@ -91,6 +91,7 @@ export default function ScoutSettings() {
     setError(null)
     try {
       const updated = await scoutApi.updateSettings({
+        name: orgName.trim(),
         org_type: settings.org_type, home_region: settings.home_region,
         refresh_cadence: settings.refresh_cadence, stale_after_weeks: settings.stale_after_weeks,
         default_window: settings.default_window, share_include_notes: settings.share_include_notes,
@@ -98,6 +99,7 @@ export default function ScoutSettings() {
         digest_enabled: settings.digest_enabled, alert_scope: settings.alert_scope,
       })
       setSettings(updated)
+      setOrgName(updated.org_name)
       setDirty(false)
       setSavedAt(new Date())
     } catch (err) {
@@ -148,7 +150,7 @@ export default function ScoutSettings() {
       actions={
         <div className="flex items-center gap-3">
           {savedAt && !dirty && <span className="text-xs text-pb-faint">Last saved {savedAt.toLocaleTimeString()}</span>}
-          <Btn variant="primary" onClick={save} disabled={!dirty || saving || !isOwner} title={!isOwner ? 'Only an org owner can change settings.' : undefined}>
+          <Btn variant="primary" onClick={save} disabled={!dirty || saving || !isOwner || !orgName.trim()} title={!isOwner ? 'Only an org owner can change settings.' : undefined}>
             {saving ? 'Saving…' : 'Save changes'}
           </Btn>
         </div>
@@ -168,7 +170,12 @@ export default function ScoutSettings() {
                 </div>
                 <div className="flex-1 space-y-2">
                   <Field label="Organisation name">
-                    <input value={orgName} onChange={(e) => setOrgName(e.target.value)} disabled className={inputCls} title="Renaming the org isn't wired up yet — contact BetterCricket staff." />
+                    <input
+                      value={orgName}
+                      onChange={(e) => { setOrgName(e.target.value); setDirty(true) }}
+                      disabled={!isOwner}
+                      className={inputCls}
+                    />
                   </Field>
                 </div>
               </div>
