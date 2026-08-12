@@ -257,11 +257,24 @@ function DashboardRedirect() {
 // docs/afl-betterstats-plan.md.
 const AflApp = lazy(() => import('./afl/AflApp'))
 
+// BetterScout: a separate PRODUCT, not another sport — same build-time silo
+// mechanism (VITE_PRODUCT=scout, the bs-scout-frontend service) but its own
+// tenant type/auth entirely, unrelated to the club Organisation model. See
+// scout/ScoutApp.jsx.
+const ScoutApp = lazy(() => import('./scout/ScoutApp'))
+
 export default function App() {
   if (import.meta.env.VITE_SPORT === 'afl') {
     return (
       <Suspense fallback={<PageLoader />}>
         <AflApp />
+      </Suspense>
+    )
+  }
+  if (import.meta.env.VITE_PRODUCT === 'scout') {
+    return (
+      <Suspense fallback={<PageLoader />}>
+        <ScoutApp />
       </Suspense>
     )
   }

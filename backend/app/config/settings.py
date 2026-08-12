@@ -9,6 +9,15 @@ class Settings(BaseSettings):
     # (app.main) never reads this; sport-specific entrypoints (app.afl_main)
     # assert it so a mis-wired env can't run the wrong sport against a DB.
     sport: str = "cricket"  # cricket | afl
+
+    # Which non-sport PRODUCT this deployment serves, alongside `sport` above.
+    # BetterScout isn't a sporting code (it's a player-scouting tool with its
+    # own tenant type, "Scout Org", unrelated to the club Organisation model),
+    # so it gets its own discriminator rather than overloading `sport`.
+    # app.main / app.afl_main never read this; app.scout_main asserts it so a
+    # mis-wired env can't run the wrong silo against the wrong database.
+    product: str = "cricket"  # cricket | scout
+
     database_url: str = "postgresql+asyncpg://cricket:cricket@db/betterstats"
     sync_database_url: str = "postgresql://cricket:cricket@db/betterstats"
 
