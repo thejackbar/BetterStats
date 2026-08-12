@@ -29,9 +29,10 @@ const HERO_SECTIONS = [
     n: '01',
     eyebrow: 'Automatic Stats Sync',
     title: 'Connect once. Sync forever.',
-    desc: 'Connect your club once and your whole match history is imported. From then on every new game flows in on its own. Stats stay current after every match, with zero data entry and no spreadsheets to keep up.',
+    desc: 'Connect your club once and your whole match history is imported. From then on every new game flows in on its own from PlayHQ or Play-Cricket. Stats stay current after every match, with zero data entry and no spreadsheets to keep up.',
     bullets: [
-      'Connect once and your full match history is imported automatically',
+      'Connect once and your full match history is imported automatically from PlayHQ or Play-Cricket',
+      'Old spreadsheets, scorebooks and stat exports merged in alongside your live sync, included in the plan',
       'Simple CSV templates to fill any gaps in older data',
       'Batting, bowling, and fielding stats captured per player per game',
       'Season aggregates and career totals computed automatically',
