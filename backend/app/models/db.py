@@ -2552,6 +2552,14 @@ class FeeMemberSeason(Base):
     # MemberQualification.last_reminder_sent_at, kept separate since the two
     # reminder kinds fire independently.
     last_fee_reminder_sent_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # PlayHQ registration (migration 235) — a club-side checkbox, not a synced
+    # fact: PlayHQ registration is a per-season playing requirement with no
+    # API this app can read it back from, so an admin ticks it once they've
+    # sighted it. Deliberately NOT carried forward by rollover (registration
+    # has to be redone every season) — a rolled-over row always starts
+    # unticked, same as any other new member-season.
+    playhq_registered = Column(Boolean, nullable=False, server_default="false", default=False)
+    playhq_registered_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     member = relationship("FeeMember", back_populates="seasons")
     schedule = relationship("FeeSchedule")

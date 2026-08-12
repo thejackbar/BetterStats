@@ -301,7 +301,7 @@ export default function AdminFeeMemberDetail() {
   const [tiers, setTiers] = useState([])
   const [membershipTypes, setMembershipTypes] = useState([])
   const [contact, setContact] = useState({ full_name: '', email: '', mobile: '', notes: '' })
-  const [tierForm, setTierForm] = useState({ fee_schedule_id: '', is_new_registration: false, membership_payment_method: '' })
+  const [tierForm, setTierForm] = useState({ fee_schedule_id: '', is_new_registration: false, membership_payment_method: '', playhq_registered: false })
   const [membershipForm, setMembershipForm] = useState({
     membership_type_id: '', is_life_member: false, is_honorary: false, honorary_expires_at: '', status: 'active',
   })
@@ -331,6 +331,7 @@ export default function AdminFeeMemberDetail() {
         fee_schedule_id: d.member_season?.fee_schedule_id || '',
         is_new_registration: d.member_season?.is_new_registration || false,
         membership_payment_method: d.member_season?.membership_payment_method || '',
+        playhq_registered: d.member_season?.playhq_registered || false,
       })
       setMembershipForm({
         membership_type_id: d.member.membership_type_id || '',
@@ -358,6 +359,7 @@ export default function AdminFeeMemberDetail() {
         fee_schedule_id: tierForm.fee_schedule_id || null,
         is_new_registration: tierForm.is_new_registration,
         membership_payment_method: tierForm.membership_payment_method || null,
+        playhq_registered: tierForm.playhq_registered,
       })
       toast.success('Tier saved'); load()
     } catch (e) { toast.error(e.message) } finally { setSavingTier(false) }
@@ -458,10 +460,16 @@ export default function AdminFeeMemberDetail() {
               onChange={e => setTierForm(t => ({ ...t, membership_payment_method: e.target.value }))}>
               {PAY_METHODS.map(m => <option key={m} value={m}>{m || '—'}</option>)}
             </select>
-            <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-4">
+            <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-2">
               <input type="checkbox" checked={tierForm.is_new_registration}
                 onChange={e => setTierForm(t => ({ ...t, is_new_registration: e.target.checked }))} />
               New registration this season
+            </label>
+            <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-4"
+              title="A playing requirement — nothing here reads it from PlayHQ automatically, tick it once you've sighted it">
+              <input type="checkbox" checked={tierForm.playhq_registered}
+                onChange={e => setTierForm(t => ({ ...t, playhq_registered: e.target.checked }))} />
+              Registered with PlayHQ this season
             </label>
             <button onClick={saveTier} disabled={savingTier}
               className="w-full py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>

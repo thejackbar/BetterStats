@@ -590,7 +590,7 @@ async def list_members(
 
     members = []
     summary = {
-        "total_members": 0, "needs_tier": 0, "non_financial": 0,
+        "total_members": 0, "needs_tier": 0, "non_financial": 0, "playhq_missing": 0,
         "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
         "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
         "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
@@ -614,11 +614,14 @@ async def list_members(
             "is_life_member": member.is_life_member,
             "is_honorary": member.is_honorary,
             "season_status": ms.status,
+            "playhq_registered": ms.playhq_registered,
+            "playhq_registered_at": ms.playhq_registered_at.isoformat() if ms.playhq_registered_at else None,
             **fin,
         })
         summary["total_members"] += 1
         summary["needs_tier"] += 1 if fin["needs_tier"] else 0
         summary["non_financial"] += 1 if fin["status"] == "non_financial" else 0
+        summary["playhq_missing"] += 0 if ms.playhq_registered else 1
         for k in ("membership_payable", "match_fee_payable", "total_payable",
                   "membership_paid", "match_fee_paid", "total_paid",
                   "membership_outstanding", "match_fee_outstanding", "total_outstanding",
@@ -899,6 +902,8 @@ async def get_member(
             "membership_payment_method": ms.membership_payment_method,
             "notes": ms.notes,
             "status": ms.status,
+            "playhq_registered": ms.playhq_registered,
+            "playhq_registered_at": ms.playhq_registered_at.isoformat() if ms.playhq_registered_at else None,
         },
         "financials": fin,
         "match_days": entries,
@@ -967,6 +972,7 @@ class MemberSeasonPatch(BaseModel):
     membership_payment_method: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    playhq_registered: Optional[bool] = None
 
 
 @router.patch("/members/{member_id}/season")
@@ -1004,6 +1010,9 @@ async def patch_member_season(
         ms.membership_payment_method = data.membership_payment_method.strip() or None
     if data.notes is not None:
         ms.notes = data.notes.strip() or None
+    if data.playhq_registered is not None:
+        ms.playhq_registered = data.playhq_registered
+        ms.playhq_registered_at = datetime.now(timezone.utc) if data.playhq_registered else None
     if data.status is not None:
         if data.status not in MEMBERSHIP_STATUSES:
             raise HTTPException(status_code=422, detail=f"Invalid status — must be one of {MEMBERSHIP_STATUSES}")

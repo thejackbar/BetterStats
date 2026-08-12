@@ -1,5 +1,28 @@
 # BetterStats — Claude Session Notes
 
+## A PlayHQ registration checkbox on Accounts (migration 235, v9.19.14, Aug 2026)
+
+Playing a season requires the person to be registered with PlayHQ, and there
+is no API this app can read that fact back from — Grassroots' `/scores/*`
+and the Partner API are both match-data feeds, neither exposes registration
+status. So it is a plain admin-ticked fact, the same shape as the existing
+`is_new_registration` checkbox already living on the same row.
+
+- **`fee_member_seasons.playhq_registered`** (bool, default false) +
+  **`.playhq_registered_at`** (nullable timestamp, set/cleared with the
+  checkbox — "when did we last check"). `PATCH /club-admin/fees/members/
+  {id}/season` gained the field, alongside the two it already had.
+- **Deliberately NOT carried forward by rollover** — `rollover_members`
+  never sets it, so a rolled-over row always starts unticked. Registration is
+  a per-season requirement; carrying last season's tick forward would assert
+  something nobody has confirmed for the new season.
+- **Surfaced in two places**: a PLAYHQ column on every Accounts row (checkbox,
+  optimistic toggle via `PATCH .../season`) plus a "Not on PlayHQ" filter
+  pill (`summary.playhq_missing`), and the same checkbox on the member detail
+  page beside "New registration this season".
+- **No new endpoint** — reuses the existing per-season PATCH, same as
+  `is_new_registration`.
+
 ## BetterFees season rollover: undo, find-and-add, and remove (v9.19.13, Aug 2026)
 
 Reported from Applecross getting 26/27 ready: rolling players over before the

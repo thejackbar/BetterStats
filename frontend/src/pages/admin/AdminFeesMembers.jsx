@@ -315,6 +315,8 @@ export default function AdminFeesMembers() {
   const [q, setQ] = useState('')
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
   const [owesOnly, setOwesOnly] = useState(false)
+  const [playhqMissingOnly, setPlayhqMissingOnly] = useState(false)
+  const [togglingPlayhq, setTogglingPlayhq] = useState(() => new Set())
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
@@ -364,6 +366,20 @@ export default function AdminFeesMembers() {
     } catch (e) { toast.error(e.message) }
   }
 
+  async function togglePlayhq(memberId, next) {
+    setTogglingPlayhq(s => new Set(s).add(memberId))
+    try {
+      await api.feePatchMemberSeason(memberId, { season_id: seasonId, playhq_registered: next })
+      setData(d => d && ({
+        ...d,
+        members: d.members.map(m => m.member_id === memberId ? { ...m, playhq_registered: next } : m),
+        summary: { ...d.summary, playhq_missing: (d.summary.playhq_missing || 0) + (next ? -1 : 1) },
+      }))
+    } catch (e) { toast.error(e.message) } finally {
+      setTogglingPlayhq(s => { const n = new Set(s); n.delete(memberId); return n })
+    }
+  }
+
   async function removeSelected() {
     const ids = Array.from(selected)
     if (!ids.length) return
@@ -391,9 +407,10 @@ export default function AdminFeesMembers() {
     return data.members.filter(m =>
       (!needsTierOnly || m.needs_tier) &&
       (!owesOnly || m.status === 'non_financial') &&
+      (!playhqMissingOnly || !m.playhq_registered) &&
       (!needle || m.full_name.toLowerCase().includes(needle) || (m.tier || '').toLowerCase().includes(needle))
     )
-  }, [data, q, needsTierOnly, owesOnly])
+  }, [data, q, needsTierOnly, owesOnly, playhqMissingOnly])
 
   const s = data?.summary || {}
   const currentSeason = seasons.find(se => se.id === seasonId)
@@ -407,7 +424,8 @@ export default function AdminFeesMembers() {
     filters: (
       <div className="flex items-center gap-2 flex-wrap">
         <SearchInput value={q} onChange={setQ} placeholder="Search name or tier…" />
-        <FilterPill active={!needsTierOnly && !owesOnly} onClick={() => { setNeedsTierOnly(false); setOwesOnly(false) }}>
+        <FilterPill active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
+          onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
           Everyone
         </FilterPill>
         <FilterPill warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
@@ -415,6 +433,9 @@ export default function AdminFeesMembers() {
         </FilterPill>
         <FilterPill active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
           Needs tier
+        </FilterPill>
+        <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
+          Not on PlayHQ
         </FilterPill>
       </div>
     ),
@@ -516,6 +537,7 @@ export default function AdminFeesMembers() {
                         <th className="font-medium py-2.5 pr-3">NAME</th>
                         <th className="font-medium py-2.5 pr-3">TYPE</th>
                         <th className="font-medium py-2.5 pr-3">TIER</th>
+                        <th className="font-medium py-2.5 pr-3 w-20 text-center" title="Registered for this season with PlayHQ — a playing requirement">PLAYHQ</th>
                         <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAID</th>
@@ -557,6 +579,13 @@ export default function AdminFeesMembers() {
                               {m.needs_tier
                                 ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
                                 : <span className="text-pb-dim text-sm">{m.tier}</span>}
+                            </td>
+                            <td className="py-2.5 pr-3 text-center">
+                              <input type="checkbox" checked={!!m.playhq_registered}
+                                disabled={togglingPlayhq.has(m.member_id)}
+                                onChange={e => togglePlayhq(m.member_id, e.target.checked)}
+                                title={m.playhq_registered ? 'Registered with PlayHQ for this season' : 'Not yet registered with PlayHQ — required to play'}
+                                className="cursor-pointer align-middle accent-pb-accent" />
                             </td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{m.match_days || 0}</td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_payable)}</td>
