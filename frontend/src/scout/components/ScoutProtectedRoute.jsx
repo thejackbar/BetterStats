@@ -17,7 +17,7 @@ export default function ScoutProtectedRoute({ children }) {
     )
   }
 
-  if (!user) return <Navigate to="/login" replace state={{ from: location }} />
+  if (!user) return <Navigate to="/betterscout/login" replace state={{ from: location }} />
 
   return children
 }

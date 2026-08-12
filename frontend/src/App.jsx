@@ -1,6 +1,11 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
+import ScoutApp from './scout/ScoutApp'
+import ScoutProtectedRoute from './scout/components/ScoutProtectedRoute'
+import ScoutLogin from './scout/pages/ScoutLogin'
+import ScoutLayout from './scout/ScoutLayout'
+import ScoutDashboard from './scout/pages/ScoutDashboard'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -26,7 +31,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -257,24 +262,11 @@ function DashboardRedirect() {
 // docs/afl-betterstats-plan.md.
 const AflApp = lazy(() => import('./afl/AflApp'))
 
-// BetterScout: a separate PRODUCT, not another sport — same build-time silo
-// mechanism (VITE_PRODUCT=scout, the bs-scout-frontend service) but its own
-// tenant type/auth entirely, unrelated to the club Organisation model. See
-// scout/ScoutApp.jsx.
-const ScoutApp = lazy(() => import('./scout/ScoutApp'))
-
 export default function App() {
   if (import.meta.env.VITE_SPORT === 'afl') {
     return (
       <Suspense fallback={<PageLoader />}>
         <AflApp />
-      </Suspense>
-    )
-  }
-  if (import.meta.env.VITE_PRODUCT === 'scout') {
-    return (
-      <Suspense fallback={<PageLoader />}>
-        <ScoutApp />
       </Suspense>
     )
   }
@@ -313,6 +305,20 @@ export default function App() {
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />
+
+          {/* BetterScout — a completely separate tenant type/login (Scout
+              Org, not a club Organisation), living inside this same app.
+              ScoutApp is a pathless layout route: it scopes ScoutAuthProvider
+              to just these routes with no URL segment of its own. The bare
+              /betterscout redirect matters because /:clubSlug below would
+              otherwise be the next-best match and render "club not found". */}
+          <Route element={<ScoutApp />}>
+            <Route path="/betterscout" element={<Navigate to="/betterscout/app" replace />} />
+            <Route path="/betterscout/login" element={<ScoutLogin />} />
+            <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutLayout /></ScoutProtectedRoute>}>
+              <Route index element={<ScoutDashboard />} />
+            </Route>
+          </Route>
 
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />

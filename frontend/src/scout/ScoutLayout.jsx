@@ -7,7 +7,7 @@ export default function ScoutLayout() {
 
   const doLogout = async () => {
     await logout()
-    navigate('/login')
+    navigate('/betterscout/login')
   }
 
   return (

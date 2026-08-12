@@ -1,10 +1,10 @@
-"""Bootstrap a BetterScout silo: create the first Scout Org and its first
-user. Run inside the bs-scout-backend container (or locally against
-app.scout_main's database):
+"""Bootstrap BetterScout: create the first Scout Org and its first user.
+BetterScout lives in the same app/database as the rest of BetterCricket (see
+models/scout.py) — run this inside the normal betterstats-backend container:
 
-    python -m app.scripts.scout_bootstrap <org_name> <username> <password>
+    docker compose exec betterstats-backend python -m app.scripts.scout_bootstrap <org_name> <username> <password>
 
-e.g.  python -m app.scripts.scout_bootstrap "Jack's Scouting" jack 'change-me-locally'
+e.g.  docker compose exec betterstats-backend python -m app.scripts.scout_bootstrap "Jack's Scouting" jack 'change-me-locally'
 
 Idempotent: an existing org (matched by name) or user (matched by username)
 is reused as-is — a rerun never overwrites an existing password, same rule
@@ -35,17 +35,18 @@ async def main() -> None:
     username = username.strip().lower()
 
     async with async_session_maker() as session:
-        # The schema is created by app.scout_main's lifespan on first boot,
-        # not here — running this against a never-started backend would
-        # otherwise fail with a wall of raw SQL that reads like a code bug
-        # rather than an ordering mistake (same guard afl_bootstrap.py uses).
+        # scout_orgs/scout_users are created by migration 236 (alembic
+        # upgrade head, which the backend's own startup command already runs
+        # before uvicorn starts) — not here. Running this before the backend
+        # has ever started would otherwise fail with a wall of raw SQL that
+        # reads like a code bug rather than an ordering mistake (same guard
+        # afl_bootstrap.py uses for its own silo's schema).
         try:
             await session.execute(select(ScoutUser).limit(1))
         except Exception:
             print(
-                "The BetterScout database has no schema yet — start "
-                "app.scout_main once so it can create the tables, then "
-                "re-run this script."
+                "scout_orgs/scout_users don't exist yet — start the backend "
+                "once (it runs migrations on boot) and re-run this script."
             )
             sys.exit(1)
 

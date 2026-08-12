@@ -16,7 +16,7 @@ export default function ScoutLogin() {
     setError(null)
     try {
       await login(username, password)
-      navigate('/app')
+      navigate('/betterscout/app')
     } catch (err) {
       setError(err.message || 'Login failed')
     } finally {

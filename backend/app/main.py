@@ -18,6 +18,11 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room
+# BetterScout — a separate tenant type (Scout Org) with its own login,
+# unrelated to the club Organisation model. Imported separately since it's a
+# submodule of routers.scout, not a top-level routers module; aliased to
+# avoid colliding with the `auth` (club-admin) import above.
+from app.routers.scout import auth as scout_auth_router
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -4739,6 +4744,44 @@ async def lifespan(app: FastAPI):
             "playhq_registered_at TIMESTAMPTZ"
         ))
 
+        # Migration 236: BetterScout's Scout Org tenant tables — a completely
+        # separate login/tenant type living in this same database (see
+        # models/scout.py, services/scout_auth.py). Byte-identical to
+        # alembic/versions/236_scout_org_tenant.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_orgs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                slug TEXT UNIQUE,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                primary_color TEXT DEFAULT '#16c784',
+                accent_color TEXT DEFAULT '#243352',
+                theme_mode TEXT DEFAULT 'dark',
+                logo_url TEXT,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_users (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                username TEXT NOT NULL UNIQUE,
+                email TEXT,
+                password_hash TEXT,
+                display_name TEXT,
+                role TEXT NOT NULL DEFAULT 'owner',
+                last_login_at TIMESTAMPTZ,
+                failed_login_count INTEGER NOT NULL DEFAULT 0,
+                locked_until TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_users_org ON scout_users(scout_org_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -4993,6 +5036,7 @@ app.include_router(public_self_serve.router)  # Public self-serve trial registra
 app.include_router(onboarding_wizard.router)  # Club onboarding wizard (flag-gated — see docs/self-serve-trial-onboarding-plan.md Phase 15)
 app.include_router(wizard_analytics.router)  # Setup Wizard analytics (super-admin) — where clubs get stuck/skip
 app.include_router(backup_admin.router)  # Backup/restore task history + DB size stats (super-admin)
+app.include_router(scout_auth_router.router)  # BetterScout — Scout Org login (own tenant type, own cookie; no require_module — unrelated to club entitlements)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

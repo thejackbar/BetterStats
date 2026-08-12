@@ -7,12 +7,16 @@ own, and its users never touch routers/auth.py's User/ClubMembership tables
 or the bs_session cookie those use. See services/scout_auth.py for the
 completely separate login/session mechanism these tables back.
 
-Registered on the same shared `Base` as every cricket/AFL model (imported
-from app.models.db) so app.scout_main's Base.metadata.create_all can create
-these tables the same way app.afl_main does for its own silo — but the
-BetterScout deployment points at its own, otherwise-empty database, so the
-rest of the cricket schema exists there unused. Same accepted tradeoff the
-AFL silo already documents in afl_main.py.
+Deliberately NOT a separate database/silo (unlike AFL) — BetterScout lives in
+the same app process and the same database as the rest of BetterCricket, so
+a normal deploy (which already runs `alembic upgrade head` on boot) picks it
+up with no extra server setup. Registered on the same `Base` as every other
+model (imported from app.models.db) purely so the ORM knows about these two
+tables; the real DDL lives in alembic/versions/236_scout_org_tenant.py (+ its
+idempotent mirror in main.py's lifespan), same as every other table in this
+app. Isolation from club/player data is enforced by having zero foreign keys
+in or out of these two tables and a completely separate login (see
+services/scout_auth.py), not by a separate database.
 """
 import uuid
 

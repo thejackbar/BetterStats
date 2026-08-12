@@ -11,7 +11,7 @@ from app.models.db import get_db
 from app.models.scout import ScoutOrg, ScoutUser
 from app.services import scout_auth
 
-router = APIRouter(prefix="/auth", tags=["scout-auth"])
+router = APIRouter(prefix="/scout/auth", tags=["scout-auth"])
 
 
 class LoginRequest(BaseModel):

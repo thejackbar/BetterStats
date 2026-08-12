@@ -19,7 +19,9 @@ import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 //   remembered for the session — so a club's own members/visitors never see a
 //   "switch to us" pitch on the club's own page. Applecross is our demo, so ad
 //   traffic there still sees it, which is what we want.
-// - Never on /contact (already converting) or /admin*, /login.
+// - Never on /contact (already converting), /admin*, /login, or /betterscout*
+//   (BetterScout is its own product with its own login — pitching it
+//   BetterCricket's club signup makes no sense there).
 // - ?cta=form on any BetterCricket marketing page pops the short form open
 //   after a short delay (once per session) — for campaign links that should
 //   land on the form rather than on the sticky bar (e.g. a social post CTA).
@@ -65,7 +67,7 @@ export default function ClubCTABar() {
 
   useEffect(() => {
     const onContact = pathname === '/contact'
-    const onAdmin = pathname.startsWith('/admin') || pathname === '/login'
+    const onAdmin = pathname.startsWith('/admin') || pathname === '/login' || pathname.startsWith('/betterscout')
     if (onContact || onAdmin) { setShow(false); return }
 
     let dismissed = false
@@ -80,7 +82,7 @@ export default function ClubCTABar() {
   // rather than making the visitor find and click the sticky bar.
   useEffect(() => {
     const onContact = pathname === '/contact'
-    const onAdmin = pathname.startsWith('/admin') || pathname === '/login'
+    const onAdmin = pathname.startsWith('/admin') || pathname === '/login' || pathname.startsWith('/betterscout')
     if (onContact || onAdmin || !isMarketingPath(pathname)) return
 
     let params
