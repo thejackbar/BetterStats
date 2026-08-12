@@ -125,6 +125,8 @@ const TRUST_CLUBS = [
   { slug: 'leeming-spartan-cricket-club', name: 'Leeming Spartan Cricket Club', logo: '/marketing/leeming-spartan-cc.webp' },
   { slug: 'scarborough-cricket-club', name: 'Scarborough Cricket Club', logo: '/api/images/organisations/6c2fad8f-8ad8-eb11-a7ad-2818780da0cc/logo' },
   { slug: 'yarraville-cricket-club', name: 'Yarraville Cricket Club', logo: '/api/images/organisations/a1e5d8a7-86d8-eb11-a7ad-2818780da0cc/logo' },
+  { slug: 'high-wycombe', name: 'High Wycombe Cricket Club', logo: '/api/images/organisations/254939ca-87d8-eb11-a7ad-2818780da0cc/logo' },
+  { slug: 'hilton-bicton', name: 'Hilton Bicton Cricket Club', logo: '/api/images/organisations/a82fad8f-8ad8-eb11-a7ad-2818780da0cc/logo' },
 ]
 
 function Logos() {
