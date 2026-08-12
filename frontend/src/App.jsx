@@ -6,6 +6,9 @@ import ScoutProtectedRoute from './scout/components/ScoutProtectedRoute'
 import ScoutLogin from './scout/pages/ScoutLogin'
 import ScoutLayout from './scout/ScoutLayout'
 import ScoutDashboard from './scout/pages/ScoutDashboard'
+import ScoutDiscover from './scout/pages/ScoutDiscover'
+import ScoutPlayers from './scout/pages/ScoutPlayers'
+import ScoutPlayerProfile from './scout/pages/ScoutPlayerProfile'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -317,6 +320,9 @@ export default function App() {
             <Route path="/betterscout/login" element={<ScoutLogin />} />
             <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutLayout /></ScoutProtectedRoute>}>
               <Route index element={<ScoutDashboard />} />
+              <Route path="discover" element={<ScoutDiscover />} />
+              <Route path="players" element={<ScoutPlayers />} />
+              <Route path="players/:id" element={<ScoutPlayerProfile />} />
             </Route>
           </Route>
 

@@ -1,5 +1,11 @@
-import { Outlet, useNavigate } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useScoutAuth } from './contexts/ScoutAuthContext'
+
+const NAV_LINKS = [
+  { to: '/betterscout/app', label: 'Dashboard', end: true },
+  { to: '/betterscout/app/discover', label: 'Discover' },
+  { to: '/betterscout/app/players', label: 'My players' },
+]
 
 export default function ScoutLayout() {
   const { user, logout } = useScoutAuth()
@@ -22,6 +28,18 @@ export default function ScoutLayout() {
             Log out
           </button>
         </div>
+        <nav className="max-w-5xl mx-auto px-4 flex gap-4 text-sm">
+          {NAV_LINKS.map(({ to, label, end }) => (
+            <NavLink
+              key={to} to={to} end={end}
+              className={({ isActive }) =>
+                `py-2 border-b-2 ${isActive ? 'border-[var(--pb-accent)] text-pb-text' : 'border-transparent text-pb-dim hover:text-pb-text'}`
+              }
+            >
+              {label}
+            </NavLink>
+          ))}
+        </nav>
       </header>
       <main className="max-w-5xl mx-auto px-4 py-8">
         <Outlet />

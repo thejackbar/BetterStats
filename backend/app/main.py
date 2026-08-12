@@ -22,7 +22,7 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
 # avoid colliding with the `auth` (club-admin) import above.
-from app.routers.scout import auth as scout_auth_router
+from app.routers.scout import auth as scout_auth_router, discovery as scout_discovery_router
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.services.usage_tracker import record_event_bg
 
@@ -4782,6 +4782,54 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_scout_users_org ON scout_users(scout_org_id)"
         ))
 
+        # Migration 237: BetterScout player discovery — a platform-wide club
+        # stats cache, the durable per-person scouted record, and the
+        # per-tenant tracking join. None have any FK to organisations/
+        # players. Byte-identical to alembic/versions/237_scout_discovery.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_club_cache (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                club_org_guid TEXT NOT NULL UNIQUE,
+                club_name TEXT,
+                status TEXT NOT NULL DEFAULT 'building',
+                payload JSONB,
+                error TEXT,
+                built_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scouted_players (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source TEXT NOT NULL,
+                grassroots_participant_id TEXT,
+                club_org_guid TEXT,
+                club_name TEXT,
+                name TEXT NOT NULL,
+                grade_name TEXT,
+                notes TEXT,
+                stats_payload JSONB,
+                stats_built_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scouted_players_participant UNIQUE (grassroots_participant_id)
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_tracked_players (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scout_tracked_player UNIQUE (scout_org_id, scouted_player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_tracked_players_org "
+            "ON scout_tracked_players(scout_org_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5037,6 +5085,7 @@ app.include_router(onboarding_wizard.router)  # Club onboarding wizard (flag-gat
 app.include_router(wizard_analytics.router)  # Setup Wizard analytics (super-admin) — where clubs get stuck/skip
 app.include_router(backup_admin.router)  # Backup/restore task history + DB size stats (super-admin)
 app.include_router(scout_auth_router.router)  # BetterScout — Scout Org login (own tenant type, own cookie; no require_module — unrelated to club entitlements)
+app.include_router(scout_discovery_router.router)  # BetterScout — player discovery (club search/roster, add/track a player)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

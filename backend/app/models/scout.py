@@ -20,8 +20,8 @@ services/scout_auth.py), not by a separate database.
 """
 import uuid
 
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text, TIMESTAMP
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text, TIMESTAMP, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
 from app.models.db import Base
@@ -80,3 +80,72 @@ class ScoutUser(Base):
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutClubCache(Base):
+    """Platform-wide cache of one Australian club's roster+career build (the
+    verbatim output of services.iq_scout._build_career) — no FK to
+    organisations, no relationship to club data at all. Every Scout Org
+    browsing the same club shares this one build, same build/poll contract
+    as BetterIQ's opposition_dossiers (see services.scout_discovery), just
+    keyed on the club's own Cricket Australia GUID instead of
+    (organisation_id, opp_key)."""
+    __tablename__ = "scout_club_cache"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    club_org_guid = Column(Text, nullable=False, unique=True)
+    club_name = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, default="building", server_default="building")  # building | ready | error
+    payload = Column(JSONB, nullable=True)
+    error = Column(Text, nullable=True)
+    built_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutedPlayer(Base):
+    """A real person BetterScout knows about — platform-wide, not owned by
+    any one Scout Org (see ScoutTrackedPlayer for the per-org fact "this org
+    has added this player"). Created only when a scout explicitly adds
+    someone, never just from browsing a search. `stats_payload` is a
+    SNAPSHOT sliced from ScoutClubCache at add/refresh time, not
+    recomputed live on every profile view."""
+    __tablename__ = "scouted_players"
+    __table_args__ = (
+        UniqueConstraint("grassroots_participant_id", name="uq_scouted_players_participant"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    source = Column(Text, nullable=False)  # au_grassroots | manual
+    # NULL for a manual (e.g. UK) entry — the unique constraint above only
+    # actually enforces uniqueness for non-null values in Postgres, so
+    # multiple manual entries can coexist without a real identity key.
+    grassroots_participant_id = Column(Text, nullable=True)
+    club_org_guid = Column(Text, nullable=True)
+    club_name = Column(Text, nullable=True)
+    name = Column(Text, nullable=False)
+    grade_name = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    stats_payload = Column(JSONB, nullable=True)
+    stats_built_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutTrackedPlayer(Base):
+    """The minimal per-tenant fact: this Scout Org has added this player.
+    Deliberately not the watchlist itself (no tags/stage/notes) — a later
+    phase's watchlist board extends this same join rather than inventing a
+    second, competing "which players does this org care about" model."""
+    __tablename__ = "scout_tracked_players"
+    __table_args__ = (
+        UniqueConstraint("scout_org_id", "scouted_player_id", name="uq_scout_tracked_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
