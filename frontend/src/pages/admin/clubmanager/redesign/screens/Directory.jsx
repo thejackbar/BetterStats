@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
+import { useAuth } from '../../../../../contexts/AuthContext'
+import { CAP } from '../../../../../lib/capabilities'
 import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip } from '../ui'
 
 // Directory — one record per person, on REAL club data. The person spine is
@@ -71,6 +73,42 @@ function typeLabel(p) {
   return null
 }
 
+// A field edited where it is read. Click the value, type, Enter or blur saves,
+// Escape cancels.
+//
+// Name, email and phone are all searchable or filterable ("Has email" / "No
+// email" drive the whole Create-a-list flow), so they have to be settable AND
+// clearable on the person — a filter you can act on but not fix sends you to a
+// dialog to undo what you just found.
+function InlineField({ value, placeholder, onSave, busy, type = 'text', style }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const start = () => { setDraft(value || ''); setEditing(true) }
+  const commit = () => {
+    setEditing(false)
+    if ((draft || '') !== (value || '')) onSave(draft.trim())
+  }
+  if (!editing) {
+    return (
+      <span onClick={start} title="Click to edit"
+        style={{ cursor: 'pointer', borderBottom: `1px dashed ${C.hair2}`, ...style }}>
+        {value || <span style={{ color: C.faint }}>{placeholder}</span>}
+      </span>
+    )
+  }
+  return (
+    <input autoFocus type={type} value={draft} disabled={busy} placeholder={placeholder}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur() }
+        if (e.key === 'Escape') { setEditing(false) }
+      }}
+      style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 6,
+        padding: '2px 7px', color: C.text, fontSize: 'inherit', fontWeight: 'inherit', outline: 'none', ...style }} />
+  )
+}
+
 function qualStatus(expiryISO) {
   if (!expiryISO) return { key: 'current', label: 'NO EXPIRY', fg: C.ok }
   const days = Math.round((new Date(expiryISO) - new Date()) / 86400000)
@@ -86,6 +124,12 @@ function fmtExpiry(iso) {
 
 export default function Directory({ st, patch, narrow }) {
   const navigate = useNavigate()
+  // Playing status lives on the Stats player record and its endpoint wants
+  // MANAGE_PLAYERS, which a volunteer or committee manager working the
+  // Directory does not necessarily hold. Gate the control rather than offer one
+  // that 403s; without the capability the status is still shown, just read-only.
+  const { hasCapability } = useAuth()
+  const canEditPlayers = hasCapability(CAP.MANAGE_PLAYERS)
   const [people, setPeople] = useState(null)   // null = loading
   const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
   const [err, setErr] = useState(null)
@@ -258,6 +302,38 @@ export default function Directory({ st, patch, narrow }) {
       else { const r = await api.dirSetPlayerLifeMembership(p.player_id, body); patch({ dirSel: r.member_id }) }
       await reload()
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // Name, email and phone, saved from the person's own header. Resolves the
+  // person row the same three ways saveMember does, so a read-through player
+  // can have contact details recorded without being duplicated.
+  const savePersonField = async (p, key, value) => {
+    setBusy(true)
+    try {
+      let mid = p.member_id
+      if (!mid && p.player_id) mid = (await api.dirEnsureMemberForPlayer(p.player_id)).member_id
+      if (!mid) return
+      await api.dirUpdateMember(mid, { [key]: value })
+      await reload()
+      patch({ dirSel: mid })
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // Playing status is the Stats active/inactive flag, and the Directory filters
+  // on it — so it has to be settable here too, or "Former players" is a filter
+  // with nothing behind it.
+  const setPlayerStatus = async (p, status) => {
+    if (!p.player_id) return
+    setBusy(true)
+    try { await api.bsUpdatePlayerProfile(p.player_id, { status }); await reload() }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // The expiry is what drives "Quals to renew", so it has to be correctable.
+  // add_qualification derives it from the type's validity period, which is
+  // right for a fresh certificate and wrong for one obtained years ago.
+  const setQualExpiry = async (qid, expires_at) => {
+    if (!qid || !sel?.member_id) return
+    setBusy(true)
+    try { await api.qualUpdateQualification(qid, { expires_at: expires_at || null }); await refreshMember(sel.member_id) }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
   const seedTypes = async () => {
     setBusy(true)
@@ -591,8 +667,19 @@ export default function Directory({ st, patch, narrow }) {
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 20 }}>
               <Avatar p={sel} size={52} fs={16} />
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: '-0.01em' }}>{sel.name}</div>
-                <div style={{ fontSize: 12.5, color: C.faint, marginTop: 3 }}>{[sel.email, sel.phone].filter(Boolean).join('  ·  ') || 'No contact details recorded'}</div>
+                {/* Name and contact are edited here, not behind Edit: the
+                    search matches on name and two filters ask about email, so
+                    all three have to be settable and clearable on the person. */}
+                <div style={{ fontWeight: 700, fontSize: 22, letterSpacing: '-0.01em' }}>
+                  <InlineField value={sel.name} placeholder="Name" busy={busy}
+                    onSave={v => v && savePersonField(sel, 'full_name', v)} />
+                </div>
+                <div style={{ fontSize: 12.5, color: C.faint, marginTop: 5, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <InlineField value={sel.email} placeholder="Add an email" busy={busy} type="email"
+                    onSave={v => savePersonField(sel, 'email', v)} />
+                  <InlineField value={sel.phone} placeholder="Add a mobile" busy={busy}
+                    onSave={v => savePersonField(sel, 'mobile', v)} />
+                </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 8 }}>
                   {/* Membership types lead, accented, because they are the
                       club's own answer for this person. Then what the module
@@ -656,7 +743,10 @@ export default function Directory({ st, patch, narrow }) {
                                 title={on ? (primary ? 'Held, and the type BetterFees bills' : 'Held — click to remove') : 'Click to add'}
                                 style={{ ...pill(on), display: 'inline-flex', alignItems: 'center', gap: 5, opacity: busy ? 0.6 : 1 }}>
                                 {t.name}
-                                {primary && <span style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em' }}>★</span>}
+                                {/* aria-hidden, or the glyph joins the button's
+                                    accessible name and it reads as "Senior
+                                    Player ★". The title carries the meaning. */}
+                                {primary && <span aria-hidden="true" style={{ fontFamily: MONO, fontSize: 8, letterSpacing: '0.08em' }}>★</span>}
                               </button>
                             )
                           })}
@@ -682,6 +772,30 @@ export default function Directory({ st, patch, narrow }) {
                     )}
                     {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Ticking a type adds this player to the member directory.</div>}
                   </>
+                )}
+
+                {/* Playing status. The Directory filters on it, so it is set
+                    here rather than only in Stats. Its endpoint wants
+                    MANAGE_PLAYERS, which a volunteer or committee manager need
+                    not hold — without it the status still reads, it just says
+                    where to change it instead of offering a button that 403s. */}
+                {sel.player_id && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faintest, marginBottom: 5 }}>PLAYING</div>
+                    {canEditPlayers ? (
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {[['active', 'Playing'], ['inactive', 'Not playing']].map(([v, label]) => (
+                          <button key={v} disabled={busy} onClick={() => setPlayerStatus(sel, v)}
+                            style={{ ...pill((sel.player_status || 'active') === v), opacity: busy ? 0.6 : 1 }}>{label}</button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: C.faint }}>
+                        {sel.player_status === 'inactive' ? 'Not playing' : 'Playing'}
+                        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}> · changed on the player’s record in Stats</span>
+                      </div>
+                    )}
+                  </div>
                 )}
               </section>
 
@@ -743,7 +857,22 @@ export default function Directory({ st, patch, narrow }) {
                     <div key={qq.id || i} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '8px 11px' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, color: C.text }}>{qq.name}</div>
-                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 2 }}>{fmtExpiry(qq.expiry)}</div>
+                        {/* The expiry is what "Quals to renew" filters on, so it
+                            has to be settable and clearable. Adding a
+                            qualification derives it from the type's validity
+                            period, which is right for a fresh certificate and
+                            wrong for one obtained years ago. */}
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {qq.id ? (
+                            <>
+                              <input type="date" value={qq.expiry ? String(qq.expiry).slice(0, 10) : ''} disabled={busy}
+                                title="Expiry — clear it for a qualification that never expires"
+                                onChange={e => setQualExpiry(qq.id, e.target.value)}
+                                style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 5, padding: '1px 5px', color: C.dim, fontFamily: MONO, fontSize: 9.5, outline: 'none' }} />
+                              {!qq.expiry && <span>never expires</span>}
+                            </>
+                          ) : fmtExpiry(qq.expiry)}
+                        </div>
                       </div>
                       <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.08em', padding: '2px 7px', borderRadius: 4, border: `1px solid ${qq.st.fg}66`, color: qq.st.fg, flexShrink: 0 }}>{qq.st.label}</span>
                       {qq.id && <span onClick={() => removeQual(qq.id)} title="Remove" style={{ cursor: 'pointer', color: C.faint, fontSize: 14, flexShrink: 0 }}>×</span>}
