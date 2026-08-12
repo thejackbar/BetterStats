@@ -1,7 +1,7 @@
-import { Fragment, useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip } from '../ui'
 
 // Directory — one record per person, on REAL club data. The person spine is
 // fee_members (a member's player_id links to a stats player where one exists,
@@ -10,19 +10,23 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials } from '../ui'
 // player gets a member row lazily the first time ClubManager assigns them a
 // role. ClubManager owns adding/editing non-player people and their roles here.
 
-// THREE AXES, drawn as three labelled groups rather than one undifferentiated
-// row of pills — which is what made a single-valued member type look reasonable
-// in the first place. See services/directory.py for the same split server-side.
+// THREE AXES, and each gets ONE control rather than a row of pills.
 //
 //   MEMBERSHIP — what kind of member. Built from the club's OWN catalogue, so a
-//     club that adds "Country Member" gets a chip with no deploy. Players is
-//     derived from the Stats record rather than the catalogue, so it still
-//     works for a club that has adopted no catalogue at all.
-//   ROLES      — what they do. Several at once, and independent of membership:
-//     an umpire may hold the role and no membership whatsoever.
+//     club that adds "Country Member" gets it for free. Players is derived from
+//     the Stats record rather than the catalogue, so the axis still works for a
+//     club that has adopted no catalogue at all.
+//   ROLES      — what they do. Independent of membership: an umpire may hold
+//     the role and no membership whatsoever.
 //   HONOURS    — Life membership, bestowed on a member of any type.
 //
-// A membership type arrives prefixed `type:` so a club that named a type
+// Each axis is its own single-select and they AND together, so Senior Player +
+// Volunteers is now askable — one shared `dirSeg` could not express it. They
+// are menus rather than pills because the membership options come from club
+// data: as one flat row the control count grew with the club's catalogue, which
+// is how this header reached ~26 controls.
+//
+// A membership type carries the `type:` prefix so a club that named a type
 // "Volunteer" (every club that adopted the pre-235 starter set has one) cannot
 // collide with the Volunteer ROLE.
 const TYPE_PREFIX = 'type:'
@@ -34,6 +38,8 @@ const ROLE_SEGS = [
 const HONOUR_SEGS = [
   { seg: 'Life member', label: 'Life members' },
 ]
+const PLAYING_LABEL = { active: 'Playing', inactive: 'Former players' }
+const EMAIL_LABEL = { has: 'Has email', none: 'No email' }
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -65,18 +71,6 @@ function typeLabel(p) {
   return null
 }
 
-// One axis of filters, named. The label is what stops the three groups reading
-// as one long undifferentiated row — which is how membership, roles and honours
-// got conflated in the first place.
-function FilterGroup({ label, children }) {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <span style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', color: C.faintest, marginRight: 1 }}>{label}</span>
-      {children}
-    </div>
-  )
-}
-
 function qualStatus(expiryISO) {
   if (!expiryISO) return { key: 'current', label: 'NO EXPIRY', fg: C.ok }
   const days = Math.round((new Date(expiryISO) - new Date()) / 86400000)
@@ -91,6 +85,7 @@ function fmtExpiry(iso) {
 }
 
 export default function Directory({ st, patch, narrow }) {
+  const navigate = useNavigate()
   const [people, setPeople] = useState(null)   // null = loading
   const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
   const [err, setErr] = useState(null)
@@ -123,8 +118,12 @@ export default function Directory({ st, patch, narrow }) {
   }, [])
 
   const q = (st.dirQuery || '').toLowerCase()
-  const seg = st.dirSeg || 'All'
-  const roleFilter = st.dirRole || null
+  // One selection per axis, AND-combined. `dirSeg` keeps its name (and its
+  // 'All' reset value) because Today.jsx and the role chip already send it.
+  const seg = st.dirSeg || 'All'               // membership axis
+  const roleSeg = st.dirRoleSeg || null        // role axis
+  const honourSeg = st.dirHonour || null       // honour axis
+  const roleFilter = st.dirRole || null        // a specific role TITLE
   const expiringOnly = !!st.dirExpiring
   const typeFilter = st.dirType || ''          // '' = any membership type
   const playing = st.dirPlaying || 'all'       // all | active | inactive
@@ -139,6 +138,8 @@ export default function Directory({ st, patch, narrow }) {
   const hasEmail = (p) => !!(p.email || '').trim()
   const list = (people || []).filter(p => {
     if (seg !== 'All' && !p.segs.includes(seg)) return false
+    if (roleSeg && !p.segs.includes(roleSeg)) return false
+    if (honourSeg && !p.segs.includes(honourSeg)) return false
     // "No type set" is about the whole set now, not the primary — someone
     // holding two types and no primary is plainly typed.
     if (typeFilter === NO_TYPE && (p.membership_types || []).length) return false
@@ -399,6 +400,40 @@ export default function Directory({ st, patch, narrow }) {
   const assignedIds = new Set((sel?.roles || []).map(r => r.id))
   const unassignedRoles = roleCatalogue.filter(r => !assignedIds.has(r.id))
 
+  // What each menu button says when something under it is on. The button
+  // carries the selection so the menu never has to be opened to read it.
+  const segLabel = (s) => s.startsWith(TYPE_PREFIX) ? s.slice(TYPE_PREFIX.length)
+    : s === 'External' ? 'Not members' : s === 'Player' ? 'Players' : s
+  const membershipLabel = seg !== 'All' ? segLabel(seg) : (typeFilter === NO_TYPE ? 'No type set' : null)
+  const roleLabel = roleFilter || (roleSeg ? (ROLE_SEGS.find(r => r.seg === roleSeg) || {}).label : null)
+  // "More" holds several unrelated switches, so its button counts rather than
+  // naming one and hiding the rest.
+  const moreOn = [honourSeg, playing !== 'all' ? playing : null, emailFilter,
+    expiringOnly ? 'quals' : null, st.dirShowArchived ? 'arch' : null].filter(Boolean)
+  const moreLabel = moreOn.length === 1
+    ? (honourSeg || PLAYING_LABEL[playing] || EMAIL_LABEL[emailFilter] || (expiringOnly ? 'Quals to renew' : 'Archived'))
+    : moreOn.length ? String(moreOn.length) : null
+
+  // Every filter that is on, each with the one patch that clears it. This is
+  // the whole point of moving the options into menus: the controls collapse,
+  // the STATE stays on the page.
+  const activeFilters = [
+    seg !== 'All' && { key: 'seg', label: segLabel(seg), clear: () => patch({ dirSeg: 'All' }) },
+    typeFilter === NO_TYPE && { key: 'notype', label: 'No type set', clear: () => patch({ dirType: '' }) },
+    roleSeg && { key: 'roleseg', label: (ROLE_SEGS.find(r => r.seg === roleSeg) || {}).label, clear: () => patch({ dirRoleSeg: null }) },
+    roleFilter && { key: 'role', label: 'Role: ' + roleFilter, clear: () => patch({ dirRole: null }) },
+    honourSeg && { key: 'honour', label: honourSeg + 's', clear: () => patch({ dirHonour: null }) },
+    playing !== 'all' && { key: 'playing', label: PLAYING_LABEL[playing], clear: () => patch({ dirPlaying: 'all' }) },
+    emailFilter && { key: 'email', label: EMAIL_LABEL[emailFilter], clear: () => patch({ dirEmail: null }) },
+    expiringOnly && { key: 'quals', label: 'Quals to renew', clear: () => patch({ dirExpiring: false }) },
+    st.dirShowArchived && { key: 'arch', label: 'Including archived', clear: () => patch({ dirShowArchived: false }) },
+    q && { key: 'q', label: `“${st.dirQuery.trim()}”`, clear: () => patch({ dirQuery: '' }) },
+  ].filter(Boolean)
+  const clearFilters = () => patch({
+    dirSeg: 'All', dirType: '', dirRoleSeg: null, dirRole: null, dirHonour: null,
+    dirPlaying: 'all', dirEmail: null, dirExpiring: false, dirShowArchived: false, dirQuery: '',
+  })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <ScreenHeader>
@@ -412,93 +447,114 @@ export default function Directory({ st, patch, narrow }) {
         </div>
         <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
-        {/* Two groups on one full-width row: what you're LOOKING AT on the
-            left (the filter pills, plus the links out to the three editors),
-            and what you can DO on the right, ending in the one primary
-            action. + Add person sits hard against the right edge rather than
-            buried mid-row among the pills. Both groups wrap internally, so a
-            narrow screen never scrolls sideways. */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap', flex: '1 1 100%' }}>
-          {/* flex-basis 0, not auto: with a max-content basis this group
-              claims the whole line and shoves the actions onto one of their
-              own, leaving a wide empty gap beside them. At basis 0 the two
-              share the line, the filters wrap within their own column, and
-              the actions stay pinned top-right. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: '1 1 0', minWidth: 0 }}>
-            {/* MEMBERSHIP — what kind of member. Chips come from the club's own
-                catalogue, so adding "Country Member" gets one for free. Players
-                is derived from the Stats record, not the catalogue, so this
-                group is never empty for a club that keeps no catalogue. */}
-            <FilterGroup label="MEMBERSHIP">
-              <button onClick={() => patch({ dirSeg: 'All' })} style={pill(seg === 'All')}>Everyone</button>
-              <button onClick={() => patch({ dirSeg: 'Player' })} style={pill(seg === 'Player')}>Players</button>
-              {internalTypes.map(t => (
-                <Fragment key={t.id}>
-                  <button onClick={() => patch({ dirSeg: TYPE_PREFIX + t.name })} style={pill(seg === TYPE_PREFIX + t.name)}>{t.name}</button>
-                  {/* Families is a page, not a filter, and belongs beside the
-                      type it relates to. */}
-                  {/^parent/i.test(t.name) && <Link to="/admin/clubhouse/directory/families" style={btnS}>Families</Link>}
-                </Fragment>
-              ))}
-              {externalTypes.map(t => (
-                <button key={t.id} onClick={() => patch({ dirSeg: TYPE_PREFIX + t.name })} style={pill(seg === TYPE_PREFIX + t.name)}>{t.name}</button>
-              ))}
-              {externalTypes.length > 0 && (
-                <button onClick={() => patch({ dirSeg: seg === 'External' ? 'All' : 'External' })} style={pill(seg === 'External')}
-                  title="Everyone whose only membership types are external — recorded by the club, not counted as members">Not a member</button>
+        {/* One row: the three axes as menus, then what you can DO, ending in
+            the single primary action. Every option that used to be its own pill
+            still exists — it lives in the menu for its axis, so the number of
+            controls no longer grows with the club's catalogue. Whatever is
+            actually filtered is drawn as chips underneath, so hiding the
+            options never hides the state. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: '1 1 100%' }}>
+          <MenuButton label="Membership" value={membershipLabel} width={260}>
+            {close => (
+              <>
+                <MenuItem on={seg === 'All' && !typeFilter} onClick={() => { patch({ dirSeg: 'All', dirType: '' }); close() }}>Everyone</MenuItem>
+                <MenuItem on={seg === 'Player'} onClick={() => { patch({ dirSeg: seg === 'Player' ? 'All' : 'Player' }); close() }}>Players</MenuItem>
+                {internalTypes.length > 0 && <MenuHeading>MEMBERS</MenuHeading>}
+                {internalTypes.map(t => (
+                  <MenuItem key={t.id} on={seg === TYPE_PREFIX + t.name}
+                    onClick={() => { patch({ dirSeg: seg === TYPE_PREFIX + t.name ? 'All' : TYPE_PREFIX + t.name }); close() }}>{t.name}</MenuItem>
+                ))}
+                {externalTypes.length > 0 && <MenuHeading>NOT MEMBERS</MenuHeading>}
+                {externalTypes.map(t => (
+                  <MenuItem key={t.id} on={seg === TYPE_PREFIX + t.name}
+                    onClick={() => { patch({ dirSeg: seg === TYPE_PREFIX + t.name ? 'All' : TYPE_PREFIX + t.name }); close() }}>{t.name}</MenuItem>
+                ))}
+                {externalTypes.length > 0 && (
+                  <MenuItem on={seg === 'External'} onClick={() => { patch({ dirSeg: seg === 'External' ? 'All' : 'External' }); close() }}>Anyone who is not a member</MenuItem>
+                )}
+                <MenuDivider />
+                <MenuItem on={typeFilter === NO_TYPE} onClick={() => { patch({ dirType: typeFilter === NO_TYPE ? '' : NO_TYPE }); close() }}>No type set</MenuItem>
+                {memberTypes.length === 0 && (
+                  <MenuItem onClick={() => { seedTypes(); close() }} disabled={busy}>+ Set up membership types</MenuItem>
+                )}
+              </>
+            )}
+          </MenuButton>
+
+          <MenuButton label="Role" value={roleLabel} width={230}>
+            {close => (
+              <>
+                <MenuItem on={!roleSeg && !roleFilter} onClick={() => { patch({ dirRoleSeg: null, dirRole: null }); close() }}>Any role</MenuItem>
+                {ROLE_SEGS.map(s => (
+                  <MenuItem key={s.seg} on={roleSeg === s.seg}
+                    onClick={() => { patch({ dirRoleSeg: roleSeg === s.seg ? null : s.seg }); close() }}>{s.label}</MenuItem>
+                ))}
+                {roleFilter && (
+                  <>
+                    <MenuDivider />
+                    <MenuItem on onClick={() => { patch({ dirRole: null }); close() }}>{roleFilter}</MenuItem>
+                  </>
+                )}
+              </>
+            )}
+          </MenuButton>
+
+          <MenuButton label="More" value={moreLabel} width={230}>
+            {close => (
+              <>
+                <MenuHeading>HONOURS</MenuHeading>
+                {HONOUR_SEGS.map(s => (
+                  <MenuItem key={s.seg} on={honourSeg === s.seg}
+                    onClick={() => { patch({ dirHonour: honourSeg === s.seg ? null : s.seg }); close() }}>{s.label}</MenuItem>
+                ))}
+                {/* Playing status is the Stats active/inactive flag, so a club
+                    can tell this season's players from the ones who have
+                    stopped without losing either from the directory. */}
+                <MenuHeading>PLAYING</MenuHeading>
+                <MenuItem on={playing === 'active'} onClick={() => { patch({ dirPlaying: playing === 'active' ? 'all' : 'active' }); close() }}>Playing</MenuItem>
+                <MenuItem on={playing === 'inactive'} onClick={() => { patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' }); close() }}>Former players</MenuItem>
+                <MenuHeading>CONTACT</MenuHeading>
+                <MenuItem on={emailFilter === 'has'} onClick={() => { patch({ dirEmail: emailFilter === 'has' ? null : 'has' }); close() }}>Has email</MenuItem>
+                <MenuItem on={emailFilter === 'none'} onClick={() => { patch({ dirEmail: emailFilter === 'none' ? null : 'none' }); close() }}>No email</MenuItem>
+                <MenuDivider />
+                <MenuItem on={expiringOnly} onClick={() => { patch({ dirExpiring: !expiringOnly }); close() }}>Quals to renew</MenuItem>
+                <MenuItem on={!!st.dirShowArchived} onClick={() => { patch({ dirShowArchived: !st.dirShowArchived }); close() }}>Show archived</MenuItem>
+              </>
+            )}
+          </MenuButton>
+
+          {/* Everything that is not a filter. Families, Qualifications and
+              Volunteer bulk entry are PAGES, and Import/Create list are
+              actions — mixing them in among the filters is what made the row
+              read as one undifferentiated wall. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+            <MenuButton label="Manage" width={230} align="right">
+              {close => (
+                <>
+                  <MenuHeading>OPEN</MenuHeading>
+                  <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/families') }}>Families</MenuItem>
+                  <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/qualifications') }}>Qualifications</MenuItem>
+                  <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/volunteers') }}>Volunteer bulk entry</MenuItem>
+                  <MenuDivider />
+                  <MenuItem disabled={!emailable} onClick={() => { close(); openMakeList() }}>
+                    Create a list{emailable ? ` (${emailable})` : ''}
+                  </MenuItem>
+                  <MenuItem onClick={() => { close(); setImp({ text: '', preview: null, result: null }) }}>Import people from CSV</MenuItem>
+                </>
               )}
-              <button onClick={() => patch({ dirType: typeFilter === NO_TYPE ? '' : NO_TYPE })} style={pill(typeFilter === NO_TYPE, 'amber')}>No type set</button>
-              {!internalTypes.length && !externalTypes.length && (
-                <button onClick={seedTypes} disabled={busy} style={{ ...btnS, opacity: busy ? 0.6 : 1 }}
-                  title="Senior Player, Junior Player, Parent, Social Member, Honorary Member, plus Sponsor Contact and External Contact">
-                  + Set up membership types
-                </button>
-              )}
-            </FilterGroup>
-
-            {/* ROLES — what they do. Independent of membership: an umpire may
-                hold the role and no membership at all. */}
-            <FilterGroup label="ROLES">
-              {ROLE_SEGS.map(s => (
-                <Fragment key={s.seg}>
-                  <button onClick={() => patch({ dirSeg: seg === s.seg ? 'All' : s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
-                  {s.seg === 'Volunteer' && <Link to="/admin/clubhouse/directory/qualifications" style={btnS}>Qualifications</Link>}
-                </Fragment>
-              ))}
-              <Link to="/admin/clubhouse/directory/volunteers" style={btnS}>Volunteer bulk entry</Link>
-            </FilterGroup>
-
-            {/* HONOURS — bestowed on a member of any type. */}
-            <FilterGroup label="HONOURS">
-              {HONOUR_SEGS.map(s => (
-                <button key={s.seg} onClick={() => patch({ dirSeg: seg === s.seg ? 'All' : s.seg })} style={pill(seg === s.seg)}>{s.label}</button>
-              ))}
-            </FilterGroup>
-
-            <FilterGroup label="ALSO">
-              {/* Playing status is the Stats active/inactive flag, so a club can
-                  tell this season's players from the ones who have stopped
-                  without losing either from the directory. */}
-              <button onClick={() => patch({ dirPlaying: playing === 'active' ? 'all' : 'active' })} style={pill(playing === 'active')}>Playing</button>
-              <button onClick={() => patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' })} style={pill(playing === 'inactive')}>Former players</button>
-              <button onClick={() => patch({ dirEmail: emailFilter === 'has' ? null : 'has' })} style={pill(emailFilter === 'has')}>Has email</button>
-              <button onClick={() => patch({ dirEmail: emailFilter === 'none' ? null : 'none' })} style={pill(emailFilter === 'none', 'amber')}>No email</button>
-              <button onClick={() => patch({ dirExpiring: !expiringOnly })} style={pill(expiringOnly, 'amber')}>Quals to renew</button>
-              {roleFilter && <button onClick={() => patch({ dirRole: null })} style={{ ...pill(true), display: 'inline-flex', alignItems: 'center', gap: 6 }}>Role: {roleFilter}  ✕</button>}
-            </FilterGroup>
-          </div>
-          {/* No flexShrink:0 here on purpose — pinning this group at its
-              max-content width stops its own flexWrap from ever firing, and a
-              phone then scrolls sideways. Letting it shrink is what makes the
-              four buttons stack instead. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end', marginLeft: 'auto' }}>
-            <button onClick={() => patch({ dirShowArchived: !st.dirShowArchived })} style={pill(!!st.dirShowArchived, 'amber')}>Show archived</button>
-            <button onClick={openMakeList} disabled={!emailable} title={emailable ? '' : 'Nobody in this filter has an email address'}
-              style={{ ...btnS, opacity: emailable ? 1 : 0.5, cursor: emailable ? 'pointer' : 'not-allowed' }}>Create list ({emailable})</button>
-            <button onClick={() => setImp({ text: '', preview: null, result: null })} style={btnS}>Import CSV</button>
+            </MenuButton>
             <button onClick={openAdd} style={btnP}>+ Add person</button>
           </div>
         </div>
+
+        {/* What is actually filtered, and how to undo it. Drawn only when
+            something is on, so an unfiltered Directory carries no extra row. */}
+        {activeFilters.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', flex: '1 1 100%' }}>
+            {activeFilters.map(f => <FilterChip key={f.key} onClear={f.clear}>{f.label}</FilterChip>)}
+            <button onClick={clearFilters} style={{ ...btnS, border: 'none', color: C.faint }}>Clear all</button>
+          </div>
+        )}
       </ScreenHeader>
 
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
