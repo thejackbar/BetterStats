@@ -4,7 +4,7 @@ app.scout_main's database):
 
     python -m app.scripts.scout_bootstrap <org_name> <username> <password>
 
-e.g.  python -m app.scripts.scout_bootstrap "Jack's Scouting" jack 'Better2026!'
+e.g.  python -m app.scripts.scout_bootstrap "Jack's Scouting" jack 'change-me-locally'
 
 Idempotent: an existing org (matched by name) or user (matched by username)
 is reused as-is — a rerun never overwrites an existing password, same rule
