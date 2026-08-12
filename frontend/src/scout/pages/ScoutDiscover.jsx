@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { scoutApi } from '../lib/scoutApi'
 import { useScoutAuth } from '../contexts/ScoutAuthContext'
+import { WINDOW_OPTIONS, rollupSeasons } from '../lib/seasonRollup'
 
 const POLL_MS = 2500
 const MAX_POLLS = 60 // bounded so a wedged build doesn't poll forever (~2.5min)
@@ -31,12 +32,12 @@ export default function ScoutDiscover() {
   const [clubs, setClubs] = useState([])
   const [searching, setSearching] = useState(false)
   const [club, setClub] = useState(null) // { id, name }
-  const [roster, setRoster] = useState(null) // { status, players }
-  const [grades, setGrades] = useState(null) // null = loading/none yet, [] = fetched, empty
+  const [roster, setRoster] = useState(null) // { status, players, grades, window }
   const [addingId, setAddingId] = useState(null)
   const [addedPlayers, setAddedPlayers] = useState({}) // player_id -> scoutedPlayer.id
   const [expandedId, setExpandedId] = useState(null)
   const [filters, setFilters] = useState(EMPTY_FILTERS)
+  const [windowN, setWindowN] = useState(null) // null = full window (today's behaviour)
   const [clientSort, setClientSort] = useState({ col: 'matches', dir: 'desc' })
   const [error, setError] = useState(null)
   const pollRef = useRef(null)
@@ -63,14 +64,13 @@ export default function ScoutDiscover() {
     pollCount.current = 0
     setClub(c)
     setRoster({ status: 'building' })
-    setGrades(null)
     setAddedPlayers({})
     setExpandedId(null)
     setFilters(EMPTY_FILTERS)
+    setWindowN(null)
     setClientSort({ col: 'matches', dir: 'desc' })
     setError(null)
     poll(c)
-    scoutApi.getClubGrades(c.id).then(setGrades).catch(() => setGrades([]))
   }
 
   const poll = (c) => {
@@ -108,8 +108,45 @@ export default function ScoutDiscover() {
 
   const allPlayers = roster?.players || []
 
+  // The anchor year for "last N seasons" — the same for every player, so
+  // a "last 1 season" view means the same real calendar year for everyone,
+  // not "each player's own last N appearances" (a player who stopped
+  // playing two years ago should show as inactive, not have older stats
+  // disguised as recent). Deliberately the latest year with any RECORDED
+  // matches, not roster.window.to_year (the club's raw season list can
+  // include a freshly-opened season with a real season id but zero played
+  // matches yet — anchoring to that would make "last 1 season" silently
+  // empty for every player the moment a new season is created upstream).
+  const latestActiveYear = useMemo(() => {
+    let max = null
+    for (const p of allPlayers) {
+      for (const s of p.seasons || []) {
+        if (s.matches > 0 && (max === null || s.year > max)) max = s.year
+      }
+    }
+    return max
+  }, [allPlayers])
+
+  const cutoffYear = useMemo(() => (
+    windowN != null && latestActiveYear ? latestActiveYear - (windowN - 1) : null
+  ), [windowN, latestActiveYear])
+
+  // Recombines each player's totals from just the seasons within the
+  // window — entirely client-side (the raw counts needed to re-derive
+  // rates correctly, balls_faced/bowling_balls, already came down with
+  // the roster), so switching windows never triggers a re-fetch or a
+  // roster rebuild. p.seasons itself is left untouched, so the row-expand
+  // preview always shows full multi-year history regardless of window.
+  const windowedPlayers = useMemo(() => {
+    if (cutoffYear == null) return allPlayers
+    return allPlayers.map((p) => ({
+      ...p,
+      totals: rollupSeasons((p.seasons || []).filter((s) => s.year >= cutoffYear)),
+    }))
+  }, [allPlayers, cutoffYear])
+
   const filteredPlayers = useMemo(() => {
-    return allPlayers.filter((p) => {
+    return windowedPlayers.filter((p) => {
       for (const c of FILTER_FIELDS) {
         const min = filters[`${c.key}_min`]
         const max = filters[`${c.key}_max`]
@@ -121,7 +158,7 @@ export default function ScoutDiscover() {
       }
       return true
     })
-  }, [allPlayers, filters])
+  }, [windowedPlayers, filters])
 
   const sortedPlayers = useMemo(() => {
     const { col, dir } = clientSort
@@ -189,11 +226,11 @@ export default function ScoutDiscover() {
             </button>
           </div>
 
-          {grades && grades.length > 0 && (
+          {roster?.grades?.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
               <span className="text-pb-dim">Grades:</span>
-              {grades.map((g) => (
-                <span key={g.grade_id} className="px-2 py-0.5 rounded-full bg-pb-surface2 text-pb-dim">
+              {roster.grades.map((g) => (
+                <span key={g.grade_id} className="px-2 py-0.5 rounded-full bg-pb-surface2 text-pb-dim" title={g.years?.join(', ')}>
                   {g.grade_name || g.team_name}
                 </span>
               ))}
@@ -212,6 +249,8 @@ export default function ScoutDiscover() {
 
           {roster?.status === 'ready' && allPlayers.length > 0 && (
             <>
+              <CareerWindowPanel windowN={windowN} setWindowN={setWindowN} cutoffYear={cutoffYear} toYear={latestActiveYear} />
+
               <FilterPanel filters={filters} setFilter={setFilter} clearFilters={clearFilters} hasActiveFilters={hasActiveFilters} />
 
               <p className="text-xs text-pb-dim">
@@ -251,6 +290,31 @@ export default function ScoutDiscover() {
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function CareerWindowPanel({ windowN, setWindowN, cutoffYear, toYear }) {
+  return (
+    <div className="pb-card p-4 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs text-pb-dim uppercase font-mono">Career window</span>
+        {WINDOW_OPTIONS.map((opt) => (
+          <button key={opt.label} onClick={() => setWindowN(opt.n)}
+                  className={`text-xs px-2.5 py-1 rounded-full border ${
+                    windowN === opt.n
+                      ? 'border-[var(--pb-accent)] text-[var(--pb-accent)]'
+                      : 'border-pb-hairline text-pb-dim hover:text-pb-text'
+                  }`}>
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-pb-dim">
+        {cutoffYear != null && toYear
+          ? `Stats and filters below are for ${cutoffYear === toYear ? toYear : `${cutoffYear}–${toYear}`} only.`
+          : "Full window covers BetterScout's ~10-year pull, not necessarily a player's whole career."}
+      </p>
     </div>
   )
 }

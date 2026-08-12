@@ -22,7 +22,6 @@ export const scoutApi = {
     request(`/scout/clubs/${orgGuid}/roster${clubName ? `?club_name=${encodeURIComponent(clubName)}` : ''}`),
   refreshClubRoster: (orgGuid, clubName) =>
     request(`/scout/clubs/${orgGuid}/roster/refresh${clubName ? `?club_name=${encodeURIComponent(clubName)}` : ''}`, { method: 'POST' }),
-  getClubGrades: (orgGuid) => request(`/scout/clubs/${orgGuid}/grades`),
   addPlayer: (orgGuid, playerId, clubName) =>
     request('/scout/players/add', { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, club_name: clubName }) }),
   addManualPlayer: (name, clubName, notes) =>

@@ -9,7 +9,6 @@ from app.models.db import get_db
 from app.models.scout import ScoutedPlayer, ScoutOrg, ScoutUser
 from app.routers.scout.auth import get_current_scout_user
 from app.services import playhq_client, scout_discovery
-from app.services import iq_scout
 
 router = APIRouter(prefix="/scout", tags=["scout-discovery"])
 
@@ -44,13 +43,6 @@ async def refresh_club_roster(
     db: AsyncSession = Depends(get_db),
 ):
     return await scout_discovery.get_or_start_club_roster(db, org_guid, club_name=club_name, force=True)
-
-
-@router.get("/clubs/{org_guid}/grades")
-async def get_club_grades(
-    org_guid: str, current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
-):
-    return await iq_scout.external_club_teams(org_guid)
 
 
 class AddPlayerRequest(BaseModel):
