@@ -19,11 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scout import (
     ScoutClubCache,  # noqa: F401 — re-exported for callers that want the type
+    ScoutOrg,
     ScoutWatchlist,
     ScoutWatchlistCard,
     ScoutWatchlistColumn,
     ScoutedPlayer,
 )
+from app.services import scout_billing  # tracked-player cap check, see ensure_card_on_default_watchlist
 
 DEFAULT_COLUMNS = ["Watching", "Shortlisted", "Under Review", "Archived"]
 DEFAULT_WATCHLIST_NAME = "My Players"
@@ -334,6 +336,21 @@ async def ensure_card_on_default_watchlist(
     card = res.scalar_one_or_none()
     if card:
         return card
+
+    # This is the one place a NEW tracked-player fact is created (both
+    # add_player and add_manual_player funnel through here), so it's the
+    # single enforcement point for the tier's player cap. An already-tracked
+    # player (the early return above) never counts against it again.
+    org = await session.get(ScoutOrg, scout_org_id)
+    cap = scout_billing.cap_for(org.tier if org else None)
+    if cap is not None:
+        count = await scout_billing.tracked_player_count(session, scout_org_id)
+        if count >= cap:
+            raise ValueError(
+                f"You've reached your {scout_billing.label_for(org.tier if org else None)} "
+                f"plan's {cap}-player limit. Contact us to upgrade."
+            )
+
     res = await session.execute(
         select(ScoutWatchlistColumn)
         .where(ScoutWatchlistColumn.watchlist_id == wl.id)

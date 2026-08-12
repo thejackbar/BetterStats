@@ -87,7 +87,10 @@ async def add_manual_player(
     if not (data.name or "").strip():
         raise HTTPException(status_code=400, detail="Name is required.")
     _, org = current
-    return await scout_discovery.add_manual_player(db, org.id, data.name.strip(), data.club_name, data.notes)
+    try:
+        return await scout_discovery.add_manual_player(db, org.id, data.name.strip(), data.club_name, data.notes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/players")

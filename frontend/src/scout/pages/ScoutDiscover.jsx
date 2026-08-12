@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { scoutApi } from '../lib/scoutApi'
+import { useScoutAuth } from '../contexts/ScoutAuthContext'
 
 const POLL_MS = 2500
 const MAX_POLLS = 60 // bounded so a wedged build doesn't poll forever (~2.5min)
 
 export default function ScoutDiscover() {
   const navigate = useNavigate()
+  const { user } = useScoutAuth()
+  const atCap = !!user?.usage?.at_cap
   const [query, setQuery] = useState('')
   const [clubs, setClubs] = useState([])
   const [searching, setSearching] = useState(false)
@@ -77,6 +80,12 @@ export default function ScoutDiscover() {
         <p className="text-sm text-pb-dim">Search any Australian club to browse its roster and stats.</p>
       </div>
 
+      {atCap && (
+        <p className="text-sm px-3 py-2 rounded border border-[var(--pb-negative)] text-[var(--pb-negative)]">
+          You've reached your {user.usage.tier_label} plan's {user.usage.player_cap}-player limit. Contact us to upgrade before adding another player.
+        </p>
+      )}
+
       <form onSubmit={search} className="flex gap-2">
         <input
           value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search for a club…"
@@ -142,7 +151,8 @@ export default function ScoutDiscover() {
                       <td className="px-3 py-2 text-right">{p.totals?.average ?? '—'}</td>
                       <td className="px-3 py-2 text-right">{p.totals?.wickets ?? '—'}</td>
                       <td className="px-3 py-2 text-right">
-                        <button onClick={() => addPlayer(p)} disabled={addingId === p.player_id}
+                        <button onClick={() => addPlayer(p)} disabled={addingId === p.player_id || atCap}
+                                title={atCap ? "You've reached your plan's player limit." : undefined}
                                 className="text-xs px-2 py-1 rounded bg-[var(--pb-accent)] text-black disabled:opacity-50">
                           {addingId === p.player_id ? 'Adding…' : 'Add'}
                         </button>

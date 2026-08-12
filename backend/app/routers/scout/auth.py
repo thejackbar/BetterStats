@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.models.scout import ScoutOrg, ScoutUser
-from app.services import scout_auth
+from app.services import scout_auth, scout_billing
 
 router = APIRouter(prefix="/scout/auth", tags=["scout-auth"])
 
@@ -38,7 +38,7 @@ async def get_current_scout_user(
     return user, org
 
 
-def _build_me(user: ScoutUser, org: ScoutOrg) -> dict:
+def _build_me(user: ScoutUser, org: ScoutOrg, usage: dict) -> dict:
     return {
         "id": str(user.id),
         "username": user.username,
@@ -52,6 +52,7 @@ def _build_me(user: ScoutUser, org: ScoutOrg) -> dict:
             "accent_color": org.accent_color,
             "theme_mode": org.theme_mode,
         },
+        "usage": usage,
     }
 
 
@@ -87,7 +88,8 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
     await db.commit()
 
     scout_auth.issue_session_cookie(response, org.id, user.id)
-    return _build_me(user, org)
+    usage = await scout_billing.usage_for(db, org)
+    return _build_me(user, org, usage)
 
 
 @router.post("/logout")
@@ -97,6 +99,10 @@ async def logout(response: Response):
 
 
 @router.get("/me")
-async def me(current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user)):
+async def me(
+    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    db: AsyncSession = Depends(get_db),
+):
     user, org = current
-    return _build_me(user, org)
+    usage = await scout_billing.usage_for(db, org)
+    return _build_me(user, org, usage)

@@ -4905,6 +4905,13 @@ async def lifespan(app: FastAPI):
             "ON scout_watchlist_cards(share_token) WHERE share_token IS NOT NULL"
         ))
 
+        # Migration 240: BetterScout pricing tiers (limits + upgrade
+        # messaging only, no Stripe). Byte-identical to
+        # alembic/versions/240_scout_pricing_tiers.py.
+        await conn.execute(text(
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'starter'"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

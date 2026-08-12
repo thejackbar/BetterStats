@@ -42,6 +42,10 @@ class ScoutOrg(Base):
     # username (see scout_auth.read_session).
     slug = Column(Text, unique=True, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    # starter | growth | unlimited — see services/scout_billing.py for the
+    # tracked-player caps. Assigned by BetterCricket staff (scripts/
+    # scout_set_tier.py), not self-serve — there's no Stripe wiring here yet.
+    tier = Column(Text, nullable=False, default="starter", server_default="starter")
 
     # Same theme shape as Organisation (primary_color/accent_color/theme_mode)
     # so the shared ThemeProvider needs no new branching for this silo — just
