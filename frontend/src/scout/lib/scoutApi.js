@@ -17,18 +17,31 @@ async function request(path, options = {}) {
 }
 
 export const scoutApi = {
+  getOverview: () => request('/scout/overview'),
   searchClubs: (q) => request(`/scout/clubs/search?q=${encodeURIComponent(q)}`),
   getClubRoster: (orgGuid, clubName) =>
     request(`/scout/clubs/${orgGuid}/roster${clubName ? `?club_name=${encodeURIComponent(clubName)}` : ''}`),
   refreshClubRoster: (orgGuid, clubName) =>
     request(`/scout/clubs/${orgGuid}/roster/refresh${clubName ? `?club_name=${encodeURIComponent(clubName)}` : ''}`, { method: 'POST' }),
-  addPlayer: (orgGuid, playerId, clubName) =>
-    request('/scout/players/add', { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, club_name: clubName }) }),
-  addManualPlayer: (name, clubName, notes) =>
-    request('/scout/players/manual', { method: 'POST', body: JSON.stringify({ name, club_name: clubName, notes }) }),
+  addPlayer: (orgGuid, playerId, clubName, watchlistId) =>
+    request('/scout/players/add', { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, club_name: clubName, watchlist_id: watchlistId }) }),
+  addManualPlayer: (name, clubName, notes, watchlistId) =>
+    request('/scout/players/manual', { method: 'POST', body: JSON.stringify({ name, club_name: clubName, notes, watchlist_id: watchlistId }) }),
   listPlayers: () => request('/scout/players'),
   getPlayer: (id) => request(`/scout/players/${id}`),
   refreshPlayer: (id) => request(`/scout/players/${id}/refresh`, { method: 'POST' }),
+  listNotes: (id) => request(`/scout/players/${id}/notes`),
+  createNote: (id, body, kind) => request(`/scout/players/${id}/notes`, { method: 'POST', body: JSON.stringify({ body, kind }) }),
+  updateNote: (noteId, fields) => request(`/scout/players/notes/${noteId}`, { method: 'PATCH', body: JSON.stringify(fields) }),
+  deleteNote: (noteId) => request(`/scout/players/notes/${noteId}`, { method: 'DELETE' }),
+  uploadPlayerPhoto: async (id, file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    const res = await fetch(API_BASE + `/scout/players/${id}/photo`, { method: 'POST', credentials: 'include', body: fd })
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || 'Upload failed') }
+    return res.json()
+  },
+  deletePlayerPhoto: (id) => request(`/scout/players/${id}/photo`, { method: 'DELETE' }),
 
   listWatchlists: () => request('/scout/watchlists'),
   createWatchlist: (name) => request('/scout/watchlists', { method: 'POST', body: JSON.stringify({ name }) }),
@@ -52,4 +65,29 @@ export const scoutApi = {
   // fine either way (it just sends credentials:'include', harmless with no
   // cookie present).
   getSharedCard: (token) => request(`/public/scout/share/${token}`),
+
+  // Compare
+  getComparison: (playerIds) => request(`/scout/compare?players=${playerIds.map(encodeURIComponent).join(',')}`),
+  shareComparison: (playerIds) => request('/scout/compare/share', { method: 'POST', body: JSON.stringify({ player_ids: playerIds }) }),
+  getSharedComparison: (token) => request(`/public/scout/compare/${token}`),
+
+  // Milestones
+  getMilestones: () => request('/scout/milestones'),
+  markMilestoneSeen: (scoutedPlayerId, milestoneType, milestoneValue) =>
+    request('/scout/milestones/seen', { method: 'POST', body: JSON.stringify({ scouted_player_id: scoutedPlayerId, milestone_type: milestoneType, milestone_value: milestoneValue }) }),
+  markAllMilestonesSeen: () => request('/scout/milestones/seen-all', { method: 'POST' }),
+
+  // Settings
+  getSettings: () => request('/scout/settings'),
+  updateSettings: (fields) => request('/scout/settings', { method: 'PATCH', body: JSON.stringify(fields) }),
+  getBilling: () => request('/scout/settings/billing'),
+  listPeople: () => request('/scout/people'),
+  invitePerson: (email, role) => request('/scout/people/invite', { method: 'POST', body: JSON.stringify({ email, role }) }),
+  revokeInvite: (inviteId) => request(`/scout/people/invites/${inviteId}`, { method: 'DELETE' }),
+  listShareLinksOrg: () => request('/scout/settings/share-links'),
+  revokeAllShareLinks: () => request('/scout/settings/share-links/revoke-all', { method: 'POST' }),
+  closeOrg: () => request('/scout/settings/close-org', { method: 'POST' }),
+  previewInvite: (token) => request(`/public/scout/invite/${token}`),
+  acceptInvite: (token, username, password, displayName) =>
+    request(`/public/scout/invite/${token}/accept`, { method: 'POST', body: JSON.stringify({ username, password, display_name: displayName }) }),
 }

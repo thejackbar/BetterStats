@@ -24,8 +24,11 @@ from app.routers import auth, organisations, players, games, webhooks, leaderboa
 # avoid colliding with the `auth` (club-admin) import above.
 from app.routers.scout import (
     auth as scout_auth_router,
+    compare as scout_compare_router,
     discovery as scout_discovery_router,
+    milestones as scout_milestones_router,
     public_share as scout_public_share_router,
+    settings as scout_settings_router,
     watchlist as scout_watchlist_router,
 )
 from app.jobs.scheduler import start_scheduler, stop_scheduler
@@ -4912,6 +4915,135 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS tier TEXT NOT NULL DEFAULT 'starter'"
         ))
 
+        # Migration 241: BetterScout internal-club link (see
+        # services/scout_internal_link.py) — plain UUID columns, no FK, per
+        # this file's zero-foreign-key isolation rule. Byte-identical to
+        # alembic/versions/241_scout_internal_link.py.
+        await conn.execute(text(
+            "ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS internal_org_id UUID"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS internal_player_id UUID"
+        ))
+
+        # Migration 242: BetterScout org settings + invites + share-link
+        # expiry stamp. Byte-identical to alembic/versions/242_scout_settings.py.
+        for stmt in [
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS org_type TEXT",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS home_region TEXT",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS refresh_cadence TEXT NOT NULL DEFAULT 'weekly'",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS stale_after_weeks INTEGER NOT NULL DEFAULT 6",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS default_window TEXT NOT NULL DEFAULT '2'",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS share_include_notes BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS share_include_tags BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS share_expiry_days INTEGER DEFAULT 90",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS digest_enabled BOOLEAN NOT NULL DEFAULT TRUE",
+            "ALTER TABLE scout_orgs ADD COLUMN IF NOT EXISTS alert_scope TEXT NOT NULL DEFAULT 'all_tracked'",
+            "ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS share_token_created_at TIMESTAMPTZ",
+        ]:
+            await conn.execute(text(stmt))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_invites (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                email TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'viewer',
+                token TEXT NOT NULL UNIQUE,
+                invited_by UUID REFERENCES scout_users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                accepted_at TIMESTAMPTZ,
+                expires_at TIMESTAMPTZ NOT NULL
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_invites_org ON scout_invites(scout_org_id)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scout_invites_org_email_pending "
+            "ON scout_invites(scout_org_id, email) WHERE accepted_at IS NULL"
+        ))
+
+        # Migration 243: BetterScout player profile — notes timeline + photo.
+        # Byte-identical to alembic/versions/243_scout_profile.py.
+        for stmt in [
+            "ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS photo_url TEXT",
+            "ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS photo_data BYTEA",
+            "ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS photo_mime TEXT",
+        ]:
+            await conn.execute(text(stmt))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_player_notes (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                author_scout_user_id UUID REFERENCES scout_users(id) ON DELETE SET NULL,
+                body TEXT NOT NULL,
+                kind TEXT NOT NULL DEFAULT 'other',
+                occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_player_notes_org_player "
+            "ON scout_player_notes(scout_org_id, scouted_player_id, occurred_at DESC)"
+        ))
+
+        # Migration 244: BetterScout scout_club_views (Overview's "Clubs
+        # you've looked at"). Byte-identical to
+        # alembic/versions/244_scout_club_views.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_club_views (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                club_org_guid TEXT NOT NULL,
+                club_name TEXT,
+                last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scout_club_views_org_club UNIQUE (scout_org_id, club_org_guid)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_club_views_org "
+            "ON scout_club_views(scout_org_id, last_viewed_at DESC)"
+        ))
+
+        # Migration 245: BetterScout scout_milestone_seen (Milestones "Mark
+        # as seen" + badge). Byte-identical to
+        # alembic/versions/245_scout_milestone_seen.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_milestone_seen (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                milestone_type TEXT NOT NULL,
+                milestone_value INTEGER NOT NULL,
+                seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scout_milestone_seen UNIQUE (scout_org_id, scouted_player_id, milestone_type, milestone_value)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_milestone_seen_org "
+            "ON scout_milestone_seen(scout_org_id)"
+        ))
+
+        # Migration 246: BetterScout scout_shared_comparisons (Compare's
+        # read-only share link). Byte-identical to
+        # alembic/versions/246_scout_shared_comparisons.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_shared_comparisons (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                player_ids JSONB NOT NULL,
+                token TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_shared_comparisons_org "
+            "ON scout_shared_comparisons(scout_org_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5170,6 +5302,9 @@ app.include_router(scout_auth_router.router)  # BetterScout — Scout Org login 
 app.include_router(scout_discovery_router.router)  # BetterScout — player discovery (club search/roster, add/track a player)
 app.include_router(scout_watchlist_router.router)  # BetterScout — watchlists (Kanban boards, tags, recruiting fields)
 app.include_router(scout_public_share_router.router)  # BetterScout — unauthenticated read-only per-card share link
+app.include_router(scout_settings_router.router)  # BetterScout — org settings, people/invites, share-link management
+app.include_router(scout_milestones_router.router)  # BetterScout — the Milestones screen (in reach / reached / seen)
+app.include_router(scout_compare_router.router)  # BetterScout — the Compare screen (side-by-side + share link)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

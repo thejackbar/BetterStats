@@ -5,14 +5,18 @@ import ScoutApp from './scout/ScoutApp'
 import ScoutProtectedRoute from './scout/components/ScoutProtectedRoute'
 import ScoutLogin from './scout/pages/ScoutLogin'
 import ScoutLayout from './scout/ScoutLayout'
-import ScoutDashboard from './scout/pages/ScoutDashboard'
+import ScoutOverview from './scout/pages/ScoutOverview'
 import ScoutDiscover from './scout/pages/ScoutDiscover'
 import ScoutPlayers from './scout/pages/ScoutPlayers'
 import ScoutPlayerProfile from './scout/pages/ScoutPlayerProfile'
 import ScoutWatchlists from './scout/pages/ScoutWatchlists'
 import ScoutWatchlistBoard from './scout/pages/ScoutWatchlistBoard'
 import ScoutCompare from './scout/pages/ScoutCompare'
+import ScoutMilestones from './scout/pages/ScoutMilestones'
+import ScoutSettings from './scout/pages/ScoutSettings'
+import ScoutAcceptInvite from './scout/pages/ScoutAcceptInvite'
 import ScoutPublicShare from './scout/pages/ScoutPublicShare'
+import ScoutShareComparison from './scout/pages/ScoutShareComparison'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -317,6 +321,7 @@ export default function App() {
               ScoutAuthProvider, deliberately NOT nested inside ScoutApp
               below. The token itself is the credential. */}
           <Route path="/betterscout/share/:token" element={<ScoutPublicShare />} />
+          <Route path="/betterscout/share-compare/:token" element={<ScoutShareComparison />} />
 
           {/* BetterScout — a completely separate tenant type/login (Scout
               Org, not a club Organisation), living inside this same app.
@@ -327,14 +332,25 @@ export default function App() {
           <Route element={<ScoutApp />}>
             <Route path="/betterscout" element={<Navigate to="/betterscout/app" replace />} />
             <Route path="/betterscout/login" element={<ScoutLogin />} />
+            {/* Discover has been migrated to the flat, self-wrapping-layout
+                pattern every other Better module uses (the page itself wraps
+                <ScoutModuleLayout>, so it can pass its own title/caption/
+                filters/stats/actions) — moved OUT of the nested-Outlet block
+                below. Every other /betterscout/app/* page still mounts
+                through <ScoutLayout>'s <Outlet/>; as each is rebuilt with its
+                own header it moves up here too, and once none are left,
+                ScoutLayout/the wrapper route come out entirely. */}
+            <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutOverview /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/discover" element={<ScoutProtectedRoute><ScoutDiscover /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/settings" element={<ScoutProtectedRoute><ScoutSettings /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/players/:id" element={<ScoutProtectedRoute><ScoutPlayerProfile /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/milestones" element={<ScoutProtectedRoute><ScoutMilestones /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/compare" element={<ScoutProtectedRoute><ScoutCompare /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/accept-invite/:token" element={<ScoutAcceptInvite />} />
             <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutLayout /></ScoutProtectedRoute>}>
-              <Route index element={<ScoutDashboard />} />
-              <Route path="discover" element={<ScoutDiscover />} />
               <Route path="players" element={<ScoutPlayers />} />
-              <Route path="players/:id" element={<ScoutPlayerProfile />} />
               <Route path="watchlists" element={<ScoutWatchlists />} />
               <Route path="watchlists/:id" element={<ScoutWatchlistBoard />} />
-              <Route path="compare" element={<ScoutCompare />} />
             </Route>
           </Route>
 

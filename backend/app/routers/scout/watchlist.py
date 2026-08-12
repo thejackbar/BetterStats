@@ -1,14 +1,17 @@
 """BetterScout — watchlist (Kanban board) routes. Every route requires a
 signed-in Scout Org user; ownership of every watchlist/column/card id is
 re-checked in services/scout_watchlist.py on every call, never trusted from
-the URL alone."""
+the URL alone. Reads (list/board) are open to either role; every write —
+creating/editing/moving a watchlist, column or card, and share-link
+creation/revocation — requires 'owner' (see routers/scout/auth.py's
+require_scout_owner docstring)."""
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.models.scout import ScoutOrg, ScoutUser
-from app.routers.scout.auth import get_current_scout_user
+from app.routers.scout.auth import get_current_scout_user, require_scout_owner
 from app.services import scout_watchlist
 
 router = APIRouter(prefix="/scout/watchlists", tags=["scout-watchlists"])
@@ -33,7 +36,7 @@ class CreateWatchlistRequest(BaseModel):
 @router.post("")
 async def create_watchlist(
     data: CreateWatchlistRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     if not (data.name or "").strip():
@@ -61,7 +64,7 @@ class CreateColumnRequest(BaseModel):
 @router.post("/{watchlist_id}/columns")
 async def create_column(
     watchlist_id: str, data: CreateColumnRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     if not (data.name or "").strip():
@@ -79,7 +82,7 @@ class ReorderColumnsRequest(BaseModel):
 @router.post("/{watchlist_id}/columns/reorder")
 async def reorder_columns(
     watchlist_id: str, data: ReorderColumnsRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -96,7 +99,7 @@ class RenameColumnRequest(BaseModel):
 @router.patch("/columns/{column_id}")
 async def rename_column(
     column_id: str, data: RenameColumnRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     if not (data.name or "").strip():
@@ -110,7 +113,7 @@ async def rename_column(
 @router.delete("/columns/{column_id}")
 async def delete_column(
     column_id: str,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -128,7 +131,7 @@ class MoveCardRequest(BaseModel):
 @router.post("/cards/{card_id}/move")
 async def move_card(
     card_id: str, data: MoveCardRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -156,7 +159,7 @@ class UpdateCardRequest(BaseModel):
 @router.patch("/cards/{card_id}")
 async def update_card(
     card_id: str, data: UpdateCardRequest,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -170,7 +173,7 @@ async def update_card(
 @router.delete("/cards/{card_id}")
 async def remove_card(
     card_id: str,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -183,7 +186,7 @@ async def remove_card(
 @router.post("/cards/{card_id}/share")
 async def create_share_link(
     card_id: str,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:
@@ -195,7 +198,7 @@ async def create_share_link(
 @router.delete("/cards/{card_id}/share")
 async def revoke_share_link(
     card_id: str,
-    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
     db: AsyncSession = Depends(get_db),
 ):
     try:

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.models.scout import ScoutOrg, ScoutUser
-from app.services import scout_auth, scout_billing
+from app.services import scout_auth, scout_billing, scout_milestones
 
 router = APIRouter(prefix="/scout/auth", tags=["scout-auth"])
 
@@ -38,7 +38,22 @@ async def get_current_scout_user(
     return user, org
 
 
-def _build_me(user: ScoutUser, org: ScoutOrg, usage: dict) -> dict:
+async def require_scout_owner(
+    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+) -> tuple[ScoutUser, ScoutOrg]:
+    """Org-wide actions (settings, billing, inviting/removing teammates,
+    share-link bulk management) need the 'owner' role — a 'viewer' can read
+    everything but shouldn't be able to change what the org is or who's in
+    it. See services/scout_watchlist.py / scout_discovery.py's own write
+    endpoints for the per-record ownership check every route already has;
+    this is the ADDITIONAL org-wide layer on top of it."""
+    user, org = current
+    if user.role != "owner":
+        raise HTTPException(status_code=403, detail="Only an org owner can do this.")
+    return current
+
+
+def _build_me(user: ScoutUser, org: ScoutOrg, usage: dict, milestones_unseen_count: int = 0) -> dict:
     return {
         "id": str(user.id),
         "username": user.username,
@@ -53,6 +68,9 @@ def _build_me(user: ScoutUser, org: ScoutOrg, usage: dict) -> dict:
             "theme_mode": org.theme_mode,
         },
         "usage": usage,
+        # Reached-but-not-yet-marked-seen milestones — see
+        # services/scout_milestones.py's ScoutMilestoneSeen docstring.
+        "milestones_unseen_count": milestones_unseen_count,
     }
 
 
@@ -89,7 +107,8 @@ async def login(data: LoginRequest, response: Response, db: AsyncSession = Depen
 
     scout_auth.issue_session_cookie(response, org.id, user.id)
     usage = await scout_billing.usage_for(db, org)
-    return _build_me(user, org, usage)
+    unseen = await scout_milestones.unseen_reached_count(db, org.id)
+    return _build_me(user, org, usage, unseen)
 
 
 @router.post("/logout")
@@ -105,4 +124,5 @@ async def me(
 ):
     user, org = current
     usage = await scout_billing.usage_for(db, org)
-    return _build_me(user, org, usage)
+    unseen = await scout_milestones.unseen_reached_count(db, org.id)
+    return _build_me(user, org, usage, unseen)

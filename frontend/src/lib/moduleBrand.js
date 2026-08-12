@@ -15,6 +15,7 @@ import socialsLogo from '../assets/modules/bettersocials.svg'
 import adminLogo from '../assets/modules/betteradmin.svg'
 import iqLogo from '../assets/modules/betteriq.svg'
 import fantasyLogo from '../assets/modules/betterfantasy.svg'
+import scoutLogo from '../assets/modules/betterscout.svg'
 
 // accent     — the named brand colour, legible on the dark navy UI
 // accentRgb  — space-separated channels for the layouts' --pb-accent-rgb
@@ -31,6 +32,10 @@ export const MODULE_BRAND = {
   admin:   { name: 'BetterClubhouse', accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
   iq:      { name: 'BetterIQ',      accent: '#A855F7', accentRgb: '168 85 247', logo: iqLogo },
   fantasy: { name: 'BetterFantasyCricket', accent: '#06B6D4', accentRgb: '6 182 212', logo: fantasyLogo },
+  // BetterScout — a separate tenant type (a Scout Org, not a club), so its
+  // magenta-violet sits in the same violet family as BetterIQ (analytical
+  // cousins) but stays visually distinct from it.
+  scout:   { name: 'BetterScout',   accent: '#C026D3', accentRgb: '192 38 211', logo: scoutLogo },
 }
 
 // The various registries key modules differently (marketing uses slugs, the
@@ -46,6 +51,7 @@ const ALIAS = {
   fees: 'admin', comms: 'admin', merch: 'admin', crm: 'admin', bettercrm: 'admin',
   betteriq: 'iq',
   betterfantasy: 'fantasy', betterfantasycricket: 'fantasy', fantasycricket: 'fantasy',
+  betterscout: 'scout',
 }
 
 // Resolve a module key/slug to its brand. Falls back to the Core (green) so a

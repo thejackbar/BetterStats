@@ -21,7 +21,7 @@ services/scout_auth.py), not by a separate database.
 """
 import uuid
 
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, Text, TIMESTAMP, UniqueConstraint
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, LargeBinary, Text, TIMESTAMP, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.sql import func
 
@@ -54,6 +54,20 @@ class ScoutOrg(Base):
     accent_color = Column(Text, nullable=True, default="#243352")
     theme_mode = Column(Text, nullable=True, default="dark")
     logo_url = Column(Text, nullable=True)
+
+    # Settings screen — org profile, plan/refresh cadence, honesty
+    # thresholds and sharing defaults. See services/scout_settings.py for
+    # the vocab each is validated against.
+    org_type = Column(Text, nullable=True)  # agency | club | selector
+    home_region = Column(Text, nullable=True)
+    refresh_cadence = Column(Text, nullable=False, default="weekly", server_default="weekly")  # daily | weekly | manual
+    stale_after_weeks = Column(Integer, nullable=False, default=6, server_default="6")
+    default_window = Column(Text, nullable=False, default="2", server_default="2")  # '1' | '2' | '5' | 'full'
+    share_include_notes = Column(Boolean, nullable=False, default=True, server_default="true")
+    share_include_tags = Column(Boolean, nullable=False, default=True, server_default="true")
+    share_expiry_days = Column(Integer, nullable=True, default=90)  # NULL = never expires
+    digest_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
+    alert_scope = Column(Text, nullable=False, default="all_tracked", server_default="all_tracked")  # all_tracked | watchlisted_only
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -134,6 +148,25 @@ class ScoutedPlayer(Base):
     notes = Column(Text, nullable=True)
     stats_payload = Column(JSONB, nullable=True)
     stats_built_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
+    # Scout-uploaded photo — the fallback when this player has no internal
+    # link (or the linked real player has no photo either). Same bytes-in-
+    # Postgres shape as players.photo_data, for the same reason (the upload
+    # volume isn't guaranteed to persist). photo_url is what a client reads;
+    # NULL means "show initials", same as everywhere else in the app.
+    photo_url = Column(Text, nullable=True)
+    photo_data = Column(LargeBinary, nullable=True)
+    photo_mime = Column(Text, nullable=True)
+
+    # Set only when this player resolved via services/scout_internal_link.py
+    # — an org/player id on an ALREADY-onboarded BetterCricket club, whose
+    # per-game tables back this player's stats instead of the public CA
+    # aggregate API. Deliberately plain UUID columns with NO ForeignKey (see
+    # this module's docstring): a value here is a snapshot copied at build
+    # time, not a relationship, so a club deleting a player later cannot
+    # break anything on this side of the table.
+    internal_org_id = Column(UUID(as_uuid=True), nullable=True)
+    internal_player_id = Column(UUID(as_uuid=True), nullable=True)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
@@ -223,6 +256,116 @@ class ScoutWatchlistCard(Base):
     # unlike every *_link_token in the rest of the app, because this gates
     # one record's low-sensitivity cricket data, not a whole tenant.
     share_token = Column(Text, nullable=True, unique=True)
+    # When share_token was last (re)minted — separate from updated_at, which
+    # changes on every card edit, not just sharing. What share_expiry_days
+    # is actually measured from.
+    share_token_created_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutInvite(Base):
+    """A pending teammate invite — Settings → People's dashed read-only row
+    ("Invited 3 days ago"). Turns into a real ScoutUser on accept
+    (services/scout_invites.py); the row itself stays as history
+    (accepted_at set) rather than being deleted, same reasoning
+    club-side invites use."""
+    __tablename__ = "scout_invites"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    email = Column(Text, nullable=False)
+    role = Column(Text, nullable=False, default="viewer", server_default="viewer")
+    token = Column(Text, nullable=False, unique=True)
+    invited_by = Column(UUID(as_uuid=True), ForeignKey("scout_users.id", ondelete="SET NULL"), nullable=True)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    accepted_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=False)
+
+
+class ScoutClubView(Base):
+    """Per-org "clubs you've looked at" history. ScoutClubCache (see above)
+    is platform-wide and shared by every Scout Org, so it can't answer which
+    clubs THIS org has browsed — this is the org-scoped viewing log that
+    backs Overview's own panel. Upserted on every roster fetch."""
+    __tablename__ = "scout_club_views"
+    __table_args__ = (
+        UniqueConstraint("scout_org_id", "club_org_guid", name="uq_scout_club_views_org_club"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    club_org_guid = Column(Text, nullable=False)
+    club_name = Column(Text, nullable=True)
+    last_viewed_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutPlayerNote(Base):
+    """One dated scouting-log entry ("14 Feb 2026 · Dan Wilson · Watched
+    live") — the profile's Scouting notes card. Org-scoped (this org's
+    private intel on a platform-wide ScoutedPlayer), and deliberately never
+    surfaced on a public share link (see scout_watchlist._SHARED_CARD_FIELDS'
+    own docstring on why the recruiting/private detail stays off shares —
+    notes here are commentary, same sensitivity class)."""
+    __tablename__ = "scout_player_notes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    author_scout_user_id = Column(UUID(as_uuid=True), ForeignKey("scout_users.id", ondelete="SET NULL"), nullable=True)
+    body = Column(Text, nullable=False)
+    kind = Column(Text, nullable=False, default="other", server_default="other")  # watched_live | phone | scorecard_review | other
+    occurred_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutMilestoneSeen(Base):
+    """One row per (org, player, milestone) an owner/viewer has dismissed
+    on the Milestones screen's Reached table. Existence is the only signal
+    — there's nothing else to store. Backs both "Mark as seen" and the
+    sidebar badge / "N since your last visit" count (services/
+    scout_milestones.py counts reached rows with no matching row here)."""
+    __tablename__ = "scout_milestone_seen"
+    __table_args__ = (
+        UniqueConstraint(
+            "scout_org_id", "scouted_player_id", "milestone_type", "milestone_value",
+            name="uq_scout_milestone_seen",
+        ),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    milestone_type = Column(Text, nullable=False)
+    milestone_value = Column(Integer, nullable=False)
+    seen_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutSharedComparison(Base):
+    """A read-only, public link onto a snapshot of a Compare selection (2-5
+    scouted_players ids). Deliberately its own token/table rather than
+    reusing ScoutWatchlistCard.share_token — a comparison names SEVERAL
+    players, and sharing it must not require each of those players to
+    already have their own individual card share turned on. Same
+    never-the-five-recruiting-fields rule as a per-card share (see
+    services/scout_watchlist.get_shared_card's own docstring); enforced in
+    services/scout_compare.py, not by this table.
+
+    `expires_at` is computed ONCE at share-creation time from the org's
+    `share_expiry_days` (NULL when the org has no expiry set) rather than
+    checked dynamically like a card's `share_token_created_at` — a
+    comparison is a point-in-time snapshot handed to someone outside the
+    org, so a later change to the org's sharing defaults should not
+    retroactively alter a link already sent."""
+    __tablename__ = "scout_shared_comparisons"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    player_ids = Column(JSONB, nullable=False)  # ordered list of scouted_players.id strings
+    token = Column(Text, unique=True, nullable=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    expires_at = Column(TIMESTAMP(timezone=True), nullable=True)

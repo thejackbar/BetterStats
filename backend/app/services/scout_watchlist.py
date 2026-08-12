@@ -13,8 +13,9 @@ monitor its own juniors), so nothing here implies an outcome.
 from __future__ import annotations
 
 import secrets
+from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scout import (
@@ -25,7 +26,8 @@ from app.models.scout import (
     ScoutWatchlistColumn,
     ScoutedPlayer,
 )
-from app.services import scout_billing  # tracked-player cap check, see ensure_card_on_default_watchlist
+from app.services import scout_billing  # tracked-player cap check, see ensure_card_on_watchlist
+from app.services import scout_settings  # share-link expiry + include_notes/include_tags defaults
 
 DEFAULT_COLUMNS = ["Watching", "Shortlisted", "Under Review", "Archived"]
 DEFAULT_WATCHLIST_NAME = "My Players"
@@ -106,7 +108,50 @@ async def list_watchlists(session: AsyncSession, scout_org_id: str) -> list[dict
     res = await session.execute(
         select(ScoutWatchlist).where(ScoutWatchlist.scout_org_id == scout_org_id).order_by(ScoutWatchlist.created_at)
     )
-    return [{"id": str(w.id), "name": w.name} for w in res.scalars().all()]
+    watchlists = res.scalars().all()
+    if not watchlists:
+        return []
+    # A card's own created_at doubles as "last used" (cards are created, not
+    # timestamped on move) — good enough for "which board did this org touch
+    # most recently", which is only ever used to pick a sane default in the
+    # Discover "Add to watchlist" picker, not shown as a real activity log.
+    res = await session.execute(
+        select(ScoutWatchlistCard.watchlist_id, func.max(ScoutWatchlistCard.created_at))
+        .where(ScoutWatchlistCard.watchlist_id.in_([w.id for w in watchlists]))
+        .group_by(ScoutWatchlistCard.watchlist_id)
+    )
+    last_card_at = {str(wid): ts for wid, ts in res.all()}
+    return [
+        {
+            "id": str(w.id), "name": w.name,
+            "last_used_at": (last_card_at.get(str(w.id)) or w.created_at).isoformat(),
+        }
+        for w in watchlists
+    ]
+
+
+async def cards_for_player(session: AsyncSession, scout_org_id: str, scouted_player_id: str) -> list[dict]:
+    """Every card this org has for one player, across every watchlist — the
+    profile's "On watchlists" panel and stage control both read this. Each
+    row carries enough to render a stage pill (watchlist + column names) and
+    to know which card_id the inline recruiting-fields editor should PATCH."""
+    player = await session.get(ScoutedPlayer, scouted_player_id)
+    res = await session.execute(
+        select(ScoutWatchlistCard, ScoutWatchlist.name, ScoutWatchlistColumn.name)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .join(ScoutWatchlistColumn, ScoutWatchlistColumn.id == ScoutWatchlistCard.column_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutWatchlistCard.scouted_player_id == scouted_player_id)
+        .order_by(ScoutWatchlistCard.created_at)
+    )
+    out = []
+    for card, wl_name, col_name in res.all():
+        out.append({
+            **_card_out(card, player),
+            "watchlist_id": str(card.watchlist_id),
+            "watchlist_name": wl_name,
+            "column_name": col_name,
+        })
+    return out
 
 
 async def get_board(session: AsyncSession, watchlist_id: str, scout_org_id: str) -> dict:
@@ -285,6 +330,7 @@ async def create_share_link(session: AsyncSession, card_id: str, scout_org_id: s
     'share' and 'regenerate'."""
     card = await _get_owned_card(session, card_id, scout_org_id)
     card.share_token = secrets.token_urlsafe(24)
+    card.share_token_created_at = datetime.now(timezone.utc)
     await session.commit()
     return {"share_token": card.share_token}
 
@@ -292,41 +338,91 @@ async def create_share_link(session: AsyncSession, card_id: str, scout_org_id: s
 async def revoke_share_link(session: AsyncSession, card_id: str, scout_org_id: str) -> None:
     card = await _get_owned_card(session, card_id, scout_org_id)
     card.share_token = None
+    card.share_token_created_at = None
     await session.commit()
+
+
+async def list_share_links(session: AsyncSession, scout_org_id: str) -> list[dict]:
+    """Settings → Sharing defaults' "N links live now / Manage links"."""
+    res = await session.execute(
+        select(ScoutWatchlistCard, ScoutedPlayer)
+        .join(ScoutedPlayer, ScoutedPlayer.id == ScoutWatchlistCard.scouted_player_id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutWatchlistCard.share_token.isnot(None))
+        .order_by(ScoutWatchlistCard.share_token_created_at.desc().nullslast())
+    )
+    return [
+        {
+            "card_id": str(card.id),
+            "player_name": player.name,
+            "created_at": card.share_token_created_at.isoformat() if card.share_token_created_at else None,
+        }
+        for card, player in res.all()
+    ]
+
+
+async def revoke_all_share_links(session: AsyncSession, scout_org_id: str) -> int:
+    res = await session.execute(
+        select(ScoutWatchlistCard)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutWatchlistCard.share_token.isnot(None))
+    )
+    cards = res.scalars().all()
+    for card in cards:
+        card.share_token = None
+        card.share_token_created_at = None
+    await session.commit()
+    return len(cards)
 
 
 async def get_shared_card(session: AsyncSession, token: str) -> dict | None:
     """The one unscoped lookup in this module, by design — the token itself
     IS the credential, there's no Scout Org to check ownership against from
     the public side. Returns a deliberately narrow shape: never the five
-    recruiting fields, whatever _card_out otherwise carries."""
+    recruiting fields, whatever _card_out otherwise carries — and never
+    tags/notes either, when the owning org's sharing defaults say not to.
+    An expired link (org.share_expiry_days) reads exactly like an unknown
+    token — no separate "expired" state leaked to a stranger holding a dead
+    link."""
     res = await session.execute(
-        select(ScoutWatchlistCard, ScoutedPlayer)
+        select(ScoutWatchlistCard, ScoutedPlayer, ScoutWatchlist.scout_org_id)
         .join(ScoutedPlayer, ScoutedPlayer.id == ScoutWatchlistCard.scouted_player_id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
         .where(ScoutWatchlistCard.share_token == token)
     )
     row = res.first()
     if not row:
         return None
-    card, player = row
+    card, player, scout_org_id = row
+    org = await session.get(ScoutOrg, scout_org_id)
+    if org and scout_settings.share_link_expired(org, card.share_token_created_at):
+        return None
     full = _card_out(card, player)
+    shared = {k: full[k] for k in _SHARED_CARD_FIELDS}
+    if org and not org.share_include_notes:
+        shared.pop("notes", None)
+    if org and not org.share_include_tags:
+        shared.pop("tags", None)
     return {
         "player": full["player"],
         "stats": player.stats_payload,
-        **{k: full[k] for k in _SHARED_CARD_FIELDS},
+        **shared,
     }
 
 
-async def ensure_card_on_default_watchlist(
-    session: AsyncSession, scout_org_id: str, scouted_player_id: str,
+async def ensure_card_on_watchlist(
+    session: AsyncSession, scout_org_id: str, scouted_player_id: str, watchlist_id: str | None = None,
 ) -> ScoutWatchlistCard:
     """Called by scout_discovery.add_player/add_manual_player — puts a newly
-    added player onto the org's default watchlist (creating it if needed),
-    in its first column. Idempotent: re-adding an already-tracked player
-    returns the existing card rather than duplicating it (the unique
-    constraint on (watchlist_id, scouted_player_id) makes that the only safe
-    behaviour anyway)."""
-    wl = await ensure_default_watchlist(session, scout_org_id)
+    added player onto a watchlist (the one the scout picked, or the org's
+    default — creating the default if needed — when they didn't pick one),
+    in its first column. Idempotent: re-adding an already-tracked player to
+    the SAME board returns the existing card rather than duplicating it (the
+    unique constraint on (watchlist_id, scouted_player_id) makes that the
+    only safe behaviour anyway) — adding them to a DIFFERENT board is a
+    second, separate card, which is the whole point of "On N watchlists"."""
+    wl = await _get_owned_watchlist(session, watchlist_id, scout_org_id) if watchlist_id \
+        else await ensure_default_watchlist(session, scout_org_id)
     res = await session.execute(
         select(ScoutWatchlistCard).where(
             ScoutWatchlistCard.watchlist_id == wl.id,

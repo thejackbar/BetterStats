@@ -14,6 +14,7 @@ from app.models.db import (
     ClubCommitteeMember, ClubGalleryImage, ClubNews, ClubRoomMedia, Organisation,
     Player, SocialMediaAsset, Sponsor, get_db,
 )
+from app.models.scout import ScoutedPlayer
 from app.services import fonts as font_service
 
 router = APIRouter(prefix="/images", tags=["images"])
@@ -129,6 +130,23 @@ async def get_gallery_image(image_id: str, db: AsyncSession = Depends(get_db)):
 @router.get("/players/{player_id}/photo")
 async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db)):
     player = await db.get(Player, _parse_uuid(player_id))
+    if not player or not player.photo_data:
+        raise HTTPException(404, "No photo")
+    return Response(
+        content=player.photo_data,
+        media_type=player.photo_mime or "image/png",
+        headers=_CACHE_HEADERS,
+    )
+
+
+@router.get("/scouted-players/{scouted_player_id}/photo")
+async def get_scouted_player_photo(scouted_player_id: str, db: AsyncSession = Depends(get_db)):
+    """BetterScout's own scout-uploaded fallback photo — see
+    services/scout_discovery.player_out for when this is used vs a real
+    linked BetterCricket player's photo_url. No auth: same posture as the
+    club player photo above, a low-sensitivity image behind an unguessable
+    UUID."""
+    player = await db.get(ScoutedPlayer, _parse_uuid(scouted_player_id))
     if not player or not player.photo_data:
         raise HTTPException(404, "No photo")
     return Response(
