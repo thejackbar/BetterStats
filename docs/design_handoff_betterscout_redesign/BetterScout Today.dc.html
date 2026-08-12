@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#0a0d14; color:#e6e8ef; font-family:'Geist','Inter',system-ui,sans-serif; }
+  a { color:#e6e8ef; }
+  a:hover { color:#16c784; }
+</style>
+</helmet>
+
+<div style="display:flex; flex-direction:column; gap:0; background:#0a0d14; color:#e6e8ef; font-family:'Geist','Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;">
+
+  <div style="display:flex; flex-direction:column; gap:6px; padding:40px 40px 28px;">
+    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#5b6072;">Recreation · frontend/src/scout/*</div>
+    <div style="font-size:26px; font-weight:700; letter-spacing:-0.01em;">BetterScout as it is today</div>
+    <div style="font-size:14px; color:#8a90a2; max-width:720px; text-wrap:pretty;">Every screen currently in <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#e6e8ef;">frontend/src/scout</span>, rebuilt from source — Press Box dark theme, house green accent, the top-tab chrome BetterScout uses instead of the module sidebar. Sample data: Applecross Cricket Club.</div>
+  </div>
+
+  <!-- ═══ 01 LOGIN ═══ -->
+  <div data-screen-label="01 Login" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">01 · Login</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/login · ScoutLogin.jsx</span>
+    </div>
+    <div style="min-height:520px; display:flex; align-items:center; justify-content:center; padding:16px;">
+      <form style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:24px; width:100%; max-width:384px; display:flex; flex-direction:column; gap:16px;">
+        <div>
+          <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Better<span style="background:linear-gradient(135deg,#16c784 0%,#3b82f6 100%); -webkit-background-clip:text; background-clip:text; color:transparent;">Scout</span></h1>
+          <p style="margin:0; font-size:14px; color:#5b6072;">Scout org sign in</p>
+        </div>
+        <label style="display:block; font-size:14px;">
+          <span style="color:#8a90a2;">Username</span>
+          <input value="scout@wilsonsports.au" style="margin-top:4px; width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:8px 12px; color:#e6e8ef; font-family:inherit; font-size:14px;">
+        </label>
+        <label style="display:block; font-size:14px;">
+          <span style="color:#8a90a2;">Password</span>
+          <input type="password" value="••••••••••" style="margin-top:4px; width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:8px 12px; color:#e6e8ef; font-family:inherit; font-size:14px;">
+        </label>
+        <button style="width:100%; padding:8px 0; border:0; border-radius:4px; font-weight:600; background:#16c784; color:#000; font-family:inherit; font-size:14px; cursor:pointer;">Sign in</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ═══ 02 DASHBOARD ═══ -->
+  <div data-screen-label="02 Dashboard" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">02 · Dashboard</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app · ScoutDashboard.jsx + ScoutLayout.jsx</span>
+    </div>
+
+    <header style="border-bottom:1px solid #1d2331; background:#10141d;">
+      <div style="max-width:1280px; margin:0 auto; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
+        <div style="display:flex; align-items:baseline; gap:12px;">
+          <span style="font-weight:700;">Better<span style="background:linear-gradient(135deg,#16c784 0%,#3b82f6 100%); -webkit-background-clip:text; background-clip:text; color:transparent;">Scout</span></span>
+          <span style="font-size:14px; color:#8a90a2;">Wilson Sports Management</span>
+        </div>
+        <button style="background:none; border:0; font-size:14px; color:#8a90a2; font-family:inherit; cursor:pointer;">Log out</button>
+      </div>
+      <nav style="max-width:1280px; margin:0 auto; padding:0 16px; display:flex; gap:16px; font-size:14px;">
+        <span style="padding:8px 0; border-bottom:2px solid #16c784; color:#e6e8ef;">Dashboard</span>
+        <span style="padding:8px 0; border-bottom:2px solid transparent; color:#8a90a2;">Discover</span>
+        <span style="padding:8px 0; border-bottom:2px solid transparent; color:#8a90a2;">Watchlists</span>
+        <span style="padding:8px 0; border-bottom:2px solid transparent; color:#8a90a2;">My players</span>
+        <span style="padding:8px 0; border-bottom:2px solid transparent; color:#8a90a2;">Compare</span>
+      </nav>
+    </header>
+
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div>
+        <h1 style="margin:0; font-size:24px; line-height:32px; font-weight:700;">Welcome to BetterScout</h1>
+        <p style="margin:0; color:#8a90a2;">Signed in as <span style="color:#e6e8ef;">Dan Wilson</span> at <span style="color:#e6e8ef;">Wilson Sports Management</span>.</p>
+      </div>
+
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; font-size:14px; margin-bottom:8px;">
+          <span style="color:#8a90a2;">Agency plan · 38 / 50 players tracked</span>
+        </div>
+        <div style="height:6px; border-radius:9999px; background:#161b27; overflow:hidden;">
+          <div style="height:100%; width:76%; border-radius:9999px; background:#16c784;"></div>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+          <div style="font-weight:500;">Discover players</div>
+          <div style="font-size:14px; color:#8a90a2; margin-top:2px;">Search any Australian club’s roster and stats.</div>
+        </div>
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+          <div style="font-weight:500;">Watchlists</div>
+          <div style="font-size:14px; color:#8a90a2; margin-top:2px;">Kanban boards for shortlisting and tracking.</div>
+        </div>
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+          <div style="font-weight:500;">My players</div>
+          <div style="font-size:14px; color:#8a90a2; margin-top:2px;">Everyone this org is tracking.</div>
+        </div>
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+          <div style="font-weight:500;">Compare</div>
+          <div style="font-size:14px; color:#8a90a2; margin-top:2px;">Side-by-side career stats for two or more players.</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 03 DISCOVER — search ═══ -->
+  <div data-screen-label="03 Discover search" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">03 · Discover — club search</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/discover · ScoutDiscover.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div>
+        <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Discover players</h1>
+        <p style="margin:0; font-size:14px; color:#8a90a2;">Search any Australian club to browse its roster and stats.</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input value="applecross" style="flex:1; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:8px 12px; color:#e6e8ef; font-family:inherit; font-size:14px;">
+        <button style="padding:8px 16px; border:0; border-radius:4px; font-weight:600; background:#16c784; color:#000; font-family:inherit; font-size:14px; cursor:pointer;">Search</button>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <div style="padding:12px 16px; font-size:14px;">Applecross Cricket Club</div>
+        <div style="padding:12px 16px; font-size:14px; border-top:1px solid #1d2331;">Applecross Districts Junior Cricket Club</div>
+        <div style="padding:12px 16px; font-size:14px; border-top:1px solid #1d2331;">Ardross Applecross Cricket Club (Inc)</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 04 DISCOVER — roster ═══ -->
+  <div data-screen-label="04 Discover roster" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">04 · Discover — roster, career window, filters, expanded row</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">ScoutDiscover.jsx · seasonRollup.js</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div>
+        <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Discover players</h1>
+        <p style="margin:0; font-size:14px; color:#8a90a2;">Search any Australian club to browse its roster and stats.</p>
+      </div>
+
+      <div style="display:flex; flex-direction:column; gap:12px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h2 style="margin:0; font-size:16px; font-weight:600;">Applecross Cricket Club</h2>
+          <span style="font-size:14px; color:#8a90a2;">← Back to search</span>
+        </div>
+
+        <div style="display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:12px;">
+          <span style="color:#8a90a2;">Grades:</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">1st Grade</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">2nd Grade</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">3rd Grade</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">4th Grade</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">T20 Cup</span>
+          <span style="padding:2px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Under 17s</span>
+        </div>
+
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Career window</span>
+            <span style="font-size:12px; padding:4px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">Last 1 season</span>
+            <span style="font-size:12px; padding:4px 10px; border-radius:9999px; border:1px solid #16c784; color:#16c784;">Last 2 seasons</span>
+            <span style="font-size:12px; padding:4px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">Last 5 seasons</span>
+            <span style="font-size:12px; padding:4px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">Full window</span>
+          </div>
+          <p style="margin:0; font-size:12px; color:#8a90a2;">Stats and filters below are for 2024–2025 only.</p>
+        </div>
+
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Filters</span>
+            <span style="font-size:12px; color:#8a90a2; text-decoration:underline;">Clear filters</span>
+          </div>
+          <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px;">
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Matches</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Runs</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Avg</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" value="35" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">SR</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Wkts</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Bowl avg</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+            <div>
+              <label style="display:block; font-size:12px; color:#8a90a2; margin-bottom:4px;">Econ</label>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <input placeholder="Min" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+                <span style="color:#8a90a2; font-size:12px;">–</span>
+                <input placeholder="Max" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <p style="margin:0; font-size:12px; color:#8a90a2;">Showing 9 of 47 players</p>
+
+        <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+          <table style="width:100%; font-size:14px; border-collapse:collapse;">
+            <thead>
+              <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">
+                <th style="padding:8px 12px; text-align:left; font-weight:400;">Player</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">Matches</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">Runs</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400; color:#16c784;">Avg ↓</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">SR</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">Wkts</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">Bowl avg</th>
+                <th style="padding:8px 12px; text-align:right; font-weight:400;">Econ</th>
+                <th style="padding:8px 12px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Callum Rasheed</td>
+                <td style="padding:8px 12px; text-align:right;">26</td>
+                <td style="padding:8px 12px; text-align:right;">1184</td>
+                <td style="padding:8px 12px; text-align:right;">59.2</td>
+                <td style="padding:8px 12px; text-align:right;">78.41</td>
+                <td style="padding:8px 12px; text-align:right;">4</td>
+                <td style="padding:8px 12px; text-align:right;">44.25</td>
+                <td style="padding:8px 12px; text-align:right;">5.31</td>
+                <td style="padding:8px 12px; text-align:right;">
+                  <span style="font-size:12px; display:flex; align-items:center; justify-content:flex-end; gap:8px;"><span style="color:#16c784;">Added ✓</span><span style="color:#8a90a2; text-decoration:underline;">View profile →</span></span>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331; background:rgba(22,27,39,0.3);">
+                <td colspan="9" style="padding:12px;">
+                  <div style="display:flex; flex-direction:column; gap:12px;">
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                      <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:16px; font-size:14px; flex:1;">
+                        <div>
+                          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Best figures</div>
+                          <div style="font-size:14px; font-weight:600;">2/18</div>
+                        </div>
+                        <div>
+                          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">High score</div>
+                          <div style="font-size:14px; font-weight:600;">147*</div>
+                        </div>
+                        <div>
+                          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">50s / 100s</div>
+                          <div style="font-size:14px; font-weight:600;">7 / 3</div>
+                        </div>
+                        <div>
+                          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Catches</div>
+                          <div style="font-size:14px; font-weight:600;">14</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <table style="width:100%; font-size:12px; border-collapse:collapse;">
+                        <thead>
+                          <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; text-transform:uppercase; color:#8a90a2;">
+                            <th style="text-align:left; padding:4px 8px; font-weight:400;">Season</th>
+                            <th style="text-align:right; padding:4px 8px; font-weight:400;">Matches</th>
+                            <th style="text-align:right; padding:4px 8px; font-weight:400;">Runs</th>
+                            <th style="text-align:right; padding:4px 8px; font-weight:400;">Avg</th>
+                            <th style="text-align:right; padding:4px 8px; font-weight:400;">Wkts</th>
+                            <th style="text-align:right; padding:4px 8px; font-weight:400;">Econ</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr style="border-bottom:1px solid #1d2331;"><td style="padding:4px 8px;">2025</td><td style="padding:4px 8px; text-align:right;">13</td><td style="padding:4px 8px; text-align:right;">641</td><td style="padding:4px 8px; text-align:right;">64.1</td><td style="padding:4px 8px; text-align:right;">2</td><td style="padding:4px 8px; text-align:right;">5.12</td></tr>
+                          <tr style="border-bottom:1px solid #1d2331;"><td style="padding:4px 8px;">2024</td><td style="padding:4px 8px; text-align:right;">13</td><td style="padding:4px 8px; text-align:right;">543</td><td style="padding:4px 8px; text-align:right;">54.3</td><td style="padding:4px 8px; text-align:right;">2</td><td style="padding:4px 8px; text-align:right;">5.49</td></tr>
+                          <tr style="border-bottom:1px solid #1d2331;"><td style="padding:4px 8px;">2023</td><td style="padding:4px 8px; text-align:right;">14</td><td style="padding:4px 8px; text-align:right;">402</td><td style="padding:4px 8px; text-align:right;">33.5</td><td style="padding:4px 8px; text-align:right;">5</td><td style="padding:4px 8px; text-align:right;">4.88</td></tr>
+                          <tr><td style="padding:4px 8px;">2022</td><td style="padding:4px 8px; text-align:right;">11</td><td style="padding:4px 8px; text-align:right;">288</td><td style="padding:4px 8px; text-align:right;">26.18</td><td style="padding:4px 8px; text-align:right;">1</td><td style="padding:4px 8px; text-align:right;">6.02</td></tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Harrison Tolley</td>
+                <td style="padding:8px 12px; text-align:right;">24</td>
+                <td style="padding:8px 12px; text-align:right;">903</td>
+                <td style="padding:8px 12px; text-align:right;">47.53</td>
+                <td style="padding:8px 12px; text-align:right;">71.02</td>
+                <td style="padding:8px 12px; text-align:right;">1</td>
+                <td style="padding:8px 12px; text-align:right;">61.0</td>
+                <td style="padding:8px 12px; text-align:right;">6.1</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Ravi Doshi</td>
+                <td style="padding:8px 12px; text-align:right;">25</td>
+                <td style="padding:8px 12px; text-align:right;">742</td>
+                <td style="padding:8px 12px; text-align:right;">43.65</td>
+                <td style="padding:8px 12px; text-align:right;">64.88</td>
+                <td style="padding:8px 12px; text-align:right;">31</td>
+                <td style="padding:8px 12px; text-align:right;">21.42</td>
+                <td style="padding:8px 12px; text-align:right;">3.94</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Ethan Bramwell</td>
+                <td style="padding:8px 12px; text-align:right;">22</td>
+                <td style="padding:8px 12px; text-align:right;">688</td>
+                <td style="padding:8px 12px; text-align:right;">40.47</td>
+                <td style="padding:8px 12px; text-align:right;">88.31</td>
+                <td style="padding:8px 12px; text-align:right;">9</td>
+                <td style="padding:8px 12px; text-align:right;">33.11</td>
+                <td style="padding:8px 12px; text-align:right;">5.86</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Jack Mendonca</td>
+                <td style="padding:8px 12px; text-align:right;">19</td>
+                <td style="padding:8px 12px; text-align:right;">604</td>
+                <td style="padding:8px 12px; text-align:right;">40.26</td>
+                <td style="padding:8px 12px; text-align:right;">73.44</td>
+                <td style="padding:8px 12px; text-align:right;">0</td>
+                <td style="padding:8px 12px; text-align:right;">—</td>
+                <td style="padding:8px 12px; text-align:right;">—</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Sam Kirkbride</td>
+                <td style="padding:8px 12px; text-align:right;">26</td>
+                <td style="padding:8px 12px; text-align:right;">589</td>
+                <td style="padding:8px 12px; text-align:right;">39.26</td>
+                <td style="padding:8px 12px; text-align:right;">61.7</td>
+                <td style="padding:8px 12px; text-align:right;">18</td>
+                <td style="padding:8px 12px; text-align:right;">26.72</td>
+                <td style="padding:8px 12px; text-align:right;">4.31</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Nikhil Arora</td>
+                <td style="padding:8px 12px; text-align:right;">21</td>
+                <td style="padding:8px 12px; text-align:right;">521</td>
+                <td style="padding:8px 12px; text-align:right;">37.21</td>
+                <td style="padding:8px 12px; text-align:right;">69.19</td>
+                <td style="padding:8px 12px; text-align:right;">27</td>
+                <td style="padding:8px 12px; text-align:right;">19.85</td>
+                <td style="padding:8px 12px; text-align:right;">3.72</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr style="border-bottom:1px solid #1d2331;">
+                <td style="padding:8px 12px;">Toby Ellery</td>
+                <td style="padding:8px 12px; text-align:right;">17</td>
+                <td style="padding:8px 12px; text-align:right;">436</td>
+                <td style="padding:8px 12px; text-align:right;">36.33</td>
+                <td style="padding:8px 12px; text-align:right;">94.16</td>
+                <td style="padding:8px 12px; text-align:right;">6</td>
+                <td style="padding:8px 12px; text-align:right;">38.5</td>
+                <td style="padding:8px 12px; text-align:right;">6.44</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+              <tr>
+                <td style="padding:8px 12px;">Lachlan Peake</td>
+                <td style="padding:8px 12px; text-align:right;">23</td>
+                <td style="padding:8px 12px; text-align:right;">392</td>
+                <td style="padding:8px 12px; text-align:right;">35.64</td>
+                <td style="padding:8px 12px; text-align:right;">58.03</td>
+                <td style="padding:8px 12px; text-align:right;">44</td>
+                <td style="padding:8px 12px; text-align:right;">16.09</td>
+                <td style="padding:8px 12px; text-align:right;">3.41</td>
+                <td style="padding:8px 12px; text-align:right;"><span style="font-size:12px; padding:4px 8px; border-radius:4px; background:#16c784; color:#000;">Add</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 05 WATCHLISTS ═══ -->
+  <div data-screen-label="05 Watchlists" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">05 · Watchlists</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/watchlists · ScoutWatchlists.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div>
+        <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Watchlists</h1>
+        <p style="margin:0; font-size:14px; color:#8a90a2;">Boards for organising who you're tracking.</p>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <input placeholder="New watchlist name…" style="flex:1; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:8px 12px; color:#e6e8ef; font-family:inherit; font-size:14px;">
+        <button style="padding:8px 16px; border:0; border-radius:4px; font-weight:600; background:#16c784; color:#000; opacity:0.5; font-family:inherit; font-size:14px;">New watchlist</button>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <div style="padding:12px 16px; font-weight:500;">UK 2026/27 overseas placements</div>
+        <div style="padding:12px 16px; font-weight:500; border-top:1px solid #1d2331;">WA Premier — top-order targets</div>
+        <div style="padding:12px 16px; font-weight:500; border-top:1px solid #1d2331;">Junior pathway — Applecross feeder clubs</div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 06 BOARD ═══ -->
+  <div data-screen-label="06 Watchlist board" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">06 · Watchlist board</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/watchlists/:id · ScoutWatchlistBoard.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:16px;">
+      <span style="font-size:14px; color:#8a90a2;">← Watchlists</span>
+      <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">UK 2026/27 overseas placements</h1>
+      <div style="display:flex; gap:16px; padding-bottom:16px;">
+        <div style="flex:none; width:256px; border-radius:8px; border:1px solid #1d2331; background:#10141d; padding:8px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px;">
+            <span style="font-weight:600; font-size:14px;">Longlist</span>
+            <span style="display:flex; align-items:center; gap:8px; font-size:12px; color:#8a90a2;"><span>3</span><span>✕</span></span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; min-height:60px;">
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px;">
+              <div style="font-weight:500; font-size:14px;">Harrison Tolley</div>
+              <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+              <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">top order</span>
+              </div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px;">
+              <div style="font-weight:500; font-size:14px;">Toby Ellery</div>
+              <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+              <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">u21</span>
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">aggressive</span>
+              </div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px;">
+              <div style="font-weight:500; font-size:14px;">Nikhil Arora</div>
+              <div style="font-size:12px; color:#8a90a2;">Melville Cricket Club</div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:none; width:256px; border-radius:8px; border:1px solid #16c784; background:#161b27; padding:8px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px;">
+            <span style="font-weight:600; font-size:14px;">Contacted</span>
+            <span style="display:flex; align-items:center; gap:8px; font-size:12px; color:#8a90a2;"><span>2</span><span>✕</span></span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; min-height:60px;">
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px;">
+              <div style="font-weight:500; font-size:14px;">Ravi Doshi</div>
+              <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+              <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">all-rounder</span>
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">visa ok</span>
+              </div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px; box-shadow:0 10px 15px -3px rgba(0,0,0,0.5);">
+              <div style="font-weight:500; font-size:14px;">Sam Kirkbride</div>
+              <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:none; width:256px; border-radius:8px; border:1px solid #1d2331; background:#10141d; padding:8px; display:flex; flex-direction:column; gap:8px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; padding:4px;">
+            <span style="font-weight:600; font-size:14px;">Offer out</span>
+            <span style="display:flex; align-items:center; gap:8px; font-size:12px; color:#8a90a2;"><span>1</span><span>✕</span></span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; min-height:60px;">
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px;">
+              <div style="font-weight:500; font-size:14px;">Callum Rasheed</div>
+              <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+              <div style="display:flex; flex-wrap:wrap; gap:4px; margin-top:6px;">
+                <span style="font-size:10px; padding:2px 6px; border-radius:9999px; background:#161b27; color:#8a90a2;">priority</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div style="flex:none; width:256px;">
+          <input placeholder="+ Add column" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:8px 12px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 07 CARD EDITOR ═══ -->
+  <div data-screen-label="07 Card editor" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">07 · Card editor (modal)</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">ScoutCardEditor.jsx</span>
+    </div>
+    <div style="background:rgba(0,0,0,0.6); padding:16px; display:flex; justify-content:center;">
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; width:100%; max-width:512px; padding:20px; display:flex; flex-direction:column; gap:16px;">
+        <div style="display:flex; align-items:center; justify-content:space-between;">
+          <h2 style="margin:0; font-weight:700; font-size:18px;">Ravi Doshi</h2>
+          <span style="color:#8a90a2;">✕</span>
+        </div>
+        <div style="border:1px solid #1d2331; border-radius:4px; padding:12px; display:flex; flex-direction:column; gap:8px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Share</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input readonly value="https://betterat.cricket/betterscout/share/9f3c1a7e" style="flex:1; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:12px; font-family:'JetBrains Mono',monospace; color:#e6e8ef;">
+            <span style="flex:none; font-size:12px; padding:6px 8px; border-radius:4px; border:1px solid #1d2331; color:#e6e8ef;">Copy</span>
+          </div>
+          <div style="display:flex; gap:12px; font-size:12px;">
+            <span style="color:#8a90a2;">Regenerate</span>
+            <span style="color:#ef5b5b;">Turn off sharing</span>
+          </div>
+        </div>
+        <div>
+          <label style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Tags</label>
+          <div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+            <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; display:flex; align-items:center; gap:4px;">all-rounder <span style="color:#8a90a2;">✕</span></span>
+            <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; display:flex; align-items:center; gap:4px;">visa ok <span style="color:#8a90a2;">✕</span></span>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input placeholder="Add a tag…" style="flex:1; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:4px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+            <span style="font-size:14px; padding:4px 12px; border-radius:4px; border:1px solid #1d2331;">Add</span>
+          </div>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Role</span>
+            <div style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px;">All-rounder</div>
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Batting hand</span>
+            <div style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px;">Right hand</div>
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Bowling</span>
+            <div style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px;">Right arm off spin</div>
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Region</span>
+            <div style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px;">WA</div>
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Level</span>
+            <div style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px;">Premier Cricket</div>
+          </label>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:12px;">
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Transfer preference</span>
+            <input value="North of England preferred" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Visa / eligibility</span>
+            <input value="Has ancestry visa" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Agent / representative contact</span>
+            <input placeholder="e.g. agent@example.com" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Availability</span>
+            <input value="Available from October 2026" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Fee expectations</span>
+            <input value="£400/week + accommodation" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">
+          </label>
+          <label style="display:block;">
+            <span style="display:block; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Notes</span>
+            <textarea rows="3" style="width:100%; box-sizing:border-box; background:#161b27; border:1px solid #1d2331; border-radius:4px; padding:6px 8px; font-size:14px; color:#e6e8ef; font-family:inherit;">Watched round 6 v Fremantle: bowled 8 tight overs into the breeze, then 42* off 38. Handles pace well.</textarea>
+          </label>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding-top:8px;">
+          <span style="font-size:14px; color:#ef5b5b;">Remove from this watchlist</span>
+          <div style="display:flex; gap:8px;">
+            <span style="padding:6px 12px; border-radius:4px; border:1px solid #1d2331; font-size:14px;">Cancel</span>
+            <span style="padding:6px 12px; border-radius:4px; background:#16c784; color:#000; font-size:14px; font-weight:600;">Save</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 08 MY PLAYERS ═══ -->
+  <div data-screen-label="08 My players" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">08 · My players</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/players · ScoutPlayers.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+        <div>
+          <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">My players</h1>
+          <p style="margin:0; font-size:14px; color:#8a90a2;">Everyone this Scout Org has added.</p>
+        </div>
+        <span style="flex:none; font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2; font-family:'JetBrains Mono',monospace;">38 / 50</span>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px;">
+          <div>
+            <div style="font-weight:500;">Callum Rasheed</div>
+            <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+          </div>
+          <div style="font-size:14px; color:#8a90a2; font-family:'JetBrains Mono',monospace;">1184 runs · 4 wkts</div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid #1d2331;">
+          <div>
+            <div style="font-weight:500;">Ravi Doshi</div>
+            <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+          </div>
+          <div style="font-size:14px; color:#8a90a2; font-family:'JetBrains Mono',monospace;">742 runs · 31 wkts</div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid #1d2331;">
+          <div>
+            <div style="font-weight:500;">Sam Kirkbride</div>
+            <div style="font-size:12px; color:#8a90a2;">Applecross Cricket Club</div>
+          </div>
+          <div style="font-size:14px; color:#8a90a2; font-family:'JetBrains Mono',monospace;">589 runs · 18 wkts</div>
+        </div>
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:12px 16px; border-top:1px solid #1d2331;">
+          <div>
+            <div style="font-weight:500;">Josh Whitehorn</div>
+            <div style="font-size:12px; color:#8a90a2;">No club recorded <span style="margin-left:8px; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2;">Manual</span></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 09 PLAYER PROFILE ═══ -->
+  <div data-screen-label="09 Player profile" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">09 · Player profile</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/players/:id · ScoutPlayerProfile.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <span style="font-size:14px; color:#8a90a2;">← My players</span>
+      <div style="display:flex; align-items:flex-start; justify-content:space-between;">
+        <div>
+          <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Ravi Doshi</h1>
+          <p style="margin:0; font-size:14px; color:#8a90a2;">Applecross Cricket Club</p>
+        </div>
+        <span style="font-size:14px; padding:6px 12px; border-radius:4px; border:1px solid #1d2331; color:#e6e8ef;">Refresh stats</span>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px; display:grid; grid-template-columns:repeat(4,1fr); gap:16px; font-size:14px;">
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Matches</div><div style="font-size:18px; font-weight:600;">98</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Runs</div><div style="font-size:18px; font-weight:600;">2614</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Average</div><div style="font-size:18px; font-weight:600;">33.51</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Strike rate</div><div style="font-size:18px; font-weight:600;">62.88</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Wickets</div><div style="font-size:18px; font-weight:600;">147</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Economy</div><div style="font-size:18px; font-weight:600;">3.88</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Best figures</div><div style="font-size:18px; font-weight:600;">6/31</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Catches</div><div style="font-size:18px; font-weight:600;">41</div></div>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <table style="width:100%; font-size:14px; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">
+              <th style="text-align:left; padding:8px 12px; font-weight:400;">Season</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Matches</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Runs</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Avg</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Wkts</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Econ</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2025</td><td style="padding:8px 12px; text-align:right;">13</td><td style="padding:8px 12px; text-align:right;">402</td><td style="padding:8px 12px; text-align:right;">44.67</td><td style="padding:8px 12px; text-align:right;">18</td><td style="padding:8px 12px; text-align:right;">3.71</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2024</td><td style="padding:8px 12px; text-align:right;">12</td><td style="padding:8px 12px; text-align:right;">340</td><td style="padding:8px 12px; text-align:right;">42.5</td><td style="padding:8px 12px; text-align:right;">13</td><td style="padding:8px 12px; text-align:right;">4.18</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2023</td><td style="padding:8px 12px; text-align:right;">14</td><td style="padding:8px 12px; text-align:right;">361</td><td style="padding:8px 12px; text-align:right;">30.08</td><td style="padding:8px 12px; text-align:right;">21</td><td style="padding:8px 12px; text-align:right;">3.64</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2022</td><td style="padding:8px 12px; text-align:right;">11</td><td style="padding:8px 12px; text-align:right;">288</td><td style="padding:8px 12px; text-align:right;">28.8</td><td style="padding:8px 12px; text-align:right;">17</td><td style="padding:8px 12px; text-align:right;">3.92</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2021</td><td style="padding:8px 12px; text-align:right;">13</td><td style="padding:8px 12px; text-align:right;">311</td><td style="padding:8px 12px; text-align:right;">31.1</td><td style="padding:8px 12px; text-align:right;">19</td><td style="padding:8px 12px; text-align:right;">3.81</td></tr>
+            <tr><td style="padding:8px 12px;">2020</td><td style="padding:8px 12px; text-align:right;">9</td><td style="padding:8px 12px; text-align:right;">204</td><td style="padding:8px 12px; text-align:right;">25.5</td><td style="padding:8px 12px; text-align:right;">12</td><td style="padding:8px 12px; text-align:right;">4.02</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 10 COMPARE ═══ -->
+  <div data-screen-label="10 Compare" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">10 · Compare</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/app/compare · ScoutCompare.jsx</span>
+    </div>
+    <main style="max-width:1280px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px; display:flex; flex-direction:column; gap:24px;">
+      <div>
+        <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Compare players</h1>
+        <p style="margin:0; font-size:14px; color:#8a90a2;">Pick two or more tracked players to see them side by side.</p>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+          <span style="font-size:14px; padding:6px 12px; border-radius:9999px; border:1px solid #16c784; background:#16c784; color:#000; font-weight:500;">Callum Rasheed</span>
+          <span style="font-size:14px; padding:6px 12px; border-radius:9999px; border:1px solid #16c784; background:#16c784; color:#000; font-weight:500;">Ravi Doshi</span>
+          <span style="font-size:14px; padding:6px 12px; border-radius:9999px; border:1px solid #1d2331;">Sam Kirkbride</span>
+          <span style="font-size:14px; padding:6px 12px; border-radius:9999px; border:1px solid #1d2331;">Harrison Tolley</span>
+          <span style="font-size:14px; padding:6px 12px; border-radius:9999px; border:1px solid #1d2331;">Josh Whitehorn</span>
+        </div>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <table style="width:100%; font-size:14px; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">
+              <th style="text-align:left; padding:8px 12px; font-weight:400;">Career totals</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Callum Rasheed</th>
+              <th style="text-align:right; padding:8px 12px; font-weight:400;">Ravi Doshi</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Matches</td><td style="padding:8px 12px; text-align:right;">74</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">98</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Runs</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">3218</td><td style="padding:8px 12px; text-align:right;">2614</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Average</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">48.03</td><td style="padding:8px 12px; text-align:right;">33.51</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Strike rate</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">76.12</td><td style="padding:8px 12px; text-align:right;">62.88</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Wickets</td><td style="padding:8px 12px; text-align:right;">9</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">147</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Economy</td><td style="padding:8px 12px; text-align:right; background:rgba(239,68,68,0.14); color:#fca5a5;">5.44</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">3.88</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Bowling average</td><td style="padding:8px 12px; text-align:right; background:rgba(239,68,68,0.14); color:#fca5a5;">42.11</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">19.74</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px; color:#8a90a2;">Best figures</td><td style="padding:8px 12px; text-align:right;">2/18</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">6/31</td></tr>
+            <tr><td style="padding:8px 12px; color:#8a90a2;">Catches</td><td style="padding:8px 12px; text-align:right;">33</td><td style="padding:8px 12px; text-align:right; background:rgba(34,197,94,0.14); color:#86efac;">41</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+        <table style="width:100%; font-size:14px; border-collapse:collapse;">
+          <thead>
+            <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">
+              <th style="text-align:left; padding:8px 12px; font-weight:400;">Season</th>
+              <th colspan="3" style="text-align:center; padding:8px 12px; font-weight:400; border-left:1px solid #1d2331;">Callum Rasheed</th>
+              <th colspan="3" style="text-align:center; padding:8px 12px; font-weight:400; border-left:1px solid #1d2331;">Ravi Doshi</th>
+            </tr>
+            <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">
+              <th></th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400; border-left:1px solid #1d2331;">Runs</th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400;">Avg</th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400;">Wkts</th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400; border-left:1px solid #1d2331;">Runs</th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400;">Avg</th>
+              <th style="text-align:right; padding:4px 8px; font-weight:400;">Wkts</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2025</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">641</td><td style="padding:8px; text-align:right;">64.1</td><td style="padding:8px; text-align:right;">2</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">402</td><td style="padding:8px; text-align:right;">44.67</td><td style="padding:8px; text-align:right;">18</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2024</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">543</td><td style="padding:8px; text-align:right;">54.3</td><td style="padding:8px; text-align:right;">2</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">340</td><td style="padding:8px; text-align:right;">42.5</td><td style="padding:8px; text-align:right;">13</td></tr>
+            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:8px 12px;">2023</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">402</td><td style="padding:8px; text-align:right;">33.5</td><td style="padding:8px; text-align:right;">5</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">361</td><td style="padding:8px; text-align:right;">30.08</td><td style="padding:8px; text-align:right;">21</td></tr>
+            <tr><td style="padding:8px 12px;">2022</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">288</td><td style="padding:8px; text-align:right;">26.18</td><td style="padding:8px; text-align:right;">1</td><td style="padding:8px; text-align:right; border-left:1px solid #1d2331;">288</td><td style="padding:8px; text-align:right;">28.8</td><td style="padding:8px; text-align:right;">17</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══ 11 PUBLIC SHARE ═══ -->
+  <div data-screen-label="11 Public share" style="display:flex; flex-direction:column; gap:0;">
+    <div style="display:flex; align-items:baseline; gap:12px; padding:10px 40px; border-top:1px solid #1d2331; border-bottom:1px solid #1d2331; background:#10141d;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">11 · Public share (no login)</span>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">/betterscout/share/:token · ScoutPublicShare.jsx</span>
+    </div>
+    <header style="border-bottom:1px solid #1d2331; background:#10141d;">
+      <div style="max-width:768px; margin:0 auto; padding:12px 16px; display:flex; align-items:center; justify-content:space-between;">
+        <span style="font-weight:700;">Better<span style="background:linear-gradient(135deg,#16c784 0%,#3b82f6 100%); -webkit-background-clip:text; background-clip:text; color:transparent;">Scout</span></span>
+        <span style="font-size:12px; color:#8a90a2; text-transform:uppercase; font-family:'JetBrains Mono',monospace;">Shared player</span>
+      </div>
+    </header>
+    <main style="max-width:768px; width:100%; margin:0 auto; box-sizing:border-box; padding:32px 16px 56px; display:flex; flex-direction:column; gap:24px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <div>
+          <h1 style="margin:0; font-size:20px; line-height:28px; font-weight:700;">Ravi Doshi</h1>
+          <p style="margin:0; font-size:14px; color:#8a90a2;">Applecross Cricket Club</p>
+        </div>
+        <span style="font-size:14px; padding:6px 12px; border-radius:4px; border:1px solid #1d2331;">Print / Save PDF</span>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">All-rounder</span>
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Right hand</span>
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Right arm off spin</span>
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">WA</span>
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Premier Cricket</span>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:6px;">
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; border:1px solid #16c784; color:#16c784;">all-rounder</span>
+        <span style="font-size:12px; padding:4px 8px; border-radius:9999px; border:1px solid #16c784; color:#16c784;">visa ok</span>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2; margin-bottom:4px;">Notes</div>
+        <p style="margin:0; font-size:14px; white-space:pre-wrap;">Watched round 6 v Fremantle: bowled 8 tight overs into the breeze, then 42* off 38. Handles pace well.</p>
+      </div>
+      <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px; display:grid; grid-template-columns:repeat(4,1fr); gap:16px; font-size:14px;">
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Matches</div><div style="font-size:18px; font-weight:600;">98</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Runs</div><div style="font-size:18px; font-weight:600;">2614</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Average</div><div style="font-size:18px; font-weight:600;">33.51</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Strike rate</div><div style="font-size:18px; font-weight:600;">62.88</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Wickets</div><div style="font-size:18px; font-weight:600;">147</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Economy</div><div style="font-size:18px; font-weight:600;">3.88</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Best figures</div><div style="font-size:18px; font-weight:600;">6/31</div></div>
+        <div><div style="font-family:'JetBrains Mono',monospace; font-size:12px; text-transform:uppercase; color:#8a90a2;">Catches</div><div style="font-size:18px; font-weight:600;">41</div></div>
+      </div>
+    </main>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

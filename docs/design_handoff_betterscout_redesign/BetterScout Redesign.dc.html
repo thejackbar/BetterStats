@@ -1,0 +1,1521 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  body { margin:0; background:#07090f; color:#e6e8ef; font-family:'Geist','Inter',system-ui,sans-serif; }
+  a { color:#e6e8ef; text-decoration:none; }
+  a:hover { color:#C026D3; }
+</style>
+</helmet>
+
+<div style="display:flex; flex-direction:column; gap:52px; padding:44px 44px 90px; background:#07090f; color:#e6e8ef; font-family:'Geist','Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased;">
+
+  <div style="display:flex; flex-direction:column; gap:8px; max-width:840px;">
+    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.14em; text-transform:uppercase; color:#5b6072;">Turn 1 · Redesign onto house module chrome</div>
+    <div style="font-size:28px; font-weight:700; letter-spacing:-0.015em;">BetterScout, wearing the module shell</div>
+    <div style="font-size:14px; color:#8a90a2; text-wrap:pretty;">Press Box tokens, the 232px <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#e6e8ef;">ModuleLayout</span> sidebar every other module uses, and a scout brand of magenta-violet <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#e879f9;">#C026D3</span> — violet family like BetterIQ, its analytical cousin, without wearing IQ's exact accent. Player photos have a reserved slot everywhere a player appears, falling back to the initials avatar the club-side comparison page already ships. Marks in the module switcher are the real <span style="font-family:'JetBrains Mono',monospace; font-size:13px; color:#e6e8ef;">assets/modules</span> SVGs; BetterScout has no mark upstream yet, so its lockup uses an accent tile as a placeholder. Sample data: Applecross Cricket Club, tracked by a placement agency.</div>
+    <div style="display:flex; gap:20px; margin-top:6px; font-size:13px; color:#8a90a2;">
+      <a href="#1a">1a Overview</a><a href="#1b">1b Discover</a><a href="#1c">1c Player profile</a><a href="#1d">1d Compare</a><a href="#1e">1e Milestones</a><a href="#1f">1f Settings</a>
+    </div>
+  </div>
+
+  <!-- ════════ 1a OVERVIEW ════════ -->
+  <div id="1a" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1a</span>
+      <span style="font-size:15px; font-weight:600;">Overview — a scouting pipeline, not four link tiles</span>
+    </div>
+
+    <div data-screen-label="1a Overview" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div style="min-width:0;">
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:9px; padding:1px 5px; border-radius:9999px; background:rgba(245,181,66,0.18); color:#f5b542;">38</span></span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:9px; padding:1px 5px; border-radius:9999px; background:rgba(192,38,211,0.18); color:#e879f9;">6</span></span>
+          <div style="padding:15px 16px 4px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; color:#5b6072; text-transform:uppercase;">Not built yet</div>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; color:#3a3f50;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Player name search</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; color:#3a3f50;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M13 3L5 13h6l-1 8 8-10h-6z"></path></svg>Hot form feed</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px;">
+          <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.12em; text-transform:uppercase; color:#3a3f50; margin-bottom:6px;">Switch module</div>
+          <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+            <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11.5px; line-height:1; white-space:nowrap; font-weight:500; color:#5b6072; background:transparent; border:1px solid transparent;"><img src="frontend/src/assets/modules/betterstats.svg" alt="" style="width:14px; height:14px; border-radius:4px; flex:none;">Stats</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11.5px; line-height:1; white-space:nowrap; font-weight:500; color:#5b6072; background:transparent; border:1px solid transparent;"><img src="frontend/src/assets/modules/betterselect.svg" alt="" style="width:14px; height:14px; border-radius:4px; flex:none;">Select</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11.5px; line-height:1; white-space:nowrap; font-weight:500; color:#5b6072; background:transparent; border:1px solid transparent;"><img src="frontend/src/assets/modules/betteradmin.svg" alt="" style="width:14px; height:14px; border-radius:4px; flex:none;">Clubhouse</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11.5px; line-height:1; white-space:nowrap; font-weight:500; color:#5b6072; background:transparent; border:1px solid transparent;"><img src="frontend/src/assets/modules/betteriq.svg" alt="" style="width:14px; height:14px; border-radius:4px; flex:none;">IQ</span>
+            <span style="display:inline-flex; align-items:center; gap:6px; padding:4px 8px; border-radius:999px; font-size:11.5px; line-height:1; white-space:nowrap; font-weight:600; color:#C026D3; background:color-mix(in srgb, #C026D3 14%, transparent); border:1px solid color-mix(in srgb, #C026D3 38%, transparent);"><span style="width:14px; height:14px; border-radius:4px; flex:none; background:#C026D3; color:#0a0d14; font-size:9px; font-weight:700; display:flex; align-items:center; justify-content:center;">S</span>Scout</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:10px; padding-top:10px; border-top:1px solid #1d2331;">
+            <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; color:#8a90a2; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span>
+            <span style="font-size:12.5px; color:#8a90a2;">Dan Wilson</span>
+          </div>
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:14px 20px; display:flex; align-items:center; gap:14px;">
+          <div>
+            <h1 style="margin:0; font-size:19px; font-weight:700; letter-spacing:-0.01em;">Overview</h1>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#5b6072; margin-top:2px; text-transform:uppercase;">38 of 100 tracked · 4 watchlists · 12 clubs cached</div>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:26px;">
+            <div style="text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.12em; color:#5b6072; text-transform:uppercase;">In pipeline</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:17px; font-weight:700;">11</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.12em; color:#5b6072; text-transform:uppercase;">Offer out</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:17px; font-weight:700; color:#e879f9;">3</div>
+            </div>
+            <span style="padding:8px 14px; border-radius:8px; background:#C026D3; color:#0a0d14; font-size:13px; font-weight:600;">Find players</span>
+          </div>
+        </header>
+
+        <main style="padding:22px 24px 28px; display:grid; grid-template-columns:1fr 372px; gap:20px; align-items:start;">
+
+          <div style="display:flex; flex-direction:column; gap:20px; min-width:0;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center; gap:10px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Form movers</span>
+                <span style="font-size:12px; color:#5b6072;">last season vs. the two before, among players you track</span>
+                <span style="margin-left:auto; font-size:12px; color:#8a90a2;">See all 38 →</span>
+              </div>
+              <div style="display:flex; flex-direction:column;">
+
+                <div style="display:flex; align-items:center; gap:14px; padding:12px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:36px; height:36px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">CR</span>
+                  <div style="min-width:180px;">
+                    <div style="font-size:14px; font-weight:600;">Callum Rasheed</div>
+                    <div style="font-size:12px; color:#8a90a2;">Applecross CC · 1st Grade · Top order</div>
+                  </div>
+                  <div style="display:flex; align-items:flex-end; gap:3px; height:34px; flex:none;">
+                    <span style="width:7px; height:12px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:16px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:22px; background:#8a90a2; border-radius:2px;"></span>
+                    <span style="width:7px; height:28px; background:#C026D3; border-radius:2px;"></span>
+                    <span style="width:7px; height:34px; background:#C026D3; border-radius:2px;"></span>
+                  </div>
+                  <div style="margin-left:auto; text-align:right;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">64.10 <span style="color:#16c784; font-size:12px;">▲ 9.8</span></div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; text-transform:uppercase;">Batting avg</div>
+                  </div>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Open</span>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:14px; padding:12px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:36px; height:36px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">LP</span>
+                  <div style="min-width:180px;">
+                    <div style="font-size:14px; font-weight:600;">Lachlan Peake</div>
+                    <div style="font-size:12px; color:#8a90a2;">Melville CC · 1st Grade · Left-arm quick</div>
+                  </div>
+                  <div style="display:flex; align-items:flex-end; gap:3px; height:34px; flex:none;">
+                    <span style="width:7px; height:20px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:15px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:24px; background:#8a90a2; border-radius:2px;"></span>
+                    <span style="width:7px; height:31px; background:#C026D3; border-radius:2px;"></span>
+                    <span style="width:7px; height:29px; background:#C026D3; border-radius:2px;"></span>
+                  </div>
+                  <div style="margin-left:auto; text-align:right;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">16.09 <span style="color:#16c784; font-size:12px;">▼ 4.4</span></div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; text-transform:uppercase;">Bowling avg</div>
+                  </div>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Open</span>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:14px; padding:12px 16px;">
+                  <span style="width:36px; height:36px; border-radius:9999px; background:#f59e0b; color:#fff; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">TE</span>
+                  <div style="min-width:180px;">
+                    <div style="font-size:14px; font-weight:600;">Toby Ellery</div>
+                    <div style="font-size:12px; color:#8a90a2;">Applecross CC · 2nd Grade · U21</div>
+                  </div>
+                  <div style="display:flex; align-items:flex-end; gap:3px; height:34px; flex:none;">
+                    <span style="width:7px; height:8px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:11px; background:#262d3d; border-radius:2px;"></span>
+                    <span style="width:7px; height:14px; background:#8a90a2; border-radius:2px;"></span>
+                    <span style="width:7px; height:25px; background:#C026D3; border-radius:2px;"></span>
+                    <span style="width:7px; height:33px; background:#C026D3; border-radius:2px;"></span>
+                  </div>
+                  <div style="margin-left:auto; text-align:right;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">94.16 <span style="color:#16c784; font-size:12px;">▲ 17.2</span></div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; text-transform:uppercase;">Strike rate</div>
+                  </div>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Open</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center; gap:10px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Going stale</span>
+                <span style="font-size:12px; color:#5b6072;">tracked, but no stats refresh or note in 6+ weeks</span>
+                <span style="margin-left:auto; padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Refresh all 5</span>
+              </div>
+              <div style="display:flex; flex-direction:column;">
+                <div style="display:flex; align-items:center; gap:12px; padding:11px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#10b981; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">HT</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Harrison Tolley</div>
+                    <div style="font-size:12px; color:#8a90a2;">Applecross CC · Longlist · UK 2026/27</div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#f5b542;">stats 9 wks old</span>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Refresh</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; padding:11px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">NA</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Nikhil Arora</div>
+                    <div style="font-size:12px; color:#8a90a2;">Melville CC · Longlist · no note yet</div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#f5b542;">no note, 11 wks</span>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Add note</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; padding:11px 16px;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#161b27; border:1px dashed #262d3d; color:#5b6072; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">JW</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Josh Whitehorn <span style="margin-left:6px; font-size:10px; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2;">Manual</span></div>
+                    <div style="font-size:12px; color:#8a90a2;">No club recorded · nothing to refresh automatically</div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#5b6072;">manual entry</span>
+                  <span style="padding:5px 10px; border:1px solid #262d3d; border-radius:6px; font-size:12px; color:#8a90a2;">Edit</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:20px;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:10px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Growth plan</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:12px; color:#e6e8ef;">38 / 100</span>
+              </div>
+              <div style="height:6px; border-radius:9999px; background:#161b27; overflow:hidden;">
+                <div style="height:100%; width:38%; border-radius:9999px; background:#C026D3;"></div>
+              </div>
+              <div style="font-size:12px; color:#5b6072; margin-top:8px;">Priced by players actively tracked. 62 slots left — archive someone to free one up.</div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Clubs you've looked at</span>
+              </div>
+              <div style="display:flex; flex-direction:column;">
+                <div style="display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid #1d2331;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Applecross Cricket Club</div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">47 players · cached 3 days ago</div>
+                  </div>
+                  <span style="font-size:12px; color:#e879f9;">Open roster →</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid #1d2331;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Melville Cricket Club</div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">52 players · cached 1 wk ago</div>
+                  </div>
+                  <span style="font-size:12px; color:#e879f9;">Open roster →</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; padding:11px 16px; border-bottom:1px solid #1d2331;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Willetton Cricket Club</div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">44 players · cached 2 wks ago</div>
+                  </div>
+                  <span style="font-size:12px; color:#e879f9;">Open roster →</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:10px; padding:11px 16px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Fremantle Districts CC</div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:#f5b542;">rebuild needed · 6 wks old</div>
+                  </div>
+                  <span style="font-size:12px; color:#e879f9;">Rebuild →</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px dashed #262d3d; border-radius:10px; padding:16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072; margin-bottom:8px;">Not built yet</div>
+              <div style="font-size:13.5px; font-weight:600; margin-bottom:6px;">Search a player by name, anywhere in Australia</div>
+              <div style="font-size:12.5px; color:#8a90a2; text-wrap:pretty;">BetterScout only knows the clubs you've searched for. Name search across all ~6,900 clubs needs a crawl and an index, not a screen — so it's honestly switched off rather than half-working.</div>
+              <div style="margin-top:12px; background:#0a0d14; border:1px solid #1d2331; border-radius:6px; padding:8px 10px; font-size:13px; color:#3a3f50;">Search every player in Australia…</div>
+              <div style="font-size:12px; color:#5b6072; margin-top:10px;">Same story for a country-wide hot-form feed.</div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 1b DISCOVER ════════ -->
+  <div id="1b" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1b</span>
+      <span style="font-size:15px; font-weight:600;">Discover — the roster table doing the scouting work</span>
+    </div>
+
+    <div data-screen-label="1b Discover" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div>
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px; font-size:12.5px; color:#8a90a2; display:flex; align-items:center; gap:8px;">
+          <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span> Dan Wilson
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:14px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <div>
+            <h1 style="margin:0; font-size:19px; font-weight:700; letter-spacing:-0.01em;">Applecross Cricket Club</h1>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#5b6072; margin-top:2px; text-transform:uppercase;">47 players · 6 grades · built from Cricket Australia records, 3 days ago</div>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:10px;">
+            <div style="display:flex; align-items:center; gap:8px; background:#0a0d14; border:1px solid #1d2331; border-radius:8px; padding:7px 10px; width:240px;">
+              <span style="font-size:13px; color:#5b6072;">Search another club…</span>
+            </div>
+            <span style="padding:8px 14px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Rebuild roster</span>
+          </div>
+        </header>
+
+        <main style="padding:20px 24px 28px; display:flex; flex-direction:column; gap:16px;">
+
+          <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Window</span>
+              <div style="display:flex; border:1px solid #1d2331; border-radius:8px; overflow:hidden;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:6px 11px; color:#8a90a2;">1 SEASON</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:6px 11px; background:#C026D3; color:#0a0d14; font-weight:600;">2 SEASONS</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:6px 11px; color:#8a90a2;">5 SEASONS</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; padding:6px 11px; color:#8a90a2;">FULL</span>
+              </div>
+              <span style="font-size:12px; color:#5b6072;">2024–2025 only</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:6px; margin-left:auto;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Presets</span>
+              <span style="font-size:12px; padding:5px 10px; border-radius:9999px; border:1px solid #C026D3; color:#e879f9;">Bat avg 35+</span>
+              <span style="font-size:12px; padding:5px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">Bowl avg &lt;25</span>
+              <span style="font-size:12px; padding:5px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">SR 85+</span>
+              <span style="font-size:12px; padding:5px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">All-rounders</span>
+              <span style="font-size:12px; padding:5px 10px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">10+ matches</span>
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px; background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:10px 14px; flex-wrap:wrap;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Filters</span>
+            <span style="display:flex; align-items:center; gap:6px; font-size:12.5px; background:#161b27; border:1px solid #262d3d; border-radius:6px; padding:4px 8px;"><span style="color:#8a90a2;">Avg</span> <span style="font-family:'JetBrains Mono',monospace;">35 – ∞</span> <span style="color:#5b6072;">✕</span></span>
+            <span style="display:flex; align-items:center; gap:6px; font-size:12.5px; background:#161b27; border:1px solid #262d3d; border-radius:6px; padding:4px 8px;"><span style="color:#8a90a2;">Matches</span> <span style="font-family:'JetBrains Mono',monospace;">10 – ∞</span> <span style="color:#5b6072;">✕</span></span>
+            <span style="font-size:12.5px; padding:4px 8px; border:1px dashed #262d3d; border-radius:6px; color:#8a90a2;">+ Runs</span>
+            <span style="font-size:12.5px; padding:4px 8px; border:1px dashed #262d3d; border-radius:6px; color:#8a90a2;">+ SR</span>
+            <span style="font-size:12.5px; padding:4px 8px; border:1px dashed #262d3d; border-radius:6px; color:#8a90a2;">+ Wkts</span>
+            <span style="font-size:12.5px; padding:4px 8px; border:1px dashed #262d3d; border-radius:6px; color:#8a90a2;">+ Bowl avg</span>
+            <span style="font-size:12.5px; padding:4px 8px; border:1px dashed #262d3d; border-radius:6px; color:#8a90a2;">+ Econ</span>
+            <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:11px; color:#5b6072;">9 OF 47 PLAYERS</span>
+            <span style="font-size:12px; color:#8a90a2; text-decoration:underline;">Clear</span>
+          </div>
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+            <table style="width:100%; border-collapse:collapse; font-size:13.5px;">
+              <thead>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <th style="text-align:left; padding:10px 14px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Player</th>
+                  <th style="text-align:left; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Form</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Mat</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Runs</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#e879f9; font-weight:600;">Avg ↓</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">SR</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Wkts</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Bowl</th>
+                  <th style="text-align:right; padding:10px 8px; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; font-weight:400;">Econ</th>
+                  <th style="text-align:right; padding:10px 14px;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #1d2331; background:rgba(192,38,211,0.05);">
+                  <td style="padding:10px 14px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:32px; height:32px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center; flex:none;">CR</span>
+                      <div>
+                        <div style="font-weight:600;">Callum Rasheed</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">1ST GRADE · RHB TOP ORDER · 24y</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:8px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:11px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:14px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:17px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:20px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">26</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">1,184</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">59.20</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">78.41</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">4</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">44.25</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">5.31</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; color:#e879f9;">Tracked ✓</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331; background:#161b27;">
+                  <td colspan="10" style="padding:14px;">
+                    <div style="display:flex; gap:20px; align-items:flex-start;">
+                      <div style="width:78px; height:96px; border:1px dashed #262d3d; border-radius:8px; background:#0a0d14; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; flex:none;">
+                        <span style="width:34px; height:34px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">CR</span>
+                        <span style="font-family:'JetBrains Mono',monospace; font-size:8.5px; letter-spacing:0.08em; color:#3a3f50; text-align:center;">NO PHOTO<br>IN CA DATA</span>
+                      </div>
+                      <div style="flex:1; display:flex; flex-direction:column; gap:12px; min-width:0;">
+                        <div style="display:grid; grid-template-columns:repeat(5,1fr); gap:16px;">
+                          <div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">High score</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700;">147*</div></div>
+                          <div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">50s / 100s</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700;">7 / 3</div></div>
+                          <div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">Best figures</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700;">2/18</div></div>
+                          <div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">Catches</div><div style="font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700;">14</div></div>
+                          <div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">Grades played</div><div style="font-size:13px; font-weight:600;">1st, 2nd, T20</div></div>
+                        </div>
+                        <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                          <thead>
+                            <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">
+                              <th style="text-align:left; padding:5px 8px; font-weight:400;">Season</th>
+                              <th style="text-align:left; padding:5px 8px; font-weight:400;">Grade</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">Mat</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">Runs</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">Avg</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">SR</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">Wkts</th>
+                              <th style="text-align:right; padding:5px 8px; font-weight:400;">Econ</th>
+                            </tr>
+                          </thead>
+                          <tbody style="font-family:'JetBrains Mono',monospace;">
+                            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:5px 8px;">2025</td><td style="padding:5px 8px; font-family:'Geist',sans-serif;">1st Grade</td><td style="padding:5px 8px; text-align:right;">13</td><td style="padding:5px 8px; text-align:right;">641</td><td style="padding:5px 8px; text-align:right;">64.10</td><td style="padding:5px 8px; text-align:right;">81.24</td><td style="padding:5px 8px; text-align:right;">2</td><td style="padding:5px 8px; text-align:right;">5.12</td></tr>
+                            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:5px 8px;">2024</td><td style="padding:5px 8px; font-family:'Geist',sans-serif;">1st Grade</td><td style="padding:5px 8px; text-align:right;">13</td><td style="padding:5px 8px; text-align:right;">543</td><td style="padding:5px 8px; text-align:right;">54.30</td><td style="padding:5px 8px; text-align:right;">75.19</td><td style="padding:5px 8px; text-align:right;">2</td><td style="padding:5px 8px; text-align:right;">5.49</td></tr>
+                            <tr style="border-bottom:1px solid #1d2331;"><td style="padding:5px 8px;">2023</td><td style="padding:5px 8px; font-family:'Geist',sans-serif;">2nd Grade</td><td style="padding:5px 8px; text-align:right;">14</td><td style="padding:5px 8px; text-align:right;">402</td><td style="padding:5px 8px; text-align:right;">33.50</td><td style="padding:5px 8px; text-align:right;">68.02</td><td style="padding:5px 8px; text-align:right;">5</td><td style="padding:5px 8px; text-align:right;">4.88</td></tr>
+                            <tr><td style="padding:5px 8px;">2022</td><td style="padding:5px 8px; font-family:'Geist',sans-serif;">2nd Grade</td><td style="padding:5px 8px; text-align:right;">11</td><td style="padding:5px 8px; text-align:right;">288</td><td style="padding:5px 8px; text-align:right;">26.18</td><td style="padding:5px 8px; text-align:right;">61.44</td><td style="padding:5px 8px; text-align:right;">1</td><td style="padding:5px 8px; text-align:right;">6.02</td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div style="width:196px; flex:none; display:flex; flex-direction:column; gap:8px;">
+                        <span style="text-align:center; padding:8px 12px; border-radius:8px; background:#C026D3; color:#0a0d14; font-size:13px; font-weight:600;">Open full profile</span>
+                        <span style="text-align:center; padding:8px 12px; border-radius:8px; border:1px solid #262d3d; color:#e6e8ef; font-size:13px;">Add to watchlist ▾</span>
+                        <span style="text-align:center; padding:8px 12px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Add to compare</span>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:center; margin-top:2px;">ON 2 WATCHLISTS</div>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:10px 14px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:32px; height:32px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;">HT</span><div><div style="font-weight:600;">Harrison Tolley</div><div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">1ST GRADE · RHB · 27y</div></div></div></td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:14px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:16px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:12px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:15px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:13px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">24</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">903</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">47.53</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">71.02</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">1</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">61.00</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">6.10</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; background:#C026D3; color:#0a0d14; font-weight:600;">Track</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:10px 14px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:32px; height:32px; border-radius:9999px; background:#10b981; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span><div><div style="font-weight:600;">Ravi Doshi</div><div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">1ST GRADE · ALL-ROUNDER · 29y</div></div></div></td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:10px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:13px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:16px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:18px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:20px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">25</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">742</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">43.65</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">64.88</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; color:#e879f9;">31</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; color:#e879f9;">21.42</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">3.94</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; color:#e879f9;">Tracked ✓</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:10px 14px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:32px; height:32px; border-radius:9999px; background:#f59e0b; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;">EB</span><div><div style="font-weight:600;">Ethan Bramwell</div><div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">1ST GRADE · LHB · 21y</div></div></div></td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:6px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:9px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:13px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:19px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:17px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">22</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">688</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">40.47</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; color:#e879f9;">88.31</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">9</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">33.11</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">5.86</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; background:#C026D3; color:#0a0d14; font-weight:600;">Track</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:10px 14px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:32px; height:32px; border-radius:9999px; background:#ef4444; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;">SK</span><div><div style="font-weight:600;">Sam Kirkbride</div><div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">1ST GRADE · ALL-ROUNDER · 26y</div></div></div></td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:12px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:15px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:13px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:14px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:16px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">26</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">589</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">39.26</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">61.70</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">18</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">26.72</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">4.31</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; color:#e879f9;">Tracked ✓</span></td>
+                </tr>
+                <tr>
+                  <td style="padding:10px 14px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:32px; height:32px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:11.5px; font-weight:700; display:flex; align-items:center; justify-content:center;">TE</span><div><div style="font-weight:600;">Toby Ellery</div><div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; color:#5b6072;">2ND GRADE · RHB · 19y</div></div></div></td>
+                  <td style="padding:10px 8px;"><span style="display:inline-flex; align-items:flex-end; gap:2px; height:20px;"><span style="width:5px; height:5px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:7px; background:#262d3d; border-radius:1px;"></span><span style="width:5px; height:9px; background:#8a90a2; border-radius:1px;"></span><span style="width:5px; height:15px; background:#C026D3; border-radius:1px;"></span><span style="width:5px; height:20px; background:#C026D3; border-radius:1px;"></span></span></td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">17</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">436</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-weight:700;">36.33</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace; color:#e879f9;">94.16</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">6</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">38.50</td>
+                  <td style="padding:10px 8px; text-align:right; font-family:'JetBrains Mono',monospace;">6.44</td>
+                  <td style="padding:10px 14px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; background:#C026D3; color:#0a0d14; font-weight:600;">Track</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#3a3f50;">FORM COLUMN = LAST 5 SEASONS, THE SORTED METRIC · GREY BARS FALL OUTSIDE THE CHOSEN WINDOW</div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 1c PLAYER PROFILE ════════ -->
+  <div id="1c" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1c</span>
+      <span style="font-size:15px; font-weight:600;">Player profile — stats, grade context, and the recruiting decision in one place</span>
+    </div>
+
+    <div data-screen-label="1c Player profile" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div>
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px; font-size:12.5px; color:#8a90a2; display:flex; align-items:center; gap:8px;">
+          <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span> Dan Wilson
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:16px 20px; display:flex; align-items:flex-start; gap:16px;">
+          <div style="width:76px; height:92px; border:1px dashed #262d3d; border-radius:10px; background:#0a0d14; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; flex:none;">
+            <span style="width:38px; height:38px; border-radius:9999px; background:#10b981; color:#fff; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:8.5px; letter-spacing:0.06em; color:#3a3f50; text-align:center;">DROP PHOTO<br>OR PASTE URL</span>
+          </div>
+          <div style="min-width:0;">
+            <h1 style="margin:0; font-size:22px; font-weight:700; letter-spacing:-0.015em;">Ravi Doshi</h1>
+            <div style="font-size:13.5px; color:#8a90a2; margin-top:2px;">Applecross Cricket Club · 1st Grade · WA Premier Cricket</div>
+            <div style="display:flex; gap:6px; margin-top:9px; flex-wrap:wrap;">
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">All-rounder</span>
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Right hand</span>
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">Right arm off spin</span>
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">WA</span>
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; border:1px solid #C026D3; color:#e879f9;">priority</span>
+              <span style="font-size:11.5px; padding:3px 8px; border-radius:9999px; border:1px solid #C026D3; color:#e879f9;">visa ok</span>
+            </div>
+          </div>
+          <div style="margin-left:auto; display:flex; flex-direction:column; align-items:flex-end; gap:10px;">
+            <div style="display:flex; gap:8px;">
+              <span style="padding:8px 13px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Refresh stats</span>
+              <span style="padding:8px 13px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Share profile</span>
+              <span style="padding:8px 13px; border-radius:8px; background:#C026D3; color:#0a0d14; font-size:13px; font-weight:600;">Compare</span>
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">UK 2026/27 stage</span>
+              <div style="display:flex; border:1px solid #1d2331; border-radius:8px; overflow:hidden;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; padding:5px 9px; color:#5b6072;">LONGLIST</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; padding:5px 9px; background:#C026D3; color:#0a0d14; font-weight:600;">CONTACTED</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; padding:5px 9px; color:#5b6072;">OFFER OUT</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; padding:5px 9px; color:#5b6072;">SIGNED</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main style="padding:20px 24px 28px; display:grid; grid-template-columns:1fr 356px; gap:20px; align-items:start;">
+
+          <div style="display:flex; flex-direction:column; gap:20px; min-width:0;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="display:flex; border-bottom:1px solid #1d2331;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; border-bottom:2px solid #C026D3; margin-bottom:-1px;">BATTING</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">BOWLING</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">FIELDING</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">CAREER</span>
+                <div style="margin-left:auto; display:flex; align-items:center; gap:6px; padding:0 14px;">
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:4px 9px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">1 SEASON</span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:4px 9px; border-radius:9999px; border:1px solid #1d2331; color:#8a90a2;">5 SEASONS</span>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:4px 9px; border-radius:9999px; border:1px solid #C026D3; color:#e879f9;">FULL</span>
+                </div>
+              </div>
+              <div style="padding:18px 20px; display:grid; grid-template-columns:repeat(6,1fr); gap:18px; border-bottom:1px solid #1d2331;">
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Innings</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700;">86</div></div>
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Runs</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700;">2,614</div></div>
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Average</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700; color:#e879f9;">33.51</div></div>
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Strike rate</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700;">62.88</div></div>
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">High score</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700;">118</div></div>
+                <div><div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">50s / 100s</div><div style="font-family:'JetBrains Mono',monospace; font-size:21px; font-weight:700;">14 / 2</div></div>
+              </div>
+
+              <div style="padding:18px 20px;">
+                <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Season by season</span>
+                  <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#8a90a2;"><span style="width:9px; height:9px; border-radius:2px; background:#C026D3;"></span>Runs</span>
+                  <span style="display:flex; align-items:center; gap:6px; font-size:11.5px; color:#8a90a2;"><span style="width:9px; height:9px; border-radius:2px; background:#3b82f6;"></span>Wickets</span>
+                  <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">GRADE SHOWN UNDER EACH SEASON</span>
+                </div>
+                <div style="display:flex; align-items:flex-end; gap:26px; height:150px; padding-bottom:2px;">
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:61px; background:#C026D3; border-radius:3px 3px 0 0; opacity:0.55;"></div>
+                      <div style="width:22px; height:69px; background:#3b82f6; border-radius:3px 3px 0 0; opacity:0.55;"></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:93px; background:#C026D3; border-radius:3px 3px 0 0; opacity:0.7;"></div>
+                      <div style="width:22px; height:109px; background:#3b82f6; border-radius:3px 3px 0 0; opacity:0.7;"></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:86px; background:#C026D3; border-radius:3px 3px 0 0; opacity:0.8;"></div>
+                      <div style="width:22px; height:97px; background:#3b82f6; border-radius:3px 3px 0 0; opacity:0.8;"></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:108px; background:#C026D3; border-radius:3px 3px 0 0;"></div>
+                      <div style="width:22px; height:120px; background:#3b82f6; border-radius:3px 3px 0 0;"></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:101px; background:#C026D3; border-radius:3px 3px 0 0;"></div>
+                      <div style="width:22px; height:74px; background:#3b82f6; border-radius:3px 3px 0 0;"></div>
+                    </div>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;">
+                    <div style="display:flex; align-items:flex-end; gap:4px; height:120px;">
+                      <div style="width:22px; height:120px; background:#C026D3; border-radius:3px 3px 0 0;"></div>
+                      <div style="width:22px; height:103px; background:#3b82f6; border-radius:3px 3px 0 0;"></div>
+                    </div>
+                  </div>
+                </div>
+                <div style="display:flex; gap:26px; margin-top:8px;">
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2020</div><div style="font-size:11px; color:#5b6072;">3rd Grade</div></div>
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2021</div><div style="font-size:11px; color:#5b6072;">2nd Grade</div></div>
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2022</div><div style="font-size:11px; color:#5b6072;">2nd Grade</div></div>
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2023</div><div style="font-size:11px; color:#e6e8ef;">1st Grade</div></div>
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2024</div><div style="font-size:11px; color:#e6e8ef;">1st Grade</div></div>
+                  <div style="flex:1; text-align:center;"><div style="font-family:'JetBrains Mono',monospace; font-size:11.5px;">2025</div><div style="font-size:11px; color:#e6e8ef;">1st Grade</div></div>
+                </div>
+              </div>
+
+              <table style="width:100%; border-collapse:collapse; font-size:13px; border-top:1px solid #1d2331;">
+                <thead>
+                  <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">
+                    <th style="text-align:left; padding:9px 20px; font-weight:400;">Season</th>
+                    <th style="text-align:left; padding:9px 8px; font-weight:400;">Grade</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">Mat</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">Runs</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">Avg</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">SR</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">HS</th>
+                    <th style="text-align:right; padding:9px 8px; font-weight:400;">Wkts</th>
+                    <th style="text-align:right; padding:9px 20px; font-weight:400;">Econ</th>
+                  </tr>
+                </thead>
+                <tbody style="font-family:'JetBrains Mono',monospace;">
+                  <tr style="border-bottom:1px solid #1d2331;"><td style="padding:9px 20px;">2025</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">1st Grade</td><td style="padding:9px 8px; text-align:right;">13</td><td style="padding:9px 8px; text-align:right;">402</td><td style="padding:9px 8px; text-align:right;">44.67</td><td style="padding:9px 8px; text-align:right;">67.11</td><td style="padding:9px 8px; text-align:right;">96</td><td style="padding:9px 8px; text-align:right;">18</td><td style="padding:9px 20px; text-align:right;">3.71</td></tr>
+                  <tr style="border-bottom:1px solid #1d2331;"><td style="padding:9px 20px;">2024</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">1st Grade</td><td style="padding:9px 8px; text-align:right;">12</td><td style="padding:9px 8px; text-align:right;">340</td><td style="padding:9px 8px; text-align:right;">42.50</td><td style="padding:9px 8px; text-align:right;">64.02</td><td style="padding:9px 8px; text-align:right;">118</td><td style="padding:9px 8px; text-align:right;">13</td><td style="padding:9px 20px; text-align:right;">4.18</td></tr>
+                  <tr style="border-bottom:1px solid #1d2331;"><td style="padding:9px 20px;">2023</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">1st Grade</td><td style="padding:9px 8px; text-align:right;">14</td><td style="padding:9px 8px; text-align:right;">361</td><td style="padding:9px 8px; text-align:right;">30.08</td><td style="padding:9px 8px; text-align:right;">61.44</td><td style="padding:9px 8px; text-align:right;">87</td><td style="padding:9px 8px; text-align:right;">21</td><td style="padding:9px 20px; text-align:right;">3.64</td></tr>
+                  <tr style="border-bottom:1px solid #1d2331;"><td style="padding:9px 20px;">2022</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">2nd Grade</td><td style="padding:9px 8px; text-align:right;">11</td><td style="padding:9px 8px; text-align:right;">288</td><td style="padding:9px 8px; text-align:right;">28.80</td><td style="padding:9px 8px; text-align:right;">60.12</td><td style="padding:9px 8px; text-align:right;">74</td><td style="padding:9px 8px; text-align:right;">17</td><td style="padding:9px 20px; text-align:right;">3.92</td></tr>
+                  <tr style="border-bottom:1px solid #1d2331;"><td style="padding:9px 20px;">2021</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">2nd Grade</td><td style="padding:9px 8px; text-align:right;">13</td><td style="padding:9px 8px; text-align:right;">311</td><td style="padding:9px 8px; text-align:right;">31.10</td><td style="padding:9px 8px; text-align:right;">58.88</td><td style="padding:9px 8px; text-align:right;">69</td><td style="padding:9px 8px; text-align:right;">19</td><td style="padding:9px 20px; text-align:right;">3.81</td></tr>
+                  <tr><td style="padding:9px 20px;">2020</td><td style="padding:9px 8px; font-family:'Geist',sans-serif;">3rd Grade</td><td style="padding:9px 8px; text-align:right;">9</td><td style="padding:9px 8px; text-align:right;">204</td><td style="padding:9px 8px; text-align:right;">25.50</td><td style="padding:9px 8px; text-align:right;">55.19</td><td style="padding:9px 8px; text-align:right;">51</td><td style="padding:9px 20px; text-align:right;">12</td><td style="padding:9px 20px; text-align:right;">4.02</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:20px;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+              <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Recruiting</span>
+                <span style="font-family:'JetBrains Mono',monospace; font-size:9.5px; padding:2px 7px; border-radius:9999px; background:#161b27; color:#5b6072;">NEVER SHARED</span>
+              </div>
+              <div style="display:flex; flex-direction:column; gap:10px;">
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Visa / eligibility</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:7px 9px; font-size:13px;">Has UK ancestry visa · valid to 2029</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Transfer preference</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:7px 9px; font-size:13px;">North of England preferred</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Availability</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:7px 9px; font-size:13px;">From October 2026</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Fee expectations</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:7px 9px; font-size:13px;">£400/week + accommodation</div>
+                </div>
+                <div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Agent / contact</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:7px 9px; font-size:13px; color:#3a3f50;">Add a contact…</div>
+                </div>
+              </div>
+              <div style="font-size:11.5px; color:#5b6072; margin-top:11px;">These five fields stay internal — a shared profile carries stats, tags and notes only.</div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Scouting notes</span>
+                <span style="margin-left:auto; font-size:12px; color:#e879f9;">+ Add note</span>
+              </div>
+              <div style="display:flex; flex-direction:column;">
+                <div style="padding:13px 16px; border-bottom:1px solid #1d2331;">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; margin-bottom:4px;">14 FEB 2026 · DAN WILSON · WATCHED LIVE</div>
+                  <div style="font-size:13px; color:#e6e8ef; text-wrap:pretty;">Rd 6 v Fremantle: 8 tight overs into the breeze, then 42* off 38. Reads length early, strong off the back foot.</div>
+                </div>
+                <div style="padding:13px 16px; border-bottom:1px solid #1d2331;">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; margin-bottom:4px;">02 FEB 2026 · DAN WILSON · PHONE</div>
+                  <div style="font-size:13px; color:#e6e8ef; text-wrap:pretty;">Open to a UK season if the club covers flights. Works in trades — needs work sorted alongside.</div>
+                </div>
+                <div style="padding:13px 16px;">
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#5b6072; margin-bottom:4px;">19 JAN 2026 · A. FIELD · SCORECARD REVIEW</div>
+                  <div style="font-size:13px; color:#e6e8ef; text-wrap:pretty;">Bowling average has come down three seasons running while moving up a grade. Worth a live look.</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2; margin-bottom:10px;">On watchlists</div>
+              <div style="display:flex; flex-direction:column; gap:9px;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div style="flex:1; font-size:13px;">UK 2026/27 overseas placements</div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:3px 8px; border-radius:9999px; background:rgba(192,38,211,0.18); color:#e879f9;">CONTACTED</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <div style="flex:1; font-size:13px;">WA Premier — top-order targets</div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">LONGLIST</span>
+                </div>
+                <div style="font-size:12.5px; color:#5b6072; border-top:1px solid #1d2331; padding-top:9px;">+ Add to another watchlist</div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 1d COMPARE ════════ -->
+  <div id="1d" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1d</span>
+      <span style="font-size:15px; font-weight:600;">Compare — the club-side head-to-head layout, brought into BetterScout</span>
+      <span style="font-size:13px; color:#5b6072;">avatar-headed columns, discipline tabs, green best / red worst</span>
+    </div>
+
+    <div data-screen-label="1d Compare" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div>
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px; font-size:12.5px; color:#8a90a2; display:flex; align-items:center; gap:8px;">
+          <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span> Dan Wilson
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:14px 20px; display:flex; align-items:center; gap:14px;">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:#5b6072;">Head to head</div>
+            <h1 style="margin:2px 0 0; font-size:19px; font-weight:700; letter-spacing:-0.01em;">Compare players</h1>
+          </div>
+          <div style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#5b6072;">UP TO 5 PLAYERS · GREEN = BEST · RED = WORST</div>
+        </header>
+
+        <main style="padding:20px 24px 28px; display:flex; flex-direction:column; gap:16px;">
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:16px;">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
+              <div style="display:flex; align-items:center; gap:10px; background:#161b27; border:1px solid #1d2331; border-radius:8px; padding:8px 12px;">
+                <span style="width:34px; height:34px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">CR</span>
+                <div>
+                  <div style="font-size:13.5px; font-weight:600; color:#3b82f6; line-height:1.15;">Callum Rasheed</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">Top order · Applecross</div>
+                </div>
+                <span style="color:#5b6072; font-size:17px; line-height:1;">×</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; background:#161b27; border:1px solid #1d2331; border-radius:8px; padding:8px 12px;">
+                <span style="width:34px; height:34px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span>
+                <div>
+                  <div style="font-size:13.5px; font-weight:600; color:#8b5cf6; line-height:1.15;">Ravi Doshi</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">All-rounder · Applecross</div>
+                </div>
+                <span style="color:#5b6072; font-size:17px; line-height:1;">×</span>
+              </div>
+              <div style="display:flex; align-items:center; gap:10px; background:#161b27; border:1px solid #1d2331; border-radius:8px; padding:8px 12px;">
+                <span style="width:34px; height:34px; border-radius:9999px; background:#10b981; color:#fff; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">SK</span>
+                <div>
+                  <div style="font-size:13.5px; font-weight:600; color:#10b981; line-height:1.15;">Sam Kirkbride</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">All-rounder · Applecross</div>
+                </div>
+                <span style="color:#5b6072; font-size:17px; line-height:1;">×</span>
+              </div>
+              <div style="width:192px; background:#0a0d14; border:1px solid #1d2331; border-radius:6px; padding:8px 10px; font-size:13px; color:#5b6072;">Add tracked player…</div>
+            </div>
+          </div>
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:12px 14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.14em; text-transform:uppercase; color:#5b6072; margin-right:2px;">Window</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:5px 10px; border-radius:4px; background:#C026D3; color:#0a0d14; font-weight:600;">ALL TIME</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:5px 10px; border-radius:4px; border:1px solid #1d2331; color:#8a90a2;">THIS SEASON</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:5px 10px; border-radius:4px; border:1px solid #1d2331; color:#8a90a2;">LAST SEASON</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:5px 10px; border-radius:4px; border:1px solid #1d2331; color:#8a90a2;">LAST 2 SEASONS</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:5px 10px; border-radius:4px; border:1px solid #1d2331; color:#8a90a2;">LAST 5 SEASONS</span>
+            <span style="margin-left:auto; font-size:12px; color:#5b6072;">Season windows only — BetterScout has season rollups, not ball-by-ball, so “last 3 games” isn't available here.</span>
+          </div>
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+            <div style="display:flex; border-bottom:1px solid #1d2331;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; border-bottom:2px solid #C026D3; margin-bottom:-1px;">BATTING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">BOWLING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">FIELDING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">GAMES</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.1em; padding:12px 20px; color:#5b6072;">RECRUITING</span>
+            </div>
+            <table style="width:100%; table-layout:fixed; border-collapse:collapse;">
+              <thead>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <th style="width:180px; text-align:left; padding:16px 20px; vertical-align:bottom;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:#3a3f50;">Stat</span></th>
+                  <th style="padding:16px 12px; vertical-align:bottom; border-left:1px solid #1d2331;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+                      <span style="width:44px; height:44px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;">CR</span>
+                      <span style="font-size:12.5px; font-weight:600; color:#3b82f6;">Callum Rasheed</span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">Top order · 24y</span>
+                    </div>
+                  </th>
+                  <th style="padding:16px 12px; vertical-align:bottom; border-left:1px solid #1d2331;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+                      <span style="width:44px; height:44px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span>
+                      <span style="font-size:12.5px; font-weight:600; color:#8b5cf6;">Ravi Doshi</span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">All-rounder · 29y</span>
+                    </div>
+                  </th>
+                  <th style="padding:16px 12px; vertical-align:bottom; border-left:1px solid #1d2331;">
+                    <div style="display:flex; flex-direction:column; align-items:center; gap:6px;">
+                      <span style="width:44px; height:44px; border-radius:9999px; background:#10b981; color:#fff; font-size:15px; font-weight:700; display:flex; align-items:center; justify-content:center;">SK</span>
+                      <span style="font-size:12.5px; font-weight:600; color:#10b981;">Sam Kirkbride</span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.08em; text-transform:uppercase; color:#5b6072;">All-rounder · 26y</span>
+                    </div>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">INNINGS</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">68</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">86</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">61</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">RUNS</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">3,218</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">2,614</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">1,742</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">BATTING AVG</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">48.03</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">33.51</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">30.56</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">STRIKE RATE</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">76.12</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">62.88</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">58.41</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">HIGH SCORE</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">147*</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">118</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">94</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">FIFTIES</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">19</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">14</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">8</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">CENTURIES</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">6</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">2</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">2</span></td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 20px;"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.06em; color:#5b6072;">DUCKS</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(239,68,68,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#fca5a5;">7</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700;">5</span></td>
+                  <td style="padding:12px; text-align:center; border-left:1px solid #1d2331; background:rgba(34,197,94,0.14);"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#86efac;">3</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.1em; color:#3a3f50;">GREEN = BEST · RED = WORST · ALL TIME · TIES UNMARKED</div>
+            <span style="margin-left:auto; padding:7px 13px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Export as one-page PDF</span>
+            <span style="padding:7px 13px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Share read-only link</span>
+          </div>
+
+          <div style="background:#10141d; border:1px dashed #262d3d; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:12px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Recruiting tab</span>
+            <span style="font-size:13px; color:#8a90a2;">Compares visa, availability, fee and stage side by side — internal only, and stripped from any shared or exported copy.</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 1e MILESTONES ════════ -->
+  <div id="1e" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1e</span>
+      <span style="font-size:15px; font-weight:600;">Milestones — reasons to make contact this week</span>
+      <span style="font-size:13px; color:#5b6072;">same thresholds as BetterStats' club milestones, scoped to who you track</span>
+    </div>
+
+    <div data-screen-label="1e Milestones" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div>
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:9px; padding:1px 5px; border-radius:9999px; background:rgba(192,38,211,0.18); color:#e879f9;">6</span></span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9"></path></svg>Settings</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px; font-size:12.5px; color:#8a90a2; display:flex; align-items:center; gap:8px;">
+          <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span> Dan Wilson
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:14px 20px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <div>
+            <h1 style="margin:0; font-size:19px; font-weight:700; letter-spacing:-0.01em;">Milestones</h1>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#5b6072; margin-top:2px; text-transform:uppercase;">6 in reach · 4 reached since your last visit · across 38 tracked players</div>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <div style="display:flex; border:1px solid #1d2331; border-radius:6px; overflow:hidden;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; background:#161b27; color:#e879f9;">IN REACH</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">REACHED</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">ALL</span>
+            </div>
+            <div style="display:flex; border:1px solid #1d2331; border-radius:6px; overflow:hidden;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; background:#161b27; color:#e879f9;">ALL</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">BATTING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">BOWLING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">FIELDING</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; padding:6px 11px; color:#5b6072;">MATCHES</span>
+            </div>
+            <div style="background:#0a0d14; border:1px solid #1d2331; border-radius:6px; padding:6px 10px; font-size:12.5px; color:#5b6072; width:150px;">Search player…</div>
+          </div>
+        </header>
+
+        <main style="padding:20px 24px 28px; display:flex; flex-direction:column; gap:20px;">
+
+          <div style="display:grid; grid-template-columns:repeat(4,1fr); gap:14px;">
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:14px 16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Fifties, 2025/26 so far</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; margin-top:3px;">31</div>
+              <div style="font-size:12px; color:#8a90a2;">across your tracked players</div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:14px 16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Hundreds</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; margin-top:3px; color:#e879f9;">6</div>
+              <div style="font-size:12px; color:#8a90a2;">2 by U21 players</div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:14px 16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Five-wicket hauls</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; margin-top:3px;">9</div>
+              <div style="font-size:12px; color:#8a90a2;">best 6/31 — Ravi Doshi</div>
+            </div>
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; padding:14px 16px;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Milestone games ahead</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:700; margin-top:3px;">3</div>
+              <div style="font-size:12px; color:#8a90a2;">100th, 150th and 200th caps</div>
+            </div>
+          </div>
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+            <div style="padding:13px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center; gap:10px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Milestones in reach</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">(6)</span>
+              <span style="margin-left:auto; font-size:12px; color:#5b6072;">Career totals against the house thresholds — runs 500 then every 1,000; wickets 50 then every 100; games and catches every 50.</span>
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:13.5px;">
+              <thead>
+                <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:#3a3f50;">
+                  <th style="text-align:left; padding:10px 16px; font-weight:400;">Player</th>
+                  <th style="text-align:left; padding:10px 8px; font-weight:400;">Category</th>
+                  <th style="text-align:left; padding:10px 8px; font-weight:400;">Milestone</th>
+                  <th style="text-align:right; padding:10px 8px; font-weight:400;">Progress</th>
+                  <th style="text-align:right; padding:10px 8px; font-weight:400;">To go</th>
+                  <th style="text-align:right; padding:10px 16px; font-weight:400;">Act</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span>
+                      <div>
+                        <div style="font-weight:600;">Ravi Doshi</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">APPLECROSS CC · CONTACTED</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(52,211,153,0.2); background:rgba(52,211,153,0.1); color:#34d399;">BOWLING</span></td>
+                  <td style="padding:11px 8px;"><div>150 wickets</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">CAREER, ALL GRADES</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:98%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">98%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">147 / 150</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#e879f9;">3</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">CR</span>
+                      <div>
+                        <div style="font-weight:600;">Callum Rasheed</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">APPLECROSS CC · OFFER OUT</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(96,165,250,0.2); background:rgba(96,165,250,0.1); color:#60a5fa;">BATTING</span></td>
+                  <td style="padding:11px 8px;"><div>4,000 runs</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">CAREER, ALL GRADES</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:80%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">80%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">3,218 / 4,000</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#8a90a2;">782</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">SK</span>
+                      <div>
+                        <div style="font-weight:600;">Sam Kirkbride</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">APPLECROSS CC · CONTACTED</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(192,132,252,0.2); background:rgba(192,132,252,0.1); color:#c084fc;">MATCHES</span></td>
+                  <td style="padding:11px 8px;"><div>100 club games</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">98 PLAYED · 2 TO GO IN THIS SEASON</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:98%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">98%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">98 / 100</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#e879f9;">2</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#f59e0b; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">TE</span>
+                      <div>
+                        <div style="font-weight:600;">Toby Ellery</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">APPLECROSS CC · LONGLIST</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(96,165,250,0.2); background:rgba(96,165,250,0.1); color:#60a5fa;">BATTING</span></td>
+                  <td style="padding:11px 8px;"><div>500 runs</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">FIRST CAREER MILESTONE · 19y</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:93%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">93%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">464 / 500</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#e879f9;">36</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#10b981; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">LP</span>
+                      <div>
+                        <div style="font-weight:600;">Lachlan Peake</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">MELVILLE CC · LONGLIST</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(52,211,153,0.2); background:rgba(52,211,153,0.1); color:#34d399;">BOWLING</span></td>
+                  <td style="padding:11px 8px;"><div>100 wickets</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">CAREER, ALL GRADES</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:94%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">94%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">94 / 100</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#e879f9;">6</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+                <tr>
+                  <td style="padding:11px 16px;">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <span style="width:30px; height:30px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">HT</span>
+                      <div>
+                        <div style="font-weight:600;">Harrison Tolley</div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">APPLECROSS CC · LONGLIST</div>
+                      </div>
+                    </div>
+                  </td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(251,191,36,0.2); background:rgba(251,191,36,0.1); color:#fbbf24;">FIELDING</span></td>
+                  <td style="padding:11px 8px;"><div>50 catches</div><div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">CAREER, ALL GRADES</div></td>
+                  <td style="padding:11px 8px;">
+                    <div style="display:flex; align-items:center; justify-content:flex-end; gap:8px;">
+                      <span style="width:80px; height:6px; background:#161b27; border-radius:9999px; overflow:hidden; display:block;"><span style="display:block; height:100%; width:92%; background:#C026D3; border-radius:9999px;"></span></span>
+                      <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#5b6072;">92%</span>
+                    </div>
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50; text-align:right; margin-top:2px;">46 / 50</div>
+                  </td>
+                  <td style="padding:11px 8px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; color:#e879f9;">4</span></td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-size:12px; padding:5px 10px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2;">Add note</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px; overflow:hidden;">
+            <div style="padding:13px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center; gap:10px;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Reached recently</span>
+              <span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#3a3f50;">(4)</span>
+              <span style="margin-left:auto; font-size:12px; color:#8a90a2;">Mark all as seen</span>
+            </div>
+            <table style="width:100%; border-collapse:collapse; font-size:13.5px;">
+              <thead>
+                <tr style="border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; text-transform:uppercase; color:#3a3f50;">
+                  <th style="text-align:left; padding:10px 16px; font-weight:400;">Player</th>
+                  <th style="text-align:left; padding:10px 8px; font-weight:400;">Category</th>
+                  <th style="text-align:left; padding:10px 8px; font-weight:400;">Milestone</th>
+                  <th style="text-align:left; padding:10px 8px; font-weight:400;">Grade</th>
+                  <th style="text-align:right; padding:10px 8px; font-weight:400;">When</th>
+                  <th style="text-align:right; padding:10px 16px; font-weight:400;">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:30px; height:30px; border-radius:9999px; background:#3b82f6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">CR</span><span style="font-weight:600;">Callum Rasheed</span></div></td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(96,165,250,0.2); background:rgba(96,165,250,0.1); color:#60a5fa;">BATTING</span></td>
+                  <td style="padding:11px 8px;">3,000 runs</td>
+                  <td style="padding:11px 8px; color:#8a90a2;">1st Grade</td>
+                  <td style="padding:11px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#8a90a2;">7 Feb 2026</td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; padding:2px 6px; border-radius:4px; background:rgba(22,199,132,0.12); color:#16c784;">MATCH DATED</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:30px; height:30px; border-radius:9999px; background:#8b5cf6; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">RD</span><span style="font-weight:600;">Ravi Doshi</span></div></td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(251,191,36,0.2); background:rgba(251,191,36,0.1); color:#fbbf24;">FIELDING</span></td>
+                  <td style="padding:11px 8px;">50 catches</td>
+                  <td style="padding:11px 8px; color:#8a90a2;">1st Grade</td>
+                  <td style="padding:11px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#8a90a2;">2025/26 season</td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2;">SEASON ONLY</span></td>
+                </tr>
+                <tr style="border-bottom:1px solid #1d2331;">
+                  <td style="padding:11px 16px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:30px; height:30px; border-radius:9999px; background:#f59e0b; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">EB</span><span style="font-weight:600;">Ethan Bramwell</span></div></td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(192,132,252,0.2); background:rgba(192,132,252,0.1); color:#c084fc;">MATCHES</span></td>
+                  <td style="padding:11px 8px;">50 club games</td>
+                  <td style="padding:11px 8px; color:#8a90a2;">1st Grade</td>
+                  <td style="padding:11px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#8a90a2;">2025/26 season</td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2;">SEASON ONLY</span></td>
+                </tr>
+                <tr>
+                  <td style="padding:11px 16px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:30px; height:30px; border-radius:9999px; background:#10b981; color:#fff; font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center;">LP</span><span style="font-weight:600;">Lachlan Peake</span></div></td>
+                  <td style="padding:11px 8px;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.14em; padding:2px 6px; border-radius:4px; border:1px solid rgba(52,211,153,0.2); background:rgba(52,211,153,0.1); color:#34d399;">BOWLING</span></td>
+                  <td style="padding:11px 8px;">50 wickets</td>
+                  <td style="padding:11px 8px; color:#8a90a2;">2nd Grade</td>
+                  <td style="padding:11px 8px; text-align:right; font-family:'JetBrains Mono',monospace; font-size:11.5px; color:#8a90a2;">2024/25 season</td>
+                  <td style="padding:11px 16px; text-align:right;"><span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2;">SEASON ONLY</span></td>
+                </tr>
+              </tbody>
+            </table>
+            <div style="padding:11px 16px; border-top:1px solid #1d2331; font-size:12.5px; color:#8a90a2; text-wrap:pretty;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:9px; letter-spacing:0.1em; padding:2px 6px; border-radius:4px; background:#161b27; color:#8a90a2; margin-right:8px;">SEASON ONLY</span>
+              Public Cricket Australia data gives season totals, so a milestone can be placed in a season but not on a date. Players at clubs already on BetterCricket get the exact match — everyone else is dated when their next refresh detects the crossing.
+            </div>
+          </div>
+
+          <div style="background:#10141d; border:1px dashed #262d3d; border-radius:10px; padding:14px 16px; display:flex; align-items:center; gap:12px;">
+            <span style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.12em; text-transform:uppercase; color:#5b6072;">Not built yet</span>
+            <span style="font-size:13px; color:#8a90a2;">Milestone alerts the moment they happen need a scheduled crawl of the clubs you track. Today this page recomputes on each visit from the last refresh — set the cadence in Settings.</span>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════ 1f SETTINGS ════════ -->
+  <div id="1f" style="display:flex; flex-direction:column; gap:12px;">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700; padding:3px 8px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9;">1f</span>
+      <span style="font-size:15px; font-weight:600;">Settings — the org, the plan, the data, the sharing rules</span>
+    </div>
+
+    <div data-screen-label="1f Settings" style="width:1440px; border:1px solid #1d2331; border-radius:12px; overflow:hidden; display:flex; background:#0a0d14;">
+
+      <aside style="width:232px; flex:none; border-right:1px solid #1d2331; background:#10141d; display:flex; flex-direction:column;">
+        <div style="padding:16px; border-bottom:1px solid #1d2331; display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="width:32px; height:32px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-weight:700; font-size:15px; display:flex; align-items:center; justify-content:center;">W</span>
+            <div>
+              <div style="font-weight:700; font-size:14px; line-height:1.2;">Wilson Sports</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; letter-spacing:0.08em; color:#3a3f50;">SCOUT ORG · 2026/27</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:26px; height:26px; border-radius:5px; background:#C026D3; color:#0a0d14; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center;">S</span>
+            <span style="font-weight:700; font-size:14px; line-height:1;">Better<span style="color:#e879f9;">Scout</span></span>
+          </div>
+        </div>
+        <nav style="flex:1; padding:8px 0; display:flex; flex-direction:column;">
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>Overview</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="11" cy="11" r="7"></circle><path d="M21 21l-4-4"></path></svg>Discover clubs</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><rect x="3.5" y="4" width="7" height="16" rx="1.6"></rect><rect x="13.5" y="4" width="7" height="16" rx="1.6"></rect></svg>Watchlists</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="9" cy="8" r="3"></circle><path d="M3.5 19a5.5 5.5 0 0 1 11 0"></path><path d="M16 6.5a3 3 0 0 1 0 6M17.5 19a5.5 5.5 0 0 0-3-4.9"></path></svg>My players</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M5 21V9M12 21V4M19 21v-8"></path></svg>Compare</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid transparent; color:#5b6072;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><path d="M12 3l2.4 5.3L20 9l-4 4 1 6-5-2.8L7 19l1-6-4-4 5.6-.7z"></path></svg>Milestones</span>
+          <span style="display:flex; align-items:center; gap:11px; padding:9px 16px; font-size:13.5px; border-right:2px solid #C026D3; background:rgba(192,38,211,0.10); color:#e879f9;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="flex:none;"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3M12 19v3M22 12h-3M5 12H2M19.1 4.9l-2.1 2.1M7 17l-2.1 2.1M19.1 19.1L17 17M7 7L4.9 4.9"></path></svg>Settings</span>
+        </nav>
+        <div style="border-top:1px solid #1d2331; padding:11px 12px; font-size:12.5px; color:#8a90a2; display:flex; align-items:center; gap:8px;">
+          <span style="width:24px; height:24px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; font-size:9px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span> Dan Wilson
+        </div>
+      </aside>
+
+      <div style="flex:1; min-width:0; display:flex; flex-direction:column;">
+        <header style="background:#10141d; border-bottom:1px solid #1d2331; padding:14px 20px; display:flex; align-items:center; gap:14px;">
+          <div>
+            <h1 style="margin:0; font-size:19px; font-weight:700; letter-spacing:-0.01em;">Settings</h1>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.08em; color:#5b6072; margin-top:2px; text-transform:uppercase;">Wilson Sports Management · growth plan · 3 seats</div>
+          </div>
+          <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12.5px; color:#5b6072;">Last saved 2 minutes ago</span>
+            <span style="padding:8px 14px; border-radius:8px; background:#C026D3; color:#0a0d14; font-size:13px; font-weight:600;">Save changes</span>
+          </div>
+        </header>
+
+        <main style="padding:20px 24px 28px; display:grid; grid-template-columns:1fr 1fr; gap:20px; align-items:start;">
+
+          <div style="display:flex; flex-direction:column; gap:20px; min-width:0;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Organisation</div>
+              <div style="padding:16px; display:flex; flex-direction:column; gap:12px;">
+                <div style="display:flex; gap:14px; align-items:flex-start;">
+                  <div style="width:64px; height:64px; border:1px dashed #262d3d; border-radius:10px; background:#0a0d14; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px; flex:none;">
+                    <span style="width:26px; height:26px; border-radius:5px; background:rgba(192,38,211,0.18); color:#e879f9; font-size:12px; font-weight:700; display:flex; align-items:center; justify-content:center;">W</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:8px; letter-spacing:0.06em; color:#3a3f50;">LOGO</span>
+                  </div>
+                  <div style="flex:1; display:flex; flex-direction:column; gap:12px;">
+                    <div>
+                      <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Organisation name</div>
+                      <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:8px 10px; font-size:13.5px;">Wilson Sports Management</div>
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+                      <div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Org type</div>
+                        <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:8px 10px; font-size:13.5px;">Recruiting agency ▾</div>
+                      </div>
+                      <div>
+                        <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072; margin-bottom:3px;">Home region</div>
+                        <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:8px 10px; font-size:13.5px;">WA ▾</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div style="font-size:12px; color:#5b6072; border-top:1px solid #1d2331; padding-top:11px;">Org type sets your defaults, nothing else: an agency starts on visa and fee fields, a premier club on grade pathway. Scout orgs never see club-admin data, and no club can see your watchlists.</div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Plan &amp; usage</span>
+                <span style="margin-left:auto; font-family:'JetBrains Mono',monospace; font-size:9.5px; padding:2px 7px; border-radius:9999px; background:rgba(245,181,66,0.18); color:#f5b542;">BILLING NOT COLLECTING YET</span>
+              </div>
+              <div style="padding:16px; display:flex; flex-direction:column; gap:14px;">
+                <div>
+                  <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:8px;">
+                    <span style="font-size:13.5px;">Growth — up to 100 tracked players</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:12px;">38 / 100</span>
+                  </div>
+                  <div style="height:6px; border-radius:9999px; background:#161b27; overflow:hidden;">
+                    <div style="height:100%; width:38%; border-radius:9999px; background:#C026D3;"></div>
+                  </div>
+                </div>
+                <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:10px;">
+                  <div style="border:1px solid #1d2331; border-radius:8px; padding:11px;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">Starter</div>
+                    <div style="font-size:14px; font-weight:600; margin-top:2px;">25 players</div>
+                  </div>
+                  <div style="border:1px solid #C026D3; border-radius:8px; padding:11px; background:rgba(192,38,211,0.06);">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#e879f9;">Growth · current</div>
+                    <div style="font-size:14px; font-weight:600; margin-top:2px;">100 players</div>
+                  </div>
+                  <div style="border:1px solid #1d2331; border-radius:8px; padding:11px;">
+                    <div style="font-family:'JetBrains Mono',monospace; font-size:9.5px; letter-spacing:0.1em; text-transform:uppercase; color:#5b6072;">Unlimited</div>
+                    <div style="font-size:14px; font-weight:600; margin-top:2px;">No cap</div>
+                  </div>
+                </div>
+                <div style="font-size:12px; color:#5b6072;">Caps are enforced today — adding a 101st player is blocked. Card collection is a flag flip away, so upgrades go through us in the meantime.</div>
+                <div style="display:flex; gap:8px;">
+                  <span style="padding:7px 13px; border-radius:8px; border:1px solid #262d3d; color:#e6e8ef; font-size:13px;">Request an upgrade</span>
+                  <span style="padding:7px 13px; border-radius:8px; border:1px solid #262d3d; color:#8a90a2; font-size:13px;">Archive players to free slots</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; display:flex; align-items:center;">
+                <span style="font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">People</span>
+                <span style="margin-left:auto; font-size:12px; color:#e879f9;">+ Invite</span>
+              </div>
+              <div style="display:flex; flex-direction:column;">
+                <div style="display:flex; align-items:center; gap:11px; padding:12px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; color:#8a90a2; font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center;">DW</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Dan Wilson <span style="font-size:11.5px; color:#5b6072;">· you</span></div>
+                    <div style="font-size:12px; color:#8a90a2;">dan@wilsonsports.au</div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:3px 8px; border-radius:9999px; background:rgba(192,38,211,0.18); color:#e879f9;">OWNER</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:11px; padding:12px 16px; border-bottom:1px solid #1d2331;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; color:#8a90a2; font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center;">AF</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600;">Alex Field</div>
+                    <div style="font-size:12px; color:#8a90a2;">alex@wilsonsports.au</div>
+                  </div>
+                  <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:3px 8px; border-radius:9999px; background:#161b27; color:#8a90a2;">SCOUT</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:11px; padding:12px 16px;">
+                  <span style="width:30px; height:30px; border-radius:9999px; background:#161b27; border:1px dashed #262d3d; color:#5b6072; font-size:10px; font-weight:600; display:flex; align-items:center; justify-content:center;">?</span>
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; font-weight:600; color:#8a90a2;">jo@northsidecc.co.uk</div>
+                    <div style="font-size:12px; color:#5b6072;">Invited 3 days ago · read-only</div>
+                  </div>
+                  <span style="font-size:12px; color:#8a90a2;">Resend</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex; flex-direction:column; gap:20px; min-width:0;">
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Data &amp; refresh</div>
+              <div style="padding:16px; display:flex; flex-direction:column; gap:14px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;">Refresh tracked players</div>
+                    <div style="font-size:12px; color:#5b6072;">Rebuild stats from Cricket Australia records on this cadence</div>
+                  </div>
+                  <div style="display:flex; border:1px solid #1d2331; border-radius:6px; overflow:hidden;">
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:6px 10px; color:#5b6072;">DAILY</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:6px 10px; background:#C026D3; color:#0a0d14; font-weight:600;">WEEKLY</span>
+                    <span style="font-family:'JetBrains Mono',monospace; font-size:10px; padding:6px 10px; color:#5b6072;">MANUAL</span>
+                  </div>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:14px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;">Call a player stale after</div>
+                    <div style="font-size:12px; color:#5b6072;">Drives the “Going stale” panel on Overview</div>
+                  </div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:6px 10px; font-family:'JetBrains Mono',monospace; font-size:12px;">6 WEEKS ▾</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:14px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;">Default career window</div>
+                    <div style="font-size:12px; color:#5b6072;">What Discover and profiles open on</div>
+                  </div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:6px 10px; font-family:'JetBrains Mono',monospace; font-size:12px;">LAST 2 SEASONS ▾</div>
+                </div>
+                <div style="font-size:12px; color:#5b6072; border-top:1px solid #1d2331; padding-top:12px;">BetterScout pulls roughly ten seasons per player. Anything older isn't missing from a career — it's outside the window, and the app says so wherever a total is shown.</div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Sharing defaults</div>
+              <div style="padding:16px; display:flex; flex-direction:column; gap:13px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="flex:1; font-size:13.5px;">Include scouting notes in shared profiles</div>
+                  <span style="width:38px; height:21px; border-radius:9999px; background:#C026D3; position:relative; display:inline-block; flex:none;"><span style="position:absolute; top:3px; right:3px; width:15px; height:15px; border-radius:9999px; background:#0a0d14;"></span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:13px;">
+                  <div style="flex:1; font-size:13.5px;">Include tags</div>
+                  <span style="width:38px; height:21px; border-radius:9999px; background:#C026D3; position:relative; display:inline-block; flex:none;"><span style="position:absolute; top:3px; right:3px; width:15px; height:15px; border-radius:9999px; background:#0a0d14;"></span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:13px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px; color:#5b6072;">Include recruiting fields</div>
+                    <div style="font-size:12px; color:#5b6072;">Visa, fee, agent and availability never leave the org</div>
+                  </div>
+                  <span style="width:38px; height:21px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; position:relative; display:inline-block; flex:none;"><span style="position:absolute; top:3px; left:3px; width:15px; height:15px; border-radius:9999px; background:#3a3f50;"></span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:13px;">
+                  <div style="flex:1; font-size:13.5px;">Share links expire after</div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:6px 10px; font-family:'JetBrains Mono',monospace; font-size:12px;">90 DAYS ▾</div>
+                </div>
+                <div style="border-top:1px solid #1d2331; padding-top:13px; display:flex; align-items:center; gap:10px;">
+                  <div style="flex:1; font-size:13px; color:#8a90a2;">4 links live now</div>
+                  <span style="padding:6px 11px; border-radius:6px; border:1px solid #262d3d; color:#8a90a2; font-size:12.5px;">Manage links</span>
+                  <span style="padding:6px 11px; border-radius:6px; border:1px solid rgba(239,91,91,0.4); color:#ef5b5b; font-size:12.5px;">Revoke all</span>
+                </div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid #1d2331; border-radius:10px;">
+              <div style="padding:14px 16px; border-bottom:1px solid #1d2331; font-family:'JetBrains Mono',monospace; font-size:10.5px; letter-spacing:0.12em; text-transform:uppercase; color:#8a90a2;">Milestone alerts</div>
+              <div style="padding:16px; display:flex; flex-direction:column; gap:13px;">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;">Weekly digest</div>
+                    <div style="font-size:12px; color:#5b6072;">Monday morning: milestones reached, in reach, form movers</div>
+                  </div>
+                  <span style="width:38px; height:21px; border-radius:9999px; background:#C026D3; position:relative; display:inline-block; flex:none;"><span style="position:absolute; top:3px; right:3px; width:15px; height:15px; border-radius:9999px; background:#0a0d14;"></span></span>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:13px;">
+                  <div style="flex:1;">
+                    <div style="font-size:13.5px;">Alert me within</div>
+                    <div style="font-size:12px; color:#5b6072;">How close a milestone has to be to appear</div>
+                  </div>
+                  <div style="background:#161b27; border:1px solid #1d2331; border-radius:6px; padding:6px 10px; font-family:'JetBrains Mono',monospace; font-size:12px;">HOUSE DEFAULT ▾</div>
+                </div>
+                <div style="display:flex; align-items:center; gap:12px; border-top:1px solid #1d2331; padding-top:13px;">
+                  <div style="flex:1; font-size:13.5px;">Only players on a watchlist</div>
+                  <span style="width:38px; height:21px; border-radius:9999px; background:#161b27; border:1px solid #262d3d; position:relative; display:inline-block; flex:none;"><span style="position:absolute; top:3px; left:3px; width:15px; height:15px; border-radius:9999px; background:#3a3f50;"></span></span>
+                </div>
+                <div style="font-size:12px; color:#5b6072; border-top:1px solid #1d2331; padding-top:12px;">Real-time alerts wait on scheduled crawling. Until then the digest is only as fresh as your last refresh.</div>
+              </div>
+            </div>
+
+            <div style="background:#10141d; border:1px solid rgba(239,91,91,0.3); border-radius:10px; padding:16px; display:flex; align-items:center; gap:12px;">
+              <div style="flex:1;">
+                <div style="font-size:13.5px; font-weight:600; color:#ef5b5b;">Close this Scout Org</div>
+                <div style="font-size:12px; color:#8a90a2;">Deletes watchlists, notes and share links. Cached club rosters stay — they aren't yours.</div>
+              </div>
+              <span style="padding:7px 13px; border-radius:8px; border:1px solid rgba(239,91,91,0.4); color:#ef5b5b; font-size:13px;">Close org</span>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1540,&quot;height&quot;:1000}}"></script>
+</body>
+</html>
