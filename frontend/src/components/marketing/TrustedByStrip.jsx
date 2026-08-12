@@ -7,8 +7,8 @@ import { TRUST_CLUBS } from '../../data/trustedClubs'
 // competing with the search box above it).
 export default function TrustedByStrip({ compact = false }) {
   return (
-    <section className={`px-4 sm:px-6 lg:px-10 border-y pb-hairline bg-black/20 ${compact ? 'py-5' : 'py-12'}`}>
-      <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-8 gap-y-3">
+    <section className={`px-4 sm:px-6 lg:px-10 border-y pb-hairline ${compact ? 'py-6' : 'py-12'}`}>
+      <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center gap-x-10 gap-y-3">
         <p className={`font-mono uppercase tracking-wide3 font-medium shrink-0 text-pb-faint ${compact ? 'text-[10px]' : 'text-xs'}`}>
           Trusted by clubs at
         </p>
@@ -18,7 +18,7 @@ export default function TrustedByStrip({ compact = false }) {
               <Link
                 key={`${c.slug}-${i}`}
                 to={`/${c.slug}`}
-                className={`flex items-center gap-2 font-semibold text-pb-text/80 hover:text-accent transition-colors shrink-0 ${compact ? 'text-sm' : 'text-base gap-3'}`}
+                className={`flex items-center gap-3 font-semibold text-pb-text/80 hover:text-accent transition-colors shrink-0 ${compact ? 'text-sm' : 'text-base'}`}
               >
                 <img
                   src={c.logo}
