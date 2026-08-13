@@ -1,5 +1,39 @@
 # BetterStats — Claude Session Notes
 
+## A picker inside a `<label>` cancels its own selection (v9.23.1.1, Aug 2026)
+
+Reported from Accounts → Add member → Find in club: picking a player from the
+search results left "Player or member" empty for one super admin and worked for
+another, on the same club, the same person and the same two search results. The
+difference was the browser. Chrome held the pick; Edge and Safari dropped it.
+
+- **`Field` renders a `<label>`, and a label forwards a click on ANY descendant
+  to whichever labelable control the field holds at that moment.** Choosing
+  someone re-renders `PersonSearch` from "an input plus a list of option
+  buttons" into "the chosen name plus a CLEAR button", so the forwarded click
+  lands on Clear and wipes the choice before it can be seen. Nothing to do with
+  the data, the club, capabilities or `active_club_id`, which is why two super
+  admins on identical rows disagreed.
+- **It survives only if the re-render has NOT committed by the time the browser
+  forwards.** Verified in Chromium against the real components: commit the swap
+  synchronously or in a microtask and the pick is wiped, defer it a task and it
+  holds. That race is the whole "works for me, not for them", and no amount of
+  reading the search endpoint would have found it.
+- **`Field` gained `composite`**, which renders a `role="group"` div instead of
+  a label. Use it for anything holding its own buttons. An ordinary input keeps
+  the `<label>`, which is what gives it an accessible name and its
+  click-the-caption-to-focus behaviour, so this is not a blanket change.
+- **The pickers also defend themselves**: every option row and clear button in
+  `clubmanager/pickers.jsx` goes through `choose()`, which calls
+  `preventDefault()`. That suppresses the forwarding, so a picker mounted in a
+  stray label still holds its choice. It cannot save a click on the label's own
+  caption text, which is why the wrapper is the real fix and the guard is the
+  net. The Club Diary's assigned-member and volunteer pickers had the same
+  wrapper and are fixed too.
+- **The trap generalises.** Any composite widget (a combobox, a chip
+  multi-select, a segmented control) inside a `<label>` is a click-forwarding
+  bug waiting to be reported by whoever is not on Chrome.
+
 ## A search beacon's top match is NOT the club they wanted (v9.23.1, Aug 2026)
 
 Reported off the Meta Ads page: one person typing their way to Warnbro Swans

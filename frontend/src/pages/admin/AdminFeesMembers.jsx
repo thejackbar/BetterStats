@@ -46,7 +46,7 @@ function FindMemberTab({ seasonId, tiers, onClose, onCreated }) {
 
   return (
     <div className="grid gap-3">
-      <Field label="Player or member *">
+      <Field label="Player or member *" composite>
         <PersonSearch value={person} onChange={setPerson}
           placeholder="Type a name — anyone the club knows, including players who sat out last season…" autoFocus />
       </Field>

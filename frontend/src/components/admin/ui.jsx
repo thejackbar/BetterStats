@@ -185,13 +185,25 @@ export function TextArea({ className = '', ...rest }) {
   return <textarea className={`${INPUT_CLS} min-h-[80px] leading-[1.55] ${className}`} {...rest} />
 }
 
-export function Field({ label, children, hint, className = '' }) {
+export function Field({ label, children, hint, className = '', composite = false }) {
+  // A field is a <label> wrapping its control, which is what gives an ordinary
+  // input its accessible name and its click-the-caption-to-focus behaviour.
+  //
+  // `composite` turns that off, and it is NOT cosmetic. A picker is a group of
+  // buttons, not one labelled control, and a <label> forwards a click on ANY
+  // descendant to whichever labelable control the field holds at that moment.
+  // The instant a pick re-renders the field into "the chosen name + a clear
+  // button", that control is CLEAR — so the browser wipes the selection the
+  // person just made, before they ever see it. Pass `composite` for anything
+  // holding its own buttons; the caption then names the group instead.
+  const Tag = composite ? 'div' : 'label'
+  const groupProps = composite ? { role: 'group', 'aria-label': label || undefined } : {}
   return (
-    <label className={`block ${className}`}>
+    <Tag className={`block ${className}`} {...groupProps}>
       {label && <FieldLabel>{label}</FieldLabel>}
       {children}
       {hint && <div className="text-[11.5px] text-pb-faintest mt-1 leading-[1.5]">{hint}</div>}
-    </label>
+    </Tag>
   )
 }
 

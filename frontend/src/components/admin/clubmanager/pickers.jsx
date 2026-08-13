@@ -26,6 +26,23 @@ const SHOWN = 60
 // with no member row yet has none, so they are keyed on the player instead.
 const personKey = m => m.member_id || (m.player_id ? `player:${m.player_id}` : m.full_name)
 
+// Every option row and clear button in this file goes through this.
+//
+// A picker must not sit inside a <label> (`Field composite` is how a screen
+// says so), because a label forwards a click on any descendant to whichever
+// labelable control the field holds at that moment. Choosing someone re-renders
+// the field into "their name + a clear button", so the forwarded click lands on
+// CLEAR and the choice is wiped before it can be seen — reported from Accounts
+// → Add member, where picking a player left the field empty in Edge and Safari
+// while the same click worked in Chrome. Whether it bites comes down to whether
+// the re-render has committed by the time the browser forwards, which is why it
+// looked like it depended on the person doing it.
+//
+// preventDefault() suppresses the forwarding, so the pickers hold their choice
+// wherever they are mounted rather than relying on every screen getting the
+// wrapper right.
+const choose = fn => (e) => { e.preventDefault(); fn() }
+
 // Searchable single-member picker. `members`: [{ member_id, full_name, ... }].
 // `value` = member_id (or a `player:<id>` key) | null.
 // onChange(key | null, person | null) — the second argument carries the whole
@@ -57,7 +74,7 @@ export function MemberSelect({ members = [], value, onChange, placeholder = 'Sea
       {selected && !open ? (
         <div className={`${inp} flex items-center justify-between`}>
           <span className="truncate">{selected.full_name}</span>
-          <button type="button" onClick={() => { onChange(null, null); setQ(''); setOpen(true) }}
+          <button type="button" onClick={choose(() => { onChange(null, null); setQ(''); setOpen(true) })}
             className="text-pb-faint hover:text-pb-red text-[11px] shrink-0 ml-2">clear</button>
         </div>
       ) : (
@@ -69,7 +86,7 @@ export function MemberSelect({ members = [], value, onChange, placeholder = 'Sea
           {matches.length === 0 && <div className="px-3 py-2 text-[12px] text-pb-faintest">No members match.</div>}
           {shown.map(m => (
             <button type="button" key={personKey(m)}
-              onClick={() => { onChange(personKey(m), m); setOpen(false); setQ('') }}
+              onClick={choose(() => { onChange(personKey(m), m); setOpen(false); setQ('') })}
               className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">
               {m.full_name}{m.is_linked ? <span className="text-pb-faint text-[10px]"> · player</span> : null}
             </button>
@@ -126,7 +143,7 @@ export function PersonSearch({ value, onChange, placeholder = 'Type a name to se
           {value.full_name}
           {value.needs_member && <span className="text-pb-faint text-[10px]"> · not yet a member</span>}
         </span>
-        <button type="button" onClick={() => { onChange(null); setQ(''); setOpen(true) }}
+        <button type="button" onClick={choose(() => { onChange(null); setQ(''); setOpen(true) })}
           className="text-pb-faint hover:text-pb-red text-[11px] shrink-0 ml-2">clear</button>
       </div>
     )
@@ -146,7 +163,7 @@ export function PersonSearch({ value, onChange, placeholder = 'Type a name to se
           )}
           {(results || []).map(p => (
             <button type="button" key={p.member_id || `player:${p.player_id}`}
-              onClick={() => { onChange(p); setOpen(false); setQ('') }}
+              onClick={choose(() => { onChange(p); setOpen(false); setQ('') })}
               className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">
               {p.full_name}
               {p.needs_member
@@ -190,7 +207,7 @@ export function PersonPicker({ members = [], memberId, name, onChange, placehold
       <div className="relative" ref={wrap}>
         <div className={`${inp} flex items-center justify-between`}>
           <span className="truncate">{selectedMember.full_name}</span>
-          <button type="button" onClick={() => onChange({ member_id: null, name: null })}
+          <button type="button" onClick={choose(() => onChange({ member_id: null, name: null }))}
             className="text-pb-faint hover:text-pb-red text-[11px] shrink-0 ml-2">clear</button>
         </div>
       </div>
@@ -204,7 +221,7 @@ export function PersonPicker({ members = [], memberId, name, onChange, placehold
       {open && (
         <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-56 overflow-y-auto shadow-xl">
           {shown.map(m => (
-            <button type="button" key={m.member_id} onClick={() => { onChange({ member_id: m.member_id, name: null }); setOpen(false) }}
+            <button type="button" key={m.member_id} onClick={choose(() => { onChange({ member_id: m.member_id, name: null }); setOpen(false) })}
               className="block w-full text-left px-3 py-2 text-[12.5px] hover:bg-pb-surface2">{m.full_name}</button>
           ))}
           {hidden > 0 && (
@@ -258,7 +275,7 @@ export function RoleMultiSelect({ roles = [], value = [], onChange, onCreateRole
         <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto shadow-xl">
           {roles.length === 0 && <div className="px-3 py-2 text-[11.5px] text-pb-faintest">No roles yet — create one below.</div>}
           {roles.map(r => (
-            <button type="button" key={r.id} onClick={() => toggle(r.id)}
+            <button type="button" key={r.id} onClick={choose(() => toggle(r.id))}
               className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-pb-surface2">
               <span className={`w-3.5 h-3.5 rounded-sm border ${value.includes(r.id) ? 'bg-pb-accent border-pb-accent' : 'border-pb-hairline2'}`} />
               {r.title}{r.role_type_name ? <span className="text-pb-faint text-[10px]">· {r.role_type_name}</span> : null}

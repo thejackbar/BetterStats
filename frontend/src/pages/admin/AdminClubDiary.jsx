@@ -177,11 +177,14 @@ function TaskEditor({ task, members, roles, onPatch }) {
               onBlur={() => commitNum('percent_complete', 0, 100)} />
           </div>
         </label>
-        <label className="block">
+        {/* A div, not a label: a label forwards a click on any of the picker's
+            own buttons to the clear button that appears once someone is chosen,
+            which wipes the choice. See `Field`'s `composite` note. */}
+        <div className="block" role="group" aria-label="Assigned member">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">ASSIGNED MEMBER</span>
           <MemberSelect members={members} value={task.assigned_to_member_id || null}
             onChange={v => patch({ assigned_to_member_id: v || null })} placeholder="Search a member…" />
-        </label>
+        </div>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">ASSIGNED ROLE</span>
           <select className={inp} value={task.assigned_to_role_id || ''} onChange={e => patch({ assigned_to_role_id: e.target.value || null })}>
@@ -399,10 +402,10 @@ function GanttTab({ plan, members, roles, categories, year }) {
             {FREQUENCIES.map(fr => <option key={fr} value={fr}>{label(fr)}</option>)}
           </select>
         </label>
-        <label className="block w-56">
+        <div className="block w-56" role="group" aria-label="Volunteer">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">VOLUNTEER</span>
           <MemberSelect members={members} value={memberId || null} onChange={v => setMemberId(v || '')} placeholder="Any member…" />
-        </label>
+        </div>
         <label className="block">
           <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest">THIRD PARTY</span>
           <input className={`${inp} w-40`} placeholder="Contractor…" value={thirdParty} onChange={e => setThirdParty(e.target.value)} />
