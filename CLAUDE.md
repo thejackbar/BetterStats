@@ -1,5 +1,72 @@
 # BetterStats — Claude Session Notes
 
+## Clubs Searched or Selected in the Wizard (migration 251, v9.23.0, Aug 2026)
+
+The Meta Ads page names the warm prospects — "Clubs selected in the wizard" and
+"Clubs searched in the wizard" — and could do nothing with them. Both tables are
+now merged into one CRM tool at `/admin/super/crm/wizard-clubs` (tile on the CRM
+hub) that matches each club to the Club Directory, turns a filtered set into a
+BetterComms list, and reports the outreach back per club.
+
+- **The two tables merge on the key they already share.** `get_selected_clubs`
+  and `get_searched_clubs` both group on the stripped, lowercased club name and
+  both already drop the rows a super admin flagged as test noise, so
+  `merged_wizard_clubs` just folds them together — a club in both is ONE row
+  tagged `both`. **The Meta Ads page is untouched**; nothing there changed.
+- **Directory matching is guid-first, name-second.** The wizard's
+  `club_prepared` beacon captures the club's real CA organisation guid, which is
+  the same guid the PlayHQ crawler keys `marketing_clubs.grassroots_guid` on —
+  the strongest signal, and the reason "Applecross CC" and "Applecross Cricket
+  Club" land on one row. Case-insensitive name is the fallback for a beacon that
+  predates the guid being captured. Same priority `twenty_sync
+  ._resolve_onboarding_club` already uses.
+- **"Has this club been emailed" is DERIVED, not stored.** A sent campaign
+  carries its audience `list_id`, a `comms_recipients` row carries its contact,
+  and a directory-exported `comms_contacts` row carries its `marketing_club_id`
+  — join those three, restricted to campaigns whose audience was one of the
+  lists THIS page created, and the club's whole send history falls out. **No
+  send-path hook**, so a corrected or repeated send needs nothing kept in step,
+  and only `status = 'sent'` counts (a failed recipient is not a contact made).
+  The `list_id` comparison is made **as text**: a campaign's audience JSON is
+  free-form and one non-uuid value there would abort a `::uuid` cast for every
+  row.
+- **`wizard_club_lists.list_id` deliberately has NO foreign key.** A super admin
+  deleting an old list must not take the club's email history with it, and the
+  id is still exactly what the sent campaign's stored audience holds, so the
+  reporting keeps resolving after the list is gone (the row reports
+  `deleted: true` instead). `list_name` is stored alongside for the same reason.
+- **Export follows the Club Directory's own rules** rather than a second set —
+  never an `excluded` club, never an unsubscribed contact, every new contact
+  linked back to its directory club (so `{{club}}` and the per-recipient
+  unsubscribe resolve) and `exported_at` stamped so the Directory badge stays
+  accurate. An existing address is reused, never re-created and never
+  un-suppressed.
+- **An un-named generic mailbox gets `first_name = "Committee Members"`**
+  (`GENERIC_FIRST_NAME`). A club address is read by whoever is on the committee
+  this year: blank renders "Hi ,", and a person's name would be a lie.
+- **The browser sends club KEYS, never emails.** The server re-reads the
+  directory and takes addresses from its own data, so a stale or tampered
+  payload cannot introduce a recipient the club does not hold — the same rule
+  the Directory's own "create a list from this selection" follows.
+- **A tick never targets a hidden club.** `selectedRows` is intersected with
+  what is on screen, and with nothing ticked the button acts on the whole
+  filtered set — "create a list from what I picked" has to mean what it says.
+- **Filters**: search, source (selected / searched), progress (Registration
+  completed / Not completed / Reached terms — read off `furthest_step`, and a
+  searched-only club has no step, so "Not completed" is the absence of the
+  completed label) and Emailed / Not emailed. Sort by club, last seen or
+  contacts. Select-all is scoped to the shown rows.
+- **Verified against a real Postgres** (47 checks: the merge, guid and name
+  matching, the emailable count excluding an opt-out and a no-email contact, the
+  "Committee Members" greeting, the excluded/unmatched clubs reported rather
+  than dropped, a failed recipient not counting, an unrelated list's send not
+  reading as outreach, a junk `list_id` not breaking the report, re-export
+  minting no duplicate person, a deleted list keeping its history, and the route
+  bodies) with **migration 251 applied three times to a populated table**, and
+  **driven in Chromium** (34 checks: every filter incl. Registration completed,
+  both sort directions, select-all, the tick-survives-filtering rule, the exact
+  create-list payload, no page errors, no overflow at 390px).
+
 ## A PlayHQ registration checkbox on Accounts (migration 235, v9.19.14, Aug 2026)
 
 Playing a season requires the person to be registered with PlayHQ, and there

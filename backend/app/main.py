@@ -5160,6 +5160,32 @@ async def lifespan(app: FastAPI):
             "ON scout_player_search_views(scout_org_id, last_viewed_at DESC)"
         ))
 
+        # Migration 251: which registration-wizard clubs were exported into
+        # which auto-generated BetterComms list, so a send can be reported per
+        # club. Byte-identical to alembic/versions/251_wizard_club_lists.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS wizard_club_lists (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                list_id UUID NOT NULL,
+                list_name TEXT,
+                club_key TEXT NOT NULL,
+                club_name TEXT NOT NULL,
+                marketing_club_id UUID REFERENCES marketing_clubs(id) ON DELETE SET NULL,
+                contacts_added INTEGER NOT NULL DEFAULT 0,
+                created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_wizard_club_lists_list_club UNIQUE (list_id, club_key)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_wizard_club_lists_key "
+            "ON wizard_club_lists(club_key)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_wizard_club_lists_club "
+            "ON wizard_club_lists(marketing_club_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

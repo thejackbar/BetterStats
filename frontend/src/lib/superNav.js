@@ -60,6 +60,7 @@ export const SUPER_SECTIONS = [
     items: [
       { to: '/admin/super/clubs', label: 'All Clubs', blurb: 'Onboard clubs, edit plans and subscriptions, sync or remove them.' },
       { to: '/admin/super/marketing', label: 'Club Directory', blurb: 'Prospect clubs, outreach lists and Twenty CRM sync.' },
+      { to: '/admin/super/crm/wizard-clubs', label: 'Clubs Searched or Selected in the Wizard', blurb: 'Warm prospects from the trial signup wizard, and the outreach sent to them.' },
       { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
       { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
       { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },

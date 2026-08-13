@@ -805,6 +805,51 @@ async def super_list_export_commit(body: ListExportCommitBody,
     return result
 
 
+# ─── Clubs searched or selected in the registration wizard ────────────────────
+# The Meta Ads page reports these as two separate read-only tables; this is the
+# outreach surface over both of them merged — match each club to the Club
+# Directory, turn a filtered set into an auto-generated BetterComms list of that
+# club's contacts, and report which clubs have since been emailed through one of
+# those lists. See services/wizard_club_lists.py.
+WIZARD_DAYS_DEFAULT = 365
+WIZARD_DAYS_MAX = 730
+
+
+class WizardListCreateBody(BaseModel):
+    name: str
+    club_keys: List[str] = []
+
+
+@super_router.get("/wizard-clubs", dependencies=[_super])
+async def super_wizard_clubs(
+    days: int = WIZARD_DAYS_DEFAULT,
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import wizard_club_lists
+    days = max(1, min(int(days or WIZARD_DAYS_DEFAULT), WIZARD_DAYS_MAX))
+    return await wizard_club_lists.list_wizard_clubs(db, days)
+
+
+@super_router.post("/wizard-clubs/create-list", dependencies=[_super])
+async def super_wizard_clubs_create_list(
+    body: WizardListCreateBody,
+    days: int = WIZARD_DAYS_DEFAULT,
+    db: AsyncSession = Depends(get_db),
+    user: "object" = Depends(get_current_user),
+):
+    from app.services import wizard_club_lists
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="A list name is required")
+    days = max(1, min(int(days or WIZARD_DAYS_DEFAULT), WIZARD_DAYS_MAX))
+    result = await wizard_club_lists.create_list_from_clubs(
+        db, name=name, days=days, club_keys=body.club_keys,
+        created_by=getattr(user, "id", None))
+    if result.get("error"):
+        raise HTTPException(status_code=409, detail=result.get("detail") or result["error"])
+    return result
+
+
 # ─── Manual full engagement recompute (the "Recalculate" board button) ────────
 # Runs the SAME logic as `python -m app.scripts.recalc_engagement`: recompute and
 # re-cache every club's engagement score (twenty_sync._engagement, a local

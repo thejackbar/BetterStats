@@ -4042,6 +4042,41 @@ class CommsRecipient(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class WizardClubList(Base):
+    """One wizard club's inclusion in an auto-generated BetterComms list
+    (migration 251).
+
+    The Meta Ads page names the clubs that searched for themselves or picked
+    themselves in the registration wizard; "Clubs Searched or Selected in the
+    Wizard" turns a filtered set of them into a list of their Club Directory
+    contacts. This is the record of that export, and it is what makes
+    per-club email reporting possible: a sent campaign carries its audience
+    ``list_id``, a recipient carries its contact, and a contact carries its
+    ``marketing_club_id``.
+
+    ``list_id`` deliberately has NO foreign key. A super admin deleting an old
+    list must not take the club's email history with it, and a sent campaign's
+    stored audience keeps the same id either way, so the reporting still
+    resolves once the list itself is gone.
+    """
+    __tablename__ = "wizard_club_lists"
+    __table_args__ = (
+        UniqueConstraint("list_id", "club_key", name="uq_wizard_club_lists_list_club"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    list_id = Column(UUID(as_uuid=True), nullable=False)
+    list_name = Column(Text, nullable=True)
+    # The normalised (lowercased, trimmed) wizard club name — the same key the
+    # Meta Ads selected/searched tables group on.
+    club_key = Column(Text, nullable=False)
+    club_name = Column(Text, nullable=False)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="SET NULL"), nullable=True)
+    contacts_added = Column(Integer, nullable=False, server_default="0", default=0)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CommsSegment(Base):
     """A saved dynamic segment (migration 111, BetterComms Phase 2).
 

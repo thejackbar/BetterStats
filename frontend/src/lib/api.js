@@ -1119,6 +1119,13 @@ export const api = {
     request('/club-admin/super/crm/list-export/prepare', { method: 'POST', body: JSON.stringify({ deal_ids: dealIds }) }),
   superCrmListExportCommit: (data) =>
     request('/club-admin/super/crm/list-export/commit', { method: 'POST', body: JSON.stringify(data) }),
+  // Clubs Searched or Selected in the Wizard — the merged Meta Ads
+  // selected/searched tables, matched to the Club Directory, plus the
+  // "turn this filtered set into a BetterComms list" action.
+  superWizardClubs: () => request('/club-admin/super/crm/wizard-clubs'),
+  superWizardClubsCreateList: (data) =>
+    request('/club-admin/super/crm/wizard-clubs/create-list', { method: 'POST', body: JSON.stringify(data) }),
+
   superCrmGetSettings: () => request('/club-admin/super/crm/settings'),
   superCrmUpdateSettings: (data) => request('/club-admin/super/crm/settings', { method: 'PATCH', body: JSON.stringify(data) }),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
