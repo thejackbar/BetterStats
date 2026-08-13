@@ -203,12 +203,19 @@ async def _assert_grade_in_season(db: AsyncSession, grade_id: uuid.UUID, season_
 
 
 async def _season_in_use(db: AsyncSession, season_id: uuid.UUID) -> bool:
+    # player_season_stats and imported_stats matter here precisely because the
+    # deletable seasons are the manually-created ones: a BetterImport upload
+    # writes aggregate stat rows against exactly such a season, and both FKs
+    # cascade — without these two checks a season full of imported history
+    # deleted straight through, taking the stats with it.
     res = await db.execute(_t("""
         SELECT
             EXISTS(SELECT 1 FROM grades WHERE season_id = :sid) AS has_grades,
             EXISTS(SELECT 1 FROM games g JOIN grades gr ON gr.id = g.grade_id WHERE gr.season_id = :sid) AS has_games,
             EXISTS(SELECT 1 FROM manual_games WHERE season_id = :sid) AS has_manual_games,
-            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE season_id = :sid) AS has_adjustments
+            EXISTS(SELECT 1 FROM manual_season_adjustments WHERE season_id = :sid) AS has_adjustments,
+            EXISTS(SELECT 1 FROM player_season_stats WHERE season_id = :sid) AS has_season_stats,
+            EXISTS(SELECT 1 FROM imported_stats WHERE season_id = :sid) AS has_imported_stats
     """), {"sid": str(season_id)})
     row = res.mappings().first()
     return bool(row and any(row.values()))
@@ -432,6 +439,57 @@ async def create_manual_season(
         db, org_id=club.id, user_id=current_user.id, action="create",
         target_table="seasons", target_id=str(season.id),
         summary=f"Added season '{name}'", before=None, after=_row_to_dict(season),
+    )
+    await db.commit()
+    return {"id": str(season.id), "name": season.name, "year": season.year}
+
+
+class SeasonPatchIn(BaseModel):
+    name: Optional[str] = None
+    year: Optional[int] = None
+
+
+@router.patch("/seasons/{season_id}")
+async def update_season(
+    season_id: str,
+    data: SeasonPatchIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Edit a season's name and/or year. Deliberately NOT restricted to
+    manually-created seasons — the sync never overwrites an existing season's
+    name (it only backfills a NULL year), so a tidied display name on a synced
+    season sticks across future syncs. Mirrors the AFL silo's rename_season
+    (routers/afl/seasons_admin.py)."""
+    sid = _to_uuid(season_id, "season")
+    season = await db.get(Season, sid)
+    if not season or season.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Season not found")
+
+    before = {"name": season.name, "year": season.year}
+    if data.name is not None:
+        name = data.name.strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Season name is required")
+        existing = await db.execute(
+            select(Season).where(
+                Season.organisation_id == club.id,
+                Season.id != season.id,
+                func.lower(Season.name) == name.lower(),
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail=f"A season named '{name}' already exists.")
+        season.name = name
+    if data.year is not None:
+        season.year = data.year
+
+    await _log_edit(
+        db, org_id=club.id, user_id=current_user.id, action="update",
+        target_table="seasons", target_id=season_id,
+        summary=f"Edited season '{before['name']}'",
+        before=before, after={"name": season.name, "year": season.year},
     )
     await db.commit()
     return {"id": str(season.id), "name": season.name, "year": season.year}

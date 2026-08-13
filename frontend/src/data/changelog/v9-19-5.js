@@ -1,13 +1,12 @@
 export default {
   version: 'v9.19.5',
   date: '2026-08-11',
-  sortKey: '2026-08-15T20:00:00Z',
-  title: 'Directory filters that read the club’s real records',
+  // Must sort above v9.19.4.2's (future-dated) 2026-08-15T20:00:00Z key,
+  // or SITE_VERSION keeps reading v9.19.4.2.
+  sortKey: '2026-08-15T21:00:00Z',
+  title: 'Edit and delete seasons',
   items: [
-    'The Officials filter now lists everyone holding a role whose type is Official — umpires, scorers and the like — not just people hand-tagged as one.',
-    'Parents lists anyone recorded as a parent or guardian in a family, whether the family links them as a member or through their player record.',
-    'Life members now includes anyone with a Life Membership award on the honour board, alongside the members flagged directly.',
-    'Third parties is now called External contacts, and Committees reads Committee.',
-    'Families and Qualifications open their own pages, so they now sit as buttons beside the filters they relate to — Families next to Parents, Qualifications next to Volunteers.',
+    'Every row on Admin → Seasons now has an Edit button, so a season\'s name or year can be fixed in place. A renamed season keeps its new name across future syncs.',
+    'Manually-created seasons can be deleted from the same page. Only an empty season is accepted: anything with games, grades or stats recorded against it is refused with the reason, so a season full of imported history can never be removed by accident.',
   ],
 }

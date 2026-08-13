@@ -105,6 +105,8 @@ async def create_coupon(
         coupon = await discount_coupons.create_coupon(db, created_by=current_user.id, **body.model_dump())
     except discount_coupons.CouponError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:  # Stripe errors etc. — see force_apply/redeem below
+        raise HTTPException(status_code=502, detail=str(e) or "Could not create this coupon in Stripe")
     return _serialize(coupon)
 
 

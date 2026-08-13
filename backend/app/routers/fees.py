@@ -590,7 +590,7 @@ async def list_members(
 
     members = []
     summary = {
-        "total_members": 0, "needs_tier": 0, "non_financial": 0,
+        "total_members": 0, "needs_tier": 0, "non_financial": 0, "playhq_missing": 0,
         "membership_payable": 0.0, "match_fee_payable": 0.0, "total_payable": 0.0,
         "membership_paid": 0.0, "match_fee_paid": 0.0, "total_paid": 0.0,
         "membership_outstanding": 0.0, "match_fee_outstanding": 0.0, "total_outstanding": 0.0,
@@ -614,11 +614,14 @@ async def list_members(
             "is_life_member": member.is_life_member,
             "is_honorary": member.is_honorary,
             "season_status": ms.status,
+            "playhq_registered": ms.playhq_registered,
+            "playhq_registered_at": ms.playhq_registered_at.isoformat() if ms.playhq_registered_at else None,
             **fin,
         })
         summary["total_members"] += 1
         summary["needs_tier"] += 1 if fin["needs_tier"] else 0
         summary["non_financial"] += 1 if fin["status"] == "non_financial" else 0
+        summary["playhq_missing"] += 0 if ms.playhq_registered else 1
         for k in ("membership_payable", "match_fee_payable", "total_payable",
                   "membership_paid", "match_fee_paid", "total_paid",
                   "membership_outstanding", "match_fee_outstanding", "total_outstanding",
@@ -675,6 +678,77 @@ async def create_member(
     ))
     await db.commit()
     return {"member_id": str(member_id)}
+
+
+class MemberEnroll(BaseModel):
+    season_id: str
+    member_id: Optional[str] = None   # an existing fee_members row
+    player_id: Optional[str] = None   # a club player with no fee_members row yet
+    fee_schedule_id: Optional[str] = None
+
+
+@router.post("/members/enroll")
+async def enroll_member(
+    data: MemberEnroll,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an EXISTING person to a season's fee list — a player who sat out
+    last season, or one who's new to the club and has never had a fee_members
+    row at all. `create_member` above only ever creates a brand-new
+    non-playing person; this is the search-driven counterpart (paired with
+    `PersonSearch` / `GET /people/search` on the frontend), which finds
+    anyone the club already knows — including a registered player with no
+    fee_members row yet — rather than minting a duplicate manual entry for
+    someone who already exists.
+
+    Idempotent: enrolling someone already in this season just returns their
+    existing row rather than erroring, so a double-click or a re-search of
+    someone already added is harmless.
+    """
+    season = await _season_or_404(db, club, data.season_id)
+    member_id = data.member_id
+    if not member_id and data.player_id:
+        try:
+            member_id = await members_svc.ensure_for_player(db, club.id, uuid.UUID(data.player_id))
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    if not member_id:
+        raise HTTPException(status_code=422, detail="member_id or player_id is required")
+
+    member = await db.get(FeeMember, uuid.UUID(member_id))
+    if not member or member.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    existing = (await db.execute(select(FeeMemberSeason).where(
+        FeeMemberSeason.member_id == member.id, FeeMemberSeason.season_id == season.id
+    ))).scalar_one_or_none()
+    if existing:
+        await db.commit()  # persist a freshly-minted fee_members row even if already enrolled
+        return {"member_id": str(member.id), "member_season_id": str(existing.id), "already_enrolled": True}
+
+    # A schedule pick, else fall back to the member's own carried-forward tier
+    # name (same default `patch_member_season`/rollover use) so someone who's
+    # played for the club before doesn't land in "Needs tier" for no reason.
+    schedule = await _resolve_schedule(db, club, season, data.fee_schedule_id)
+    if schedule is None and member.current_tier:
+        dest_schedule_by_name = {
+            (s.name or "").strip().lower(): s for s in (
+                await db.execute(select(FeeSchedule).where(FeeSchedule.season_id == season.id))
+            ).scalars().all()
+        }
+        schedule = dest_schedule_by_name.get(member.current_tier.strip().lower())
+
+    ms = FeeMemberSeason(
+        id=uuid.uuid4(), member_id=member.id, season_id=season.id, organisation_id=club.id,
+        fee_schedule_id=schedule.id if schedule else None,
+    )
+    db.add(ms)
+    if schedule is not None:
+        member.current_tier = schedule.name
+    await db.commit()
+    return {"member_id": str(member.id), "member_season_id": str(ms.id), "already_enrolled": False}
 
 
 class MemberImportPreview(BaseModel):
@@ -828,6 +902,8 @@ async def get_member(
             "membership_payment_method": ms.membership_payment_method,
             "notes": ms.notes,
             "status": ms.status,
+            "playhq_registered": ms.playhq_registered,
+            "playhq_registered_at": ms.playhq_registered_at.isoformat() if ms.playhq_registered_at else None,
         },
         "financials": fin,
         "match_days": entries,
@@ -896,6 +972,7 @@ class MemberSeasonPatch(BaseModel):
     membership_payment_method: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = None
+    playhq_registered: Optional[bool] = None
 
 
 @router.patch("/members/{member_id}/season")
@@ -933,10 +1010,54 @@ async def patch_member_season(
         ms.membership_payment_method = data.membership_payment_method.strip() or None
     if data.notes is not None:
         ms.notes = data.notes.strip() or None
+    if data.playhq_registered is not None:
+        ms.playhq_registered = data.playhq_registered
+        ms.playhq_registered_at = datetime.now(timezone.utc) if data.playhq_registered else None
     if data.status is not None:
         if data.status not in MEMBERSHIP_STATUSES:
             raise HTTPException(status_code=422, detail=f"Invalid status — must be one of {MEMBERSHIP_STATUSES}")
         ms.status = data.status
+    await db.commit()
+    return {"ok": True}
+
+
+@router.delete("/members/{member_id}/season")
+async def remove_member_season(
+    member_id: str,
+    season_id: str,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Take one member out of a season's fee list — for a player you know
+    isn't coming back this season. Only removes their line in THIS season;
+    the person record and every other season's history is untouched.
+
+    Refused once a payment has been recorded against them this season —
+    deleting the row would cascade-delete real money (fee_member_seasons →
+    fee_payments is ON DELETE CASCADE). Nothing here un-charges match days;
+    that's the recompute/waive tools' job, done first if a clean removal is
+    still wanted.
+    """
+    season = await _season_or_404(db, club, season_id)
+    member = await db.get(FeeMember, uuid.UUID(member_id))
+    if not member or member.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Member not found")
+    ms = (await db.execute(select(FeeMemberSeason).where(
+        FeeMemberSeason.member_id == member.id, FeeMemberSeason.season_id == season.id
+    ))).scalar_one_or_none()
+    if ms is None:
+        raise HTTPException(status_code=404, detail="Not in this season")
+
+    payment_count = (await db.execute(
+        select(func.count()).select_from(FeePayment).where(FeePayment.member_season_id == ms.id)
+    )).scalar_one()
+    if payment_count:
+        raise HTTPException(
+            status_code=409,
+            detail=f"{member.full_name} has {payment_count} payment{'s' if payment_count != 1 else ''} recorded this season — remove the payment(s) first",
+        )
+    await db.delete(ms)
     await db.commit()
     return {"ok": True}
 
@@ -1563,6 +1684,63 @@ async def rollover_members(
         "skipped_existing": skipped_existing,
         "skipped_left_club": skipped_left,
     }
+
+
+class RolloverUndoRequest(BaseModel):
+    season_id: str
+
+
+@router.post("/rollover/undo")
+async def undo_rollover(
+    data: RolloverUndoRequest,
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Clear every member out of a season's fee list in one go.
+
+    The fix for rolling players over before the new season's rate card was
+    ready: every rolled-over row lands with no tier (or the wrong one, if a
+    name happened to collide), so the season needs wiping and redoing once
+    the schedule is copied across. Deliberately a season-wide reset rather
+    than "undo only what the last rollover added" — by the time someone
+    reaches for this, sorting rollover-added rows from anyone else added
+    since isn't a distinction worth making; it's "start this season's roster
+    again from nothing".
+
+    A member with a payment already recorded this season is kept, never
+    deleted — the same money guard `remove_member_season` applies to one row
+    at a time, applied here across the whole season. The person themselves,
+    and every other season, are untouched either way.
+    """
+    season = await _season_or_404(db, club, data.season_id)
+    rows = (await db.execute(
+        select(FeeMemberSeason, FeeMember)
+        .join(FeeMember, FeeMemberSeason.member_id == FeeMember.id)
+        .where(FeeMemberSeason.season_id == season.id)
+    )).all()
+    if not rows:
+        return {"removed": 0, "kept_with_payments": []}
+
+    ms_ids = [ms.id for ms, _ in rows]
+    paid_ms_ids = {
+        row[0] for row in (
+            await db.execute(
+                select(FeePayment.member_season_id).where(FeePayment.member_season_id.in_(ms_ids)).distinct()
+            )
+        ).all()
+    }
+
+    kept = []
+    removed = 0
+    for ms, member in rows:
+        if ms.id in paid_ms_ids:
+            kept.append(member.full_name)
+            continue
+        await db.delete(ms)
+        removed += 1
+    await db.commit()
+    return {"removed": removed, "kept_with_payments": sorted(kept)}
 
 
 # ───────────────────────────────────────────────────────────────────────────

@@ -316,7 +316,7 @@ export default function AdminLayout({ children }) {
               </Link>
             )}
             <div className="hidden sm:block">
-              <BookmarkButton pageLabel={labelForPath(location.pathname)} />
+              <BookmarkButton pageLabel={labelForPath(location.pathname)} variant="bar" />
             </div>
             {wizardAvailable && (
               <button
@@ -414,6 +414,13 @@ export default function AdminLayout({ children }) {
                 <button onClick={handleLogout} className="shrink-0 tracking-wide2 hover:text-pb-text transition-colors border pb-hairline rounded px-2 py-1">
                   LOG OUT
                 </button>
+              </div>
+              <div className="px-2">
+                <BookmarkButton
+                  pageLabel={labelForPath(location.pathname)}
+                  variant="inline"
+                  onNavigate={() => setMobileOpen(false)}
+                />
               </div>
               <div className="px-2 flex items-center gap-2 flex-wrap">
                 {user?.club_slug && (

@@ -71,7 +71,7 @@ from app.services.sync import (
 logger = logging.getLogger(__name__)
 
 # Payload schema versions — bump on shape changes so stale caches rebuild.
-CAREER_VERSION = 2     # bumped: career window widened 5 → 10 years
+CAREER_VERSION = 4     # bumped: payload now carries grades across the whole window, not just the latest season
 DEEP_VERSION = 3       # bumped: added batting reliability + style (floor/ceiling, boundary profile)
 
 # How far back the external "full career, all clubs" view reaches. The aggregate
@@ -264,6 +264,7 @@ def _rollup(rows: list[dict]) -> dict:
         "innings": inns,
         "runs": runs,
         "not_outs": no,
+        "balls_faced": balls,
         "average": round(runs / outs, 2) if outs else None,
         "strike_rate": round(100 * runs / balls, 2) if balls else None,
         "high_score": (f"{hs}*" if hs_no else str(hs)) if hs is not None else None,
@@ -272,6 +273,7 @@ def _rollup(rows: list[dict]) -> dict:
         "ducks": ducks,
         "wickets": w,
         "overs": _balls_to_overs(bballs),
+        "bowling_balls": bballs,
         "runs_conceded": bruns,
         "maidens": maid,
         "five_fors": fiw,
@@ -291,13 +293,14 @@ def _has_activity(t: dict) -> bool:
 
 async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
     """One club's last-CAREER_YEARS player aggregates, every player, keyed for a
-    per-player slice on read. ~3 light calls per season row, all public."""
+    per-player slice on read, plus every grade the club fielded across that
+    same window. ~4 light calls per season row, all public."""
     dated = await _dated_seasons(org_guid)
     built_at = datetime.now(timezone.utc).isoformat()
     if not dated:
         return {
             "org": {"id": org_guid, "name": club_name},
-            "window": None, "players": [],
+            "window": None, "players": [], "grades": [],
             "schema_v": CAREER_VERSION, "built_at": built_at,
         }
     cur = max(y for y, _, _ in dated)
@@ -320,11 +323,42 @@ async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
         tasks.append(fetch("bat", playhq_client.get_batting_stats, sid))
         tasks.append(fetch("bowl", playhq_client.get_bowling_stats, sid))
         tasks.append(fetch("field", playhq_client.get_fielding_stats, sid))
+        # "teams" reuses the same call external_club_teams makes, but across
+        # EVERY season row in this window rather than stopping at the first
+        # year with data — external_club_teams answers "what does this club
+        # field THIS season" (what BetterIQ's opponent discovery needs);
+        # this answers "every grade we've actually surfaced stats for",
+        # which needs the whole window, not just the most recent year.
+        tasks.append(fetch("teams", playhq_client.get_teams, sid))
     results = await asyncio.gather(*tasks)
 
     # pid → {name, rows: {season_guid: {year, bat, bowl, field}}}
     acc: dict[str, dict] = {}
+    # A grade's own GUID changes every season (a new competition row per
+    # year), so grouping by grade_id would show "1st Grade" as several
+    # separate chips, one per year. Grouped by NAME instead — grade_id is
+    # kept only as a React-key-friendly representative, not an identity.
+    grades_by_name: dict[str, dict] = {}
     for kind, sid, rows in results:
+        if kind == "teams":
+            for t in rows or []:
+                team_name = t.get("name") or t.get("displayName")
+                grade_objs = list(t.get("grades") or [])
+                if t.get("grade"):
+                    grade_objs.append(t["grade"])
+                for gd in grade_objs:
+                    gid = ((gd or {}).get("id") or "").strip()
+                    gname = (gd.get("name") or "").strip()
+                    if not gid or not gname:
+                        continue
+                    g = grades_by_name.setdefault(gname.lower(), {
+                        "grade_id": gid,
+                        "grade_name": gname,
+                        "team_name": team_name or gname,
+                        "years": set(),
+                    })
+                    g["years"].add(year_of[sid])
+            continue
         for p in rows or []:
             pid = (p.get("id") or "").strip()
             if not pid:
@@ -332,6 +366,11 @@ async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
             e = acc.setdefault(pid, {"name": p.get("name") or p.get("shortName") or "Unknown", "rows": {}})
             r = e["rows"].setdefault(sid, {"year": year_of[sid]})
             r[kind] = p.get("statistics") or {}
+
+    grades = sorted(
+        ({**g, "years": sorted(g["years"], reverse=True)} for g in grades_by_name.values()),
+        key=lambda d: (_team_rank(d["grade_name"] or d["team_name"]), d["grade_name"] or ""),
+    )
 
     players = []
     for pid, e in acc.items():
@@ -363,6 +402,7 @@ async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
         "window": {"from_year": cur - (CAREER_YEARS - 1), "to_year": cur},
         "season_rows_scanned": len(window),
         "players": players,
+        "grades": grades,
         "schema_v": CAREER_VERSION,
         "built_at": built_at,
     }

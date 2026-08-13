@@ -1579,10 +1579,19 @@ async def _season_by_season_scoped(
 
     Season aliasing is applied first (`season_aliases`), so a club that merged
     Summer and Winter 25/26 gets the same single row it gets unfiltered.
+
+    Season-keyed residual rows (a BetterImport season delta, a manual season
+    adjustment — `_RESIDUAL_SOURCES`) are added per season on top of the
+    per-game figures, exactly as `_career_residuals` adds them to the scoped
+    career header. Without this a player whose only record for a season is an
+    imported total has no row here at all, and the table stops reconciling
+    with the header right above it (the reported 1970/71 case: header says
+    338 runs, season table and every chart built from it say nothing).
     """
-    params: dict = {"pid": player_id}
+    params: dict = {"pid": player_id, "residual_sources": list(_RESIDUAL_SOURCES)}
     scope.bind(params)
     clause = scope.clause("g.grade_id")
+    resid_clause = scope.clause("pss.grade_id")
     res = await session.execute(
         text(f"""
             WITH scoped_games AS (
@@ -1653,47 +1662,98 @@ async def _season_by_season_scoped(
                 ) t
                 JOIN scoped_games sg ON sg.game_id = t.game_id
                 GROUP BY sg.sid
+            ),
+            -- Aggregate-only rows with no scorecards behind them (an imported
+            -- season, a manual season adjustment). Filtered by grade_id where
+            -- one is set; exclusion semantics keep the usual grade-less rows.
+            resid AS (
+                SELECT COALESCE(sa.canonical_season_id, pss.season_id) AS sid,
+                    SUM(pss.matches) AS matches,
+                    SUM(pss.batting_innings) AS batting_innings,
+                    SUM(pss.runs) AS total_runs,
+                    MAX(pss.high_score) AS high_score,
+                    SUM(pss.not_outs) AS not_outs,
+                    SUM(pss.balls_faced) AS balls_faced,
+                    SUM(pss.fifties) AS fifties,
+                    SUM(pss.hundreds) AS hundreds,
+                    SUM(pss.ducks) AS ducks,
+                    SUM(pss.fours) AS total_fours,
+                    SUM(pss.sixes) AS total_sixes,
+                    SUM(pss.wickets) AS total_wickets,
+                    SUM(pss.runs_conceded) AS bowling_runs_conceded,
+                    SUM(pss.overs) AS total_overs,
+                    SUM(pss.bowling_balls) AS bowling_balls,
+                    SUM(pss.maidens) AS total_maidens,
+                    MAX(pss.best_bowling_wickets) AS best_bowling_wickets,
+                    (ARRAY_AGG(pss.best_bowling_figures
+                        ORDER BY pss.best_bowling_wickets DESC NULLS LAST
+                     ) FILTER (WHERE pss.best_bowling_figures IS NOT NULL))[1] AS best_bowling_figures,
+                    SUM(pss.five_wicket_innings) AS five_fors,
+                    SUM(pss.catches) AS total_catches,
+                    SUM(pss.catches_wk) AS total_catches_wk,
+                    SUM(pss.catches_non_wk) AS total_catches_non_wk,
+                    SUM(pss.run_outs) AS total_run_outs,
+                    SUM(pss.stumpings) AS total_stumpings
+                FROM v_effective_player_season_stats pss
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = pss.season_id AND sa.undone_at IS NULL
+                WHERE pss.player_id = CAST(:pid AS UUID)
+                  AND pss.season_id IS NOT NULL
+                  AND pss.source = ANY(:residual_sources){resid_clause}
+                GROUP BY COALESCE(sa.canonical_season_id, pss.season_id)
             )
             SELECT
                 s.id AS season_id,
                 s.name AS season_name,
                 s.year,
-                COALESCE(played.matches, 0) AS matches,
-                COALESCE(bat.batting_innings, 0) AS batting_innings,
-                COALESCE(bat.total_runs, 0) AS total_runs,
-                bat.high_score,
-                ROUND(bat.total_runs::numeric
-                    / NULLIF(bat.batting_innings - bat.not_outs, 0), 2) AS batting_average,
-                ROUND(bat.total_runs::numeric / NULLIF(bat.balls_faced, 0) * 100, 2) AS strike_rate,
-                COALESCE(bat.fifties, 0) AS fifties,
-                COALESCE(bat.hundreds, 0) AS hundreds,
-                COALESCE(bat.not_outs, 0) AS not_outs,
-                COALESCE(bat.ducks, 0) AS ducks,
-                COALESCE(bat.total_fours, 0) AS total_fours,
-                COALESCE(bat.total_sixes, 0) AS total_sixes,
-                COALESCE(bowl.total_wickets, 0) AS total_wickets,
-                COALESCE(bowl.bowling_runs_conceded, 0) AS bowling_runs_conceded,
-                COALESCE(bowl.total_overs, 0) AS total_overs,
-                ROUND(bowl.bowling_runs_conceded::numeric
-                    / NULLIF(bowl.total_wickets, 0), 2) AS bowling_average,
-                ROUND(bowl.bowling_runs_conceded::numeric
-                    / NULLIF(bowl.bowling_balls, 0) * 6, 2) AS economy,
-                bowl.best_bowling_wickets,
-                bowl.best_bowling_figures,
-                COALESCE(bowl.five_fors, 0) AS five_fors,
-                COALESCE(bowl.total_maidens, 0) AS total_maidens,
-                COALESCE(field.total_catches, 0) AS total_catches,
-                COALESCE(field.total_catches_wk, 0) AS total_catches_wk,
-                COALESCE(field.total_catches_non_wk, 0) AS total_catches_non_wk,
-                COALESCE(field.total_run_outs, 0) AS total_run_outs,
-                COALESCE(field.total_stumpings, 0) AS total_stumpings
+                COALESCE(played.matches, 0) + COALESCE(resid.matches, 0) AS matches,
+                COALESCE(bat.batting_innings, 0) + COALESCE(resid.batting_innings, 0) AS batting_innings,
+                COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0) AS total_runs,
+                GREATEST(bat.high_score, resid.high_score) AS high_score,
+                ROUND((COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0))::numeric
+                    / NULLIF((COALESCE(bat.batting_innings, 0) + COALESCE(resid.batting_innings, 0))
+                             - (COALESCE(bat.not_outs, 0) + COALESCE(resid.not_outs, 0)), 0), 2) AS batting_average,
+                ROUND((COALESCE(bat.total_runs, 0) + COALESCE(resid.total_runs, 0))::numeric
+                    / NULLIF(COALESCE(bat.balls_faced, 0) + COALESCE(resid.balls_faced, 0), 0) * 100, 2) AS strike_rate,
+                COALESCE(bat.fifties, 0) + COALESCE(resid.fifties, 0) AS fifties,
+                COALESCE(bat.hundreds, 0) + COALESCE(resid.hundreds, 0) AS hundreds,
+                COALESCE(bat.not_outs, 0) + COALESCE(resid.not_outs, 0) AS not_outs,
+                COALESCE(bat.ducks, 0) + COALESCE(resid.ducks, 0) AS ducks,
+                COALESCE(bat.total_fours, 0) + COALESCE(resid.total_fours, 0) AS total_fours,
+                COALESCE(bat.total_sixes, 0) + COALESCE(resid.total_sixes, 0) AS total_sixes,
+                COALESCE(bowl.total_wickets, 0) + COALESCE(resid.total_wickets, 0) AS total_wickets,
+                COALESCE(bowl.bowling_runs_conceded, 0) + COALESCE(resid.bowling_runs_conceded, 0) AS bowling_runs_conceded,
+                COALESCE(bowl.total_overs, 0) + COALESCE(resid.total_overs, 0) AS total_overs,
+                ROUND((COALESCE(bowl.bowling_runs_conceded, 0) + COALESCE(resid.bowling_runs_conceded, 0))::numeric
+                    / NULLIF(COALESCE(bowl.total_wickets, 0) + COALESCE(resid.total_wickets, 0), 0), 2) AS bowling_average,
+                ROUND((COALESCE(bowl.bowling_runs_conceded, 0) + COALESCE(resid.bowling_runs_conceded, 0))::numeric
+                    / NULLIF(COALESCE(bowl.bowling_balls, 0) + COALESCE(resid.bowling_balls, 0), 0) * 6, 2) AS economy,
+                GREATEST(bowl.best_bowling_wickets, resid.best_bowling_wickets) AS best_bowling_wickets,
+                -- The figures string follows whichever side holds the better
+                -- wicket count; a residual's figures are the club's own book
+                -- for this season, so they're safe at season scope.
+                CASE WHEN resid.best_bowling_wickets IS NOT NULL
+                          AND (bowl.best_bowling_wickets IS NULL
+                               OR resid.best_bowling_wickets > bowl.best_bowling_wickets)
+                          AND resid.best_bowling_figures IS NOT NULL
+                     THEN resid.best_bowling_figures
+                     ELSE bowl.best_bowling_figures END AS best_bowling_figures,
+                COALESCE(bowl.five_fors, 0) + COALESCE(resid.five_fors, 0) AS five_fors,
+                COALESCE(bowl.total_maidens, 0) + COALESCE(resid.total_maidens, 0) AS total_maidens,
+                COALESCE(field.total_catches, 0) + COALESCE(resid.total_catches, 0) AS total_catches,
+                COALESCE(field.total_catches_wk, 0) + COALESCE(resid.total_catches_wk, 0) AS total_catches_wk,
+                COALESCE(field.total_catches_non_wk, 0) + COALESCE(resid.total_catches_non_wk, 0) AS total_catches_non_wk,
+                COALESCE(field.total_run_outs, 0) + COALESCE(resid.total_run_outs, 0) AS total_run_outs,
+                COALESCE(field.total_stumpings, 0) + COALESCE(resid.total_stumpings, 0) AS total_stumpings
             FROM seasons s
             LEFT JOIN played ON played.sid = s.id
             LEFT JOIN bat ON bat.sid = s.id
             LEFT JOIN bowl ON bowl.sid = s.id
             LEFT JOIN field ON field.sid = s.id
+            LEFT JOIN resid ON resid.sid = s.id
             WHERE played.sid IS NOT NULL OR bat.sid IS NOT NULL
                OR bowl.sid IS NOT NULL OR field.sid IS NOT NULL
+               OR resid.sid IS NOT NULL
             ORDER BY s.year DESC NULLS LAST, s.name
         """),
         params,

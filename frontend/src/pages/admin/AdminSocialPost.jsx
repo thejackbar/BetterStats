@@ -130,13 +130,14 @@ const TAB_ICON = {
 }
 // Post types that pull from external data (BetterSelect / a match link / a round
 // import). These open on the "Get your data" step so the source is collected first.
-const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard']
+const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm']
 const SOURCE_HELP = {
   lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
   result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
   results: 'Pull the latest round\'s results for every grade straight from the results feed.',
+  motm: 'Paste the match link and we\'ll work out the player of the match from the scorecard. You choose which of their batting, bowling and fielding stats go on the post.',
 }
 
 
@@ -510,8 +511,17 @@ function topBatters(t) {
 // Sensible grade ordering for roundup posts: senior numbered grades first
 // (1st, 2nd, 3rd…), then one-day/limited grades, then the rest — each by number.
 const _WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
-function gradeSortKey(grade) {
-  const s = (grade || '').toUpperCase().trim()
+// A row's grade may carry its own gradeOrder from the club's Merge Grades →
+// Order setting (backend-resolved, see social_rounds.py). That always wins —
+// it's a considered choice the club made, not a guess from the grade's name —
+// and sorts before every un-ordered grade, matching the Merge Grades screen's
+// own "anything you haven't ordered sits below the ones you have" rule. Only
+// grades with no order set fall back to this name heuristic among themselves.
+function gradeSortKey(row) {
+  const grade = typeof row === 'string' ? row : (row?.grade || '')
+  const order = typeof row === 'object' && row ? row.gradeOrder : null
+  const s = grade.toUpperCase().trim()
+  if (order != null) return [-1, order, s]
   const ord = s.match(/(\d+)\s*(ST|ND|RD|TH)\b/)
   if (ord) return [0, parseInt(ord[1], 10), s]
   const firstWord = (s.split(/\s+/)[0] || '').toLowerCase()
@@ -525,7 +535,7 @@ function gradeSortKey(grade) {
 }
 function sortByGrade(rows) {
   return [...rows].sort((a, b) => {
-    const ka = gradeSortKey(a.grade), kb = gradeSortKey(b.grade)
+    const ka = gradeSortKey(a), kb = gradeSortKey(b)
     return (ka[0] - kb[0]) || (ka[1] - kb[1]) || ka[2].localeCompare(kb[2])
   })
 }
@@ -602,9 +612,14 @@ function OppLogoChip({ logo, loading, onClear }) {
 
 // Pull a whole round (all grades) from Play.cricket — the multi-match analogue
 // of the scorecard URL import. Lets the operator pick a match-day when the club
-// played across more than one date.
-function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
+// played across more than one date. Two ways in: "Pull latest round" hits the
+// live feed with no link, or a pasted match link resolves that link's own round
+// (onFetchLink). A pasted playhq.com link comes back as a `notice` — a different
+// id namespace, so the correction renders as its own amber box.
+function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick, onFetchLink, notice }) {
+  const [link, setLink] = useState('')
   const rowsOf = (d) => (d ? d[rowsKey] || [] : [])
+  const fetchLink = () => { const q = link.trim(); if (q) onFetchLink(q) }
   return (
     <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
       <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
@@ -612,7 +627,7 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
         <button onClick={onPull} disabled={status === 'loading'}
           className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
           style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
-          {status === 'loading' ? 'Loading…' : 'Pull from match link'}
+          {status === 'loading' ? 'Loading…' : 'Pull latest round'}
         </button>
         {dates.length > 1 && (
           <select value={idx} onChange={e => onPick(+e.target.value)}
@@ -623,6 +638,22 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
           </select>
         )}
       </div>
+      <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mt-3 mb-1.5">…or paste any match link from that round</p>
+      <div className="flex gap-2">
+        <input value={link} onChange={e => setLink(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && fetchLink()}
+          placeholder="Match link from play.cricket.com.au"
+          className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+        <button onClick={fetchLink} disabled={status === 'loading'}
+          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>Fetch</button>
+      </div>
+      {notice?.kind === 'playhq' && (
+        <div className="mt-2 p-2.5 rounded border border-amber-400/50 bg-amber-400/10">
+          <p className="font-mono text-[9px] text-amber-400 leading-relaxed">{notice.message}</p>
+          <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">Open your match on play.cricket.com.au and copy the address from there.</p>
+        </div>
+      )}
       {status === 'ok' && dates.length > 0 && (
         <p className="font-mono text-[9px] mt-1.5 text-green-400">✓ {rowsOf(dates[idx]).length} loaded · {dates[idx]?.label}</p>
       )}
@@ -635,6 +666,71 @@ function RoundImportBox({ hint, status, dates, idx, rowsKey, onPull, onPick }) {
   )
 }
 
+// Split rows into n contiguous chunks with sizes as even as possible
+// (11 rows over 2 pages → 6 + 5). Used to spread a roundup across a carousel.
+function chunkEven(rows, n) {
+  const count = Math.max(1, n | 0)
+  const base = Math.floor(rows.length / count)
+  const extra = rows.length % count
+  const out = []
+  let pos = 0
+  for (let i = 0; i < count; i++) {
+    const size = base + (i < extra ? 1 : 0)
+    out.push(rows.slice(pos, pos + size))
+    pos += size
+  }
+  return out
+}
+
+// HTML5 drag-and-drop reorder for the roundup row cards (fixtures & results
+// share it). The grab handle carries `draggable`; the card is the drop target.
+function useRowDrag(setRows) {
+  const dragIdx = useRef(null)
+  const [overIdx, setOverIdx] = useState(null)
+  const onDragStart = (i) => (e) => {
+    dragIdx.current = i
+    e.dataTransfer.effectAllowed = 'move'
+    try { e.dataTransfer.setData('text/plain', String(i)) } catch { /* older engines */ }
+  }
+  const onDragOver = (i) => (e) => {
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    setOverIdx(cur => (cur === i ? cur : i))
+  }
+  const onDrop = (i) => (e) => {
+    e.preventDefault()
+    const from = dragIdx.current
+    dragIdx.current = null
+    setOverIdx(null)
+    if (from == null || from === i) return
+    setRows(rows => {
+      if (from < 0 || from >= rows.length || i < 0 || i >= rows.length) return rows
+      const next = [...rows]
+      const [moved] = next.splice(from, 1)
+      next.splice(i, 0, moved)
+      return next
+    })
+  }
+  const onDragEnd = () => { dragIdx.current = null; setOverIdx(null) }
+  return { overIdx, onDragStart, onDragOver, onDrop, onDragEnd }
+}
+
+// Ranked-player label for the POTM import's player select — name plus whichever
+// stat blocks the scorecard actually holds ("J. BARENDSE · 64 (71) · 2/22").
+function potmPlayerLabel(p) {
+  const name = p.short || [p.first ? `${p.first[0]}.` : '', (p.last || '').toUpperCase()].filter(Boolean).join(' ') || 'Player'
+  const bits = [name]
+  if (p.batting) bits.push(`${p.batting.r}${p.batting.notOut ? '*' : ''} (${p.batting.b})`)
+  if (p.bowling) bits.push(`${p.bowling.w}/${p.bowling.r}`)
+  if (p.fielding && (p.fielding.catches || p.fielding.stumpings)) {
+    bits.push(`${p.fielding.catches || 0} ct${p.fielding.stumpings ? ` · ${p.fielding.stumpings} st` : ''}`)
+  }
+  return bits.join(' · ')
+}
+
+// Helper line under every match-link box — the playhq.com id-namespace gotcha.
+const LINK_HELP = "Use the link from play.cricket.com.au. A playhq.com link uses a different match ID, but we'll help you find your match if you paste one."
+
 const NO_RECENT_MATCHES = "We couldn't find any completed matches for your club this season to match that link against."
 
 // Shown when the pasted link can't name one match on its own. A playhq.com
@@ -645,10 +741,18 @@ const NO_RECENT_MATCHES = "We couldn't find any completed matches for your club 
 // the link.
 function MatchPickList({ picks, onPick, onDismiss }) {
   if (!picks?.matches?.length) return null
+  const isPlayhq = picks.source === 'playhq'
   return (
-    <div className="mt-2 rounded border pb-hairline bg-pb-surface p-2">
+    <div className="mt-2">
+      {isPlayhq && (
+        <div className="mb-2 p-2.5 rounded border border-amber-400/50 bg-amber-400/10">
+          <p className="font-mono text-[10px] text-amber-400 leading-relaxed">That's a playhq.com link. BetterPosts pulls match data from play.cricket.com.au.</p>
+          {picks.message && <p className="font-mono text-[9px] text-amber-400/80 mt-1 leading-relaxed">{picks.message}</p>}
+        </div>
+      )}
+      <div className="rounded border pb-hairline bg-pb-surface p-2">
       <div className="flex items-start gap-2 mb-2">
-        <p className="flex-1 font-mono text-[9px] text-pb-faint leading-relaxed">{picks.message}</p>
+        <p className="flex-1 font-mono text-[9px] text-pb-faint leading-relaxed">{isPlayhq ? 'Pick your match below.' : picks.message}</p>
         <button onClick={onDismiss} className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">✕</button>
       </div>
       <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
@@ -661,6 +765,7 @@ function MatchPickList({ picks, onPick, onDismiss }) {
             </div>
           </button>
         ))}
+      </div>
       </div>
     </div>
   )
@@ -879,13 +984,33 @@ export default function AdminSocialPost() {
   const [resUrlInput, setResUrlInput] = useState('')
   const [resUrlStatus, setResUrlStatus] = useState(null)
   const [resPicks, setResPicks] = useState(null)
+  // Player-of-the-match import (paste a match link → the club's own side ranked
+  // best-performance first, with per-block toggles feeding the C3 stats).
+  const [potmUrlInput, setPotmUrlInput] = useState('')
+  const [potmUrlStatus, setPotmUrlStatus] = useState(null)
+  const [potmPicks, setPotmPicks] = useState(null)
+  const [potmImport, setPotmImport] = useState({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
   // Fixtures / results roundups — one post, all grades. Seeded with sample rows
   // so a fresh tab previews well; users edit/add/remove.
   const [fixtures, setFixtures] = useState(() => DEFAULT_FIXTURES.map((f) => ({ ...f })))
   const [results, setResults] = useState(() => DEFAULT_RESULTS.map((r) => ({ ...r })))
   // Play.cricket round import (the multi-match analogue of the scorecard import).
-  const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null })
-  const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null })
+  const [fxImport, setFxImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  const [rrImport, setRrImport] = useState({ status: null, dates: [], idx: 0, season: null, notice: null })
+  // Fixtures / results roundups spread across a carousel: rows are split evenly
+  // across `count` derived pages, `idx` is the page being previewed.
+  const [roundPages, setRoundPages] = useState({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
+  const patchRoundPages = (tab, patch) => setRoundPages(rp => {
+    const next = { ...rp[tab], ...patch }
+    next.count = Math.max(1, Math.min(6, next.count))
+    next.idx = Math.max(0, Math.min(next.count - 1, next.idx))
+    return { ...rp, [tab]: next }
+  })
+  // Scorecard as two square (1080×1080) Instagram posts instead of one wide
+  // 1920×1080 canvas — always exactly 2 pages (batted-first team, then the
+  // chasing team), no page-count picker needed.
+  const [scSplit, setScSplit] = useState(false)
+  const [scSplitIdx, setScSplitIdx] = useState(0)
 
   // Club-event / announcement posters (Events tab). One editable facts object +
   // a chosen layout, motif glyph and optional background photo.
@@ -915,6 +1040,10 @@ export default function AdminSocialPost() {
   // starts a fresh undo history — snapshots belong to a single page.
   const pages = usePages(canvas, { onPageChange: () => canvasHistory.clear() })
   const pageRefs = useRef([])
+  // Separate ref array for the derived fixtures/results carousel pages, so the
+  // blank-tab carousel's own refs are never clashed with.
+  const roundPageRefs = useRef([])
+  const scSplitPageRefs = useRef([])
   // Coalesces a burst of same-label edits (e.g. slider ticks) into one snapshot.
   const lastRec = useRef({ label: '', t: 0 })
   // Custom Edit mode: overlay freeform blocks on top of the current (non-blank)
@@ -1278,6 +1407,99 @@ export default function AdminSocialPost() {
     setResUrlStatus(res.kind === 'choose' ? NO_RECENT_MATCHES : (res.message || 'Paste a match link or a match ID'))
   }
 
+  // ── Player of the match import ──────────────────────────────────────────────
+  // Builds the C3 template inputs from a ranked player + the block toggles:
+  // up to 4 stats in priority order (batting → bowling → fielding), the player
+  // slot (roster record when the pid resolves, else a minimal live-name entry,
+  // same shape loadLineupFromPlayCricket builds), and the match meta.
+  const applyPotm = useCallback((data, playerIdx, include) => {
+    const pl = data?.players?.[playerIdx]
+    if (!pl) return
+    const stats = []
+    if (include.bat && pl.batting) {
+      const b = pl.batting
+      stats.push({ label: 'Runs', value: `${b.r}${b.notOut ? '*' : ''} (${b.b})` })
+      stats.push({ label: 'Strike rate', value: String(b.sr ?? '') })
+    }
+    if (include.bowl && pl.bowling) {
+      const bw = pl.bowling
+      stats.push({ label: 'Wickets', value: `${bw.w}/${bw.r}` })
+      stats.push({ label: 'Overs', value: String(bw.o ?? '') })
+    }
+    if (include.field && pl.fielding) {
+      const f = pl.fielding
+      stats.push({ label: 'Catches', value: `${f.catches ?? 0}${f.stumpings ? ` · ${f.stumpings} st` : ''}` })
+    }
+    setMotm(m => ({ ...m, playerIdx: 0, stats: stats.slice(0, 4), summary: m.summary }))
+
+    const rosterPlayer = pl.pid ? playerForPid(pl.pid) : null
+    const role = pl.batting && pl.bowling ? 'AR' : pl.bowling ? 'BOWL' : 'BAT'
+    // Comma form splits reliably whatever the club's name-format setting is.
+    const fallbackName = pl.first && pl.last ? `${pl.last}, ${pl.first}` : (pl.last || pl.first || pl.short || 'Player')
+    const player = rosterPlayer || { id: pl.pid || `potm_${playerIdx}`, display_name: fallbackName }
+    setSelectedPlayers([{
+      player,
+      role: rosterPlayer?.player_role && ['BAT', 'BOWL', 'AR', 'WK'].includes(rosterPlayer.player_role) ? rosterPlayer.player_role : role,
+      captain: false, viceCaptain: false, keeper: false,
+    }])
+
+    const mm = data.match || {}
+    if (mm.opponent) {
+      setOpponent(o => ({ ...o, name: tidyClubName(mm.opponent) || o.name, monogram: mm.oppMono || o.monogram }))
+    }
+    setMatch(m => ({
+      ...m,
+      round: mm.round || m.round,
+      venue: mm.venue || m.venue,
+      date: fmtIsoDate(mm.date) || m.date,
+      competition: mm.grade || m.competition,
+    }))
+  }, [playerForPid])
+
+  const loadPotmMatch = async (matchId) => {
+    setPotmPicks(null)
+    setPotmUrlStatus('loading')
+    try {
+      const data = await api.getSocialPotm(matchId)
+      if (!data?.players?.length) { setPotmUrlStatus('No player stats found for that match'); return }
+      const include = { bat: true, bowl: true, field: true }
+      setPotmImport({ status: 'ok', data, playerIdx: 0, include })
+      applyPotm(data, 0, include)
+      setPotmUrlStatus('ok')
+    } catch (e) {
+      setPotmUrlStatus(e?.message || 'Failed to load the scorecard')
+    }
+  }
+
+  const handlePotmImport = async () => {
+    setPotmPicks(null)
+    setPotmUrlStatus('loading')
+    let res
+    try {
+      res = await api.socialMatchLookup(potmUrlInput.trim())
+    } catch (e) {
+      setPotmUrlStatus(e?.message || 'Could not look that match up')
+      return
+    }
+    if (res.kind === 'match') { await loadPotmMatch(res.match_id); return }
+    if (res.kind === 'choose' && res.matches?.length) {
+      setPotmPicks(res)
+      setPotmUrlStatus(null)
+      return
+    }
+    setPotmUrlStatus(res.kind === 'choose' ? NO_RECENT_MATCHES : (res.message || 'Paste a match link or a match ID'))
+  }
+
+  const changePotmPlayer = (idx) => {
+    setPotmImport(s => ({ ...s, playerIdx: idx }))
+    applyPotm(potmImport.data, idx, potmImport.include)
+  }
+  const togglePotmInclude = (key) => {
+    const include = { ...potmImport.include, [key]: !potmImport.include[key] }
+    setPotmImport(s => ({ ...s, include }))
+    applyPotm(potmImport.data, potmImport.playerIdx, include)
+  }
+
   // ── Play.cricket fixtures / results round import ────────────────────────────
   const applyFxDate = useCallback((d, season) => {
     if (!d) return
@@ -1310,6 +1532,56 @@ export default function AdminSocialPost() {
       applyRrDate(dates[0], data.season)
     } catch (e) { setRrImport({ status: e?.message || 'failed', dates: [], idx: 0, season: null }) }
   }, [applyRrDate])
+
+  // Same round pull, resolved from a pasted match link instead of the live
+  // feed's latest — any one match link from a round names the whole round.
+  // A playhq.com link can't (different id namespace, see the match-lookup
+  // notes) and comes back kind 'playhq' for the amber correction.
+  const importFixturesFromLink = useCallback(async (q) => {
+    setFxImport(s => ({ ...s, status: 'loading', notice: null }))
+    try {
+      const data = await api.getSocialFixtures(q)
+      if (data.kind === 'round') {
+        const dates = data.dates || []
+        if (!dates.length) { setFxImport(s => ({ ...s, status: 'empty', notice: null })); return }
+        setFxImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
+        applyFxDate(dates[0], data.season)
+        return
+      }
+      if (data.kind === 'playhq') {
+        setFxImport(s => ({ ...s, status: null, notice: { kind: 'playhq', message: data.message } }))
+        return
+      }
+      setFxImport(s => ({ ...s, status: data.message || 'Could not read that link', notice: null }))
+    } catch (e) {
+      setFxImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
+    }
+  }, [applyFxDate])
+
+  const importResultsFromLink = useCallback(async (q) => {
+    setRrImport(s => ({ ...s, status: 'loading', notice: null }))
+    try {
+      const data = await api.getSocialResults(q)
+      if (data.kind === 'round') {
+        const dates = data.dates || []
+        if (!dates.length) { setRrImport(s => ({ ...s, status: 'empty', notice: null })); return }
+        setRrImport({ status: 'ok', dates, idx: 0, season: data.season, notice: null })
+        applyRrDate(dates[0], data.season)
+        return
+      }
+      if (data.kind === 'playhq') {
+        setRrImport(s => ({ ...s, status: null, notice: { kind: 'playhq', message: data.message } }))
+        return
+      }
+      setRrImport(s => ({ ...s, status: data.message || 'Could not read that link', notice: null }))
+    } catch (e) {
+      setRrImport(s => ({ ...s, status: e?.message || 'failed', notice: null }))
+    }
+  }, [applyRrDate])
+
+  // Drag-and-drop reorder for the roundup row cards (▲▼ and ✕ keep working).
+  const fxDrag = useRowDrag(setFixtures)
+  const rrDrag = useRowDrag(setResults)
 
   // Reorder a roundup row (fixtures / results) up or down.
   const moveRow = (setter, idx, dir) => setter(rows => {
@@ -1465,15 +1737,32 @@ export default function AdminSocialPost() {
     setExporting(true)
     setExportError(null)
     try {
-      const W = tmpl.w || (tmpl.isScorecard ? 1920 : 1080)
-      const H = tmpl.h || 1080
+      const splitOn = isScorecard && scSplit
+      const W = splitOn ? 1080 : (tmpl.w || (tmpl.isScorecard ? 1920 : 1080))
+      const H = splitOn ? 1080 : (tmpl.h || 1080)
       const stamp = Date.now()
       // A Blank-tab carousel exports every page as its own PNG (slideN).
+      const roundCount = (tmpl.kind === 'fixtures' || tmpl.kind === 'results') ? roundPages[tmpl.kind].count : 1
       if (tmpl.kind === 'blank' && pages.count > 1) {
         for (let i = 0; i < pages.count; i++) {
           const node = pageRefs.current[i]
           if (!node) continue
           await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-carousel-${stamp}-slide${i + 1}.png` })
+        }
+      } else if (roundCount > 1) {
+        // A fixtures/results roundup spread across pages exports each derived
+        // page as its own PNG (slideN), same as the blank carousel.
+        for (let i = 0; i < roundCount; i++) {
+          const node = roundPageRefs.current[i]
+          if (!node) continue
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
+        }
+      } else if (splitOn) {
+        // Scorecard split into 2 square posts — one team per slide.
+        for (let i = 0; i < 2; i++) {
+          const node = scSplitPageRefs.current[i]
+          if (!node) continue
+          await exportNodeToPng(node, { width: W, height: H, fileName: `betterstats-${templateId.toLowerCase()}-${stamp}-slide${i + 1}.png` })
         }
       } else {
         if (!renderRef.current) return
@@ -1586,11 +1875,19 @@ export default function AdminSocialPost() {
   const tmpl = TEMPLATES.find(t => t.id === templateId) || TEMPLATES[0]
   const isScorecard = !!(tmpl.isScorecard)
   const TemplateComponent = tmpl.component
+  // Scorecard split into 2 square Instagram posts (batted-first team, then
+  // the chasing team) instead of 1 wide 1920×1080 canvas.
+  const scSplitOn = isScorecard && scSplit
 
   // Which freeform layer is being edited, and whether the freeform tools show.
   // Blank tab → the standalone canvas; Custom Edit on a real template → overlay.
   const isBlankTab = tmpl.kind === 'blank'
   const showBlankTools = isBlankTab || customEdit
+  // Fixtures/results roundups can spread across derived carousel pages: same
+  // template, each page rendering its even slice of the rows (chunkEven).
+  const isRoundTab = tmpl.kind === 'fixtures' || tmpl.kind === 'results'
+  const roundPage = isRoundTab ? roundPages[tmpl.kind] : null
+  const roundPagesOn = !!(roundPage && roundPage.count > 1)
   // The layer the rail panels + inspector edit: the standalone canvas on the
   // Blank tab, else the overlay that floats on top of a real template. (Adding
   // a block to a real template turns Custom Edit on so the overlay shows.)
@@ -1714,7 +2011,10 @@ export default function AdminSocialPost() {
       topBatters: result.topBatters, topBowlers: result.topBowlers,
     }
   }
-  if (isScorecard) extraProps.match = scorecardMatch
+  if (isScorecard) {
+    extraProps.match = scorecardMatch
+    if (scSplitOn) { extraProps.square = true; extraProps.only = scSplitIdx === 0 ? 'home' : 'away' }
+  }
 
   const templatePlayers = selectedPlayers.map((sp, i) => {
     const base = playerToTemplatePlayer(sp.player, sp, nameFormat, swapNames)
@@ -1793,13 +2093,13 @@ export default function AdminSocialPost() {
   const roundMeta = { round: matchData.round, date: matchData.date, comp: matchData.competition, season: matchData.season }
   if (tmpl.kind === 'fixtures') {
     extraProps.meta = roundMeta
-    extraProps.fixtures = fixtures
+    extraProps.fixtures = roundPagesOn ? chunkEven(fixtures, roundPage.count)[roundPage.idx] || [] : fixtures
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
   if (tmpl.kind === 'results') {
     extraProps.meta = roundMeta
-    extraProps.results = results
+    extraProps.results = roundPagesOn ? chunkEven(results, roundPage.count)[roundPage.idx] || [] : results
     extraProps.club = clubMark
     extraProps.sponsors = scorecardMatch.meta.sponsors
   }
@@ -1871,11 +2171,19 @@ export default function AdminSocialPost() {
     })
     setResUrlInput('')
     setResUrlStatus(null)
+    setResPicks(null)
+    setPotmUrlInput('')
+    setPotmUrlStatus(null)
+    setPotmPicks(null)
+    setPotmImport({ status: null, data: null, playerIdx: 0, include: { bat: true, bowl: true, field: true } })
     setFixtures(DEFAULT_FIXTURES.map((f) => ({ ...f })))
     setResults(DEFAULT_RESULTS.map((r) => ({ ...r })))
+    setRoundPages({ fixtures: { count: 1, idx: 0 }, results: { count: 1, idx: 0 } })
     setScorecardMatch(DEFAULT_SCORECARD)
     setScUrlInput('')
     setScUrlStatus(null)
+    setScSplit(false)
+    setScSplitIdx(0)
     setEvent(DEFAULT_EVENT)
     setEventPreset('curry')
     setEventMotifKey('star')
@@ -1894,8 +2202,8 @@ export default function AdminSocialPost() {
   )
 
   // ─── Preview renderer ────────────────────────────────────────────────────────
-  const W = tmpl.w || (isScorecard ? 1920 : 1080)
-  const H = tmpl.h || 1080
+  const W = scSplitOn ? 1080 : (tmpl.w || (isScorecard ? 1920 : 1080))
+  const H = scSplitOn ? 1080 : (tmpl.h || 1080)
 
   // ─── Controls ────────────────────────────────────────────────────────────────
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
@@ -2127,7 +2435,7 @@ export default function AdminSocialPost() {
         className="px-2.5 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">↺ RESET</button>
       <button onClick={saveCurrentTemplate} title="Save this post as a reusable template"
         className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">SAVE AS TEMPLATE</button>
-      {!(isBlankTab && pages.count > 1) && (
+      {!((isBlankTab && pages.count > 1) || roundPagesOn || scSplitOn) && (
         <button onClick={handleSaveToClubRoom} disabled={savingToClubRoom} title="Add this post to the Club Room Mode TV slideshow"
           className="px-3 h-8 rounded-md border pb-hairline2 font-mono text-[10px] tracking-wide2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors disabled:opacity-60">
           {savingToClubRoom ? 'SAVING…' : clubRoomSaved ? '✓ SAVED' : 'SAVE TO CLUB ROOM'}
@@ -2135,7 +2443,7 @@ export default function AdminSocialPost() {
       )}
       <button onClick={handleExport} disabled={exporting}
         className="px-3.5 h-8 rounded-md font-mono text-[10px] tracking-wide2 disabled:opacity-60 transition-colors"
-        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : '↓ DOWNLOAD PNG')}</button>
+        style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>{exporting ? 'EXPORTING…' : (isBlankTab && pages.count > 1 ? `↓ ${pages.count} SLIDES` : roundPagesOn ? `↓ ${roundPage.count} SLIDES` : scSplitOn ? '↓ 2 SLIDES' : '↓ DOWNLOAD PNG')}</button>
     </>
   )
 
@@ -2154,6 +2462,19 @@ export default function AdminSocialPost() {
         {isBlankTab && (
           <PageStrip count={pages.count} index={pages.index}
             onGoTo={pages.goTo} onAdd={pages.add} onDuplicate={pages.duplicate} onRemove={pages.remove} />
+        )}
+        {isRoundTab && (
+          // Derived pages: rows re-spread evenly whenever the count changes, so
+          // adding/removing a page never edits the rows themselves.
+          <PageStrip count={roundPage.count} index={roundPage.idx}
+            onGoTo={(i) => patchRoundPages(tmpl.kind, { idx: i })}
+            onAdd={() => patchRoundPages(tmpl.kind, { count: roundPage.count + 1 })}
+            onRemove={() => patchRoundPages(tmpl.kind, { count: roundPage.count - 1 })} />
+        )}
+        {scSplitOn && (
+          // Always exactly 2 pages — the batted-first team, then the chasing
+          // team — so nothing to add or remove, just switch between them.
+          <PageStrip count={2} index={scSplitIdx} onGoTo={setScSplitIdx} fixed />
         )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
@@ -2176,7 +2497,7 @@ export default function AdminSocialPost() {
           </div>
         </div>
         <div className="mt-2 flex items-center justify-between gap-3" style={{ width: pw }}>
-          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : 'SINGLE POST'}</span>
+          <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{W} × {H} · {Math.round(scale * 100)}% · {isBlankTab && pages.count > 1 ? `PAGE ${pages.index + 1} OF ${pages.count} · CAROUSEL` : roundPagesOn ? `PAGE ${roundPage.idx + 1} OF ${roundPage.count} · CAROUSEL` : scSplitOn ? `PAGE ${scSplitIdx + 1} OF 2 · INSTAGRAM SQUARES` : 'SINGLE POST'}</span>
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">{showBlankTools ? 'DRAG TO MOVE · SHIFT-CLICK FOR SEVERAL' : ''}</span>
         </div>
       </div>
@@ -2201,6 +2522,53 @@ export default function AdminSocialPost() {
       onAddSponsor={(sp) => addBlock('image', { src: sp.url, srcName: sp.name, fit: 'contain' })}
       club={{ name: settings?.name, logo_url: team.logo }}
     />
+  )
+
+  // Player-of-the-match import controls — rendered on the motm source step AND
+  // inside the C3 Content section, so the same state drives both.
+  const potmPlayers = potmImport.data?.players || []
+  const potmSel = potmPlayers[potmImport.playerIdx] || null
+  const potmImportControls = (
+    <div>
+      <div className="flex gap-2">
+        <input type="text" value={potmUrlInput}
+          onChange={(e) => { setPotmUrlInput(e.target.value); setPotmUrlStatus(null); setPotmPicks(null) }}
+          onKeyDown={(e) => e.key === 'Enter' && handlePotmImport()}
+          placeholder="Match link from play.cricket.com.au, or a match ID"
+          className="flex-1 min-w-0 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono placeholder:text-pb-faintest" />
+        <button onClick={handlePotmImport} disabled={potmUrlStatus === 'loading'}
+          className="px-3 py-1.5 rounded text-xs font-mono tracking-wide2 shrink-0 disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: 'var(--pb-bg)' }}>
+          {potmUrlStatus === 'loading' ? 'Loading…' : 'Fetch'}
+        </button>
+      </div>
+      <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
+      {potmUrlStatus && potmUrlStatus !== 'loading' && (
+        <p className={`font-mono text-[9px] mt-1.5 ${potmUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
+          {potmUrlStatus === 'ok' ? '✓ Player of the match worked out from the scorecard' : `✗ ${potmUrlStatus}`}
+        </p>
+      )}
+      <MatchPickList picks={potmPicks} onPick={loadPotmMatch} onDismiss={() => setPotmPicks(null)} />
+      {potmPlayers.length > 0 && (
+        <div className="mt-3 flex flex-col gap-2">
+          <Field label="Player (ranked by performance)">
+            <select value={potmImport.playerIdx} onChange={(e) => changePotmPlayer(+e.target.value)}
+              className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text font-mono">
+              {potmPlayers.map((p, i) => <option key={i} value={i}>{potmPlayerLabel(p)}</option>)}
+            </select>
+          </Field>
+          <div className="flex gap-4 flex-wrap">
+            {[['bat', 'Batting', 'batting'], ['bowl', 'Bowling', 'bowling'], ['field', 'Fielding', 'fielding']].map(([key, label, block]) => (
+              <label key={key} className={`flex items-center gap-1.5 text-xs font-mono ${potmSel?.[block] ? 'text-pb-text cursor-pointer' : 'text-pb-faintest'}`}>
+                <input type="checkbox" checked={!!potmImport.include[key]} disabled={!potmSel?.[block]}
+                  onChange={() => togglePotmInclude(key)} />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 
   return (
@@ -2299,7 +2667,7 @@ export default function AdminSocialPost() {
                         value={activeTab === 'result' ? resUrlInput : scUrlInput}
                         onChange={(e) => { if (activeTab === 'result') { setResUrlInput(e.target.value); setResUrlStatus(null) } else { setScUrlInput(e.target.value); setScUrlStatus(null) } }}
                         onKeyDown={(e) => e.key === 'Enter' && (activeTab === 'result' ? handleResultImport() : handleScUrlImport())}
-                        placeholder="Play.Cricket or PlayHQ match link, or a match ID"
+                        placeholder="Match link from play.cricket.com.au, or a match ID"
                         className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-2 text-xs text-pb-text font-mono" />
                       <button onClick={activeTab === 'result' ? handleResultImport : handleScUrlImport}
                         disabled={(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading'}
@@ -2307,6 +2675,7 @@ export default function AdminSocialPost() {
                         {(activeTab === 'result' ? resUrlStatus : scUrlStatus) === 'loading' ? '…' : 'Fetch'}
                       </button>
                     </div>
+                    <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
                     {(() => {
                       const st = activeTab === 'result' ? resUrlStatus : scUrlStatus
                       if (!st || st === 'loading') return null
@@ -2324,7 +2693,7 @@ export default function AdminSocialPost() {
                   <div className="pb-card p-4">
                     <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                       status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
-                      onPull={importFixtures}
+                      onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
                       onPick={(i) => { setFxImport((s) => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
                   </div>
                 )}
@@ -2332,8 +2701,16 @@ export default function AdminSocialPost() {
                   <div className="pb-card p-4">
                     <RoundImportBox hint="recent results" rowsKey="results"
                       status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                      onPull={importResults}
+                      onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
                       onPick={(i) => { setRrImport((s) => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
+                  </div>
+                )}
+
+                {activeTab === 'motm' && (
+                  <div className="pb-card p-4">
+                    <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint mb-2">Paste the match link</div>
+                    {potmImportControls}
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">You can still edit the player and every stat after.</p>
                   </div>
                 )}
 
@@ -2919,6 +3296,15 @@ export default function AdminSocialPost() {
             {templateId === 'C3' && (
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-3">Player Spotlight</h2>
+
+                {/* Match-link import — works out the player of the match and fills
+                    the stat tiles; the manual list below stays for fine-tuning. */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
+                  {potmImportControls}
+                  <p className="font-mono text-[9px] mt-1.5 text-pb-faintest">Importing replaces the stats below. Fine-tune them there after.</p>
+                </div>
+
                 {selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <Field label="Featured Player">
@@ -2962,7 +3348,7 @@ export default function AdminSocialPost() {
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={resUrlInput} onChange={e => { setResUrlInput(e.target.value); setResUrlStatus(null); setResPicks(null) }}
-                      placeholder="Play.Cricket or PlayHQ match link, or a match ID"
+                      placeholder="Match link from play.cricket.com.au, or a match ID"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleResultImport()} />
                     <button onClick={handleResultImport} disabled={resUrlStatus === 'loading'}
@@ -2971,6 +3357,7 @@ export default function AdminSocialPost() {
                       {resUrlStatus === 'loading' ? 'Loading…' : 'Import'}
                     </button>
                   </div>
+                  <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
                   {resUrlStatus && resUrlStatus !== 'loading' && (
                     <p className={`font-mono text-[9px] mt-1.5 ${resUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
                       {resUrlStatus === 'ok' ? '✓ Top performers, scores & MOTM filled — review below' : `✗ ${resUrlStatus}`}
@@ -3113,17 +3500,30 @@ export default function AdminSocialPost() {
                     <span className="font-mono text-[9px] text-pb-faintest">{fixtures.length} grades</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above. Drag-free reorder with ▲▼.</p>
+                <p className="text-[11px] text-pb-faint mb-3">Round, date &amp; competition come from <strong>Match Info</strong> above. Drag a row by its ⋮⋮ handle, or use ▲▼.</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pages</span>
+                  <button onClick={() => patchRoundPages('fixtures', { count: roundPages.fixtures.count - 1 })} disabled={roundPages.fixtures.count <= 1}
+                    className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">−</button>
+                  <span className="font-mono text-xs text-pb-text w-4 text-center">{roundPages.fixtures.count}</span>
+                  <button onClick={() => patchRoundPages('fixtures', { count: roundPages.fixtures.count + 1 })} disabled={roundPages.fixtures.count >= 6}
+                    className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">+</button>
+                  <span className="text-pb-faintest text-[10px]">Rows spread evenly across pages</span>
+                </div>
                 <RoundImportBox hint="upcoming fixtures" rowsKey="fixtures"
                   status={fxImport.status} dates={fxImport.dates} idx={fxImport.idx}
-                  onPull={importFixtures}
+                  onPull={importFixtures} onFetchLink={importFixturesFromLink} notice={fxImport.notice}
                   onPick={(i) => { setFxImport(s => ({ ...s, idx: i })); applyFxDate(fxImport.dates[i], fxImport.season) }} />
                 <div className="flex flex-col gap-2">
                   {fixtures.map((f, i) => {
                     const set = (patch) => setFixtures(rows => rows.map((r, j) => j === i ? { ...r, ...patch } : r))
                     return (
-                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '14px 1fr 58px 20px' }}>
+                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
+                        onDragOver={fxDrag.onDragOver(i)} onDrop={fxDrag.onDrop(i)}
+                        style={fxDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 58px 20px' }}>
+                          <span draggable onDragStart={fxDrag.onDragStart(i)} onDragEnd={fxDrag.onDragEnd} title="Drag to reorder"
+                            className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setFixtures, i, -1)} onDown={() => moveRow(setFixtures, i, 1)} isFirst={i === 0} isLast={i === fixtures.length - 1} />
                           <input value={f.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -3166,17 +3566,30 @@ export default function AdminSocialPost() {
                     <span className="font-mono text-[9px] text-pb-faintest">{results.length} grades</span>
                   </div>
                 </div>
-                <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post. Reorder with ▲▼.</p>
+                <p className="text-[11px] text-pb-faint mb-3">Round &amp; date come from <strong>Match Info</strong> above. W/L colour-codes the post. Drag a row by its ⋮⋮ handle, or use ▲▼.</p>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pages</span>
+                  <button onClick={() => patchRoundPages('results', { count: roundPages.results.count - 1 })} disabled={roundPages.results.count <= 1}
+                    className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">−</button>
+                  <span className="font-mono text-xs text-pb-text w-4 text-center">{roundPages.results.count}</span>
+                  <button onClick={() => patchRoundPages('results', { count: roundPages.results.count + 1 })} disabled={roundPages.results.count >= 6}
+                    className="w-6 h-6 rounded border pb-hairline font-mono text-xs text-pb-faint hover:text-pb-text disabled:opacity-30">+</button>
+                  <span className="text-pb-faintest text-[10px]">Rows spread evenly across pages</span>
+                </div>
                 <RoundImportBox hint="recent results" rowsKey="results"
                   status={rrImport.status} dates={rrImport.dates} idx={rrImport.idx}
-                  onPull={importResults}
+                  onPull={importResults} onFetchLink={importResultsFromLink} notice={rrImport.notice}
                   onPick={(i) => { setRrImport(s => ({ ...s, idx: i })); applyRrDate(rrImport.dates[i], rrImport.season) }} />
                 <div className="flex flex-col gap-2">
                   {results.map((r, i) => {
                     const set = (patch) => setResults(rows => rows.map((x, j) => j === i ? { ...x, ...patch } : x))
                     return (
-                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5">
-                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '14px 1fr 72px 20px' }}>
+                      <div key={i} className="rounded border pb-hairline p-2 bg-pb-surface2 flex flex-col gap-1.5"
+                        onDragOver={rrDrag.onDragOver(i)} onDrop={rrDrag.onDrop(i)}
+                        style={rrDrag.overIdx === i ? { borderColor: 'var(--pb-accent)' } : undefined}>
+                        <div className="grid gap-1.5 items-center" style={{ gridTemplateColumns: '12px 14px 1fr 72px 20px' }}>
+                          <span draggable onDragStart={rrDrag.onDragStart(i)} onDragEnd={rrDrag.onDragEnd} title="Drag to reorder"
+                            className="cursor-grab select-none font-mono text-[10px] leading-none text-pb-faintest hover:text-pb-text text-center">⋮⋮</span>
                           <RowReorder onUp={() => moveRow(setResults, i, -1)} onDown={() => moveRow(setResults, i, 1)} isFirst={i === 0} isLast={i === results.length - 1} />
                           <input value={r.grade} onChange={e => set({ grade: e.target.value })} placeholder="Grade · 1ST XI"
                             className="bg-pb-surface border pb-hairline rounded px-2 py-1 text-sm text-pb-text font-mono placeholder:text-pb-faintest" />
@@ -3248,7 +3661,7 @@ export default function AdminSocialPost() {
                   <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Auto-fill from match link</p>
                   <div className="flex gap-2">
                     <input type="text" value={scUrlInput} onChange={e => { setScUrlInput(e.target.value); setScUrlStatus(null); setScPicks(null) }}
-                      placeholder="Play.Cricket or PlayHQ match link, or a match ID"
+                      placeholder="Match link from play.cricket.com.au, or a match ID"
                       className="flex-1 bg-pb-surface border pb-hairline rounded px-2 py-1.5 text-xs text-pb-text font-mono"
                       onKeyDown={e => e.key === 'Enter' && handleScUrlImport()} />
                     <button onClick={handleScUrlImport} disabled={scUrlStatus === 'loading'}
@@ -3257,12 +3670,30 @@ export default function AdminSocialPost() {
                       {scUrlStatus === 'loading' ? 'Loading…' : 'Import'}
                     </button>
                   </div>
+                  <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
                   {scUrlStatus && scUrlStatus !== 'loading' && (
                     <p className={`font-mono text-[9px] mt-1.5 ${scUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
                       {scUrlStatus === 'ok' ? '✓ Scorecard loaded' : `✗ ${scUrlStatus}`}
                     </p>
                   )}
                   <MatchPickList picks={scPicks} onPick={loadScorecardMatch} onDismiss={() => setScPicks(null)} />
+                </div>
+
+                {/* Layout: one wide post, or two square Instagram posts */}
+                <div className="mb-4 p-3 rounded border pb-hairline bg-pb-surface2">
+                  <p className="font-mono text-[9px] text-pb-faint uppercase tracking-wide2 mb-2">Layout</p>
+                  <div className="flex gap-0.5 p-[3px] rounded-lg bg-pb-surface border pb-hairline">
+                    {[{ key: false, label: 'One wide post' }, { key: true, label: '2 Instagram squares' }].map((opt) => (
+                      <button key={String(opt.key)}
+                        onClick={() => { setScSplit(opt.key); setScSplitIdx(0) }}
+                        className={`flex-1 py-1.5 rounded-md font-mono text-[9px] tracking-wide2 uppercase transition-colors ${
+                          scSplit === opt.key ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-dim'
+                        }`}>{opt.label}</button>
+                    ))}
+                  </div>
+                  {scSplit && (
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">One square per team — the side that batted first, then the side that chased. Downloads as 2 PNGs.</p>
+                  )}
                 </div>
 
                 {/* Meta fields */}
@@ -3484,6 +3915,26 @@ export default function AdminSocialPost() {
             <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
               {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
               <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
+            </div>
+          ))
+        ) : roundPagesOn ? (
+          // One full-size node per derived fixtures/results page — same template,
+          // each with its even slice of the rows.
+          chunkEven(tmpl.kind === 'fixtures' ? fixtures : results, roundPage.count).map((chunk, i) => (
+            <div key={i} ref={(el) => { roundPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
+                {...extraProps} {...(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })} />
+            </div>
+          ))
+        ) : scSplitOn ? (
+          // One 1080×1080 node per team — the batted-first side, then the
+          // chasing side — regardless of which page is currently previewed.
+          ['home', 'away'].map((side, i) => (
+            <div key={side} ref={(el) => { scSplitPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
+                {...extraProps} only={side} />
             </div>
           ))
         ) : (

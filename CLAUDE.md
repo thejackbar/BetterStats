@@ -1,5 +1,173 @@
 # BetterStats — Claude Session Notes
 
+## A PlayHQ registration checkbox on Accounts (migration 235, v9.19.14, Aug 2026)
+
+Playing a season requires the person to be registered with PlayHQ, and there
+is no API this app can read that fact back from — Grassroots' `/scores/*`
+and the Partner API are both match-data feeds, neither exposes registration
+status. So it is a plain admin-ticked fact, the same shape as the existing
+`is_new_registration` checkbox already living on the same row.
+
+- **`fee_member_seasons.playhq_registered`** (bool, default false) +
+  **`.playhq_registered_at`** (nullable timestamp, set/cleared with the
+  checkbox — "when did we last check"). `PATCH /club-admin/fees/members/
+  {id}/season` gained the field, alongside the two it already had.
+- **Deliberately NOT carried forward by rollover** — `rollover_members`
+  never sets it, so a rolled-over row always starts unticked. Registration is
+  a per-season requirement; carrying last season's tick forward would assert
+  something nobody has confirmed for the new season.
+- **Surfaced in two places**: a PLAYHQ column on every Accounts row (checkbox,
+  optimistic toggle via `PATCH .../season`) plus a "Not on PlayHQ" filter
+  pill (`summary.playhq_missing`), and the same checkbox on the member detail
+  page beside "New registration this season".
+- **No new endpoint** — reuses the existing per-season PATCH, same as
+  `is_new_registration`.
+
+## BetterFees season rollover: undo, find-and-add, and remove (v9.19.13, Aug 2026)
+
+Reported from Applecross getting 26/27 ready: rolling players over before the
+new season's fee schedule is set up leaves everyone mismatched (rollover
+resolves each member's tier by name against the DESTINATION season's rate
+card, so an empty rate card means everyone lands "needs tier" with no way
+back short of SQL), there was no way to add a player who sat out last season
+or one new to the club without minting a duplicate manual entry, and no way
+to drop a player who isn't returning.
+
+- **`POST /club-admin/fees/rollover/undo`** clears every `FeeMemberSeason`
+  row for a season in one go — "Remove all" on the Accounts page, for
+  exactly the mismatched-rollover case above. A member with a payment
+  already recorded this season is kept, never deleted (`fee_member_seasons`
+  → `fee_payments` is `ON DELETE CASCADE`, so removing the row would take
+  real money with it). Deliberately a season-wide reset, not "undo only what
+  the last rollover added" — by the time someone reaches for this, sorting
+  rollover-added rows from anyone else added since isn't a distinction worth
+  making.
+- **`RolloverModal` warns up front** when the destination season has no fee
+  schedule yet, with a link straight to Fee Schedule, rather than letting the
+  admin discover the mismatch after the fact.
+- **`POST /club-admin/fees/members/enroll`** is the search-driven
+  counterpart to the existing `create_member` (which only ever makes a
+  brand-new non-playing person): finds an existing `fee_members` row OR a
+  Stats player with none yet (`needs_member: true` off the existing
+  `GET /people/search` / `PersonSearch` picker, the same one Committee's
+  "start term" already uses), enrols them into the season via
+  `members_svc.ensure_for_player` when needed, and is idempotent — enrolling
+  someone already in the season just returns their row. "Add member" on the
+  Accounts page is now two tabs, **Find in club** (this) and **New person**
+  (the old manual-create form).
+- **`DELETE /club-admin/fees/members/{member_id}/season`** removes one
+  member's line from one season — a Remove action on every row and on the
+  existing bulk-select bar, for "I know they're not coming back this
+  season". Only clears that season's row; the person record and every other
+  season are untouched. Refused (409) once a payment is recorded against
+  them this season, for the same cascade-delete-real-money reason the undo
+  above guards against.
+- **No schema change** — all three read/write the existing `fee_members` /
+  `fee_member_seasons` / `fee_payments` tables.
+
+## Families is a BetterStats tool again, and a suggestion is opted INTO (v9.19.7, Aug 2026)
+
+Families moved into BetterClubhouse with the v9.3.0 merge, which put it behind a
+module a club may not hold — but a family grouping is Core data (it is a StatLab
+player filter, `PLAYER_CONTEXT_FILTERS` in `services/statlab.py`), so it belongs
+with Players and Seasons.
+
+- **`/admin/families` is the screen again**, under BetterStats → Club Data.
+  `AdminFamilies.jsx` renders in `BetterStatsLayout` and the route is
+  `requireCore`, matching every other Core tool. That URL previously mounted the
+  Clubhouse Directory; **`/admin/clubhouse/directory/families` now redirects to
+  it**, so the Directory's own Families button and any bookmark still land.
+  `BetterStatsLayout` had to start forwarding `caption` to `ModuleLayout` — it
+  accepted only `title`, so the screen's mono subtitle was being dropped.
+- **The nav item carries `MANAGE_FAMILIES`, the same capability
+  `routers/families.py` enforces** — the rule the Clubhouse note below sets, and
+  it holds across modules.
+- **The Directory keeps its per-person family panel.** Only the setup screen
+  moved; `dirCreateFamily`/`dirAddToFamily` are untouched, and a person's family
+  is still read and edited where that person is.
+- **A suggestion now starts with NOBODY selected.** It used to select every
+  player sharing the surname and ask the admin to deselect the strangers, which
+  makes the destructive reading ("these people are a family") the default and
+  the correct one an act of removal. Two unrelated Matthews households are
+  ordinary, so **opting a player IN is the deliberate act** and the confirm
+  button is dead until someone is picked ("Select players above" → "Confirm —
+  create with N"). An unselected player is drawn plain, not struck through — it
+  means "not chosen yet", not "excluded".
+- **Anyone left unselected stays in the suggestion list** and comes back on the
+  next refresh, which is what lets one surname be split into two families across
+  two passes. That behaviour is unchanged; the card now says so in place of the
+  old "N will be re-suggested".
+- **No backend change** — same endpoints, same payloads, same capability.
+- **Driven in Chromium** (18 checks: the BetterStats shell and sidebar item, the
+  old URL redirecting, the confirm button disabled with nothing selected and its
+  label at each count, select-all/clear, the not-selected hint's singular and
+  plural, both create and add-to-existing paths, no page errors, no overflow at
+  390px).
+
+## Season list tidy-up script (v9.19.4.2, Aug 2026)
+
+Reported for Yarraville: the seasons page was a mix of synced "Summer 1968/69"
+rows and bare "1968/69" rows the historical import created (grassroots_id NULL,
+no year), interleaved and duplicated. **`python -m app.scripts.cleanup_seasons
+<org-id-or-slug>`** (dry-run by default, `--apply` to act) makes the list
+uniform:
+
+- **Only manually-created seasons are ever written** (`grassroots_id IS NULL` —
+  the documented "not from a sync" marker). A synced season is never renamed,
+  re-yeared or aliased, and the merge target is chosen among synced siblings
+  first.
+- **A duplicate is MERGED, not renamed** — an alias row through the club's own
+  Merge Seasons machinery (`season_aliases`), so stats aggregate under the
+  canonical season and the merge is undoable from Admin → Seasons. The script
+  mirrors the endpoint's chain rule: anything previously merged INTO the manual
+  season is re-pointed at the new canonical so resolution stays single-hop.
+- **A manual season with no synced sibling is renamed** to "Summer YYYY/YY" and
+  given its `year` (which is what fixes the sort order — `_season_sort_key`
+  reads the 4-digit year out of the name, and `resolve_season_filter` expands
+  year siblings). Two manual seasons for one year: the exact-named or fullest
+  one becomes canonical, the other is aliased into it.
+- **Two things it refuses to guess**: a year with several synced seasons and
+  none named plain "Summer YYYY/YY" (e.g. a masters comp under its own CA
+  season id — merging into the wrong one would co-mingle comps), and a manual
+  name with no recognisable "YYYY/YY" token. Both are reported and left alone.
+- **Verified against a real Postgres** (13 checks: the merge with data counts,
+  the rename+year, `1960-61` dash form, year-fill on an already-right name,
+  two-manual collapse, the ambiguous-synced skip, exact-name preference among
+  two synced, the chain re-point, a pre-existing alias untouched, another
+  club untouched, idempotent re-run, slug and org-id resolution).
+
+## Seasons are editable and deletable from the Seasons page (v9.19.5, Aug 2026)
+
+Follow-up to the cleanup script: Admin → Seasons only ever offered reorder and
+merge, so fixing one season's name or year meant a script or SQL.
+
+- **`PATCH /club-admin/seasons/{id}`** (`manual_entries.update_season`, cap
+  `MANAGE_MANUAL_ENTRIES`, mirrors AFL's `rename_season`) edits name and/or
+  year, with a case-insensitive org-scoped duplicate-name 409. **Deliberately
+  not restricted to manual seasons** — the sync never overwrites an existing
+  season's name (it only backfills a NULL year, see `sync.py`'s season upsert),
+  so a tidied name on a synced season sticks. Audited via `_log_edit`.
+- **Delete reuses the existing `delete_manual_season`** (manual-only + empty-
+  only), now surfaced as a per-row button. **`_season_in_use` gained
+  `player_season_stats` and `imported_stats`** — the deletable seasons are
+  exactly the ones BetterImport writes aggregate rows against, both FKs
+  cascade, and neither table was checked, so a season full of imported history
+  deleted straight through before this.
+- **`GET /club-admin/seasons` now returns `synced`** (`grassroots_id IS NOT
+  NULL`) so the page only offers Delete on rows the endpoint could ever
+  accept. `synced_at` alone was the wrong proxy for this — it's a display
+  field.
+- **Frontend**: `AdminSeasons.jsx`'s row became `SeasonRow` — inline name/year
+  edit (Enter saves, Escape cancels, only changed fields are sent), Delete
+  behind a `window.confirm` with the server's refusal reason shown inline.
+- **Verified against a real Postgres** (20 route-level checks: rename+audit,
+  synced rename persisting, year-only patch, dup/blank/foreign/junk-id
+  rejections, cross-club name reuse allowed, the two new in-use guards, all
+  three delete refusals, the actual delete, and the `synced` flag) **and
+  driven in Chromium** (14 checks: the exact PATCH payload on the wire,
+  no-change save sending nothing, confirm dismiss/accept, a refused delete's
+  reason rendered, Delete absent on synced rows, no overflow at 390px).
+
 ## Undoing a stats import deletes the players it minted (migration 234, v9.19.4.1, Aug 2026)
 
 Reported from the Leeming Spartans demo: a mis-mapped BetterImport upload

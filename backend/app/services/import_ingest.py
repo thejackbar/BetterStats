@@ -44,6 +44,8 @@ ALL_FIELDS = KEY_FIELDS + INT_FIELDS + FLOAT_FIELDS + DERIVED_FIELDS + (HS_FIELD
 # confirm/override, so a wrong guess is cheap.
 SYNONYMS = {
     "player_name": ["player", "name", "player name", "full name", "members", "member"],
+    "player_first_name": ["first name", "given name", "christian name", "forename", "firstname", "fname"],
+    "player_last_name": ["surname", "last name", "family name", "lastname", "lname"],
     "season_label": ["season", "year", "yr", "season year", "summer", "yrs"],
     "grade_label": ["grade", "team", "grades", "division", "comp", "competition", "teams"],
     "games_played": ["games", "matches", "m", "mat", "gp", "games played", "appearances", "apps", "played"],
@@ -302,6 +304,79 @@ def row_to_truth(values: dict) -> tuple:
             notes.append("runs conceded reconstructed from economy (±1)")
 
     return truth, notes
+
+
+# ── name column resolution ───────────────────────────────────────────────────
+# A sheet's player identity can arrive as one combined column ("Jack Barendse",
+# "Barendse, Jack", "Barendse J") or as two separate columns (first name +
+# surname — or surname + a bare initial, which is the same shape). Two columns
+# are unambiguous by construction (the sheet has already told us which part is
+# which), so that's the option to reach for whenever a sheet offers it. A single
+# combined column still needs *some* rule for word order — ``NAME_FORMAT_LABELS``
+# lets the person doing the import say what their sheet uses instead of leaving
+# it to a heuristic that guesses wrong on a plain "Surname Firstname" column
+# (no comma to key off) by reading the surname as the first name.
+
+NAME_FORMAT_LABELS = {
+    "auto": "Auto-detect (recommended)",
+    "first_last": "First name then Surname — e.g. “Jack Barendse”",
+    "last_first": "Surname then First name — e.g. “Barendse Jack” or “Barendse, Jack”",
+}
+
+
+def apply_name_format(raw: str, name_format: str) -> str:
+    """Reorder a single combined-name cell into 'First Last' according to an
+    explicitly chosen format, so matching doesn't have to guess.
+
+    'auto' and 'first_last' return the cell unchanged — 'auto' leaves the
+    existing comma/initial heuristics in ``_normalise_name``/``_parse_initial_form``
+    to do the work (unchanged behaviour), and a sheet already in "First Last"
+    order needs no reordering. 'last_first' forces a surname-first reading even
+    when there's no comma to key off (the one case those heuristics can't tell
+    apart from a plain "First Last" column) — comma or not, the LAST token is
+    read as the given name/initial and everything before it as the surname, so
+    a multi-word surname ("Van Der Berg Jack" → "Jack Van Der Berg") still comes
+    out right.
+    """
+    raw = (raw or "").strip()
+    if not raw or name_format not in ("last_first",):
+        return raw
+    if "," in raw:
+        last, first = raw.split(",", 1)
+        return f"{first.strip()} {last.strip()}".strip()
+    toks = raw.split()
+    if len(toks) < 2:
+        return raw
+    return f"{toks[-1]} {' '.join(toks[:-1])}".strip()
+
+
+def combine_name_parts(first: str, last: str) -> str:
+    """First-name and surname columns → one 'First Last' string, ready for the
+    normal name matcher. A bare surname (no first-name column, or an empty cell
+    on this row) passes through as a mononym — ``match_players`` still handles
+    that via an exact-string match, just without the first/last-aware fuzzy
+    passes. A surname column paired with just an initial column works for free:
+    "F" + "Camarda" → "F Camarda", which ``_parse_initial_form`` already reads
+    as surname-plus-initial regardless of which side the initial is on.
+    """
+    first = (first or "").strip()
+    last = (last or "").strip()
+    return f"{first} {last}".strip()
+
+
+def resolve_row_name(row: dict, name_col=None, first_col=None, last_col=None,
+                      name_format: str = "auto") -> str:
+    """The one place a row's raw player-name string is built, whichever of the
+    three column layouts the sheet uses. Separate first/last columns win
+    outright when either is mapped (unambiguous by construction); otherwise the
+    single combined column is read through ``apply_name_format``.
+    """
+    if first_col or last_col:
+        first = str(row.get(first_col, "")).strip() if first_col else ""
+        last = str(row.get(last_col, "")).strip() if last_col else ""
+        return combine_name_parts(first, last)
+    raw = str(row.get(name_col, "")).strip() if name_col else ""
+    return apply_name_format(raw, name_format)
 
 
 # ── name + season matching ────────────────────────────────────────────────────

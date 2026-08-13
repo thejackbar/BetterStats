@@ -17,6 +17,7 @@ export const GROUPS = [
       { to: '/admin/players', label: 'Players', icon: 'player', cap: CAP.MANAGE_PLAYERS, exact: true, desc: "The club's player register and profiles." },
       { to: '/admin/players/import', label: 'Import Players', icon: 'plus', cap: CAP.MANAGE_PLAYERS, desc: 'Bring players in from PlayHQ with their emails, phone numbers and contact details.' },
       { to: '/admin/seasons', label: 'Seasons', icon: 'ladders', cap: null, desc: 'Seasons, grades and their setup.' },
+      { to: '/admin/families', label: 'Families', icon: 'teams', cap: CAP.MANAGE_FAMILIES, desc: 'Group related players into family groups.' },
     ],
   },
   {
@@ -70,9 +71,9 @@ export const NAV = [
   ]),
 ]
 
-export default function BetterStatsLayout({ children, title, actions }) {
+export default function BetterStatsLayout({ children, title, caption, actions }) {
   return (
-    <ModuleLayout moduleName="Stats" nav={NAV} title={title} actions={actions}>
+    <ModuleLayout moduleName="Stats" nav={NAV} title={title} caption={caption} actions={actions}>
       {children}
     </ModuleLayout>
   )

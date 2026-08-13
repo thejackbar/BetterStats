@@ -144,15 +144,21 @@ async def resolve_match_reference(db: AsyncSession, org, raw: str) -> dict:
     ``{"kind": "match", "match_id": ...}``  — go straight to the scorecard.
     ``{"kind": "choose", "matches": [...]}`` — the admin picks one.
     ``{"kind": "unknown", "message": ...}``  — nothing usable in the box.
+
+    Every response carries ``source`` — ``"playcricket"`` for a pasted
+    Grassroots GUID, ``"playhq"`` for anything born from a playhq.com code,
+    ``"unknown"`` otherwise — so the frontend can explain the playhq mistake
+    wherever the response lands.
     """
     ref = parse_reference(raw)
     if not ref:
         return {
             "kind": "unknown",
+            "source": "unknown",
             "message": "Paste a match link from play.cricket.com.au or playhq.com, or a match ID",
         }
     if ref.get("match_id"):
-        return {"kind": "match", "match_id": ref["match_id"]}
+        return {"kind": "match", "source": "playcricket", "match_id": ref["match_id"]}
 
     matches, grade_name_by_guid = await _club_results(db, org)
     keys = club_match_keys(org)
@@ -177,16 +183,26 @@ async def resolve_match_reference(db: AsyncSession, org, raw: str) -> dict:
         if exact:
             narrowed = exact
 
+    source = "playhq" if ref.get("playhq_code") else "playcricket"
     if len(narrowed) == 1:
-        return {"kind": "match", "match_id": narrowed[0]["match_id"], "matched": narrowed[0]}
+        return {
+            "kind": "match",
+            "source": source,
+            "match_id": narrowed[0]["match_id"],
+            "matched": narrowed[0],
+        }
 
     note = (
-        "A playhq.com link doesn't carry the match ID we need, so pick the match below."
+        "That's a playhq.com link. BetterPosts pulls match data from "
+        "play.cricket.com.au, which uses a different match ID. Find the same "
+        "match on play.cricket.com.au and paste that link, or pick it from "
+        "your club's recent matches below."
         if ref.get("playhq_code")
         else "Pick the match below."
     )
     return {
         "kind": "choose",
+        "source": source,
         "message": note,
         "grade": grade_slug,
         "matches": narrowed[:_MAX_CANDIDATES],

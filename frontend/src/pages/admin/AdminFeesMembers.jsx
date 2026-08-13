@@ -8,6 +8,7 @@ import {
   Modal, Field, TextInput, Select, TextArea, Checkbox, Note, Badge,
 } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
+import { PersonSearch } from '../../components/admin/clubmanager/pickers'
 
 function sortSeasons(seasons) {
   return seasons.filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0) || (b.name > a.name ? 1 : -1))
@@ -21,7 +22,50 @@ function StatusPill({ status }) {
   return null
 }
 
-function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }) {
+function FindMemberTab({ seasonId, tiers, onClose, onCreated }) {
+  const toast = useToast()
+  const [person, setPerson] = useState(null)
+  const [feeScheduleId, setFeeScheduleId] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  async function submit() {
+    if (!person) return
+    setBusy(true)
+    try {
+      const r = await api.feeEnrollMember({
+        season_id: seasonId,
+        member_id: person.member_id || undefined,
+        player_id: person.needs_member ? person.player_id : undefined,
+        fee_schedule_id: feeScheduleId || null,
+      })
+      toast.success(r.already_enrolled ? `${person.full_name} is already in this season` : `${person.full_name} added`)
+      onCreated()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="grid gap-3">
+      <Field label="Player or member *">
+        <PersonSearch value={person} onChange={setPerson}
+          placeholder="Type a name — anyone the club knows, including players who sat out last season…" autoFocus />
+      </Field>
+      <Field label="Tier">
+        <Select value={feeScheduleId} onChange={e => setFeeScheduleId(e.target.value)}>
+          <option value="">— Needs tier —</option>
+          {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+      </Field>
+      <div className="flex justify-end gap-2 pt-1">
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="primary" onClick={submit} disabled={busy || !person}>
+          {busy ? 'Adding…' : 'Add to season'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function NewMemberTab({ seasonId, tiers, membershipTypes, onClose, onCreated }) {
   const toast = useToast()
   const [form, setForm] = useState({ full_name: '', email: '', mobile: '', fee_schedule_id: '', membership_type_id: '' })
   const [busy, setBusy] = useState(false)
@@ -41,43 +85,56 @@ function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }
   }
 
   return (
-    <Modal
-      onClose={onClose}
-      title="Add a person"
-      subtitle="For non-playing members (life members, sponsors, ICL). Players who appear in a game are added automatically."
-      footer={<>
+    <div className="grid gap-3">
+      <Field label="Full name *">
+        <TextInput autoFocus placeholder="Surname, First" value={form.full_name}
+          onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
+      </Field>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Email">
+          <TextInput value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+        </Field>
+        <Field label="Mobile">
+          <TextInput value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
+        </Field>
+      </div>
+      <Field label="Tier">
+        <Select value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
+          <option value="">— Needs tier —</option>
+          {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+      </Field>
+      <Field label="Membership type">
+        <Select value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
+          <option value="">— None —</option>
+          {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </Select>
+      </Field>
+      <div className="flex justify-end gap-2 pt-1">
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="primary" onClick={submit} disabled={busy || !form.full_name.trim()}>
           {busy ? 'Adding…' : 'Add member'}
         </Button>
-      </>}
-    >
-      <div className="grid gap-3">
-        <Field label="Full name *">
-          <TextInput autoFocus placeholder="Surname, First" value={form.full_name}
-            onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} />
-        </Field>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Email">
-            <TextInput value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
-          </Field>
-          <Field label="Mobile">
-            <TextInput value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
-          </Field>
-        </div>
-        <Field label="Tier">
-          <Select value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
-            <option value="">— Needs tier —</option>
-            {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-        </Field>
-        <Field label="Membership type">
-          <Select value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-            <option value="">— None —</option>
-            {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-          </Select>
-        </Field>
       </div>
+    </div>
+  )
+}
+
+function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }) {
+  const [tab, setTab] = useState('find')
+  return (
+    <Modal
+      onClose={onClose}
+      title="Add a person"
+      subtitle="Find anyone the club already knows — a player who sat out last season, or one new to the club — or add a non-playing member (life member, sponsor, ICL). Players who appear in a game this season are still added automatically."
+    >
+      <div className="flex gap-2 mb-3.5">
+        <FilterPill active={tab === 'find'} onClick={() => setTab('find')}>Find in club</FilterPill>
+        <FilterPill active={tab === 'new'} onClick={() => setTab('new')}>New person</FilterPill>
+      </div>
+      {tab === 'find'
+        ? <FindMemberTab seasonId={seasonId} tiers={tiers} onClose={onClose} onCreated={onCreated} />
+        : <NewMemberTab seasonId={seasonId} tiers={tiers} membershipTypes={membershipTypes} onClose={onClose} onCreated={onCreated} />}
     </Modal>
   )
 }
@@ -174,7 +231,7 @@ function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
   )
 }
 
-function RolloverModal({ seasonId, fromSeason, onClose, onDone }) {
+function RolloverModal({ seasonId, seasonName, fromSeason, tiers, onClose, onDone }) {
   const toast = useToast()
   const [includeLeft, setIncludeLeft] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -196,12 +253,53 @@ function RolloverModal({ seasonId, fromSeason, onClose, onDone }) {
         <Button variant="primary" onClick={go} disabled={busy}>{busy ? 'Rolling over…' : 'Roll over'}</Button>
       </>}
     >
+      {tiers.length === 0 && (
+        <Note toneKey="warn" className="mb-3.5">
+          {seasonName} has no fee schedule yet — every member rolled over will land as "needs tier" with no way to
+          match their old tier by name. <Link to="/admin/fees/schedule" className="underline">Set up {seasonName}'s
+          fee schedule</Link> (or copy it from {fromSeason.name}) before rolling over, so tiers carry across cleanly.
+        </Note>
+      )}
       <Checkbox checked={includeLeft} onChange={setIncludeLeft}>
         Include “Left club” tiers
         <span className="text-pb-faintest"> · skipped by default</span>
       </Checkbox>
       <Note toneKey="calm" className="mt-3.5">
-        Members who already exist in this season are skipped. Payments stay with the original season.
+        Members who already exist in this season are skipped. Payments stay with the original season. Rolled over
+        before the schedule was ready? Use "Remove all" to clear this season and start again.
+      </Note>
+    </Modal>
+  )
+}
+
+function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone }) {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  async function go() {
+    setBusy(true)
+    try {
+      const r = await api.feeRolloverUndo(seasonId)
+      const keptNote = r.kept_with_payments.length
+        ? ` — ${r.kept_with_payments.length} kept (already has a payment recorded: ${r.kept_with_payments.join(', ')})`
+        : ''
+      toast.success(`Removed ${r.removed} member${r.removed === 1 ? '' : 's'} from ${seasonName}${keptNote}`)
+      onDone()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <Modal
+      onClose={onClose}
+      title={`Remove everyone from ${seasonName}`}
+      subtitle="For undoing a rollover done before the fee schedule was ready — this clears every member's line in this season so you can set up the rate card and roll over again."
+      footer={<>
+        <Button onClick={onClose}>Cancel</Button>
+        <Button variant="danger" onClick={go} disabled={busy}>{busy ? 'Removing…' : `Remove all ${memberCount}`}</Button>
+      </>}
+    >
+      <Note toneKey="warn">
+        This can't be undone from here. Anyone with a payment already recorded this season is kept, not deleted —
+        everyone else's line in {seasonName} is gone. The club's own people record and every other season are
+        untouched either way.
       </Note>
     </Modal>
   )
@@ -217,12 +315,16 @@ export default function AdminFeesMembers() {
   const [q, setQ] = useState('')
   const [needsTierOnly, setNeedsTierOnly] = useState(false)
   const [owesOnly, setOwesOnly] = useState(false)
+  const [playhqMissingOnly, setPlayhqMissingOnly] = useState(false)
+  const [togglingPlayhq, setTogglingPlayhq] = useState(() => new Set())
   const [showAdd, setShowAdd] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [recomputing, setRecomputing] = useState(false)
   const [selected, setSelected] = useState(() => new Set())
   const [showBulkTier, setShowBulkTier] = useState(false)
   const [showRollover, setShowRollover] = useState(false)
+  const [showRolloverUndo, setShowRolloverUndo] = useState(false)
+  const [removingSelected, setRemovingSelected] = useState(false)
 
   useEffect(() => {
     api.adminListSeasons()
@@ -255,17 +357,63 @@ export default function AdminFeesMembers() {
     } catch (e) { toast.error(e.message) } finally { setRecomputing(false) }
   }
 
+  async function removeMember(memberId, fullName) {
+    if (!window.confirm(`Remove ${fullName} from this season? They stay in the club's own records — this only clears their line here. Refused if a payment is already recorded against them this season.`)) return
+    try {
+      await api.feeRemoveMemberSeason(memberId, seasonId)
+      toast.success(`${fullName} removed from this season`)
+      load()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function togglePlayhq(memberId, next) {
+    setTogglingPlayhq(s => new Set(s).add(memberId))
+    try {
+      await api.feePatchMemberSeason(memberId, { season_id: seasonId, playhq_registered: next })
+      setData(d => d && ({
+        ...d,
+        members: d.members.map(m => m.member_id === memberId ? { ...m, playhq_registered: next } : m),
+        summary: { ...d.summary, playhq_missing: (d.summary.playhq_missing || 0) + (next ? -1 : 1) },
+      }))
+    } catch (e) { toast.error(e.message) } finally {
+      setTogglingPlayhq(s => { const n = new Set(s); n.delete(memberId); return n })
+    }
+  }
+
+  async function removeSelected() {
+    const ids = Array.from(selected)
+    if (!ids.length) return
+    if (!window.confirm(`Remove ${ids.length} member${ids.length === 1 ? '' : 's'} from this season? Anyone with a payment already recorded this season is kept.`)) return
+    setRemovingSelected(true)
+    let removed = 0
+    const kept = []
+    for (const id of ids) {
+      const m = data.members.find(x => x.member_id === id)
+      try {
+        await api.feeRemoveMemberSeason(id, seasonId)
+        removed += 1
+      } catch (e) {
+        kept.push(m?.full_name || id)
+      }
+    }
+    setRemovingSelected(false)
+    toast.success(`Removed ${removed}${kept.length ? ` — ${kept.length} kept (has a payment recorded): ${kept.join(', ')}` : ''}`)
+    load()
+  }
+
   const filtered = useMemo(() => {
     if (!data?.members) return []
     const needle = q.trim().toLowerCase()
     return data.members.filter(m =>
       (!needsTierOnly || m.needs_tier) &&
       (!owesOnly || m.status === 'non_financial') &&
+      (!playhqMissingOnly || !m.playhq_registered) &&
       (!needle || m.full_name.toLowerCase().includes(needle) || (m.tier || '').toLowerCase().includes(needle))
     )
-  }, [data, q, needsTierOnly, owesOnly])
+  }, [data, q, needsTierOnly, owesOnly, playhqMissingOnly])
 
   const s = data?.summary || {}
+  const currentSeason = seasons.find(se => se.id === seasonId)
 
   // Header slots: the title, its live count, the filters and the primary action
   // all belong to the shell's sticky header now, which is why the old page-level
@@ -276,7 +424,8 @@ export default function AdminFeesMembers() {
     filters: (
       <div className="flex items-center gap-2 flex-wrap">
         <SearchInput value={q} onChange={setQ} placeholder="Search name or tier…" />
-        <FilterPill active={!needsTierOnly && !owesOnly} onClick={() => { setNeedsTierOnly(false); setOwesOnly(false) }}>
+        <FilterPill active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
+          onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
           Everyone
         </FilterPill>
         <FilterPill warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
@@ -284,6 +433,9 @@ export default function AdminFeesMembers() {
         </FilterPill>
         <FilterPill active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
           Needs tier
+        </FilterPill>
+        <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
+          Not on PlayHQ
         </FilterPill>
       </div>
     ),
@@ -300,6 +452,11 @@ export default function AdminFeesMembers() {
           {seasons.map(se => <option key={se.id} value={se.id}>{se.name}</option>)}
         </Select>
         {previousSeason && <Button size="sm" onClick={() => setShowRollover(true)} disabled={!seasonId}>Roll over</Button>}
+        {data?.members?.length > 0 && (
+          <Button size="sm" variant="quiet-danger" onClick={() => setShowRolloverUndo(true)} disabled={!seasonId}>
+            Remove all
+          </Button>
+        )}
         <Button size="sm" onClick={() => setShowImport(true)} disabled={!seasonId}>Import</Button>
         <Button variant="primary" onClick={() => setShowAdd(true)} disabled={!seasonId}>Add member</Button>
       </>
@@ -380,11 +537,13 @@ export default function AdminFeesMembers() {
                         <th className="font-medium py-2.5 pr-3">NAME</th>
                         <th className="font-medium py-2.5 pr-3">TYPE</th>
                         <th className="font-medium py-2.5 pr-3">TIER</th>
+                        <th className="font-medium py-2.5 pr-3 w-20 text-center" title="Registered for this season with PlayHQ — a playing requirement">PLAYHQ</th>
                         <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAID</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">OWED</th>
-                        <th className="font-medium py-2.5 pr-5 w-28 text-right">STATUS</th>
+                        <th className="font-medium py-2.5 pr-3 w-28 text-right">STATUS</th>
+                        <th className="font-medium py-2.5 pr-5 w-8"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -421,19 +580,33 @@ export default function AdminFeesMembers() {
                                 ? <span className="font-mono text-[10px] text-pb-amber">⚠ needs tier</span>
                                 : <span className="text-pb-dim text-sm">{m.tier}</span>}
                             </td>
+                            <td className="py-2.5 pr-3 text-center">
+                              <input type="checkbox" checked={!!m.playhq_registered}
+                                disabled={togglingPlayhq.has(m.member_id)}
+                                onChange={e => togglePlayhq(m.member_id, e.target.checked)}
+                                title={m.playhq_registered ? 'Registered with PlayHQ for this season' : 'Not yet registered with PlayHQ — required to play'}
+                                className="cursor-pointer align-middle accent-pb-accent" />
+                            </td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{m.match_days || 0}</td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_payable)}</td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{money(m.total_paid)}</td>
                             <td className={`py-2.5 pr-3 text-right font-mono text-[11px] tabular-nums ${m.total_outstanding > 0 ? 'text-pb-text' : 'text-pb-faintest'}`}>
                               {money(m.total_outstanding)}
                             </td>
-                            <td className="py-2.5 pr-5 text-right whitespace-nowrap">
+                            <td className="py-2.5 pr-3 text-right whitespace-nowrap">
                               {m.in_credit && (
                                 <span title="In credit toward future games" className="mr-1.5 inline-block">
                                   <Badge toneKey="ok">+{money(m.credit)}</Badge>
                                 </span>
                               )}
                               <StatusPill status={m.status} />
+                            </td>
+                            <td className="py-2.5 pr-5 text-right">
+                              <button type="button" title="Remove from this season — not coming back?"
+                                onClick={() => removeMember(m.member_id, m.full_name)}
+                                className="text-pb-faint hover:text-pb-red text-[13px] leading-none transition-colors">
+                                ✕
+                              </button>
                             </td>
                           </tr>
                         )
@@ -453,6 +626,9 @@ export default function AdminFeesMembers() {
           style={{ borderColor: 'var(--pb-accent)' }}>
           <span className="font-mono text-[11px] text-pb-text">{selected.size} selected</span>
           <Button size="sm" variant="primary" onClick={() => setShowBulkTier(true)}>Set tier</Button>
+          <Button size="sm" variant="quiet-danger" onClick={removeSelected} disabled={removingSelected}>
+            {removingSelected ? 'Removing…' : 'Remove'}
+          </Button>
           <Button size="sm" variant="quiet" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
@@ -473,9 +649,14 @@ export default function AdminFeesMembers() {
           onSaved={() => { setShowBulkTier(false); setSelected(new Set()); load() }} />
       )}
       {showRollover && previousSeason && (
-        <RolloverModal seasonId={seasonId} fromSeason={previousSeason}
+        <RolloverModal seasonId={seasonId} seasonName={currentSeason?.name || 'this season'} fromSeason={previousSeason} tiers={tiers}
           onClose={() => setShowRollover(false)}
           onDone={() => { setShowRollover(false); load() }} />
+      )}
+      {showRolloverUndo && (
+        <RolloverUndoModal seasonId={seasonId} seasonName={currentSeason?.name || 'this season'} memberCount={data?.members?.length ?? 0}
+          onClose={() => setShowRolloverUndo(false)}
+          onDone={() => { setShowRolloverUndo(false); load() }} />
       )}
     </BetterFeesLayout>
   )

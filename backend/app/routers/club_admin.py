@@ -361,6 +361,10 @@ async def list_seasons(
             "id": str(s.id),
             "name": s.name,
             "year": s.year,
+            # grassroots_id is the "came from the sync" marker (a manually
+            # created season never has one) — the Seasons page uses this to
+            # only offer Delete on rows the delete endpoint could ever accept.
+            "synced": s.grassroots_id is not None,
             "synced_at": s.synced_at,
             "display_order": s.display_order,
             "alias_of": reverse_map.get(str(s.id)),

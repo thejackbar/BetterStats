@@ -27,13 +27,13 @@ shape as committee_task_assignees keeping assigned_to_member_id (migration 220).
 `member_category` is NOT dropped. It is left alone as history and still read as
 a fallback, so a club tagged before this never loses a filter.
 
-Revision ID: 235
-Revises: 234
+Revision ID: 248
+Revises: 247
 """
 from alembic import op
 
-revision = "235"
-down_revision = "234"
+revision = "248"
+down_revision = "247"
 branch_labels = None
 depends_on = None
 

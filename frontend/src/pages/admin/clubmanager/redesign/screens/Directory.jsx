@@ -29,7 +29,7 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuIt
 // is how this header reached ~26 controls.
 //
 // A membership type carries the `type:` prefix so a club that named a type
-// "Volunteer" (every club that adopted the pre-235 starter set has one) cannot
+// "Volunteer" (every club that adopted the pre-248 starter set has one) cannot
 // collide with the Volunteer ROLE.
 const TYPE_PREFIX = 'type:'
 const ROLE_SEGS = [
@@ -45,7 +45,7 @@ const EMAIL_LABEL = { has: 'Has email', none: 'No email' }
 // Stored as full day names, matching what the Volunteers screen has always
 // written and what services/roster.day_index reads back tolerantly.
 const DAY_KEYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
-// The pre-235 single-valued tag. No longer written here — membership is the
+// The pre-248 single-valued tag. No longer written here — membership is the
 // catalogue and roles are roles — but still READ, so a club that tagged people
 // before the split keeps a sensible label until it types them properly.
 const CAT_SHORT = {
@@ -60,7 +60,7 @@ const NO_TYPE = '__none__'
 // One line answering "what kind of member is this?". Every type they hold, not
 // just the primary — a Senior Player who is also a Parent is both, and showing
 // one of them was the whole problem. A club may keep no catalogue at all, so
-// this falls back to the pre-235 category tag and then to the Stats record.
+// this falls back to the pre-248 category tag and then to the Stats record.
 function typeLabel(p) {
   const held = (p.membership_types || []).map(t => t.name)
   if (held.length) return held.join(' · ')
@@ -608,7 +608,7 @@ export default function Directory({ st, patch, narrow }) {
               {close => (
                 <>
                   <MenuHeading>OPEN</MenuHeading>
-                  <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/families') }}>Families</MenuItem>
+                  <MenuItem onClick={() => { close(); navigate('/admin/families') }}>Families</MenuItem>
                   <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/qualifications') }}>Qualifications</MenuItem>
                   <MenuItem onClick={() => { close(); navigate('/admin/clubhouse/directory/volunteers') }}>Volunteer bulk entry</MenuItem>
                   <MenuDivider />

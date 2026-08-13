@@ -1,6 +1,23 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
+import ScoutApp from './scout/ScoutApp'
+import ScoutProtectedRoute from './scout/components/ScoutProtectedRoute'
+import ScoutLogin from './scout/pages/ScoutLogin'
+import ScoutOverview from './scout/pages/ScoutOverview'
+import ScoutDiscover from './scout/pages/ScoutDiscover'
+import ScoutPlayers from './scout/pages/ScoutPlayers'
+import ScoutPlayerProfile from './scout/pages/ScoutPlayerProfile'
+import ScoutWatchlists from './scout/pages/ScoutWatchlists'
+import ScoutWatchlistBoard from './scout/pages/ScoutWatchlistBoard'
+import ScoutCompare from './scout/pages/ScoutCompare'
+import ScoutMilestones from './scout/pages/ScoutMilestones'
+import ScoutSettings from './scout/pages/ScoutSettings'
+import ScoutSearch from './scout/pages/ScoutSearch'
+import ScoutHotForm from './scout/pages/ScoutHotForm'
+import ScoutAcceptInvite from './scout/pages/ScoutAcceptInvite'
+import ScoutPublicShare from './scout/pages/ScoutPublicShare'
+import ScoutShareComparison from './scout/pages/ScoutShareComparison'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { ToastProvider } from './contexts/ToastContext'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -26,7 +43,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -301,6 +318,40 @@ export default function App() {
           {/* Auth */}
           <Route path="/login" element={<Login />} />
 
+          {/* BetterScout's read-only public share link — no login, no
+              ScoutAuthProvider, deliberately NOT nested inside ScoutApp
+              below. The token itself is the credential. */}
+          <Route path="/betterscout/share/:token" element={<ScoutPublicShare />} />
+          <Route path="/betterscout/share-compare/:token" element={<ScoutShareComparison />} />
+
+          {/* BetterScout — a completely separate tenant type/login (Scout
+              Org, not a club Organisation), living inside this same app.
+              ScoutApp is a pathless layout route: it scopes ScoutAuthProvider
+              to just these routes with no URL segment of its own. The bare
+              /betterscout redirect matters because /:clubSlug below would
+              otherwise be the next-best match and render "club not found". */}
+          <Route element={<ScoutApp />}>
+            <Route path="/betterscout" element={<Navigate to="/betterscout/app" replace />} />
+            <Route path="/betterscout/login" element={<ScoutLogin />} />
+            {/* Every /betterscout/app/* screen is now the flat, self-wrapping-
+                layout pattern every other Better module uses — each page
+                wraps <ScoutModuleLayout> itself and passes its own title/
+                caption/filters/stats/actions. ScoutLayout's nested-Outlet
+                wrapper is retired now that nothing mounts through it. */}
+            <Route path="/betterscout/app" element={<ScoutProtectedRoute><ScoutOverview /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/discover" element={<ScoutProtectedRoute><ScoutDiscover /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/search" element={<ScoutProtectedRoute><ScoutSearch /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/hot-form" element={<ScoutProtectedRoute><ScoutHotForm /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/settings" element={<ScoutProtectedRoute><ScoutSettings /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/players/:id" element={<ScoutProtectedRoute><ScoutPlayerProfile /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/milestones" element={<ScoutProtectedRoute><ScoutMilestones /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/compare" element={<ScoutProtectedRoute><ScoutCompare /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/players" element={<ScoutProtectedRoute><ScoutPlayers /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/watchlists" element={<ScoutProtectedRoute><ScoutWatchlists /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/app/watchlists/:id" element={<ScoutProtectedRoute><ScoutWatchlistBoard /></ScoutProtectedRoute>} />
+            <Route path="/betterscout/accept-invite/:token" element={<ScoutAcceptInvite />} />
+          </Route>
+
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
@@ -347,7 +398,9 @@ export default function App() {
           <Route path="/admin/clubhouse/events/manage" element={<ProtectedRoute><AdminEvents /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
-          <Route path="/admin/clubhouse/directory/families" element={<ProtectedRoute><AdminFamilies /></ProtectedRoute>} />
+          {/* Families moved back into BetterStats (/admin/families); the old
+              Clubhouse URL redirects so bookmarks and links still land. */}
+          <Route path="/admin/clubhouse/directory/families" element={<Navigate to="/admin/families" replace />} />
           <Route path="/admin/clubhouse/directory/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/directory/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
           {/* Old entry points, kept so bookmarks and links still land somewhere. */}
@@ -366,7 +419,7 @@ export default function App() {
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
-          <Route path="/admin/families" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
+          <Route path="/admin/families" element={<ProtectedRoute requireCore><AdminFamilies /></ProtectedRoute>} />
           <Route path="/admin/committee" element={<ProtectedRoute><ClubManagerApp initialScreen="committee" /></ProtectedRoute>} />
           <Route path="/admin/volunteers" element={<ProtectedRoute><ClubManagerApp initialScreen="directory" /></ProtectedRoute>} />
           <Route path="/admin/roles" element={<ProtectedRoute><ClubManagerApp initialScreen="setup" /></ProtectedRoute>} />

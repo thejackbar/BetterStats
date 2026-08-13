@@ -6,7 +6,7 @@ FeeSchedule $ tier. Nothing is seeded automatically — a club seeds the starter
 set (or builds its own) the same way it adopts an award-definitions template:
 opt-in, not presumed.
 
-`scope` (migration 235) splits INTERNAL membership (Senior Player, Junior
+`scope` (migration 248) splits INTERNAL membership (Senior Player, Junior
 Player, Parent, Social Member — people the club counts as members) from
 EXTERNAL (Sponsor Contact, External Contact — people the club records but has
 not gained as members). It is what lets "how many members have we got" mean

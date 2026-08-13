@@ -8,10 +8,12 @@ import { PbSpinner } from '../../lib/presskit'
 import { genderLabel, battingHandLabel, bowlingLabel } from '../../lib/playerAttributes'
 
 // ── the columns this importer understands ────────────────────────────────────
-// player_name is the only required field; everything else is optional and only
-// updates a player when the cell has a value (a blank never overwrites).
+// Player name is required, matched by NameColumnFields below (one combined
+// column with a word-order format, or separate first-name/surname columns) —
+// it isn't in this flat list because it needs its own mode toggle, not a
+// single FieldRow. Everything else is optional and only updates a player
+// when the cell has a value (a blank never overwrites).
 const FIELDS = [
-  ['player_name', 'Player name', true, 'Match each row to a player by name.'],
   ['email', 'Email', false, ''],
   ['phone', 'Phone / mobile', false, ''],
   ['squad', 'Squad (selection pool)', false, 'Assign the player to a selection-pool team.'],
@@ -20,7 +22,17 @@ const FIELDS = [
   ['bowling', 'Bowling', false, 'e.g. Right-arm fast-medium, Off spin.'],
   ['gender', 'Gender', false, 'Male / Female.'],
 ]
-const FIELD_LABEL = Object.fromEntries(FIELDS.map(([k, l]) => [k, l]))
+const FIELD_LABEL = {
+  player_name: 'Player name', player_first_name: 'First name', player_last_name: 'Surname',
+  ...Object.fromEntries(FIELDS.map(([k, l]) => [k, l])),
+}
+
+// Mirrors import_ingest.NAME_FORMAT_LABELS on the backend.
+const NAME_FORMAT_OPTIONS = [
+  ['auto', 'Auto-detect (recommended)'],
+  ['first_last', 'First name then Surname — e.g. "Jack Barendse"'],
+  ['last_first', 'Surname then First name — e.g. "Barendse Jack" or "Barendse, Jack"'],
+]
 
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 
@@ -88,6 +100,55 @@ function FieldRow({ field, label, required, value, headers, conf, onMap }) {
         {headers.map((h) => <option key={h} value={h}>{h}</option>)}
       </select>
       {conf != null && <Pct score={conf} />}
+    </div>
+  )
+}
+
+// Player name mapping: one combined column (with an explicit word-order format
+// so "Surname Firstname" isn't silently misread) or two separate first/surname
+// columns (unambiguous by construction — the sheet already tells us which part
+// is which). Toggling mode clears the other mode's mapping.
+function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, mapping, setMap, headers, confByField }) {
+  return (
+    <div className="mb-2">
+      <div className="flex items-center gap-2 mb-2 flex-wrap">
+        <span className="text-[11px] font-semibold text-green-300 shrink-0 leading-tight">
+          Player name<span className="text-pb-red/70 ml-0.5">*</span>
+        </span>
+        <div className="flex gap-1">
+          {[['single', 'ONE COLUMN'], ['split', 'FIRST NAME + SURNAME']].map(([m, label]) => (
+            <button key={m} type="button" onClick={() => setNameMode(m)}
+              className={`font-mono text-[9px] tracking-wide2 px-2.5 py-1 rounded border ${nameMode === m ? 'text-pb-bg border-transparent' : 'text-pb-faint pb-hairline hover:text-pb-text'}`}
+              style={nameMode === m ? { background: 'var(--pb-accent)' } : undefined}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {nameMode === 'single' ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <FieldRow field="player_name" label={FIELD_LABEL.player_name} required
+            value={mapping.player_name} headers={headers} conf={confByField.player_name} onMap={setMap} />
+          <div className="flex items-center gap-2 rounded px-2 py-1.5 border pb-hairline">
+            <span className="text-[11px] font-semibold text-pb-faint w-16 shrink-0 leading-tight">Format</span>
+            <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={nameFormat} onChange={(e) => setNameFormat(e.target.value)}>
+              {NAME_FORMAT_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <FieldRow field="player_first_name" label={FIELD_LABEL.player_first_name}
+            value={mapping.player_first_name} headers={headers} conf={confByField.player_first_name} onMap={setMap} />
+          <FieldRow field="player_last_name" label={FIELD_LABEL.player_last_name} required
+            value={mapping.player_last_name} headers={headers} conf={confByField.player_last_name} onMap={setMap} />
+        </div>
+      )}
+      <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed max-w-2xl">
+        {nameMode === 'single'
+          ? 'One name column — pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
+          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works — just leave First name unmapped.'}
+      </p>
     </div>
   )
 }
@@ -476,6 +537,8 @@ export default function AdminPlayerImport() {
   const [parsed, setParsed] = useState(null)
   const [mapping, setMapping] = useState({})
   const [confByField, setConfByField] = useState({})
+  const [nameMode, setNameModeRaw] = useState('single')   // single column vs first+surname
+  const [nameFormat, setNameFormat] = useState('auto')     // word order, single-column mode only
   const [playerOverrides, setPlayerOverrides] = useState({})
   const [squadOverrides, setSquadOverrides] = useState({})
   const [resolved, setResolved] = useState(null)
@@ -497,12 +560,13 @@ export default function AdminPlayerImport() {
   )
 
   // Keep the change preview fresh as the mapping / matches change (debounced).
-  // Waits for the name column to be mapped — without it /resolve 422s.
+  // Waits for a name column to be mapped — without it /resolve 422s.
+  const nameReady = nameMode === 'split' ? !!mapping.player_last_name : !!mapping.player_name
   useEffect(() => {
-    if (!parsed || !mapping.player_name) return
+    if (!parsed || !nameReady) return
     let cancelled = false
     setResolving(true)
-    const payload = { rows: parsed.rows, mapping, player_overrides: playerOverrides, squad_overrides: squadOverrides }
+    const payload = { rows: parsed.rows, mapping, name_format: nameFormat, player_overrides: playerOverrides, squad_overrides: squadOverrides }
     const t = setTimeout(() => {
       api.playerImportResolve(payload)
         .then((r) => { if (!cancelled) setResolved(r) })
@@ -511,16 +575,20 @@ export default function AdminPlayerImport() {
     }, 200)
     return () => { cancelled = true; clearTimeout(t) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [parsed, JSON.stringify(mapping), JSON.stringify(playerOverrides), JSON.stringify(squadOverrides)])
+  }, [parsed, JSON.stringify(mapping), nameFormat, JSON.stringify(playerOverrides), JSON.stringify(squadOverrides)])
 
   async function runParse() {
     if (!file) return
     setParsing(true); setParsed(null); setResolved(null); setCommitted(null)
     setPlayerOverrides({}); setSquadOverrides({})
+    setNameModeRaw('single'); setNameFormat('auto')
     try {
       const p = await api.playerImportPreview(file)
       const m = {}, c = {}
       Object.entries(p.mapping_suggestions || {}).forEach(([f, v]) => { m[f] = v.column; c[f] = v.confidence })
+      // A sheet with separate first-name/surname columns auto-suggests both —
+      // switch straight to split mode so the match isn't sitting one tab over.
+      if ((m.player_first_name || m.player_last_name) && !m.player_name) setNameModeRaw('split')
       setParsed(p); setMapping(m); setConfByField(c)
       setStep('map')
       toast.success(`Parsed ${p.row_count} row${p.row_count === 1 ? '' : 's'}`)
@@ -531,6 +599,14 @@ export default function AdminPlayerImport() {
     setMapping((m) => { const n = { ...m }; if (col) n[field] = col; else delete n[field]; return n })
     setConfByField((c) => ({ ...c, [field]: undefined }))
   }
+  // Switching name mode clears the OTHER mode's mapping, so a stale player_name
+  // (or first/last) mapping from before the switch can't linger and silently
+  // win server-side (resolve_row_name prefers first/last whenever either is set).
+  function setNameMode(mode) {
+    setNameModeRaw(mode)
+    if (mode === 'split') { setMap('player_name', '') }
+    else { setMap('player_first_name', ''); setMap('player_last_name', '') }
+  }
   function setPOverride(name, val) {
     setPlayerOverrides((o) => { const n = { ...o }; if (val === '') delete n[name]; else n[name] = val; return n })
   }
@@ -539,14 +615,14 @@ export default function AdminPlayerImport() {
     setSquadOverrides((o) => { const n = { ...o }; if (val === '') delete n[label]; else n[label] = val; return n })
   }
 
-  const mapReady = !!mapping.player_name
-  const mappedValueFields = FIELDS.filter(([k]) => k !== 'player_name' && mapping[k]).map(([k]) => k)
+  const mapReady = nameReady
+  const mappedValueFields = FIELDS.filter(([k]) => mapping[k]).map(([k]) => k)
 
   async function commit() {
     setCommitting(true)
     try {
       const res = await api.playerImportCommit({
-        rows: parsed.rows, mapping, filename: file?.name,
+        rows: parsed.rows, mapping, name_format: nameFormat, filename: file?.name,
         player_overrides: playerOverrides, squad_overrides: squadOverrides,
       })
       setCommitted(res)
@@ -557,6 +633,7 @@ export default function AdminPlayerImport() {
   function reset() {
     setStep('upload'); setFile(null); setParsed(null); setResolved(null); setCommitted(null)
     setMapping({}); setPlayerOverrides({}); setSquadOverrides({})
+    setNameModeRaw('single'); setNameFormat('auto')
   }
 
   return (
@@ -633,6 +710,8 @@ export default function AdminPlayerImport() {
                 </span>
                 <span className="text-pb-faintest text-[10px] sm:ml-1">Only Name is required. Map whichever details you have and leave the rest blank.</span>
               </div>
+              <NameColumnFields nameMode={nameMode} setNameMode={setNameMode} nameFormat={nameFormat} setNameFormat={setNameFormat}
+                mapping={mapping} setMap={setMap} headers={parsed.headers} confByField={confByField} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {FIELDS.map(([f, label, required]) => (
                   <FieldRow key={f} field={f} label={label} required={required}

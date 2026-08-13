@@ -53,6 +53,9 @@ MAX_UPLOAD_BYTES = 8 * 1024 * 1024
 class ResolveRequest(BaseModel):
     rows: list[dict] = []
     mapping: dict = {}                  # field -> column header (or {"column": ...})
+    # Only used when the name arrives as one combined column (mapping.player_name) —
+    # ignored once mapping.player_first_name/player_last_name are mapped instead.
+    name_format: str = "auto"           # auto | first_last | last_first
     player_overrides: dict = {}         # raw_name  -> player_id | "__new__" | "__skip__"
     squad_overrides: dict = {}          # raw_squad -> team_id   | "__new__" | "__skip__"
 
@@ -146,15 +149,21 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     per-player change preview. Also returns an internal ``_targets`` list the
     commit step writes from (stripped before /resolve returns it)."""
     name_col = _col(req.mapping, "player_name")
-    if not name_col:
+    first_col = _col(req.mapping, "player_first_name")
+    last_col = _col(req.mapping, "player_last_name")
+    if not name_col and not (first_col or last_col):
         raise HTTPException(422, "No column is mapped to the player name.")
     squad_col = _col(req.mapping, "squad")
+
+    def row_name(r):
+        return ingest.resolve_row_name(r, name_col=name_col, first_col=first_col,
+                                        last_col=last_col, name_format=req.name_format)
 
     # Distinct names + squad labels, in first-seen order.
     names: list = []
     squad_labels: list = []
     for r in req.rows:
-        nm = str(r.get(name_col, "")).strip()
+        nm = row_name(r)
         if nm and nm not in names:
             names.append(nm)
         if squad_col:
@@ -187,7 +196,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         return None
 
     for r in req.rows:
-        nm = str(r.get(name_col, "")).strip()
+        nm = row_name(r)
         if not nm:
             continue
         pm = pmatch.get(nm) or {}

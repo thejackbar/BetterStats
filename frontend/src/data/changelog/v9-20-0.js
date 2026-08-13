@@ -1,7 +1,7 @@
 export default {
   version: 'v9.20.0',
   date: '2026-08-12',
-  sortKey: '2026-08-15T22:00:00Z',
+  sortKey: '2026-08-16T09:00:00Z',
   title: 'A person can be several kinds of member at once',
   items: [
     'Membership type is no longer one box. Someone who plays and whose kid plays is a Senior Player and a Parent, and the Directory records both. Tick as many as apply, straight on the person.',

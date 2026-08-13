@@ -204,7 +204,10 @@ export default function ModuleLayout({
         <span className="text-[12.5px] text-pb-dim truncate flex-1 min-w-0" title={user?.display_name || user?.username}>
           {user?.display_name || user?.username}
         </span>
-        <BookmarkButton pageLabel={bookmarkLabel} drop="up" />
+        {/* The header (below) carries this normally, right beside the title —
+            far more visible than buried in this footer. `hideHeader` screens
+            skip that header entirely, so this is their only way to reach it. */}
+        {hideHeader && <BookmarkButton pageLabel={bookmarkLabel} drop="up" />}
         <button
           onClick={async () => { await logout(); navigate('/login') }}
           title="Log out" aria-label="Log out"
@@ -270,6 +273,7 @@ export default function ModuleLayout({
           {filters}
           <div className="ml-auto flex items-center gap-[26px]">
             {stats}
+            <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />
             {actions && <div className="flex items-center gap-2">{actions}</div>}
           </div>
         </header>

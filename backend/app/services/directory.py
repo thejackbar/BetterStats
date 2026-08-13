@@ -11,7 +11,7 @@ gets a member row lazily the first time ClubManager assigns them anything, so
 Raw SQL throughout (same posture as services/roster.py) so this stays out of the
 ORM/Alembic graph; it only ever writes fee_members / volunteer_roles.
 
-THREE AXES, kept apart on purpose (migration 235). They were one single-valued
+THREE AXES, kept apart on purpose (migration 248). They were one single-valued
 `member_category` whose vocabulary mixed all three, so a person could only ever
 be one thing and "Volunteer" competed with "Parent" for the same slot:
 
@@ -42,7 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
 
 # A membership type contributes a segment prefixed `type:`, so the club naming a
-# type "Volunteer" (every club that adopted the pre-235 starter set has one) can
+# type "Volunteer" (every club that adopted the pre-248 starter set has one) can
 # never collide with the Volunteer ROLE segment. Roles and honours stay bare.
 TYPE_SEG_PREFIX = "type:"
 SEG_EXTERNAL = "External"
@@ -99,7 +99,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
 
-    # Every membership type a person holds (migration 235), not just the primary
+    # Every membership type a person holds (migration 248), not just the primary
     # one on fee_members. The catalogue join is org-scoped on both sides, same
     # rule as the players join above: a stray row must not pull another club's
     # type name into this club's Directory.
@@ -239,7 +239,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         # ── AXIS 2: roles — what they DO, independent of membership. An
         # Official is the case that proves the axes are separate: a panel umpire
         # may hold the role and no membership whatsoever. member_category is
-        # read as a fallback for anyone tagged before 235 split the axes, so no
+        # read as a fallback for anyone tagged before 248 split the axes, so no
         # club loses a filter on upgrade.
         if mid in vol_profiles or mid in volunteer_roles:
             segs.append("Volunteer")

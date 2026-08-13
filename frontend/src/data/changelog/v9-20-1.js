@@ -1,7 +1,7 @@
 export default {
   version: 'v9.20.1',
   date: '2026-08-12',
-  sortKey: '2026-08-15T23:00:00Z',
+  sortKey: '2026-08-16T10:00:00Z',
   title: 'A calmer Directory header',
   items: [
     'The filter row had grown to about two dozen buttons, and it got longer every time a club added a membership type. It is now three menus: Membership, Role and More. Everything that was there is still there.',

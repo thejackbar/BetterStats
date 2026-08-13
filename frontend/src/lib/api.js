@@ -113,8 +113,9 @@ export const api = {
   searchOrgs: (q) => request(`/organisations/search?q=${encodeURIComponent(q)}`),
   getSocialScorecard: (matchId) => request(`/admin/social/scorecard/${matchId}`),
   socialMatchLookup: (q) => request(`/admin/social/match-lookup?q=${encodeURIComponent(q)}`),
-  getSocialFixtures: () => request('/admin/social/fixtures'),
-  getSocialResults: () => request('/admin/social/results'),
+  getSocialFixtures: (q) => request(`/admin/social/fixtures${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
 
   // BetterSocials — media library
   listSocialMedia: () => request('/admin/social/media'),
@@ -330,13 +331,19 @@ export const api = {
     }),
 
   // Grade category label + public visibility
-  classifyGrade: (gradeName, { category, is_public } = {}) =>
+  classifyGrade: (gradeName, { category, is_public, display_order } = {}) =>
     request('/admin/grades/classify', {
       method: 'PATCH',
-      body: JSON.stringify({ grade_name: gradeName, category, is_public }),
+      body: JSON.stringify({ grade_name: gradeName, category, is_public, display_order }),
     }),
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
+  // The club's own reading order for its grades — drives Merge Grades' Order
+  // column AND, via each grade's stored display_order, the row order of
+  // BetterPosts' Fixtures/Results roundup posts.
+  reorderGrades: (gradeNames) =>
+    request('/admin/grades/reorder', { method: 'POST', body: JSON.stringify({ grade_names: gradeNames }) }),
+  clearGradeOrder: () => request('/admin/grades/clear-order', { method: 'POST' }),
 
   // Committee Administration (core capability, not a paid module)
   committeeListPositions: (includeInactive) =>
@@ -873,12 +880,16 @@ export const api = {
   feeListMembers: (seasonId) => request(`/club-admin/fees/members?season_id=${seasonId}`),
   feeCreateMember: (data) =>
     request('/club-admin/fees/members', { method: 'POST', body: JSON.stringify(data) }),
+  feeEnrollMember: (data) =>
+    request('/club-admin/fees/members/enroll', { method: 'POST', body: JSON.stringify(data) }),
   feeGetMember: (memberId, seasonId) =>
     request(`/club-admin/fees/members/${memberId}?season_id=${seasonId}`),
   feePatchMember: (memberId, data) =>
     request(`/club-admin/fees/members/${memberId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   feePatchMemberSeason: (memberId, data) =>
     request(`/club-admin/fees/members/${memberId}/season`, { method: 'PATCH', body: JSON.stringify(data) }),
+  feeRemoveMemberSeason: (memberId, seasonId) =>
+    request(`/club-admin/fees/members/${memberId}/season?season_id=${seasonId}`, { method: 'DELETE' }),
   feePatchMatchDay: (entryId, data) =>
     request(`/club-admin/fees/match-days/${entryId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   feeRecompute: (seasonId) =>
@@ -911,6 +922,11 @@ export const api = {
     request('/club-admin/fees/rollover', {
       method: 'POST',
       body: JSON.stringify({ season_id: seasonId, from_season_id: fromSeasonId, include_left_club: includeLeftClub }),
+    }),
+  feeRolloverUndo: (seasonId) =>
+    request('/club-admin/fees/rollover/undo', {
+      method: 'POST',
+      body: JSON.stringify({ season_id: seasonId }),
     }),
   feeBulkSetTier: (seasonId, memberIds, feeScheduleId) =>
     request('/club-admin/fees/members/bulk-tier', {
@@ -1606,6 +1622,8 @@ export const api = {
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
   adminCreateManualSeason: (data) =>
     request('/club-admin/manual-entries/seasons', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateSeason: (id, data) =>
+    request(`/club-admin/manual-entries/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualSeason: (id) =>
     request(`/club-admin/manual-entries/seasons/${id}`, { method: 'DELETE' }),
   adminCreateManualGrade: (data) =>

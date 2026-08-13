@@ -1,7 +1,7 @@
 export default {
   version: 'v9.20.2',
   date: '2026-08-12',
-  sortKey: '2026-08-16T00:00:00Z',
+  sortKey: '2026-08-16T11:00:00Z',
   title: 'Everything you can filter for, you can now fix',
   items: [
     'Playing and Former players were filters with nothing behind them. A person\'s playing status is now set on their record in the Directory, so you can find who is wrong and change it in the same place.',

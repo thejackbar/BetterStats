@@ -274,6 +274,76 @@ async def send_diary_reminders():
         logger.error(f"Club Diary reminder scan failed: {e}")
 
 
+async def refresh_scout_players():
+    """BetterScout — the actual engine behind org.refresh_cadence (a Scout
+    Org setting that otherwise does nothing on its own: every refresh today
+    is user-triggered via POST /scout/players/{id}/refresh). Every tracked
+    au_grassroots player whose cached stats_payload is older than their own
+    org's cadence gets rebuilt. Scoped to TRACKED players only — never a
+    country-wide crawl, per the redesign's own "Deliberately NOT built"
+    table. cadence='manual' orgs are never swept.
+
+    Batched per CLUB, not per player or per org: due players are collected
+    across EVERY org first, grouped by club_org_guid, so a club several
+    orgs/scouts are tracking players at costs one rebuild for this whole
+    run, not one per org or one per player (services.scout_discovery.
+    refresh_club_and_apply's own docstring explains why calling
+    refresh_player() N times would be wasteful here)."""
+    from datetime import datetime, timedelta, timezone
+    from app.models.scout import ScoutedPlayer, ScoutOrg, ScoutWatchlist, ScoutWatchlistCard
+    from app.services import scout_discovery
+    from app.services.scout_overview import _CADENCE_DAYS
+
+    logger.info("Starting scheduled BetterScout player refresh")
+    now = datetime.now(timezone.utc)
+
+    async with async_session_maker() as session:
+        orgs = (await session.execute(select(ScoutOrg).where(ScoutOrg.is_active.is_(True)))).scalars().all()
+
+    due_by_club: dict[str, dict] = {}
+    for org in orgs:
+        cadence = org.refresh_cadence or "weekly"
+        if cadence == "manual":
+            continue
+        max_age = timedelta(days=_CADENCE_DAYS.get(cadence, 7))
+        async with async_session_maker() as session:
+            players = (await session.execute(
+                select(ScoutedPlayer)
+                .join(ScoutWatchlistCard, ScoutWatchlistCard.scouted_player_id == ScoutedPlayer.id)
+                .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+                .where(
+                    ScoutWatchlist.scout_org_id == org.id,
+                    ScoutedPlayer.source == "au_grassroots",
+                    ScoutedPlayer.grassroots_participant_id.isnot(None),
+                    ScoutedPlayer.club_org_guid.isnot(None),
+                )
+                .distinct()
+            )).scalars().all()
+        for p in players:
+            built_at = p.stats_built_at
+            if built_at is not None and built_at.tzinfo is None:
+                built_at = built_at.replace(tzinfo=timezone.utc)
+            stale = built_at is None or (now - built_at) >= max_age
+            if not stale:
+                continue
+            bucket = due_by_club.setdefault(p.club_org_guid, {"club_name": p.club_name, "player_ids": set()})
+            bucket["player_ids"].add(str(p.id))
+
+    if not due_by_club:
+        logger.info("BetterScout refresh: nothing due")
+        return
+
+    total_players = sum(len(b["player_ids"]) for b in due_by_club.values())
+    logger.info(f"BetterScout refresh: {len(due_by_club)} club(s) due, {total_players} player(s)")
+
+    for org_guid, bucket in due_by_club.items():
+        try:
+            n = await scout_discovery.refresh_club_and_apply(org_guid, bucket["club_name"], list(bucket["player_ids"]))
+            logger.info(f"BetterScout refresh: {org_guid} -> {n} player(s) updated")
+        except Exception as e:
+            logger.error(f"BetterScout refresh failed for club {org_guid}: {e}")
+
+
 async def comms_daily_maintenance():
     """BetterComms daily housekeeping, run just after the AWS quota window rolls
     over (midnight UTC): (1) trip the bounce/complaint circuit breaker on any
@@ -461,6 +531,17 @@ def start_scheduler():
         id="daily_module_trial_sweep",
         replace_existing=True,
     )
+    # BetterScout — sweep tracked players due for a refresh under their org's
+    # own refresh_cadence setting. Right after the daily admin-reminder
+    # cluster; batched per club so this stays cheap even as orgs grow.
+    scheduler.add_job(
+        refresh_scout_players,
+        trigger="cron",
+        hour=9,
+        minute=0,
+        id="daily_scout_refresh",
+        replace_existing=True,
+    )
     # BetterComms daily maintenance — 00:15 UTC, just after AWS's daily send
     # quota resets at midnight UTC: trip the bounce/complaint breaker, then resume
     # any campaigns whose overflow was deferred to today's fresh allowance.
@@ -496,8 +577,8 @@ def start_scheduler():
     scheduler.start()
     logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
                 "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
-                "trial lifecycle nudges 08:00, Meta Ads snapshot hourly at :05, "
-                "draft tick /15min", marketing_mode)
+                "trial lifecycle nudges 08:00, BetterScout refresh 09:00, "
+                "Meta Ads snapshot hourly at :05, draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():
