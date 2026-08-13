@@ -19,6 +19,7 @@ from app.routers.auth import get_current_club
 from app.auth.capabilities import (
     require_cap, require_any_cap,
     MANAGE_MEMBERS, MANAGE_VOLUNTEERS, MANAGE_COMMITTEE, MANAGE_QUALIFICATIONS, MANAGE_FEES,
+    MANAGE_PLAYERS,
 )
 from app.services import directory as svc
 from app.services import members as members_svc
@@ -65,6 +66,21 @@ class LifeMembershipBody(BaseModel):
     is_life_member: bool
     # Omit to leave the recorded date alone; "" clears it.
     since: Optional[str] = "__keep__"
+    # Free text beside the date — a life member number, usually. Same rule.
+    detail: Optional[str] = "__keep__"
+
+
+class GenderBody(BaseModel):
+    gender: Optional[str] = None      # "" / null clears it
+
+
+class SquadBody(BaseModel):
+    team_id: Optional[str] = None     # "" / null takes them out of a squad
+
+
+class FeeTierBody(BaseModel):
+    season_id: str
+    fee_schedule_id: Optional[str] = None  # null = the club's own "needs tier"
 
 
 @router.get("/people")
@@ -78,6 +94,10 @@ async def list_people(include_archived: bool = False, _: User = _read, club: Org
         "people": await svc.list_people(db, club.id, include_archived=include_archived),
         "categories": members_svc.MEMBER_CATEGORIES,
         "membership_types": await membership_types_svc.list_types(db, club.id),
+        # Gender / squad / fee-tier vocabularies, for the same reason: the
+        # screen draws the club's OWN squads and tiers rather than a guess, and
+        # one round trip serves the whole header.
+        **await svc.filter_options(db, club.id),
     }
 
 
@@ -188,6 +208,50 @@ async def set_player_life_membership(player_id: str, data: LifeMembershipBody, _
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
     return {"member_id": mid}
+
+
+@router.put("/people/{member_id}/gender")
+async def set_gender(member_id: str, data: GenderBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    await svc.set_gender(db, club.id, _uuid(member_id), data.gender)
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/players/{player_id}/gender")
+async def set_player_gender(player_id: str, data: GenderBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        mid = await members_svc.ensure_for_player(db, club.id, _uuid(player_id))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    await svc.set_gender(db, club.id, _uuid(mid), data.gender)
+    await db.commit()
+    return {"member_id": mid}
+
+
+@router.put("/players/{player_id}/squad")
+async def set_squad(player_id: str, data: SquadBody, club: Organisation = Depends(get_current_club),
+                    db: AsyncSession = Depends(get_db),
+                    _: User = Depends(require_cap(MANAGE_PLAYERS))):
+    """A squad is a Stats/BetterSelect concept on the player record, so this is
+    the one Directory write gated on MANAGE_PLAYERS rather than MANAGE_MEMBERS —
+    the same boundary the playing-status control respects."""
+    try:
+        await svc.set_squad(db, club.id, _uuid(player_id), _uuid(data.team_id) if data.team_id else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.put("/people/{member_id}/fee-tier")
+async def set_fee_tier(member_id: str, data: FeeTierBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    try:
+        await svc.set_fee_tier(db, club.id, _uuid(member_id), _uuid(data.season_id),
+                               _uuid(data.fee_schedule_id) if data.fee_schedule_id else None)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+    return {"ok": True}
 
 
 @router.post("/membership-types/seed")

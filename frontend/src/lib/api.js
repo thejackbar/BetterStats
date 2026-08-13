@@ -492,6 +492,12 @@ export const api = {
   dirSetLifeMembership: (memberId, body) => request(`/club-admin/directory/people/${memberId}/life-membership`, { method: 'PUT', body: JSON.stringify(body) }),
   dirSetPlayerLifeMembership: (playerId, body) => request(`/club-admin/directory/players/${playerId}/life-membership`, { method: 'POST', body: JSON.stringify(body) }),
   dirSeedMembershipTypes: () => request('/club-admin/directory/membership-types/seed', { method: 'POST' }),
+  dirSetGender: (memberId, gender) => request(`/club-admin/directory/people/${memberId}/gender`, { method: 'PUT', body: JSON.stringify({ gender }) }),
+  dirSetPlayerGender: (playerId, gender) => request(`/club-admin/directory/players/${playerId}/gender`, { method: 'POST', body: JSON.stringify({ gender }) }),
+  // Squad lives on the Stats player record, so this one needs MANAGE_PLAYERS.
+  dirSetSquad: (playerId, teamId) => request(`/club-admin/directory/players/${playerId}/squad`, { method: 'PUT', body: JSON.stringify({ team_id: teamId || null }) }),
+  // A fee tier is per SEASON, so the season is always named.
+  dirSetFeeTier: (memberId, seasonId, feeScheduleId) => request(`/club-admin/directory/people/${memberId}/fee-tier`, { method: 'PUT', body: JSON.stringify({ season_id: seasonId, fee_schedule_id: feeScheduleId || null }) }),
   dirAddRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles`, { method: 'POST', body: JSON.stringify({ role_id: roleId }) }),
   dirRemoveRole: (memberId, roleId) => request(`/club-admin/directory/people/${memberId}/roles/${roleId}`, { method: 'DELETE' }),
   dirImportPreview: (csvText) => request('/club-admin/directory/import/preview', { method: 'POST', body: JSON.stringify({ csv: csvText }) }),

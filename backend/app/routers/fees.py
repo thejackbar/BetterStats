@@ -879,14 +879,31 @@ async def get_member(
 
         fin = _financials(schedule, total_days, paid_totals, waived_days)
 
+    # Contact details are the ONE person record shared with the Directory, and
+    # the Directory shows the member's own value falling back to the linked
+    # player's. Returning the raw column here made the two screens disagree: a
+    # synced player's email showed in the Directory and this page sat blank.
+    # Org-scoped, per the shared-game rule — a member row can point at another
+    # club's player, and that club's contact details must not be served here.
+    linked = None
+    if member.player_id:
+        linked = (await db.execute(
+            select(Player.email, Player.phone).where(
+                Player.id == member.player_id, Player.organisation_id == club.id)
+        )).first()
     return {
         "member": {
             "id": str(member.id),
             "full_name": member.full_name,
             "player_id": str(member.player_id) if member.player_id else None,
             "is_linked": member.player_id is not None,
-            "email": member.email,
-            "mobile": member.mobile,
+            "email": member.email or (linked[0] if linked else None),
+            "mobile": member.mobile or (linked[1] if linked else None),
+            # Whether the value above is this person record's own. Saving writes
+            # to the member row either way, which is the club recording it
+            # rather than leaving it only on the Stats player.
+            "email_from_player": not member.email and bool(linked and linked[0]),
+            "mobile_from_player": not member.mobile and bool(linked and linked[1]),
             "current_tier": member.current_tier,
             "notes": member.notes,
             "membership_type_id": str(member.membership_type_id) if member.membership_type_id else None,

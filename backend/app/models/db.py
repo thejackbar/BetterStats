@@ -2515,6 +2515,14 @@ class FeeMember(Base):
     # (it doesn't reset each season the way a fee_schedule tier does).
     membership_type_id = Column(UUID(as_uuid=True), ForeignKey("membership_types.id", ondelete="SET NULL"), nullable=True)
     is_life_member = Column(Boolean, nullable=False, server_default="false", default=False)
+    # Migration 248/249. The honour's own date, and free text beside it for
+    # whatever the club records against it — usually a life member number.
+    life_member_since = Column(Date, nullable=True)
+    life_member_detail = Column(Text, nullable=True)
+    # Migration 249. Gender lived only on `players`, so a social member or a
+    # sponsor's contact had nowhere to carry one. Read precedence is the same as
+    # email/mobile: this value, falling back to the linked player's.
+    gender = Column(Text, nullable=True)
     is_honorary = Column(Boolean, nullable=False, server_default="false", default=False)
     honorary_expires_at = Column(Date, nullable=True)  # NULL + is_honorary = perpetual
     # Soft-delete (migration 212). The Directory hides an archived person and

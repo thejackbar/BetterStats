@@ -32,6 +32,12 @@ import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuIt
 // "Volunteer" (every club that adopted the pre-248 starter set has one) cannot
 // collide with the Volunteer ROLE.
 const TYPE_PREFIX = 'type:'
+// Three more axes, each prefixed server-side for the same collision reason:
+// a squad and a fee tier both carry names the club chose.
+const SQUAD_PREFIX = 'squad:'
+const TIER_PREFIX = 'tier:'
+const GENDER_PREFIX = 'gender:'
+const GENDER_LABEL = { male: 'Male', female: 'Female', other: 'Other' }
 const ROLE_SEGS = [
   { seg: 'Volunteer', label: 'Volunteers' },
   { seg: 'Committee', label: 'Committee' },
@@ -132,6 +138,9 @@ export default function Directory({ st, patch, narrow }) {
   const canEditPlayers = hasCapability(CAP.MANAGE_PLAYERS)
   const [people, setPeople] = useState(null)   // null = loading
   const [memberTypes, setMemberTypes] = useState([])  // the club's membership-type catalogue
+  // The club's own gender / squad / fee-tier vocabularies, and which season the
+  // tiers belong to (a tier is per-season, so the screen has to say which).
+  const [opts, setOpts] = useState({ genders: [], squads: [], tiers: [], tier_season: null })
   const [err, setErr] = useState(null)
   const [roleCatalogue, setRoleCatalogue] = useState([])   // general (non-committee) club roles
   const [qualTypes, setQualTypes] = useState([])
@@ -150,6 +159,10 @@ export default function Directory({ st, patch, narrow }) {
   const reload = () => api.dirPeople(st.dirShowArchived).then(res => {
     setPeople(res?.people || [])
     setMemberTypes(res?.membership_types || [])
+    setOpts({
+      genders: res?.genders || [], squads: res?.squads || [],
+      tiers: res?.tiers || [], tier_season: res?.tier_season || null,
+    })
   }).catch(e => setErr(String(e?.message || e)))
   const reloadFamilies = () => api.dirFamilies().then(r => setFamilies(r?.families || [])).catch(() => {})
   useEffect(() => { reload() }, [st.dirShowArchived]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -168,6 +181,9 @@ export default function Directory({ st, patch, narrow }) {
   const roleSeg = st.dirRoleSeg || null        // role axis
   const honourSeg = st.dirHonour || null       // honour axis
   const roleFilter = st.dirRole || null        // a specific role TITLE
+  const genderSeg = st.dirGender || null       // gender axis
+  const squadSeg = st.dirSquad || null         // squad axis
+  const tierSeg = st.dirTier || null           // fee-tier axis
   const expiringOnly = !!st.dirExpiring
   const typeFilter = st.dirType || ''          // '' = any membership type
   const playing = st.dirPlaying || 'all'       // all | active | inactive
@@ -184,6 +200,9 @@ export default function Directory({ st, patch, narrow }) {
     if (seg !== 'All' && !p.segs.includes(seg)) return false
     if (roleSeg && !p.segs.includes(roleSeg)) return false
     if (honourSeg && !p.segs.includes(honourSeg)) return false
+    if (genderSeg && !p.segs.includes(genderSeg)) return false
+    if (squadSeg && !p.segs.includes(squadSeg)) return false
+    if (tierSeg && !p.segs.includes(tierSeg)) return false
     // "No type set" is about the whole set now, not the primary — someone
     // holding two types and no primary is plainly typed.
     if (typeFilter === NO_TYPE && (p.membership_types || []).length) return false
@@ -294,10 +313,14 @@ export default function Directory({ st, patch, narrow }) {
       await reload()
     } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
-  const setLifeMember = async (p, on, since) => {
+  const setLifeMember = async (p, on, since, detail) => {
     setBusy(true)
     try {
-      const body = { is_life_member: on, ...(since === undefined ? {} : { since }) }
+      const body = {
+        is_life_member: on,
+        ...(since === undefined ? {} : { since }),
+        ...(detail === undefined ? {} : { detail }),
+      }
       if (p.member_id) await api.dirSetLifeMembership(p.member_id, body)
       else { const r = await api.dirSetPlayerLifeMembership(p.player_id, body); patch({ dirSel: r.member_id }) }
       await reload()
@@ -334,6 +357,36 @@ export default function Directory({ st, patch, narrow }) {
     setBusy(true)
     try { await api.qualUpdateQualification(qid, { expires_at: expires_at || null }); await refreshMember(sel.member_id) }
     catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // Gender goes on the person spine — never on the Stats player — so a
+  // non-player can carry one and a synced player's shows through until the club
+  // records its own.
+  const setGender = async (p, g) => {
+    setBusy(true)
+    try {
+      if (p.member_id) await api.dirSetGender(p.member_id, g)
+      else { const r = await api.dirSetPlayerGender(p.player_id, g); patch({ dirSel: r.member_id }) }
+      await reload()
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  // Squad is the one write that touches the Stats player record, so it is
+  // offered only to someone holding MANAGE_PLAYERS.
+  const setSquad = async (p, teamId) => {
+    if (!p.player_id) return
+    setBusy(true)
+    try { await api.dirSetSquad(p.player_id, teamId); await reload() }
+    catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
+  }
+  const setFeeTier = async (p, tierId) => {
+    if (!opts.tier_season) return
+    setBusy(true)
+    try {
+      let mid = p.member_id
+      if (!mid && p.player_id) mid = (await api.dirEnsureMemberForPlayer(p.player_id)).member_id
+      if (!mid) return
+      await api.dirSetFeeTier(mid, opts.tier_season.id, tierId)
+      await reload(); patch({ dirSel: mid })
+    } catch (e) { setErr(String(e?.message || e)) } finally { setBusy(false) }
   }
   const seedTypes = async () => {
     setBusy(true)
@@ -484,10 +537,15 @@ export default function Directory({ st, patch, narrow }) {
   const roleLabel = roleFilter || (roleSeg ? (ROLE_SEGS.find(r => r.seg === roleSeg) || {}).label : null)
   // "More" holds several unrelated switches, so its button counts rather than
   // naming one and hiding the rest.
+  const genderLabel = genderSeg ? (GENDER_LABEL[genderSeg.slice(GENDER_PREFIX.length)] || genderSeg.slice(GENDER_PREFIX.length)) : null
+  const squadLabel = squadSeg ? squadSeg.slice(SQUAD_PREFIX.length) : null
+  const tierLabel = tierSeg ? tierSeg.slice(TIER_PREFIX.length) : null
   const moreOn = [honourSeg, playing !== 'all' ? playing : null, emailFilter,
+    genderSeg, squadSeg, tierSeg,
     expiringOnly ? 'quals' : null, st.dirShowArchived ? 'arch' : null].filter(Boolean)
   const moreLabel = moreOn.length === 1
-    ? (honourSeg || PLAYING_LABEL[playing] || EMAIL_LABEL[emailFilter] || (expiringOnly ? 'Quals to renew' : 'Archived'))
+    ? (honourSeg || PLAYING_LABEL[playing] || EMAIL_LABEL[emailFilter] || genderLabel || squadLabel || tierLabel
+       || (expiringOnly ? 'Quals to renew' : 'Archived'))
     : moreOn.length ? String(moreOn.length) : null
 
   // Every filter that is on, each with the one patch that clears it. This is
@@ -499,6 +557,9 @@ export default function Directory({ st, patch, narrow }) {
     roleSeg && { key: 'roleseg', label: (ROLE_SEGS.find(r => r.seg === roleSeg) || {}).label, clear: () => patch({ dirRoleSeg: null }) },
     roleFilter && { key: 'role', label: 'Role: ' + roleFilter, clear: () => patch({ dirRole: null }) },
     honourSeg && { key: 'honour', label: honourSeg + 's', clear: () => patch({ dirHonour: null }) },
+    genderSeg && { key: 'gender', label: genderLabel, clear: () => patch({ dirGender: null }) },
+    squadSeg && { key: 'squad', label: 'Squad: ' + squadLabel, clear: () => patch({ dirSquad: null }) },
+    tierSeg && { key: 'tier', label: 'Tier: ' + tierLabel, clear: () => patch({ dirTier: null }) },
     playing !== 'all' && { key: 'playing', label: PLAYING_LABEL[playing], clear: () => patch({ dirPlaying: 'all' }) },
     emailFilter && { key: 'email', label: EMAIL_LABEL[emailFilter], clear: () => patch({ dirEmail: null }) },
     expiringOnly && { key: 'quals', label: 'Quals to renew', clear: () => patch({ dirExpiring: false }) },
@@ -507,6 +568,7 @@ export default function Directory({ st, patch, narrow }) {
   ].filter(Boolean)
   const clearFilters = () => patch({
     dirSeg: 'All', dirType: '', dirRoleSeg: null, dirRole: null, dirHonour: null,
+    dirGender: null, dirSquad: null, dirTier: null,
     dirPlaying: 'all', dirEmail: null, dirExpiring: false, dirShowArchived: false, dirQuery: '',
   })
 
@@ -589,6 +651,29 @@ export default function Directory({ st, patch, narrow }) {
                 <MenuHeading>PLAYING</MenuHeading>
                 <MenuItem on={playing === 'active'} onClick={() => { patch({ dirPlaying: playing === 'active' ? 'all' : 'active' }); close() }}>Playing</MenuItem>
                 <MenuItem on={playing === 'inactive'} onClick={() => { patch({ dirPlaying: playing === 'inactive' ? 'all' : 'inactive' }); close() }}>Former players</MenuItem>
+                {opts.genders.length > 0 && <MenuHeading>GENDER</MenuHeading>}
+                {opts.genders.map(g => (
+                  <MenuItem key={g} on={genderSeg === GENDER_PREFIX + g}
+                    onClick={() => { patch({ dirGender: genderSeg === GENDER_PREFIX + g ? null : GENDER_PREFIX + g }); close() }}>
+                    {GENDER_LABEL[g] || g}
+                  </MenuItem>
+                ))}
+                {opts.squads.length > 0 && <MenuHeading>SQUAD</MenuHeading>}
+                {opts.squads.map(t => (
+                  <MenuItem key={t.id} on={squadSeg === SQUAD_PREFIX + t.name}
+                    onClick={() => { patch({ dirSquad: squadSeg === SQUAD_PREFIX + t.name ? null : SQUAD_PREFIX + t.name }); close() }}>
+                    {t.name}
+                  </MenuItem>
+                ))}
+                {/* A tier belongs to a season, so the heading names which one
+                    rather than letting "Senior" read as a fact about the person. */}
+                {opts.tiers.length > 0 && <MenuHeading>MEMBERSHIP TIER{opts.tier_season ? ' · ' + opts.tier_season.name : ''}</MenuHeading>}
+                {opts.tiers.map(t => (
+                  <MenuItem key={t.id} on={tierSeg === TIER_PREFIX + t.name}
+                    onClick={() => { patch({ dirTier: tierSeg === TIER_PREFIX + t.name ? null : TIER_PREFIX + t.name }); close() }}>
+                    {t.name}
+                  </MenuItem>
+                ))}
                 <MenuHeading>CONTACT</MenuHeading>
                 <MenuItem on={emailFilter === 'has'} onClick={() => { patch({ dirEmail: emailFilter === 'has' ? null : 'has' }); close() }}>Has email</MenuItem>
                 <MenuItem on={emailFilter === 'none'} onClick={() => { patch({ dirEmail: emailFilter === 'none' ? null : 'none' }); close() }}>No email</MenuItem>
@@ -774,6 +859,62 @@ export default function Directory({ st, patch, narrow }) {
                   </>
                 )}
 
+                {/* Gender. On the person spine, so a non-player can carry one;
+                    a linked player's shows through until the club records its
+                    own, which is why clearing reads as "from their player
+                    record" rather than as empty. */}
+                <div style={{ marginTop: 14 }}>
+                  <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faintest, marginBottom: 5 }}>GENDER</div>
+                  <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                    {opts.genders.map(g => (
+                      <button key={g} disabled={busy}
+                        onClick={() => setGender(sel, (sel.gender || '') === g ? '' : g)}
+                        style={{ ...pill((sel.gender || '') === g), opacity: busy ? 0.6 : 1 }}>{GENDER_LABEL[g] || g}</button>
+                    ))}
+                  </div>
+                  {sel.gender && !sel.gender_own && (
+                    <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 5 }}>From their player record in Stats.</div>
+                  )}
+                </div>
+
+                {/* Squad — a BetterSelect concept on the player record, so only
+                    a player has one and only MANAGE_PLAYERS may change it. */}
+                {sel.player_id && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faintest, marginBottom: 5 }}>SQUAD</div>
+                    {canEditPlayers ? (
+                      <select value={sel.squad?.id || ''} disabled={busy} onChange={e => setSquad(sel, e.target.value)}
+                        style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
+                        <option value="">— No squad —</option>
+                        {opts.squads.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                      </select>
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: C.faint }}>
+                        {sel.squad?.name || 'No squad'}
+                        <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}> · changed on the player’s record in Stats</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Membership tier — per SEASON, so the label names the season
+                    rather than letting it read as a fact about the person.
+                    Blank is the club's own "needs tier", which the Accounts
+                    review queue reads, so it is offered as a real choice. */}
+                {opts.tier_season && (
+                  <div style={{ marginTop: 14 }}>
+                    <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faintest, marginBottom: 5 }}>
+                      MEMBERSHIP TIER · {opts.tier_season.name}
+                    </div>
+                    <select value={sel.tier?.id || ''} disabled={busy || !opts.tiers.length}
+                      onChange={e => setFeeTier(sel, e.target.value)}
+                      style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
+                      <option value="">{opts.tiers.length ? '— Needs tier —' : 'No tiers set up'}</option>
+                      {opts.tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </select>
+                  </div>
+                )}
+
                 {/* Playing status. The Directory filters on it, so it is set
                     here rather than only in Stats. Its endpoint wants
                     MANAGE_PLAYERS, which a volunteer or committee manager need
@@ -809,12 +950,24 @@ export default function Directory({ st, patch, narrow }) {
                   Life member
                 </label>
                 {sel.life_member_flag && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                    <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>SINCE</span>
-                    <input type="date" disabled={busy} value={sel.life_member_since || ''}
-                      onChange={e => setLifeMember(sel, true, e.target.value)}
-                      style={{ ...inp, width: 'auto' }} />
-                  </div>
+                  <>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>SINCE</span>
+                      <input type="date" disabled={busy} value={sel.life_member_since || ''}
+                        onChange={e => setLifeMember(sel, true, e.target.value)}
+                        style={{ ...inp, width: 'auto' }} />
+                    </div>
+                    {/* Free text, unparsed — a life member number is the usual
+                        thing, and clubs number these however they always have. */}
+                    <div style={{ marginTop: 8 }}>
+                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginBottom: 4 }}>DETAIL</div>
+                      <input disabled={busy} defaultValue={sel.life_member_detail || ''}
+                        key={sel.key + ':lmd'} placeholder="Life member number, or anything else recorded"
+                        onBlur={e => { if (e.target.value !== (sel.life_member_detail || '')) setLifeMember(sel, true, undefined, e.target.value) }}
+                        onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur() }}
+                        style={{ ...inp, maxWidth: 280 }} />
+                    </div>
+                  </>
                 )}
                 {/* The honour board is the ceremonial record and the Awards
                     screen owns it, so this says where the answer came from
@@ -856,7 +1009,9 @@ export default function Directory({ st, patch, narrow }) {
                   {quals.map((qq, i) => (
                     <div key={qq.id || i} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '8px 11px' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ fontSize: 13, color: C.text }}>{qq.name}</div>
+                        {/* Accent, matching an assigned role and committee
+                            position: all three are things this person holds. */}
+                        <div style={{ fontSize: 13, color: C.accent }}>{qq.name}</div>
                         {/* The expiry is what "Quals to renew" filters on, so it
                             has to be settable and clearable. Adding a
                             qualification derives it from the type's validity
@@ -900,8 +1055,13 @@ export default function Directory({ st, patch, narrow }) {
                 ) : (
                   <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {/* Accent, like an assigned role — a held position is the
+                          same kind of thing as a held role, and reading it in
+                          body white made it look like plain text. The office
+                          bearer keeps a filled background, so the two are still
+                          told apart. */}
                       {overlays.committee.map(c => (
-                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : C.surface2, border: `1px solid ${c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`, color: c.is_office_bearer ? C.accent : C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
+                        <span key={c.term_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: c.is_office_bearer ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', border: `1px solid color-mix(in srgb, var(--pb-accent) ${c.is_office_bearer ? 45 : 30}%, transparent)`, color: C.accent, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
                           {c.name}{c.is_office_bearer ? ' · office bearer' : ''}<span onClick={() => removeCommittee(c.term_id)} title="End term" style={{ cursor: 'pointer', opacity: 0.7, fontSize: 13 }}>×</span>
                         </span>
                       ))}

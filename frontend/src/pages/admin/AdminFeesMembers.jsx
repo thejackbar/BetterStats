@@ -9,6 +9,7 @@ import {
 } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { PersonSearch } from '../../components/admin/clubmanager/pickers'
+import { usePeopleFilters } from '../../components/admin/clubmanager/peopleFilters'
 
 function sortSeasons(seasons) {
   return seasons.filter(s => !s.alias_of).sort((a, b) => (b.year || 0) - (a.year || 0) || (b.name > a.name ? 1 : -1))
@@ -306,6 +307,9 @@ function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone 
 }
 
 export default function AdminFeesMembers() {
+  // The Directory's People filters, matched on the segments that service
+  // computes. Fetched once here; this screen's own data layer is untouched.
+  const people = usePeopleFilters()
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
   const [seasonId, setSeasonId] = useState('')
@@ -408,9 +412,12 @@ export default function AdminFeesMembers() {
       (!needsTierOnly || m.needs_tier) &&
       (!owesOnly || m.status === 'non_financial') &&
       (!playhqMissingOnly || !m.playhq_registered) &&
+      // The Directory's People filters, matched on the segments that service
+      // already computes rather than re-derived here.
+      people.matches(m.member_id) &&
       (!needle || m.full_name.toLowerCase().includes(needle) || (m.tier || '').toLowerCase().includes(needle))
     )
-  }, [data, q, needsTierOnly, owesOnly, playhqMissingOnly])
+  }, [data, q, needsTierOnly, owesOnly, playhqMissingOnly, people.anyOn, people.matches])
 
   const s = data?.summary || {}
   const currentSeason = seasons.find(se => se.id === seasonId)
@@ -437,6 +444,11 @@ export default function AdminFeesMembers() {
         <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
           Not on PlayHQ
         </FilterPill>
+        {/* The same Membership / Role / More menus the Directory carries, so a
+            money job can be scoped to a group of people ("every Junior Player
+            who owes") without leaving this screen. */}
+        {people.menus}
+        {people.chips}
       </div>
     ),
     stats: (

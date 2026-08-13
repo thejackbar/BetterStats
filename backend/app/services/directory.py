@@ -48,6 +48,15 @@ TYPE_SEG_PREFIX = "type:"
 SEG_EXTERNAL = "External"
 SEG_PLAYER = "Player"
 SEG_LIFE_MEMBER = "Life member"
+# Three more filterable axes, each prefixed for the same reason `type:` is: they
+# carry club-authored names (a squad and a fee tier are both named by the club)
+# and must not collide with each other or with a role.
+SQUAD_SEG_PREFIX = "squad:"
+TIER_SEG_PREFIX = "tier:"
+GENDER_SEG_PREFIX = "gender:"
+# What the Directory offers; `players.gender` has always been free text, so an
+# unrecognised stored value is still shown and filterable rather than dropped.
+GENDERS = ["male", "female", "other"]
 
 
 async def list_people(db: AsyncSession, org_id, include_archived: bool = False) -> list[dict]:
@@ -89,15 +98,40 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # Directory can say which kind of member someone is, not just "Player".
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, fm.life_member_since, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
+               fm.is_life_member, fm.life_member_since, fm.life_member_detail,
+               fm.gender AS member_gender, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
                mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
                p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
-               p.status AS player_status
+               p.status AS player_status, p.gender AS player_gender,
+               t.id AS squad_id, t.name AS squad_name
         FROM fee_members fm
         LEFT JOIN players p ON p.id = fm.player_id AND p.organisation_id = fm.organisation_id
+        LEFT JOIN teams t ON t.id = p.squad_team_id AND t.organisation_id = p.organisation_id
         LEFT JOIN membership_types mt ON mt.id = fm.membership_type_id AND mt.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
+
+    # The fee tier this person sits on, for the season the Directory is showing
+    # (the club's most recent). A tier is per-season by design — fee_schedule
+    # rows are re-created each year — so this is "their tier now", not a fact
+    # about the person, and the season it came from is returned alongside it so
+    # the screen can say which year it is talking about.
+    tier_season = (await db.execute(text("""
+        SELECT s.id, s.name FROM seasons s
+        WHERE s.organisation_id = :org
+          AND EXISTS (SELECT 1 FROM fee_member_seasons ms WHERE ms.season_id = s.id AND ms.organisation_id = :org)
+        ORDER BY s.year DESC NULLS LAST, lower(s.name) DESC
+        LIMIT 1
+    """), {"org": org_id})).mappings().first()
+    tiers_by = {}
+    if tier_season:
+        for r in (await db.execute(text("""
+            SELECT ms.member_id, fs.id, fs.name
+            FROM fee_member_seasons ms
+            JOIN fee_schedule fs ON fs.id = ms.fee_schedule_id
+            WHERE ms.organisation_id = :org AND ms.season_id = :season
+        """), {"org": org_id, "season": tier_season["id"]})).mappings().all():
+            tiers_by[str(r["member_id"])] = {"id": str(r["id"]), "name": r["name"]}
 
     # Every membership type a person holds (migration 248), not just the primary
     # one on fee_members. The catalogue join is org-scoped on both sides, same
@@ -261,6 +295,19 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         if m["is_honorary"]:
             segs.append("Honorary")
 
+        # Gender, squad and fee tier. Gender falls back to the linked player's
+        # the same way email and mobile do, so a synced player's is shown
+        # without being copied onto the spine.
+        gender = (m["member_gender"] or m["player_gender"] or "") or None
+        squad = {"id": str(m["squad_id"]), "name": m["squad_name"]} if m["squad_id"] else None
+        tier = tiers_by.get(mid)
+        if gender:
+            segs.append(GENDER_SEG_PREFIX + gender.lower())
+        if squad:
+            segs.append(SQUAD_SEG_PREFIX + squad["name"])
+        if tier:
+            segs.append(TIER_SEG_PREFIX + tier["name"])
+
         q = quals_by.get(mid, {})
         # NULL only when nobody's linked player — a linked player always carries
         # a status, so None here reads as "not a player" rather than "unknown".
@@ -290,6 +337,12 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "life_member_flag": bool(m["is_life_member"]),
             "life_member_award": life_award,
             "life_member_since": m["life_member_since"].isoformat() if m["life_member_since"] else None,
+            "life_member_detail": m["life_member_detail"],
+            # Effective gender, plus whether it is the spine's own — the pane
+            # needs to know which, or clearing it would look like a no-op when
+            # the player's value shows straight back through.
+            "gender": gender, "gender_own": m["member_gender"],
+            "squad": squad, "tier": tier,
             "is_honorary": bool(m["is_honorary"]),
             "honorary_expires_at": m["honorary_expires_at"].isoformat() if m["honorary_expires_at"] else None,
             "roles": roles_by.get(mid, []),
@@ -300,8 +353,10 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
 
     # Players with no member row still appear (read-through from Stats/Core).
     extra = (await db.execute(text("""
-        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone, p.status
+        SELECT p.id, COALESCE(p.display_name_override, p.name) AS name, p.photo_url, p.email, p.phone,
+               p.status, p.gender, t.id AS squad_id, t.name AS squad_name
         FROM players p
+        LEFT JOIN teams t ON t.id = p.squad_team_id AND t.organisation_id = p.organisation_id
         WHERE p.organisation_id = :org
           AND NOT EXISTS (SELECT 1 FROM fee_members fm WHERE fm.player_id = p.id AND fm.organisation_id = :org)
     """), {"org": org_id})).mappings().all()
@@ -318,6 +373,12 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         life_award = pid in life_award_players
         if life_award:
             psegs.append(SEG_LIFE_MEMBER)
+        pgender = (p["gender"] or "") or None
+        psquad = {"id": str(p["squad_id"]), "name": p["squad_name"]} if p["squad_id"] else None
+        if pgender:
+            psegs.append(GENDER_SEG_PREFIX + pgender.lower())
+        if psquad:
+            psegs.append(SQUAD_SEG_PREFIX + psquad["name"])
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
             "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
@@ -325,7 +386,10 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "membership_type_id": None, "membership_type": None, "membership_type_playing": None,
             "membership_types": [], "is_external": False,
             "is_life_member": life_award, "life_member_flag": False,
-            "life_member_award": life_award, "life_member_since": None,
+            "life_member_award": life_award, "life_member_since": None, "life_member_detail": None,
+            # No member row, so nothing on the spine — the gender shown is the
+            # player's own, and there is no fee tier without a season row.
+            "gender": pgender, "gender_own": None, "squad": psquad, "tier": None,
             "is_honorary": False, "honorary_expires_at": None,
             "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
@@ -420,7 +484,93 @@ def _as_date(v):
         raise ValueError("Invalid date")
 
 
-async def set_life_membership(db: AsyncSession, org_id, member_id, is_life_member, since="__keep__") -> None:
+async def filter_options(db: AsyncSession, org_id) -> dict:
+    """The club's own vocabulary for the gender / squad / fee-tier filters.
+
+    Squads and tiers are club-authored and change, so the screen draws whatever
+    the club actually has rather than a hardcoded list. The tier list is for the
+    season `list_people` reported a tier from, or the two would disagree about
+    which year they mean."""
+    squads = [{"id": str(r["id"]), "name": r["name"]} for r in (await db.execute(text(
+        "SELECT id, name FROM teams WHERE organisation_id = :org ORDER BY sort_order NULLS LAST, lower(name)"
+    ), {"org": org_id})).mappings().all()]
+    season = (await db.execute(text("""
+        SELECT s.id, s.name FROM seasons s
+        WHERE s.organisation_id = :org
+          AND EXISTS (SELECT 1 FROM fee_member_seasons ms WHERE ms.season_id = s.id AND ms.organisation_id = :org)
+        ORDER BY s.year DESC NULLS LAST, lower(s.name) DESC
+        LIMIT 1
+    """), {"org": org_id})).mappings().first()
+    tiers = []
+    if season:
+        tiers = [{"id": str(r["id"]), "name": r["name"]} for r in (await db.execute(text(
+            "SELECT id, name FROM fee_schedule WHERE season_id = :season ORDER BY lower(name)"
+        ), {"season": season["id"]})).mappings().all()]
+    return {
+        "genders": GENDERS,
+        "squads": squads,
+        "tiers": tiers,
+        "tier_season": {"id": str(season["id"]), "name": season["name"]} if season else None,
+    }
+
+
+async def set_gender(db: AsyncSession, org_id, member_id, gender) -> None:
+    """Record gender on the person spine.
+
+    Written HERE, never to `players.gender` — Stats owns the player record and
+    the Directory does not reach across into it. The read falls back to the
+    player's, so a synced value shows through until the club records its own."""
+    v = (str(gender).strip().lower() if gender else "") or None
+    await db.execute(text(
+        "UPDATE fee_members SET gender = :g, updated_at = NOW() WHERE id = :mid AND organisation_id = :org"
+    ), {"g": v, "mid": member_id, "org": org_id})
+
+
+async def set_squad(db: AsyncSession, org_id, player_id, team_id) -> None:
+    """Move a player into a BetterSelect squad (or out of one).
+
+    This one DOES write `players`, because a squad has nowhere else to live —
+    it is a Stats/BetterSelect concept and a non-player has no squad at all.
+    The route gates it on MANAGE_PLAYERS for that reason."""
+    if team_id:
+        ok = (await db.execute(text(
+            "SELECT 1 FROM teams WHERE id = :t AND organisation_id = :org"
+        ), {"t": team_id, "org": org_id})).scalar()
+        if not ok:
+            raise ValueError("Team not found")
+    await db.execute(text(
+        "UPDATE players SET squad_team_id = :t WHERE id = :pid AND organisation_id = :org"
+    ), {"t": team_id, "pid": player_id, "org": org_id})
+
+
+async def set_fee_tier(db: AsyncSession, org_id, member_id, season_id, fee_schedule_id) -> None:
+    """Put a member on a fee tier for a season, creating the season row if they
+    have none yet.
+
+    A tier is per-season (fee_schedule rows are re-created each year), so this
+    always writes against a named season rather than the person. NULL is the
+    club's own "needs tier" state, which the Accounts review queue reads, so
+    clearing is a real answer and not a failure."""
+    if fee_schedule_id:
+        ok = (await db.execute(text("""
+            SELECT 1 FROM fee_schedule fs JOIN seasons s ON s.id = fs.season_id
+            WHERE fs.id = :fs AND s.id = :season AND s.organisation_id = :org
+        """), {"fs": fee_schedule_id, "season": season_id, "org": org_id})).scalar()
+        if not ok:
+            raise ValueError("Fee tier not found for that season")
+    member = (await db.execute(text(
+        "SELECT 1 FROM fee_members WHERE id = :mid AND organisation_id = :org"
+    ), {"mid": member_id, "org": org_id})).scalar()
+    if not member:
+        raise ValueError("Member not found")
+    await db.execute(text("""
+        INSERT INTO fee_member_seasons (id, member_id, season_id, organisation_id, fee_schedule_id)
+        VALUES (gen_random_uuid(), :mid, :season, :org, :fs)
+        ON CONFLICT (member_id, season_id) DO UPDATE SET fee_schedule_id = EXCLUDED.fee_schedule_id
+    """), {"mid": member_id, "season": season_id, "org": org_id, "fs": fee_schedule_id})
+
+
+async def set_life_membership(db: AsyncSession, org_id, member_id, is_life_member, since="__keep__", detail="__keep__") -> None:
     """Record (or clear) the life-membership honour on the person spine.
 
     Deliberately NOT written to `player_achievements`: that table keys on
@@ -442,6 +592,11 @@ async def set_life_membership(db: AsyncSession, org_id, member_id, is_life_membe
     # not happen is worse than no date.
     elif not is_life_member:
         sets.append("life_member_since = NULL")
+    if detail != "__keep__":
+        sets.append("life_member_detail = :detail")
+        params["detail"] = ((str(detail).strip()[:200]) or None) if detail else None
+    elif not is_life_member:
+        sets.append("life_member_detail = NULL")
     await db.execute(text(
         f"UPDATE fee_members SET {', '.join(sets)}, updated_at = NOW()"
         " WHERE id = :mid AND organisation_id = :org"

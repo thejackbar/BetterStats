@@ -385,6 +385,12 @@ async def lifespan(app: FastAPI):
             "ON member_membership_types(organisation_id, membership_type_id)"
         ))
         await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS life_member_since DATE"))
+        # Migration 249 — gender on the person spine (it lived only on `players`,
+        # so a non-player had nowhere to carry one, and the Directory filters on
+        # it), plus free text beside the life-membership date for whatever the
+        # club records against the honour, usually a life member number.
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS gender TEXT"))
+        await conn.execute(text("ALTER TABLE fee_members ADD COLUMN IF NOT EXISTS life_member_detail TEXT"))
         await conn.execute(text("""
             UPDATE membership_types SET scope = 'external'
             WHERE lower(name) IN ('sponsor contact', 'external contact', 'third party', 'contractor')

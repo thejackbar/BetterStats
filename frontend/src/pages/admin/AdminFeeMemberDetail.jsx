@@ -482,10 +482,23 @@ export default function AdminFeeMemberDetail() {
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Contact &amp; Notes</p>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">NAME</label>
             <input className={`${inp} mb-3`} value={contact.full_name} onChange={e => setContact(c => ({ ...c, full_name: e.target.value }))} />
+            {/* One person record, shared with the Directory. The value shown
+                is this record's own, falling back to the linked player's — the
+                same precedence the Directory uses, so the two screens can no
+                longer disagree about someone's email. Saving records it on the
+                person, which is why a value that came from the player says so. */}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">EMAIL</label>
-            <input className={`${inp} mb-3`} value={contact.email} onChange={e => setContact(c => ({ ...c, email: e.target.value }))} />
+            <input className={`${inp} ${data.member.email_from_player ? 'mb-1' : 'mb-3'}`} value={contact.email}
+              onChange={e => setContact(c => ({ ...c, email: e.target.value }))} />
+            {data.member.email_from_player && (
+              <p className="font-mono text-[9.5px] text-pb-faintest mb-3">From their player record. Saving records it on this person.</p>
+            )}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MOBILE</label>
-            <input className={`${inp} mb-3`} value={contact.mobile} onChange={e => setContact(c => ({ ...c, mobile: e.target.value }))} />
+            <input className={`${inp} ${data.member.mobile_from_player ? 'mb-1' : 'mb-3'}`} value={contact.mobile}
+              onChange={e => setContact(c => ({ ...c, mobile: e.target.value }))} />
+            {data.member.mobile_from_player && (
+              <p className="font-mono text-[9.5px] text-pb-faintest mb-3">From their player record. Saving records it on this person.</p>
+            )}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">NOTES</label>
             <textarea rows={2} className={`${inp} mb-4`} value={contact.notes} onChange={e => setContact(c => ({ ...c, notes: e.target.value }))} />
             <button onClick={saveContact} disabled={savingContact}

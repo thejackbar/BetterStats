@@ -4,6 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import { Button, Select, SearchInput, StatCard, Badge, Empty } from '../../components/admin/ui'
+import { usePeopleFilters } from '../../components/admin/clubmanager/peopleFilters'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -16,6 +17,9 @@ function sortSeasons(seasons) {
 const KIND_LABEL = { membership: "M'ship", match_day: 'Match' }
 
 export default function AdminFeePayments() {
+  // The Directory's People filters (see peopleFilters.jsx) — matched on the
+  // segments that service computes, so this screen never re-derives them.
+  const people = usePeopleFilters()
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
   const [seasonId, setSeasonId] = useState('')
@@ -41,11 +45,14 @@ export default function AdminFeePayments() {
     const needle = q.trim().toLowerCase()
     return payments.filter(p =>
       (!kindFilter || p.kind === kindFilter) &&
+      // The Directory's People filters, so a payment run can be scoped to a
+      // group of people rather than only searched by name.
+      people.matches(p.member_id) &&
       (!needle || (p.full_name || '').toLowerCase().includes(needle) ||
                   (p.bank_ref || '').toLowerCase().includes(needle) ||
                   (p.method || '').toLowerCase().includes(needle))
     )
-  }, [payments, q, kindFilter])
+  }, [payments, q, kindFilter, people.anyOn, people.matches])
 
   const total = useMemo(() =>
     filtered.reduce((acc, p) => {
@@ -71,6 +78,7 @@ export default function AdminFeePayments() {
     filters: (
       <div className="flex items-center gap-2 flex-wrap">
         <SearchInput value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
+        {people.menus}
         <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="!w-auto">
           <option value="">All kinds</option>
           <option value="membership">Membership only</option>
