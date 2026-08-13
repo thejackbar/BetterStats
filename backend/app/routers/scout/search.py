@@ -21,4 +21,5 @@ async def unified_search(
     current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await scout_search.unified_search(db, q)
+    _, org = current
+    return await scout_search.unified_search(db, str(org.id), q)

@@ -610,17 +610,22 @@ async def suggest_other_clubs(session: AsyncSession, scouted_player_id: str) -> 
     player (their original grassroots_participant_id, or any linked club's
     own — see ScoutedPlayerClub); a raw CA aggregate id and this canonical
     id often do coincide. When no id matches, fall back to every identity
-    whose name matches ours exactly (case/punctuation-insensitive, not
-    fuzzy) — NOT just a lone unambiguous hit. PlayHQ's own index genuinely
-    holds two-plus distinct people under one common name (confirmed live:
-    "Benji Floros" alone resolves to two separate canonical ids), and
-    requiring uniqueness there silently returned zero candidates for a real,
-    scoutable player. Every candidate still needs a scout's confirm click in
-    link_player_club before anything is linked, so surfacing an extra club
-    that turns out to belong to a same-named stranger costs one Dismiss, not
-    a wrong link. A genuinely zero-result search still returns no candidates
-    — the scout still has "Find at other clubs" for a manual, scout-picked
-    search.
+    whose name FUZZY-matches ours (scout_feed._score_name, the same
+    NAME_MATCH_THRESHOLD find_name_matches already uses) — NOT an exact
+    string match, and NOT just a lone unambiguous hit. Two things independently
+    silently returned zero candidates for a real, scoutable player before this:
+    (1) requiring uniqueness — PlayHQ's own index genuinely holds two-plus
+    distinct people under one common name (confirmed live: "Benji Floros"
+    alone resolves to two separate canonical ids); (2) requiring an exact
+    string match — the aggregate feed a roster was built from and this live
+    canonical index are different PlayHQ services (see scout_live_search's own
+    docstring) and don't always agree on spelling out a nickname/middle name
+    ("Benji" vs "Benjamin") or word order. Every candidate still needs a
+    scout's confirm click in link_player_club before anything is linked, so
+    surfacing an extra club that turns out to belong to a same-named or
+    similarly-spelled stranger costs one Dismiss, not a wrong link. A
+    genuinely zero-result search still returns no candidates — the scout
+    still has "Find at other clubs" for a manual, scout-picked search.
 
     Writes the result onto ScoutedPlayer as a cache (other_club_candidates),
     same "recompute wholesale, never partial-edit" rule stats_payload
@@ -642,16 +647,40 @@ async def suggest_other_clubs(session: AsyncSession, scouted_player_id: str) -> 
     identity = next((p for p in result["players"] if p["id"] in known_ids), None)
     identities = [identity] if identity else []
     if identity is None:
-        # No id we already hold matched anything live. Rather than requiring
-        # exactly one same-named identity (which silently returns nothing
-        # the moment PlayHQ's own index holds two+ people under this name —
-        # a real, observed case, not hypothetical), take EVERY exact-name
-        # hit. A candidate is never auto-linked — link_player_club always
-        # needs a scout's confirm click — so showing an extra club that
-        # turns out to belong to a same-named stranger costs one Dismiss
-        # click, while silently showing nothing costs the whole feature.
-        target_norm = scout_feed._normalise_name_for_match(player.name)
-        identities = [p for p in result["players"] if scout_feed._normalise_name_for_match(p["name"]) == target_norm]
+        # No id we already hold matched anything live. Take EVERY identity
+        # that fuzzy-matches our stored name at or above the same threshold
+        # find_name_matches uses — not an exact string match (a nickname or
+        # a different word order between the aggregate feed and this live
+        # canonical index is enough to break equality) and not just a lone
+        # unambiguous hit (PlayHQ's own index genuinely holds two-plus
+        # distinct people under one common name). A candidate is never
+        # auto-linked — link_player_club always needs a scout's confirm
+        # click — so an extra, wrongly-matched club costs one Dismiss click,
+        # while silently showing nothing costs the whole feature.
+        identities = [
+            p for p in result["players"]
+            if scout_feed._score_name(player.name, p["name"]) >= scout_feed.NAME_MATCH_THRESHOLD
+        ]
+        if not identities:
+            # A full "First Last" search term can come back with ZERO
+            # results even when the person is right there in the index —
+            # confirmed live: searching the literal term "Benjamin Floros"
+            # returns nothing at all, while "Benji Floros" is one of 14 hits
+            # for the bare surname "Floros". PlayHQ's own search appears to
+            # match the WHOLE term, not an OR of its words, so a first-name
+            # mismatch between the aggregate feed this player's name came
+            # from and this live canonical index (a nickname, a middle name,
+            # a typo) starves our fuzzy filter above of anything to even
+            # look at. Retry once on the surname alone — reliably the widest
+            # net PlayHQ's search will give us for one person — then apply
+            # the same fuzzy filter over that wider result.
+            surname = (player.name or "").strip().split()[-1] if (player.name or "").strip() else None
+            if surname and surname.lower() != (player.name or "").strip().lower():
+                wider = await scout_live_search.search_playcommunity(surname, types=("PLAYCOMM_PLAYER",))
+                identities = [
+                    p for p in wider["players"]
+                    if scout_feed._score_name(player.name, p["name"]) >= scout_feed.NAME_MATCH_THRESHOLD
+                ]
 
     candidates = []
     seen_guids = set()

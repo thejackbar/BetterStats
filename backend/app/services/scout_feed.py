@@ -25,7 +25,7 @@ from difflib import SequenceMatcher
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.scout import ScoutClubCache, ScoutedPlayer, ScoutedPlayerClub
+from app.models.scout import ScoutClubCache, ScoutedPlayer, ScoutedPlayerClub, ScoutWatchlist, ScoutWatchlistCard
 from app.services.scout_overview import movers_for_seasons
 
 MAX_CLUBS_SCANNED = 80
@@ -145,15 +145,21 @@ async def find_name_matches(
     return scored[:limit]
 
 
-async def _tracked_lookup(session: AsyncSession, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
+async def _tracked_lookup(session: AsyncSession, scout_org_id: str, pairs: list[tuple[str, str]]) -> dict[tuple[str, str], str]:
     """Maps (club_org_guid, participant_id) -> scouted_player_id for every
-    match already tracked platform-wide. Checks BOTH a player's original/
-    primary identity (ScoutedPlayer.grassroots_participant_id — club-agnostic,
-    a bare unique constraint) AND any club linked afterwards via
-    ScoutedPlayerClub (see that model's docstring — a player tracked at more
-    than one club, e.g. Spencer Green, must read as "Tracked" no matter which
-    of his cached clubs you found him in, not only the one he was first
-    added from)."""
+    match THIS org has tracked — i.e. holds an active ScoutWatchlistCard for
+    (never a bare ScoutedPlayer/ScoutedPlayerClub existence check: those two
+    are platform-wide by design, shared by every Scout Org, see
+    models/scout.py's docstrings — a ScoutedPlayer surviving
+    remove_player_everywhere on purpose, or another org's own tracking of the
+    same real person, must never read back as "Tracked" for an org that has
+    no card for them; that was a real bug, "tracked when clearly not," fixed
+    here). Still checks BOTH a player's original/primary identity
+    (ScoutedPlayer.grassroots_participant_id) AND any club linked afterwards
+    via ScoutedPlayerClub (see that model's docstring — a player tracked at
+    more than one club, e.g. Spencer Green, must read as "Tracked" no matter
+    which of his cached clubs you found him in), just gated on this org
+    actually holding a card for the resolved scouted_player_id."""
     pairs = [(g, p) for g, p in pairs if g and p]
     if not pairs:
         return {}
@@ -168,21 +174,32 @@ async def _tracked_lookup(session: AsyncSession, pairs: list[tuple[str, str]]) -
         .where(ScoutedPlayerClub.grassroots_participant_id.in_(ids))
     )).all()
     club_by_pair = {(guid, ext): str(sid) for guid, ext, sid in club_rows}
+
+    candidate_sids = {sid for sid in primary_by_id.values()} | {sid for sid in club_by_pair.values()}
+    if not candidate_sids:
+        return {}
+    tracked_sids = set((await session.execute(
+        select(ScoutWatchlistCard.scouted_player_id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutWatchlistCard.scouted_player_id.in_(candidate_sids))
+        .distinct()
+    )).scalars().all())
+    tracked_sids = {str(sid) for sid in tracked_sids}
+
     out: dict[tuple[str, str], str] = {}
     for guid, ext in pairs:
         sid = club_by_pair.get((guid, ext)) or primary_by_id.get(ext)
-        if sid:
+        if sid and sid in tracked_sids:
             out[(guid, ext)] = sid
     return out
 
 
-async def search_players(session: AsyncSession, q: str) -> dict:
+async def search_players(session: AsyncSession, scout_org_id: str, q: str) -> dict:
     """Substring name match across every cached club's player list. Returns
     the raw external `player_id` (a Cricket Australia participant GUID) on
-    each hit, plus `scouted_player_id`/`tracked` for anyone this platform
-    has already added somewhere — same overlay shape Discover's
-    `annotate_tracking` uses, so the frontend card renders identically
-    whichever screen it came from."""
+    each hit, plus `scouted_player_id`/`tracked` for anyone THIS org has
+    already added — same overlay shape Discover's `annotate_tracking` uses,
+    so the frontend card renders identically whichever screen it came from."""
     q_norm = (q or "").strip().lower()
     caches = await _ready_caches(session)
     if len(q_norm) < MIN_QUERY_LEN:
@@ -202,7 +219,7 @@ async def search_players(session: AsyncSession, q: str) -> dict:
                 "totals": p.get("totals"),
             })
 
-    tracked = await _tracked_lookup(session, [(m["club_org_guid"], m["player_id"]) for m in matches])
+    tracked = await _tracked_lookup(session, scout_org_id, [(m["club_org_guid"], m["player_id"]) for m in matches])
     for m in matches:
         sid = tracked.get((m["club_org_guid"], m["player_id"]))
         m["scouted_player_id"] = sid
@@ -219,12 +236,15 @@ def _latest_grade(seasons: list[dict] | None) -> str | None:
     return None
 
 
-async def hot_form_feed(session: AsyncSession) -> dict:
+async def hot_form_feed(session: AsyncSession, scout_org_id: str) -> dict:
     """Who's in form right now, across every cached club — the platform-wide
     mirror of Overview's own form_movers panel, which only looks at players
-    this ONE org already tracks. Same "latest active season vs the two
-    before it" math (movers_for_seasons), just walked over raw cache rows
-    instead of ScoutedPlayer.stats_payload snapshots."""
+    this ONE org already tracks. Same latest-season-vs-career-average math
+    (movers_for_seasons), just walked over raw cache rows instead of
+    ScoutedPlayer.stats_payload snapshots. `tracked` is scoped to THIS org's
+    own ScoutWatchlistCard rows (see _tracked_lookup) — the raw cache scan
+    itself stays platform-wide (it's just already-fetched stats data, not
+    sensitive), only the tracked flag is per-org."""
     caches = await _ready_caches(session)
     movers: list[dict] = []
     for cache in caches:
@@ -242,7 +262,7 @@ async def hot_form_feed(session: AsyncSession) -> dict:
                 m["club_org_guid"] = cache.club_org_guid
                 movers.append(m)
 
-    tracked = await _tracked_lookup(session, [(m["club_org_guid"], m["id"]) for m in movers])
+    tracked = await _tracked_lookup(session, scout_org_id, [(m["club_org_guid"], m["id"]) for m in movers])
     for m in movers:
         sid = tracked.get((m["club_org_guid"], m["id"]))
         m["scouted_player_id"] = sid

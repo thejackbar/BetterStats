@@ -9,16 +9,21 @@ module's docstring for exactly how). Genuinely national coverage: a club or
 player nobody has looked up on BetterScout before still resolves, which the
 old cache-scan approach could never do.
 
-`tracked`/`scouted_player_id` on a player result is still resolved against
-OUR OWN database — the live search only knows what PlayHQ knows, not which
-of its players a Scout Org has added here.
+`tracked`/`scouted_player_id` on a player result is scoped to the CALLING
+org's own tracking, not just "does a ScoutedPlayer row exist anywhere" —
+ScoutedPlayer/ScoutedPlayerClub are platform-wide by design (see
+models/scout.py), so a bare-existence check would read "Tracked" for a
+player another Scout Org tracks, or one THIS org tracked and then removed
+via "Remove from My Players" (which deliberately leaves the shared row in
+place — see scout_watchlist.remove_player_everywhere's own docstring). That
+was a real bug ("tracked when clearly not"); see _tracked_by_canonical_id.
 """
 from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.scout import ScoutedPlayer, ScoutedPlayerClub
+from app.models.scout import ScoutedPlayer, ScoutedPlayerClub, ScoutWatchlist, ScoutWatchlistCard
 from app.services import scout_live_search
 
 MIN_QUERY_LEN = 2
@@ -26,14 +31,16 @@ CLUBS_LIMIT = 8
 PLAYERS_LIMIT = 8
 
 
-async def _tracked_by_canonical_id(session: AsyncSession, canonical_ids: list[str]) -> dict[str, str]:
+async def _tracked_by_canonical_id(session: AsyncSession, scout_org_id: str, canonical_ids: list[str]) -> dict[str, str]:
     """Maps a live-search player's canonical `id` -> scouted_player_id, for
-    anyone this platform has tracked under that id (as their original/
-    primary identity, OR as one of their other linked clubs — see
-    ScoutedPlayerClub). Unlike scout_feed._tracked_lookup (which is
+    anyone THIS ORG holds an active ScoutWatchlistCard for under that id (as
+    their original/primary identity, OR as one of their other linked clubs —
+    see ScoutedPlayerClub). Unlike scout_feed._tracked_lookup (which is
     club-pair-scoped because a raw per-club cache id isn't guaranteed
     globally unique), the live search's `id` IS PlayHQ's own canonical
-    cross-club identity, so a bare id lookup is enough here."""
+    cross-club identity, so a bare id lookup resolves the scouted_player_id
+    — but resolving to a row isn't enough on its own, since that row is
+    shared platform-wide; only a live card for THIS org means "tracked"."""
     ids = [i for i in canonical_ids if i]
     if not ids:
         return {}
@@ -48,10 +55,20 @@ async def _tracked_by_canonical_id(session: AsyncSession, canonical_ids: list[st
     )).all()
     for ext, sid in club_rows:
         out.setdefault(ext, str(sid))
-    return out
+    if not out:
+        return {}
+    candidate_sids = {sid for sid in out.values()}
+    tracked_sids = set((await session.execute(
+        select(ScoutWatchlistCard.scouted_player_id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(ScoutWatchlist.scout_org_id == scout_org_id, ScoutWatchlistCard.scouted_player_id.in_(candidate_sids))
+        .distinct()
+    )).scalars().all())
+    tracked_sids = {str(sid) for sid in tracked_sids}
+    return {ext: sid for ext, sid in out.items() if sid in tracked_sids}
 
 
-async def unified_search(session: AsyncSession, q: str) -> dict:
+async def unified_search(session: AsyncSession, scout_org_id: str, q: str) -> dict:
     q_norm = (q or "").strip()
     if len(q_norm) < MIN_QUERY_LEN:
         return {"query": q_norm, "clubs": [], "players": []}
@@ -60,7 +77,7 @@ async def unified_search(session: AsyncSession, q: str) -> dict:
     clubs = result["clubs"][:CLUBS_LIMIT]
     players = result["players"][:PLAYERS_LIMIT]
 
-    tracked = await _tracked_by_canonical_id(session, [p["id"] for p in players])
+    tracked = await _tracked_by_canonical_id(session, scout_org_id, [p["id"] for p in players])
     out_players = []
     for p in players:
         orgs = p["organisations"]

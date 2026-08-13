@@ -21,7 +21,8 @@ async def search_players(
     current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await scout_feed.search_players(db, q)
+    _, org = current
+    return await scout_feed.search_players(db, str(org.id), q)
 
 
 @router.get("/hot-form")
@@ -29,4 +30,5 @@ async def hot_form(
     current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await scout_feed.hot_form_feed(db)
+    _, org = current
+    return await scout_feed.hot_form_feed(db, str(org.id))
