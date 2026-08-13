@@ -59,6 +59,28 @@ GENDER_SEG_PREFIX = "gender:"
 GENDERS = ["male", "female", "other"]
 
 
+async def _tier_season(db: AsyncSession, org_id):
+    """The season the Directory talks about when it says "membership tier".
+
+    The club's most recent season that has a rate card SET UP, falling back to
+    one that merely has member rows. Keyed on the rate card rather than on
+    enrolment so a club that has built its tiers but enrolled nobody yet can
+    still assign a first one from here — keyed the other way, the field never
+    appeared and there was no way to start.
+
+    Shared by list_people and filter_options deliberately: two copies would
+    eventually name different seasons and the filter would stop matching what
+    the rows show."""
+    return (await db.execute(text("""
+        SELECT s.id, s.name FROM seasons s
+        WHERE s.organisation_id = :org
+          AND (EXISTS (SELECT 1 FROM fee_schedule fs WHERE fs.season_id = s.id)
+               OR EXISTS (SELECT 1 FROM fee_member_seasons ms WHERE ms.season_id = s.id AND ms.organisation_id = :org))
+        ORDER BY s.year DESC NULLS LAST, lower(s.name) DESC
+        LIMIT 1
+    """), {"org": org_id})).mappings().first()
+
+
 async def list_people(db: AsyncSession, org_id, include_archived: bool = False) -> list[dict]:
     """One row per person: every active fee_members row, unioned with the club's
     players that don't yet have a member row. Each person carries its computed
@@ -116,13 +138,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # rows are re-created each year — so this is "their tier now", not a fact
     # about the person, and the season it came from is returned alongside it so
     # the screen can say which year it is talking about.
-    tier_season = (await db.execute(text("""
-        SELECT s.id, s.name FROM seasons s
-        WHERE s.organisation_id = :org
-          AND EXISTS (SELECT 1 FROM fee_member_seasons ms WHERE ms.season_id = s.id AND ms.organisation_id = :org)
-        ORDER BY s.year DESC NULLS LAST, lower(s.name) DESC
-        LIMIT 1
-    """), {"org": org_id})).mappings().first()
+    tier_season = await _tier_season(db, org_id)
     tiers_by = {}
     if tier_season:
         for r in (await db.execute(text("""
@@ -492,15 +508,12 @@ async def filter_options(db: AsyncSession, org_id) -> dict:
     season `list_people` reported a tier from, or the two would disagree about
     which year they mean."""
     squads = [{"id": str(r["id"]), "name": r["name"]} for r in (await db.execute(text(
-        "SELECT id, name FROM teams WHERE organisation_id = :org ORDER BY sort_order NULLS LAST, lower(name)"
+        # `sequence` is the hierarchy rank (1 = top team). NOT `sort_order` —
+        # teams has no such column, and ordering by one 500s this whole
+        # endpoint, which is what took the Directory down.
+        "SELECT id, name FROM teams WHERE organisation_id = :org ORDER BY sequence, lower(name)"
     ), {"org": org_id})).mappings().all()]
-    season = (await db.execute(text("""
-        SELECT s.id, s.name FROM seasons s
-        WHERE s.organisation_id = :org
-          AND EXISTS (SELECT 1 FROM fee_member_seasons ms WHERE ms.season_id = s.id AND ms.organisation_id = :org)
-        ORDER BY s.year DESC NULLS LAST, lower(s.name) DESC
-        LIMIT 1
-    """), {"org": org_id})).mappings().first()
+    season = await _tier_season(db, org_id)
     tiers = []
     if season:
         tiers = [{"id": str(r["id"]), "name": r["name"]} for r in (await db.execute(text(

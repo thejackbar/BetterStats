@@ -27,6 +27,7 @@ const ROLE_SEGS = [
 
 export function usePeopleFilters() {
   const [people, setPeople] = useState(null)
+  const [failed, setFailed] = useState(false)
   const [opts, setOpts] = useState({ genders: [], squads: [], tiers: [], tier_season: null })
   const [types, setTypes] = useState([])
   const [f, setF] = useState({ membership: null, role: null, honour: null, gender: null, squad: null, tier: null })
@@ -41,7 +42,7 @@ export function usePeopleFilters() {
         genders: res?.genders || [], squads: res?.squads || [],
         tiers: res?.tiers || [], tier_season: res?.tier_season || null,
       })
-    }).catch(() => { if (!dead) setPeople([]) })   // a screen must still work if this fails
+    }).catch(() => { if (!dead) { setPeople([]); setFailed(true) } })
     return () => { dead = true }
   }, [])
 
@@ -58,8 +59,14 @@ export function usePeopleFilters() {
 
   // A person the Directory does not know about cannot satisfy a People filter,
   // so they drop out while any filter is on and are kept when none is.
+  //
+  // FAIL OPEN if the Directory could not be read at all. Filtering everything
+  // out on a failed fetch turns one broken endpoint into an empty Accounts
+  // page, which reads as "this club has no members" — exactly what a 500 in
+  // GET /people did before. No menus are drawn in that state either, so the
+  // screen simply carries on without People filters.
   const matches = (memberId) => {
-    if (!anyOn) return true
+    if (failed || !anyOn) return true
     const segs = segsById.get(memberId)
     if (!segs) return false
     return active.every(([, seg]) => segs.includes(seg))
@@ -69,7 +76,7 @@ export function usePeopleFilters() {
   const external = types.filter(t => (t.scope || 'internal') === 'external')
   const label = (seg, prefix) => (seg || '').slice(prefix.length)
 
-  const menus = (
+  const menus = failed ? null : (
     <>
       <MenuButton label="Membership" width={260}
         value={f.membership ? (f.membership === 'Player' ? 'Players' : f.membership === 'External' ? 'Not members' : label(f.membership, TYPE_PREFIX)) : null}>
@@ -159,5 +166,5 @@ export function usePeopleFilters() {
     </div>
   ) : null
 
-  return { menus, chips, matches, anyOn, loading: people === null }
+  return { menus, chips, matches, anyOn, failed, loading: people === null }
 }
