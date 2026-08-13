@@ -346,6 +346,35 @@ async def remove_card(session: AsyncSession, card_id: str, scout_org_id: str) ->
     await session.commit()
 
 
+async def remove_player_everywhere(session: AsyncSession, scout_org_id: str, scouted_player_id: str) -> int:
+    """The "My Players" remove action — deletes every one of THIS org's
+    ScoutWatchlistCard rows for one scouted_player_id, across every one of
+    this org's watchlists (a player can be on more than one board — see
+    ensure_card_on_watchlist). Never touches ScoutedPlayer or
+    ScoutedPlayerClub — both are platform-wide, shared by every Scout Org
+    (see models/scout.py's docstrings), so deleting either would either wipe
+    another org's tracking of the same real person or, via
+    ScoutWatchlistCard.scouted_player_id's ondelete=CASCADE, silently delete
+    every OTHER org's cards for them too. This is a per-org unlink, nothing
+    more. Raises ValueError if this org has no card for this player."""
+    card_ids = (await session.execute(
+        select(ScoutWatchlistCard.id)
+        .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
+        .where(
+            ScoutWatchlist.scout_org_id == scout_org_id,
+            ScoutWatchlistCard.scouted_player_id == scouted_player_id,
+        )
+    )).scalars().all()
+    if not card_ids:
+        raise ValueError("You aren't tracking this player.")
+    for card_id in card_ids:
+        card = await session.get(ScoutWatchlistCard, card_id)
+        if card:
+            await session.delete(card)
+    await session.commit()
+    return len(card_ids)
+
+
 # ─── read-only public share link ───────────────────────────────────────────
 
 # Fields excluded from a shared card view — the recruiting-CRM detail is

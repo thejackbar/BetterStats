@@ -28,8 +28,18 @@ export const scoutApi = {
   addManualPlayer: (name, clubName, notes, watchlistId) =>
     request('/scout/players/manual', { method: 'POST', body: JSON.stringify({ name, club_name: clubName, notes, watchlist_id: watchlistId }) }),
   listPlayers: () => request('/scout/players'),
-  getPlayer: (id) => request(`/scout/players/${id}`),
+  getPlayer: (id, q) => request(`/scout/players/${id}${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   refreshPlayer: (id) => request(`/scout/players/${id}/refresh`, { method: 'POST' }),
+  removePlayerEverywhere: (id) => request(`/scout/players/${id}/tracking`, { method: 'DELETE' }),
+
+  // Cross-club linking — a player who plays for several clubs.
+  getOtherClubCandidates: (id) => request(`/scout/players/${id}/other-clubs`),
+  rescanOtherClubs: (id) => request(`/scout/players/${id}/other-clubs/scan`, { method: 'POST' }),
+  searchOtherClub: (id, { orgGuid, clubName }) =>
+    request(`/scout/players/${id}/other-clubs/search-club`, { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, club_name: clubName }) }),
+  linkPlayerClub: (id, { orgGuid, playerId, isPrimary }) =>
+    request(`/scout/players/${id}/clubs/link`, { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, is_primary: !!isPrimary }) }),
+  unlinkPlayerClub: (id, clubRowId) => request(`/scout/players/${id}/clubs/${clubRowId}`, { method: 'DELETE' }),
   listNotes: (id) => request(`/scout/players/${id}/notes`),
   createNote: (id, body, kind) => request(`/scout/players/${id}/notes`, { method: 'POST', body: JSON.stringify({ body, kind }) }),
   updateNote: (noteId, fields) => request(`/scout/players/notes/${noteId}`, { method: 'PATCH', body: JSON.stringify(fields) }),
@@ -76,6 +86,9 @@ export const scoutApi = {
   // roster (see services/scout_feed.py's docstring for the exact scope).
   searchFeed: (q) => request(`/scout/feed/search?q=${encodeURIComponent(q)}`),
   getHotForm: () => request('/scout/feed/hot-form'),
+
+  // Global search — clubs + players in one dropdown (see services/scout_search.py).
+  unifiedSearch: (q) => request(`/scout/search?q=${encodeURIComponent(q)}`),
 
   // Milestones
   getMilestones: (seasons) => request(`/scout/milestones${seasons ? `?seasons=${seasons}` : ''}`),

@@ -29,6 +29,7 @@ from app.routers.scout import (
     feed as scout_feed_router,
     milestones as scout_milestones_router,
     public_share as scout_public_share_router,
+    search as scout_search_router,
     settings as scout_settings_router,
     watchlist as scout_watchlist_router,
 )
@@ -5103,6 +5104,62 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS batting_intel JSONB"))
         await conn.execute(text("ALTER TABLE scout_watchlist_cards ADD COLUMN IF NOT EXISTS bowling_intel JSONB"))
 
+        # Migration 250: BetterScout multi-club player tracking
+        # (scouted_player_clubs) + player search history
+        # (scout_player_search_views). Byte-identical to
+        # alembic/versions/250_scout_player_clubs.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scouted_player_clubs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                club_org_guid TEXT NOT NULL,
+                club_name TEXT,
+                grade_name TEXT,
+                grassroots_participant_id TEXT,
+                is_primary BOOLEAN NOT NULL DEFAULT false,
+                stats_payload JSONB,
+                stats_built_at TIMESTAMPTZ,
+                linked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                linked_via TEXT NOT NULL DEFAULT 'add',
+                CONSTRAINT uq_scouted_player_clubs_player_club UNIQUE (scouted_player_id, club_org_guid)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_scouted_player_clubs_primary "
+            "ON scouted_player_clubs(scouted_player_id) WHERE is_primary"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scouted_player_clubs_player "
+            "ON scouted_player_clubs(scouted_player_id)"
+        ))
+        await conn.execute(text("""
+            INSERT INTO scouted_player_clubs
+                (id, scouted_player_id, club_org_guid, club_name, grassroots_participant_id,
+                 stats_payload, stats_built_at, is_primary, linked_via)
+            SELECT gen_random_uuid(), id, club_org_guid, club_name, grassroots_participant_id,
+                   stats_payload, stats_built_at, true, 'add'
+            FROM scouted_players
+            WHERE club_org_guid IS NOT NULL
+            ON CONFLICT (scouted_player_id, club_org_guid) DO NOTHING
+        """))
+        await conn.execute(text("ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS other_club_candidates JSONB"))
+        await conn.execute(text("ALTER TABLE scouted_players ADD COLUMN IF NOT EXISTS other_club_candidates_checked_at TIMESTAMPTZ"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS scout_player_search_views (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                scout_org_id UUID NOT NULL REFERENCES scout_orgs(id) ON DELETE CASCADE,
+                scouted_player_id UUID NOT NULL REFERENCES scouted_players(id) ON DELETE CASCADE,
+                player_name TEXT,
+                query_text TEXT,
+                last_viewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT uq_scout_player_search_views_org_player UNIQUE (scout_org_id, scouted_player_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_scout_player_search_views_org "
+            "ON scout_player_search_views(scout_org_id, last_viewed_at DESC)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5365,6 +5422,7 @@ app.include_router(scout_settings_router.router)  # BetterScout — org settings
 app.include_router(scout_milestones_router.router)  # BetterScout — the Milestones screen (in reach / reached / seen)
 app.include_router(scout_compare_router.router)  # BetterScout — the Compare screen (side-by-side + share link)
 app.include_router(scout_feed_router.router)  # BetterScout — Player Name Search + Hot Form Feed (platform-wide, across every cached club roster)
+app.include_router(scout_search_router.router)  # BetterScout — the one global search bar (clubs + players together)
 # ─── Better ecosystem module gating ──────────────────────────────────────────
 # These routers are the discrete Better modules; require_module() returns 402
 # (with an upsell payload) when the caller's club isn't entitled. Core routers

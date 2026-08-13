@@ -157,14 +157,22 @@ def _has_activity(t: dict) -> bool:
     return bool(t["matches"] or t["innings"] or t["runs"] or t["wickets"] or t["catches"])
 
 
-async def build_internal_career(org: Organisation, session: AsyncSession) -> dict:
+async def build_internal_career(org: Organisation, session: AsyncSession, years: int | None = None) -> dict:
     """Every player at this club, season-by-season — same payload shape as
     iq_scout._build_career (org/window/players[]/grades[]/schema_v/built_at)
     so scout_discovery's roster cache and every downstream reader (Discover,
     Profile, Overview) work unchanged whichever path built it. Two things an
     external build can't give: internal_player_id per player (a real
     players.id, not just the CA participant GUID) and a real per-season
-    grade name derived from games actually played, not a guess."""
+    grade name derived from games actually played, not a guess.
+
+    `years`, when given, caps the window to the most recent N years (BetterScout
+    passes SCOUT_CAREER_YEARS so an already-onboarded club obeys the same
+    5-year recruiting-search cap iq_scout._build_career applies to every
+    other club — without this an internal club would silently ignore it).
+    Filtered in Python after the fetch, not in SQL: this is our own DB, not a
+    rate-limited external call, so there's no politeness budget to save by
+    narrowing the query itself."""
     built_at = datetime.now(timezone.utc).isoformat()
     org_id = str(org.id)
 
@@ -190,6 +198,16 @@ async def build_internal_career(org: Organisation, session: AsyncSession) -> dic
             "window": None, "players": [], "grades": [],
             "schema_v": INTERNAL_SCHEMA_VERSION, "built_at": built_at, "source": "internal",
         }
+
+    min_year = None
+    if years:
+        cur = max((r["season_year"] for r in season_rows if r["season_year"] is not None), default=None)
+        if cur is not None:
+            min_year = cur - (years - 1)
+            season_rows = [
+                r for r in season_rows
+                if r["season_year"] is None or r["season_year"] >= min_year
+            ]
 
     # Primary grade per (player, season) — the grade they played the most
     # games in that season, from real per-game appearances. A player who
@@ -226,6 +244,8 @@ async def build_internal_career(org: Organisation, session: AsyncSession) -> dic
     for r in club_grade_rows:
         gname = (r["grade_name"] or "").strip()
         if not gname:
+            continue
+        if min_year is not None and r["year"] is not None and r["year"] < min_year:
             continue
         g = grades_by_name.setdefault(gname.lower(), {
             "grade_id": str(r["grade_id"]), "grade_name": gname, "team_name": gname, "years": set(),

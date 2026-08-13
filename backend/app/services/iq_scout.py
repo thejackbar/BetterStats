@@ -291,10 +291,15 @@ def _has_activity(t: dict) -> bool:
     return bool(t["matches"] or t["innings"] or t["runs"] or t["wickets"] or t["catches"])
 
 
-async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
-    """One club's last-CAREER_YEARS player aggregates, every player, keyed for a
+async def _build_career(org_guid: str, club_name: str | None = None, years: int = CAREER_YEARS) -> dict:
+    """One club's last-`years` player aggregates, every player, keyed for a
     per-player slice on read, plus every grade the club fielded across that
-    same window. ~4 light calls per season row, all public."""
+    same window. ~4 light calls per season row, all public.
+
+    `years` defaults to CAREER_YEARS (BetterIQ's opposition scouting, which
+    is every caller except BetterScout's club-roster build) — BetterScout
+    passes years=SCOUT_CAREER_YEARS (5) to keep retired/inactive players out
+    of a recruiting search without touching BetterIQ's own window."""
     dated = await _dated_seasons(org_guid)
     built_at = datetime.now(timezone.utc).isoformat()
     if not dated:
@@ -305,7 +310,7 @@ async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
         }
     cur = max(y for y, _, _ in dated)
     window = sorted(
-        [d for d in dated if d[0] >= cur - (CAREER_YEARS - 1)], reverse=True
+        [d for d in dated if d[0] >= cur - (years - 1)], reverse=True
     )[:MAX_CAREER_SEASON_ROWS]
 
     async def fetch(kind: str, fn, sid: str):
@@ -399,7 +404,7 @@ async def _build_career(org_guid: str, club_name: str | None = None) -> dict:
 
     return {
         "org": {"id": org_guid, "name": club_name},
-        "window": {"from_year": cur - (CAREER_YEARS - 1), "to_year": cur},
+        "window": {"from_year": cur - (years - 1), "to_year": cur},
         "season_rows_scanned": len(window),
         "players": players,
         "grades": grades,

@@ -5,6 +5,7 @@ import { Icon } from '../pages/admin/betterselect/ui'
 import { moduleBrand } from '../lib/moduleBrand'
 import { Caption, HelpDot, initials, TINT } from '../components/admin/ui'
 import ModuleLockup from '../components/ModuleLockup'
+import ScoutGlobalSearch from './components/ScoutGlobalSearch'
 
 // BetterScout's own module shell — visually the same shape as
 // components/admin/ModuleLayout.jsx (232px sticky sidebar, brand block,
@@ -187,6 +188,7 @@ export default function ScoutModuleLayout({
             </div>
             {onHelp && <HelpDot onClick={onHelp} />}
           </div>
+          <ScoutGlobalSearch />
           {filters}
           <div className="ml-auto flex items-center gap-[26px]">
             {stats}

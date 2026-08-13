@@ -122,7 +122,7 @@ async def list_players(
 
 @router.get("/players/{player_id}")
 async def get_player(
-    player_id: str,
+    player_id: str, q: str | None = None,
     current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -132,6 +132,7 @@ async def get_player(
         raise HTTPException(status_code=404, detail="Player not found.")
     out = await scout_discovery.player_out(db, player)
     out["cards"] = await scout_watchlist.cards_for_player(db, org.id, player_id)
+    await scout_overview.upsert_player_search_view(db, org.id, player.id, player.name, query_text=q)
     return out
 
 
@@ -145,6 +146,101 @@ async def refresh_player(
         return await scout_discovery.refresh_player(db, player_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# ─── cross-club linking (a player who plays for several clubs) ─────────────
+
+@router.get("/players/{player_id}/other-clubs")
+async def get_other_club_candidates(
+    player_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(get_current_scout_user),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await db.get(ScoutedPlayer, player_id)
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found.")
+    return {
+        "candidates": player.other_club_candidates or [],
+        "checked_at": player.other_club_candidates_checked_at.isoformat() if player.other_club_candidates_checked_at else None,
+    }
+
+
+@router.post("/players/{player_id}/other-clubs/scan")
+async def rescan_other_clubs(
+    player_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scout_discovery.suggest_other_clubs(db, player_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class SearchOtherClubRequest(BaseModel):
+    org_guid: str
+    club_name: str | None = None
+
+
+@router.post("/players/{player_id}/other-clubs/search-club")
+async def search_other_club(
+    player_id: str, data: SearchOtherClubRequest,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scout_discovery.search_other_club(db, player_id, data.org_guid, data.club_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class LinkPlayerClubRequest(BaseModel):
+    org_guid: str
+    player_id: str
+    is_primary: bool = False
+
+
+@router.post("/players/{player_id}/clubs/link")
+async def link_player_club(
+    player_id: str, data: LinkPlayerClubRequest,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scout_discovery.link_player_club(
+            db, player_id, data.org_guid, data.player_id, is_primary=data.is_primary,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/players/{player_id}/clubs/{club_row_id}")
+async def unlink_player_club(
+    player_id: str, club_row_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await scout_discovery.unlink_player_club(db, player_id, club_row_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/players/{player_id}/tracking")
+async def remove_player_tracking(
+    player_id: str,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """The "My Players" remove action — untracks this player from every one
+    of this org's watchlists. See scout_watchlist.remove_player_everywhere's
+    own docstring on why this never touches the shared ScoutedPlayer row."""
+    _, org = current
+    try:
+        n = await scout_watchlist.remove_player_everywhere(db, org.id, player_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"status": "removed", "cards_removed": n}
 
 
 # ─── scouting notes ─────────────────────────────────────────────────────────

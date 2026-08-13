@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scout import (
-    ScoutClubCache, ScoutClubView, ScoutOrg, ScoutPlayerNote, ScoutUser,
+    ScoutClubCache, ScoutClubView, ScoutOrg, ScoutPlayerNote, ScoutPlayerSearchView, ScoutUser,
     ScoutWatchlist, ScoutWatchlistCard, ScoutWatchlistColumn, ScoutedPlayer,
 )
 from app.services import scout_billing
@@ -29,6 +29,32 @@ async def upsert_club_view(session: AsyncSession, scout_org_id: str, org_guid: s
         row = ScoutClubView(scout_org_id=scout_org_id, club_org_guid=org_guid.lower())
         session.add(row)
     row.club_name = club_name or row.club_name
+    row.last_viewed_at = datetime.now(timezone.utc)
+    await session.commit()
+
+
+async def upsert_player_search_view(
+    session: AsyncSession, scout_org_id: str, scouted_player_id: str, player_name: str | None,
+    query_text: str | None = None,
+) -> None:
+    """Per-org player-viewing history — the exact twin of upsert_club_view
+    above. Called on GET /scout/players/{id}. `query_text` is only
+    overwritten when a non-empty value is passed, so a direct nav from "My
+    Players" (no search term) doesn't blank out the last real search that
+    led here."""
+    res = await session.execute(
+        select(ScoutPlayerSearchView).where(
+            ScoutPlayerSearchView.scout_org_id == scout_org_id,
+            ScoutPlayerSearchView.scouted_player_id == scouted_player_id,
+        )
+    )
+    row = res.scalar_one_or_none()
+    if row is None:
+        row = ScoutPlayerSearchView(scout_org_id=scout_org_id, scouted_player_id=scouted_player_id)
+        session.add(row)
+    row.player_name = player_name or row.player_name
+    if query_text:
+        row.query_text = query_text
     row.last_viewed_at = datetime.now(timezone.utc)
     await session.commit()
 
@@ -230,6 +256,35 @@ async def _recent_clubs(session: AsyncSession, scout_org_id: str, refresh_cadenc
     return out
 
 
+async def _recent_players(session: AsyncSession, scout_org_id: str, limit: int = 4) -> list[dict]:
+    """Twin of _recent_clubs above — Overview's "Players you've looked at"
+    panel. Joins back to ScoutedPlayer for whatever's current (name/club
+    may have changed since the view was logged) rather than trusting the
+    view row's own denormalised copies for display."""
+    views = (await session.execute(
+        select(ScoutPlayerSearchView)
+        .where(ScoutPlayerSearchView.scout_org_id == scout_org_id)
+        .order_by(ScoutPlayerSearchView.last_viewed_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    if not views:
+        return []
+    players = dict((await session.execute(
+        select(ScoutedPlayer.id, ScoutedPlayer)
+        .where(ScoutedPlayer.id.in_([v.scouted_player_id for v in views]))
+    )).all())
+    out = []
+    for v in views:
+        p = players.get(v.scouted_player_id)
+        out.append({
+            "scouted_player_id": str(v.scouted_player_id),
+            "name": (p.name if p else None) or v.player_name,
+            "club_name": p.club_name if p else None,
+            "last_viewed_at": v.last_viewed_at.isoformat() if v.last_viewed_at else None,
+        })
+    return out
+
+
 _CADENCE_DAYS = {"daily": 1, "weekly": 7, "manual": 3650}
 
 
@@ -239,6 +294,7 @@ async def build_overview(session: AsyncSession, org: ScoutOrg) -> dict:
     movers, movers_total = await _form_movers(session, org.id)
     stale = await _stale_players(session, org.id, org.stale_after_weeks or 6)
     recent_clubs = await _recent_clubs(session, org.id, _CADENCE_DAYS.get(org.refresh_cadence, 7))
+    recent_players = await _recent_players(session, org.id)
     return {
         "usage": usage,
         "pipeline_counts": pipeline,
@@ -246,4 +302,5 @@ async def build_overview(session: AsyncSession, org: ScoutOrg) -> dict:
         "form_movers_total": movers_total,
         "stale": stale,
         "recent_clubs": recent_clubs,
+        "recent_players": recent_players,
     }

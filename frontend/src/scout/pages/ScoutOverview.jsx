@@ -35,7 +35,7 @@ export default function ScoutOverview() {
   if (error) return <ScoutModuleLayout title="Overview"><p className="text-sm text-pb-red">{error}</p></ScoutModuleLayout>
   if (data === undefined) return <ScoutModuleLayout title="Overview"><p className="text-sm text-pb-dim">Loading…</p></ScoutModuleLayout>
 
-  const { usage, pipeline_counts: pipeline, form_movers: movers, form_movers_total, stale, recent_clubs: clubs } = data
+  const { usage, pipeline_counts: pipeline, form_movers: movers, form_movers_total, stale, recent_clubs: clubs, recent_players: recentPlayers } = data
 
   return (
     <ScoutModuleLayout
@@ -148,6 +148,25 @@ export default function ScoutOverview() {
                     {c.stale ? 'Rebuild →' : 'Open roster →'}
                   </Link>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pb-card p-4 space-y-1">
+            <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Players you've looked at</div>
+            {(!recentPlayers || recentPlayers.length === 0) && <p className="text-xs text-pb-faint">Open a player's profile to build this list.</p>}
+            <div className="divide-y divide-pb-hairline -mx-4">
+              {(recentPlayers || []).map((p) => (
+                <Link key={p.scouted_player_id} to={`/betterscout/app/players/${p.scouted_player_id}`}
+                  className="flex items-center justify-between px-4 py-2.5 hover:bg-pb-surface2 transition-colors">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{p.name}</div>
+                    <div className="font-mono text-[11px] text-pb-faint truncate">
+                      {p.club_name || 'No club recorded'} · {p.last_viewed_at ? new Date(p.last_viewed_at).toLocaleDateString() : '—'}
+                    </div>
+                  </div>
+                  <span className="text-xs shrink-0" style={{ color: 'var(--pb-accent)' }}>Open →</span>
+                </Link>
               ))}
             </div>
           </div>

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { scoutApi } from '../lib/scoutApi'
 import { WINDOW_OPTIONS, rollupSeasons } from '../lib/seasonRollup'
 import ScoutModuleLayout from '../ScoutModuleLayout'
 import { PlayerAvatar } from '../components/ScoutUi'
-import { Btn, Segmented } from '../../pages/admin/betterselect/ui'
+import { Btn, Icon, Search, Segmented } from '../../pages/admin/betterselect/ui'
 import { bowlingLabel, bowlingFromLabel, BOWLING_OPTS, ROLE_OPTS, BAT_HANDS, REGION_OPTS } from '../lib/watchlistOptions'
 import ScoutingCard from '../../pages/admin/betteriq/ScoutingCard'
 import '../../pages/admin/betteriq/iq-theme.css'
@@ -40,9 +40,11 @@ function Stat({ label, value, accent }) {
 export default function ScoutPlayerProfile() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const [player, setPlayer] = useState(undefined)
   const [error, setError] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [removing, setRemoving] = useState(false)
   const [activeTab, setActiveTab] = useState('batting')
   const [windowN, setWindowN] = useState(null)
   const [notes, setNotes] = useState([])
@@ -50,7 +52,7 @@ export default function ScoutPlayerProfile() {
   const fileRef = useRef(null)
 
   const load = () => {
-    scoutApi.getPlayer(id).then((p) => {
+    scoutApi.getPlayer(id, searchParams.get('q')).then((p) => {
       setPlayer(p)
       if (p.cards?.length) setSelectedCardId((cur) => cur && p.cards.some((c) => c.id === cur) ? cur : p.cards[0].id)
       const bat = p.stats?.totals
@@ -70,6 +72,20 @@ export default function ScoutPlayerProfile() {
       setError(err.message)
     } finally {
       setRefreshing(false)
+    }
+  }
+
+  const removeEverywhere = async () => {
+    if (!player) return
+    if (!window.confirm(`Remove ${player.name} from My Players? This removes them from every one of your boards.`)) return
+    setRemoving(true)
+    setError(null)
+    try {
+      await scoutApi.removePlayerEverywhere(id)
+      navigate('/betterscout/app/players')
+    } catch (err) {
+      setError(err.message)
+      setRemoving(false)
     }
   }
 
@@ -127,6 +143,9 @@ export default function ScoutPlayerProfile() {
           )}
           <Btn variant="ghost" sm onClick={() => navigator.clipboard?.writeText(window.location.href)}>Share profile</Btn>
           <Btn variant="primary" sm onClick={() => navigate(`/betterscout/app/compare?players=${player.id}`)}>Compare</Btn>
+          <Btn variant="ghost" sm onClick={removeEverywhere} disabled={removing} className="text-pb-red">
+            {removing ? 'Removing…' : 'Remove from My Players'}
+          </Btn>
         </div>
       }
     >
@@ -182,6 +201,10 @@ export default function ScoutPlayerProfile() {
             )}
           </div>
         </div>
+
+        {player.source === 'au_grassroots' && (
+          <ClubsSection player={player} onChanged={load} setError={setError} />
+        )}
 
         {!totals.matches && !totals.wickets ? (
           <p className="text-sm text-pb-dim">
@@ -280,6 +303,200 @@ export default function ScoutPlayerProfile() {
         )}
       </div>
     </ScoutModuleLayout>
+  )
+}
+
+const OTHER_CLUB_POLL_MS = 2500
+const OTHER_CLUB_MAX_POLLS = 60
+
+// Spencer Green plays for several clubs — this is the whole cross-club
+// linking UI: the clubs already confirmed for this player, name-match
+// suggestions from other cached clubs (never auto-linked, always a confirm
+// click), and an on-demand "search a specific club" flow.
+function ClubsSection({ player, onChanged, setError }) {
+  const [linkingKey, setLinkingKey] = useState(null)
+  const [unlinkingId, setUnlinkingId] = useState(null)
+  const [scanning, setScanning] = useState(false)
+  const [dismissed, setDismissed] = useState(new Set())
+  const [findOpen, setFindOpen] = useState(false)
+  const [findQuery, setFindQuery] = useState('')
+  const [findClubs, setFindClubs] = useState([])
+  const [findSearching, setFindSearching] = useState(false)
+  const [searchingClub, setSearchingClub] = useState(null) // { id, name } while polling
+  const pollRef = useRef(null)
+  const pollCount = useRef(0)
+
+  useEffect(() => () => clearTimeout(pollRef.current), [])
+
+  const clubs = player.clubs || []
+  const candidates = (player.other_club_candidates || []).filter((c) => !dismissed.has(`${c.club_org_guid}:${c.player_id}`))
+
+  const rescan = async () => {
+    setScanning(true)
+    setError(null)
+    try {
+      await scoutApi.rescanOtherClubs(player.id)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  const confirmCandidate = async (c) => {
+    const key = `${c.club_org_guid}:${c.player_id}`
+    setLinkingKey(key)
+    setError(null)
+    try {
+      await scoutApi.linkPlayerClub(player.id, { orgGuid: c.club_org_guid, playerId: c.player_id })
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLinkingKey(null)
+    }
+  }
+
+  const dismissCandidate = (c) => {
+    setDismissed((s) => new Set(s).add(`${c.club_org_guid}:${c.player_id}`))
+  }
+
+  const unlinkClub = async (clubRow) => {
+    if (!window.confirm(`Unlink ${clubRow.club_name || 'this club'} from ${player.name}?`)) return
+    setUnlinkingId(clubRow.id)
+    setError(null)
+    try {
+      await scoutApi.unlinkPlayerClub(player.id, clubRow.id)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setUnlinkingId(null)
+    }
+  }
+
+  const searchFindClub = async (e) => {
+    e?.preventDefault()
+    if (findQuery.trim().length < 2) return
+    setFindSearching(true)
+    setError(null)
+    try {
+      setFindClubs(await scoutApi.searchClubs(findQuery.trim()))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setFindSearching(false)
+    }
+  }
+
+  const pollFindClub = (c) => {
+    scoutApi.searchOtherClub(player.id, { orgGuid: c.id, clubName: c.name }).then((res) => {
+      if (res.status === 'building') {
+        if (++pollCount.current < OTHER_CLUB_MAX_POLLS) {
+          pollRef.current = setTimeout(() => pollFindClub(c), OTHER_CLUB_POLL_MS)
+        } else {
+          setError('Timed out waiting for that club\'s roster to build.')
+          setSearchingClub(null)
+        }
+        return
+      }
+      setSearchingClub(null)
+      onChanged()
+    }).catch((err) => { setError(err.message); setSearchingClub(null) })
+  }
+
+  const pickFindClub = (c) => {
+    clearTimeout(pollRef.current)
+    pollCount.current = 0
+    setFindClubs([])
+    setFindQuery('')
+    setSearchingClub(c)
+    pollFindClub(c)
+  }
+
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Clubs</div>
+        <div className="flex items-center gap-2">
+          <Btn sm variant="ghost" onClick={rescan} disabled={scanning}>{scanning ? 'Scanning…' : 'Scan for other clubs'}</Btn>
+          <Btn sm variant="ghost" onClick={() => setFindOpen((v) => !v)}>Find at a club…</Btn>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {clubs.map((c) => (
+          <div key={c.id} className="flex items-center gap-1.5 pl-3 pr-1.5 py-1 rounded-full border border-pb-hairline2 bg-pb-surface2 text-sm">
+            <span>{c.club_name || 'Unknown club'}</span>
+            {c.is_primary && (
+              <span className="font-mono text-[9px] uppercase tracking-wide2 px-1.5 py-0.5 rounded-full"
+                style={{ background: 'color-mix(in srgb, var(--pb-accent) 18%, transparent)', color: 'var(--pb-accent)' }}>
+                Primary
+              </span>
+            )}
+            {clubs.length > 1 && (
+              <button onClick={() => unlinkClub(c)} disabled={unlinkingId === c.id}
+                title="Unlink this club" aria-label="Unlink this club"
+                className="text-pb-faint hover:text-pb-red p-0.5 rounded-full disabled:opacity-50">
+                <Icon name="close" size={12} />
+              </button>
+            )}
+          </div>
+        ))}
+        {clubs.length === 0 && <p className="text-sm text-pb-faint">No club linked.</p>}
+      </div>
+
+      {candidates.length > 0 && (
+        <div className="rounded-lg border border-pb-accent/30 bg-[color-mix(in_srgb,var(--pb-accent)_6%,transparent)] p-3 space-y-2">
+          <div className="text-sm font-medium">
+            {candidates.length} possible match{candidates.length === 1 ? '' : 'es'} at other clubs
+          </div>
+          <div className="space-y-1.5">
+            {candidates.map((c) => {
+              const key = `${c.club_org_guid}:${c.player_id}`
+              return (
+                <div key={key} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate">
+                    <strong>{c.name}</strong> at {c.club_name || 'an unnamed club'}
+                    <span className="text-pb-faint font-mono text-[10.5px] ml-2">{Math.round(c.confidence * 100)}% match</span>
+                  </span>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Btn sm variant="primary" onClick={() => confirmCandidate(c)} disabled={linkingKey === key}>
+                      {linkingKey === key ? 'Linking…' : 'Confirm — same person'}
+                    </Btn>
+                    <Btn sm variant="ghost" onClick={() => dismissCandidate(c)}>Dismiss</Btn>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {findOpen && (
+        <div className="rounded-lg border border-pb-hairline2 p-3 space-y-2">
+          <form onSubmit={searchFindClub} className="flex gap-2">
+            <Search value={findQuery} onChange={setFindQuery} placeholder="Search for a club this player might also play for…" className="flex-1" />
+            <Btn sm variant="primary" onClick={searchFindClub} disabled={findSearching || findQuery.trim().length < 2}>
+              {findSearching ? 'Searching…' : 'Search'}
+            </Btn>
+          </form>
+          {searchingClub && (
+            <p className="text-xs text-pb-dim">Checking {searchingClub.name}'s roster for a name match…</p>
+          )}
+          {!searchingClub && findClubs.length > 0 && (
+            <div className="divide-y divide-pb-hairline border border-pb-hairline rounded-lg overflow-hidden">
+              {findClubs.map((c) => (
+                <button key={c.id} onClick={() => pickFindClub(c)} className="w-full text-left px-3 py-2 hover:bg-pb-surface2 text-sm">
+                  {c.name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

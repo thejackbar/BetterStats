@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { scoutApi } from '../lib/scoutApi'
 import { useScoutAuth } from '../contexts/ScoutAuthContext'
 import { WINDOW_OPTIONS, rollupSeasons } from '../lib/seasonRollup'
@@ -57,6 +57,7 @@ function timeAgo(iso) {
 
 export default function ScoutDiscover() {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useScoutAuth()
   const atCap = !!user?.usage?.at_cap
   const [query, setQuery] = useState('')
@@ -110,6 +111,21 @@ export default function ScoutDiscover() {
     setError(null)
     poll(c)
   }
+
+  // The global search bar (ScoutGlobalSearch) hands off a club pick via
+  // router state rather than a query param — consumed once, then dropped
+  // from history so navigating back to Discover doesn't re-trigger it.
+  const handledHandoff = useRef(false)
+  useEffect(() => {
+    if (handledHandoff.current) return
+    const handoffClub = location.state?.club
+    if (handoffClub?.id) {
+      handledHandoff.current = true
+      pickClub(handoffClub)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const poll = (c) => {
     scoutApi.getClubRoster(c.id, c.name).then((d) => {

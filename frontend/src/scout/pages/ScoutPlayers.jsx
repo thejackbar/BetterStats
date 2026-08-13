@@ -4,7 +4,7 @@ import { scoutApi } from '../lib/scoutApi'
 import { useScoutAuth } from '../contexts/ScoutAuthContext'
 import ScoutModuleLayout from '../ScoutModuleLayout'
 import { PlayerAvatar, Sparkline } from '../components/ScoutUi'
-import { Search } from '../../pages/admin/betterselect/ui'
+import { Icon, Search } from '../../pages/admin/betterselect/ui'
 
 export default function ScoutPlayers() {
   const { user } = useScoutAuth()
@@ -12,10 +12,27 @@ export default function ScoutPlayers() {
   const [players, setPlayers] = useState(undefined) // undefined = loading
   const [error, setError] = useState(null)
   const [q, setQ] = useState('')
+  const [removingId, setRemovingId] = useState(null)
 
   useEffect(() => {
     scoutApi.listPlayers().then(setPlayers).catch((err) => setError(err.message))
   }, [])
+
+  const removePlayer = async (e, p) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!window.confirm(`Remove ${p.name} from My Players? This removes them from every one of your boards.`)) return
+    setRemovingId(p.id)
+    setError(null)
+    try {
+      await scoutApi.removePlayerEverywhere(p.id)
+      setPlayers((ps) => ps.filter((x) => x.id !== p.id))
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setRemovingId(null)
+    }
+  }
 
   const shown = useMemo(() => {
     if (!players) return []
@@ -75,6 +92,15 @@ export default function ScoutPlayers() {
                       {t.wickets > 0 && <> · <span className="font-bold">{t.wickets}</span> <span className="text-pb-faint text-xs">wkts</span></>}
                     </div>
                   )}
+                  <button
+                    onClick={(e) => removePlayer(e, p)}
+                    disabled={removingId === p.id}
+                    title="Remove from My Players"
+                    aria-label="Remove from My Players"
+                    className="shrink-0 text-pb-faint hover:text-pb-red p-1.5 rounded transition-colors disabled:opacity-50"
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
                 </Link>
               )
             })}

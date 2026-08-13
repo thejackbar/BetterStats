@@ -168,8 +168,61 @@ class ScoutedPlayer(Base):
     internal_org_id = Column(UUID(as_uuid=True), nullable=True)
     internal_player_id = Column(UUID(as_uuid=True), nullable=True)
 
+    # Last-computed name-match suggestions from services.scout_feed.find_name_matches
+    # ("this player might also be at these other clubs") — a cache, recomputed
+    # wholesale by services.scout_discovery.suggest_other_clubs, never edited in
+    # place. NULL means never scanned. See ScoutedPlayerClub below for the real,
+    # confirmed multi-club links this feeds into.
+    other_club_candidates = Column(JSONB, nullable=True)
+    other_club_candidates_checked_at = Column(TIMESTAMP(timezone=True), nullable=True)
+
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutedPlayerClub(Base):
+    """One club stint for a real ScoutedPlayer — platform-wide like
+    ScoutedPlayer itself (no scout_org scoping: a stint is a fact about the
+    person, not one org's opinion of them). A player can have several rows
+    here (the Spencer Green case — plays for more than one club); exactly
+    one is is_primary (enforced by uq_scouted_player_clubs_primary, a
+    partial unique index), and ScoutedPlayer.club_org_guid/club_name/
+    stats_payload/stats_built_at mirror whichever row that is, so every
+    pre-existing reader of those singular columns keeps working unchanged.
+
+    Rows are added two ways (linked_via): 'add' — the club the player was
+    originally added from (services.scout_discovery.add_player); 'match_confirmed'
+    — a scout explicitly confirmed a name-match suggestion links to the same
+    real person (services.scout_discovery.link_player_club). Never created
+    automatically from a name match alone — see scout_feed.find_name_matches'
+    own docstring on why a match is always a suggestion, never an auto-merge.
+
+    grassroots_participant_id here is the id as it appears in THIS club's
+    own roster payload — NOT assumed equal to
+    ScoutedPlayer.grassroots_participant_id (the id from wherever the
+    player was first added). There is no reachable PlayHQ/Pulselive API to
+    look up "every club one participant GUID has played for" (confirmed
+    live against grassrootsapiproxy and the Pulselive endpoints
+    play.cricket.com.au's own player page uses — both refuse/404), so
+    cross-club identity here is name-based, and each stint keeps its own
+    locally-scoped id purely so refresh_player can re-slice it from that
+    club's own cache."""
+    __tablename__ = "scouted_player_clubs"
+    __table_args__ = (
+        UniqueConstraint("scouted_player_id", "club_org_guid", name="uq_scouted_player_clubs_player_club"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    club_org_guid = Column(Text, nullable=False)
+    club_name = Column(Text, nullable=True)
+    grade_name = Column(Text, nullable=True)
+    grassroots_participant_id = Column(Text, nullable=True)
+    is_primary = Column(Boolean, nullable=False, default=False, server_default="false")
+    stats_payload = Column(JSONB, nullable=True)
+    stats_built_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    linked_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    linked_via = Column(Text, nullable=False, default="add", server_default="add")  # add | match_confirmed
 
 
 class ScoutWatchlist(Base):
@@ -316,6 +369,28 @@ class ScoutClubView(Base):
     scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
     club_org_guid = Column(Text, nullable=False)
     club_name = Column(Text, nullable=True)
+    last_viewed_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ScoutPlayerSearchView(Base):
+    """Per-org "players you've looked at" history — the exact structural
+    mirror of ScoutClubView above. ScoutedPlayer is platform-wide (shared by
+    every Scout Org), so it can't answer which players THIS org has looked
+    at; upserted whenever this org opens a specific player's profile, same
+    as ScoutClubView is upserted on a club roster fetch."""
+    __tablename__ = "scout_player_search_views"
+    __table_args__ = (
+        UniqueConstraint("scout_org_id", "scouted_player_id", name="uq_scout_player_search_views_org_player"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scout_org_id = Column(UUID(as_uuid=True), ForeignKey("scout_orgs.id", ondelete="CASCADE"), nullable=False)
+    scouted_player_id = Column(UUID(as_uuid=True), ForeignKey("scouted_players.id", ondelete="CASCADE"), nullable=False)
+    player_name = Column(Text, nullable=True)
+    # The search term that led here, when known — informational only, never
+    # the identity key (that's scouted_player_id, same as ScoutClubView keys
+    # on club_org_guid rather than whatever name was searched).
+    query_text = Column(Text, nullable=True)
     last_viewed_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

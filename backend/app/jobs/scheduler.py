@@ -288,9 +288,15 @@ async def refresh_scout_players():
     orgs/scouts are tracking players at costs one rebuild for this whole
     run, not one per org or one per player (services.scout_discovery.
     refresh_club_and_apply's own docstring explains why calling
-    refresh_player() N times would be wasteful here)."""
+    refresh_player() N times would be wasteful here).
+
+    Swept per ScoutedPlayerClub row, not per ScoutedPlayer — a player can
+    be linked to several clubs (see models/scout.py's ScoutedPlayerClub),
+    and each stint has its own staleness clock. Bucketing off ScoutedPlayer's
+    own (primary-only) club_org_guid/stats_built_at, as this used to, would
+    silently never refresh a player's secondary/non-primary clubs."""
     from datetime import datetime, timedelta, timezone
-    from app.models.scout import ScoutedPlayer, ScoutOrg, ScoutWatchlist, ScoutWatchlistCard
+    from app.models.scout import ScoutedPlayer, ScoutedPlayerClub, ScoutOrg, ScoutWatchlist, ScoutWatchlistCard
     from app.services import scout_discovery
     from app.services.scout_overview import _CADENCE_DAYS
 
@@ -307,27 +313,27 @@ async def refresh_scout_players():
             continue
         max_age = timedelta(days=_CADENCE_DAYS.get(cadence, 7))
         async with async_session_maker() as session:
-            players = (await session.execute(
-                select(ScoutedPlayer)
+            club_rows = (await session.execute(
+                select(ScoutedPlayerClub)
+                .join(ScoutedPlayer, ScoutedPlayer.id == ScoutedPlayerClub.scouted_player_id)
                 .join(ScoutWatchlistCard, ScoutWatchlistCard.scouted_player_id == ScoutedPlayer.id)
                 .join(ScoutWatchlist, ScoutWatchlist.id == ScoutWatchlistCard.watchlist_id)
                 .where(
                     ScoutWatchlist.scout_org_id == org.id,
                     ScoutedPlayer.source == "au_grassroots",
-                    ScoutedPlayer.grassroots_participant_id.isnot(None),
-                    ScoutedPlayer.club_org_guid.isnot(None),
+                    ScoutedPlayerClub.grassroots_participant_id.isnot(None),
                 )
                 .distinct()
             )).scalars().all()
-        for p in players:
-            built_at = p.stats_built_at
+        for c in club_rows:
+            built_at = c.stats_built_at
             if built_at is not None and built_at.tzinfo is None:
                 built_at = built_at.replace(tzinfo=timezone.utc)
             stale = built_at is None or (now - built_at) >= max_age
             if not stale:
                 continue
-            bucket = due_by_club.setdefault(p.club_org_guid, {"club_name": p.club_name, "player_ids": set()})
-            bucket["player_ids"].add(str(p.id))
+            bucket = due_by_club.setdefault(c.club_org_guid, {"club_name": c.club_name, "player_ids": set()})
+            bucket["player_ids"].add(str(c.scouted_player_id))
 
     if not due_by_club:
         logger.info("BetterScout refresh: nothing due")

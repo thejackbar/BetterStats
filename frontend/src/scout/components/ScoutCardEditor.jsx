@@ -190,7 +190,7 @@ export default function ScoutCardEditor({ card, onClose, onSave, onRemove, onSha
 
         <div className="flex items-center justify-between pt-2">
           <button onClick={onRemove} className="text-sm text-[var(--pb-negative)] hover:underline">
-            Remove from this watchlist
+            Remove from this board
           </button>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-3 py-1.5 rounded border border-pb-hairline text-sm hover:bg-pb-surface2">Cancel</button>
