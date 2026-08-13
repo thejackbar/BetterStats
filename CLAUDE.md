@@ -10,9 +10,18 @@ prospect clubs that nobody ever searched for, and one real one split three ways.
 
 - **Cause: `club_searched` records the TOP result and nothing else.** For a
   half-typed query that is close to arbitrary — the search ranks *something*
-  first and the beacon writes it down as fact. `get_searched_clubs` then grouped
-  on it. **A beacon's top match is evidence of what the search engine did, not
-  of what the person wanted.**
+  first and the beacon writes it down as fact. `get_searched_clubs` groups on
+  it. **A beacon's top match is evidence of what the search engine did, not of
+  what the person wanted.**
+- **Fixed on the Wizard Clubs page ONLY, per direct instruction — the Meta Ads
+  page's "Clubs searched in the wizard" table is deliberately left reporting the
+  raw top match.** So `meta_ads.get_searched_clubs` is untouched and
+  `wizard_club_lists.resolved_searched_clubs` reads the same beacons itself.
+  The split is defensible rather than accidental: Meta Ads is a report, whereas
+  this page matches a club to the Club Directory and emails its committee, so a
+  guessed club there is an email to the wrong people. **The two are allowed to
+  disagree, and the resolver never writes anything back.** Don't "tidy this up"
+  by pointing the page back at the Meta Ads table.
 - **The heavy lifting is run-collapsing, not better string matching.** A
   visitor's consecutive searches where each query is a prefix of the last (typing
   forward AND backspacing — `_same_typing_run` tests prefix in both directions)
@@ -48,16 +57,18 @@ prospect clubs that nobody ever searched for, and one real one split three ways.
   filters them out before matching, so a fragment can't be handed whatever club
   happens to be spelled like it, and the create-list flow reports it as
   unmatched rather than emailing someone on a guess.
-- **Both pages show the search terms**, which is the real fix for trust: a row's
-  club can be judged against what was actually typed. The Meta Ads column head
-  went "Top match" → "Club / search"; an unresolved row reads
-  `Searched "Warn"` + `Maybe …` with an amber "Unresolved" pill.
-- **Verified against a real Postgres** (31 checks, the reported case replayed
+- **The Wizard Clubs page shows the search terms**, which is the real fix for
+  trust: a row's club can be judged against what was actually typed. An
+  unresolved row reads `Searched "Warn"` + `Maybe …`, with a Resolved /
+  Unresolved filter beside the others.
+- **Verified against a real Postgres** (36 checks, the reported case replayed
   beacon-for-beacon: six searches → one row, both phantoms gone, plus the
   clicked-club override, the lone fragment, the two-clubs-fit fragment, the
   single-result search, per-visitor and per-session boundaries, and the page
-  refusing to export an unresolved search) and **driven in Chromium** (15 on
-  the Wizard Clubs page, 9 on the Meta Ads page).
+  refusing to export an unresolved search) — **including four that assert the
+  Meta Ads table still splits that same visitor across three rows and still
+  returns its original payload keys**, so the deliberate split can't be
+  regressed by accident. Driven in Chromium (15 checks).
 
 ## Clubs Searched or Selected in the Wizard (migration 251, v9.23.0, Aug 2026)
 
