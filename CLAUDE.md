@@ -1,5 +1,64 @@
 # BetterStats — Claude Session Notes
 
+## A search beacon's top match is NOT the club they wanted (v9.23.1, Aug 2026)
+
+Reported off the Meta Ads page: one person typing their way to Warnbro Swans
+Cricket Club in a single minute left THREE rows — "Warn" logged as a club called
+"CNSW WWCF Program - Warners Bay", "Warnb"/"Warnbro" as "WA Cricket Programs -
+Warnbro Community High School", and only the last as the club they wanted. Two
+prospect clubs that nobody ever searched for, and one real one split three ways.
+
+- **Cause: `club_searched` records the TOP result and nothing else.** For a
+  half-typed query that is close to arbitrary — the search ranks *something*
+  first and the beacon writes it down as fact. `get_searched_clubs` then grouped
+  on it. **A beacon's top match is evidence of what the search engine did, not
+  of what the person wanted.**
+- **The heavy lifting is run-collapsing, not better string matching.** A
+  visitor's consecutive searches where each query is a prefix of the last (typing
+  forward AND backspacing — `_same_typing_run` tests prefix in both directions)
+  inside `_SEARCH_RUN_GAP` are ONE run. The run resolves to the club they went
+  on to click, else the club matched by the LONGEST query they typed. Six
+  keystroke beacons become one row, and the two phantoms vanish because nobody
+  ever finished typing them.
+- **`_query_identifies` is "does the club's name START with what was typed".**
+  That is exactly what separates "warnbro swa" → *Warnbro Swans Cricket Club*
+  (typing this club's name) from "warn" → "…**Warn**ers Bay" (a hit on a word
+  buried mid-name that the searcher never aimed at). Under 4 characters never
+  identifies anyone.
+- **Prefixing the matched club is not enough — it has to prefix ONLY it.**
+  Found by the verification, not by reading the code: "south" genuinely is a
+  prefix of "Southern Cricket Club", and equally of "Southern Districts CC".
+  `_query_is_ambiguous` checks the query against every club name these beacons
+  surfaced and demotes a match that fits more than one.
+- **An unresolved search is reported as the QUERY, keyed `search:<query>`** —
+  never as a club, so two guesses at the same club can't merge back into a
+  phantom prospect row. The arbitrary top match rides along as `guess_name`
+  only. `_improve_guesses` then upgrades that guess when exactly ONE
+  confidently-resolved club in the same result set starts with the query (the
+  "warn" → Warnbro Swans case), and **drops the guess entirely when two fit** —
+  a coin toss presented as an answer is worse than no answer.
+- **`result_count` is now on the beacon** (both callers, `TrackStepRequest`,
+  metadata) so ambiguity is knowable rather than inferred: a search returning
+  exactly one club names it outright whatever was typed. NULL for every beacon
+  sent before this shipped, which is why the retroactive rules above carry the
+  historical data. Regex-matched before the `::int` cast — the metadata blob is
+  free-form and one junk value would abort the cast for every row (same lesson
+  as the `list_id`-as-text comparison below).
+- **A query row is never directory-matched or exported.** `_directory_matches`
+  filters them out before matching, so a fragment can't be handed whatever club
+  happens to be spelled like it, and the create-list flow reports it as
+  unmatched rather than emailing someone on a guess.
+- **Both pages show the search terms**, which is the real fix for trust: a row's
+  club can be judged against what was actually typed. The Meta Ads column head
+  went "Top match" → "Club / search"; an unresolved row reads
+  `Searched "Warn"` + `Maybe …` with an amber "Unresolved" pill.
+- **Verified against a real Postgres** (31 checks, the reported case replayed
+  beacon-for-beacon: six searches → one row, both phantoms gone, plus the
+  clicked-club override, the lone fragment, the two-clubs-fit fragment, the
+  single-result search, per-visitor and per-session boundaries, and the page
+  refusing to export an unresolved search) and **driven in Chromium** (15 on
+  the Wizard Clubs page, 9 on the Meta Ads page).
+
 ## Clubs Searched or Selected in the Wizard (migration 251, v9.23.0, Aug 2026)
 
 The Meta Ads page names the warm prospects — "Clubs selected in the wizard" and

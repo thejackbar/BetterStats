@@ -112,6 +112,9 @@ async def merged_wizard_clubs(session: AsyncSession, days: int) -> list[dict]:
             "in_selected": False, "in_searched": False,
             "furthest_step": "", "visitors": 0, "searches": 0, "queries": [],
             "via_meta": False, "first_at": None, "last_at": None,
+            # Set only by the searched side — a row we could not resolve to a
+            # club is the raw query, with the best guess carried alongside.
+            "is_query_row": False, "confidence": "", "guess_name": None,
         })
 
     for c in (selected.get("clubs") or []):
@@ -132,6 +135,14 @@ async def merged_wizard_clubs(session: AsyncSession, days: int) -> list[dict]:
         r["searches"] = max(r["searches"], int(c.get("searches") or 0))
         r["queries"] = r["queries"] or list(c.get("queries") or [])
         r["via_meta"] = r["via_meta"] or bool(c.get("via_meta"))
+        # A search we could not pin to a club (see meta_ads._resolve_run) is a
+        # QUERY, not a club — it must never be matched against the directory or
+        # exported, so the flag travels with it. A club that also appears on the
+        # selected side is a real club whatever the search made of it.
+        if c.get("is_query_row") and not r["in_selected"]:
+            r["is_query_row"] = True
+            r["guess_name"] = c.get("guess_name")
+        r["confidence"] = c.get("confidence") or r["confidence"]
         r["first_at"] = _earlier(r["first_at"], c.get("first_at"))
         r["last_at"] = _later(r["last_at"], c.get("last_at"))
 
@@ -148,6 +159,10 @@ async def _directory_matches(session: AsyncSession, rows: list[dict]) -> dict[st
     captured CA organisation guid first (the strongest signal — it is the same
     guid the PlayHQ crawler keys the directory on, so a club that spells itself
     two ways still lands on one row) and a case-insensitive name second."""
+    # A query row is a search term nobody has resolved to a club, so matching
+    # it by name would hand back whatever club happens to be spelled like the
+    # fragment someone typed. Left unmatched on purpose.
+    rows = [r for r in rows if not r.get("is_query_row")]
     guids = {(r.get("org_id") or "").strip() for r in rows if (r.get("org_id") or "").strip()}
     names = {r["key"] for r in rows if r["key"]}
 

@@ -309,7 +309,7 @@ export default function Trial() {
         if (top && searchedOrgRef.current !== (top.id || orgName(top))) {
           searchedOrgRef.current = top.id || orgName(top)
           api.publicSelfServeTrackStep('club_searched', getVisitorId(), {
-            name: orgName(top), org_id: top.id, query: q,
+            name: orgName(top), org_id: top.id, query: q, result_count: list.length,
           }).catch(() => {})
         }
       } catch (e) {

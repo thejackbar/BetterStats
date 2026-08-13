@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -834,6 +835,230 @@ async def get_selected_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     }
 
 
+# ── Resolving what a searcher was actually looking for ───────────────────────
+# The `club_searched` beacon records the TOP result a search returned, which for
+# a half-typed query is close to arbitrary: "Warn" surfaced "CNSW WWCF Program -
+# Warners Bay", and "Warnbro" surfaced "WA Cricket Programs - Warnbro Community
+# High School", when the person was typing their way to Warnbro Swans Cricket
+# Club all along. Taking each beacon at face value invented two prospect clubs
+# nobody ever searched for, and split one real one across three rows.
+#
+# Two rules fix it, and the first does the heavy lifting:
+#
+#   1. One person typing one club name is ONE search, not six. A visitor's
+#      consecutive searches where each query extends or trims the last (the
+#      signature of typing, and of backspacing) collapse into a single run,
+#      resolved by the most specific thing they typed — and outright by the club
+#      they went on to select, when they selected one.
+#   2. A query that does not identify the club it matched is reported as the
+#      QUERY, with the match named only as a guess. "Warn" matching a club
+#      called "…Warners Bay" is a substring hit in the middle of a name, not
+#      evidence of intent; "warnbro swa" against "Warnbro Swans Cricket Club" is.
+
+# How far apart two searches can be and still be the same person typing. Seconds
+# in practice; generous here because a search box left open while someone finds
+# their club's proper name is still one intent, not two.
+_SEARCH_RUN_GAP = timedelta(minutes=30)
+# A picked club counts as confirming a run it lands within, plus this much
+# slack — the click follows the last keystroke, never precedes it by much.
+_SELECT_SLACK = timedelta(minutes=30)
+# Below this, a query is too little to identify anyone. Four characters matched
+# three unrelated clubs in the reported case.
+_MIN_IDENTIFYING_QUERY = 4
+# Strongest evidence wins when several runs pool into one row.
+_CONFIDENCE_RANK = {"unsure": 0, "likely": 1, "confirmed": 2}
+
+
+def _norm_query(raw: str | None) -> str:
+    """Lowercased, punctuation flattened to single spaces — so "St Mary's CC"
+    and "st marys cc" compare equal."""
+    return re.sub(r"[^a-z0-9]+", " ", (raw or "").lower()).strip()
+
+
+def _same_typing_run(prev: str | None, cur: str | None) -> bool:
+    """True when one query is a prefix of the other — typing forward
+    ("warn" → "warnb") or backspacing ("warnbro swa" → "warnbro sw")."""
+    a, b = _norm_query(prev), _norm_query(cur)
+    if not a or not b:
+        return False
+    return a.startswith(b) or b.startswith(a)
+
+
+def _query_identifies(query: str | None, club_name: str | None) -> bool:
+    """Does this query actually pick out this club, or did it merely match
+    somewhere inside the name?
+
+    The test is that the club's name STARTS with what was typed. That is what
+    separates "warnbro swa" → "Warnbro Swans Cricket Club" (the person was
+    typing this club's name) from "warn" → "CNSW WWCF Program - Warners Bay"
+    (a hit on a word buried in the middle, which the searcher never aimed at).
+    """
+    q, n = _norm_query(query), _norm_query(club_name)
+    if not q or not n or len(q) < _MIN_IDENTIFYING_QUERY:
+        return False
+    return n.startswith(q)
+
+
+def _query_is_ambiguous(query: str | None, known_names: set) -> bool:
+    """True when what was typed is the start of more than one club we have
+    seen, so identifying it with any single one of them is a coin toss.
+
+    _query_identifies alone is not enough: "south" genuinely is the start of
+    "Southern Cricket Club", but it is equally the start of "Southern Districts
+    CC", and the beacon only ever recorded whichever the search ranked first.
+    The names checked against are the clubs these beacons themselves surfaced —
+    the only universe this data can see."""
+    q = _norm_query(query)
+    if not q:
+        return True
+    hits = {n for n in known_names if _norm_query(n).startswith(q)}
+    return len(hits) > 1
+
+
+def _run_row(name, org_id, queries, run, first_at, last_at, via_meta,
+             confidence, guess_name, guess_org_id) -> dict:
+    return {
+        "name": name,
+        # An unsure run is keyed on the query, never on a club — two guesses at
+        # the same club must not merge into a prospect row nobody searched for.
+        "key": (f"search:{_norm_query(name)}" if confidence == "unsure"
+                else (name or "").strip().lower()),
+        "org_id": org_id,
+        "visitor_id": run[0]["visitor_id"],
+        "queries": queries,
+        "searches": len(run),
+        "via_meta": via_meta,
+        "confidence": confidence,
+        "is_query_row": confidence == "unsure",
+        "guess_name": guess_name,
+        "guess_org_id": guess_org_id,
+        "guess_from_confirmed": False,
+        "first_at": first_at,
+        "last_at": last_at,
+    }
+
+
+def _resolve_run(run: list[dict], picks: list[dict], known_names: set) -> dict:
+    """One typing run → the club behind it, plus how sure we are.
+
+    Preference order: the club the visitor actually clicked during the run
+    (certain), then a search that returned exactly one club, then the top match
+    for the most specific query typed — reported as a real club only when that
+    query identifies it, and otherwise as the query itself with the match
+    carried alongside as a guess."""
+    # The most specific thing typed. Ties (a backspace landing on an equally
+    # long earlier query) go to the later one.
+    best = max(run, key=lambda r: (len(r["query"] or ""), r["created_at"]))
+    top_name = (best["club_name"] or "").strip()
+    top_org = best["org_id"]
+
+    queries, seen = [], set()
+    for r in run:
+        q = (r["query"] or "").strip()
+        if q and q.lower() not in seen:
+            seen.add(q.lower())
+            queries.append(q)
+
+    first_at = min(r["created_at"] for r in run)
+    last_at = max(r["created_at"] for r in run)
+    via_meta = any(bool(r["via_meta"]) for r in run)
+
+    # 1. Did they click a club around this run? That settles it — whatever they
+    #    typed, the club they opened is the club they wanted. Guarded so a
+    #    selection from an unrelated run can't hijack this one: it has to be
+    #    either the club the search surfaced, or one the typing was plainly
+    #    heading towards.
+    for p in picks:
+        if not (first_at - _SELECT_SLACK <= p["at"] <= last_at + _SELECT_SLACK):
+            continue
+        picked = (p["name"] or "").strip()
+        if not picked:
+            continue
+        if picked.lower() == top_name.lower() or _query_identifies(best["query"], picked):
+            return _run_row(picked, p["org_id"] or top_org, queries, run,
+                            first_at, last_at, via_meta, "confirmed", None, None)
+
+    # 2. A search that returned exactly one club named that club, whatever was
+    #    typed to get there. Only known for beacons sent since result_count
+    #    started being recorded; NULL for every earlier one.
+    if best.get("result_count") == 1 and top_name:
+        return _run_row(top_name, top_org, queries, run, first_at, last_at,
+                        via_meta, "likely", None, None)
+
+    # 3. Otherwise trust the match only when the query identifies it AND
+    #    identifies it uniquely — a query that fits several clubs picks none.
+    if (top_name and _query_identifies(best["query"], top_name)
+            and not _query_is_ambiguous(best["query"], known_names)):
+        return _run_row(top_name, top_org, queries, run, first_at, last_at,
+                        via_meta, "likely", None, None)
+
+    # 4. We genuinely don't know. Report the search, name the match as a guess.
+    label = (best["query"] or "").strip() or top_name
+    return _run_row(label, None, queries, run, first_at, last_at, via_meta,
+                    "unsure", top_name or None, top_org)
+
+
+def _collapse_search_runs(rows: list[dict], picks_by_visitor: dict,
+                          known_names: set) -> list[dict]:
+    """Fold a visitor's raw `club_searched` beacons into one entry per typing
+    run, each resolved to the club it was actually after (or to the query
+    itself when that can't be told). ``rows`` must be ordered by visitor then
+    time; ``picks_by_visitor`` maps a visitor to their selections."""
+    runs: list[dict] = []
+    current: list[dict] = []
+
+    def _flush():
+        if current:
+            runs.append(_resolve_run(list(current),
+                                     picks_by_visitor.get(current[0]["visitor_id"], []),
+                                     known_names))
+            current.clear()
+
+    for r in rows:
+        if current:
+            prev = current[-1]
+            # A beacon with no visitor_id can't be grouped with anything — it
+            # stands alone rather than being folded into a stranger's typing.
+            same_visitor = (r["visitor_id"] is not None
+                            and prev["visitor_id"] == r["visitor_id"])
+            in_window = (r["created_at"] - prev["created_at"]) <= _SEARCH_RUN_GAP
+            if not (same_visitor and in_window and _same_typing_run(prev["query"], r["query"])):
+                _flush()
+        current.append(r)
+    _flush()
+    return runs
+
+
+def _improve_guesses(rows: list[dict]) -> None:
+    """Give an unresolved query a better guess than its arbitrary top match.
+
+    Once the confident rows are known, an unresolved query is often the start
+    of one of them — "warn" against a "Warnbro Swans Cricket Club" someone else
+    typed out in full. When EXACTLY ONE confident club's name begins with the
+    query, that beats whatever the search engine happened to rank first. Two or
+    more and the query genuinely doesn't pick a club, so the guess is dropped
+    rather than a coin toss being presented as an answer. Mutates in place, and
+    only ever touches the guess — an unsure row stays unsure and stays keyed on
+    its query, so it can never be mistaken for a club we stand behind."""
+    confident = [c for c in rows if not c["is_query_row"]]
+    if not confident:
+        return
+    for c in rows:
+        if not c["is_query_row"]:
+            continue
+        q = _norm_query(c["name"])
+        if not q:
+            continue
+        hits = [k for k in confident if _norm_query(k["name"]).startswith(q)]
+        if len(hits) == 1:
+            c["guess_name"] = hits[0]["name"]
+            c["guess_org_id"] = hits[0]["org_id"]
+            c["guess_from_confirmed"] = True
+        elif len(hits) > 1:
+            c["guess_name"] = None
+            c["guess_org_id"] = None
+
+
 async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS) -> dict:
     """Name the clubs visitors TYPED into the search box — the step before a
     club is actually clicked/selected.
@@ -845,11 +1070,15 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     searched but which was never selected is a warm prospect the "Clubs
     selected" table would otherwise miss entirely.
 
-    Each row reports the top-matched club, how many distinct visitors searched
-    it, a sample of the literal search terms, whether the search came through a
-    Meta ad, and — the point of the table — whether it was ever `selected`
-    (clicked into the wizard). Test noise flagged on the selected-clubs table is
-    hidden here too, keyed on the same normalised club name.
+    A beacon's top match is NOT taken at face value — see the run-collapsing
+    and query-identifies rules above, which is what stops a half-typed query
+    from inventing a prospect club nobody was looking for. Each row reports the
+    resolved club (or the raw query, when it can't be resolved — `is_query_row`,
+    carrying the match as `guess_name`), how many distinct visitors searched it,
+    the literal terms typed, whether the search came through a Meta ad, how sure
+    we are (`confidence`), and — the point of the table — whether it was ever
+    `selected` (clicked into the wizard). Test noise flagged on the
+    selected-clubs table is hidden here too, keyed on the same normalised name.
 
     Deliberately NOT windowed by the counting-since cutoff (_since()) — same
     reasoning as get_selected_clubs: this is a follow-up/lead-management
@@ -857,58 +1086,98 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
     await _use_active_campaign(db)
     window = {"days": days}
 
-    # Clubs typed into the search box, grouped by the top result the search
-    # returned, tagged Meta-or-not, with a sample of the literal search terms.
-    search_rows = (await db.execute(text(f"""
-        SELECT metadata->>'club_name'   AS club_name,
-               metadata->>'club_org_id' AS org_id,
-               MIN(created_at)          AS first_at,
-               MAX(created_at)          AS last_at,
-               COUNT(DISTINCT visitor_id) AS visitors,
-               COUNT(*)                   AS searches,
-               bool_or({_META_VISITOR_SUBQUERY_PLAIN}) AS via_meta,
-               (array_agg(DISTINCT NULLIF(TRIM(metadata->>'search_query'), ''))
-                  FILTER (WHERE NULLIF(TRIM(metadata->>'search_query'), '') IS NOT NULL)
-               )[1:5] AS queries
+    # Raw beacons, ordered so one visitor's typing reads as the sequence it was.
+    # `result_count` is regex-matched before casting: the metadata blob is
+    # free-form, and one junk value would abort the cast for every row.
+    raw = (await db.execute(text(f"""
+        SELECT visitor_id::text                            AS visitor_id,
+               metadata->>'club_name'                      AS club_name,
+               metadata->>'club_org_id'                    AS org_id,
+               NULLIF(TRIM(metadata->>'search_query'), '') AS query,
+               CASE WHEN metadata->>'result_count' ~ '^[0-9]+$'
+                    THEN (metadata->>'result_count')::int END AS result_count,
+               created_at,
+               {_META_VISITOR_SUBQUERY_PLAIN}              AS via_meta
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_searched'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
-        GROUP BY 1, 2
+        ORDER BY visitor_id, created_at
     """), window)).mappings().all()
 
-    # The set of clubs that went on to actually be SELECTED (clicked into the
-    # wizard) in the same window — a searched club present here converted, the
-    # rest are searched-only. Keyed by normalised name, so it lines up with the
-    # search rows' own grouping regardless of which org_id each side captured.
-    selected_keys = set((await db.execute(text("""
-        SELECT DISTINCT lower(TRIM(metadata->>'club_name')) AS k
+    # Every club a visitor actually clicked into, so a run can be settled by
+    # what they picked rather than by what they had typed so far.
+    pick_rows = (await db.execute(text("""
+        SELECT visitor_id::text         AS visitor_id,
+               metadata->>'club_name'   AS name,
+               metadata->>'club_org_id' AS org_id,
+               created_at               AS at
         FROM usage_events
         WHERE event_type = 'self_serve_step'
           AND route = 'club_prepared'
           AND created_at >= NOW() - (:days * INTERVAL '1 day')
           AND NULLIF(TRIM(metadata->>'club_name'), '') IS NOT NULL
-    """), window)).scalars().all())
+    """), window)).mappings().all()
+    picks_by_visitor: dict = {}
+    for p in pick_rows:
+        picks_by_visitor.setdefault(p["visitor_id"], []).append(dict(p))
+
+    # Every club these beacons surfaced — the yardstick for whether a query
+    # picks out one club or several.
+    known_names = {(r["club_name"] or "").strip() for r in raw if r["club_name"]}
+    known_names |= {(p["name"] or "").strip() for p in pick_rows if p["name"]}
+    known_names.discard("")
+
+    runs = _collapse_search_runs([dict(r) for r in raw], picks_by_visitor, known_names)
+
+    # The set of clubs that went on to actually be SELECTED (clicked into the
+    # wizard) in the same window — a searched club present here converted, the
+    # rest are searched-only. Keyed by normalised name, so it lines up with the
+    # search rows' own grouping regardless of which org_id each side captured.
+    selected_keys = {(p["name"] or "").strip().lower() for p in pick_rows if p["name"]}
+
+    # One row per resolved club (or per unresolved query), pooling the runs.
+    merged: dict = {}
+    for run in runs:
+        key = run["key"]
+        if not key or key == "search:":
+            continue
+        c = merged.get(key)
+        if c is None:
+            merged[key] = c = {
+                "name": run["name"], "key": key, "org_id": run["org_id"],
+                "visitors": set(), "searches": 0, "queries": [], "via_meta": False,
+                "confidence": run["confidence"], "is_query_row": run["is_query_row"],
+                "guess_name": run["guess_name"], "guess_org_id": run["guess_org_id"],
+                "guess_from_confirmed": False,
+                "first_at": run["first_at"], "last_at": run["last_at"],
+            }
+        c["visitors"].add(run["visitor_id"])
+        c["searches"] += run["searches"]
+        c["via_meta"] = c["via_meta"] or run["via_meta"]
+        c["org_id"] = c["org_id"] or run["org_id"]
+        # Best evidence across the runs wins — one visitor confirming the club
+        # settles it for everyone who only half-typed the same name.
+        if _CONFIDENCE_RANK[run["confidence"]] > _CONFIDENCE_RANK[c["confidence"]]:
+            c["confidence"] = run["confidence"]
+        for q in run["queries"]:
+            if q not in c["queries"]:
+                c["queries"].append(q)
+        c["first_at"] = min(c["first_at"], run["first_at"])
+        c["last_at"] = max(c["last_at"], run["last_at"])
 
     rows: list[dict] = []
-    for r in search_rows:
-        name = (r["club_name"] or "").strip()
-        if not name:
-            continue
-        key = name.lower()
-        rows.append({
-            "name": name,
-            "key": key,
-            "org_id": r["org_id"],
-            "visitors": int(r["visitors"] or 0),
-            "searches": int(r["searches"] or 0),
-            "queries": list(r["queries"] or []),
-            "via_meta": bool(r["via_meta"]),
-            "selected": key in selected_keys,
-            "first_at": r["first_at"].isoformat() if r["first_at"] else None,
-            "last_at": r["last_at"].isoformat() if r["last_at"] else None,
-        })
+    for c in merged.values():
+        # A beacon with no visitor_id still represents someone searching.
+        c["visitors"] = len([v for v in c["visitors"] if v is not None]) or 1
+        c["queries"] = c["queries"][:5]
+        c["selected"] = (not c["is_query_row"]) and c["key"] in selected_keys
+        c["first_at"] = c["first_at"].isoformat() if c["first_at"] else None
+        c["last_at"] = c["last_at"].isoformat() if c["last_at"] else None
+        rows.append(c)
+
+    _improve_guesses(rows)
 
     _floor = datetime.min.replace(tzinfo=timezone.utc)
     rows.sort(key=lambda c: c["last_at"] or _floor.isoformat(), reverse=True)
@@ -928,6 +1197,7 @@ async def get_searched_clubs(db: AsyncSession, days: int = CAMPAIGN_LENGTH_DAYS)
         "hidden_count": len(hidden),
         "searched_only_count": len(searched_only),
         "converted_count": len(visible) - len(searched_only),
+        "unsure_count": sum(1 for c in visible if c["is_query_row"]),
     }
 
 

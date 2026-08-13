@@ -1835,11 +1835,14 @@ export const api = {
         visitor_id: visitorId,
         // Sent with club_prepared (the picked club) and club_searched (the top
         // result a search returned) so a dropped-off visitor's club is
-        // recoverable on the Meta Ads page. `query` is the raw text typed,
-        // sent only with club_searched.
+        // recoverable on the Meta Ads page. `query` is the raw text typed and
+        // `result_count` how many clubs came back — both sent only with
+        // club_searched. The count is what tells a search that identified ONE
+        // club from a half-typed query whose top match means nothing.
         club_name: club?.name || undefined,
         club_org_id: club?.org_id || undefined,
         query: club?.query || undefined,
+        result_count: club?.result_count,
       }),
     }),
   superCreateClub: (data) =>

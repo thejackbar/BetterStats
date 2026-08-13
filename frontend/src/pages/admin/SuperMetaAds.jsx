@@ -166,11 +166,27 @@ function SelectionRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
 // One row of the "Clubs searched" table — a club that got typed into the
 // search box (results loaded) whether or not it was then selected. `selected`
 // tells the two apart; the whole point is surfacing the searched-only ones.
+//
+// A row the backend could not pin to a club (`is_query_row` — a half-typed
+// query whose top match means nothing, see meta_ads.get_searched_clubs) shows
+// the SEARCH TERM as its identity, with the best guess underneath, so the
+// table never puts a club name where it has no business claiming one.
 function SearchRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
   const terms = (c.queries || []).filter(Boolean)
   return (
     <tr className={`border-b pb-hairline last:border-0 hover:bg-pb-surface2/40 ${hidden ? 'opacity-50' : ''}`}>
-      <td className="px-2 py-2 text-pb-text font-medium whitespace-nowrap">{c.name}</td>
+      <td className="px-2 py-2 whitespace-nowrap">
+        {c.is_query_row ? (
+          <>
+            <span className="text-pb-dim">Searched “{c.name}”</span>
+            <div className="font-mono text-[9px] uppercase text-pb-faintest">
+              {c.guess_name ? `Maybe ${c.guess_name}` : 'No clear match'}
+            </div>
+          </>
+        ) : (
+          <span className="text-pb-text font-medium">{c.name}</span>
+        )}
+      </td>
       <td className="px-2 py-2">
         <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
           c.via_meta
@@ -184,9 +200,11 @@ function SearchRow({ c, hidden = false, busy = false, onFlag, onRestore }) {
         <span className={`inline-block px-1.5 py-0.5 rounded-full border font-mono text-[9px] uppercase ${
           c.selected
             ? 'border-emerald-500/40 text-emerald-300 bg-emerald-500/10'
-            : 'border-sky-500/40 text-sky-300 bg-sky-500/10'
+            : c.is_query_row
+              ? 'border-amber-500/40 text-amber-300 bg-amber-500/10'
+              : 'border-sky-500/40 text-sky-300 bg-sky-500/10'
         }`}>
-          {c.selected ? 'Selected' : 'Searched only'}
+          {c.selected ? 'Selected' : c.is_query_row ? 'Unresolved' : 'Searched only'}
         </span>
       </td>
       <td className="px-2 py-2 text-pb-dim font-mono whitespace-nowrap" title={`${fmtNum(c.searches)} search${c.searches === 1 ? '' : 'es'}`}>
@@ -889,7 +907,7 @@ export default function SuperMetaAds() {
                       <tbody>
                         {selectedClubs.clubs.map((c) => (
                           <SelectionRow
-                            key={c.name + (c.org_id || '')}
+                            key={c.key || c.name + (c.org_id || '')}
                             c={c}
                             busy={busySelectionKey === (c.key || c.name)}
                             onFlag={() => hideSelection(c)}
@@ -897,7 +915,7 @@ export default function SuperMetaAds() {
                         ))}
                         {showHiddenSelections && (selectedClubs.hidden_clubs || []).map((c) => (
                           <SelectionRow
-                            key={'hidden-' + c.name + (c.org_id || '')}
+                            key={'hidden-' + (c.key || c.name)}
                             c={c}
                             hidden
                             busy={busySelectionKey === (c.key || c.name)}
@@ -930,9 +948,11 @@ export default function SuperMetaAds() {
                   </div>
                   <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
                     <span>
-                      {searchedClubs.identified} club{searchedClubs.identified === 1 ? '' : 's'}
+                      {searchedClubs.identified} row{searchedClubs.identified === 1 ? '' : 's'}
                       {searchedClubs.searched_only_count > 0
                         && <> &middot; {searchedClubs.searched_only_count} not selected</>}
+                      {(searchedClubs.unsure_count || 0) > 0
+                        && <> &middot; {searchedClubs.unsure_count} unresolved</>}
                     </span>
                     {searchedClubs.searched_only_count > 0 && searchedClubs.converted_count > 0 && (
                       <button
@@ -950,7 +970,7 @@ export default function SuperMetaAds() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-left font-mono text-[10px] tracking-wide2 uppercase text-pb-faint border-b pb-hairline">
-                        <th className="px-2 py-2">Top match</th>
+                        <th className="px-2 py-2">Club / search</th>
                         <th className="px-2 py-2">Source</th>
                         <th className="px-2 py-2">Status</th>
                         <th className="px-2 py-2">Visitors</th>
@@ -983,11 +1003,14 @@ export default function SuperMetaAds() {
                   </table>
                 </div>
                 <p className="font-mono text-[9px] text-pb-faintest mt-3">
-                  A row is logged when a visitor&rsquo;s search returns a result, whether or not they then
-                  click one &mdash; the top match is recorded along with the text they typed. &ldquo;Searched
-                  only&rdquo; means the club showed up in a search but was never selected. &ldquo;Visitors&rdquo;
-                  counts distinct people; hover it for the raw search count. Meta-tagged rows came through the
-                  ad. &ldquo;Flag as test&rdquo; hides the row here and in the selected-clubs table.
+                  A row is logged when a visitor&rsquo;s search returns a result, whether or not they then click
+                  one. One person typing their way to a club is ONE row, not one per keystroke, and the club is
+                  taken from what they picked or from the most specific thing they typed. A half-typed query
+                  whose match can&rsquo;t be trusted shows as &ldquo;Unresolved&rdquo; with the search term
+                  itself and a best guess, rather than naming a club nobody was after. &ldquo;Searched only&rdquo;
+                  means the club showed up in a search but was never selected. &ldquo;Visitors&rdquo; counts
+                  distinct people; hover it for the raw search count. Meta-tagged rows came through the ad.
+                  &ldquo;Flag as test&rdquo; hides the row here and in the selected-clubs table.
                 </p>
               </div>
             )}

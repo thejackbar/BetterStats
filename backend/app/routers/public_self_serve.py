@@ -130,6 +130,12 @@ class TrackStepRequest(BaseModel):
     club_name: Optional[str] = None
     club_org_id: Optional[str] = None
     query: Optional[str] = None
+    # How many clubs that search returned. The top match alone is close to
+    # arbitrary for a half-typed query ("Warn" surfaced a club called
+    # "…Warners Bay" that nobody was looking for), so the count is what lets
+    # the Meta Ads page tell a search that identified ONE club from a guess —
+    # see meta_ads.get_searched_clubs.
+    result_count: Optional[int] = None
 
 
 @router.post("/track-step")
@@ -165,6 +171,8 @@ async def track_step(data: TrackStepRequest, request: Request):
     club_org_id = (data.club_org_id or "").strip()[:64]
     search_query = (data.query or "").strip()[:200]
     metadata = {}
+    if data.result_count is not None and data.result_count >= 0:
+        metadata["result_count"] = min(int(data.result_count), 10000)
     if club_name:
         metadata["club_name"] = club_name
     if club_org_id:

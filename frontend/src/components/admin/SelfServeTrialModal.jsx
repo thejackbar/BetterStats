@@ -208,7 +208,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
         const top = list[0]
         if (top && searchedOrgRef.current !== (top.id || orgName(top))) {
           searchedOrgRef.current = top.id || orgName(top)
-          trackFunnelStep('club_searched', { name: orgName(top), org_id: top.id, query: q })
+          trackFunnelStep('club_searched', { name: orgName(top), org_id: top.id, query: q, result_count: list.length })
         }
       } catch (e) {
         setResults([])

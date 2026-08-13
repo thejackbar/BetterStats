@@ -111,6 +111,8 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
   const sendable = clubs.filter(c => c.directory && !c.directory.excluded && c.emailable_count > 0)
   const noContacts = clubs.filter(c => c.directory && !c.directory.excluded && c.emailable_count === 0)
   const unmatched = clubs.filter(c => !c.directory)
+  const unresolvedRows = unmatched.filter(c => c.is_query_row)
+  const plainUnmatched = unmatched.filter(c => !c.is_query_row)
   const excludedClubs = clubs.filter(c => c.directory?.excluded)
   const contactTotal = sendable.reduce((n, c) => n + c.emailable_count, 0)
 
@@ -181,13 +183,17 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
                 )}
                 {clubs.map(c => (
                   <tr key={c.key} className="border-b border-pb-hairline last:border-0">
-                    <td className="px-3 py-2 text-pb-text">{c.name}</td>
+                    <td className="px-3 py-2 text-pb-text">
+                      {c.is_query_row ? <span className="text-pb-dim">Searched &ldquo;{c.name}&rdquo;</span> : c.name}
+                    </td>
                     <td className="px-3 py-2 text-pb-faint">
-                      {!c.directory
-                        ? <span className="text-pb-red">Not in the directory</span>
-                        : c.directory.excluded
-                          ? <span className="text-pb-red">Excluded from outreach</span>
-                          : c.directory.name}
+                      {c.is_query_row
+                        ? <span className="text-pb-red">Search not resolved to a club</span>
+                        : !c.directory
+                          ? <span className="text-pb-red">Not in the directory</span>
+                          : c.directory.excluded
+                            ? <span className="text-pb-red">Excluded from outreach</span>
+                            : c.directory.name}
                     </td>
                     <td className="px-3 py-2 text-right">
                       {c.emailable_count > 0
@@ -202,7 +208,8 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
 
           {(unmatched.length > 0 || excludedClubs.length > 0 || noContacts.length > 0) && (
             <div className="text-[11.5px] text-pb-faint space-y-0.5">
-              {unmatched.length > 0 && <div>{unmatched.length} club{unmatched.length === 1 ? '' : 's'} could not be matched to the Club Directory and will be left out.</div>}
+              {unresolvedRows.length > 0 && <div>{unresolvedRows.length} search{unresolvedRows.length === 1 ? '' : 'es'} could not be pinned to a club, so there is nobody to email — left out.</div>}
+              {plainUnmatched.length > 0 && <div>{plainUnmatched.length} club{plainUnmatched.length === 1 ? '' : 's'} could not be matched to the Club Directory and will be left out.</div>}
               {excludedClubs.length > 0 && <div>{excludedClubs.length} club{excludedClubs.length === 1 ? '' : 's'} excluded from outreach in the Club Directory will be left out.</div>}
               {noContacts.length > 0 && <div>{noContacts.length} matched club{noContacts.length === 1 ? '' : 's'} has no contact with an email address on file.</div>}
             </div>
@@ -231,6 +238,7 @@ export default function SuperWizardClubs() {
   const [source, setSource] = useState('')          // '' | selected | searched
   const [emailed, setEmailed] = useState('')        // '' | yes | no
   const [progress, setProgress] = useState('')      // '' | completed | not_completed | terms | selected
+  const [resolved, setResolved] = useState('')      // '' | yes | no
   const [sortBy, setSortBy] = useState('last_at')   // club | last_at | contacts
   const [sortDir, setSortDir] = useState('desc')
   const [checked, setChecked] = useState(() => new Set())
@@ -263,6 +271,8 @@ export default function SuperWizardClubs() {
       if (progress === 'not_completed' && step === STEP_COMPLETED) return false
       if (progress === 'terms' && step !== STEP_TERMS) return false
       if (progress === 'selected' && step !== 'Club selected') return false
+      if (resolved === 'yes' && c.is_query_row) return false
+      if (resolved === 'no' && !c.is_query_row) return false
       return true
     })
     const dir = sortDir === 'asc' ? 1 : -1
@@ -279,7 +289,7 @@ export default function SuperWizardClubs() {
       return (a.name || '').localeCompare(b.name || '')
     })
     return out
-  }, [clubs, q, source, emailed, progress, sortBy, sortDir])
+  }, [clubs, q, source, emailed, progress, resolved, sortBy, sortDir])
 
   // A tick survives a filter change but never targets a club that is no longer
   // on screen — "create a list from what I picked" has to mean what it says.
@@ -319,6 +329,7 @@ export default function SuperWizardClubs() {
   const shownContacts = shown.reduce((n, c) => n + (c.contact_count || 0), 0)
   const shownEmailable = shown.reduce((n, c) => n + (c.emailable_count || 0), 0)
   const shownCompleted = shown.filter(c => c.furthest_step === STEP_COMPLETED).length
+  const shownUnresolved = shown.filter(c => c.is_query_row).length
 
   return (
     <AdminLayout>
@@ -369,6 +380,12 @@ export default function SuperWizardClubs() {
                 title="Everyone who dropped off before registering — the ones worth chasing">Not completed</Chip>
               <Chip active={progress === 'terms'} onClick={() => setProgress('terms')}
                 title="Got as far as Terms &amp; privacy, then stopped">Reached terms</Chip>
+              <span className="text-pb-faintest text-[11px] uppercase font-mono ml-1">Match</span>
+              <Chip active={resolved === ''} onClick={() => setResolved('')}>All</Chip>
+              <Chip active={resolved === 'yes'} onClick={() => setResolved('yes')}
+                title="Searches we could pin to a specific club">Resolved</Chip>
+              <Chip active={resolved === 'no'} onClick={() => setResolved('no')}
+                title="Half-typed searches whose match can't be trusted — the club is a guess">Unresolved</Chip>
               <span className="text-pb-faintest text-[11px] uppercase font-mono ml-1">Contact</span>
               <Chip active={emailed === ''} onClick={() => setEmailed('')}>All</Chip>
               <Chip active={emailed === 'yes'} onClick={() => setEmailed('yes')}>Emailed</Chip>
@@ -381,6 +398,7 @@ export default function SuperWizardClubs() {
               {selectedRows.length > 0 && (
                 <span className="text-pb-accent">{selectedRows.length} ticked</span>
               )}
+              {shownUnresolved > 0 && <span className="text-amber-300">{shownUnresolved} unresolved</span>}
               <span className="text-pb-faintest">{shownCompleted} registered · {data.emailed_clubs} emailed so far</span>
             </div>
           </div>
@@ -418,7 +436,16 @@ export default function SuperWizardClubs() {
                         aria-label={`Select ${c.name}`} className="cursor-pointer" />
                     </td>
                     <td className="px-2 py-2.5">
-                      <div className="text-pb-text font-medium">{c.name}</div>
+                      {c.is_query_row ? (
+                        <>
+                          <div className="text-pb-dim">Searched &ldquo;{c.name}&rdquo;</div>
+                          <div className="text-pb-faintest text-[11px]">
+                            {c.guess_name ? `Maybe ${c.guess_name}` : 'No clear match'}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-pb-text font-medium">{c.name}</div>
+                      )}
                       {c.furthest_step && (
                         <div className="mt-0.5">
                           <span className={`font-mono text-[9px] uppercase px-1.5 py-0.5 rounded-full border ${
@@ -441,10 +468,21 @@ export default function SuperWizardClubs() {
                           Meta
                         </span>
                       )}
+                      {/* What was actually typed. A club is only as trustworthy
+                          as the search behind it, so the terms are on the row
+                          rather than buried in a tooltip. */}
+                      {(c.queries || []).length > 0 && (
+                        <div className="text-pb-faintest text-[11px] mt-1 max-w-[15rem] truncate"
+                          title={c.queries.map(t => `“${t}”`).join(' · ')}>
+                          {c.queries.map(t => `“${t}”`).join(' · ')}
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-2.5">
                       {!c.directory ? (
-                        <span className="text-pb-faintest">Not matched</span>
+                        <span className="text-pb-faintest">
+                          {c.is_query_row ? 'Search not resolved' : 'Not matched'}
+                        </span>
                       ) : (
                         <div className="leading-tight">
                           <div className="text-pb-dim">{c.directory.name}</div>
