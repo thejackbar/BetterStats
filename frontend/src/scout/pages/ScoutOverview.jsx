@@ -14,6 +14,40 @@ function StatReadout({ label, value }) {
   )
 }
 
+function MoverColumn({ title, rows }) {
+  return (
+    <div>
+      <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest px-1 pb-1">{title}</div>
+      {rows.length === 0 && <p className="text-xs text-pb-faint py-3 px-1">No {title.toLowerCase()} movers yet.</p>}
+      <div className="divide-y divide-pb-hairline">
+        {rows.map((m) => <MoverRow key={`${m.id}-${m.metric}`} m={m} />)}
+      </div>
+    </div>
+  )
+}
+
+function MoverRow({ m }) {
+  return (
+    <div className="flex items-center gap-2.5 py-2.5">
+      <PlayerAvatar name={m.name} size={32} />
+      <div className="min-w-0 flex-1">
+        <Link to={`/betterscout/app/players/${m.id}`} className="text-sm font-medium hover:text-pb-accent truncate block">{m.name}</Link>
+        <div className="text-xs text-pb-faint truncate">{[m.club_name, m.grade_name].filter(Boolean).join(' · ')}</div>
+      </div>
+      <Sparkline seasons={m.sparkline.map((s) => ({ year: s.year, v: s.value }))} metricKey="v" height={30} width={6} gap={2.5} />
+      <div className="text-right shrink-0">
+        <div className="font-mono text-sm font-bold">
+          {m.current_value}
+          <span className={m.improved ? 'text-pb-positive' : 'text-pb-red'} style={{ marginLeft: 4 }}>
+            {m.improved ? '▲' : '▼'} {Math.abs(m.delta)}
+          </span>
+        </div>
+        <div className="font-mono text-[9px] text-pb-faint">vs career {m.career_value}</div>
+      </div>
+    </div>
+  )
+}
+
 export default function ScoutOverview() {
   const [data, setData] = useState(undefined)
   const [error, setError] = useState(null)
@@ -36,6 +70,8 @@ export default function ScoutOverview() {
   if (data === undefined) return <ScoutModuleLayout title="Overview"><p className="text-sm text-pb-dim">Loading…</p></ScoutModuleLayout>
 
   const { usage, pipeline_counts: pipeline, form_movers: movers, form_movers_total, stale, recent_clubs: clubs, recent_players: recentPlayers } = data
+  const battingMovers = movers.filter((m) => m.batting)
+  const bowlingMovers = movers.filter((m) => !m.batting)
 
   return (
     <ScoutModuleLayout
@@ -54,35 +90,19 @@ export default function ScoutOverview() {
             <div className="flex items-center justify-between">
               <div>
                 <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Form movers</div>
-                <p className="text-xs text-pb-faint mt-0.5">Last season vs. the two before, among players you track</p>
+                <p className="text-xs text-pb-faint mt-0.5">Latest season vs. career average, among players you track</p>
               </div>
               {form_movers_total > movers.length && (
                 <Link to="/betterscout/app/players" className="text-xs text-pb-accent hover:underline whitespace-nowrap">See all {form_movers_total} →</Link>
               )}
             </div>
             {movers.length === 0 && <p className="text-sm text-pb-faint py-4">Not enough season-on-season history to show movers yet.</p>}
-            <div className="divide-y divide-pb-hairline -mx-4 mt-1">
-              {movers.map((m) => (
-                <div key={`${m.id}-${m.metric}`} className="flex items-center gap-3 px-4 py-3">
-                  <PlayerAvatar name={m.name} size={36} />
-                  <div className="min-w-0 flex-1">
-                    <Link to={`/betterscout/app/players/${m.id}`} className="text-sm font-medium hover:text-pb-accent truncate block">{m.name}</Link>
-                    <div className="text-xs text-pb-faint truncate">{[m.club_name, m.grade_name].filter(Boolean).join(' · ')}</div>
-                  </div>
-                  <Sparkline seasons={m.sparkline.map((s) => ({ year: s.year, v: s.value }))} metricKey="v" height={34} width={7} gap={3} />
-                  <div className="text-right shrink-0">
-                    <div className="font-mono text-sm font-bold">
-                      {m.current_value}
-                      <span className={m.improved ? 'text-pb-accent' : 'text-pb-red'} style={{ marginLeft: 4 }}>
-                        {m.improved ? '▲' : '▼'} {Math.abs(m.delta)}
-                      </span>
-                    </div>
-                    <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint">{m.metric}</div>
-                  </div>
-                  <Link to={`/betterscout/app/players/${m.id}`} className="text-xs px-2 py-1 rounded border border-pb-hairline2 text-pb-faint hover:text-pb-text shrink-0">Open</Link>
-                </div>
-              ))}
-            </div>
+            {movers.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 mt-1">
+                <MoverColumn title="Batting" rows={battingMovers} />
+                <MoverColumn title="Bowling" rows={bowlingMovers} />
+              </div>
+            )}
           </div>
 
           <div className="pb-card p-4 space-y-1">
@@ -169,16 +189,6 @@ export default function ScoutOverview() {
                 </Link>
               ))}
             </div>
-          </div>
-
-          <div className="pb-card p-4 space-y-2 border-dashed" style={{ borderStyle: 'dashed' }}>
-            <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Not built yet</div>
-            <p className="text-sm font-medium">Search a player by name, anywhere in Australia</p>
-            <p className="text-xs text-pb-faint">
-              BetterScout only knows clubs a scout has actually searched for — name search across the whole country needs crawling and indexing every club's roster, which isn't built yet.
-            </p>
-            <input disabled placeholder="Search any player…" className="w-full bg-pb-bg border border-pb-hairline2 rounded px-3 py-2 text-sm text-pb-faintest cursor-not-allowed" />
-            <p className="text-xs text-pb-faint">The same applies to a country-wide hot-form feed.</p>
           </div>
         </div>
       </div>

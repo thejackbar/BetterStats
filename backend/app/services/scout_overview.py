@@ -110,23 +110,32 @@ def _season_avg(season_rows: list[dict], batting: bool) -> float | None:
 
 
 def _discipline_mover(identity: dict, active: list[dict], batting: bool) -> dict | None:
-    """Latest active season vs the two before it, on ONE discipline — batting
-    average or bowling average (down is good there, so the sign is flipped
-    for the delta before comparing magnitude, but the RAW delta shown to a
-    scout is always "how did their own number move"). Returns None when the
-    player has no usable average in this discipline (e.g. a pure bowler has
-    no batting mover, and vice versa) rather than forcing a pick between
-    disciplines — see movers_for_seasons, which asks for BOTH per player
-    instead of guessing "batter or bowler" from a career-runs/wickets ratio.
-    `identity` is a plain {id, name, club_name, grade_name} dict rather than
-    a ScoutedPlayer, so this same function serves both Overview's org-tracked
-    movers and services/scout_feed.py's platform-wide hot-form feed."""
-    latest, prior = active[0], active[1:3]
+    """Latest active season vs the player's own CAREER average on ONE
+    discipline (batting average or bowling average — down is good there, so
+    the sign is flipped for the delta before comparing magnitude, but the
+    RAW delta shown to a scout is always "how did their own number move").
+    "Career" is deliberately every season BEFORE the one being judged, not
+    every season including it — comparing a season against an average that
+    already contains itself waters the signal down and a genuinely hot or
+    cold season barely moves a long career average. Same "season vs
+    prior-career baseline" shape BetterIQ's own breakout/decline detection
+    already uses (services/iq_trends.py) — this is BetterScout's version of
+    the same idea, scaled to season-level (not innings-level) data.
+
+    Returns None when the player has no usable average in this discipline
+    (e.g. a pure bowler has no batting mover, and vice versa) rather than
+    forcing a pick between disciplines — see movers_for_seasons, which asks
+    for BOTH per player instead of guessing "batter or bowler" from a
+    career-runs/wickets ratio. `identity` is a plain {id, name, club_name,
+    grade_name} dict rather than a ScoutedPlayer, so this same function
+    serves both Overview's org-tracked movers and services/scout_feed.py's
+    platform-wide hot-form feed."""
+    latest, prior = active[0], active[1:]
     latest_avg = _season_avg([latest], batting)
-    prior_avg = _season_avg(prior, batting)
-    if latest_avg is None or prior_avg is None:
+    career_avg = _season_avg(prior, batting)
+    if latest_avg is None or career_avg is None:
         return None
-    raw_delta = round(latest_avg - prior_avg, 2)
+    raw_delta = round(latest_avg - career_avg, 2)
     improved = raw_delta > 0 if batting else raw_delta < 0
     magnitude = abs(raw_delta)
     if magnitude < 0.01:
@@ -137,11 +146,13 @@ def _discipline_mover(identity: dict, active: list[dict], batting: bool) -> dict
     ]
     return {
         **identity,
+        "batting": batting,
         "metric": "batting average" if batting else "bowling average",
         "delta": raw_delta,
         "improved": improved,
         "magnitude": magnitude,
         "current_value": latest_avg,
+        "career_value": career_avg,
         "sparkline": sparkline,
     }
 

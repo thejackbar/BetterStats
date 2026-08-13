@@ -412,6 +412,48 @@ async def add_player(
     return await player_out(session, player)
 
 
+async def add_player_from_search(
+    session: AsyncSession, scout_org_id: str, org_guid: str, player_name: str,
+    club_name: str | None = None, canonical_participant_id: str | None = None,
+    watchlist_id: str | None = None,
+) -> dict:
+    """The global search bar's own "add and track" action for an UNTRACKED
+    result. The identity there comes from the national playCommunity search
+    (services.scout_live_search), which knows a name and a club but not that
+    club's own locally-scoped roster id — unlike add_player, which is only
+    ever called from Discover with a player_id already sliced out of an
+    already-fetched club roster.
+
+    Resolves the same way link_player_club's auto-resolve does: build the
+    named club's roster (reporting {"status": "building"} for the caller to
+    poll, same contract as everywhere else in this module), try an exact
+    match on canonical_participant_id, then fall back to a name match scoped
+    to that one club. Once resolved, delegates to add_player itself — so a
+    clicked search result and a click on Discover's own roster end up
+    creating byte-for-byte the same kind of row, not a second code path."""
+    roster = await get_or_start_club_roster(session, org_guid, club_name=club_name)
+    if roster.get("status") != "ready":
+        return {"status": roster.get("status")}
+    club_row = await _load_club_row(session, org_guid)
+    resolved_club_name = club_name or ((club_row.payload or {}).get("org", {}).get("name") if club_row else None)
+
+    player_id = None
+    sliced = _slice_player(club_row.payload or {}, canonical_participant_id) if canonical_participant_id else None
+    if sliced:
+        player_id = canonical_participant_id
+    else:
+        matches = await scout_feed.find_name_matches(session, player_name, only_club_guid=org_guid, threshold=0.85)
+        if matches:
+            player_id = matches[0]["player_id"]
+    if not player_id:
+        raise ValueError("Could not find this player in that club's current roster.")
+
+    return {
+        "status": "ready",
+        **(await add_player(session, scout_org_id, org_guid, player_id, resolved_club_name, watchlist_id)),
+    }
+
+
 async def add_manual_player(
     session: AsyncSession, scout_org_id: str, name: str, club_name: str | None = None, notes: str | None = None,
     watchlist_id: str | None = None,
@@ -567,15 +609,18 @@ async def suggest_other_clubs(session: AsyncSession, scouted_player_id: str) -> 
     EXACT id match against any participant id we already know for this
     player (their original grassroots_participant_id, or any linked club's
     own — see ScoutedPlayerClub); a raw CA aggregate id and this canonical
-    id often do coincide. Falling back to a name match is done ONLY when the
-    live search returns exactly one identity whose name matches ours
-    exactly (case/punctuation-insensitive, not fuzzy) — a name like "Green"
-    is common enough that several distinct real people share it (confirmed
-    live: searching "green" alone returns dozens), so guessing among several
-    same-named strangers would risk attaching someone else's clubs to this
-    player. An ambiguous or zero-result search returns no candidates rather
-    than guessing — the scout still has "Find at other clubs" for a manual,
-    scout-picked search.
+    id often do coincide. When no id matches, fall back to every identity
+    whose name matches ours exactly (case/punctuation-insensitive, not
+    fuzzy) — NOT just a lone unambiguous hit. PlayHQ's own index genuinely
+    holds two-plus distinct people under one common name (confirmed live:
+    "Benji Floros" alone resolves to two separate canonical ids), and
+    requiring uniqueness there silently returned zero candidates for a real,
+    scoutable player. Every candidate still needs a scout's confirm click in
+    link_player_club before anything is linked, so surfacing an extra club
+    that turns out to belong to a same-named stranger costs one Dismiss, not
+    a wrong link. A genuinely zero-result search still returns no candidates
+    — the scout still has "Find at other clubs" for a manual, scout-picked
+    search.
 
     Writes the result onto ScoutedPlayer as a cache (other_club_candidates),
     same "recompute wholesale, never partial-edit" rule stats_payload
@@ -595,17 +640,27 @@ async def suggest_other_clubs(session: AsyncSession, scouted_player_id: str) -> 
 
     result = await scout_live_search.search_playcommunity(player.name, types=("PLAYCOMM_PLAYER",))
     identity = next((p for p in result["players"] if p["id"] in known_ids), None)
+    identities = [identity] if identity else []
     if identity is None:
+        # No id we already hold matched anything live. Rather than requiring
+        # exactly one same-named identity (which silently returns nothing
+        # the moment PlayHQ's own index holds two+ people under this name —
+        # a real, observed case, not hypothetical), take EVERY exact-name
+        # hit. A candidate is never auto-linked — link_player_club always
+        # needs a scout's confirm click — so showing an extra club that
+        # turns out to belong to a same-named stranger costs one Dismiss
+        # click, while silently showing nothing costs the whole feature.
         target_norm = scout_feed._normalise_name_for_match(player.name)
-        exact_name_hits = [p for p in result["players"] if scout_feed._normalise_name_for_match(p["name"]) == target_norm]
-        identity = exact_name_hits[0] if len(exact_name_hits) == 1 else None
+        identities = [p for p in result["players"] if scout_feed._normalise_name_for_match(p["name"]) == target_norm]
 
     candidates = []
-    if identity:
-        for org in identity["organisations"]:
-            if org["id"] in linked_guids:
+    seen_guids = set()
+    for ident in identities:
+        for org in ident["organisations"]:
+            if org["id"] in linked_guids or org["id"] in seen_guids:
                 continue
-            candidates.append({"club_org_guid": org["id"], "club_name": org["name"], "canonical_participant_id": identity["id"]})
+            seen_guids.add(org["id"])
+            candidates.append({"club_org_guid": org["id"], "club_name": org["name"], "canonical_participant_id": ident["id"]})
 
     player.other_club_candidates = candidates
     player.other_club_candidates_checked_at = datetime.now(timezone.utc)

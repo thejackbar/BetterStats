@@ -87,6 +87,35 @@ async def add_player(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class AddPlayerFromSearchRequest(BaseModel):
+    org_guid: str
+    player_name: str
+    club_name: str | None = None
+    canonical_participant_id: str | None = None
+    watchlist_id: str | None = None
+
+
+@router.post("/players/add-from-search")
+async def add_player_from_search(
+    data: AddPlayerFromSearchRequest,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """The global search bar's "add and track" action on an untracked
+    result — see scout_discovery.add_player_from_search's own docstring.
+    May return {"status": "building"} while the target club's roster is
+    still being fetched; the frontend polls the same way Discover already
+    does everywhere else."""
+    _, org = current
+    try:
+        return await scout_discovery.add_player_from_search(
+            db, org.id, data.org_guid, data.player_name, data.club_name,
+            data.canonical_participant_id, data.watchlist_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 class AddManualPlayerRequest(BaseModel):
     name: str
     club_name: str | None = None

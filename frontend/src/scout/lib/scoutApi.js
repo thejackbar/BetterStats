@@ -25,6 +25,11 @@ export const scoutApi = {
     request(`/scout/clubs/${orgGuid}/roster/refresh${clubName ? `?club_name=${encodeURIComponent(clubName)}` : ''}`, { method: 'POST' }),
   addPlayer: (orgGuid, playerId, clubName, watchlistId) =>
     request('/scout/players/add', { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, club_name: clubName, watchlist_id: watchlistId }) }),
+  addPlayerFromSearch: ({ orgGuid, playerName, clubName, canonicalParticipantId, watchlistId }) =>
+    request('/scout/players/add-from-search', { method: 'POST', body: JSON.stringify({
+      org_guid: orgGuid, player_name: playerName, club_name: clubName,
+      canonical_participant_id: canonicalParticipantId ?? null, watchlist_id: watchlistId ?? null,
+    }) }),
   addManualPlayer: (name, clubName, notes, watchlistId) =>
     request('/scout/players/manual', { method: 'POST', body: JSON.stringify({ name, club_name: clubName, notes, watchlist_id: watchlistId }) }),
   listPlayers: () => request('/scout/players'),
