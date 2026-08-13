@@ -19,12 +19,15 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Player, async_session_maker
-from app.models.scout import ScoutClubCache, ScoutWatchlist, ScoutWatchlistCard, ScoutedPlayer, ScoutedPlayerClub
-from app.services import iq_scout, scout_feed, scout_internal_link, scout_watchlist
+from app.models.scout import (
+    ScoutClubCache, ScoutMilestoneSeen, ScoutPlayerNote, ScoutPlayerSearchView,
+    ScoutWatchlist, ScoutWatchlistCard, ScoutedPlayer, ScoutedPlayerClub,
+)
+from app.services import iq_scout, scout_feed, scout_internal_link, scout_live_search, scout_watchlist
 from app.services.iq_opponent import BUILD_STALE_AFTER, TTL, _BUILD_TASKS  # noqa: F401 — shared build-task bookkeeping
 
 logger = logging.getLogger(__name__)
@@ -554,22 +557,56 @@ async def player_out(session: AsyncSession, p: ScoutedPlayer) -> dict:
 # ─── cross-club linking (Spencer Green plays for several clubs) ──────────────
 
 async def suggest_other_clubs(session: AsyncSession, scouted_player_id: str) -> dict:
-    """Cache-only name-match scan against every OTHER already-cached club —
-    see scout_feed.find_name_matches for why this is name-based rather than
-    a participant-GUID lookup. Writes the result onto ScoutedPlayer as a
-    cache (other_club_candidates), same "recompute wholesale, never partial-
-    edit" rule stats_payload already follows, and returns it."""
+    """Asks PlayHQ's own canonical player index (services.scout_live_search)
+    which clubs this player is REALLY registered at — not a name-similarity
+    guess. Spencer Green's own identity there lists all 12 real clubs/rep
+    sides he plays for, keyed on the same id his play.cricket.com.au profile
+    URL uses.
+
+    Matching this ScoutedPlayer to the right live-search identity: prefer an
+    EXACT id match against any participant id we already know for this
+    player (their original grassroots_participant_id, or any linked club's
+    own — see ScoutedPlayerClub); a raw CA aggregate id and this canonical
+    id often do coincide. Falling back to a name match is done ONLY when the
+    live search returns exactly one identity whose name matches ours
+    exactly (case/punctuation-insensitive, not fuzzy) — a name like "Green"
+    is common enough that several distinct real people share it (confirmed
+    live: searching "green" alone returns dozens), so guessing among several
+    same-named strangers would risk attaching someone else's clubs to this
+    player. An ambiguous or zero-result search returns no candidates rather
+    than guessing — the scout still has "Find at other clubs" for a manual,
+    scout-picked search.
+
+    Writes the result onto ScoutedPlayer as a cache (other_club_candidates),
+    same "recompute wholesale, never partial-edit" rule stats_payload
+    already follows, and returns it."""
     player = await session.get(ScoutedPlayer, scouted_player_id)
     if not player:
         raise ValueError("Player not found.")
     if player.source != "au_grassroots":
         return {"candidates": [], "checked_at": None}
-    linked_guids = {
-        row[0] for row in (await session.execute(
-            select(ScoutedPlayerClub.club_org_guid).where(ScoutedPlayerClub.scouted_player_id == player.id)
-        )).all()
-    }
-    candidates = await scout_feed.find_name_matches(session, player.name, exclude_club_guids=linked_guids)
+
+    club_rows = (await session.execute(
+        select(ScoutedPlayerClub).where(ScoutedPlayerClub.scouted_player_id == player.id)
+    )).scalars().all()
+    linked_guids = {c.club_org_guid for c in club_rows}
+    known_ids = {player.grassroots_participant_id} | {c.grassroots_participant_id for c in club_rows}
+    known_ids.discard(None)
+
+    result = await scout_live_search.search_playcommunity(player.name, types=("PLAYCOMM_PLAYER",))
+    identity = next((p for p in result["players"] if p["id"] in known_ids), None)
+    if identity is None:
+        target_norm = scout_feed._normalise_name_for_match(player.name)
+        exact_name_hits = [p for p in result["players"] if scout_feed._normalise_name_for_match(p["name"]) == target_norm]
+        identity = exact_name_hits[0] if len(exact_name_hits) == 1 else None
+
+    candidates = []
+    if identity:
+        for org in identity["organisations"]:
+            if org["id"] in linked_guids:
+                continue
+            candidates.append({"club_org_guid": org["id"], "club_name": org["name"], "canonical_participant_id": identity["id"]})
+
     player.other_club_candidates = candidates
     player.other_club_candidates_checked_at = datetime.now(timezone.utc)
     await session.commit()
@@ -590,10 +627,12 @@ async def _run_other_club_scan(scouted_player_id: str) -> None:
 
 async def search_other_club(session: AsyncSession, scouted_player_id: str, org_guid: str, club_name: str | None = None) -> dict:
     """On-demand: the scout names a SPECIFIC club they suspect this player
-    also turns out for. Same build/poll contract as Discover's own roster
-    fetch — a not-yet-cached club reports {"status": "building"} for the
-    frontend to keep polling, same as get_or_start_club_roster already
-    returns everywhere else."""
+    also turns out for (the manual counterpart to suggest_other_clubs' live-
+    search-driven automatic scan — for a club that search doesn't surface,
+    e.g. one PlayHQ's index doesn't cover yet). Same build/poll contract as
+    Discover's own roster fetch — a not-yet-cached club reports
+    {"status": "building"} for the frontend to keep polling, same as
+    get_or_start_club_roster already returns everywhere else."""
     player = await session.get(ScoutedPlayer, scouted_player_id)
     if not player:
         raise ValueError("Player not found.")
@@ -602,9 +641,12 @@ async def search_other_club(session: AsyncSession, scouted_player_id: str, org_g
         return {"status": roster.get("status"), "candidates": player.other_club_candidates or []}
     matches = await scout_feed.find_name_matches(session, player.name, only_club_guid=org_guid)
     existing = player.other_club_candidates or []
-    merged = {(c["club_org_guid"], c["player_id"]): c for c in existing}
+    merged = {(c["club_org_guid"], c.get("player_id")): c for c in existing}
     for m in matches:
-        merged[(m["club_org_guid"], m["player_id"])] = m
+        merged[(m["club_org_guid"], m["player_id"])] = {
+            "club_org_guid": m["club_org_guid"], "club_name": m["club_name"], "player_id": m["player_id"],
+            "name": m["name"], "confidence": m["confidence"],
+        }
     player.other_club_candidates = list(merged.values())
     player.other_club_candidates_checked_at = datetime.now(timezone.utc)
     await session.commit()
@@ -612,22 +654,47 @@ async def search_other_club(session: AsyncSession, scouted_player_id: str, org_g
 
 
 async def link_player_club(
-    session: AsyncSession, scouted_player_id: str, org_guid: str, player_id: str, *, is_primary: bool = False,
+    session: AsyncSession, scouted_player_id: str, org_guid: str, player_id: str | None = None, *,
+    is_primary: bool = False, canonical_participant_id: str | None = None,
 ) -> dict:
-    """The scout confirmed a name-match candidate really is the same
-    person — links that club stint onto this ScoutedPlayer. Never called
-    automatically; a suggestion in other_club_candidates only becomes a real
-    ScoutedPlayerClub row via this explicit confirm."""
+    """The scout confirmed a candidate really is the same person — links
+    that club stint onto this ScoutedPlayer. Never called automatically; a
+    suggestion in other_club_candidates only becomes a real
+    ScoutedPlayerClub row via this explicit confirm.
+
+    `player_id` — this club's OWN locally-scoped participant id — is
+    required for the manual "Find at other clubs" flow (the scout picked a
+    specific roster row) but optional for a live-search-driven candidate
+    from suggest_other_clubs, which only knows the target club's name, not
+    its own internal id for this player. When omitted, this resolves it
+    itself: build the club's roster if needed (reporting {"status":
+    "building"} for the caller to poll, exactly like search_other_club),
+    then try an exact match on `canonical_participant_id` (cheap and precise
+    when this club's own CA aggregate feed happens to use the same id),
+    falling back to a name match scoped to this one club."""
     player = await session.get(ScoutedPlayer, scouted_player_id)
     if not player:
         raise ValueError("Player not found.")
+    roster = await get_or_start_club_roster(session, org_guid)
+    if roster.get("status") != "ready":
+        return {"status": roster.get("status")}
     club_row = await _load_club_row(session, org_guid)
-    if not club_row or club_row.status != "ready":
-        raise ValueError("Club roster isn't ready yet — fetch the roster before linking a player.")
-    sliced = _slice_player(club_row.payload or {}, player_id)
+    resolved_club_name = (club_row.payload or {}).get("org", {}).get("name") if club_row else None
+
+    if player_id is None:
+        sliced = _slice_player(club_row.payload or {}, canonical_participant_id) if canonical_participant_id else None
+        if sliced:
+            player_id = canonical_participant_id
+        else:
+            matches = await scout_feed.find_name_matches(session, player.name, only_club_guid=org_guid, threshold=0.85)
+            if not matches:
+                raise ValueError("Could not find this player in that club's roster.")
+            player_id = matches[0]["player_id"]
+            sliced = _slice_player(club_row.payload or {}, player_id)
+    else:
+        sliced = _slice_player(club_row.payload or {}, player_id)
     if not sliced:
         raise ValueError("That player wasn't found in this club's roster.")
-    resolved_club_name = (club_row.payload or {}).get("org", {}).get("name")
 
     club_row_obj = await _upsert_player_club(
         session, player.id, org_guid, resolved_club_name, sliced,
@@ -642,11 +709,10 @@ async def link_player_club(
 
     # Drop the now-confirmed candidate out of the suggestion list.
     player.other_club_candidates = [
-        c for c in (player.other_club_candidates or [])
-        if not (c.get("club_org_guid") == org_guid.lower() and c.get("player_id") == player_id)
+        c for c in (player.other_club_candidates or []) if c.get("club_org_guid") != org_guid.lower()
     ]
     await session.commit()
-    return await player_out(session, player)
+    return {"status": "ready", **(await player_out(session, player))}
 
 
 async def unlink_player_club(session: AsyncSession, scouted_player_id: str, scouted_player_club_id: str) -> dict:
@@ -686,3 +752,128 @@ async def unlink_player_club(session: AsyncSession, scouted_player_id: str, scou
             player.internal_player_id = None
     await session.commit()
     return await player_out(session, player)
+
+
+# ─── merging two profiles that turn out to be one real person ────────────────
+
+async def merge_scouted_players(session: AsyncSession, keep_id: str, remove_id: str) -> dict:
+    """Combines two ScoutedPlayer profiles that turned out to be the same
+    real person — the BetterStats admin.merge_players precedent, scaled
+    down to BetterScout's simpler model. Reported live: a player had two
+    separate tracked profiles because he was added from two clubs whose own
+    CA aggregate feeds happened to mint different participant ids for him
+    (the well-documented "one real person, several CA GUIDs" class of
+    issue) — his scouting notes on one profile were invisible from the
+    other, and neither watchlist knew about the other's tracking.
+
+    `keep_id` survives; `remove_id`'s real data folds in (never clobbering a
+    value `keep` already has — same rule every other merge/fill-gap
+    operation in this codebase follows) and its row is deleted once its
+    children have all been moved or de-duplicated away. Platform-wide, not
+    org-scoped, unlike remove_player_everywhere: a merge here affects every
+    org tracking either profile, which is the point — it fixes a genuinely
+    wrong split, not one org's private opinion."""
+    if keep_id == remove_id:
+        raise ValueError("Can't merge a profile with itself.")
+    keep = await session.get(ScoutedPlayer, keep_id)
+    remove = await session.get(ScoutedPlayer, remove_id)
+    if not keep or not remove:
+        raise ValueError("Player not found.")
+
+    # ScoutedPlayerClub — skip a club `keep` already has (its own row wins),
+    # re-point the rest. At most one row may carry is_primary; only promote
+    # a moved-over row when `keep` currently has none.
+    keep_club_guids = {
+        row[0] for row in (await session.execute(
+            select(ScoutedPlayerClub.club_org_guid).where(ScoutedPlayerClub.scouted_player_id == keep.id)
+        )).all()
+    }
+    keep_has_primary = bool((await session.execute(
+        select(ScoutedPlayerClub.id).where(
+            ScoutedPlayerClub.scouted_player_id == keep.id, ScoutedPlayerClub.is_primary.is_(True),
+        )
+    )).first())
+    for c in (await session.execute(
+        select(ScoutedPlayerClub).where(ScoutedPlayerClub.scouted_player_id == remove.id)
+    )).scalars().all():
+        if c.club_org_guid in keep_club_guids:
+            await session.delete(c)
+            continue
+        c.scouted_player_id = keep.id
+        c.is_primary = not keep_has_primary
+        keep_has_primary = True
+        keep_club_guids.add(c.club_org_guid)
+
+    # ScoutWatchlistCard — one card per (watchlist, player); a watchlist
+    # both profiles happened to be on collides on that constraint. `keep`'s
+    # own card wins there (it's already tracked on that board), the
+    # duplicate is dropped rather than erroring.
+    keep_watchlist_ids = {
+        row[0] for row in (await session.execute(
+            select(ScoutWatchlistCard.watchlist_id).where(ScoutWatchlistCard.scouted_player_id == keep.id)
+        )).all()
+    }
+    for card in (await session.execute(
+        select(ScoutWatchlistCard).where(ScoutWatchlistCard.scouted_player_id == remove.id)
+    )).scalars().all():
+        if card.watchlist_id in keep_watchlist_ids:
+            await session.delete(card)
+        else:
+            card.scouted_player_id = keep.id
+            keep_watchlist_ids.add(card.watchlist_id)
+
+    # ScoutPlayerNote — org-scoped, no unique constraint to collide with.
+    # This is the actual data-loss fix: every note recorded against the
+    # OTHER profile was invisible from this one.
+    await session.execute(
+        update(ScoutPlayerNote).where(ScoutPlayerNote.scouted_player_id == remove.id).values(scouted_player_id=keep.id)
+    )
+
+    # ScoutMilestoneSeen — unique per (org, player, type, value); skip a
+    # duplicate dismissal, re-point the rest.
+    keep_milestones = {
+        (row[0], row[1], row[2]) for row in (await session.execute(
+            select(ScoutMilestoneSeen.scout_org_id, ScoutMilestoneSeen.milestone_type, ScoutMilestoneSeen.milestone_value)
+            .where(ScoutMilestoneSeen.scouted_player_id == keep.id)
+        )).all()
+    }
+    for m in (await session.execute(
+        select(ScoutMilestoneSeen).where(ScoutMilestoneSeen.scouted_player_id == remove.id)
+    )).scalars().all():
+        key = (m.scout_org_id, m.milestone_type, m.milestone_value)
+        if key in keep_milestones:
+            await session.delete(m)
+        else:
+            m.scouted_player_id = keep.id
+            keep_milestones.add(key)
+
+    # ScoutPlayerSearchView — unique per (org, player); skip a duplicate,
+    # keeping keep's own row.
+    keep_search_orgs = {
+        row[0] for row in (await session.execute(
+            select(ScoutPlayerSearchView.scout_org_id).where(ScoutPlayerSearchView.scouted_player_id == keep.id)
+        )).all()
+    }
+    for v in (await session.execute(
+        select(ScoutPlayerSearchView).where(ScoutPlayerSearchView.scouted_player_id == remove.id)
+    )).scalars().all():
+        if v.scout_org_id in keep_search_orgs:
+            await session.delete(v)
+        else:
+            v.scouted_player_id = keep.id
+            keep_search_orgs.add(v.scout_org_id)
+
+    # Fill gaps on keep from remove — never clobber a value keep already has.
+    if not keep.notes and remove.notes:
+        keep.notes = remove.notes
+    if not keep.grade_name and remove.grade_name:
+        keep.grade_name = remove.grade_name
+    if not keep.photo_url and not keep.photo_data and (remove.photo_url or remove.photo_data):
+        keep.photo_url, keep.photo_data, keep.photo_mime = remove.photo_url, remove.photo_data, remove.photo_mime
+    if not keep.internal_player_id and remove.internal_player_id:
+        keep.internal_org_id, keep.internal_player_id = remove.internal_org_id, remove.internal_player_id
+
+    await session.flush()
+    await session.delete(remove)
+    await session.commit()
+    return await player_out(session, keep)

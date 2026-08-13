@@ -196,8 +196,12 @@ async def search_other_club(
 
 class LinkPlayerClubRequest(BaseModel):
     org_guid: str
-    player_id: str
+    # Required for a manually-picked roster row (Find at other clubs);
+    # omitted for a live-search-driven candidate, which link_player_club
+    # resolves itself (see its own docstring).
+    player_id: str | None = None
     is_primary: bool = False
+    canonical_participant_id: str | None = None
 
 
 @router.post("/players/{player_id}/clubs/link")
@@ -209,6 +213,7 @@ async def link_player_club(
     try:
         return await scout_discovery.link_player_club(
             db, player_id, data.org_guid, data.player_id, is_primary=data.is_primary,
+            canonical_participant_id=data.canonical_participant_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -241,6 +246,24 @@ async def remove_player_tracking(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     return {"status": "removed", "cards_removed": n}
+
+
+class MergePlayersRequest(BaseModel):
+    merge_from_id: str
+
+
+@router.post("/players/{player_id}/merge")
+async def merge_players(
+    player_id: str, data: MergePlayersRequest,
+    current: tuple[ScoutUser, ScoutOrg] = Depends(require_scout_owner),
+    db: AsyncSession = Depends(get_db),
+):
+    """Merges `merge_from_id`'s profile into `player_id` — see
+    scout_discovery.merge_scouted_players's own docstring for what moves."""
+    try:
+        return await scout_discovery.merge_scouted_players(db, player_id, data.merge_from_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ─── scouting notes ─────────────────────────────────────────────────────────

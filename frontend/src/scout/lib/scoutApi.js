@@ -37,9 +37,14 @@ export const scoutApi = {
   rescanOtherClubs: (id) => request(`/scout/players/${id}/other-clubs/scan`, { method: 'POST' }),
   searchOtherClub: (id, { orgGuid, clubName }) =>
     request(`/scout/players/${id}/other-clubs/search-club`, { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, club_name: clubName }) }),
-  linkPlayerClub: (id, { orgGuid, playerId, isPrimary }) =>
-    request(`/scout/players/${id}/clubs/link`, { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, player_id: playerId, is_primary: !!isPrimary }) }),
+  linkPlayerClub: (id, { orgGuid, playerId, isPrimary, canonicalParticipantId }) =>
+    request(`/scout/players/${id}/clubs/link`, { method: 'POST', body: JSON.stringify({
+      org_guid: orgGuid, player_id: playerId ?? null, is_primary: !!isPrimary,
+      canonical_participant_id: canonicalParticipantId ?? null,
+    }) }),
   unlinkPlayerClub: (id, clubRowId) => request(`/scout/players/${id}/clubs/${clubRowId}`, { method: 'DELETE' }),
+  mergePlayers: (keepId, mergeFromId) =>
+    request(`/scout/players/${keepId}/merge`, { method: 'POST', body: JSON.stringify({ merge_from_id: mergeFromId }) }),
   listNotes: (id) => request(`/scout/players/${id}/notes`),
   createNote: (id, body, kind) => request(`/scout/players/${id}/notes`, { method: 'POST', body: JSON.stringify({ body, kind }) }),
   updateNote: (noteId, fields) => request(`/scout/players/notes/${noteId}`, { method: 'PATCH', body: JSON.stringify(fields) }),

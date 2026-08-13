@@ -19,6 +19,7 @@ list instead of an org's own ScoutedPlayer rows.
 """
 from __future__ import annotations
 
+import re
 from difflib import SequenceMatcher
 
 from sqlalchemy import select
@@ -63,8 +64,30 @@ async def _load_ready_cache(session: AsyncSession, club_org_guid: str) -> ScoutC
     return row if row and (row.payload or {}).get("players") else None
 
 
+def _normalise_name_for_match(name: str) -> str:
+    """Strip punctuation and collapse whitespace, and un-invert a
+    "Surname, First" name into "First Surname" — CA rosters aren't
+    consistent about which order a club exports names in (see
+    services/import_ingest.py's own name-normalisation for the same
+    real-world quirk on the import side)."""
+    n = re.sub(r"\s+", " ", (name or "").replace(",", " ")).strip().lower()
+    return n
+
+
 def _score_name(a: str, b: str) -> float:
-    return SequenceMatcher(None, (a or "").strip().lower(), (b or "").strip().lower()).ratio()
+    """Plain SequenceMatcher on the raw strings is fragile to a common real
+    case: the same person spelled "Green, Spencer" at one club and "Spencer
+    Green" at another scores ~0.52, well under NAME_MATCH_THRESHOLD — a
+    genuine match silently dropped. Token-SET overlap (order-independent) on
+    top of the direct score catches a reordered or comma-swapped name
+    (scores 1.0) without the direct score's sensitivity to word order, and
+    the max of the two keeps the direct score's tolerance for a name that's
+    merely mis-spelled rather than reordered."""
+    na, nb = _normalise_name_for_match(a), _normalise_name_for_match(b)
+    direct = SequenceMatcher(None, na, nb).ratio()
+    ta, tb = set(na.split()), set(nb.split())
+    token = (2 * len(ta & tb) / (len(ta) + len(tb))) if ta and tb else 0.0
+    return max(direct, token)
 
 
 async def find_name_matches(

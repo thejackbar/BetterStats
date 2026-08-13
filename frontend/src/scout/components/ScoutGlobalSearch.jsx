@@ -5,9 +5,10 @@ import { Icon } from '../../pages/admin/betterselect/ui'
 import { PlayerAvatar } from './ScoutUi'
 
 // The one always-visible search bar — clubs and players together, in
-// ScoutModuleLayout's header on every screen (see services/scout_search.py's
-// docstring for why this is a BetterScout-native combined search rather than
-// a mirror of play.cricket.com.au's own backend search, which isn't reachable).
+// ScoutModuleLayout's header on every screen. Backed by the REAL API behind
+// play.cricket.com.au's own header search (services/scout_live_search.py) —
+// genuinely national coverage, not limited to clubs BetterScout has already
+// cached.
 export default function ScoutGlobalSearch() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
@@ -117,18 +118,14 @@ export default function ScoutGlobalSearch() {
                     <PlayerAvatar name={p.name} size={22} />
                     <span className="min-w-0 flex-1">
                       <span className="truncate block">{p.name}</span>
-                      <span className="block font-mono text-[10px] text-pb-faint uppercase truncate">{p.club_name || 'Unknown club'}</span>
+                      <span className="block font-mono text-[10px] text-pb-faint uppercase truncate">
+                        {p.club_name || 'Unknown club'}{p.club_count > 1 ? ` +${p.club_count - 1} more` : ''}
+                      </span>
                     </span>
                     {p.tracked && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint shrink-0">Tracked</span>}
                   </button>
                 )
               })}
-            </div>
-          )}
-
-          {!loading && data && (data.clubs.length > 0 || data.players.length > 0) && (
-            <div className="px-4 py-1.5 border-t pb-hairline font-mono text-[9.5px] text-pb-faintest">
-              {data.clubs_scanned} cached club{data.clubs_scanned === 1 ? '' : 's'} scanned for players
             </div>
           )}
         </div>

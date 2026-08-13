@@ -49,6 +49,7 @@ export default function ScoutPlayerProfile() {
   const [windowN, setWindowN] = useState(null)
   const [notes, setNotes] = useState([])
   const [selectedCardId, setSelectedCardId] = useState(null)
+  const [mergeOpen, setMergeOpen] = useState(false)
   const fileRef = useRef(null)
 
   const load = () => {
@@ -143,6 +144,7 @@ export default function ScoutPlayerProfile() {
           )}
           <Btn variant="ghost" sm onClick={() => navigator.clipboard?.writeText(window.location.href)}>Share profile</Btn>
           <Btn variant="primary" sm onClick={() => navigate(`/betterscout/app/compare?players=${player.id}`)}>Compare</Btn>
+          <Btn variant="ghost" sm onClick={() => setMergeOpen(true)}>Merge duplicate…</Btn>
           <Btn variant="ghost" sm onClick={removeEverywhere} disabled={removing} className="text-pb-red">
             {removing ? 'Removing…' : 'Remove from My Players'}
           </Btn>
@@ -302,7 +304,77 @@ export default function ScoutPlayerProfile() {
           />
         )}
       </div>
+
+      {mergeOpen && (
+        <MergeDuplicateModal
+          keepId={player.id} keepName={player.name}
+          onMerged={load} onClose={() => setMergeOpen(false)}
+        />
+      )}
     </ScoutModuleLayout>
+  )
+}
+
+// Two tracked profiles that turn out to be the same real person — e.g.
+// added from two clubs whose own CA feeds minted different participant ids
+// for them. The keep side is always THIS profile; pick which other tracked
+// profile is the duplicate and its clubs/notes/tracking fold in (see
+// scout_discovery.merge_scouted_players).
+function MergeDuplicateModal({ keepId, keepName, onMerged, onClose }) {
+  const [query, setQuery] = useState('')
+  const [players, setPlayers] = useState(null)
+  const [merging, setMerging] = useState(false)
+  const [error, setError] = useState(null)
+
+  useEffect(() => { scoutApi.listPlayers().then(setPlayers).catch(() => setPlayers([])) }, [])
+
+  const q = query.trim().toLowerCase()
+  const candidates = (players || [])
+    .filter((p) => p.id !== keepId)
+    .filter((p) => !q || p.name.toLowerCase().includes(q))
+
+  const doMerge = async (other) => {
+    if (!window.confirm(
+      `Merge "${other.name}"'s profile into "${keepName}"? Their clubs, scouting notes and watchlist tracking move onto this profile, and the "${other.name}" profile is deleted. This can't be undone.`
+    )) return
+    setMerging(true)
+    setError(null)
+    try {
+      await scoutApi.mergePlayers(keepId, other.id)
+      onMerged()
+      onClose()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setMerging(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={onClose}>
+      <div className="pb-card w-full max-w-md p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <div className="font-display font-bold text-sm">Merge a duplicate into {keepName}</div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text"><Icon name="close" size={16} /></button>
+        </div>
+        <p className="text-xs text-pb-faint">
+          Pick the other tracked profile that's really this same person. Their clubs, notes and board tracking move here; theirs is deleted.
+        </p>
+        <Search value={query} onChange={setQuery} placeholder="Search your tracked players…" className="w-full" />
+        {error && <p className="text-xs text-pb-red">{error}</p>}
+        <div className="max-h-64 overflow-y-auto divide-y divide-pb-hairline border border-pb-hairline rounded-lg">
+          {players === null && <p className="px-3 py-2 text-xs text-pb-faint">Loading…</p>}
+          {players !== null && candidates.length === 0 && <p className="px-3 py-2 text-xs text-pb-faint">No match.</p>}
+          {candidates.map((p) => (
+            <button key={p.id} onClick={() => doMerge(p)} disabled={merging}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-pb-surface2 disabled:opacity-50 flex items-center justify-between gap-2">
+              <span className="truncate">{p.name}</span>
+              <span className="font-mono text-[10px] text-pb-faint uppercase truncate shrink-0">{p.club_name || 'No club'}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -325,11 +397,14 @@ function ClubsSection({ player, onChanged, setError }) {
   const [searchingClub, setSearchingClub] = useState(null) // { id, name } while polling
   const pollRef = useRef(null)
   const pollCount = useRef(0)
+  const confirmPollRef = useRef(null)
+  const confirmPollCount = useRef(0)
 
-  useEffect(() => () => clearTimeout(pollRef.current), [])
+  useEffect(() => () => { clearTimeout(pollRef.current); clearTimeout(confirmPollRef.current) }, [])
 
   const clubs = player.clubs || []
-  const candidates = (player.other_club_candidates || []).filter((c) => !dismissed.has(`${c.club_org_guid}:${c.player_id}`))
+  const candidateKey = (c) => `${c.club_org_guid}:${c.player_id || c.canonical_participant_id || ''}`
+  const candidates = (player.other_club_candidates || []).filter((c) => !dismissed.has(candidateKey(c)))
 
   const rescan = async () => {
     setScanning(true)
@@ -344,22 +419,38 @@ function ClubsSection({ player, onChanged, setError }) {
     }
   }
 
-  const confirmCandidate = async (c) => {
-    const key = `${c.club_org_guid}:${c.player_id}`
+  // Confirming a candidate may need to build that club's roster first (a
+  // live-search-sourced candidate only names the club, not a locally
+  // resolved player id — see scout_discovery.link_player_club) — same
+  // build/poll contract as "Find at a club" below.
+  const confirmCandidate = (c) => {
+    const key = candidateKey(c)
     setLinkingKey(key)
     setError(null)
-    try {
-      await scoutApi.linkPlayerClub(player.id, { orgGuid: c.club_org_guid, playerId: c.player_id })
-      onChanged()
-    } catch (err) {
-      setError(err.message)
-    } finally {
+    confirmPollCount.current = 0
+    pollConfirm(c, key)
+  }
+
+  const pollConfirm = (c, key) => {
+    scoutApi.linkPlayerClub(player.id, {
+      orgGuid: c.club_org_guid, playerId: c.player_id, canonicalParticipantId: c.canonical_participant_id,
+    }).then((res) => {
+      if (res.status === 'building') {
+        if (++confirmPollCount.current < OTHER_CLUB_MAX_POLLS) {
+          confirmPollRef.current = setTimeout(() => pollConfirm(c, key), OTHER_CLUB_POLL_MS)
+        } else {
+          setError("Timed out waiting for that club's roster to build.")
+          setLinkingKey(null)
+        }
+        return
+      }
       setLinkingKey(null)
-    }
+      onChanged()
+    }).catch((err) => { setError(err.message); setLinkingKey(null) })
   }
 
   const dismissCandidate = (c) => {
-    setDismissed((s) => new Set(s).add(`${c.club_org_guid}:${c.player_id}`))
+    setDismissed((s) => new Set(s).add(candidateKey(c)))
   }
 
   const unlinkClub = async (clubRow) => {
@@ -450,16 +541,24 @@ function ClubsSection({ player, onChanged, setError }) {
       {candidates.length > 0 && (
         <div className="rounded-lg border border-pb-accent/30 bg-[color-mix(in_srgb,var(--pb-accent)_6%,transparent)] p-3 space-y-2">
           <div className="text-sm font-medium">
-            {candidates.length} possible match{candidates.length === 1 ? '' : 'es'} at other clubs
+            {candidates.length} other club{candidates.length === 1 ? '' : 's'} found for {player.name}
           </div>
           <div className="space-y-1.5">
             {candidates.map((c) => {
-              const key = `${c.club_org_guid}:${c.player_id}`
+              const key = candidateKey(c)
+              // A live-search candidate (see scout_discovery.suggest_other_clubs)
+              // carries no `confidence` — it's a verified PlayHQ membership, not
+              // a name-similarity guess, so there's nothing to show a % for. A
+              // manual "Find at a club" hit still is a guess and shows one.
+              const verified = c.confidence == null
               return (
                 <div key={key} className="flex items-center justify-between gap-2 text-sm">
                   <span className="min-w-0 truncate">
-                    <strong>{c.name}</strong> at {c.club_name || 'an unnamed club'}
-                    <span className="text-pb-faint font-mono text-[10.5px] ml-2">{Math.round(c.confidence * 100)}% match</span>
+                    {verified
+                      ? <span>Registered at <strong>{c.club_name || 'an unnamed club'}</strong></span>
+                      : <span><strong>{c.name}</strong> at {c.club_name || 'an unnamed club'}
+                          <span className="text-pb-faint font-mono text-[10.5px] ml-2">{Math.round(c.confidence * 100)}% match</span>
+                        </span>}
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <Btn sm variant="primary" onClick={() => confirmCandidate(c)} disabled={linkingKey === key}>
