@@ -218,7 +218,7 @@ export const INTROS = {
     ],
   },
   rateCard: {
-    title: 'Rate card',
+    title: 'Membership tiers',
     lede: 'What each kind of member pays, for the season.',
     points: [
       'One tier per kind of member, carrying both the subs and the per-match rate.',

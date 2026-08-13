@@ -10,10 +10,28 @@ gets a member row lazily the first time ClubManager assigns them anything, so
 
 Raw SQL throughout (same posture as services/roster.py) so this stays out of the
 ORM/Alembic graph; it only ever writes fee_members / volunteer_roles.
+
+THREE AXES, kept apart on purpose (migration 248). They were one single-valued
+`member_category` whose vocabulary mixed all three, so a person could only ever
+be one thing and "Volunteer" competed with "Parent" for the same slot:
+
+  1. MEMBERSHIP TYPE — what kind of member. The club's own `membership_types`
+     catalogue, held MULTI-valued through `member_membership_types` (a dad who
+     plays and whose kid plays is a Senior Player AND a Parent), and scoped
+     internal vs external. `fee_members.membership_type_id` remains the PRIMARY
+     one, because BetterFees bills a single tier.
+  2. ROLES — what they DO. Volunteer / Committee / Official, through
+     volunteer_roles + committee_terms, already several at once. An Official is
+     the case that proves these are independent: a panel umpire may hold the
+     role and no membership at all.
+  3. HONOURS — Life Membership, bestowed on a member of any type. On the person
+     spine (`is_life_member` + `life_member_since`), corroborated by a Life
+     Membership award on the honour board.
 """
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,12 +41,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # segments, and role assignment).
 from app.services.members import MEMBER_CATEGORIES  # noqa: F401  (re-exported for the router)
 
+# A membership type contributes a segment prefixed `type:`, so the club naming a
+# type "Volunteer" (every club that adopted the pre-248 starter set has one) can
+# never collide with the Volunteer ROLE segment. Roles and honours stay bare.
+TYPE_SEG_PREFIX = "type:"
+SEG_EXTERNAL = "External"
+SEG_PLAYER = "Player"
+SEG_LIFE_MEMBER = "Life member"
+
 
 async def list_people(db: AsyncSession, org_id, include_archived: bool = False) -> list[dict]:
     """One row per person: every active fee_members row, unioned with the club's
     players that don't yet have a member row. Each person carries its computed
-    segments (Player / Volunteer / Committee / Parent / Third party / Life
-    member), assigned roles, hours and a quals-to-renew count.
+    segments (Player / Volunteer / Committee / Parent / External contact / Life
+    member / Official), assigned roles, hours and a quals-to-renew count.
+
+    Segments are derived from what the club has actually recorded, not just the
+    member_category tag: Official = holds a role whose TYPE is Official
+    (umpires, scorers…); Parent = recorded as a parent/guardian in any family
+    (whether the family links them as a member or as a player); Life member =
+    the fee_members flag OR a recorded Life Membership award. The category tag
+    still counts towards each, so a hand-tagged person is never dropped.
 
     A person's KIND is three separate things, and all three are returned rather
     than flattened into one: `membership_type` (the club's own cross-season
@@ -56,7 +89,7 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
     # Directory can say which kind of member someone is, not just "Player".
     members = (await db.execute(text(f"""
         SELECT fm.id, fm.full_name, fm.email, fm.mobile, fm.player_id, fm.member_category,
-               fm.is_life_member, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
+               fm.is_life_member, fm.life_member_since, fm.is_honorary, fm.honorary_expires_at, fm.archived_at,
                mt.id AS membership_type_id, mt.name AS membership_type_name, mt.is_playing AS membership_type_playing,
                p.id AS our_player_id, p.photo_url, p.email AS player_email, p.phone AS player_phone,
                p.status AS player_status
@@ -65,6 +98,23 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         LEFT JOIN membership_types mt ON mt.id = fm.membership_type_id AND mt.organisation_id = fm.organisation_id
         WHERE fm.organisation_id = :org {'' if include_archived else 'AND fm.archived_at IS NULL'}
     """), {"org": org_id})).mappings().all()
+
+    # Every membership type a person holds (migration 248), not just the primary
+    # one on fee_members. The catalogue join is org-scoped on both sides, same
+    # rule as the players join above: a stray row must not pull another club's
+    # type name into this club's Directory.
+    types_by = {}
+    for r in (await db.execute(text("""
+        SELECT mmt.member_id, t.id, t.name, t.scope, t.is_playing
+        FROM member_membership_types mmt
+        JOIN membership_types t ON t.id = mmt.membership_type_id AND t.organisation_id = mmt.organisation_id
+        WHERE mmt.organisation_id = :org
+        ORDER BY t.sort_order, lower(t.name)
+    """), {"org": org_id})).mappings().all():
+        types_by.setdefault(str(r["member_id"]), []).append({
+            "id": str(r["id"]), "name": r["name"],
+            "scope": r["scope"] or "internal", "is_playing": bool(r["is_playing"]),
+        })
 
     roles_rows = (await db.execute(text("""
         SELECT vr.member_id, cr.id AS role_id, cr.title
@@ -89,11 +139,65 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         WHERE ct.organisation_id = :org AND ct.member_id IS NOT NULL AND ct.ended_at IS NULL AND cp.is_office_bearer = TRUE
     """), {"org": org_id})).scalars().all()}
 
-    guardians = {str(m) for m in (await db.execute(text("""
+    # "Recorded as a parent" in any family: the guardian flag, or a relationship
+    # that names them one. Family rows link a person EITHER as a member
+    # (fee_member_id — what the Directory writes) OR as a player (player_id —
+    # what the Families editor has always written for players), so both links
+    # are read or a parent recorded against their player record never shows.
+    _parentish = """(fmb.is_guardian = TRUE
+          OR lower(coalesce(fmb.relationship, '')) LIKE '%parent%'
+          OR lower(coalesce(fmb.relationship, '')) IN
+              ('mother', 'father', 'mum', 'dad', 'mom', 'guardian', 'stepmother', 'stepfather'))"""
+    guardians = {str(m) for m in (await db.execute(text(f"""
         SELECT DISTINCT fmb.fee_member_id
         FROM family_members fmb JOIN families f ON f.id = fmb.family_id
         WHERE f.organisation_id = :org AND fmb.fee_member_id IS NOT NULL
-          AND (fmb.is_guardian = TRUE OR lower(coalesce(fmb.relationship, '')) LIKE '%parent%')
+          AND {_parentish}
+    """), {"org": org_id})).scalars().all()}
+    guardian_players = {str(m) for m in (await db.execute(text(f"""
+        SELECT DISTINCT fmb.player_id
+        FROM family_members fmb JOIN families f ON f.id = fmb.family_id
+        WHERE f.organisation_id = :org AND fmb.player_id IS NOT NULL
+          AND {_parentish}
+    """), {"org": org_id})).scalars().all()}
+
+    # Holds a role whose TYPE is Official (umpire, scorer…). The type's own
+    # category is the signal, with the type NAME as a fallback for a club that
+    # made an "Official" type by hand without categorising it.
+    officials = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT vr.member_id
+        FROM volunteer_roles vr
+        JOIN club_roles cr ON cr.id = vr.role_id AND cr.organisation_id = vr.organisation_id
+        LEFT JOIN club_role_types t ON t.id = cr.role_type_id AND t.organisation_id = cr.organisation_id
+        WHERE vr.organisation_id = :org
+          AND (lower(coalesce(t.category, '')) = 'official' OR lower(coalesce(t.name, '')) = 'official')
+    """), {"org": org_id})).scalars().all()}
+
+    # Holds a role that is actually VOLUNTEERING. Not every role is: an Official
+    # is a distinct role of its own (and a panel umpire may be nobody's member,
+    # let alone a volunteer), a committee role is a seat, and a `paid` role is
+    # employment — calling the club's paid bar manager a volunteer would put
+    # their hours in a grant application. Same PAID_CATEGORY rule the roster
+    # already applies.
+    volunteer_roles = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT vr.member_id
+        FROM volunteer_roles vr
+        JOIN club_roles cr ON cr.id = vr.role_id AND cr.organisation_id = vr.organisation_id
+        LEFT JOIN club_role_types t ON t.id = cr.role_type_id AND t.organisation_id = cr.organisation_id
+        WHERE vr.organisation_id = :org
+          AND lower(coalesce(t.category, '')) NOT IN ('official', 'committee', 'paid')
+          AND lower(coalesce(t.name, '')) <> 'official'
+    """), {"org": org_id})).scalars().all()}
+
+    # Awarded Life Membership on the honour board. The players join is
+    # org-scoped on both sides (the shared-game rule) so an award row can never
+    # tag another club's player through a stray id.
+    life_award_players = {str(m) for m in (await db.execute(text("""
+        SELECT DISTINCT pa.player_id
+        FROM player_achievements pa
+        JOIN players p ON p.id = pa.player_id AND p.organisation_id = pa.org_id
+        WHERE pa.org_id = :org AND pa.player_id IS NOT NULL
+          AND (lower(pa.category) = 'life membership' OR lower(pa.achievement) LIKE 'life member%')
     """), {"org": org_id})).scalars().all()}
 
     hours_by = {str(k): float(v or 0) for k, v in (await db.execute(text(
@@ -117,25 +221,46 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         our_pid = str(m["our_player_id"]) if m["our_player_id"] else None
         if our_pid:
             seen_players.add(our_pid)
-        segs = []
+        # ── AXIS 1: membership type. Several at once, and scoped.
+        my_types = types_by.get(mid, [])
+        segs = [TYPE_SEG_PREFIX + t["name"] for t in my_types]
+        # Holding ONLY external types means the club records this person but has
+        # not gained them as a member. Emitted as its own segment so a
+        # membership count never has to re-derive the rule.
+        if my_types and all(t["scope"] == "external" for t in my_types):
+            segs.append(SEG_EXTERNAL)
+        # Playing is a STATS fact, not a club classification: the record says
+        # they play, not whether the club calls them a Senior or a Junior
+        # Player. Deriving it keeps the Players filter working for a club that
+        # has adopted no catalogue at all.
         if our_pid:
-            segs.append("Player")
-        if mid in vol_profiles or roles_by.get(mid):
+            segs.append(SEG_PLAYER)
+
+        # ── AXIS 2: roles — what they DO, independent of membership. An
+        # Official is the case that proves the axes are separate: a panel umpire
+        # may hold the role and no membership whatsoever. member_category is
+        # read as a fallback for anyone tagged before 248 split the axes, so no
+        # club loses a filter on upgrade.
+        if mid in vol_profiles or mid in volunteer_roles:
             segs.append("Volunteer")
         if mid in office_bearers:
             segs.append("Office Bearer")
         if mid in committee or cat == "committee":
             segs.append("Committee")
-        if cat == "parent" or mid in guardians:
-            segs.append("Parent")
-        if cat == "third_party":
-            segs.append("Third party")
-        if m["is_life_member"] or cat == "life_member":
-            segs.append("Life member")
-        if cat == "official":
+        if cat == "official" or mid in officials:
             segs.append("Official")
+
+        # ── AXIS 3: honours. Bestowed on a member of any type, so neither a
+        # type nor a role. The flag is the club's own record and the honour
+        # board award corroborates it; either alone is enough, since a
+        # stats-first club will have the award and no flag.
+        life_award = bool(our_pid and our_pid in life_award_players)
+        is_life = bool(m["is_life_member"]) or life_award or cat == "life_member"
+        if is_life:
+            segs.append(SEG_LIFE_MEMBER)
         if m["is_honorary"]:
             segs.append("Honorary")
+
         q = quals_by.get(mid, {})
         # NULL only when nobody's linked player — a linked player always carries
         # a status, so None here reads as "not a player" rather than "unknown".
@@ -148,10 +273,23 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
             "phone": m["mobile"] or m["player_phone"] or "",
             "photo": m["photo_url"], "category": cat, "archived": m["archived_at"] is not None,
             "player_status": pstatus,
+            # The PRIMARY type (what BetterFees bills) stays exactly where it
+            # was, so every existing reader is untouched. `membership_types` is
+            # the full set this person holds.
             "membership_type_id": str(m["membership_type_id"]) if m["membership_type_id"] else None,
             "membership_type": m["membership_type_name"],
             "membership_type_playing": m["membership_type_playing"],
-            "is_life_member": bool(m["is_life_member"]),
+            "membership_types": my_types,
+            "is_external": bool(my_types) and all(t["scope"] == "external" for t in my_types),
+            # Honours.
+            "is_life_member": is_life,
+            # Whether the flag itself is set, as opposed to life membership
+            # being inferred from the honour board. The toggle reads this, or it
+            # would show itself as already on for an awarded player and do
+            # nothing visible when switched off.
+            "life_member_flag": bool(m["is_life_member"]),
+            "life_member_award": life_award,
+            "life_member_since": m["life_member_since"].isoformat() if m["life_member_since"] else None,
             "is_honorary": bool(m["is_honorary"]),
             "honorary_expires_at": m["honorary_expires_at"].isoformat() if m["honorary_expires_at"] else None,
             "roles": roles_by.get(mid, []),
@@ -171,17 +309,143 @@ async def list_people(db: AsyncSession, org_id, include_archived: bool = False) 
         pid = str(p["id"])
         if pid in seen_players:
             continue
+        # A Life Membership award belongs to the person whether or not anyone
+        # has made them a member row, so a read-through player carries it the
+        # same way a member does. They hold no membership TYPES, since a type is
+        # recorded against the person spine and they have no row on it yet —
+        # ticking one mints the row (see set_member_types).
+        psegs = [SEG_PLAYER]
+        life_award = pid in life_award_players
+        if life_award:
+            psegs.append(SEG_LIFE_MEMBER)
         people.append({
             "key": "player:" + pid, "member_id": None, "player_id": pid,
             "name": p["name"], "email": p["email"] or "", "phone": p["phone"] or "", "photo": p["photo_url"], "category": None, "archived": False,
             "player_status": p["status"] or "active",
             "membership_type_id": None, "membership_type": None, "membership_type_playing": None,
-            "is_life_member": False, "is_honorary": False, "honorary_expires_at": None,
-            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": ["Player"],
+            "membership_types": [], "is_external": False,
+            "is_life_member": life_award, "life_member_flag": False,
+            "life_member_award": life_award, "life_member_since": None,
+            "is_honorary": False, "honorary_expires_at": None,
+            "roles": [], "total_hours": 0.0, "quals_total": 0, "flagged": 0, "segs": psegs,
         })
 
     people.sort(key=lambda x: (x["name"] or "").lower())
     return people
+
+
+async def set_member_types(db: AsyncSession, org_id, member_id, type_ids, primary_id="__keep__") -> dict:
+    """Replace the membership types a person holds.
+
+    A full replace, not add/remove calls: the screen shows one set of tick boxes
+    and sends the whole set, so a type left out is one that was unticked. Two
+    requests could half-succeed and leave someone holding a type nobody chose.
+
+    Every id must be one of THIS club's own types — they arrive from a browser,
+    and a foreign id would put another club's classification on our person.
+
+    `primary_id` is the one BetterFees bills. Left alone unless passed; if the
+    type it names is dropped from the set, it falls back to the first remaining
+    type rather than pointing at one the person no longer holds.
+    """
+    member = (await db.execute(text(
+        "SELECT 1 FROM fee_members WHERE id = :mid AND organisation_id = :org"
+    ), {"mid": member_id, "org": org_id})).scalar()
+    if not member:
+        raise ValueError("Member not found")
+
+    wanted = []
+    for raw in (type_ids or []):
+        try:
+            tid = uuid.UUID(str(raw))
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError("Membership type not found")
+        if tid not in wanted:
+            wanted.append(tid)
+    if wanted:
+        ours = {r for r in (await db.execute(text(
+            "SELECT id FROM membership_types WHERE organisation_id = :org AND id = ANY(:ids)"
+        ), {"org": org_id, "ids": wanted})).scalars().all()}
+        missing = [t for t in wanted if t not in ours]
+        if missing:
+            raise ValueError("Membership type not found")
+
+    await db.execute(text(
+        "DELETE FROM member_membership_types WHERE organisation_id = :org AND member_id = :mid"
+        " AND NOT (membership_type_id = ANY(:keep))"
+    ), {"org": org_id, "mid": member_id, "keep": wanted})
+    for tid in wanted:
+        await db.execute(text("""
+            INSERT INTO member_membership_types (id, organisation_id, member_id, membership_type_id)
+            VALUES (gen_random_uuid(), :org, :mid, :tid)
+            ON CONFLICT (member_id, membership_type_id) DO NOTHING
+        """), {"org": org_id, "mid": member_id, "tid": tid})
+
+    current_primary = (await db.execute(text(
+        "SELECT membership_type_id FROM fee_members WHERE id = :mid"
+    ), {"mid": member_id})).scalar()
+    if primary_id == "__keep__":
+        new_primary = current_primary
+    elif primary_id in (None, ""):
+        new_primary = None
+    else:
+        try:
+            new_primary = uuid.UUID(str(primary_id))
+        except (ValueError, AttributeError, TypeError):
+            raise ValueError("Membership type not found")
+    # The primary must be one they actually hold. Falling back to the first
+    # remaining type keeps BetterFees pointing at something real rather than
+    # leaving a billing tier attached to a type that was just removed.
+    if new_primary is not None and new_primary not in wanted:
+        new_primary = wanted[0] if wanted else None
+    if new_primary is None and wanted:
+        new_primary = wanted[0]
+    if new_primary != current_primary:
+        await db.execute(text(
+            "UPDATE fee_members SET membership_type_id = :tid, updated_at = NOW()"
+            " WHERE id = :mid AND organisation_id = :org"
+        ), {"tid": new_primary, "mid": member_id, "org": org_id})
+    return {"type_ids": [str(t) for t in wanted], "primary_id": str(new_primary) if new_primary else None}
+
+
+def _as_date(v):
+    """"" / None clears; an ISO date is parsed; anything else is rejected."""
+    if v in (None, ""):
+        return None
+    if isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except ValueError:
+        raise ValueError("Invalid date")
+
+
+async def set_life_membership(db: AsyncSession, org_id, member_id, is_life_member, since="__keep__") -> None:
+    """Record (or clear) the life-membership honour on the person spine.
+
+    Deliberately NOT written to `player_achievements`: that table keys on
+    player_id, so a life member who never played could not be held there at all.
+    The honour board stays the ceremonial record and the Directory reads both,
+    which is why clearing this flag does not remove an award someone was
+    genuinely given — the award still shows them as a life member, and it is
+    removed on the Awards screen that owns it."""
+    sets = ["is_life_member = :flag"]
+    params = {"flag": bool(is_life_member), "mid": member_id, "org": org_id}
+    if since != "__keep__":
+        # Parsed here rather than handed to the driver as a string: the value
+        # arrives from a browser as JSON text and asyncpg will not coerce it
+        # into a DATE, so a raw string fails at execute time with a driver
+        # error instead of a readable one.
+        sets.append("life_member_since = :since")
+        params["since"] = _as_date(since)
+    # Clearing the honour clears its date too — a date for something that did
+    # not happen is worse than no date.
+    elif not is_life_member:
+        sets.append("life_member_since = NULL")
+    await db.execute(text(
+        f"UPDATE fee_members SET {', '.join(sets)}, updated_at = NOW()"
+        " WHERE id = :mid AND organisation_id = :org"
+    ), params)
 
 
 async def member_overlays(db: AsyncSession, org_id, member_id) -> dict:

@@ -1,12 +1,28 @@
 """Membership Management — the membership-type catalogue.
 
-A club-adopted catalogue (Senior Player, Junior Player, Parent, Social
-Member, Life Member, Coach, Selector, Volunteer, Umpire, Scorer, Sponsor
-Contact, Committee Member, Honorary Member, …), cross-season unlike a
-FeeSchedule $ tier. Nothing is seeded automatically — a club seeds the
-starter set (or builds its own from scratch) the same way it adopts an
-award-definitions template or a BetterComms starter template: opt-in, not
-presumed.
+WHAT KIND OF MEMBER someone is, and one of the three axes the Directory keeps
+apart (see services/directory.py). Club-adopted and cross-season, unlike a
+FeeSchedule $ tier. Nothing is seeded automatically — a club seeds the starter
+set (or builds its own) the same way it adopts an award-definitions template:
+opt-in, not presumed.
+
+`scope` (migration 248) splits INTERNAL membership (Senior Player, Junior
+Player, Parent, Social Member — people the club counts as members) from
+EXTERNAL (Sponsor Contact, External Contact — people the club records but has
+not gained as members). It is what lets "how many members have we got" mean
+something.
+
+**A role is not a membership type.** Volunteer, Umpire, Scorer, Coach, Selector
+and Committee Member were all seeded here originally and have been removed from
+the starter set: they are things a person DOES, held through club_roles /
+volunteer_roles / committee_terms, where a person has always been able to hold
+several at once. An Official especially may be nobody's member. A club that
+already adopted the old starter set keeps those rows — they are left alone, and
+archived through the ordinary CRUD if the club wants them gone.
+
+**Life Member is not a membership type either.** It is an HONOUR, bestowed on a
+member of any type, and lives on the person spine as fee_members.is_life_member
+(+ life_member_since). It was also removed from the starter set for that reason.
 
 STARTER_TYPES double as the "why these attributes" reference: is_playing
 distinguishes Senior/Junior Player from every non-playing type;
@@ -24,21 +40,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import MembershipType
 
-# (name, description, is_playing, voting, insurance, wwcc, playhq, comms_group)
+SCOPES = ("internal", "external")
+
+
+def normalise_scope(v):
+    v = (str(v).strip().lower() if v is not None else "")
+    return v if v in SCOPES else "internal"
+
+
+# (name, description, is_playing, voting, insurance, wwcc, playhq, comms_group, scope)
 STARTER_TYPES = [
-    ("Senior Player", "Registered senior playing member.", True, True, True, False, True, "Senior Players"),
-    ("Junior Player", "Registered junior playing member.", True, False, True, True, True, "Junior Players / Parents"),
-    ("Parent", "A junior player's parent or guardian.", False, False, False, True, False, "Junior Players / Parents"),
-    ("Social Member", "Non-playing social membership.", False, True, False, False, False, "Social Members"),
-    ("Life Member", "Permanent honour — set once, doesn't change season to season.", False, True, False, False, False, "Life Members"),
-    ("Coach", "Accredited coaching staff.", False, False, True, True, False, "Coaches"),
-    ("Selector", "Club selector.", False, True, False, False, False, "Committee"),
-    ("Volunteer", "General club volunteer.", False, False, True, True, False, "Volunteers"),
-    ("Umpire", "Club or panel umpire.", False, False, True, False, False, "Umpires & Scorers"),
-    ("Scorer", "Club scorer.", False, False, True, False, False, "Umpires & Scorers"),
-    ("Sponsor Contact", "A sponsor's nominated contact.", False, False, False, False, False, "Sponsors"),
-    ("Committee Member", "Elected/appointed committee position holder.", False, True, False, False, False, "Committee"),
-    ("Honorary Member", "Honorary membership — for a season, a number of years, or perpetual.", False, True, False, False, False, "Honorary Members"),
+    ("Senior Player", "Registered senior playing member.", True, True, True, False, True, "Senior Players", "internal"),
+    ("Junior Player", "Registered junior playing member.", True, False, True, True, True, "Junior Players / Parents", "internal"),
+    ("Parent", "A junior player's parent or guardian.", False, False, False, True, False, "Junior Players / Parents", "internal"),
+    ("Social Member", "Non-playing social membership.", False, True, False, False, False, "Social Members", "internal"),
+    ("Honorary Member", "Honorary membership — for a season, a number of years, or perpetual.", False, True, False, False, False, "Honorary Members", "internal"),
+    # External: recorded by the club, not counted as members.
+    ("Sponsor Contact", "A sponsor's nominated contact.", False, False, False, False, False, "Sponsors", "external"),
+    ("External Contact", "Someone the club deals with who is not a member — a contractor, a consultant, an association officer.", False, False, False, False, False, "External Contacts", "external"),
 ]
 
 
@@ -56,6 +75,9 @@ def _dict(t: MembershipType) -> dict:
         "comms_group": t.comms_group,
         "sort_order": t.sort_order,
         "is_active": t.is_active,
+        # 'internal' = a member the club counts; 'external' = someone it records
+        # but has not gained as a member (a sponsor's contact, a contractor).
+        "scope": getattr(t, "scope", None) or "internal",
     }
 
 
@@ -91,9 +113,12 @@ def _clean_fields(fields: dict) -> dict:
     allowed = (
         "description", "default_annual_fee", "is_playing", "requires_voting_rights",
         "requires_insurance", "requires_wwcc", "requires_playhq_registration",
-        "comms_group", "sort_order",
+        "comms_group", "sort_order", "scope",
     )
-    return {k: v for k, v in fields.items() if k in allowed and v is not None}
+    out = {k: v for k, v in fields.items() if k in allowed and v is not None}
+    if "scope" in out:
+        out["scope"] = normalise_scope(out["scope"])
+    return out
 
 
 async def update_type(session: AsyncSession, t: MembershipType, **fields) -> MembershipType:
@@ -119,13 +144,13 @@ async def seed_starter_types(session: AsyncSession, organisation_id) -> int:
         )).scalars().all()
     }
     seeded = 0
-    for position, (name, desc, is_playing, voting, insurance, wwcc, playhq, group) in enumerate(STARTER_TYPES):
+    for position, (name, desc, is_playing, voting, insurance, wwcc, playhq, group, scope) in enumerate(STARTER_TYPES):
         if name.lower() in existing_names:
             continue
         session.add(MembershipType(
             organisation_id=organisation_id, name=name, description=desc, is_playing=is_playing,
             requires_voting_rights=voting, requires_insurance=insurance, requires_wwcc=wwcc,
-            requires_playhq_registration=playhq, comms_group=group, sort_order=position,
+            requires_playhq_registration=playhq, comms_group=group, sort_order=position, scope=scope,
         ))
         seeded += 1
     if seeded:

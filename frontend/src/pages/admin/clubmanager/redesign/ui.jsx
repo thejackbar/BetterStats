@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../../../contexts/AuthContext'
 
@@ -162,6 +162,116 @@ export function usePref(key, fallback) {
     })
   }, [full])
   return [value, set]
+}
+
+// A button that opens a small menu under itself.
+//
+// The reason this exists: a screen whose filters are one flat row of pills does
+// not scale. The Directory's row reached ~26 controls, and the membership ones
+// come from the club's own catalogue, so a club with a long catalogue got a
+// longer row again. A menu holds the same options in one control, and the count
+// of controls stops depending on the club's data.
+//
+// `value` is the current selection, shown on the button so the menu never has
+// to be opened to read the state. `children` is called with `close`, so an item
+// decides for itself whether picking it dismisses the menu.
+export function MenuButton({ label, value, width = 250, align = 'left', disabled, children }) {
+  const [open, setOpen] = useState(false)
+  const wrap = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    // Pointerdown, not click: a click listener fires after React has already
+    // handled the item's own onClick, so a menu that re-renders its trigger
+    // would reopen itself.
+    const onDown = (e) => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false) }
+    const onKey = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('pointerdown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  const on = !!value
+  return (
+    <div ref={wrap} style={{ position: 'relative', flexShrink: 0 }}>
+      <button type="button" disabled={disabled} onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8,
+          fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', maxWidth: 230,
+          border: `1px solid ${on ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`,
+          background: on ? 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' : 'transparent',
+          color: on ? C.accent : C.dim, opacity: disabled ? 0.5 : 1,
+        }}>
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {label}{on ? ': ' + value : ''}
+        </span>
+        <span style={{ fontSize: 9, opacity: 0.7 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 5px)', [align]: 0, zIndex: 60, width,
+          maxHeight: 340, overflowY: 'auto', background: C.surface,
+          border: `1px solid ${C.hair2}`, borderRadius: 10, padding: 5,
+          boxShadow: '0 10px 28px rgba(0,0,0,0.34)',
+        }}>
+          {children(() => setOpen(false))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// One row inside a MenuButton. `on` draws the tick, so a menu reads as its own
+// state rather than needing the button's label to carry everything.
+export function MenuItem({ on, onClick, children, tone, disabled }) {
+  return (
+    <button type="button" disabled={disabled} onClick={onClick}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+        padding: '7px 9px', borderRadius: 7, fontSize: 13, border: 'none', background: 'transparent',
+        color: disabled ? C.faintest : (tone || (on ? C.accent : C.text)),
+        cursor: disabled ? 'default' : 'pointer',
+      }}
+      onMouseEnter={e => { if (!disabled) e.currentTarget.style.background = C.surface2 }}
+      onMouseLeave={e => { e.currentTarget.style.background = 'transparent' }}>
+      {/* The glyph is only RENDERED when on, not just faded out: left in the
+          DOM at opacity 0 it lands in every item's accessible name, so a
+          screen reader announces a tick on an unticked row. The span keeps its
+          width either way so the labels stay aligned. */}
+      <span aria-hidden="true" style={{ width: 12, flexShrink: 0, fontSize: 11 }}>{on ? '✓' : ''}</span>
+      <span style={{ minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{children}</span>
+    </button>
+  )
+}
+
+// A heading inside a MenuButton, for a menu holding more than one kind of thing.
+export function MenuHeading({ children }) {
+  return (
+    <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.12em', color: C.faintest, padding: '8px 9px 4px' }}>
+      {children}
+    </div>
+  )
+}
+
+export function MenuDivider() {
+  return <div style={{ height: 1, background: C.hair, margin: '5px 4px' }} />
+}
+
+// One active filter, shown under the controls with the ✕ that clears it.
+//
+// The menus keep the CONTROLS few; these keep the STATE visible, which is what
+// a menu costs you. Nothing draws when nothing is filtered, so the quiet case
+// stays quiet.
+export function FilterChip({ children, onClear }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 6px 3px 10px', borderRadius: 999,
+      fontSize: 12, border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)',
+      background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', color: C.accent,
+    }}>
+      {children}
+      <span onClick={onClear} title="Clear" style={{ cursor: 'pointer', opacity: 0.75, fontSize: 13, lineHeight: 1 }}>×</span>
+    </span>
+  )
 }
 
 // The link from a read-only screen to the editor that owns its data.
