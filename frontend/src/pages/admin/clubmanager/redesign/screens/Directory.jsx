@@ -115,6 +115,30 @@ function InlineField({ value, placeholder, onSave, busy, type = 'text', style })
   )
 }
 
+// One group in the detail pane. Each is a bordered card so the eye can find a
+// group without reading every label, and each avoids breaking across columns.
+//
+// The pane used to be a rigid two-column GRID, which forces every row to the
+// height of its tallest cell — Membership is long and Honours is short, so a
+// deep well of empty space opened under the short one. CSS columns pack the
+// cards instead, so the next card starts where the last one ended.
+function Card({ title, aside, children, style }) {
+  return (
+    <section style={{
+      breakInside: 'avoid', WebkitColumnBreakInside: 'avoid', pageBreakInside: 'avoid',
+      display: 'inline-block', width: '100%', verticalAlign: 'top',
+      background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 10,
+      padding: '13px 15px 15px', marginBottom: 14, ...style,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
+        <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest }}>{title}</div>
+        {aside && <div style={{ fontFamily: MONO, fontSize: 9, color: C.faintest, marginLeft: 'auto' }}>{aside}</div>}
+      </div>
+      {children}
+    </section>
+  )
+}
+
 function qualStatus(expiryISO) {
   if (!expiryISO) return { key: 'current', label: 'NO EXPIRY', fg: C.ok }
   const days = Math.round((new Date(expiryISO) - new Date()) / 86400000)
@@ -748,8 +772,8 @@ export default function Directory({ st, patch, narrow }) {
         </div>
 
         {sel && (
-          <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 24px' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 20 }}>
+          <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '18px 20px' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 16 }}>
               <Avatar p={sel} size={52} fs={16} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 {/* Name and contact are edited here, not behind Edit: the
@@ -789,26 +813,27 @@ export default function Directory({ st, patch, narrow }) {
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 22 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, marginBottom: 14 }}>
               {[
                 { value: (sel.total_hours || 0) + 'h', label: 'HOURS THIS SEASON' },
                 { value: sel.member_id ? String(overlays.shifts_this_week) : '—', label: 'SHIFTS THIS WEEK' },
                 { value: sel.member_id ? String(overlays.diary_open) : '—', label: 'DIARY TASKS' },
                 { value: String(sel.flagged || 0), label: 'QUALS TO RENEW' },
               ].map((s, i) => (
-                <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
-                  <div style={{ fontWeight: 700, fontSize: 19, color: C.accent, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
+                <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '9px 12px' }}>
+                  <div style={{ fontWeight: 700, fontSize: 18, color: C.accent, fontVariantNumeric: 'tabular-nums' }}>{s.value}</div>
                   <div style={{ fontFamily: MONO, fontSize: 9, letterSpacing: '0.1em', color: C.faint, marginTop: 3 }}>{s.label}</div>
                 </div>
               ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '22px 28px' }}>
+            {/* Two columns that PACK. narrow => one column, so a phone reads
+                it as one ordered list rather than two cramped ones. */}
+            <div style={{ columns: narrow ? 1 : 2, columnGap: 18 }}>
               {/* AXIS 1 — what kind of member. Several at once, ticked straight
                   on the person; no dialog, because this is the thing most often
                   wrong and a dialog is what stops anyone fixing it. */}
-              <section>
-                <div style={cap}>MEMBERSHIP</div>
+              <Card title="MEMBERSHIP">
                 {memberTypes.length === 0 ? (
                   <div style={{ fontSize: 13, color: C.faint }}>
                     Your club has no membership types yet.
@@ -938,12 +963,11 @@ export default function Directory({ st, patch, narrow }) {
                     )}
                   </div>
                 )}
-              </section>
+              </Card>
 
               {/* AXIS 3 — honours. Sits beside membership because "what are
                   they to the club" is one question; roles are the other. */}
-              <section>
-                <div style={cap}>HONOURS</div>
+              <Card title="HONOURS">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: busy ? 'default' : 'pointer', fontSize: 13, color: C.dim }}>
                   <input type="checkbox" disabled={busy} checked={!!sel.life_member_flag}
                     onChange={e => setLifeMember(sel, e.target.checked)} />
@@ -981,11 +1005,10 @@ export default function Directory({ st, patch, narrow }) {
                 <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 8 }}>
                   An honour, not a membership type — a life member is still whatever kind of member they already were.
                 </div>
-              </section>
+              </Card>
 
               {/* AXIS 2 — what they do. */}
-              <section>
-                <div style={cap}>ROLES</div>
+              <Card title="ROLES">
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, alignItems: 'center' }}>
                   {(sel.roles || []).map(r => (
                     <span key={r.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: C.accent, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
@@ -1002,9 +1025,8 @@ export default function Directory({ st, patch, narrow }) {
                   </select>
                 </div>
                 {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assigning a role adds this player to the member directory.</div>}
-              </section>
-              <section>
-                <div style={cap}>QUALIFICATIONS</div>
+              </Card>
+              <Card title="QUALIFICATIONS">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {quals.map((qq, i) => (
                     <div key={qq.id || i} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '8px 11px' }}>
@@ -1047,9 +1069,8 @@ export default function Directory({ st, patch, narrow }) {
                     <button onClick={assignQual} disabled={busy || !qualForm.type_id} style={{ ...btnS, opacity: (busy || !qualForm.type_id) ? 0.6 : 1 }}>Add</button>
                   </div>
                 )}
-              </section>
-              <section>
-                <div style={cap}>COMMITTEE</div>
+              </Card>
+              <Card title="COMMITTEE">
                 {!sel.member_id ? (
                   <div style={{ fontSize: 13, color: C.faint }}>Assign a role first, then committee positions can be recorded.</div>
                 ) : (
@@ -1073,7 +1094,18 @@ export default function Directory({ st, patch, narrow }) {
                         {positions.filter(p => !overlays.committee.some(c => c.position_id === p.id)).map(p => <option key={p.id} value={p.id}>{p.name}{p.is_office_bearer ? ' (office bearer)' : ''}</option>)}
                       </select>
                     </div>
-                    <div style={{ ...cap, marginTop: 16 }}>FAMILY</div>
+                  </>
+                )}
+              </Card>
+
+              {/* Family was nested inside the committee card, which made one
+                  card carry two unrelated things and left it twice the height
+                  of everything else. */}
+              <Card title="FAMILY">
+                {!sel.member_id ? (
+                  <div style={{ fontSize: 13, color: C.faint }}>Add this person to the directory first.</div>
+                ) : (
+                  <>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
                       {overlays.families.map(f => (
                         <span key={f.family_id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text, borderRadius: 5, padding: '3px 6px 3px 9px', fontSize: 12.5 }}>
@@ -1092,14 +1124,13 @@ export default function Directory({ st, patch, narrow }) {
                     </div>
                   </>
                 )}
-              </section>
+              </Card>
 
               {/* Availability lives here rather than on a separate screen: it is
                   the thing you want to change at the moment you notice it is
                   wrong, which is while you are looking at the person. Each
                   control saves on its own — there is no Save button to miss. */}
-              <section>
-                <div style={cap}>AVAILABILITY</div>
+              <Card title="AVAILABILITY">
                 {!sel.member_id ? (
                   <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>Assign a role first to record availability.</div>
                 ) : (
@@ -1150,13 +1181,12 @@ export default function Directory({ st, patch, narrow }) {
                     </div>
                   </>
                 )}
-              </section>
+              </Card>
               {/* Pinned to the right-hand column. Five sections flowing row by
                   row would drop the fifth back onto the left, and this one
                   belongs under availability — the two together are the answer
                   to "when can they help, and how much have they already". */}
-              <section style={{ gridColumn: 2 }}>
-                <div style={cap}>HOURS BY ACTIVITY</div>
+              <Card title="HOURS BY ACTIVITY">
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {hours.map(([activity, h], i) => (
                     <div key={i}>
@@ -1196,10 +1226,10 @@ export default function Directory({ st, patch, narrow }) {
                     )}
                   </>
                 ) : <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Assign a role first to log hours.</div>}
-              </section>
+              </Card>
             </div>
 
-            <div style={{ marginTop: 24, borderTop: `1px solid ${C.hair}`, paddingTop: 16 }}>
+            <div style={{ marginTop: 10, borderTop: `1px solid ${C.hair}`, paddingTop: 16 }}>
               <button onClick={() => patch({ screen: 'roster', navOpen: false })} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }}>Open this week's roster →</button>
             </div>
           </div>

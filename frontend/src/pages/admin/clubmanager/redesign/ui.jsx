@@ -177,6 +177,11 @@ export function usePref(key, fallback) {
 // decides for itself whether picking it dismisses the menu.
 export function MenuButton({ label, value, width = 250, align = 'left', disabled, children }) {
   const [open, setOpen] = useState(false)
+  // Which edge the panel hangs off, decided from where the button actually sits
+  // when it opens. A left-aligned panel on a button near the right of the screen
+  // runs off the page — which is what the Directory's and Accounts' "More" menu
+  // did, since both sit at the end of their row.
+  const [side, setSide] = useState(align)
   const wrap = useRef(null)
   useEffect(() => {
     if (!open) return
@@ -190,10 +195,19 @@ export function MenuButton({ label, value, width = 250, align = 'left', disabled
     return () => { document.removeEventListener('pointerdown', onDown); document.removeEventListener('keydown', onKey) }
   }, [open])
 
+  // Measured on open rather than assumed: the same button is near the middle on
+  // a wide screen and hard right on a narrow one, and a filter row wraps.
+  const place = () => {
+    const r = wrap.current?.getBoundingClientRect()
+    if (!r) return setSide(align)
+    const room = window.innerWidth - r.left - 8
+    setSide(room < width ? 'right' : align)
+  }
+
   const on = !!value
   return (
     <div ref={wrap} style={{ position: 'relative', flexShrink: 0 }}>
-      <button type="button" disabled={disabled} onClick={() => setOpen(o => !o)}
+      <button type="button" disabled={disabled} onClick={() => { if (!open) place(); setOpen(o => !o) }}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8,
           fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', maxWidth: 230,
@@ -208,7 +222,8 @@ export function MenuButton({ label, value, width = 250, align = 'left', disabled
       </button>
       {open && (
         <div style={{
-          position: 'absolute', top: 'calc(100% + 5px)', [align]: 0, zIndex: 60, width,
+          position: 'absolute', top: 'calc(100% + 5px)', [side]: 0, zIndex: 60,
+          width, maxWidth: 'calc(100vw - 24px)',
           maxHeight: 340, overflowY: 'auto', background: C.surface,
           border: `1px solid ${C.hair2}`, borderRadius: 10, padding: 5,
           boxShadow: '0 10px 28px rgba(0,0,0,0.34)',

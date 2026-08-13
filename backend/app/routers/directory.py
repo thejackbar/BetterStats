@@ -192,7 +192,7 @@ async def set_player_types(player_id: str, data: MemberTypesBody, _: User = _wri
 @router.put("/people/{member_id}/life-membership")
 async def set_life_membership(member_id: str, data: LifeMembershipBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
-        await svc.set_life_membership(db, club.id, _uuid(member_id), data.is_life_member, data.since)
+        await svc.set_life_membership(db, club.id, _uuid(member_id), data.is_life_member, data.since, data.detail)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
@@ -203,7 +203,7 @@ async def set_life_membership(member_id: str, data: LifeMembershipBody, _: User 
 async def set_player_life_membership(player_id: str, data: LifeMembershipBody, _: User = _write, club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
         mid = await members_svc.ensure_for_player(db, club.id, _uuid(player_id))
-        await svc.set_life_membership(db, club.id, _uuid(mid), data.is_life_member, data.since)
+        await svc.set_life_membership(db, club.id, _uuid(mid), data.is_life_member, data.since, data.detail)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
