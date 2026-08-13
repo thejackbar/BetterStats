@@ -12,6 +12,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import (
@@ -40,6 +41,18 @@ def _clean_mobile(raw: Optional[str]) -> Optional[str]:
     if not _MOBILE_DIGITS_RE.match(_MOBILE_STRIP_RE.sub("", value)):
         raise HTTPException(400, "That doesn't look like a valid mobile number")
     return value
+
+
+def _parse_uuid(value: str, label: str) -> uuid.UUID:
+    """uuid.UUID() raises a bare ValueError on a malformed id, which — left
+    uncaught in a route handler — surfaces to the browser as a generic 500
+    "Internal Server Error" with no indication of what went wrong. Every
+    id this router takes off a request body or path param goes through this
+    instead, so a stale/mistyped id is a clean 422 naming the field."""
+    try:
+        return uuid.UUID(value)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(422, f"'{value}' isn't a valid {label}")
 
 
 # ─── Club-scoped user management ─────────────────────────────────────────────
@@ -145,6 +158,7 @@ async def update_club_user(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    _parse_uuid(user_id, "user id")
     row = await db.execute(text(
         "SELECT u.id FROM club_memberships cm JOIN users u ON u.id = cm.user_id "
         "WHERE u.id = :uid AND cm.club_id = :club"
@@ -189,6 +203,7 @@ async def send_password_reset_link(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    _parse_uuid(user_id, "user id")
     row = await db.execute(text(
         "SELECT u.id, u.email, u.display_name, u.username FROM club_memberships cm "
         "JOIN users u ON u.id = cm.user_id WHERE u.id = :uid AND cm.club_id = :club"
@@ -224,6 +239,7 @@ async def remove_club_user(
 ):
     if str(current_user.id) == user_id:
         raise HTTPException(400, "Can't remove yourself")
+    _parse_uuid(user_id, "user id")
 
     row = await db.execute(text(
         "DELETE FROM club_memberships WHERE user_id = :uid AND club_id = :club RETURNING id"
@@ -299,25 +315,32 @@ async def create_user(
         raise HTTPException(409, "Username already taken")
     if len(data.password) < 10:
         raise HTTPException(422, "Password must be at least 10 characters")
-    club = await db.get(Organisation, uuid.UUID(data.club_id))
+    club = await db.get(Organisation, _parse_uuid(data.club_id, "club id"))
     if not club:
         raise HTTPException(404, "Club not found")
 
     user = User(username=username, password_hash=_hash_password(data.password), display_name=data.display_name)
-    db.add(user)
-    await db.flush()
+    role = data.role if data.role in ("super_admin", "club_admin") else "club_admin"
+    try:
+        db.add(user)
+        await db.flush()
+        membership = ClubMembership(club_id=club.id, user_id=user.id, role=role)
+        db.add(membership)
+        await db.flush()
+        if role == "club_admin":
+            from app.services.memberships import ensure_primary_admin
+            await ensure_primary_admin(db, club.id)
+        await db.commit()
+    except IntegrityError as exc:
+        # A raw constraint violation here (a racing duplicate username, or a
+        # production schema that's drifted from this model — e.g. a column
+        # or unique index this deploy expects but an older/partial migration
+        # never added) used to surface as a bare "Internal Server Error"
+        # with no indication of what actually went wrong. Roll back so the
+        # session isn't left poisoned, and say what Postgres actually said.
+        await db.rollback()
+        raise HTTPException(409, f"Could not create the account: {exc.orig}") from exc
 
-    membership = ClubMembership(
-        club_id=club.id, user_id=user.id,
-        role=data.role if data.role in ("super_admin", "club_admin") else "club_admin",
-    )
-    db.add(membership)
-    await db.flush()
-    if membership.role == "club_admin":
-        from app.services.memberships import ensure_primary_admin
-        await ensure_primary_admin(db, club.id)
-
-    await db.commit()
     return {"id": str(user.id), "username": user.username, "club_id": data.club_id, "role": membership.role}
 
 
@@ -335,7 +358,7 @@ async def patch_user(
     user_id: str, data: UserUpdate,
     current_user: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db),
 ):
-    user = await db.get(User, uuid.UUID(user_id))
+    user = await db.get(User, _parse_uuid(user_id, "user id"))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -369,7 +392,7 @@ async def patch_user(
         raise HTTPException(status_code=400, detail="Cannot demote the last super admin")
 
     if "club_id" in fields:
-        club = await db.get(Organisation, uuid.UUID(fields["club_id"]))
+        club = await db.get(Organisation, _parse_uuid(fields["club_id"], "club id"))
         if not club:
             raise HTTPException(status_code=404, detail="Club not found")
         if membership:
@@ -392,7 +415,7 @@ async def patch_user(
 
 @router.delete("/club-admin/super/users/{user_id}")
 async def delete_user(user_id: str, current_user: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)):
-    user = await db.get(User, uuid.UUID(user_id))
+    user = await db.get(User, _parse_uuid(user_id, "user id"))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current_user.id:
@@ -419,7 +442,7 @@ async def reset_password(
 ):
     if len(data.new_password) < 10:
         raise HTTPException(status_code=422, detail="Password must be at least 10 characters")
-    user = await db.get(User, uuid.UUID(user_id))
+    user = await db.get(User, _parse_uuid(user_id, "user id"))
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user.password_hash = _hash_password(data.new_password)
