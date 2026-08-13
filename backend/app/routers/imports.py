@@ -567,16 +567,40 @@ async def commit(
         raise HTTPException(422, "Nothing to import — no rows matched a player. "
                                  "Resolve the player matches and try again.")
 
-    # Latest-upload-wins: replace prior imported truth for these players only.
+    # Latest-upload-wins: replace prior imported truth for the exact
+    # (player, scope, season, grade) cells THIS batch is about to write —
+    # never a player's entire imported history. A player who turns out
+    # across several seasons has each season written by a different
+    # upload (one file per season is the normal shape for a historical
+    # import); deleting by player_id alone wiped every OTHER season's rows
+    # for that player each time a new season file was committed — reported
+    # live as a multi-season import silently losing most of its earlier
+    # seasons for any player who also appeared in a later file.
     pids = [uuid.UUID(p) for p in items_by_player.keys()]
-    await db.execute(
-        sa_delete(ImportedStat).where(
-            ImportedStat.organisation_id == club.id, ImportedStat.player_id.in_(pids))
-    )
-    # A re-imported player minted by an EARLIER batch now holds rows only from
-    # this one, so move the created-by marker forward — undoing THIS batch is
-    # what would leave them empty. Players the import didn't create (marker
-    # NULL: synced or hand-added) are never stamped.
+    delete_groups: dict = {}
+    for pid_str, items in items_by_player.items():
+        for it in items:
+            key = (it["scope"], it["season_id"], it.get("grade_label"), it["is_prior_bucket"])
+            delete_groups.setdefault(key, set()).add(uuid.UUID(pid_str))
+    for (scope, season_id, grade_label, is_prior), group_pids in delete_groups.items():
+        conds = [
+            ImportedStat.organisation_id == club.id,
+            ImportedStat.player_id.in_(group_pids),
+            ImportedStat.scope == scope,
+            ImportedStat.is_prior_bucket == is_prior,
+            (ImportedStat.season_id == season_id) if season_id is not None
+            else ImportedStat.season_id.is_(None),
+            (ImportedStat.grade_label == grade_label) if grade_label is not None
+            else ImportedStat.grade_label.is_(None),
+        ]
+        await db.execute(sa_delete(ImportedStat).where(*conds))
+    # A player minted by an EARLIER batch that this batch also touches gets
+    # its created-by marker moved forward, so an undo of the batch that most
+    # recently wrote to them is the one that reconsiders deleting them (the
+    # emptiness check itself looks at all their data, not just this batch's —
+    # see BLOCKING_REFS — so this is about which batch's /undo bothers to
+    # check at all, not about data safety). Players the import didn't create
+    # (marker NULL: synced or hand-added) are never stamped.
     await db.execute(
         sa_update(Player).where(
             Player.organisation_id == club.id, Player.id.in_(pids),
