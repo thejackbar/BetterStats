@@ -1,7 +1,7 @@
 export default {
   version: 'v9.22.0',
   date: '2026-08-13',
-  sortKey: '2026-08-16T15:00:00Z',
+  sortKey: '2026-08-16T16:00:00Z',
   title: 'BetterScout tracks a player across every club they play for',
   items: [
     "A player who turns out for more than one club can now be tracked as one person with every club's stats attached, instead of only ever remembering the last club you added them from.",
