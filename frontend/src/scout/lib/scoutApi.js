@@ -42,10 +42,10 @@ export const scoutApi = {
   rescanOtherClubs: (id) => request(`/scout/players/${id}/other-clubs/scan`, { method: 'POST' }),
   searchOtherClub: (id, { orgGuid, clubName }) =>
     request(`/scout/players/${id}/other-clubs/search-club`, { method: 'POST', body: JSON.stringify({ org_guid: orgGuid, club_name: clubName }) }),
-  linkPlayerClub: (id, { orgGuid, playerId, isPrimary, canonicalParticipantId }) =>
+  linkPlayerClub: (id, { orgGuid, playerId, isPrimary, canonicalParticipantId, clubName }) =>
     request(`/scout/players/${id}/clubs/link`, { method: 'POST', body: JSON.stringify({
       org_guid: orgGuid, player_id: playerId ?? null, is_primary: !!isPrimary,
-      canonical_participant_id: canonicalParticipantId ?? null,
+      canonical_participant_id: canonicalParticipantId ?? null, club_name: clubName ?? null,
     }) }),
   unlinkPlayerClub: (id, clubRowId) => request(`/scout/players/${id}/clubs/${clubRowId}`, { method: 'DELETE' }),
   mergePlayers: (keepId, mergeFromId) =>

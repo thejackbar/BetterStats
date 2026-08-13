@@ -255,7 +255,12 @@ export default function ScoutPlayerProfile() {
                       {seasons.map((s) => (
                         <tr key={s.year} className="border-b border-pb-hairline last:border-0">
                           <td className="px-2 py-1.5 font-mono">{s.year}</td>
-                          <td className="px-2 py-1.5">{s.grade || '—'}</td>
+                          <td className="px-2 py-1.5">
+                            {s.grade || '—'}
+                            {s.club_names?.length > 1 && (
+                              <span className="block font-mono text-[9px] text-pb-faint">{s.club_names.join(' + ')}</span>
+                            )}
+                          </td>
                           <td className="px-2 py-1.5 text-right font-mono">{s.matches}</td>
                           <td className="px-2 py-1.5 text-right font-mono">{s.runs}</td>
                           <td className="px-2 py-1.5 text-right font-mono">{s.average ?? '—'}</td>
@@ -434,6 +439,7 @@ function ClubsSection({ player, onChanged, setError }) {
   const pollConfirm = (c, key) => {
     scoutApi.linkPlayerClub(player.id, {
       orgGuid: c.club_org_guid, playerId: c.player_id, canonicalParticipantId: c.canonical_participant_id,
+      clubName: c.club_name,
     }).then((res) => {
       if (res.status === 'building') {
         if (++confirmPollCount.current < OTHER_CLUB_MAX_POLLS) {

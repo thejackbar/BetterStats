@@ -309,6 +309,34 @@ def _combine_season_totals(seasons: list[dict]) -> dict:
     }
 
 
+def _merge_seasons_by_year(all_seasons: list[dict]) -> list[dict]:
+    """One row per YEAR, summed across every club a player is linked to — a
+    flat concatenation of each club's own season list (what player_out used
+    to hand the frontend directly) put a player's 2025 at Club A and their
+    2025 at Club B on two separate rows with the SAME year, which is what
+    "not merging his stats together" was — the season table even collided
+    on React key={s.year}. Reuses _combine_season_totals's counting-stats-
+    sum / rate-re-derive rule per year instead of collapsing every year into
+    one grand total. `club_names` on each row lists which club(s)
+    contributed, since a scout may still want to know a year was split."""
+    by_year: dict = {}
+    for season in all_seasons:
+        by_year.setdefault(season.get("year"), []).append(season)
+    merged = []
+    for year, rows in by_year.items():
+        combined = _combine_season_totals(rows)
+        club_names = sorted({r["club_name"] for r in rows if r.get("club_name")})
+        grades = sorted({r["grade"] for r in rows if r.get("grade")})
+        merged.append({
+            "year": year,
+            **combined,
+            "grade": grades[0] if len(grades) == 1 else (" / ".join(grades) if grades else None),
+            "club_names": club_names,
+        })
+    merged.sort(key=lambda s: s["year"] or 0, reverse=True)
+    return merged
+
+
 async def _upsert_player_club(
     session: AsyncSession, scouted_player_id: str, org_guid: str, club_name: str | None, sliced: dict, *,
     participant_id: str | None, is_primary: bool, linked_via: str,
@@ -559,15 +587,16 @@ async def player_out(session: AsyncSession, p: ScoutedPlayer) -> dict:
     } for c in club_rows]
 
     if clubs:
-        # A season across several clubs — tag each with which club it came
-        # from (a season row alone doesn't say), then combine into one
-        # career total the same way the frontend combines seasons WITHIN
-        # one club (see _combine_season_totals's own docstring).
+        # Tag each season with which club it came from (a season row alone
+        # doesn't say), merge same-year rows across clubs into one (see
+        # _merge_seasons_by_year — a player who turned out for two clubs in
+        # one year gets ONE row for that year, not two), and combine
+        # everything into one grand-total career figure the same way.
         all_seasons = []
         for c in clubs:
             for season in c["seasons"]:
                 all_seasons.append({**season, "club_name": c["club_name"], "club_org_guid": c["club_org_guid"]})
-        stats = {"seasons": all_seasons, "totals": _combine_season_totals(all_seasons)}
+        stats = {"seasons": _merge_seasons_by_year(all_seasons), "totals": _combine_season_totals(all_seasons)}
     else:
         # A manual player, or one added before this feature existed and not
         # yet re-added — fall back to the legacy single-club snapshot.
@@ -739,7 +768,7 @@ async def search_other_club(session: AsyncSession, scouted_player_id: str, org_g
 
 async def link_player_club(
     session: AsyncSession, scouted_player_id: str, org_guid: str, player_id: str | None = None, *,
-    is_primary: bool = False, canonical_participant_id: str | None = None,
+    is_primary: bool = False, canonical_participant_id: str | None = None, club_name: str | None = None,
 ) -> dict:
     """The scout confirmed a candidate really is the same person — links
     that club stint onto this ScoutedPlayer. Never called automatically; a
@@ -755,15 +784,36 @@ async def link_player_club(
     "building"} for the caller to poll, exactly like search_other_club),
     then try an exact match on `canonical_participant_id` (cheap and precise
     when this club's own CA aggregate feed happens to use the same id),
-    falling back to a name match scoped to this one club."""
+    falling back to a name match scoped to this one club.
+
+    `club_name` — the real name the caller already knows for this org (a
+    suggest_other_clubs candidate carries it straight from the live search
+    results) — MUST be threaded into get_or_start_club_roster, or a
+    not-yet-cached club builds with no name at all: iq_scout._build_career
+    only ever stores whatever `club_name` it was called with, it never looks
+    one up itself, so a bare org_guid with no name produces a roster (and a
+    linked ScoutedPlayerClub row) permanently named "Unknown club". Also
+    used as the read-time fallback below, for a club that was already
+    cached nameless before this fix."""
     player = await session.get(ScoutedPlayer, scouted_player_id)
     if not player:
         raise ValueError("Player not found.")
-    roster = await get_or_start_club_roster(session, org_guid)
+    roster = await get_or_start_club_roster(session, org_guid, club_name=club_name)
     if roster.get("status") != "ready":
         return {"status": roster.get("status")}
     club_row = await _load_club_row(session, org_guid)
-    resolved_club_name = (club_row.payload or {}).get("org", {}).get("name") if club_row else None
+    resolved_club_name = ((club_row.payload or {}).get("org", {}).get("name") if club_row else None) or club_name
+    if club_row and club_name and not (club_row.payload or {}).get("org", {}).get("name"):
+        # Repairs an already-cached-nameless roster (the exact "Unknown
+        # club" symptom, for a club that was first built before this fix
+        # shipped) — every FUTURE reader of this shared cache row, not just
+        # this one player, inherits the fix. Reassign the payload dict
+        # (rather than mutating in place) so SQLAlchemy tracks the JSONB
+        # column as changed.
+        club_row.club_name = club_row.club_name or club_name
+        payload = dict(club_row.payload or {})
+        payload["org"] = {**(payload.get("org") or {}), "name": (payload.get("org") or {}).get("name") or club_name}
+        club_row.payload = payload
 
     if player_id is None:
         sliced = _slice_player(club_row.payload or {}, canonical_participant_id) if canonical_participant_id else None

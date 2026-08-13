@@ -231,6 +231,11 @@ class LinkPlayerClubRequest(BaseModel):
     player_id: str | None = None
     is_primary: bool = False
     canonical_participant_id: str | None = None
+    # The real club name the caller already knows (a suggest_other_clubs
+    # candidate carries it from the live search) — required so a not-yet-
+    # cached club's roster build actually gets a name; see
+    # scout_discovery.link_player_club's own docstring for why.
+    club_name: str | None = None
 
 
 @router.post("/players/{player_id}/clubs/link")
@@ -242,7 +247,7 @@ async def link_player_club(
     try:
         return await scout_discovery.link_player_club(
             db, player_id, data.org_guid, data.player_id, is_primary=data.is_primary,
-            canonical_participant_id=data.canonical_participant_id,
+            canonical_participant_id=data.canonical_participant_id, club_name=data.club_name,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
