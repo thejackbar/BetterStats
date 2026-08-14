@@ -1160,6 +1160,7 @@ async def lifespan(app: FastAPI):
         # player). Idempotent so existing merge_logs tables pick them up.
         for _col in (
             "bowler_wicket_ids", "fielder_wicket_ids", "grade_stat_ids", "appearance_game_ids",
+            "imported_stat_ids",
         ):
             await conn.execute(text(
                 f"ALTER TABLE merge_logs ADD COLUMN IF NOT EXISTS {_col} JSONB DEFAULT '[]'"

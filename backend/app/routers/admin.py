@@ -16,11 +16,13 @@ from app.services.grassroots_scores_client import get_match_scorecard
 from app.models.db import (
     Player, PlayerSeasonStats, BattingInnings, BowlingSpell,
     FieldingStat, FallOfWicket, Partnership, Milestone, User, Organisation, get_db,
+    ImportedStat,
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERGES
 from app.services.grade_labels import suggest_category, normalise_category
 from app.services.player_aliases import seed_alias_on_rename
+from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -264,6 +266,34 @@ async def _merge_players_core(
         batter2_rows = (await db.execute(select(Partnership).where(Partnership.batter2_id == remove_id))).scalars().all()
         milestone_rows = (await db.execute(select(Milestone).where(Milestone.player_id == remove_id))).scalars().all()
 
+        # imported_stats (BetterImport's uploaded truth) FKs to players with
+        # ON DELETE CASCADE. It was never reassigned here, so merging a player
+        # created by a historical stats import (see routers/imports.py::commit
+        # — a name that didn't match the existing roster mints a brand-new
+        # Player) silently destroyed their entire imported career the moment
+        # the removed player row was deleted, with nothing logged for undo.
+        # Same class of bug this function already fixed once for
+        # bowler_wickets/grade_stats/appearances — see the merge_logs comment
+        # in main.py's lifespan.
+        remove_imported_res = await db.execute(select(ImportedStat).where(ImportedStat.player_id == remove_id))
+        remove_imported = remove_imported_res.scalars().all()
+        keep_imported_res = await db.execute(select(ImportedStat).where(ImportedStat.player_id == keep_id))
+        keep_imported_keys = {
+            (s.scope, s.season_id, s.grade_label, s.is_prior_bucket) for s in keep_imported_res.scalars().all()
+        }
+        moved_imported_ids = []
+        for s in remove_imported:
+            key = (s.scope, s.season_id, s.grade_label, s.is_prior_bucket)
+            if key in keep_imported_keys:
+                # Same (scope, season, grade) cell already imported for keep —
+                # a genuine duplicate upload. Drop the removed side rather than
+                # risk double-counting; mirrors the PlayerSeasonStats collision
+                # rule below.
+                await db.execute(delete(ImportedStat).where(ImportedStat.id == s.id))
+            else:
+                await db.execute(update(ImportedStat).where(ImportedStat.id == s.id).values(player_id=keep_id))
+                moved_imported_ids.append(s.id)
+
         # bowler_wickets is keyed on bowler_id (wicket-taker) and fielder_id
         # (catcher / run-out fielder). Both must follow the player or they're lost:
         # the FK is ON DELETE CASCADE / SET NULL, so deleting the removed player
@@ -435,7 +465,8 @@ async def _merge_players_core(
                     moved_season_stat_ids, batting_innings_ids, bowling_spell_ids,
                     fielding_stat_ids, fall_of_wicket_ids,
                     batter1_partnership_ids, batter2_partnership_ids, milestone_ids,
-                    bowler_wicket_ids, fielder_wicket_ids, grade_stat_ids, appearance_game_ids
+                    bowler_wicket_ids, fielder_wicket_ids, grade_stat_ids, appearance_game_ids,
+                    imported_stat_ids
                 ) VALUES (
                     :org_id, :keep_id, :keep_name,
                     :remove_id, :remove_name, :remove_playhq_id,
@@ -443,7 +474,8 @@ async def _merge_players_core(
                     :pss_ids, :bat_ids, :bowl_ids,
                     :field_ids, :fow_ids,
                     :b1_ids, :b2_ids, :mil_ids,
-                    :bw_ids, :fw_ids, :grade_ids, :appear_ids
+                    :bw_ids, :fw_ids, :grade_ids, :appear_ids,
+                    :imported_ids
                 )
             """),
             {
@@ -466,6 +498,7 @@ async def _merge_players_core(
                 "fw_ids": json.dumps(list(fielder_wkt_ids)),
                 "grade_ids": json.dumps(moved_grade_stat_ids),
                 "appear_ids": json.dumps([str(g) for g in moved_appearance_game_ids]),
+                "imported_ids": json.dumps(moved_imported_ids),
             },
         )
 
@@ -484,6 +517,7 @@ async def _merge_players_core(
                     "bowler_wickets": len(bowler_wkt_ids),
                     "appearances": len(moved_appearance_game_ids),
                     "milestones": len(_ids(milestone_rows)),
+                    "imported_stats": len(moved_imported_ids),
                 },
             },
         )
@@ -499,6 +533,18 @@ async def _merge_players_core(
             status_code=409,
             detail=f"Couldn't merge these players — a data conflict blocked it: {getattr(e, 'orig', e)}",
         )
+
+    if moved_imported_ids:
+        # import_effective_deltas (the blended-into-the-dashboard totals) is
+        # fully derived from imported_stats and rebuilt wholesale on every
+        # call — regenerate it now so the kept player's effective stats
+        # reflect the moved rows immediately, not just after the next sync.
+        # Best-effort: a hiccup here must not turn an already-committed merge
+        # into a 500 (the next sync/import self-heals it regardless).
+        try:
+            await reconcile_imported_totals(str(org_id))
+        except Exception:
+            log.exception("merge_players: post-merge reconcile_imported_totals failed org=%s", org_id)
 
     return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id)}
 
@@ -1102,6 +1148,12 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
             ),
             {"pid": str(remove_id), "kid": str(keep_id), "ids": appear_ids},
         )
+    imported_ids = _jlist(log.get("imported_stat_ids"))
+    if imported_ids:
+        await db.execute(
+            text("UPDATE imported_stats SET player_id = :pid WHERE id = ANY(:ids)"),
+            {"pid": str(remove_id), "ids": imported_ids},
+        )
 
     await db.execute(
         text("UPDATE merge_logs SET undone_at = NOW() WHERE id = :id"),
@@ -1120,6 +1172,12 @@ async def undo_merge(req: UndoMergeRequest, db: AsyncSession = Depends(get_db), 
     )
 
     await db.commit()
+
+    if imported_ids:
+        try:
+            await reconcile_imported_totals(req.org_id)
+        except Exception:
+            log.exception("undo_merge: post-undo reconcile_imported_totals failed org=%s", req.org_id)
 
     return {"status": "undone", "restored_player_id": str(remove_id)}
 
