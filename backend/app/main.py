@@ -4790,6 +4790,43 @@ async def lifespan(app: FastAPI):
             END $$
         """))
 
+        # Migration 253: a plain multi-column ON DELETE SET NULL nulls EVERY
+        # column of the FK, not just player_id — so deleting a linked player
+        # (merge_players' own DELETE FROM players) tried to null
+        # organisation_id too and aborted with a NOT NULL violation. Postgres
+        # 15's per-column SET NULL (player_id) fixes it without touching
+        # organisation_id. Byte-identical to
+        # alembic/versions/253_fee_members_fk_set_null_player_only.py.
+        await conn.execute(text("""
+            DO $$
+            DECLARE
+              player_id_attnum smallint;
+            BEGIN
+              IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relname = 'fee_members' AND relkind = 'r') THEN
+                RETURN;
+              END IF;
+
+              SELECT attnum INTO player_id_attnum
+              FROM pg_attribute
+              WHERE attrelid = 'fee_members'::regclass AND attname = 'player_id';
+
+              IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'fk_fee_members_player_same_org'
+                  AND conrelid = 'fee_members'::regclass
+                  AND confdelsetcols = ARRAY[player_id_attnum]
+              ) THEN
+                ALTER TABLE fee_members DROP CONSTRAINT IF EXISTS fk_fee_members_player_same_org;
+                ALTER TABLE fee_members
+                  ADD CONSTRAINT fk_fee_members_player_same_org
+                  FOREIGN KEY (organisation_id, player_id)
+                  REFERENCES players (organisation_id, id)
+                  ON DELETE SET NULL (player_id)
+                  NOT VALID;
+              END IF;
+            END $$
+        """))
+
         # Migration 235: a per-season PlayHQ registration checkbox on
         # fee_member_seasons — playing requires it, and nothing here can read
         # it back from PlayHQ, so an admin ticks it once sighted. Byte-
