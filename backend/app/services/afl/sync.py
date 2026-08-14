@@ -534,6 +534,84 @@ async def _rollup_season_stats(session: AsyncSession, org_id: uuid.UUID) -> int:
     return result.rowcount or 0
 
 
+async def _discover_grade_games(session: AsyncSession, org_pk: uuid.UUID,
+                                grade_row_id: uuid.UUID, playhq_grade_id: str,
+                                our_team_ids: set[str], full: bool,
+                                stats: dict) -> list[tuple[uuid.UUID, str]]:
+    """Walk one grade's fixture (discoverGradeFixture), upserting Game +
+    AflGameDetails for every game either side of which is in
+    ``our_team_ids``. Returns the (game row id, raw game id) pairs whose
+    stats still need a gameView fetch.
+
+    Extracted so ``link_grade_manually`` (the admin override for a grade our
+    own discoverTeams call doesn't currently report — e.g. a team re-graded
+    into a different division mid-season, so its OLD grade drops out of the
+    "current teams" snapshot discoverTeams answers with) can walk a single
+    grade exactly the way the main sync loop below does, rather than a
+    second, drifting copy of this logic.
+    """
+    todo: list[tuple[uuid.UUID, str]] = []
+    rounds = await phq.get_grade_fixture(playhq_grade_id, force=full)
+    for rnd in rounds:
+        for gm in rnd.get("games") or []:
+            home = gm.get("home") or {}
+            away = gm.get("away") or {}
+            h_id, a_id = str(home.get("id")), str(away.get("id"))
+            if h_id not in our_team_ids and a_id not in our_team_ids:
+                continue
+            raw_gid = str(gm.get("id"))
+            game_row_id = derive_id(org_pk, f"game:{raw_gid}")
+            game_row = await session.get(Game, game_row_id)
+            our_side = "HOME" if h_id in our_team_ids else "AWAY"
+            opp = away if our_side == "HOME" else home
+            played_at = None
+            if gm.get("date"):
+                try:
+                    played_at = date.fromisoformat(gm["date"][:10])
+                except ValueError:
+                    pass
+            alloc = gm.get("allocation") or {}
+            court = alloc.get("court") or {}
+            if game_row is None:
+                game_row = Game(id=game_row_id, grade_id=grade_row_id)
+                session.add(game_row)
+            game_row.grade_id = grade_row_id
+            game_row.played_at = played_at
+            game_row.home_team = home.get("name")
+            game_row.away_team = away.get("name")
+            game_row.home_club = ((home.get("organisation") or {}).get("name"))
+            game_row.away_club = ((away.get("organisation") or {}).get("name"))
+            game_row.opp_club_name = opp.get("name")
+            game_row.opp_org_id = str((opp.get("organisation") or {}).get("id") or "") or None
+            game_row.is_final = bool(rnd.get("isFinalsRound"))
+            game_row.venue = court.get("name") or ((court.get("venue") or {}).get("name")) or game_row.venue
+
+            details = await session.get(AflGameDetails, game_row_id)
+            status = ((gm.get("status") or {}).get("value"))
+            if details is None:
+                details = AflGameDetails(game_id=game_row_id, playhq_id=raw_gid)
+                session.add(details)
+            prev_status = details.status
+            details.round_name = rnd.get("name")
+            details.round_abbrev = rnd.get("abbreviatedName")
+            details.our_side = our_side
+            details.start_time = alloc.get("time") or details.start_time
+            # Only downgrade to fixture-level status if stats have never
+            # been synced (gameView is the authority after).
+            if details.synced_at is None or status == "FINAL":
+                details.status = status
+            stats["games_discovered"] = stats.get("games_discovered", 0) + 1
+
+            needs_stats = (
+                full
+                or details.synced_at is None
+                or prev_status != "FINAL"
+            ) and status == "FINAL"
+            if needs_stats:
+                todo.append((game_row_id, raw_gid))
+    return todo
+
+
 async def sync_organisation(org_id: uuid.UUID,
                             run_id: Optional[uuid.UUID] = None,
                             full: bool = False,
@@ -594,64 +672,9 @@ async def sync_organisation(org_id: uuid.UUID,
                           10 + 20 * (idx / max(1, len(grade_infos))),
                           idx, len(grade_infos))
                 await update_sync_run(run_id, stats)
-                rounds = await phq.get_grade_fixture(gi["playhq_grade_id"], force=full)
-                for rnd in rounds:
-                    for gm in rnd.get("games") or []:
-                        home = gm.get("home") or {}
-                        away = gm.get("away") or {}
-                        h_id, a_id = str(home.get("id")), str(away.get("id"))
-                        if h_id not in our_team_ids and a_id not in our_team_ids:
-                            continue
-                        raw_gid = str(gm.get("id"))
-                        game_row_id = derive_id(org_pk, f"game:{raw_gid}")
-                        game_row = await session.get(Game, game_row_id)
-                        our_side = "HOME" if h_id in our_team_ids else "AWAY"
-                        opp = away if our_side == "HOME" else home
-                        played_at = None
-                        if gm.get("date"):
-                            try:
-                                played_at = date.fromisoformat(gm["date"][:10])
-                            except ValueError:
-                                pass
-                        alloc = gm.get("allocation") or {}
-                        court = alloc.get("court") or {}
-                        if game_row is None:
-                            game_row = Game(id=game_row_id, grade_id=gi["grade_row_id"])
-                            session.add(game_row)
-                        game_row.grade_id = gi["grade_row_id"]
-                        game_row.played_at = played_at
-                        game_row.home_team = home.get("name")
-                        game_row.away_team = away.get("name")
-                        game_row.home_club = ((home.get("organisation") or {}).get("name"))
-                        game_row.away_club = ((away.get("organisation") or {}).get("name"))
-                        game_row.opp_club_name = opp.get("name")
-                        game_row.opp_org_id = str((opp.get("organisation") or {}).get("id") or "") or None
-                        game_row.is_final = bool(rnd.get("isFinalsRound"))
-                        game_row.venue = court.get("name") or ((court.get("venue") or {}).get("name")) or game_row.venue
-
-                        details = await session.get(AflGameDetails, game_row_id)
-                        status = ((gm.get("status") or {}).get("value"))
-                        if details is None:
-                            details = AflGameDetails(game_id=game_row_id, playhq_id=raw_gid)
-                            session.add(details)
-                        prev_status = details.status
-                        details.round_name = rnd.get("name")
-                        details.round_abbrev = rnd.get("abbreviatedName")
-                        details.our_side = our_side
-                        details.start_time = alloc.get("time") or details.start_time
-                        # Only downgrade to fixture-level status if stats have
-                        # never been synced (gameView is the authority after).
-                        if details.synced_at is None or status == "FINAL":
-                            details.status = status
-                        stats["games_discovered"] += 1
-
-                        needs_stats = (
-                            full
-                            or details.synced_at is None
-                            or prev_status != "FINAL"
-                        ) and status == "FINAL"
-                        if needs_stats:
-                            todo.append((game_row_id, raw_gid))
+                todo.extend(await _discover_grade_games(
+                    session, org_pk, gi["grade_row_id"], gi["playhq_grade_id"],
+                    our_team_ids, full, stats))
                 await session.commit()
 
             # ── Per-game stats + events ──────────────────────────────────
@@ -709,3 +732,186 @@ async def sync_organisation(org_id: uuid.UUID,
         if owns_run:
             await finish_sync_run(run_id, stats, error=str(exc))
         raise
+
+
+# ─── Manually linking a grade discoverTeams doesn't (or no longer) report ──
+#
+# discoverTeams answers with each team's CURRENT grade only — there is no
+# "grade history" in the payload. A community-footy team that gets re-graded
+# mid-season (a round-robin split, promotion/relegation after the first few
+# rounds) drops its OLD grade out of every future sync's "teams & grades"
+# snapshot, and — if the club was only synced for the first time after the
+# move — that old grade's rounds may never have been discovered at all, even
+# though the aggregate participant-stats feed (a different, grade-agnostic
+# endpoint) still knows the player played them. This is the admin's manual
+# way back in: paste a PlayHQ link to any one match from the missing grade
+# and we pull the whole thing in.
+
+_PLAYHQ_GAME_URL_RE = re.compile(r"game-centre/([0-9a-zA-Z]{4,12})", re.I)
+_BARE_GAME_CODE_RE = re.compile(r"^[0-9a-zA-Z]{4,12}$")
+
+
+def parse_playhq_game_ref(raw: str) -> Optional[str]:
+    """Pull the short game-centre code out of a pasted PlayHQ match URL, or
+    accept a bare code typed in directly. None for anything else. Unlike
+    cricket's Grassroots API, this short code genuinely IS the AFL discover
+    API's own gameID (verified live — see the CLAUDE.md note on the
+    cricket/AFL discrepancy), so no candidate-matching is needed once it's
+    parsed out."""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    m = _PLAYHQ_GAME_URL_RE.search(text)
+    if m:
+        return m.group(1)
+    if _BARE_GAME_CODE_RE.match(text):
+        return text
+    return None
+
+
+def _norm_org_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+
+
+def _match_our_side(org: Organisation, home: dict, away: dict) -> Optional[str]:
+    """Which side of one game is this club — matched by PlayHQ organisation
+    id first (the reliable signal), club name only as a fallback for an
+    older row with no id captured. Returns 'home' | 'away' | None."""
+    for side_name, side in (("home", home), ("away", away)):
+        side_org = (side or {}).get("organisation") or {}
+        if org.playhq_id and str(side_org.get("id") or "") == str(org.playhq_id):
+            return side_name
+    for side_name, side in (("home", home), ("away", away)):
+        side_org = (side or {}).get("organisation") or {}
+        if org.name and _norm_org_name(side_org.get("name") or "") == _norm_org_name(org.name):
+            return side_name
+    return None
+
+
+async def resolve_grade_from_game(org: Organisation, raw_ref: str) -> dict:
+    """Resolve a pasted PlayHQ match link (or bare short code) into the
+    grade it belongs to, so the admin never has to go hunting for a raw
+    grade id — any one match from the missing rounds is enough."""
+    game_id = parse_playhq_game_ref(raw_ref)
+    if not game_id:
+        raise ValueError("Paste a PlayHQ match link (or its short code)")
+    game = await phq.get_game(game_id, force=True)
+    if not game:
+        raise ValueError("PlayHQ doesn't recognise that match")
+    grade = ((game.get("round") or {}).get("grade")) or {}
+    grade_id = grade.get("id")
+    if not grade_id:
+        raise ValueError("That match has no grade on PlayHQ")
+
+    home = game.get("home") or {}
+    away = game.get("away") or {}
+    season = grade.get("season") or {}
+    return {
+        "grade_id": str(grade_id),
+        "grade_name": grade.get("name") or "Grade",
+        "playhq_season_name": season.get("name"),
+        "competition_name": ((season.get("competition") or {}).get("name")),
+        "home_team": home.get("name"),
+        "away_team": away.get("name"),
+        "home_club": (home.get("organisation") or {}).get("name"),
+        "away_club": (away.get("organisation") or {}).get("name"),
+        "matched_side": _match_our_side(org, home, away),
+    }
+
+
+async def link_grade_manually(org_id: uuid.UUID, season_row_id: uuid.UUID,
+                              raw_grade_id: str, grade_name: str) -> dict:
+    """Pull one grade's whole fixture in directly by id, bypassing
+    discoverTeams entirely — the admin override for a grade the ordinary
+    sync can no longer discover on its own (see the module note above).
+    Raises when nothing in the fixture belongs to this club, so a mistyped
+    id can't silently create an empty grade with no games."""
+    async with async_session_maker() as session:
+        org = await session.get(Organisation, org_id)
+        if not org or not org.playhq_id:
+            raise ValueError("Organisation missing or has no playhq_id")
+        season = await session.get(Season, season_row_id)
+        if not season or season.organisation_id != org.id:
+            raise ValueError("Season not found for this club")
+
+        rounds = await phq.get_grade_fixture(raw_grade_id, force=True)
+        if not rounds:
+            raise ValueError("PlayHQ returned no fixture for that grade")
+
+        our_team_ids: set[str] = set()
+        team_names: dict[str, str] = {}
+        for rnd in rounds:
+            for gm in rnd.get("games") or []:
+                home, away = gm.get("home") or {}, gm.get("away") or {}
+                our_side = _match_our_side(org, home, away)
+                if not our_side:
+                    continue
+                side = home if our_side == "home" else away
+                tid = str(side.get("id") or "")
+                if tid:
+                    our_team_ids.add(tid)
+                    if side.get("name"):
+                        team_names[tid] = side["name"]
+
+        if not our_team_ids:
+            raise ValueError("No games in that grade's fixture belong to this club")
+
+        gid = derive_id(org.id, f"grade:{raw_grade_id}")
+        grade_row = await session.get(Grade, gid)
+        if grade_row is None:
+            grade_row = Grade(id=gid, season_id=season_row_id,
+                              grassroots_id=str(raw_grade_id),
+                              name=grade_name or "Grade", playhq_id=str(raw_grade_id))
+            session.add(grade_row)
+        else:
+            grade_row.season_id = season_row_id
+            if grade_name:
+                grade_row.name = grade_name
+
+        # A team discovered this way carries no gender/age_group — that
+        # only ever comes from discoverTeams, and neither is displayed
+        # anywhere that would read as a gap.
+        for tid in our_team_ids:
+            trow_id = derive_id(org.id, f"team:{tid}")
+            trow = await session.get(AflTeam, trow_id)
+            if trow is None:
+                trow = AflTeam(id=trow_id, organisation_id=org.id, season_id=season_row_id,
+                               grade_id=gid, playhq_id=tid, name=team_names.get(tid, "Team"))
+                session.add(trow)
+            else:
+                trow.grade_id = gid
+                trow.season_id = season_row_id
+        await session.commit()
+
+        stats: dict = {}
+        todo = await _discover_grade_games(
+            session, org.id, gid, str(raw_grade_id), our_team_ids, True, stats)
+        await session.commit()
+
+        player_cache: dict = {}
+        games_stats_synced = 0
+        for game_row_id, raw_gid in todo:
+            game_row = await session.get(Game, game_row_id)
+            details = await session.get(AflGameDetails, game_row_id)
+            try:
+                ok = await _sync_game_stats(session, org.id, game_row, details,
+                                            our_team_ids, player_cache)
+                if ok:
+                    games_stats_synced += 1
+                    await _sync_game_events(session, org.id, game_row, details)
+                await session.commit()
+            except Exception as exc:  # noqa: BLE001 — one bad game must not sink the rest
+                await session.rollback()
+                logger.warning("link_grade_manually: game %s stats failed: %s", raw_gid, exc)
+            await asyncio.sleep(0.2)
+
+        await _rollup_season_stats(session, org.id)
+        await session.commit()
+
+        return {
+            "grade_id": str(gid),
+            "grade_name": grade_row.name,
+            "teams_found": len(our_team_ids),
+            "games_discovered": stats.get("games_discovered", 0),
+            "games_stats_synced": games_stats_synced,
+        }

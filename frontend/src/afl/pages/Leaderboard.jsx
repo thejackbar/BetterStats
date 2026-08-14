@@ -53,7 +53,10 @@ export default function Leaderboard() {
     // leaderboard endpoint has no stat for it and would 422 on the name.
     if (isCareerBoard) return
     setLoading(true)
-    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, limit: 50 })
+    // A season's full roster (every grade combined) can run well past 50 —
+    // this is meant to be the whole list, not a top-N cut-off, so ask for
+    // the backend's max rather than an arbitrary round number.
+    aflApi.getLeaderboard(club.id, { stat, season_id: seasonId, grade_id: gradeId, limit: 500 })
       .then(setData)
       .finally(() => setLoading(false))
   }, [club.id, stat, seasonId, gradeId, isCareerBoard])

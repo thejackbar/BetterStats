@@ -102,6 +102,50 @@ async def full_rebuild(club: Organisation = Depends(get_current_club),
     return {"status": "started", "run_id": str(run_id)}
 
 
+class LinkGradePreviewRequest(BaseModel):
+    ref: str  # a pasted PlayHQ match link, or its bare short code
+
+
+class LinkGradeRequest(BaseModel):
+    season_id: uuid.UUID
+    ref: str
+
+
+@router.post("/link-grade/preview")
+async def link_grade_preview(body: LinkGradePreviewRequest,
+                             club: Organisation = Depends(get_current_club)):
+    """Resolve a pasted PlayHQ match link into the grade it belongs to,
+    without writing anything — lets the admin confirm it's the right game
+    (and that one side is really this club) before committing to a sync.
+    See services/afl/sync.py's "Manually linking a grade" note for why this
+    exists: a team re-graded mid-season drops its OLD grade out of every
+    future sync's discovery, and this is the way back in."""
+    try:
+        return await afl_sync.resolve_grade_from_game(club, body.ref)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+
+@router.post("/link-grade")
+async def link_grade(body: LinkGradeRequest,
+                     club: Organisation = Depends(get_current_club),
+                     db: AsyncSession = Depends(get_db)):
+    """Pull one whole grade in by resolving it from a pasted match link,
+    then walking its fixture directly — bypassing discoverTeams, which is
+    exactly the thing that can't see this grade any more. Synchronous (not
+    backgrounded like Sync Now/Full Rebuild): it's scoped to a single grade,
+    so it's fast enough to answer inline with a real result."""
+    if await _has_running_sync(db, club.id):
+        raise HTTPException(status_code=409, detail="A sync is already running")
+    try:
+        info = await afl_sync.resolve_grade_from_game(club, body.ref)
+        result = await afl_sync.link_grade_manually(
+            club.id, body.season_id, info["grade_id"], info["grade_name"])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    return result
+
+
 @router.get("/sync-runs")
 async def sync_runs(club: Organisation = Depends(get_current_club),
                     db: AsyncSession = Depends(get_db)):

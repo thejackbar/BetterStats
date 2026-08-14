@@ -86,6 +86,99 @@ function SeasonRow({ season, onSaved, onDeleted }) {
   )
 }
 
+// PlayHQ's "teams in this season" answer only ever carries a team's CURRENT
+// grade — there's no grade history in it. A team that gets re-graded into a
+// different division mid-season (a round-robin split, promotion/relegation
+// after the first few rounds) drops its OLD grade out of every later sync's
+// discovery, so that grade's rounds can go permanently missing from Results.
+// This panel is the way back in: paste a PlayHQ link to any one match from
+// the missing grade (any round works) and the whole grade gets pulled in.
+function LinkGradePanel({ seasons, onLinked }) {
+  const toast = useToast()
+  const [seasonId, setSeasonId] = useState('')
+  const [ref, setRef] = useState('')
+  const [preview, setPreview] = useState(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!seasonId && seasons?.length) setSeasonId(seasons[0].id)
+  }, [seasons, seasonId])
+
+  async function findGrade() {
+    if (!ref.trim()) { toast.error('Paste a PlayHQ match link first'); return }
+    setBusy(true)
+    setPreview(null)
+    try {
+      const info = await aflApi.linkGradePreview(ref.trim())
+      setPreview(info)
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  async function linkIt() {
+    if (!seasonId) { toast.error('Pick which season this grade belongs to'); return }
+    setBusy(true)
+    try {
+      const result = await aflApi.linkGrade(seasonId, ref.trim())
+      toast.success(`Linked "${result.grade_name}" — ${result.games_discovered} game(s) found, ${result.games_stats_synced} synced`)
+      setRef('')
+      setPreview(null)
+      onLinked()
+    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+
+  const ourSide = preview?.matched_side
+  const ourTeamName = ourSide === 'home' ? preview?.home_team : ourSide === 'away' ? preview?.away_team : null
+
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold text-pb-text">Missing a grade?</h3>
+        <p className="text-[12px] text-pb-dim mt-0.5 max-w-2xl">
+          If your team changed divisions partway through a season (a round-robin split,
+          promotion/relegation), PlayHQ stops showing us the old division — its rounds
+          never get discovered. Paste a match link from any round of the missing grade
+          (from PlayHQ's website — a club's own page or the ladder) and we'll pull the
+          whole grade in.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <select value={seasonId} onChange={e => setSeasonId(e.target.value)}
+          className="bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[12px] text-pb-text">
+          {(seasons || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+        </select>
+        <input value={ref} onChange={e => setRef(e.target.value)}
+          placeholder="https://www.playhq.com/.../game-centre/…  (or just the code)"
+          onKeyDown={e => { if (e.key === 'Enter') findGrade() }}
+          className="flex-1 min-w-[260px] bg-pb-surface2 border pb-hairline rounded px-2 py-1.5 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+        <button onClick={findGrade} disabled={busy}
+          className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1.5 bg-pb-surface2 border pb-hairline text-pb-text hover:border-pb-accent disabled:opacity-50">
+          {busy ? 'LOOKING…' : 'FIND GRADE'}
+        </button>
+      </div>
+
+      {preview && (
+        <div className="border pb-hairline rounded p-3 text-[12px] space-y-1.5">
+          <div className="text-pb-text font-medium">
+            {preview.grade_name}
+            {preview.competition_name && <span className="text-pb-faint"> · {preview.competition_name}</span>}
+            {preview.playhq_season_name && <span className="text-pb-faint"> · {preview.playhq_season_name}</span>}
+          </div>
+          <div className="text-pb-dim">{preview.home_team} <span className="text-pb-faint">({preview.home_club})</span> vs {preview.away_team} <span className="text-pb-faint">({preview.away_club})</span></div>
+          {ourSide ? (
+            <div className="text-green-300">✓ Matches this club — {ourTeamName}</div>
+          ) : (
+            <div className="text-amber-400">Couldn't confirm this club is playing in that match — double-check the link before linking.</div>
+          )}
+          <button onClick={linkIt} disabled={busy}
+            className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1.5 text-black bg-[var(--pb-accent)] disabled:opacity-50 mt-1">
+            {busy ? 'LINKING…' : 'LINK THIS GRADE'}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function AflAdminSeasons() {
   const toast = useToast()
   const [seasons, setSeasons] = useState(null)
@@ -105,27 +198,31 @@ export default function AflAdminSeasons() {
       {seasons === null ? (
         <LoadingSpinner message="Loading seasons…" />
       ) : (
-        <div className="pb-card overflow-x-auto">
-          <table className="w-full text-[12px]">
-            <thead>
-              <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left">
-                <th className="py-2 pr-2">NAME</th>
-                <th className="py-2 pr-2">YEAR</th>
-                <th className="py-2 pr-2 text-right">GRADES</th>
-                <th className="py-2 pr-2 text-right">GAMES</th>
-                <th className="py-2 pr-2 text-right"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {seasons.map(s => (
-                <SeasonRow key={s.id} season={s} onSaved={load} onDeleted={load} />
-              ))}
-              {seasons.length === 0 && (
-                <tr><td colSpan={5} className="py-4 text-center text-pb-dim text-[12px]">No seasons yet.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="pb-card overflow-x-auto">
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="font-mono text-[10px] tracking-wide3 text-pb-faint text-left">
+                  <th className="py-2 pr-2">NAME</th>
+                  <th className="py-2 pr-2">YEAR</th>
+                  <th className="py-2 pr-2 text-right">GRADES</th>
+                  <th className="py-2 pr-2 text-right">GAMES</th>
+                  <th className="py-2 pr-2 text-right"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {seasons.map(s => (
+                  <SeasonRow key={s.id} season={s} onSaved={load} onDeleted={load} />
+                ))}
+                {seasons.length === 0 && (
+                  <tr><td colSpan={5} className="py-4 text-center text-pb-dim text-[12px]">No seasons yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {seasons.length > 0 && <LinkGradePanel seasons={seasons} onLinked={load} />}
+        </>
       )}
     </div>
   )

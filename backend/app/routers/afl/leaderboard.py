@@ -34,7 +34,7 @@ async def leaderboard(org_id: uuid.UUID,
                       stat: str = Query("goals"),
                       season_id: Optional[uuid.UUID] = None,
                       grade_id: Optional[uuid.UUID] = None,
-                      limit: int = Query(50, le=200),
+                      limit: int = Query(200, le=500),
                       db: AsyncSession = Depends(get_db)):
     if stat not in _STATS and stat not in _VOTE_STATS:
         raise HTTPException(status_code=422, detail=f"stat must be one of {sorted({*_STATS, *_VOTE_STATS})}")

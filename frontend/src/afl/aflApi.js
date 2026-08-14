@@ -45,6 +45,14 @@ export const aflApi = {
   syncNow: () => request('/club-admin/sync', { method: 'POST' }),
   fullRebuild: () => request('/club-admin/full-rebuild', { method: 'POST' }),
   getSyncRuns: () => request('/club-admin/sync-runs'),
+  // A grade discoverTeams can't see any more (a team re-graded mid-season) —
+  // paste a match link from it and pull the whole grade in directly.
+  linkGradePreview: (ref) => request('/club-admin/link-grade/preview', {
+    method: 'POST', body: JSON.stringify({ ref }),
+  }),
+  linkGrade: (seasonId, ref) => request('/club-admin/link-grade', {
+    method: 'POST', body: JSON.stringify({ season_id: seasonId, ref }),
+  }),
   getAdminSettings: () => request('/club-admin/settings'),
   patchAdminSettings: (body) => request('/club-admin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
   registerClub: (playhqOrgId) => request('/club-admin/register-club', {
