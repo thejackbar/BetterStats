@@ -36,6 +36,21 @@ from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
 router = APIRouter(prefix="/players", tags=["players"])
 
 
+async def _resolve_player_scope(db: AsyncSession, player: Player, categories: Optional[str]):
+    """Same grade-category scope the career/grade breakdowns use, for the rest
+    of the Analysis-tab sub-endpoints (dismissals, by-position, by-venue,
+    by-opposition, partnerships, ...). Every one of them reads the same
+    per-game rows the scoped career totals do, so a player with the Junior
+    toggle off must not have a junior game reappear in one of these without
+    the other."""
+    org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
+    scope, _ = await grade_scope.resolve_scope_for_player(
+        db, player.organisation_id, str(player.id), categories,
+        auto_widen=bool(org.stats_auto_show_played_grades) if org else True,
+    )
+    return scope
+
+
 def _str_keys(d: dict | None) -> dict | None:
     if not d:
         return d
@@ -178,24 +193,31 @@ async def get_player_stats(
 
 
 @router.get("/{player_id}/dismissals")
-async def get_player_dismissals(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_dismissals(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_dismissal_breakdown(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_dismissal_breakdown(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-position")
-async def get_player_by_position(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_by_position(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_batting_by_position(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_batting_by_position(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-grade")
 async def get_player_by_grade(
     player_id: str,
+    categories: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -204,12 +226,14 @@ async def get_player_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    return await get_batting_by_grade(db, player_id, org_id, public_only=public_only)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_batting_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
 @router.get("/{player_id}/bowling-by-grade")
 async def get_player_bowling_by_grade(
     player_id: str,
+    categories: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
@@ -218,39 +242,52 @@ async def get_player_bowling_by_grade(
         raise HTTPException(status_code=404, detail="Player not found")
     org_id = str(player.organisation_id)
     public_only = not await user_can_view_org_private(db, viewer, org_id)
-    return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_bowling_by_grade(db, player_id, org_id, public_only=public_only, scope=scope)
 
 
 @router.get("/{player_id}/bowling-dismissals")
-async def get_player_bowling_dismissals(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_bowling_dismissals(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_bowling_dismissal_breakdown(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_bowling_dismissal_breakdown(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/bowling-by-batter-position")
-async def get_player_bowling_by_batter_position(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_bowling_by_batter_position(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_bowling_by_batter_position(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_bowling_by_batter_position(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-venue")
-async def get_player_by_venue_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_by_venue_endpoint(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_player_by_venue(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_player_by_venue(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/by-opposition")
-async def get_player_by_opposition_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_by_opposition_endpoint(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    return await get_player_by_opposition(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    return await get_player_by_opposition(db, player_id, scope=scope)
 
 
 @router.get("/{player_id}/teammates")
@@ -355,11 +392,14 @@ async def get_player_milestones_endpoint(player_id: str, db: AsyncSession = Depe
 
 
 @router.get("/{player_id}/partnerships")
-async def get_player_partnerships_endpoint(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player_partnerships_endpoint(
+    player_id: str, categories: Optional[str] = Query(None), db: AsyncSession = Depends(get_db)
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
         raise HTTPException(status_code=404, detail="Player not found")
-    rows = await get_player_partnerships(db, player_id)
+    scope = await _resolve_player_scope(db, player, categories)
+    rows = await get_player_partnerships(db, player_id, scope=scope)
     return [_str_keys(r) for r in rows]
 
 

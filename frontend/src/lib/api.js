@@ -194,14 +194,26 @@ export const api = {
     if (categories) params.set('categories', categories)
     return request(`/players/${playerId}/stats?${params}`)
   },
-  getPlayerDismissals: (playerId) => request(`/players/${playerId}/dismissals`),
-  getPlayerByPosition: (playerId) => request(`/players/${playerId}/by-position`),
-  getPlayerByGrade: (playerId) => request(`/players/${playerId}/by-grade`),
-  getPlayerBowlingByGrade: (playerId) => request(`/players/${playerId}/bowling-by-grade`),
-  getPlayerBowlingDismissals: (playerId) => request(`/players/${playerId}/bowling-dismissals`),
-  getPlayerBowlingByBatterPosition: (playerId) => request(`/players/${playerId}/bowling-by-batter-position`),
-  getPlayerByVenue: (playerId) => request(`/players/${playerId}/by-venue`),
-  getPlayerByOpposition: (playerId) => request(`/players/${playerId}/by-opposition`),
+  // `categories` is the same comma-separated grade-category selection the
+  // career stats call takes (see getPlayerStats) — every one of these reads
+  // the same per-game rows the scoped career totals do, so a player with the
+  // Junior toggle off must not see a junior game reappear in one of these.
+  getPlayerDismissals: (playerId, categories) =>
+    request(`/players/${playerId}/dismissals` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerByPosition: (playerId, categories) =>
+    request(`/players/${playerId}/by-position` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerByGrade: (playerId, categories) =>
+    request(`/players/${playerId}/by-grade` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerBowlingByGrade: (playerId, categories) =>
+    request(`/players/${playerId}/bowling-by-grade` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerBowlingDismissals: (playerId, categories) =>
+    request(`/players/${playerId}/bowling-dismissals` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerBowlingByBatterPosition: (playerId, categories) =>
+    request(`/players/${playerId}/bowling-by-batter-position` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerByVenue: (playerId, categories) =>
+    request(`/players/${playerId}/by-venue` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerByOpposition: (playerId, categories) =>
+    request(`/players/${playerId}/by-opposition` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
   // Public teammates: who this player has shared a side with, and the with-vs-
   // without split of the player's output alongside one teammate.
   getPlayerTeammates: (playerId) => request(`/players/${playerId}/teammates`),
@@ -215,7 +227,8 @@ export const api = {
   getPlayerSeasons: (playerId, categories) =>
     request(`/players/${playerId}/seasons` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
-  getPlayerPartnerships: (playerId) => request(`/players/${playerId}/partnerships`),
+  getPlayerPartnerships: (playerId, categories) =>
+    request(`/players/${playerId}/partnerships` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
   getPlayerRankings: (playerId, { seasonId } = {}) => {
