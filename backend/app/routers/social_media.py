@@ -15,7 +15,7 @@ the other social admin routes in `admin.py`, mounted under the same
 """
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,7 +29,9 @@ router = APIRouter(prefix="/admin/social", tags=["social-media"])
 MEDIA_ALLOWED_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
 MEDIA_MAX_BYTES = 5 * 1024 * 1024
 MEDIA_MAX_PER_CLUB = 200
+BACKGROUND_MAX_PER_CLUB = 30
 BRAND_KIT_MAX_BYTES = 256 * 1024
+MEDIA_KINDS = {"background"}  # None/omitted = an ordinary Photos-tab upload
 
 _IMAGE_MIME = {
     ".jpg": "image/jpeg",
@@ -48,26 +50,30 @@ def _asset_dict(asset: SocialMediaAsset) -> dict:
         "id": str(asset.id),
         "name": asset.filename,
         "url": f"/api/images/social-media/{asset.id}?v={ts}",
+        "kind": asset.kind,
     }
 
 
 @router.get("/media", dependencies=[Depends(require_module("socials"))])
 async def list_media(
+    kind: str | None = None,
     current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    rows = await db.execute(
-        select(SocialMediaAsset)
-        .where(SocialMediaAsset.organisation_id == club.id)
-        .order_by(SocialMediaAsset.created_at.desc())
-    )
+    # kind=background lists only the club's background library; omitted (the
+    # default) lists the ordinary Photos pool (kind IS NULL) — a background
+    # never clutters the general photo picker and vice versa.
+    q = select(SocialMediaAsset).where(SocialMediaAsset.organisation_id == club.id)
+    q = q.where(SocialMediaAsset.kind == kind) if kind in MEDIA_KINDS else q.where(SocialMediaAsset.kind.is_(None))
+    rows = await db.execute(q.order_by(SocialMediaAsset.created_at.desc()))
     return [_asset_dict(a) for a in rows.scalars().all()]
 
 
 @router.post("/media", dependencies=[Depends(require_module("socials"))])
 async def upload_media(
     file: UploadFile = File(...),
+    kind: str | None = Form(None),
     current_user: User = Depends(require_cap(MANAGE_SOCIAL)),
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
@@ -81,15 +87,16 @@ async def upload_media(
     if len(data) > MEDIA_MAX_BYTES:
         raise HTTPException(400, "Image must be 5 MB or smaller")
 
-    count = await db.scalar(
-        select(func.count()).select_from(SocialMediaAsset).where(
-            SocialMediaAsset.organisation_id == club.id
-        )
+    kind = kind if kind in MEDIA_KINDS else None
+    limit = BACKGROUND_MAX_PER_CLUB if kind == "background" else MEDIA_MAX_PER_CLUB
+    count_q = select(func.count()).select_from(SocialMediaAsset).where(
+        SocialMediaAsset.organisation_id == club.id
     )
-    if (count or 0) >= MEDIA_MAX_PER_CLUB:
-        raise HTTPException(
-            400, f"Media library is full ({MEDIA_MAX_PER_CLUB} images). Delete some first."
-        )
+    count_q = count_q.where(SocialMediaAsset.kind == kind) if kind else count_q.where(SocialMediaAsset.kind.is_(None))
+    count = await db.scalar(count_q)
+    if (count or 0) >= limit:
+        label = "Background library" if kind == "background" else "Media library"
+        raise HTTPException(400, f"{label} is full ({limit} images). Delete some first.")
 
     asset = SocialMediaAsset(
         organisation_id=club.id,
@@ -97,6 +104,7 @@ async def upload_media(
         mime=_IMAGE_MIME.get(ext, "image/jpeg"),
         image_data=data,
         created_by=current_user.id,
+        kind=kind,
     )
     db.add(asset)
     await db.commit()

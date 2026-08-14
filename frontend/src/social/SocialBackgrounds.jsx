@@ -1,4 +1,5 @@
 import React from 'react'
+import { AutoFitText } from './cricket-templates'
 
 /**
  * BetterSocials — grunge social-post background system.
@@ -53,6 +54,29 @@ export const SOCIAL_BACKGROUNDS = [
   { key: 'bolt',             label: 'Bolt Energy',       group: 'Geometric' },
   { key: 'shard',            label: 'Shard Cut',         group: 'Geometric' },
   { key: 'contour-rings',    label: 'Contour Rings',     group: 'Geometric' },
+  // Clean & Minimal — a solid club-colour panel with a faint diagonal-line
+  // texture and one bold accent shard, styled after a plain team-branding
+  // graphic rather than a grunge poster. Pairs well with `bigText` (a huge
+  // typed number/word — "100", "1ST GRADE", "ROUND 1") layered on top.
+  { key: 'clean-lines',      label: 'Clean Lines',       group: 'Clean & Minimal' },
+  { key: 'clean-shard',      label: 'Clean Shard',       group: 'Clean & Minimal' },
+  { key: 'clean-frame',      label: 'Clean Frame',       group: 'Clean & Minimal' },
+  // Gradient — two club colours blending in a chosen direction, with an
+  // optional low-opacity crest watermark (see the `logoUrl` prop below).
+  { key: 'gradient-custom',  label: 'Gradient',          group: 'Gradient' },
+]
+
+// Named compass directions for the gradient-custom variant's angle control —
+// CSS gradient-angle convention (0deg = bottom-to-top, clockwise from there).
+export const GRADIENT_ANGLES = [
+  { angle: 180, label: '↓ Top to bottom' },
+  { angle: 0,   label: '↑ Bottom to top' },
+  { angle: 90,  label: '→ Left to right' },
+  { angle: 270, label: '← Right to left' },
+  { angle: 135, label: '↘ Diagonal' },
+  { angle: 315, label: '↖ Diagonal' },
+  { angle: 45,  label: '↗ Diagonal' },
+  { angle: 225, label: '↙ Diagonal' },
 ]
 
 const abs = (o) => ({ position: 'absolute', ...o })
@@ -69,6 +93,29 @@ const Tex = ({ id, fill, opacity = 1, blend, transform }) => (
     <rect width="1080" height="1080" fill={fill} filter={`url(#${id})`} />
   </svg>
 )
+// Faint diagonal ruling — the "slight detail" texture behind the Clean &
+// Gradient families. Plain CSS, no SVG filter, so it stays crisp at any scale.
+const DiagonalLines = ({ color = '#fff', opacity = 0.06, gap = 15, angle = -45 }) => (
+  <div style={{ ...full, opacity, backgroundImage: `repeating-linear-gradient(${angle}deg, ${color} 0 1.5px, transparent 1.5px ${gap}px)` }} />
+)
+// A single bold triangular shard in one corner — the "something small
+// graphically" accent used across the Clean & Gradient variants.
+const CornerShard = ({ color, opacity = 1, corner = 'br', size = 620 }) => {
+  const pos = {
+    br: { right: -size * 0.22, bottom: -size * 0.3 },
+    tr: { right: -size * 0.22, top: -size * 0.3 },
+    bl: { left: -size * 0.22, bottom: -size * 0.3 },
+    tl: { left: -size * 0.22, top: -size * 0.3 },
+  }[corner]
+  const rot = { br: 12, tr: -12, bl: -12, tl: 12 }[corner]
+  return (
+    <div style={abs({
+      ...pos, width: size, height: size, opacity, background: color,
+      clipPath: 'polygon(58% 0%, 34% 46%, 54% 46%, 30% 100%, 82% 42%, 56% 42%)',
+      transform: `rotate(${rot}deg)`,
+    })} />
+  )
+}
 const Drip = ({ x, y, w, h, c }) => (
   <div style={abs({ left: x, top: y, width: w, height: h, background: c, borderRadius: `0 0 ${w}px ${w}px` })}>
     <div style={abs({ bottom: -w * 0.7, left: -w * 0.45, width: w * 1.9, height: w * 1.9, borderRadius: '50%', background: c })} />
@@ -253,6 +300,51 @@ const VARIANTS = {
       <Grain fill="#fff" />
     </React.Fragment>
   ),
+  // Solid deep panel + faint diagonal ruling + one accent shard, top corner —
+  // the plain "team graphics" look (dark green panel, thin white hairlines,
+  // a gold wedge) rather than a grunge treatment.
+  'clean-lines': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: p.primary }} />
+      <div style={{ ...full, background: `linear-gradient(160deg, ${p.secondary}55, transparent 60%)` }} />
+      <DiagonalLines color={p.ink} opacity={0.05} gap={16} />
+      <CornerShard color={p.tertiary} opacity={0.92} corner="tr" size={760} />
+      <Grain fill="#fff" opacity={0.15} />
+    </React.Fragment>
+  ),
+  // Two shards, opposing corners, tighter ruling — a bit more graphic energy
+  // without leaving the "clean panel" family (no splatter/grit textures).
+  'clean-shard': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: `linear-gradient(200deg, ${p.secondary}, ${p.primary} 62%)` }} />
+      <DiagonalLines color={p.ink} opacity={0.06} gap={12} angle={-32} />
+      <CornerShard color={p.tertiary} opacity={0.85} corner="br" size={640} />
+      <CornerShard color={p.tertiary} opacity={0.28} corner="tl" size={420} />
+      <Grain fill="#fff" opacity={0.18} />
+    </React.Fragment>
+  ),
+  // A plain panel with an inset accent border — reads as a "card", good for a
+  // headshot or a stat block sat dead centre with nothing fighting it.
+  'clean-frame': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: p.primary }} />
+      <DiagonalLines color={p.ink} opacity={0.045} gap={18} angle={45} />
+      <div style={abs({ inset: 34, border: `4px solid ${p.tertiary}`, opacity: 0.55 })} />
+      <div style={abs({ left: 0, top: 0, width: '100%', height: 14, background: p.tertiary, opacity: 0.9 })} />
+      <Grain fill="#fff" opacity={0.15} />
+    </React.Fragment>
+  ),
+  // Free-direction two-colour gradient (angle/from/to read straight off the
+  // colours prop — `angle` on p.angle, `secondary`→`tertiary` as from→to,
+  // so the existing per-style colour-override UI edits it for free) with the
+  // same faint ruling as the rest of the Clean family layered on top.
+  'gradient-custom': (p) => (
+    <React.Fragment>
+      <div style={{ ...full, background: `linear-gradient(${Number.isFinite(p.angle) ? p.angle : 135}deg, ${p.secondary}, ${p.tertiary})` }} />
+      <DiagonalLines color="#fff" opacity={0.08} gap={20} />
+      <Grain fill="#fff" opacity={0.12} />
+    </React.Fragment>
+  ),
   'drip-curtain': (p) => (
     <React.Fragment>
       <div style={{ ...full, background: p.ink }} />
@@ -268,7 +360,21 @@ const VARIANTS = {
   ),
 }
 
-export function SocialBackground({ variant = 'ink-splatter', colors, size = 1080, height, radius = 0, className, style, children }) {
+export function SocialBackground({
+  variant = 'ink-splatter', colors, size = 1080, height, radius = 0, className, style, children,
+  // A club's own uploaded photo, full-bleed — when set this REPLACES the
+  // procedural `variant` render entirely (variant is ignored), so a custom
+  // background composes with `bigText`/`logoUrl` below exactly like any
+  // built-in variant does ("draw over the top of a background").
+  imageUrl,
+  // A big typed word/number sat behind everything else — "100", "1ST GRADE",
+  // "ROUND 1". Freely typed by whoever is building the post; not tied to any
+  // particular stat. Works with every variant, not just the Clean family.
+  bigText, bigTextOpacity = 0.16, bigTextColor,
+  // A low-opacity club-crest watermark, centred. Defaults suit the 10-20%
+  // "over the gradient" look; any variant can carry one.
+  logoUrl, logoOpacity = 0.14,
+}) {
   const p = { ...DEFAULT_COLORS, ...(colors || {}) }
   const render = VARIANTS[variant] || VARIANTS['ink-splatter']
   const px = Number(size) || 1080
@@ -286,7 +392,33 @@ export function SocialBackground({ variant = 'ink-splatter', colors, size = 1080
     <div className={className} style={{ position: 'relative', width: px, height: py, overflow: 'hidden', borderRadius: radius, background: '#000', ...style }}>
       {/* fixed 1080 design space, scaled to cover the requested box */}
       <div style={{ position: 'absolute', top: offsetY, left: offsetX, width: 1080, height: 1080, transformOrigin: 'top left', transform: `scale(${scale})` }}>
-        {render(p)}
+        {imageUrl
+          ? <div style={{ ...full, backgroundImage: `url(${imageUrl})`, backgroundSize: 'cover', backgroundPosition: 'center' }} />
+          : render(p)}
+        {logoUrl && (
+          <div style={{ ...full, display: 'grid', placeItems: 'center', opacity: logoOpacity, pointerEvents: 'none' }}>
+            <img src={logoUrl} alt="" style={{ width: '72%', height: '72%', objectFit: 'contain' }} />
+          </div>
+        )}
+        {bigText && (
+          <div style={{
+            ...full, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            opacity: bigTextOpacity, pointerEvents: 'none', overflow: 'hidden',
+          }}>
+            <div style={{ width: 1000 }}>
+              <AutoFitText
+                text={bigText}
+                max={440}
+                min={60}
+                style={{
+                  fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+                  lineHeight: 0.85, letterSpacing: 2, textAlign: 'center',
+                  color: bigTextColor || p.ink,
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
       {/* content overlay in the caller's own coordinate space */}
       {children != null && <div style={{ position: 'absolute', inset: 0 }}>{children}</div>}

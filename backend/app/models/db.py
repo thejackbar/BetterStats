@@ -592,6 +592,10 @@ class SocialMediaAsset(Base):
     height = Column(Integer, nullable=True)
     created_by = Column(UUID(as_uuid=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    # 'background' = a reusable post background offered in its own picker
+    # (migration 254); NULL = an ordinary Photos-tab upload. Same table, same
+    # bytes-in-Postgres storage — just a different shelf.
+    kind = Column(Text, nullable=True)
 
 
 # ─── Club Room Mode (migration 205) ───────────────────────────────────────────

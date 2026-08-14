@@ -331,6 +331,15 @@ export function orgAccent(org) {
   return org?.theme_config?.accent || org?.accent_color || org?.primary_color || '#16c784'
 }
 
+// The club's second brand colour, same fallback chain ShareCard.jsx already
+// uses for its own gradient. A club that hasn't set one falls back to a dark
+// navy rather than a hue-rotation of the primary accent — a real second
+// colour, not a synthesised one, since this backs a user-facing gradient
+// picker (default "from/to" for the gradient-custom social background).
+export function orgAccent2(org) {
+  return org?.theme_config?.accent2 || org?.theme_config?.dark?.surface2 || '#0d2a4e'
+}
+
 export function orgToPalette(org) {
   // Neutral dark background pair with the club's primary colour as the
   // accent only — club colours rarely make a good post background, and the

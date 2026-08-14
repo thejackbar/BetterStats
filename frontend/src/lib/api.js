@@ -117,11 +117,14 @@ export const api = {
   getSocialResults: (q) => request(`/admin/social/results${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   getSocialPotm: (matchId) => request(`/admin/social/potm/${matchId}`),
 
-  // BetterSocials — media library
-  listSocialMedia: () => request('/admin/social/media'),
-  uploadSocialMedia: (file) => {
+  // BetterSocials — media library. `kind` is undefined for the ordinary Photos
+  // pool, or 'background' for the small reusable post-background library —
+  // same table, same upload endpoint, just tagged differently on the way in.
+  listSocialMedia: (kind) => request(`/admin/social/media${kind ? `?kind=${encodeURIComponent(kind)}` : ''}`),
+  uploadSocialMedia: (file, kind) => {
     const form = new FormData()
     form.append('file', file)
+    if (kind) form.append('kind', kind)
     return fetch(`${BASE}/admin/social/media`, { method: 'POST', body: form, credentials: 'include' })
       .then(async r => {
         if (!r.ok) {

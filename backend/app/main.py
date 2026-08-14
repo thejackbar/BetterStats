@@ -5223,6 +5223,14 @@ async def lifespan(app: FastAPI):
             "ON wizard_club_lists(marketing_club_id)"
         ))
 
+        # Migration 254: tags a social_media_asset as a reusable club-uploaded
+        # post background (kind='background') vs an ordinary Photos-tab upload
+        # (kind NULL). Byte-identical to
+        # alembic/versions/254_social_media_background_kind.py.
+        await conn.execute(text(
+            "ALTER TABLE social_media_asset ADD COLUMN IF NOT EXISTS kind TEXT"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
