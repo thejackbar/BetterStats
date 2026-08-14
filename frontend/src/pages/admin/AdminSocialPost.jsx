@@ -21,7 +21,7 @@ import {
   T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgToPalette,
+  PALETTES, orgAccent, orgAccent2, orgToPalette,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -30,7 +30,7 @@ import {
   DEFAULT_FIXTURES, DEFAULT_RESULTS,
 } from '../../social/round-templates'
 import { exportNodeToPng } from '../../social/exportImage'
-import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
+import { SocialBackground, SocialBackgroundDefs, SOCIAL_BACKGROUNDS, GRADIENT_ANGLES, DEFAULT_COLORS as BG_DEFAULT_COLORS } from '../../social/SocialBackgrounds'
 import { EVENT_TEMPLATES, EVENT_PRESETS, DEFAULT_EVENT, resolveMotif, eventPaletteFor } from '../../social/event-templates'
 import EventPostEditor from '../../components/admin/EventPostEditor'
 import { BlankCanvas, newBlankItem, defaultBlankItems } from '../../social/blank-template'
@@ -887,6 +887,20 @@ export default function AdminSocialPost() {
   const [bgColors, setBgColors] = useState(() => {
     try { return JSON.parse(localStorage.getItem('bs_social_bg_colors') || '{}') } catch { return {} }
   })
+  // A big typed word/number laid behind everything on the background — "100",
+  // "1ST GRADE", "ROUND 1". Free text, works with any bgStyle. Persisted like
+  // the style controls above so it carries between posts.
+  const [bgBigText, setBgBigText] = useState(() => localStorage.getItem('bs_social_bg_text') || '')
+  const [bgBigTextOpacity, setBgBigTextOpacity] = useState(() => Number(localStorage.getItem('bs_social_bg_text_op')) || 0.16)
+  // Low-opacity club-crest watermark, centred over the background.
+  const [bgLogoOn, setBgLogoOn] = useState(() => localStorage.getItem('bs_social_bg_logo') === '1')
+  const [bgLogoOpacity, setBgLogoOpacity] = useState(() => Number(localStorage.getItem('bs_social_bg_logo_op')) || 0.15)
+  // A club's own uploaded background photo — a small library kept separate
+  // from the general Photos pool (kind='background' on the same table), one
+  // picked per post. bgStyle is set to the sentinel 'custom-image' while one
+  // is active; bgCustomUrl carries which.
+  const [bgAssets, setBgAssets] = useState([])
+  const [bgCustomUrl, setBgCustomUrl] = useState(null)
 
   const [match, setMatch] = useState({ competition: '', round: '', venue: '', date: '', time: '', season: '' })
   const patchMatch = patch => setMatch(m => ({ ...m, ...patch }))
@@ -1123,6 +1137,10 @@ export default function AdminSocialPost() {
   useEffect(() => { localStorage.setItem('bs_social_font', fontKey) }, [fontKey])
   useEffect(() => { localStorage.setItem('bs_social_bg', bgStyle) }, [bgStyle])
   useEffect(() => { localStorage.setItem('bs_social_bg_colors', JSON.stringify(bgColors)) }, [bgColors])
+  useEffect(() => { localStorage.setItem('bs_social_bg_text', bgBigText) }, [bgBigText])
+  useEffect(() => { localStorage.setItem('bs_social_bg_text_op', String(bgBigTextOpacity)) }, [bgBigTextOpacity])
+  useEffect(() => { localStorage.setItem('bs_social_bg_logo', bgLogoOn ? '1' : '0') }, [bgLogoOn])
+  useEffect(() => { localStorage.setItem('bs_social_bg_logo_op', String(bgLogoOpacity)) }, [bgLogoOpacity])
   // Debounced persistence of the Blank canvas so it resumes after a reload.
   useEffect(() => {
     const id = setTimeout(() => {
@@ -1211,6 +1229,7 @@ export default function AdminSocialPost() {
 
   // Club media library — reusable uploads shared across posts and admins.
   useEffect(() => { api.listSocialMedia().then((a) => setMediaAssets(a || [])).catch(() => {}) }, [])
+  useEffect(() => { api.listSocialMedia('background').then((a) => setBgAssets(a || [])).catch(() => {}) }, [])
 
   // Team-sheet handoff from BetterSelect selection. Pre-populates the lineup
   // post from a saved XI once the player list has loaded. Runs once.
@@ -1946,9 +1965,28 @@ export default function AdminSocialPost() {
   // — and, just as importantly, so switching TEMPLATE doesn't perturb it:
   // only ever store the keys the user actually touched (see the colour
   // picker onChange below), never a full baked-in snapshot.
-  const bgColorsMerged = bgStyle !== 'none' ? { ...paletteToBgColors(renderPalette), ...(bgColors[bgStyle] || {}) } : null
+  // The gradient variant's "to" colour defaults to the club's actual second
+  // brand colour (accent2) rather than a hue-rotation of the primary accent —
+  // a real second colour, since this is a user-facing "pick two colours"
+  // control, not a decorative fill. Still fully overridable per-style below.
+  const bgStyleDefaults = bgStyle === 'gradient-custom'
+    ? { ...paletteToBgColors(renderPalette), tertiary: orgAccent2(settings) }
+    : paletteToBgColors(renderPalette)
+  const bgColorsMerged = bgStyle !== 'none' ? { ...bgStyleDefaults, ...(bgColors[bgStyle] || {}) } : null
   const bgActive = bgStyle !== 'none'
   const bgResolvedColors = bgActive ? bgColorsMerged : null
+  // Extra background-layer props shared by every SocialBackground render site
+  // below — a custom uploaded photo (replaces the procedural variant), a big
+  // typed background word/number, and a low-opacity crest watermark. All
+  // compose with any bgStyle, so they're computed once here rather than per
+  // call site.
+  const bgExtraProps = {
+    imageUrl: bgStyle === 'custom-image' ? bgCustomUrl : undefined,
+    bigText: bgBigText || undefined,
+    bigTextOpacity: bgBigTextOpacity,
+    logoUrl: bgLogoOn ? team.logo : undefined,
+    logoOpacity: bgLogoOpacity,
+  }
   // The template's own opaque canvas fill is given an alpha channel so the
   // SocialBackground sitting behind it (same coordinate space, lower in the
   // DOM) shows through — the templates' hardcoded `background: palette.primary`
@@ -2215,7 +2253,7 @@ export default function AdminSocialPost() {
   if (isMobile && !forceFullEditor) {
     const previewContent = (
       <>
-        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+        {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
         {isBlankTab
           ? <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData} width={W} height={H} />
           : <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />}
@@ -2385,6 +2423,31 @@ export default function AdminSocialPost() {
     if (sel && sel.type === 'image') { record('Replace image'); layer.update(sel.id, { src: asset.url, srcName: asset.name }) }
     else addBlock('image', { src: asset.url, srcName: asset.name })
   }
+  // Same optimistic-upload shape as uploadMedia above, tagged kind='background'
+  // so it lands in the club's small background library instead of the general
+  // Photos pool. Newly uploaded backgrounds are applied immediately — a club
+  // uploading their own image almost always wants to see it applied, not
+  // just filed away.
+  const uploadBgAsset = async (files) => {
+    for (const f of files) {
+      if (!f) continue
+      const tmpId = `tmp_${Date.now()}_${Math.round(Math.random() * 1e6)}`
+      const tmpUrl = URL.createObjectURL(f)
+      setBgAssets((a) => [{ id: tmpId, name: f.name, url: tmpUrl, _tmp: true }, ...a])
+      try {
+        const saved = await api.uploadSocialMedia(f, 'background')
+        setBgAssets((a) => a.map((x) => (x.id === tmpId ? saved : x)))
+        setBgStyle('custom-image')
+        setBgCustomUrl(saved.url)
+      } catch { setBgAssets((a) => a.filter((x) => x.id !== tmpId)) }
+    }
+  }
+  const useBgAsset = (asset) => { setBgStyle('custom-image'); setBgCustomUrl(asset.url) }
+  const deleteBgAsset = async (asset) => {
+    setBgAssets((a) => a.filter((x) => x.id !== asset.id))
+    if (bgCustomUrl === asset.url) { setBgStyle('none'); setBgCustomUrl(null) }
+    try { await api.deleteSocialMedia(asset.id) } catch { /* asset stays removed locally */ }
+  }
   const pickImageForItem = (itemId) => { pendingImgItem.current = itemId; blankImgInputRef.current?.click() }
 
   const clubName = settings?.name || 'Club'
@@ -2478,7 +2541,7 @@ export default function AdminSocialPost() {
         )}
         <div style={{ width: pw, height: ph, overflow: 'hidden', borderRadius: 6, background: '#080808', boxShadow: '0 24px 60px rgba(0,0,0,.55)' }}>
           <div style={{ ...fontStyle, transform: `scale(${scale})`, transformOrigin: 'top left', width: W, height: H, pointerEvents: showBlankTools ? 'auto' : 'none', position: 'relative' }}>
-            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             {isBlankTab ? (
               <BlankCanvas team={team} palette={templatePalette} items={canvas.items} data={blankData}
                 interactive scale={scale} selectedIds={canvas.selIds}
@@ -2864,9 +2927,63 @@ export default function AdminSocialPost() {
                   ))}
                 </div>
               </div>
-              {bgStyle !== 'none' && (
+              {/* Your own uploaded backgrounds — a small library kept separate from
+                  the general Photos pool, picked per post like any other bgStyle. */}
+              <div className="mt-1">
+                <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Your backgrounds</span>
+                <div className="flex gap-2 flex-wrap items-center mt-1.5 mb-1">
+                  {bgAssets.map(a => (
+                    <div key={a.id} className="relative group">
+                      <button
+                        onClick={() => useBgAsset(a)}
+                        title={a.name}
+                        style={{
+                          width: BG_SWATCH_SIZE, height: BG_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden',
+                          background: `center/cover no-repeat url(${a.url})`,
+                          border: `2px solid ${bgStyle === 'custom-image' && bgCustomUrl === a.url ? 'var(--pb-accent)' : 'transparent'}`,
+                        }}
+                      />
+                      <button
+                        onClick={() => deleteBgAsset(a)}
+                        title="Delete"
+                        className="hidden group-hover:flex absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full items-center justify-center text-[9px] leading-none bg-pb-surface2 border pb-hairline text-pb-faint hover:text-red-400"
+                      >✕</button>
+                    </div>
+                  ))}
+                  <label
+                    title="Upload a background image"
+                    className="flex items-center justify-center rounded-md border border-dashed pb-hairline2 text-pb-faint hover:text-pb-text hover:border-pb-accent cursor-pointer transition-colors font-mono text-[16px] leading-none"
+                    style={{ width: BG_SWATCH_SIZE, height: BG_SWATCH_SIZE }}
+                  >
+                    +
+                    <input type="file" accept="image/png,image/jpeg,image/webp" className="sr-only"
+                      onChange={e => { uploadBgAsset(Array.from(e.target.files || [])); e.target.value = '' }} />
+                  </label>
+                </div>
+              </div>
+              {bgStyle === 'gradient-custom' && (
+                <div className="flex gap-1.5 flex-wrap items-center mt-2">
+                  <span className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2 w-full">Direction</span>
+                  {GRADIENT_ANGLES.map(({ angle, label }) => (
+                    <button
+                      key={angle}
+                      title={label}
+                      onClick={() => setBgColors(c => ({ ...c, 'gradient-custom': { ...(c['gradient-custom'] || {}), angle } }))}
+                      className="px-2 py-1 rounded-md border pb-hairline font-mono text-[11px] transition-colors"
+                      style={{
+                        borderColor: (bgColors['gradient-custom']?.angle ?? 135) === angle ? 'var(--pb-accent)' : undefined,
+                        color: (bgColors['gradient-custom']?.angle ?? 135) === angle ? 'var(--pb-text)' : 'var(--pb-faint)',
+                      }}
+                    >{label.slice(0, 1)}</button>
+                  ))}
+                </div>
+              )}
+              {bgStyle !== 'none' && bgStyle !== 'custom-image' && (
                 <div className="flex gap-3 flex-wrap items-center mt-2">
-                  {BG_COLOR_KEYS.map(({ key, label }) => (
+                  {(bgStyle === 'gradient-custom'
+                    ? BG_COLOR_KEYS.filter(k => k.key === 'secondary' || k.key === 'tertiary').map(k => ({ key: k.key, label: k.key === 'secondary' ? 'From' : 'To' }))
+                    : BG_COLOR_KEYS
+                  ).map(({ key, label }) => (
                     <label key={key} className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
                       <input
                         type="color"
@@ -2883,6 +3000,39 @@ export default function AdminSocialPost() {
                       className="text-pb-faintest hover:text-pb-text text-[10px] font-mono underline"
                     >Reset to club colours</button>
                   )}
+                </div>
+              )}
+              {bgActive && (
+                <div className="flex flex-col gap-2 mt-2 pt-2 border-t pb-hairline">
+                  <div className="flex items-center gap-2">
+                    <input
+                      value={bgBigText}
+                      onChange={e => setBgBigText(e.target.value)}
+                      placeholder="Background text — 100, 1ST GRADE, ROUND 1…"
+                      className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono"
+                    />
+                    {bgBigText && (
+                      <label className="flex items-center gap-1.5 text-[10px] text-pb-faintest font-mono whitespace-nowrap">
+                        <input type="range" min={0.04} max={0.5} step={0.01} value={bgBigTextOpacity}
+                          onChange={e => setBgBigTextOpacity(Number(e.target.value))} className="w-16" />
+                        {Math.round(bgBigTextOpacity * 100)}%
+                      </label>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-1.5 text-[11px] text-pb-faint font-mono">
+                      <input type="checkbox" checked={bgLogoOn} onChange={e => setBgLogoOn(e.target.checked)} disabled={!team.logo} />
+                      Club crest watermark
+                    </label>
+                    {bgLogoOn && (
+                      <label className="flex items-center gap-1.5 text-[10px] text-pb-faintest font-mono whitespace-nowrap">
+                        <input type="range" min={0.05} max={0.4} step={0.01} value={bgLogoOpacity}
+                          onChange={e => setBgLogoOpacity(Number(e.target.value))} className="w-16" />
+                        {Math.round(bgLogoOpacity * 100)}%
+                      </label>
+                    )}
+                    {!team.logo && <span className="text-[10px] text-pb-faintest font-mono">— upload a club logo in Settings first</span>}
+                  </div>
                 </div>
               )}
               <div className="flex gap-2 flex-wrap items-center mt-2 pt-2 border-t pb-hairline">
@@ -3913,7 +4063,7 @@ export default function AdminSocialPost() {
           // One full-size node per carousel page, captured in turn on export.
           pages.all().map((pageItems, i) => (
             <div key={i} ref={(el) => { pageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
               <BlankCanvas team={team} palette={templatePalette} items={pageItems} data={blankData} width={W} height={H} />
             </div>
           ))
@@ -3922,7 +4072,7 @@ export default function AdminSocialPost() {
           // each with its even slice of the rows.
           chunkEven(tmpl.kind === 'fixtures' ? fixtures : results, roundPage.count).map((chunk, i) => (
             <div key={i} ref={(el) => { roundPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
                 {...extraProps} {...(tmpl.kind === 'fixtures' ? { fixtures: chunk } : { results: chunk })} />
             </div>
@@ -3932,14 +4082,14 @@ export default function AdminSocialPost() {
           // chasing side — regardless of which page is currently previewed.
           ['home', 'away'].map((side, i) => (
             <div key={side} ref={(el) => { scSplitPageRefs.current[i] = el }} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+              {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
               <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline}
                 {...extraProps} only={side} />
             </div>
           ))
         ) : (
           <div ref={renderRef} style={{ ...fontStyle, width: W, height: H, position: 'relative' }}>
-            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} />}
+            {bgActive && <SocialBackground variant={bgStyle} colors={bgResolvedColors} size={W} height={H} style={{ position: 'absolute', inset: 0 }} {...bgExtraProps} />}
             <TemplateComponent team={team} opponent={oppData} match={matchData} players={templatePlayers} palette={templatePalette} headline={headline} {...extraProps} />
             {customEdit && !isBlankTab && (
               <BlankCanvas team={team} palette={templatePalette} items={overlay.items} data={blankData} transparent width={W} height={H} style={{ position: 'absolute', inset: 0 }} />
