@@ -240,6 +240,48 @@ async def _career_identity(session: AsyncSession, player_id: str) -> dict:
     }
 
 
+async def _scoped_games_played(
+    session: AsyncSession,
+    player_id: str,
+    season_id: Optional[str],
+    scope: Optional[GradeScope],
+) -> int:
+    """Distinct in-scope games this player appeared in at all, however.
+
+    A "games" figure derived from just ONE per-game table (a batting innings, a
+    bowling spell, a fielding-stats row) undercounts the moment a player did
+    something else in a game instead — most visibly a batting-only `qualifying`
+    count, which deliberately excludes a "did not bat" row (right for `innings`/
+    `average`, wrong for "how many matches did they play"). This unions every
+    source of "they were in this game" — including a bare DNB batting row and a
+    plain roster appearance with no stats at all — so a player who only bowled,
+    only fielded, or was named but never got a knock still counts the match.
+    Mirrors the unscoped path, where `player_season_stats.matches` already means
+    "matches played", not "matches batted in".
+    """
+    params: dict = {"pid": player_id}
+    season_clause = await _game_season_clause(session, season_id, params)
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    if _scoped(scope):
+        scope.bind(params)
+    sql = f"""
+        SELECT COUNT(DISTINCT g.id)
+        FROM v_effective_games g
+        WHERE g.id IN (
+            SELECT bi.game_id FROM v_effective_batting_innings bi WHERE bi.player_id = CAST(:pid AS UUID)
+            UNION
+            SELECT bs.game_id FROM v_effective_bowling_spells bs WHERE bs.player_id = CAST(:pid AS UUID)
+            UNION
+            SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
+            UNION
+            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+        )
+        {season_clause}{scope_clause}
+    """
+    result = await session.execute(text(sql), params)
+    return int(result.scalar() or 0)
+
+
 async def get_career_batting(
     session: AsyncSession,
     player_id: str,
@@ -254,6 +296,7 @@ async def get_career_batting(
     if _scoped(scope):
         pg = await get_career_batting_from_innings(session, player_id, season_id=season_id, scope=scope) or {}
         r = await _career_residuals(session, player_id, season_id, scope)
+        matches = await _scoped_games_played(session, player_id, season_id, scope)
         innings = _n(pg.get("innings")) + _n(r.get("innings"))
         runs = _n(pg.get("total_runs")) + _n(r.get("total_runs"))
         not_outs = _n(pg.get("not_outs")) + _n(r.get("not_outs"))
@@ -271,7 +314,7 @@ async def get_career_batting(
             "ducks": _n(pg.get("ducks")) + _n(r.get("ducks")),
             "total_fours": _n(pg.get("total_fours")) + _n(r.get("total_fours")),
             "total_sixes": _n(pg.get("total_sixes")) + _n(r.get("total_sixes")),
-            "games": _n(pg.get("games")) + _n(r.get("games")),
+            "games": matches + _n(r.get("games")),
         }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
@@ -315,6 +358,7 @@ async def get_career_bowling(
     if _scoped(scope):
         pg = await get_career_bowling_from_spells(session, player_id, season_id=season_id, scope=scope) or {}
         r = await _career_residuals(session, player_id, season_id, scope)
+        matches = await _scoped_games_played(session, player_id, season_id, scope)
         wickets = _n(pg.get("total_wickets")) + _n(r.get("total_wickets"))
         conceded = _n(pg.get("total_runs")) + _n(r.get("bowling_runs"))
         balls = _n(pg.get("total_balls")) + _n(r.get("bowling_balls"))
@@ -335,7 +379,7 @@ async def get_career_bowling(
             "total_runs": conceded,
             "five_fors": _n(pg.get("five_fors")) + _n(r.get("five_fors")),
             "bowling_strike_rate": _ratio(balls, wickets),
-            "games": _n(pg.get("games")) + _n(r.get("games")),
+            "games": matches + _n(r.get("games")),
         }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
@@ -382,6 +426,7 @@ async def get_career_fielding(
     if _scoped(scope):
         pg = await get_career_fielding_from_stats(session, player_id, season_id=season_id, scope=scope) or {}
         r = await _career_residuals(session, player_id, season_id, scope)
+        matches = await _scoped_games_played(session, player_id, season_id, scope)
         catches = _n(pg.get("total_catches")) + _n(r.get("total_catches"))
         run_outs = _n(pg.get("total_run_outs")) + _n(r.get("total_run_outs"))
         stumpings = _n(pg.get("total_stumpings")) + _n(r.get("total_stumpings"))
@@ -399,7 +444,7 @@ async def get_career_fielding(
             "total_unassisted_run_outs": None,
             "total_stumpings": stumpings,
             "total_dismissals": catches + run_outs + stumpings,
-            "games": _n(pg.get("games")) + _n(r.get("games")),
+            "games": matches + _n(r.get("games")),
         }
     season_ids = await resolve_season_filter_no_org(session, season_id)
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
