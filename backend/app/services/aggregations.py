@@ -1163,9 +1163,15 @@ async def get_player_bowling_spells(
     return [dict(r) for r in result.mappings()]
 
 
-async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_dismissal_breakdown(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 CASE
                     WHEN bi.not_out THEN 'not out'
@@ -1185,26 +1191,34 @@ async def get_dismissal_breakdown(session: AsyncSession, player_id: str) -> list
                 END AS dismissal_type,
                 COUNT(*) AS count
             FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
               AND (bi.did_not_bat IS NOT TRUE)
+              {scope_clause}
             GROUP BY 1
             ORDER BY COUNT(*) DESC
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
 
-async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_bowling_dismissal_breakdown(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
     """Breakdown of HOW this bowler dismisses batters (bowled/caught/lbw/etc).
 
     Counts bowler_wickets rows where bowler_id = player. caught-and-bowled is
     its own slice. Excludes non-credit dismissal types (run-outs etc.) — they
     aren't recorded in bowler_wickets in the first place.
     """
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 CASE
                     WHEN bw.dismissal_type = 'caught' AND bw.caught_behind IS TRUE
@@ -1213,16 +1227,20 @@ async def get_bowling_dismissal_breakdown(session: AsyncSession, player_id: str)
                 END AS dismissal_type,
                 COUNT(*) AS count
             FROM v_effective_bowler_wickets bw
+            JOIN v_effective_games g ON g.id = bw.game_id
             WHERE bw.bowler_id = :pid
+              {scope_clause}
             GROUP BY 1
             ORDER BY COUNT(*) DESC
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
 
-async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_bowling_by_batter_position(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
     """How many batters at each batting position (1-13) this bowler has dismissed.
 
     Returns one row per position with a wicket count. Positions with zero
@@ -1230,8 +1248,12 @@ async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) 
     cover the rare cases of substitutes / forfeits where CA assigns a higher
     batting order than the standard 1-11.
     """
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             WITH positions AS (
                 SELECT generate_series(1, 13) AS batting_position
             )
@@ -1242,17 +1264,25 @@ async def get_bowling_by_batter_position(session: AsyncSession, player_id: str) 
             LEFT JOIN v_effective_bowler_wickets bw
               ON bw.batter_position = p.batting_position
              AND bw.bowler_id = :pid
+            LEFT JOIN v_effective_games g ON g.id = bw.game_id
+            WHERE TRUE{scope_clause}
             GROUP BY p.batting_position
             ORDER BY p.batting_position
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
 
-async def get_batting_by_position(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_batting_by_position(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 bi.batting_position,
                 COUNT(*) AS innings,
@@ -1265,14 +1295,16 @@ async def get_batting_by_position(session: AsyncSession, player_id: str) -> list
                 MAX(bi.runs) AS high_score,
                 ROUND(AVG(bi.strike_rate), 1) AS avg_strike_rate
             FROM v_effective_batting_innings bi
+            JOIN v_effective_games g ON g.id = bi.game_id
             WHERE bi.player_id = :pid
               AND bi.batting_position IS NOT NULL
               AND bi.runs IS NOT NULL
               AND (bi.did_not_bat IS NOT TRUE)
+              {scope_clause}
             GROUP BY bi.batting_position
             ORDER BY bi.batting_position
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
@@ -1282,10 +1314,15 @@ async def get_batting_by_grade(
     player_id: str,
     org_id: Optional[str] = None,
     public_only: bool = False,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     # Public views drop grades a club has opted out of sharing; admin/internal
     # callers (public_only=False) still see every grade.
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
+    scope_clause = scope.clause("gr.id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id, "org_id": org_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
         text(f"""
             SELECT
@@ -1320,11 +1357,11 @@ async def get_batting_by_grade(
             WHERE bi.player_id = :pid
               AND bi.runs IS NOT NULL
               AND (bi.did_not_bat IS NOT TRUE)
-              {public_clause}
+              {public_clause}{scope_clause}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY SUM(bi.runs) DESC
         """),
-        {"pid": player_id, "org_id": org_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
@@ -1975,9 +2012,15 @@ async def get_player_milestones(session: AsyncSession, player_id: str) -> list[d
     return [dict(r) for r in result.mappings()]
 
 
-async def get_player_partnerships(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_player_partnerships(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             SELECT
                 CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END AS partner_id,
                 CASE WHEN pt.batter1_id = :pid
@@ -1994,6 +2037,7 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
             LEFT JOIN players p2 ON p2.id = pt.batter2_id
             WHERE (pt.batter1_id = :pid OR pt.batter2_id = :pid)
               AND pt.runs IS NOT NULL AND pt.runs > 0
+              {scope_clause}
             GROUP BY
                 CASE WHEN pt.batter1_id = :pid THEN pt.batter2_id::text ELSE pt.batter1_id::text END,
                 CASE WHEN pt.batter1_id = :pid
@@ -2003,7 +2047,7 @@ async def get_player_partnerships(session: AsyncSession, player_id: str) -> list
             ORDER BY total_runs DESC
             LIMIT 20
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
@@ -3205,8 +3249,13 @@ async def get_bowling_by_grade(
     player_id: str,
     org_id: Optional[str] = None,
     public_only: bool = False,
+    scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
+    scope_clause = scope.clause("gr.id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id, "org_id": org_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
         text(f"""
             WITH grade_spells AS (
@@ -3237,7 +3286,7 @@ async def get_bowling_by_grade(
                 ) gdn ON TRUE
                 WHERE bs.player_id = :pid
                   AND bs.wickets IS NOT NULL
-                  {public_clause}
+                  {public_clause}{scope_clause}
             ),
             best_per_grade AS (
                 SELECT DISTINCT ON (grade_name)
@@ -3264,14 +3313,20 @@ async def get_bowling_by_grade(
             GROUP BY gs.grade_name, bp.best_wickets, bp.best_runs
             ORDER BY SUM(gs.wickets) DESC
         """),
-        {"pid": player_id, "org_id": org_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
 
-async def get_player_by_opposition(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_player_by_opposition(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             WITH player_org AS (
                 SELECT organisation_id FROM players WHERE id = CAST(:pid AS UUID)
             ),
@@ -3365,6 +3420,7 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
                 JOIN v_effective_games g ON g.id = pgi.game_id
                 CROSS JOIN player_org po
                 LEFT JOIN game_appearances ga ON ga.game_id = pgi.game_id AND ga.player_id = CAST(:pid AS UUID)
+                WHERE TRUE{scope_clause}
             ),
             player_games AS (
                 SELECT * FROM player_games_raw
@@ -3455,14 +3511,20 @@ async def get_player_by_opposition(session: AsyncSession, player_id: str) -> lis
             LEFT JOIN fielding_by_opposition fo ON fo.opp_key = gbo.opp_key
             ORDER BY gbo.games DESC
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 
 
-async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dict]:
+async def get_player_by_venue(
+    session: AsyncSession, player_id: str, scope: Optional[GradeScope] = None
+) -> list[dict]:
+    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    params: dict = {"pid": player_id}
+    if _scoped(scope):
+        scope.bind(params)
     result = await session.execute(
-        text("""
+        text(f"""
             WITH player_game_ids AS (
                 -- Same union as per-opposition: synced via appearances + manual via per-innings tables.
                 SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
@@ -3486,6 +3548,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 JOIN v_effective_games g ON g.id = pgi.game_id
                 WHERE g.venue IS NOT NULL
                   AND g.result IS NOT NULL
+                  {scope_clause}
                 GROUP BY g.venue
             ),
             batting_by_venue AS (
@@ -3499,6 +3562,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 JOIN v_effective_games g ON g.id = bi.game_id
                 WHERE bi.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
+                  {scope_clause}
                 GROUP BY g.venue
             ),
             bowling_by_venue AS (
@@ -3511,6 +3575,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 JOIN v_effective_games g ON g.id = bs.game_id
                 WHERE bs.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
+                  {scope_clause}
                 GROUP BY g.venue
             ),
             fielding_by_venue AS (
@@ -3523,6 +3588,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
                 JOIN v_effective_games g ON g.id = fs.game_id
                 WHERE fs.player_id = CAST(:pid AS UUID)
                   AND g.venue IS NOT NULL
+                  {scope_clause}
                 GROUP BY g.venue
             )
             SELECT
@@ -3547,7 +3613,7 @@ async def get_player_by_venue(session: AsyncSession, player_id: str) -> list[dic
             LEFT JOIN fielding_by_venue fv ON fv.venue = gv.venue
             ORDER BY gv.games DESC
         """),
-        {"pid": player_id},
+        params,
     )
     return [dict(r) for r in result.mappings()]
 

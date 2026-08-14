@@ -2358,8 +2358,14 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId || !data?.player) return
-    if (lastAuxFetchRef.current === playerId) return
-    lastAuxFetchRef.current = playerId
+    // Keyed on playerId + the resolved category selection, not on `data.player`
+    // (a new object reference every time the season filter refetches career
+    // stats) — so this only re-runs when the player changes or the Junior/
+    // Senior/etc toggle actually changes, not on every unrelated re-render.
+    const catKey = categories == null ? null : categoriesParam(categories)
+    const key = `${playerId}|${catKey || ''}`
+    if (lastAuxFetchRef.current === key) return
+    lastAuxFetchRef.current = key
     // Reset stale state from previously-viewed player — otherwise navigating
     // between profiles would show the previous player's dismissal/grade data.
     setPartnerships([])
@@ -2372,15 +2378,15 @@ export default function PlayerProfile() {
     setByVenue([])
     setByOpposition([])
     Promise.allSettled([
-      api.getPlayerPartnerships(playerId),
-      api.getPlayerDismissals(playerId),
-      api.getPlayerByGrade(playerId),
-      api.getPlayerByPosition(playerId),
-      api.getPlayerBowlingByGrade(playerId),
-      api.getPlayerBowlingDismissals(playerId),
-      api.getPlayerBowlingByBatterPosition(playerId),
-      api.getPlayerByVenue(playerId),
-      api.getPlayerByOpposition(playerId),
+      api.getPlayerPartnerships(playerId, catKey),
+      api.getPlayerDismissals(playerId, catKey),
+      api.getPlayerByGrade(playerId, catKey),
+      api.getPlayerByPosition(playerId, catKey),
+      api.getPlayerBowlingByGrade(playerId, catKey),
+      api.getPlayerBowlingDismissals(playerId, catKey),
+      api.getPlayerBowlingByBatterPosition(playerId, catKey),
+      api.getPlayerByVenue(playerId, catKey),
+      api.getPlayerByOpposition(playerId, catKey),
     ]).then(([p, d, g, pos, bg, bd, bbp, bv, bo]) => {
       if (p.status === 'fulfilled') setPartnerships(p.value)
       if (d.status === 'fulfilled') setDismissals(d.value)
@@ -2392,7 +2398,7 @@ export default function PlayerProfile() {
       if (bv.status === 'fulfilled') setByVenue(Array.isArray(bv.value) ? bv.value : [])
       if (bo.status === 'fulfilled') setByOpposition(Array.isArray(bo.value) ? bo.value : [])
     })
-  }, [playerId, data?.player])
+  }, [playerId, data?.player, categories])
 
   useEffect(() => {
     if (!playerId || !data?.player) return
