@@ -3,14 +3,14 @@ club-uploaded post BACKGROUND (kind='background') vs an ordinary photo
 (kind NULL), so BetterSocials can offer a small per-club background library
 separate from the general Photos upload pool, off the same table.
 
-Revision ID: 253
-Revises: 252
+Revision ID: 254
+Revises: 253
 Create Date: 2026-08-14
 """
 from alembic import op
 
-revision = '253'
-down_revision = '252'
+revision = '254'
+down_revision = '253'
 branch_labels = None
 depends_on = None
 
