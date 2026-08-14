@@ -541,14 +541,28 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending, on
                 {visibleCols.map((c, colIdx) => (
                   <td key={c.key} className="p-0.5">
                     <input
-                      type={c.text ? 'text' : 'number'}
-                      step={c.decimal ? '0.1' : 1}
+                      type="text"
+                      inputMode={c.text ? undefined : (c.decimal ? 'decimal' : 'numeric')}
                       value={row[c.key] === null || row[c.key] === undefined ? '' : row[c.key]}
                       onChange={e => {
                         const v = e.target.value
                         if (c.text) return updateCell(rowIdx, c.key, v)
-                        if (v === '') return updateCell(rowIdx, c.key, c.nullable ? '' : 0)
-                        updateCell(rowIdx, c.key, c.decimal ? parseFloat(v) : parseInt(v, 10))
+                        // Allow every in-progress typing state (empty, a bare "-",
+                        // a trailing ".") through untouched — coercing to a final
+                        // number happens on blur. Coercing on every keystroke was
+                        // what made a "-" get wiped the instant it was typed.
+                        const partial = c.decimal ? /^-?\d*\.?\d*$/ : /^-?\d*$/
+                        if (v === '' || partial.test(v)) updateCell(rowIdx, c.key, v)
+                      }}
+                      onBlur={() => {
+                        if (c.text) return
+                        const v = row[c.key]
+                        if (v === '' || v === '-' || v === null || v === undefined) {
+                          return updateCell(rowIdx, c.key, c.nullable ? '' : 0)
+                        }
+                        if (typeof v === 'number') return
+                        const num = c.decimal ? parseFloat(v) : parseInt(v, 10)
+                        updateCell(rowIdx, c.key, Number.isNaN(num) ? (c.nullable ? '' : 0) : num)
                       }}
                       onPaste={e => handlePaste(e, rowIdx, colIdx)}
                       className="w-16 bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-1 py-1 focus:outline-none focus:border-pb-accent no-spinner"
