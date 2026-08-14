@@ -407,13 +407,24 @@ def _parse_initial_form(name: str):
 
     Examples → ('camarda', 'f'): "Camarda F", "F Camarda", "Van Der Berg F".
     Uses the last surname token (so middle names on our side still match).
+
+    Dots are treated as separators first — "K. Adair" and "R.J. Manning" are
+    the dominant style in a real historical club sheet (found via a ~2,100-row
+    career-totals import: roughly half its rows write an initial this way),
+    and without this the trailing dot inflates "k." to two characters, so
+    neither length-1 branch below ever fires and every one of those rows is
+    read as a brand-new, never-seen name instead of an abbreviation of an
+    existing player. "R.J. Manning" collapses to three tokens ("r", "j",
+    "manning") the same way — the middle initial is dropped here exactly as
+    it already is for a plain "R Manning", which is an accepted, pre-existing
+    limit of surname+first-initial matching, not something this fix changes.
     """
-    toks = _normalise_name(name).split()
+    toks = re.sub(r"\s+", " ", _normalise_name(name).replace(".", " ")).strip().split()
     if len(toks) < 2:
         return None
     if len(toks[-1]) == 1 and len(toks[-2]) > 1:   # "Camarda F" / "Van Der Berg F"
         return (toks[-2], toks[-1])
-    if len(toks[0]) == 1 and len(toks[-1]) > 1:    # "F Camarda" / "F Van Der Berg"
+    if len(toks[0]) == 1 and len(toks[-1]) > 1:    # "F Camarda" / "F Van Der Berg" / "R.J. Manning"
         return (toks[-1], toks[0])
     return None
 
