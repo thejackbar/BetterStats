@@ -242,11 +242,16 @@ CONTEXT_FILTERS: dict[str, dict] = {**MATCH_CONTEXT_FILTERS, **INNINGS_CONTEXT_F
 # can't be evaluated against the filter — same reasoning as _RESIDUAL_SOURCES
 # in aggregations.py, applied to whichever filters make it unanswerable.
 # What a residual DOES carry: its own season_id, grade_id (when the upload
-# named one) and the player it belongs to — so season/grade/year filters and
-# player-attribute filters (gender, role, overseas, family, awards) can still
-# be answered and are deliberately NOT in this disqualifying set.
+# named one, or grade_label when it's a career-scope import spanning many
+# seasons' worth of same-named grades — see _RESIDUAL_GRADE_MATCH) and the
+# player it belongs to — so season/grade/year filters and player-attribute
+# filters (gender, role, overseas, family, awards) can be answered and are
+# deliberately NOT in this disqualifying set. `grade_name` used to be listed
+# here (a straight bug, contradicting this very comment) — see the "records
+# before 2008/09 disappear once a merged grade is filtered" report, fixed by
+# _RESIDUAL_GRADE_MATCH below instead of disqualifying the residual outright.
 _RESIDUAL_DISQUALIFYING_MATCH_KEYS = (
-    "date_from", "date_to", "opposition", "finals_only", "result", "on_this_day", "grade_name",
+    "date_from", "date_to", "opposition", "finals_only", "result", "on_this_day",
 )
 _RESIDUAL_DISQUALIFYING_PLAYER_KEYS = ("captain_only", "keeper_only")
 
@@ -276,12 +281,46 @@ def _residual_disqualified(context: dict, ic: list[str]) -> bool:
     return False
 
 
+def _residual_grade_match(prefix: str) -> str:
+    """Merge-aware grade-name match for a residual row.
+
+    Mirrors aggregations.py's `_GRADE_MATCH` / `_IMPORT_GRADE_MATCH` — the
+    identical fix (migration 154) applied there for grade-filtered
+    leaderboards, ported to StatLab's residual CTEs (`_residual_career_cte` /
+    `_residual_season_cte` / `_residual_grade_cte`), which read the view
+    instead of `import_effective_deltas` directly and so need their own copy.
+
+    A season-scope import delta or a `manual_aggregate` row carries a real
+    `grade_id` — one actual `grades` row for that season — resolved via `rg`
+    (every caller LEFT JOINs `grades rg ON rg.id = pss.grade_id`). A
+    career-scope import residual spans many seasons' worth of same-named
+    grades and so has no `grade_id` at all (see migration 154's note); it's
+    tagged by grade *name* instead, via `pss.grade_label`
+    (migration 252 — surfaced onto the view; `manual_career`/`manual_game`
+    rows always carry NULL here, since they were never grade-scoped at
+    upload time and self-exclude by never matching).
+    """
+    p = prefix
+    return (
+        f"(COALESCE(rg.name, pss.grade_label) = :{p}grade_name"
+        " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+        " WHERE gml.org_id = CAST(:org_id AS UUID)"
+        f" AND gml.alias_name = COALESCE(rg.name, pss.grade_label) AND gml.undone_at IS NULL"
+        f" AND (gml.canonical_name = :{p}grade_name"
+        " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+        " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
+        f" AND gr2.display_name_override = :{p}grade_name))))"
+    )
+
+
 def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
-    """Season/year/grade clauses for a residual query, using the `pss`/`s`
-    aliases a residual CTE joins (not `g`/`gr`/`gu` — a residual has no game
-    row). Covers the same dimensions MATCH_CONTEXT_FILTERS' season_id/
-    season_ids/min_year/max_year/grade_id/grade_ids already validate; reusing
-    those functions isn't possible since the SQL text differs by alias.
+    """Season/year/grade clauses for a residual query, using the `pss`/`s`/
+    `rg` aliases a residual CTE joins (not `g`/`gr`/`gu` — a residual has no
+    game row; `rg` is `LEFT JOIN grades rg ON rg.id = pss.grade_id`, added by
+    every caller for _residual_grade_match). Covers the same dimensions
+    MATCH_CONTEXT_FILTERS' season_id/season_ids/min_year/max_year/grade_id/
+    grade_ids/grade_name already validate; reusing those functions isn't
+    possible since the SQL text differs by alias.
     """
     clauses: list[str] = []
 
@@ -339,6 +378,16 @@ def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
         clauses.append(f"pss.grade_id IN ({ph})")
         for i, v in enumerate(grade_ids):
             params[f"{prefix}grade_ids_{i}"] = v
+
+    # The filter StatLab's own Grade dropdown actually sends (ctx.grade_name
+    # in StatLab.jsx) — see _residual_grade_match for the merge-aware match
+    # this resolves through.
+    grade_name = context.get("grade_name")
+    if grade_name:
+        coerced = _coerce_value("text", grade_name)
+        if coerced:
+            clauses.append(_residual_grade_match(prefix))
+            params[f"{prefix}grade_name"] = coerced
 
     return (" AND " + " AND ".join(clauses)) if clauses else ""
 
@@ -403,6 +452,10 @@ def _residual_career_cte(context: dict, params: dict) -> str:
             FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             LEFT JOIN seasons s ON s.id = pss.season_id
+            -- To-one (grades.id is a PK): resolves a grade filter for the
+            -- rows that carry a real grade_id (manual_aggregate, a
+            -- season-scope import delta) — see _residual_grade_match.
+            LEFT JOIN grades rg ON rg.id = pss.grade_id
             WHERE p.organisation_id = :org_id
               AND pss.source = ANY(:residual_sources)
               {scope_clause}
@@ -445,12 +498,78 @@ def _residual_season_cte(context: dict, params: dict) -> str:
             FROM v_effective_player_season_stats pss
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
+            -- To-one (grades.id is a PK) — see _residual_career_cte's own note.
+            LEFT JOIN grades rg ON rg.id = pss.grade_id
             WHERE p.organisation_id = :org_id
               AND pss.source = ANY(:residual_sources)
               AND pss.season_id IS NOT NULL
               {scope_clause}
               {player_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), pss.season_id, s.name, s.year
+        )
+    """
+
+
+def _residual_grade_cte(context: dict, params: dict) -> str:
+    """The grade-grouped mirror of `_residual_career_cte`, for
+    query_player_grade — previously the one target with NO residual branch
+    at all, filtered or not, so an imported/manual-aggregate history never
+    appeared under any grade. This is the direct fix for the reported bug: a
+    club merges many old grade names into one canonical grade and StatLab's
+    GRADE filter shows nothing before the season real per-game scorecards
+    begin, because everything before that is exactly this kind of residual
+    row.
+
+    Resolves the canonical grade name the same way `game_universe` does for
+    real per-game rows (`am`/`gdn` LATERALs against `grade_merge_logs` /
+    `grades.display_name_override`), just fed from `rg`/`pss.grade_label`
+    instead of a real games→grades join. A row with neither `grade_id` nor
+    `grade_label` (`manual_career`, always ungraded at upload time) has
+    nothing to group under here and is dropped by the WHERE clause — it's
+    still visible career-wide via query_player_career, just not per grade.
+    """
+    params["residual_sources"] = list(_RESIDUAL_SOURCES)
+    scope_clause = _residual_scope_clause(context, params, "rg_")
+    player_clauses, player_params, _ = _build_filter_block(context, _RESIDUAL_PLAYER_FILTERS)
+    params.update(player_params)
+    player_clause = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
+    return f"""
+        resid AS (
+            SELECT
+                p.id AS player_id,
+                COALESCE(p.display_name_override, p.name) AS player_name,
+                COALESCE(am.canonical_name, rg.name, pss.grade_label) AS grade_name,
+                COALESCE(gdn.display_name_override,
+                         COALESCE(am.canonical_name, rg.name, pss.grade_label)) AS display_grade_name,
+                {_RESIDUAL_AGG_COLS_SQL}
+            FROM v_effective_player_season_stats pss
+            JOIN players p ON p.id = pss.player_id
+            LEFT JOIN seasons s ON s.id = pss.season_id
+            -- To-one (grades.id is a PK) — see _residual_career_cte's own note.
+            LEFT JOIN grades rg ON rg.id = pss.grade_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = COALESCE(rg.name, pss.grade_label)
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, rg.name, pss.grade_label)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE p.organisation_id = :org_id
+              AND pss.source = ANY(:residual_sources)
+              AND (pss.grade_id IS NOT NULL OR pss.grade_label IS NOT NULL)
+              {scope_clause}
+              {player_clause}
+            GROUP BY p.id, COALESCE(p.display_name_override, p.name),
+                     COALESCE(am.canonical_name, rg.name, pss.grade_label),
+                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, rg.name, pss.grade_label))
         )
     """
 
@@ -1252,7 +1371,9 @@ async def query_player_grade(
     context: dict,
 ) -> list[dict]:
     """One row per (player, canonical grade name). Always uses per-innings
-    aggregation since player_season_stats has no grade dimension."""
+    aggregation since player_season_stats has no grade dimension. Blends in
+    the residual (imported/manual-aggregate) history under its own resolved
+    grade — see _residual_grade_cte for why this target needed one at all."""
     sort_by, sort_dir, limit = _validated("player_grade", sort_by, sort_dir, limit)
 
     mc, mp, ic, ip, pc, pp, _ = _build_context_filters(context)
@@ -1266,51 +1387,75 @@ async def query_player_grade(
         select_cols=("p.id AS player_id, COALESCE(p.display_name_override, p.name) AS player_name, "
                      "gu.canonical_grade_name AS grade_name, gu.display_grade_name,"),
     )
+    # Same rule as query_player_career/query_player_season: a residual row can
+    # only join in when every active filter is one it can actually answer.
+    residual_ok = not _residual_disqualified(context, ic)
+    resid_with = (",\n" + _residual_grade_cte(context, params)) if residual_ok else ""
+    # See query_player_career's own note: a FULL OUTER JOIN condition can't
+    # reference the table it's joining on both sides, so the join uses the
+    # live-only columns and the outer SELECT below adds resid as a separate
+    # final fallback.
+    live_pid = "COALESCE(appear.player_id, bat.player_id, bowl.player_id, field.player_id)"
+    live_gname = "COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name, field.grade_name)"
+    resid_pid = f"COALESCE({live_pid}, resid.player_id)" if residual_ok else live_pid
+    resid_pname = "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name, resid.player_name)" if residual_ok \
+        else "COALESCE(appear.player_name, bat.player_name, bowl.player_name, field.player_name)"
+    resid_gname = f"COALESCE({live_gname}, resid.grade_name)" if residual_ok else live_gname
+    resid_dispname = "COALESCE(appear.display_grade_name, bat.display_grade_name, bowl.display_grade_name, field.display_grade_name, resid.display_grade_name)" if residual_ok \
+        else "COALESCE(appear.display_grade_name, bat.display_grade_name, bowl.display_grade_name, field.display_grade_name)"
+    resid_join = f"FULL OUTER JOIN resid ON resid.player_id = {live_pid} AND resid.grade_name = {live_gname}" if residual_ok else ""
+
+    def _r(col: str) -> str:
+        """A live column plus its residual counterpart, or just the live
+        column when a disqualifying filter ruled the residual out."""
+        return f"(COALESCE({col}, 0) + COALESCE(resid.{col.split('.')[-1]}, 0))" if residual_ok else f"COALESCE({col}, 0)"
+
     sql = f"""
-        {cte},
+        {cte}{resid_with},
         agg AS (
             SELECT
-                COALESCE(appear.player_id, bat.player_id)::text         AS player_id,
-                COALESCE(appear.player_name, bat.player_name)           AS player_name,
-                COALESCE(appear.grade_name, bat.grade_name)             AS grade_name,
-                COALESCE(appear.display_grade_name, bat.display_grade_name) AS display_grade_name,
-                COALESCE(appear.matches, 0)                             AS matches,
+                {resid_pid}::text  AS player_id,
+                {resid_pname}      AS player_name,
+                {resid_gname}      AS grade_name,
+                {resid_dispname}   AS display_grade_name,
+                {_r('appear.matches')}                                   AS matches,
                 1                                                        AS seasons_played,
-                COALESCE(bat.batting_innings, 0)                        AS batting_innings,
-                COALESCE(bat.runs, 0)                                   AS runs,
-                COALESCE(bat.not_outs, 0)                               AS not_outs,
-                COALESCE(bat.balls_faced, 0)                            AS balls_faced,
-                ROUND(bat.runs::numeric / NULLIF(bat.batting_innings - bat.not_outs, 0), 2) AS batting_average,
-                ROUND(bat.runs::numeric / NULLIF(bat.balls_faced, 0) * 100, 2)             AS batting_strike_rate,
-                COALESCE(bat.high_score, 0)                             AS high_score,
-                COALESCE(bat.fifties, 0)                                AS fifties,
-                COALESCE(bat.hundreds, 0)                               AS hundreds,
-                COALESCE(bat.ducks, 0)                                  AS ducks,
-                COALESCE(bat.fours, 0)                                  AS fours,
-                COALESCE(bat.sixes, 0)                                  AS sixes,
-                COALESCE(bowl.bowling_innings, 0)                       AS bowling_innings,
-                COALESCE(bowl.wickets, 0)                               AS wickets,
-                COALESCE(bowl.overs, 0)                                 AS overs,
-                COALESCE(bowl.runs_conceded, 0)                         AS runs_conceded,
-                ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.wickets, 0), 2) AS bowling_average,
-                ROUND(bowl.runs_conceded::numeric / NULLIF(bowl.overs * 6, 0) * 6, 2) AS bowling_economy,
-                ROUND(bowl.overs::numeric * 6 / NULLIF(bowl.wickets, 0), 2) AS bowling_strike_rate,
-                COALESCE(bowl.five_wicket_innings, 0)                   AS five_wicket_innings,
-                COALESCE(bowl.maidens, 0)                               AS maidens,
-                bowl.best_bowling_wickets                                AS best_bowling_wickets,
-                COALESCE(bowl.wides, 0)    AS wides,
-                COALESCE(bowl.no_balls, 0) AS no_balls,
-                COALESCE(field.catches, 0)                              AS catches,
-                COALESCE(field.catches_wk, 0)                           AS catches_wk,
-                COALESCE(field.catches_non_wk, 0)                       AS catches_non_wk,
-                COALESCE(field.run_outs, 0)                             AS run_outs,
-                COALESCE(field.stumpings, 0)                            AS stumpings
+                {_r('bat.batting_innings')}                              AS batting_innings,
+                {_r('bat.runs')}                                         AS runs,
+                {_r('bat.not_outs')}                                     AS not_outs,
+                {_r('bat.balls_faced')}                                  AS balls_faced,
+                ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
+                ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)                     AS batting_strike_rate,
+                GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
+                {_r('bat.fifties')}                                      AS fifties,
+                {_r('bat.hundreds')}                                     AS hundreds,
+                {_r('bat.ducks')}                                        AS ducks,
+                {_r('bat.fours')}                                        AS fours,
+                {_r('bat.sixes')}                                        AS sixes,
+                {_r('bowl.bowling_innings')}                             AS bowling_innings,
+                {_r('bowl.wickets')}                                     AS wickets,
+                {_r('bowl.overs')}                                       AS overs,
+                {_r('bowl.runs_conceded')}                               AS runs_conceded,
+                ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
+                ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
+                {_r('bowl.five_wicket_innings')}                         AS five_wicket_innings,
+                {_r('bowl.maidens')}                                     AS maidens,
+                GREATEST(bowl.best_bowling_wickets{', resid.best_bowling_wickets' if residual_ok else ''}) AS best_bowling_wickets,
+                {_r('bowl.wides')}    AS wides,
+                {_r('bowl.no_balls')} AS no_balls,
+                {_r('field.catches')}                                    AS catches,
+                {_r('field.catches_wk')}                                 AS catches_wk,
+                {_r('field.catches_non_wk')}                             AS catches_non_wk,
+                {_r('field.run_outs')}                                   AS run_outs,
+                {_r('field.stumpings')}                                  AS stumpings
             FROM appear
             FULL OUTER JOIN bat   ON bat.player_id   = appear.player_id   AND bat.grade_name   = appear.grade_name
             FULL OUTER JOIN bowl  ON bowl.player_id  = COALESCE(appear.player_id, bat.player_id)
                                  AND bowl.grade_name  = COALESCE(appear.grade_name, bat.grade_name)
             FULL OUTER JOIN field ON field.player_id = COALESCE(appear.player_id, bat.player_id, bowl.player_id)
                                  AND field.grade_name = COALESCE(appear.grade_name, bat.grade_name, bowl.grade_name)
+            {resid_join}
         )
         SELECT * FROM agg
         {where_sql}
