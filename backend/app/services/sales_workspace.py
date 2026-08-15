@@ -778,3 +778,52 @@ async def create_list_from_wizard_clubs(
         "clubs_matched": matched_count,
         "clubs_unmatched": unmatched,
     }
+
+
+async def create_list_from_crm_deals(
+    session: AsyncSession, *, name: str, description: Optional[str],
+    deals: list, created_by_user_id=None,
+) -> dict:
+    """Import an already-filtered set of Sales Pipeline deals into a Sales
+    List — the CRM-export source. No Club Directory matching needed: these
+    are already real crm_deals rows, so this just groups their
+    marketing_club_id under one list. A deal with no club linked (a
+    manually-created deal with no Club Directory match) has nothing to
+    attach a list membership to and is reported, not silently dropped.
+    Deliberately does NOT touch the deals themselves (stage, owner, value,
+    or create new ones) — importing is a read of the pipeline, never a
+    write to it, unlike the Wizard Clubs import which mints a fresh deal
+    for a club that doesn't have one yet."""
+    if not (name or "").strip():
+        return {"error": "no_name", "detail": "Name the list."}
+    if not deals:
+        return {"error": "no_clubs", "detail": "No deals were selected."}
+
+    sales_list = SalesList(
+        name=name.strip(), description=(description or "").strip() or None,
+        source_type="crm_export", created_by_user_id=created_by_user_id,
+    )
+    session.add(sales_list)
+    await session.flush()  # need sales_list.id for the membership rows
+
+    added = 0
+    seen_club_ids: set = set()
+    unmatched: list[str] = []
+    for d in deals:
+        if d.marketing_club_id is None:
+            unmatched.append(d.title or str(d.id))
+            continue
+        # Two deals can point at the same club (rare, but not impossible) —
+        # only one membership row per list+club.
+        if d.marketing_club_id not in seen_club_ids:
+            seen_club_ids.add(d.marketing_club_id)
+            session.add(SalesListClub(sales_list_id=sales_list.id, marketing_club_id=d.marketing_club_id))
+            added += 1
+
+    return {
+        "id": str(sales_list.id),
+        "name": sales_list.name,
+        "clubs_added": added,
+        "clubs_matched": len(seen_club_ids),
+        "clubs_unmatched": unmatched,
+    }

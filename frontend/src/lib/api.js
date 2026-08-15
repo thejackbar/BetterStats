@@ -2068,6 +2068,8 @@ export const api = {
   salesWorkspaceList: (listId) => request(`/club-admin/sales-workspace/lists/${listId}`),
   salesWorkspaceImportFromWizardClubs: (data) =>
     request('/club-admin/sales-workspace/lists/from-wizard-clubs', { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceImportFromCrmDeals: (data) =>
+    request('/club-admin/sales-workspace/lists/from-crm-deals', { method: 'POST', body: JSON.stringify(data) }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',

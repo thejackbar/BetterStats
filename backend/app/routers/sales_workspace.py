@@ -769,3 +769,42 @@ async def import_from_wizard_clubs(
         raise HTTPException(status_code=422, detail=result.get("detail") or result["error"])
     await db.commit()
     return result
+
+
+class ImportCrmDealsBody(BaseModel):
+    name: str
+    description: str = ""
+    deal_ids: list[str]
+
+
+@router.post("/lists/from-crm-deals")
+async def import_from_crm_deals(
+    body: ImportCrmDealsBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Import a set of Sales Pipeline deals (the CRM's own filtered board or
+    list view) into a Sales List — the CRM-export source, alongside Wizard
+    Clubs. Super-admin only, same posture as the other list-building
+    actions. No matching needed: these are already real deals, so this is
+    a pure grouping, never a write to the pipeline itself."""
+    _require_super(actor)
+    if not body.deal_ids:
+        raise HTTPException(status_code=422, detail="Select at least one deal")
+    deal_uuids = [_uuid_or_none(d) for d in body.deal_ids]
+    deals = (await db.execute(
+        select(CrmDeal).where(
+            CrmDeal.id.in_(deal_uuids), CrmDeal.scope == crm_service.SCOPE_PLATFORM,
+            CrmDeal.archived_at.is_(None),
+        )
+    )).scalars().all()
+    if not deals:
+        raise HTTPException(status_code=404, detail="None of the selected deals could be found")
+
+    result = await sw.create_list_from_crm_deals(
+        db, name=body.name, description=body.description, deals=deals, created_by_user_id=actor.user.id,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result.get("detail") or result["error"])
+    await db.commit()
+    return result

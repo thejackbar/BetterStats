@@ -30,7 +30,7 @@ const fmtDate = (iso) => {
   return d.toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-const SOURCE_LABEL = { wizard_clubs: 'Wizard Clubs', manual: 'Manual' }
+const SOURCE_LABEL = { wizard_clubs: 'Wizard Clubs', crm_export: 'CRM Export', manual: 'Manual' }
 
 function ListRow({ l, active, onClick }) {
   return (
@@ -151,7 +151,8 @@ export default function SalesLists() {
           ) : lists.length === 0 ? (
             <p className="text-[12px] text-pb-faintest p-3">
               No lists yet. Import one from{' '}
-              <Link to="/admin/super/crm/wizard-clubs" className="underline hover:text-pb-text">Clubs Searched or Selected in the Wizard</Link>.
+              <Link to="/admin/super/crm/wizard-clubs" className="underline hover:text-pb-text">Clubs Searched or Selected in the Wizard</Link>,
+              or from the <Link to="/admin/super/crm" className="underline hover:text-pb-text">Sales Pipeline</Link>'s "Import to Sales List".
             </p>
           ) : lists.map(l => (
             <ListRow key={l.id} l={l} active={l.id === selectedId} onClick={() => setSelectedId(l.id)} />
