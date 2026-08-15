@@ -25,8 +25,8 @@ Or book a demo first: https://betterat.cricket/contact
 
 IT RUNS THE REST OF THE CLUB TOO
 
-BetterClubhouse (new)  Members, fees, volunteers and committee
-                       https://betterat.cricket/modules/betterclubhouse
+BetterAdmin (expanded) Members, fees, volunteers and committee
+                       https://betterat.cricket/modules/betteradmin
 BetterSelect           Availability, selection and vote counting
                        https://betterat.cricket/modules/betterselect
 BetterSocials          Match-day graphics and your club website

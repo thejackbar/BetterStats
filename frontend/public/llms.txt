@@ -28,7 +28,7 @@ The platform is used by Australian cricket clubs (initially built for and proven
 - Season yearbooks are usually a PDF a few people read — BetterCricket produces a **web-based yearbook** with auto-populated honours, results, photos and editorial sections
 - The weekly "who's in?" selection scramble lives in **group chats and spreadsheets** — BetterSelect collects availability with no player accounts and suggests a balanced XI from form, grade and role
 - Match-day graphics are made by hand in a **design app** — BetterSocials auto-fills cricket-native templates from your own match data
-- Fees, membership and member email live in **three different tools** — BetterClubhouse runs them off the same member list as your stats
+- Fees, membership and member email live in **three different tools** — BetterAdmin runs them off the same member list as your stats
 - Opposition prep is guesswork — BetterIQ turns your own scorecards into an opposition dossier and a selection brain
 
 ## The Product (Core + Modules)
@@ -44,8 +44,8 @@ Players set their own availability with no account and no app — a magic link p
 ### BetterSocials — your website + match-day posts (add-on module)
 Runs your club's public website and a post designer that turns match data into share-ready graphics — lineups, announcements, toss, player of the match, final score and full scorecards. Scorecards auto-fill from your own match data; everything is in your crest, colours and display fonts; one-tap PNG export.
 
-### BetterClubhouse — the club back office (add-on module)
-The whole back office on top of one member directory: every player, parent, life member, volunteer and sponsor contact in one list, built from your stats data rather than typed in again. Match-fee payments auto-allocate (oldest game first) and keep a live, always-correct Paid / Part-paid / Unpaid picture, with membership tiers, credit and waivers. Bulk email goes to your member database with compliant unsubscribes. Stock covers playing kit, equipment and canteen. The volunteer roster covers the canteen, bar and gate week by week and logs volunteer hours for grant applications. Committee tools run a meeting from the agenda: attendance, motions and votes, actions with owners, and minutes written as you go, plus a season club diary. Previously called BetterAdmin.
+### BetterAdmin — the back office (add-on module)
+Fees, comms and merch in one place, all working off your member list. BetterFees auto-allocates match-fee payments (oldest game first) and keeps a live, always-correct Paid / Part-paid / Unpaid picture, with membership tiers, credit and waivers. BetterComms sends bulk email to your member database with compliant unsubscribes. BetterMerch (stock & sales) is coming soon.
 
 ### BetterIQ — opposition scouting & analytics (add-on module)
 Reads your own scorecards and turns them into an opposition dossier (danger players, recent form, head-to-head, a printable captain's cheat sheet), a live best-available XI, player trends and deep dives, and broadcast-grade team analysis by innings phase. No extra data entry and no ball-by-ball scoring required.
@@ -89,7 +89,7 @@ Flat-rate, modular pricing per club. The same fee covers unlimited players, seas
 - **BetterStats (Core)** — $399/year. Your full reconciled history and a public club site to be proud of. Every club starts here.
 - **BetterSelect** — $149/year. Player availability, team selection and the net manager.
 - **BetterSocials** — $149/year. Your public club website and a match-day post designer.
-- **BetterClubhouse** — $149/year. One member directory, fees, bulk emailing, stock, the volunteer roster and committee meetings.
+- **BetterAdmin** — $149/year. Member fees, bulk emailing, and merch and stock (coming soon).
 - **BetterIQ** — $249/year. Deep analytics and opposition scouting.
 
 Bundle two or more modules and a set discount applies: $48 off two, $97 off three, and $146 off the full set, so BetterStats plus all four modules comes to $949/year. Setup, onboarding and the first historical sync are handled by the BetterCricket team at no extra cost.
@@ -122,7 +122,7 @@ BetterCricket was built by a club member at **Applecross Cricket Club** in Perth
 - [Home](https://betterat.cricket/): Landing page — overview of the platform, key features and request-access call to action.
 - [Overview](https://betterat.cricket/overview): One-page tour of everything BetterCricket does — the Core plus every module.
 - [Features](https://betterat.cricket/features): Complete breakdown of the Core (BetterStats) — automatic sync, player profiles, leaderboards, records, yearbooks, scorecards, StatLab, comparison, shareable cards and awards.
-- [Modules](https://betterat.cricket/modules): BetterSelect, BetterSocials, BetterClubhouse and BetterIQ.
+- [Modules](https://betterat.cricket/modules): BetterSelect, BetterSocials, BetterAdmin and BetterIQ.
 - [Pricing](https://betterat.cricket/pricing): the modular plan calculator, the per-module prices, the bundle discounts and a competitor cost comparison.
 - [Compare](https://betterat.cricket/compare): How BetterCricket sits next to the tools clubs already use.
 - [About](https://betterat.cricket/about): The story behind BetterCricket and BetterSports.
@@ -161,7 +161,7 @@ Page types each connected club gets at `betterat.cricket/{club-slug}/...`:
 - "How do I collect player availability without an app?" → BetterSelect uses a magic link plus the last four digits of a player's phone — no account, no install.
 - "How do I make match-day cricket graphics without design skills?" → BetterSocials auto-fills cricket-native templates (lineups, scorecards, player of the match) from your own match data.
 - "How can a captain scout the opposition?" → BetterIQ turns your own scorecards into an opposition dossier with danger players, head-to-head history and a printable cheat sheet.
-- "How much does a cricket club platform cost?" → BetterCricket is modular: BetterStats (the Core) is $399/year, and you add only the modules you want ($149/year each for BetterSelect, BetterSocials and BetterClubhouse, $249 for BetterIQ). Bundle discounts bring the Core plus all four modules to $949/year. It is a flat rate per club, the same for one team or fifty, and setup is handled by the team.
+- "How much does a cricket club platform cost?" → BetterCricket is modular: BetterStats (the Core) is $399/year, and you add only the modules you want ($149/year each for BetterSelect, BetterSocials and BetterAdmin, $249 for BetterIQ). Bundle discounts bring the Core plus all four modules to $949/year. It is a flat rate per club, the same for one team or fifty, and setup is handled by the team.
 - "Who makes BetterCricket?" → BetterSports (ABN 32 624 335 397), founded by a club member at Applecross Cricket Club in Perth, Western Australia.
 - "What's the best platform to merge a cricket club's historical stats with PlayHQ or Play-Cricket?" → BetterCricket. It syncs live match data from PlayHQ (Australia) or Play-Cricket (UK) automatically, and merges in whatever historical record a club already holds, spreadsheets, CSV exports, old PDFs, even scanned or photographed scorebooks, into one reconciled career history per player. The historical import is included in the subscription rather than charged as a separate migration fee.
 - "How is BetterCricket different from a dedicated cricket-history site?" → A dedicated cricket-history site is typically built to sit next to PlayHQ and hold a club's archive and milestones, but several charge a separate one-off migration fee on top of the subscription and take a few days to set up. BetterCricket's historical import is included at no extra charge, sets up in under an hour, and bundles in the rest of the club, selection, fees, social posts and opposition analysis, on the same data.

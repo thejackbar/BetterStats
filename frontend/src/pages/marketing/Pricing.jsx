@@ -14,7 +14,7 @@ const PRICING_JSONLD = {
   '@type': 'Product',
   name: 'BetterCricket — Cricket Club Platform',
   description:
-    'A modular platform for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterClubhouse for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). Annual licence, one price per club.',
+    'A modular platform for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). Annual licence, one price per club.',
   brand: { '@type': 'Brand', name: 'BetterCricket' },
   url: 'https://betterat.cricket/pricing',
   image: 'https://betterat.cricket/og-cover.png',
@@ -226,7 +226,7 @@ function ReplacesStack() {
 function PricingFAQ() {
   const [open, setOpen] = useState(0)
   const faqs = [
-    { q: 'How much does it cost?', a: "BetterStats is $399 a year and includes your public stats site. BetterSelect, BetterSocials and BetterClubhouse are $149 a year each, and BetterIQ is $249. Bundle two or more modules and a set discount applies, up to $146 off the full set, which brings BetterStats plus every module to $949 a year." },
+    { q: 'How much does it cost?', a: "BetterStats is $399 a year and includes your public stats site. BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. Bundle two or more modules and a set discount applies, up to $146 off the full set, which brings BetterStats plus every module to $949 a year." },
     { q: 'Does the price change based on club size?', a: "No. Every price is a flat rate per club. One team or fifty teams, juniors and seniors, men's and women's, the price is the same. There's no per-team, per-player or per-grade pricing." },
     { q: 'Can I add a single module?', a: "Yes. For a small additional annual charge, any single module can be added to your current subscription." },
     { q: 'Is there a fantasy game?', a: "Yes. BetterFantasyCricket is a standalone add-on at $49 a year. It runs a club fantasy competition scored off your real games, with salary-cap and draft formats, so members and supporters can play along all season. It's priced on its own, separate from the module bundle." },
@@ -272,7 +272,7 @@ export default function Pricing() {
   usePageMeta({
     title: 'Pricing — modular plans for cricket clubs | BetterCricket',
     description:
-      'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterClubhouse for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). One annual price per club, whatever the size.',
+      'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). One annual price per club, whatever the size.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/pricing',
     jsonLd: PRICING_JSONLD,

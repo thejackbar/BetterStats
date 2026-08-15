@@ -386,7 +386,7 @@ function FinalCTA({ onCta }) {
 export default function Overview() {
   usePageMeta({
     title: 'Overview — Everything BetterCricket does | The cricket club platform',
-    description: 'A one-page tour of BetterCricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterClubhouse and BetterIQ. The whole platform Australian cricket clubs run on, with no manual data entry.',
+    description: 'A one-page tour of BetterCricket: automated stats and a public club site (BetterStats), plus BetterSelect, BetterSocials, BetterAdmin and BetterIQ. The whole platform Australian cricket clubs run on, with no manual data entry.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/overview',
   })

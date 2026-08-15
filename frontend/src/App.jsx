@@ -304,11 +304,8 @@ export default function App() {
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/compare" element={<Compare />} />
           <Route path="/modules" element={<Modules />} />
-          {/* Legacy module slugs → the BetterClubhouse umbrella. betteradmin was
-              the module's public name until Aug 2026; both URLs are indexed and
-              linked from older emails and blog posts, so they keep resolving. */}
-          <Route path="/modules/betterfees" element={<Navigate to="/modules/betterclubhouse" replace />} />
-          <Route path="/modules/betteradmin" element={<Navigate to="/modules/betterclubhouse" replace />} />
+          {/* Legacy module slug → BetterAdmin umbrella */}
+          <Route path="/modules/betterfees" element={<Navigate to="/modules/betteradmin" replace />} />
           <Route path="/modules/:slug" element={<ModuleDetail />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />

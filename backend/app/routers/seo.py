@@ -43,11 +43,8 @@ STATIC_PAGES: list[tuple[str, str, str]] = [
 
 # Module detail pages at /modules/{slug}. Keep in sync with
 # frontend/src/data/modules-marketing.js.
-# "betteradmin" is deliberately absent: it was this module's slug until Aug 2026
-# and now redirects to betterclubhouse, so listing it would put a redirecting URL
-# in the sitemap.
 MODULE_PAGES: list[str] = [
-    "betterstats", "betterselect", "bettersocials", "betterclubhouse", "betteriq",
+    "betterstats", "betterselect", "bettersocials", "betteradmin", "betteriq",
 ]
 
 # Marketing blog posts at /blog/{slug} come from app.content.blog (BLOG_SLUGS),

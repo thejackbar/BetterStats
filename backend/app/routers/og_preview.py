@@ -81,10 +81,10 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "analytics.",
     ),
     "/modules": (
-        "Modules — BetterSelect, BetterSocials, BetterClubhouse & BetterIQ | BetterCricket",
+        "Modules — BetterSelect, BetterSocials, BetterAdmin & BetterIQ | BetterCricket",
         "The four BetterCricket add-ons: BetterSelect for selection, "
-        "BetterSocials for your website, BetterClubhouse for the club back "
-        "office, and BetterIQ for analytics.",
+        "BetterSocials for your website, BetterAdmin for fees and comms, and "
+        "BetterIQ for analytics.",
     ),
     "/modules/betterstats": (
         "BetterStats — your club's stats and public website | BetterCricket",
@@ -103,20 +103,11 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "into share-ready graphics: lineups, results, player of the match and "
         "scorecards.",
     ),
-    # betteradmin was this module's public name until Aug 2026. Both paths are
-    # kept so an older shared link still renders a card; the frontend redirects
-    # the old URL to the new one.
-    "/modules/betterclubhouse": (
-        "BetterClubhouse — the club back office | BetterCricket",
-        "BetterClubhouse runs the club back office off one member directory: "
-        "match fees that allocate themselves, bulk member email, stock, the "
-        "volunteer roster and committee meetings with minutes and motions.",
-    ),
     "/modules/betteradmin": (
-        "BetterClubhouse — the club back office | BetterCricket",
-        "BetterClubhouse runs the club back office off one member directory: "
-        "match fees that allocate themselves, bulk member email, stock, the "
-        "volunteer roster and committee meetings with minutes and motions.",
+        "BetterAdmin — fees, comms & merch | BetterCricket",
+        "BetterAdmin runs the club back office: BetterFees auto-allocates match "
+        "payments, BetterComms sends bulk member email, and BetterMerch tracks "
+        "stock.",
     ),
     "/modules/betteriq": (
         "BetterIQ — opposition scouting & analytics | BetterCricket",
@@ -245,10 +236,10 @@ MARKETING_FAQ: list[tuple[str, str]] = [
      "batting, bowling and fielding stat and turns it into a public club "
      "website with player profiles, leaderboards, all-time records, "
      "partnerships, awards, season yearbooks and shareable stat cards. From "
-     "there you can add BetterSelect, BetterSocials, BetterClubhouse and BetterIQ."),
+     "there you can add BetterSelect, BetterSocials, BetterAdmin and BetterIQ."),
     ("How much does BetterCricket cost?",
      "BetterStats is $399 a year and includes your public stats site. You add "
-     "only the modules you want: BetterSelect, BetterSocials and BetterClubhouse are "
+     "only the modules you want: BetterSelect, BetterSocials and BetterAdmin are "
      "$149 a year each, and BetterIQ is $249. Bundle two or more and a set "
      "discount applies, which brings BetterStats plus every module to $949 a "
      "year. Every price is a flat rate per club, the same for one team or fifty."),

@@ -84,10 +84,16 @@ yourself a test after the deploy and confirm all four crests render.
 
 ### Naming
 
-These emails call the back-office module **BetterClubhouse**, which is what it
-is called in the app. The marketing site was renamed to match in the same
-commit, and `/modules/betteradmin` now redirects to `/modules/betterclubhouse`,
-so older emails and blog links still resolve.
+These emails call the back-office module **BetterAdmin**, matching the public
+site. The app calls the same module BetterClubhouse, and that split is
+deliberate and long-standing (see the note in the root `CLAUDE.md`). A prospect
+only ever sees the public name, so the emails and the site agree; a club that
+signs up will see BetterClubhouse once they are inside the admin app.
+
+The emails describe it as **expanded** rather than new, because BetterAdmin
+itself is not new. What is new is what it covers: the member directory, the
+volunteer roster, committee meetings and the club diary, on top of the fees and
+comms it always had. The module page was updated to say so.
 
 The **initial** email is the one to send first. It runs the longer "we've been those volunteers" copy, carries the five-module section (each card links to its page on the site), and uses the dark background you asked for. The **follow-up** is the short two-minute nudge, on a light body.
 

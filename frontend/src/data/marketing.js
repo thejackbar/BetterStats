@@ -260,11 +260,11 @@ export const COMPARISONS = {
     cta: { line: 'Turn the weekly "who’s in?" scramble into a few taps.', label: 'Explore BetterSelect →', to: '/modules/betterselect' },
   },
 
-  // BetterClubhouse — the back office, vs email + fee/merch tooling.
+  // BetterAdmin — the back office, vs email + fee/merch tooling.
   betteradmin: {
     eyebrow: 'Compare',
     heading: 'Your back office, on top of your member list.',
-    sub: 'BetterClubhouse runs fees, comms, stock, volunteers and the committee off the same player database as your stats, so you are not exporting CSVs between an email tool, a spreadsheet and a payment app.',
+    sub: 'BetterAdmin runs fees, comms, stock, volunteers and the committee off the same player database as your stats, so you are not exporting CSVs between an email tool, a spreadsheet and a payment app.',
     columns: [
       { key: 'mailchimp', name: 'Mailchimp', tag: 'Email tool', sub: 'Newsletters & lists' },
       { key: 'sheets', name: 'Spreadsheets & apps', tag: 'Fees / merch', sub: 'Manual tracking' },
@@ -299,7 +299,7 @@ export const COMPARISONS = {
         ],
       },
     ],
-    cta: { line: 'Stop reconciling three tools every month.', label: 'Explore BetterClubhouse →', to: '/modules/betterclubhouse' },
+    cta: { line: 'Stop reconciling three tools every month.', label: 'Explore BetterAdmin →', to: '/modules/betteradmin' },
   },
 }
 

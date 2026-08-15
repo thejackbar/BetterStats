@@ -71,7 +71,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'What is BetterCricket?',
-        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterClubhouse (one member directory, fee management, bulk emailing, stock, the volunteer roster and committee meetings) and BetterIQ (deep analytics and opposition scouting).",
+        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (one member directory, fee management, bulk emailing, stock, the volunteer roster and committee meetings) and BetterIQ (deep analytics and opposition scouting).",
       },
       {
         q: 'Do we have to change how our club scores or registers to use BetterCricket?',
@@ -115,11 +115,11 @@ const CATEGORIES = [
     items: [
       {
         q: 'How much does it cost?',
-        a: "BetterCricket is modular. BetterStats is $399 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterClubhouse are $149 a year each, and BetterIQ is $249. There's a set discount when you bundle two or more modules: $48 off for two, $97 off for three, and up to $146 off the full set, which brings BetterStats plus every module to $949 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
+        a: "BetterCricket is modular. BetterStats is $399 a year and includes your public stats site. From there you add only the modules you want: BetterSelect, BetterSocials and BetterAdmin are $149 a year each, and BetterIQ is $249. There's a set discount when you bundle two or more modules: $48 off for two, $97 off for three, and up to $146 off the full set, which brings BetterStats plus every module to $949 a year. Every price covers unlimited players, seasons and teams, whatever the club's size.",
       },
       {
         q: 'What does each module include?',
-        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterClubhouse adds one member directory for the whole club, fee management, bulk emailing, stock, the volunteer roster and committee meetings with minutes and motions. BetterIQ adds deep analytics and opposition scouting.",
+        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds one member directory for the whole club, fee management, bulk emailing, stock, the volunteer roster and committee meetings with minutes and motions. BetterIQ adds deep analytics and opposition scouting.",
       },
       {
         q: 'Can I add just one module?',
