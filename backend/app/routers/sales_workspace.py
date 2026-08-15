@@ -97,13 +97,19 @@ async def list_clubs(
     either bound is set, same rule the Sales Pipeline board's own score
     filter uses. ``stage_key`` may hold several stage keys comma-separated
     (a club matching ANY of them is kept — narrowing to "Target, Contacted"
-    is an OR within the field). ``meta_selected``/``meta_searched`` filter to
-    clubs that picked themselves / searched for themselves in the trial
-    signup wizard (Meta Ads' own source split); ticking both is an OR
-    ("either"), ticking one is that one alone."""
+    is an OR within the field). Two synthetic keys, ``trial_current`` /
+    ``trial_expired``, split the single real 'trial' stage by whether the
+    club's own trial has actually lapsed (see crm_service.
+    trial_days_remaining_by_club) — a club with no trial data at all reads
+    as current, never expired, since there's nothing proving it's lapsed.
+    ``meta_selected``/``meta_searched`` filter to clubs that picked
+    themselves / searched for themselves in the trial signup wizard (Meta
+    Ads' own source split); ticking both is an OR ("either"), ticking one is
+    that one alone."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
+    trial_stage_id = stage_by_key["trial"].id if "trial" in stage_by_key else None
 
     effective_owner = None
     if actor.role == "sales":
@@ -119,9 +125,38 @@ async def list_clubs(
         )).scalars().all()
         member_ids = set(member_rows)
         deals = [d for d in deals if d.marketing_club_id in member_ids]
+
+    # club_by_id / min_trial_days computed here, ahead of the stage filter,
+    # since splitting 'trial' into current/expired needs the trial data to
+    # decide the split — reused below for the output rows too, so this isn't
+    # a second query later.
+    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
+    trial_days_by_club = await crm_service.trial_days_remaining_by_club(db, club_by_id)
+    min_trial_by_club = {
+        cid: min(days.values()) for cid, days in trial_days_by_club.items() if days
+    }
+
+    def _trial_expired(club_id):
+        days = min_trial_by_club.get(club_id)
+        return days is not None and days < 0
+
     if stage_key:
-        wanted_stage_ids = {stage_by_key[k].id for k in stage_key.split(",") if k in stage_by_key}
-        deals = [d for d in deals if d.stage_id in wanted_stage_ids]
+        requested = [k for k in stage_key.split(",") if k]
+        wants_trial_current = "trial_current" in requested
+        wants_trial_expired = "trial_expired" in requested
+        wanted_stage_ids = {stage_by_key[k].id for k in requested if k in stage_by_key}
+
+        def _stage_match(d):
+            if d.stage_id in wanted_stage_ids:
+                return True
+            if trial_stage_id is not None and d.stage_id == trial_stage_id:
+                expired = _trial_expired(d.marketing_club_id)
+                if wants_trial_current and not expired:
+                    return True
+                if wants_trial_expired and expired:
+                    return True
+            return False
+        deals = [d for d in deals if _stage_match(d)]
     if meta_selected or meta_searched:
         wizard_map = await sw.wizard_source_by_club(db)
         def _meta_match(club_id):
@@ -134,7 +169,6 @@ async def list_clubs(
         needle = q.strip().lower()
         deals = [d for d in deals if needle in (d.title or "").lower()]
 
-    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals))
     deal_ids = [d.id for d in deals]
     last_calls = await sw.last_calls_by_deal(db, deal_ids)
     follow_ups = await sw.next_follow_ups_by_deal(db, deal_ids)
@@ -154,6 +188,13 @@ async def list_clubs(
         row["owner_name"] = (owner.display_name or owner.username) if owner else None
         row["contact_count"] = contact_counts.get(d.marketing_club_id, 0)
         row["not_interested"] = bool(club.not_interested) if club else False
+        row["min_trial_days_remaining"] = min_trial_by_club.get(d.marketing_club_id)
+        # Trial is the one stage that reads differently depending on whether
+        # it's actually still live — split the display label the same way
+        # the stage filter itself splits it, so the queue row and the filter
+        # never disagree about what "expired" means.
+        if trial_stage_id is not None and d.stage_id == trial_stage_id:
+            row["stage_name"] = "Trial (Expired)" if _trial_expired(d.marketing_club_id) else "Trial (Current)"
         last_call = last_calls.get(d.id)
         row["ever_called"] = last_call is not None
         row["last_call"] = crm_service._activity_dict(last_call) if last_call else None

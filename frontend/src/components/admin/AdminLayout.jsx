@@ -12,7 +12,7 @@ import NotificationBell from '../NotificationBell'
 import NotificationModal from '../NotificationModal'
 import ClubSwitcher from './ClubSwitcher'
 import BrandLogo from '../BrandLogo'
-import { SUPER_OVERVIEW, SUPER_SECTIONS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
+import { SUPER_OVERVIEW, SUPER_SECTIONS, SALES_MANAGEMENT_ITEMS, visibleSectionItems, sectionBadgeCount } from '../../lib/superNav'
 
 function compareVersions(a, b) {
   const parse = v => (v || '').replace('v', '').split('.').map(Number)
@@ -149,6 +149,10 @@ export default function AdminLayout({ children }) {
       map[`/admin/super/hub/${s.key}`] = s.label
       s.items.forEach(i => { map[i.to] = i.label })
     })
+    // These no longer render as their own hub tiles (folded under the one
+    // "Sales Management" tile), but a bookmark to one directly should still
+    // show its own name, not the generic path-segment fallback.
+    SALES_MANAGEMENT_ITEMS.forEach(i => { map[i.to] = i.label })
     dashboardTiles().forEach(m => { if (m.to) map[m.to] = m.name })
     return (path) => {
       if (map[path]) return map[path]

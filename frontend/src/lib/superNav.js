@@ -12,6 +12,22 @@
 
 export const SUPER_OVERVIEW = { to: '/admin/super', label: 'Platform Overview', exact: true }
 
+// The seven sales tools collapsed into one "Sales Management" tile in the CRM
+// hub — its own landing page (SalesManagement.jsx, /admin/super/crm/sales-
+// management) lists these as tiles, same visual language as a hub page. Kept
+// as a separate export (not folded into SUPER_SECTIONS.crm.items) so
+// AdminLayout's bookmark-label map can still resolve each of these paths to
+// its own name even though they no longer render as individual hub tiles.
+export const SALES_MANAGEMENT_ITEMS = [
+  { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
+  { to: '/admin/super/crm/follow-ups', label: 'Sales Follow-ups', blurb: 'Overdue, due today and upcoming callbacks.' },
+  { to: '/admin/super/crm/sales-lists', label: 'Sales Lists', blurb: 'Imported batches of clubs, ready to assign.' },
+  { to: '/admin/super/crm/performance', label: 'Sales Performance', blurb: 'Call volume, conversion funnel and results by salesperson.' },
+  { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },
+  { to: '/admin/super/crm/targets', label: 'Sales Targets', blurb: 'Revenue and signup goals.' },
+  { to: '/admin/super/crm/workspace', label: 'Sales Workspace', blurb: 'Call queue, contacts and engagement intel for the clubs assigned to you.' },
+]
+
 export const SUPER_SECTIONS = [
   {
     key: 'access',
@@ -62,13 +78,7 @@ export const SUPER_SECTIONS = [
       { to: '/admin/super/marketing', label: 'Club Directory', blurb: 'Prospect clubs, outreach lists and Twenty CRM sync.' },
       { to: '/admin/super/crm/wizard-clubs', label: 'Clubs Searched or Selected in the Wizard', blurb: 'Warm prospects from the trial signup wizard, and the outreach sent to them.' },
       { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
-      { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
-      { to: '/admin/super/crm/follow-ups', label: 'Sales Follow-ups', blurb: 'Overdue, due today and upcoming callbacks.' },
-      { to: '/admin/super/crm/sales-lists', label: 'Sales Lists', blurb: 'Imported batches of clubs, ready to assign.' },
-      { to: '/admin/super/crm/performance', label: 'Sales Performance', blurb: 'Call volume, conversion funnel and results by salesperson.' },
-      { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },
-      { to: '/admin/super/crm/targets', label: 'Sales Targets', blurb: 'Revenue and signup goals.' },
-      { to: '/admin/super/crm/workspace', label: 'Sales Workspace', blurb: 'Call queue, contacts and engagement intel for the clubs assigned to you.' },
+      { to: '/admin/super/crm/sales-management', label: 'Sales Management', blurb: 'Workspace, lists, follow-ups, performance, pipeline, targets and automation.' },
     ],
   },
   {

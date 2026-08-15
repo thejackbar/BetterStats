@@ -26,9 +26,28 @@ function useDismiss(open, onClose) {
 // Stage is a multi-select: narrowing to "Target, Contacted" is an OR within
 // the field (a club at either stage matches), same convention BetterIQ's
 // TeamPicker uses for a multi-grade filter.
+// The single real 'trial' stage reads as two things to a salesperson —
+// still running, or lapsed and worth a different kind of call — so the
+// picker splits it into two synthetic keys the backend interprets specially
+// (services/sales_workspace.py never stores these; they only ever mean
+// "stage=trial AND expired/not"). Every other stage passes through as-is.
+function displayStages(stages) {
+  const out = []
+  for (const s of stages || []) {
+    if (s.key === 'trial') {
+      out.push({ id: 'trial_current', key: 'trial_current', name: 'Trial (Current)' })
+      out.push({ id: 'trial_expired', key: 'trial_expired', name: 'Trial (Expired)' })
+    } else {
+      out.push(s)
+    }
+  }
+  return out
+}
+
 function StagePicker({ stages, value, onChange }) {
   const [open, setOpen] = useState(false)
   const ref = useDismiss(open, () => setOpen(false))
+  const options = useMemo(() => displayStages(stages), [stages])
   const picked = new Set(value)
   const toggle = (key) => {
     const next = new Set(picked)
@@ -36,7 +55,7 @@ function StagePicker({ stages, value, onChange }) {
     onChange([...next])
   }
   const label = picked.size === 0 ? 'All stages'
-    : picked.size === 1 ? stages.find(s => s.key === value[0])?.name || value[0]
+    : picked.size === 1 ? options.find(s => s.key === value[0])?.name || value[0]
     : `${picked.size} stages`
   return (
     <div className="relative" ref={ref}>
@@ -53,7 +72,7 @@ function StagePicker({ stages, value, onChange }) {
             className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${picked.size === 0 ? 'text-pb-accent' : 'text-pb-text'}`}>
             All stages
           </button>
-          {stages.map(s => (
+          {options.map(s => (
             <label key={s.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
               <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
               {s.name}
