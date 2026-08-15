@@ -760,7 +760,14 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     if club.existing_org_id:
         org = await db.get(Organisation, club.existing_org_id,
                            options=[selectinload(Organisation.module_subscriptions)])
-    eng = await twenty_sync._engagement(db, club, org)
+    # fast_web=True — this is a live, per-club recompute fired on every Sales
+    # Workspace drawer open (services/sales_workspace.py calls this function
+    # directly), so it must use the indexed usage_events.resolved_marketing_
+    # club_id column rather than the ~6s, 7-subquery _RESOLVED_CID scan over
+    # the whole table. Same trade twenty_sync.sync_engagement_promotion
+    # already makes for its own live-signal recompute — see that function's
+    # docstring for why the two paths are equivalent once backfilled.
+    eng = await twenty_sync._engagement(db, club, org, fast_web=True)
 
     # Split email engagement into opens vs clicks (with their own decay points),
     # so the breakdown itemises them instead of lumping "email engagement". Uses

@@ -109,6 +109,39 @@ function timeAgo(iso) {
   return `${d}d ago`
 }
 
+const ONBOARDING_METHOD_LABELS = {
+  self_serve_trial: 'Self-Serve Trial',
+  super_admin_trial: 'Super Admin Trial',
+  direct_subscriber: 'Direct Subscriber',
+  none: 'Not onboarded',
+}
+
+// Stage / onboarding method / call status — the three things a rep asks
+// first before reading the engagement breakdown below it.
+function DealSummaryStrip({ deal }) {
+  const called = deal.ever_called
+    ? `Yes — ${timeAgo(deal.last_call?.occurred_at) || 'logged'}`
+    : 'Never called'
+  return (
+    <div className="grid grid-cols-3 gap-3 text-center">
+      <div>
+        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Stage</div>
+        <div className="text-[13px] text-pb-text font-medium">{deal.stage_name || '—'}</div>
+      </div>
+      <div>
+        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Onboarding</div>
+        <div className="text-[13px] text-pb-text font-medium">
+          {ONBOARDING_METHOD_LABELS[deal.onboarding_method] || deal.onboarding_method || '—'}
+        </div>
+      </div>
+      <div>
+        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Called</div>
+        <div className={`text-[13px] font-medium ${deal.ever_called ? 'text-pb-text' : 'text-pb-amber'}`}>{called}</div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Engagement panel (sourced from the drawer's own already-fetched
 // `engagement` field, NOT a second fetch — club_engagement_breakdown is
 // super-admin-only server-side, so a 'sales' role must never call it
@@ -461,15 +494,20 @@ export default function SalesWorkspace() {
         <Field label="Stage" width="180px">
           <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
         </Field>
-        {isSuper && (
-          <Field label="Owner" width="180px">
+        <Field label="Owner" width="180px">
+          {isSuper ? (
             <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
               <option value="">Everyone</option>
               <option value="__unassigned__" disabled>— pick a rep —</option>
               {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
             </Select>
-          </Field>
-        )}
+          ) : (
+            // The server already restricts a sales caller to their own deals
+            // regardless of what's sent here — this is a locked display, not
+            // a real filter control, so there's nothing else it could show.
+            <TextInput value={user?.display_name || user?.username || ''} disabled readOnly />
+          )}
+        </Field>
         <Field label="Engagement score" width="150px">
           <div className="flex items-center gap-1.5">
             <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
@@ -629,6 +667,10 @@ export default function SalesWorkspace() {
               </div>
 
               <div className={CARD}>
+                <DealSummaryStrip deal={drawer.deal} />
+              </div>
+
+              <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
                 <EngagementPanel engagement={drawer.engagement} />
               </div>
@@ -660,9 +702,9 @@ export default function SalesWorkspace() {
                           {c.do_not_contact && <Pill tone="red">do not contact{c.do_not_contact_reason ? ` — ${c.do_not_contact_reason}` : ''}</Pill>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <div className="text-pb-faintest text-[10.5px] text-right">
-                            {c.email && <div className="truncate max-w-[220px]">{c.email}</div>}
-                            {c.mobile && <div>{c.mobile}</div>}
+                          <div className="text-right">
+                            {c.email && <div className="text-pb-faintest text-[10.5px] truncate max-w-[220px]">{c.email}</div>}
+                            {c.mobile && <div className="text-pb-text text-[12px]">{c.mobile}</div>}
                           </div>
                           {c.directory_contact_id && (
                             <button

@@ -87,6 +87,30 @@ _ADVANCEABLE_STAGE_KEYS = ("manually_added", "target", "contacted")
 # only an explicit stop request does.
 _DO_NOT_CONTACT_OUTCOMES = ("dont_call_again", "remove_from_list")
 
+# Outcomes worth a real calendar reminder, not just the queue's own
+# next_follow_up_at tag — every kind of "this needs a deliberate next step
+# with a person", per direct instruction. Deliberately excludes
+# 'spoke_no_decision' (the one neutral outcome with nothing concrete to
+# follow up ON) and everything unsuccessful/negative/administrative.
+_EVENT_WORTHY_OUTCOMES = (
+    "interested", "wants_more_info", "wants_trial", "wants_demo", "wants_pricing",
+    "wants_committee_discussion", "asked_callback", "referred_to_other", "requested_information",
+)
+
+# Default event note per outcome when the call itself carried no free-text
+# notes — {name} is the followed-up contact's name, filled in at creation.
+_FOLLOW_UP_NOTE_TEMPLATES = {
+    "interested": "Follow up with {name} — interested in BetterCricket.",
+    "wants_more_info": "Follow up with {name} — wants more information.",
+    "wants_trial": "Follow up with {name} — wants to start a trial.",
+    "wants_demo": "Follow up with {name} — wants a demo.",
+    "wants_pricing": "Follow up with {name} — wants to discuss pricing.",
+    "wants_committee_discussion": "Follow up with {name} following his committee meeting.",
+    "asked_callback": "Callback requested by {name}.",
+    "referred_to_other": "Follow up with {name} — referred to another contact.",
+    "requested_information": "Follow up with {name} — requested more information.",
+}
+
 
 def outcome_options() -> list[dict]:
     """The vocabulary, grouped for a dropdown — CATEGORY_ORDER first."""
@@ -318,6 +342,24 @@ async def log_call(
             if club is not None:
                 club.not_interested = True
         await session.flush()
+
+    # A real next step with a real person deserves a calendar reminder, not
+    # just the queue's quiet next_follow_up_at tag — only when BOTH a
+    # follow-up date was actually set and the outcome is one worth acting on
+    # (see _EVENT_WORTHY_OUTCOMES). Owned by whoever logged the call (the
+    # rep themselves, or a super admin logging on their behalf) — that's the
+    # person who knows the context and should see it on their own calendar.
+    if next_follow_up_at is not None and outcome in _EVENT_WORTHY_OUTCOMES:
+        contact_name = person.full_name if person else "the contact"
+        template = _FOLLOW_UP_NOTE_TEMPLATES.get(outcome, "Follow up with {name}.")
+        event_body = (notes or "").strip() or template.format(name=contact_name)
+        await crm_service.create_event(
+            session, deal_id=deal.id, marketing_club_id=deal.marketing_club_id,
+            contact_person_id=person.id if person else None,
+            owner_user_id=created_by_user_id, event_type="follow_up",
+            title=f"Follow up: {deal.title}", body=event_body,
+            starts_at=next_follow_up_at, created_by_user_id=created_by_user_id,
+        )
 
     return activity
 

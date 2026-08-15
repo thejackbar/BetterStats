@@ -23,11 +23,25 @@ export default function ProtectedRoute({ children, requireRole, requireModule, r
   // array of roles (e.g. Sales Workspace: ["super_admin", "sales"]) — a
   // super_admin always passes either form, matching every existing
   // single-string caller unchanged.
-  const roleAllowed = !requireRole || user.role === 'super_admin' || (
-    Array.isArray(requireRole) ? requireRole.includes(user.role) : user.role === requireRole
+  //
+  // A 'sales' user is deliberately NOT given the ordinary "no requireRole
+  // set = allowed" default every other role gets — most club-admin routes
+  // (the dashboard, Players, Settings…) carry no requireRole at all, since
+  // they only ever expected a real club_admin/club_member to reach them. A
+  // sales account's one ClubMembership is pinned to the platform's internal
+  // outreach org (see routers/auth.py's login note), so without this it
+  // reads as that org's own club_admin and lands on an ordinary — and
+  // meaningless — admin dashboard. Sales is restricted to routes that
+  // explicitly opt it in via requireRole; today that's Sales Workspace only.
+  const isSales = user.role === 'sales'
+  const requireRoleIncludesSales = Array.isArray(requireRole) ? requireRole.includes('sales') : requireRole === 'sales'
+  const roleAllowed = user.role === 'super_admin' || (
+    isSales
+      ? requireRoleIncludesSales
+      : (!requireRole || (Array.isArray(requireRole) ? requireRole.includes(user.role) : user.role === requireRole))
   )
   if (!roleAllowed) {
-    return <Navigate to="/admin" replace />
+    return <Navigate to={isSales ? '/admin/super/crm/workspace' : '/admin'} replace />
   }
 
   // Module entitlement gate — clubs not entitled to the module are bounced back

@@ -286,8 +286,11 @@ export default function Login() {
     setError('')
     setLoading(true)
     try {
-      await login(username.trim(), password)
-      navigate(redirectTo, { replace: true })
+      const data = await login(username.trim(), password)
+      // A sales account's one page is the Workspace — send it straight
+      // there regardless of where the login was triggered from (ProtectedRoute
+      // would bounce anywhere else right back anyway, see its own note).
+      navigate(data?.role === 'sales' ? '/admin/super/crm/workspace' : redirectTo, { replace: true })
     } catch (err) {
       setError(err.message || 'Invalid username or password')
     } finally {

@@ -289,6 +289,12 @@ async def get_club(
     deal_out["not_interested"] = bool(club.not_interested) if club else False
     stage_options = [{"id": str(s.id), "key": s.key, "name": s.name} for s in (pipeline.stages if pipeline else [])]
 
+    # Same shape the queue list already carries, so the drawer's own "Called
+    # / Never called" reads off the identical field the queue row does.
+    last_call = (await sw.last_calls_by_deal(db, [deal.id])).get(deal.id)
+    deal_out["ever_called"] = last_call is not None
+    deal_out["last_call"] = crm_service._activity_dict(last_call) if last_call else None
+
     engagement = None
     if club is not None:
         try:
