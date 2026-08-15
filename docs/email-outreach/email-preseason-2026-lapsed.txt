@@ -2,8 +2,13 @@ Subject: What's changed since you looked
 
 Hi [first name],
 
-You looked at BetterCricket a while back and it did not go ahead. Three things
-are different now, and all three were common reasons clubs held off.
+You looked at BetterCricket a while back and it did not go ahead. The reason to
+do it has not changed: your full history imported from Cricket Australia, the
+errors in it found and fixed, and every season of it turned into a profile for
+each player, leaderboards, all-time records and a yearbook. Then it keeps itself
+up to date, for good.
+
+Three things HAVE changed, and all three were common reasons clubs held off.
 
 1. BetterAdmin, expanded. It runs the whole club now, not just fees and email:
    one member directory, the volunteer roster, and committee meetings with

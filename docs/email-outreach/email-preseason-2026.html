@@ -13,10 +13,18 @@
      make_sends.py works unchanged: utm_source=ca is the per-club placeholder,
      greeting is "Hi [first name],".
 
-     LENGTH: body copy is ~155 words on purpose. Reply rates peak at 50-125 words
-     and fall off a cliff past 200 (8.2% vs 3.9% across 4M+ emails). Every point
-     in the brief costs words, so this is the shortest version that still carries
-     all of them. If you cut anything, cut the module line, not the error story.
+     FOCUS: the stats are the pitch and everything else is one sentence. The
+     three body paragraphs are the whole argument in order — the spreadsheet is
+     wrong, we fix it and turn it into a real stats site, then it runs itself.
+     The other four modules get a single grey line below the CTA, deliberately
+     not a card list or a panel: those competed with the stats for the eye and
+     made the email read as a product catalogue.
+
+     LENGTH: body copy is ~175 words. Reply rates peak at 50-125 words and fall
+     off a cliff past 200 (8.2% vs 3.9% across 4M+ emails), so this is already
+     at the limit. If you add anything, take something out. The one line to cut
+     first is the module sentence; the spreadsheet-errors paragraph is the hook
+     and the stats paragraph is what is actually being sold.
      A shorter plain-text version is in email-preseason-2026-plain.txt and is the
      one to send to a cold list.
 
@@ -81,12 +89,12 @@ We import your full history, fix the errors in it, and you never import anything
               </tr>
               <tr>
                 <td style="padding-bottom:16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  We import your full history from Cricket Australia, find those errors and fix them. After that you never import anything again. Every scorecard flows in on its own, week after week, and your site is current on Sunday morning whether anyone logged in or not.
+                  We import your full history from Cricket Australia, find those errors and fix them. Then we give it somewhere to live: a profile for every player who has turned out for your club, leaderboards, all-time records, every scorecard back as far as the records go, and a yearbook for each season, on your own public club site.
                 </td>
               </tr>
               <tr>
                 <td style="padding-bottom:24px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  You are not doing the setup alone. We run a demo for your committee, set it up with you, and stay on hand through your first season.
+                  After that you never import anything again. Every scorecard flows in on its own after the game. We set it up with you, run a demo for your committee, and stay on hand through your first season.
                 </td>
               </tr>
             </table>
@@ -112,32 +120,23 @@ We import your full history, fix the errors in it, and you never import anything
           </td>
         </tr>
 
-        <!-- The rest of the platform, one line each. Deliberately a compact list
-             rather than five module cards: the cards were most of the old email's
-             length and the detail belongs on the pages they link to. -->
+        <!-- The other modules, one sentence. Deliberately NOT a card list or a
+             box: the stats are the pitch, and a four-row panel here competed
+             with them for the eye. Named and linked so they are discoverable,
+             sized so nobody mistakes them for the point of the email. -->
         <tr>
-          <td style="padding:0 36px 0 36px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0e1524; border:1px solid #1d2331; border-radius:12px;">
-              <tr>
-                <td style="padding:18px 20px 8px 20px;">
-                  <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:22px; font-weight:bold; color:#e6e8ef; display:block; padding-bottom:12px;">It runs the rest of the club too</span>
-                </td>
-              </tr>
-              <tr>
-                <td style="padding:0 20px 16px 20px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:14px; line-height:22px; color:#aab1c2;">
-                  <a href="https://betterat.cricket/modules/betteradmin?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_admin" style="color:#F59E0B; text-decoration:none; font-weight:bold;">BetterAdmin</a><span style="color:#8a90a2;"> (expanded)</span> &nbsp;Members, fees, volunteers and committee<br>
-                  <a href="https://betterat.cricket/modules/betterselect?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_select" style="color:#3B82F6; text-decoration:none; font-weight:bold;">BetterSelect</a> &nbsp;Availability, selection and vote counting<br>
-                  <a href="https://betterat.cricket/modules/bettersocials?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_socials" style="color:#EC4899; text-decoration:none; font-weight:bold;">BetterSocials</a> &nbsp;Match-day graphics and your club website<br>
-                  <a href="https://betterat.cricket/modules/betteriq?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_iq" style="color:#A855F7; text-decoration:none; font-weight:bold;">BetterIQ</a> &nbsp;Opposition scouting from your own scorecards
-                </td>
-              </tr>
-            </table>
+          <td style="padding:0 36px 0 36px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:14px; line-height:23px; color:#8a90a2;">
+            The same match data also runs
+            <a href="https://betterat.cricket/modules/betterselect?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_select" style="color:#3B82F6; text-decoration:underline;">availability, selection and vote counting</a>,
+            <a href="https://betterat.cricket/modules/bettersocials?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_socials" style="color:#EC4899; text-decoration:underline;">match-day posts</a>,
+            <a href="https://betterat.cricket/modules/betteriq?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_iq" style="color:#A855F7; text-decoration:underline;">opposition scouting</a>
+            and a newly expanded <a href="https://betterat.cricket/modules/betteradmin?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_admin" style="color:#F59E0B; text-decoration:underline;">club and volunteer back office</a>, when you want them.
           </td>
         </tr>
 
         <!-- Trusted by clubs at -->
         <tr>
-          <td style="padding:22px 36px 0 36px;">
+          <td style="padding:26px 36px 0 36px;">
             <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" style="padding-bottom:12px;">

@@ -25,8 +25,9 @@ years. The same player recorded three ways, hundreds filed against the wrong
 season, totals that stopped adding up in 2019.
 
 We import your full history from Cricket Australia, fix the errors in it, and
-then you never import anything again. Every scorecard flows in on its own after
-the game.
+turn it into a profile for every player, leaderboards, all-time records and a
+yearbook for every season, on your own club site. After that you never import
+anything again.
 
 We run the demo, set it up with you, and stay on hand through your first
 season. It is free for 14 days.

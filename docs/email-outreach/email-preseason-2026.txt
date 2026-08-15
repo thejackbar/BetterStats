@@ -11,28 +11,25 @@ ten years. The same player recorded three different ways. Hundreds filed
 against the wrong season. Career totals that quietly stopped adding up in 2019.
 
 We import your full history from Cricket Australia, find those errors and fix
-them. After that you never import anything again. Every scorecard flows in on
-its own, week after week, and your site is current on Sunday morning whether
-anyone logged in or not.
+them. Then we give it somewhere to live: a profile for every player who has
+turned out for your club, leaderboards, all-time records, every scorecard back
+as far as the records go, and a yearbook for each season, on your own public
+club site.
 
-You are not doing the setup alone. We run a demo for your committee, set it up
-with you, and stay on hand through your first season.
+After that you never import anything again. Every scorecard flows in on its own
+after the game. We set it up with you, run a demo for your committee, and stay
+on hand through your first season.
 
 Set your club up free: https://betterat.cricket/trial
 14 days, every module included, no credit card.
 Or book a demo first: https://betterat.cricket/contact
 
-
-IT RUNS THE REST OF THE CLUB TOO
-
-BetterAdmin (expanded) Members, fees, volunteers and committee
-                       https://betterat.cricket/modules/betteradmin
-BetterSelect           Availability, selection and vote counting
-                       https://betterat.cricket/modules/betterselect
-BetterSocials          Match-day graphics and your club website
-                       https://betterat.cricket/modules/bettersocials
-BetterIQ               Opposition scouting from your own scorecards
-                       https://betterat.cricket/modules/betteriq
+The same match data also runs availability, selection and vote counting
+(https://betterat.cricket/modules/betterselect), match-day posts
+(https://betterat.cricket/modules/bettersocials), opposition scouting
+(https://betterat.cricket/modules/betteriq) and a newly expanded club and
+volunteer back office (https://betterat.cricket/modules/betteradmin), when you
+want them.
 
 
 TRUSTED BY CLUBS AT
