@@ -1151,7 +1151,9 @@ _PRODUCT_INTEREST_PATH_RE = [
     (re.compile(r"^/modules/betterstats(/|$)", re.I), "core"),
     (re.compile(r"^/modules/betterselect(/|$)", re.I), "select"),
     (re.compile(r"^/modules/bettersocials(/|$)", re.I), "socials"),
-    (re.compile(r"^/modules/betteradmin(/|$)", re.I), "admin"),
+    # betteradmin was this module's slug until Aug 2026. Both spellings match,
+    # or every page view recorded before the rename stops counting as interest.
+    (re.compile(r"^/modules/better(clubhouse|admin)(/|$)", re.I), "admin"),
     (re.compile(r"^/modules/betteriq(/|$)", re.I), "iq"),
     (re.compile(r"^/modules/betterfantasy(/|$)", re.I), "fantasy"),
 ]

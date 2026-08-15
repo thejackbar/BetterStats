@@ -23,7 +23,7 @@ export const LAUNCH_MODULES = [
   { name: 'BetterStats',   blurb: 'Our stats, ladders and history across every team.',  logo: statsLogo },
   { name: 'BetterSelect',  blurb: 'Availability and team selection for every game.',     logo: selectLogo },
   { name: 'BetterSocials', blurb: 'Our news, photos and match-day updates for members.', logo: socialsLogo },
-  { name: 'BetterAdmin',   blurb: 'Members, fees, emails and merch in one place.',       logo: adminLogo },
+  { name: 'BetterClubhouse', blurb: 'Members, fees, emails, volunteers and committee.',  logo: adminLogo },
   { name: 'BetterIQ',      blurb: 'Analytics and opposition scouting so we can plan ahead.', logo: iqLogo },
   { name: 'BetterFantasy', blurb: 'A fantasy comp for our members, run off our own games.', logo: fantasyLogo },
 ]

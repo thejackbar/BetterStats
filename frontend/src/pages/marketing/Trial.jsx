@@ -39,7 +39,7 @@ const TRIAL_JSONLD = {
 
 const FAQS = [
   ['Is it free to get started?', 'Yes. Setting your club up is free and we never ask for a credit card. Add your name, email and mobile and your club goes live.'],
-  ['What’s included?', 'Everything. BetterStats plus every add-on module (BetterSelect, BetterSocials, BetterAdmin, BetterIQ and BetterFantasy), all on at once, so your committee can judge the whole platform.'],
+  ['What’s included?', 'Everything. BetterStats plus every add-on module (BetterSelect, BetterSocials, BetterClubhouse, BetterIQ and BetterFantasy), all on at once, so your committee can judge the whole platform.'],
   ['How much history do you import?', 'Everything Cricket Australia holds for your club, imported automatically in the background. There’s no limit on how far back it goes. And if your club has old spreadsheets, we can bring those into BetterCricket too.'],
   ['Who should register the club?', 'Someone with the authority to evaluate software for the club, typically a committee member, secretary or captain. You’ll confirm that during signup.'],
 ]

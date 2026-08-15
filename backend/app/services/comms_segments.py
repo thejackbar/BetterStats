@@ -79,7 +79,9 @@ _VISIT_PATH_SQL = {
     "stats": "split_part(ue.path, '?', 1) ~* '^/modules/betterstats(/|$)'",
     "select": "split_part(ue.path, '?', 1) ~* '^/modules/betterselect(/|$)'",
     "socials": "split_part(ue.path, '?', 1) ~* '^/modules/bettersocials(/|$)'",
-    "admin": "split_part(ue.path, '?', 1) ~* '^/modules/betteradmin(/|$)'",
+    # betteradmin was this module's slug until Aug 2026; both spellings match so
+    # a visit recorded before the rename still resolves.
+    "admin": "split_part(ue.path, '?', 1) ~* '^/modules/better(clubhouse|admin)(/|$)'",
     "betteriq": "split_part(ue.path, '?', 1) ~* '^/modules/betteriq(/|$)'",
     "fantasy": "split_part(ue.path, '?', 1) ~* '^/modules/betterfantasy(/|$)'",
     "pricing": "split_part(ue.path, '?', 1) ~* '^/pricing(/|$)'",

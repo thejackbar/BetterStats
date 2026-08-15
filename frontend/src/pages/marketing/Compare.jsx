@@ -32,7 +32,7 @@ const MODULE_COMPARES = [
   },
   {
     which: 'betteradmin',
-    eyebrow: 'BetterAdmin',
+    eyebrow: 'BetterClubhouse',
     intro:
       'Your cricket club back office: fees, member comms and merch in one place, instead of an expensive bulk email tool and yet more spreadsheets that most clubs stitch together.',
   },

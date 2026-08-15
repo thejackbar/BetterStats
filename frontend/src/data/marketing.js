@@ -260,11 +260,11 @@ export const COMPARISONS = {
     cta: { line: 'Turn the weekly "who’s in?" scramble into a few taps.', label: 'Explore BetterSelect →', to: '/modules/betterselect' },
   },
 
-  // BetterAdmin — the back office, vs email + fee/merch tooling.
+  // BetterClubhouse — the back office, vs email + fee/merch tooling.
   betteradmin: {
     eyebrow: 'Compare',
     heading: 'Your back office, on top of your member list.',
-    sub: 'BetterAdmin runs fees, comms and merch off the same player database as your stats, so you are not exporting CSVs between an email tool, a spreadsheet and a payment app.',
+    sub: 'BetterClubhouse runs fees, comms, stock, volunteers and the committee off the same player database as your stats, so you are not exporting CSVs between an email tool, a spreadsheet and a payment app.',
     columns: [
       { key: 'mailchimp', name: 'Mailchimp', tag: 'Email tool', sub: 'Newsletters & lists' },
       { key: 'sheets', name: 'Spreadsheets & apps', tag: 'Fees / merch', sub: 'Manual tracking' },
@@ -277,7 +277,7 @@ export const COMPARISONS = {
           { feature: 'Match fees that auto-allocate', tip: 'A payment settles games oldest-first; status is always correct', values: { mailchimp: false, sheets: 'manual', us: true } },
           { feature: 'Membership tiers & schedules', values: { mailchimp: false, sheets: 'manual', us: true } },
           { feature: 'Credit & waivers handled', values: { mailchimp: false, sheets: 'manual', us: true } },
-          { feature: 'Merch stock & sales', tip: 'Coming soon', values: { mailchimp: false, sheets: 'manual', us: 'partial' } },
+          { feature: 'Stock, kit & canteen tracking', values: { mailchimp: false, sheets: 'manual', us: true } },
         ],
       },
       {
@@ -286,11 +286,20 @@ export const COMPARISONS = {
           { feature: 'Bulk email to your members', values: { mailchimp: true, sheets: false, us: true } },
           { feature: 'Contacts come from your player database', tip: 'No list to export and re-import', values: { mailchimp: false, sheets: false, us: true } },
           { feature: 'Spam-Act compliant unsubscribes', values: { mailchimp: true, sheets: false, us: true } },
-          { feature: 'One back office, one bill', textRow: true, values: { mailchimp: '~$20+/mo', sheets: 'Free + your time', us: 'Included in Best' } },
+        ],
+      },
+      {
+        section: 'People & committee',
+        rows: [
+          { feature: 'One member directory', tip: 'Players, parents, life members, volunteers and sponsor contacts', values: { mailchimp: 'partial', sheets: 'manual', us: true } },
+          { feature: 'Volunteer roster & hours', tip: 'Roster the canteen, bar and gate, and log hours for grants', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Committee meetings, minutes & motions', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Season club diary', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'One back office, one bill', textRow: true, values: { mailchimp: '~$20+/mo', sheets: 'Free + your time', us: '$149 a year' } },
         ],
       },
     ],
-    cta: { line: 'Stop reconciling three tools every month.', label: 'Explore BetterAdmin →', to: '/modules/betteradmin' },
+    cta: { line: 'Stop reconciling three tools every month.', label: 'Explore BetterClubhouse →', to: '/modules/betterclubhouse' },
   },
 }
 

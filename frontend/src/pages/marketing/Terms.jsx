@@ -82,7 +82,7 @@ export default function Terms() {
             <p>
               The Service is offered on flat per-club annual plans: the <strong className="text-pb-text">Core</strong> (BetterStats)
               is a mandatory module, and you can add other modules (e.g. <strong className="text-pb-text">BetterSelect</strong>,{' '}
-              <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterAdmin</strong>).
+              <strong className="text-pb-text">BetterSocials</strong> and <strong className="text-pb-text">BetterClubhouse</strong>).
               We may offer a bundle discount for your first year when you select multiple modules in addition to
               BetterStats on your first subscription. Pricing is per club regardless of how many grades, teams or
               players you run. The plan you select at sign-up, and what it includes, is set out on our{' '}

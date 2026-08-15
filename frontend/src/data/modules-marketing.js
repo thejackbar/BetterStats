@@ -6,8 +6,9 @@
 // src/data/pricing.js (the modular pricing model + calculator).
 //
 // The bolt-ons mirror the in-app umbrella tiles: BetterSelect, BetterSocials
-// (the post designer + the club website), BetterAdmin (the back office — fees,
-// comms and merch) and BetterIQ. BetterFantasyCricket is a standalone add-on too
+// (the post designer + the club website), BetterClubhouse (the back office —
+// the member directory, fees, comms, merch, volunteers and the committee) and
+// BetterIQ. BetterFantasyCricket is a standalone add-on too
 // (a club fantasy game scored off your real games), priced on its own in
 // pricing.js rather than in the module bundle.
 
@@ -50,7 +51,7 @@ export const CORE_MARKETING = {
     { title: 'Awards and honour boards', desc: 'Record season awards and honour boards, shown on player profiles and across the club site.' },
     { title: 'Shareable stat cards', desc: 'Every player has a clean, club-branded stat card, one tap to share on Instagram, Facebook or X.' },
   ],
-  note: 'BetterStats is the base every club runs on. BetterSelect, BetterSocials, BetterAdmin and BetterIQ all bolt straight onto the same data.',
+  note: 'BetterStats is the base every club runs on. BetterSelect, BetterSocials, BetterClubhouse and BetterIQ all bolt straight onto the same data.',
   screenshot: '/marketing/hero-career-card.jpg',
   // The best four screens, each with a proper write-up. Shown as full
   // text-beside-screenshot sections on the module page; everything else
@@ -285,31 +286,34 @@ export const MODULES_MARKETING = [
     ],
   },
   {
-    slug: 'betteradmin',
+    slug: 'betterclubhouse',
     key: 'admin',
-    name: 'BetterAdmin',
+    name: 'BetterClubhouse',
     icon: '◉',
     accent: BRAND.admin.accent,
     logo: BRAND.admin.logo,
-    audience: 'For the treasurer & secretary',
+    audience: 'For the committee, treasurer & secretary',
     compareKey: 'betteradmin',
-    tagline: 'Run the back office — fees, comms and merch in one place.',
+    tagline: 'Run the whole club: people, money, volunteers and the committee.',
     summary:
-      'BetterAdmin is your club’s back office on top of your member list. Auto-allocating match fees, membership, bulk email to your members and merch tracking — all working off the same player database as your stats, so nothing needs exporting between tools.',
-    members: ['BetterFees', 'BetterComms', 'BetterMerch (soon)'],
+      'BetterClubhouse is your club’s back office on top of one member directory. Fees that allocate themselves, bulk email, stock, the volunteer roster, committee meetings with minutes and motions, and a season diary — all working off the same player database as your stats, so nothing needs exporting between tools.',
+    members: ['Directory', 'BetterFees', 'BetterComms', 'BetterMerch', 'Committee', 'Roster'],
     highlights: [
+      'One member directory for the whole club',
       'Auto-allocating match-fee payments',
-      'Live Paid / Part-paid / Unpaid',
-      'Bulk email to your member database',
-      'Merch stock & sales (coming soon)',
+      'Volunteer roster and hours',
+      'Committee meetings, minutes and motions',
     ],
     features: [
+      { title: 'One member directory', desc: 'Every player, parent, life member, volunteer and sponsor contact in one list, built from your stats data rather than typed in again.' },
       { title: 'Automatic fee allocation', desc: 'A recorded payment settles games oldest-first, in full while the money lasts; the boundary game shows part-paid. Edit days played and it re-allocates itself.' },
       { title: 'Always-correct status', desc: 'Per-game Paid / Part-paid / Unpaid is derived on read — there’s no stale flag to keep in sync.' },
       { title: 'Credit & waivers', desc: 'Overpay and the balance rolls forward as credit; waive a match-day fee with a note. Membership and match-fee buckets stay separate.' },
-      { title: 'Membership & schedules', desc: 'Set membership tiers and match-day fee schedules per season, with clean financial reports for the committee.' },
+      { title: 'Volunteer roster', desc: 'Roster the canteen, the bar and the gate week by week, track who is available, and log volunteer hours for grant applications.' },
+      { title: 'Committee & meetings', desc: 'Run a meeting from the agenda: attendance, motions and votes, actions with owners, and minutes written as you go.' },
+      { title: 'Season club diary', desc: 'The jobs that come around every year, laid out across your season so nothing is remembered the week it was due.' },
       { title: 'Bulk email (BetterComms)', desc: 'Newsletters and announcements to your member database — contacts come straight from your players, with Spam-Act-compliant unsubscribes.' },
-      { title: 'Merch (coming soon)', desc: 'Track merchandise stock and sales alongside the rest of the back office.' },
+      { title: 'Stock and merch', desc: 'Track playing kit, equipment and canteen stock, what has been issued to who, and what is still owed.' },
     ],
     screenshot: '/marketing/modules/betteradmin-overview.jpg',
     showcase: [

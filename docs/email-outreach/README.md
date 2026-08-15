@@ -1,14 +1,68 @@
 # BetterCricket outreach emails
 
-Two pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallbacks.
+Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallbacks.
 
 | File | Use | Subject | Theme |
 |------|-----|---------|-------|
-| `email-initial-demo.html` | First email in the sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
+| `email-preseason-2026.html` | **The current send.** Pre-season push to the cold list (clubs in the directory who have never signed up) | The season's nearly here. Get the whole club sorted now. | Dark navy, section rules, five module cards with BetterClubhouse badged NEW, static trusted-by strip |
+| `email-preseason-2026-lapsed.html` | The same push to the warm list (past enquiries and unfinished trials) | A fair bit has changed since you last looked at us | Same shell, roughly half the length, leads on what is new |
+| `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
+| `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
-| `email-selfserve-launch.html` | The self-serve launch (re-engagement, sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page: headline, three horizontal steps, module cards, club grid, hidden preheader |
 
-Each has a matching `.txt` plain-text fallback (`email-initial-demo.txt`, `email-followup-demo.txt`).
+Each has a matching `.txt` plain-text fallback.
+
+## The pre-season send (Aug 2026)
+
+Two variants of one campaign, `utm_campaign=BC_AU_PreSeason_EDM_Aug2026`. They
+share the campaign so the send reads as one line on the ad-signups report;
+`utm_content` is what separates them (`edm_*` on the cold email,
+`edm_lapsed_*` on the warm one).
+
+**Split the list before sending.** The cold email explains what BetterCricket
+is; the warm one assumes they already know and would read as condescending to
+someone who has never heard of us. Alternative subject lines are listed in the
+comment at the top of each HTML file.
+
+**What each one argues, in order.** Cold: the season is close and the jobs are
+piling up, it was never just stats (the five modules), your spreadsheet has
+errors in it and we find them, you are not doing the setup alone, set it up
+once and never touch it again, then the analysis payoff, then proof, then the
+trial. Warm: here is what is new since you looked (BetterClubhouse, vote
+counting, guided setup), a short reminder of the accuracy and set-and-forget
+argument, proof, then the trial.
+
+**CTA structure is trial first, demo second.** Every green button goes to
+`/trial`. Under each one, a smaller "Book a demo with us" text link goes to
+`/contact`. The demo link exists because the emails promise hand-holding, and a
+committee that wants that needs somewhere to land other than a self-serve
+signup form.
+
+### The trusted-by strip
+
+The site's `TrustedByStrip` scrolls with a CSS marquee. **That cannot work in
+email** — Gmail strips `<style>` so there are no keyframes, and Outlook has no
+animation at all. The strip in these emails is the same four clubs laid out
+statically, styled to match. Each crest links to that club's live public site,
+which is the part that actually builds trust.
+
+Clubs shown: Scarborough, Rockingham-Mandurah, Applecross, Leeming Spartan. To
+swap one, replace the crest `<img>`, the club name and the `/{slug}` link, and
+add a matching PNG under `frontend/public/email/`.
+
+**Two crests are new and must be deployed before the send.**
+`scarborough-cc.png` and `rockingham-mandurah-cc.png` were added to
+`frontend/public/email/` in the same commit as these emails and currently 404
+on production. They were downscaled to 88px square (2x the 44px display size)
+from the clubs' own uploaded logos, which are up to 700KB at full size. Send
+yourself a test after the deploy and confirm all four crests render.
+
+### Naming
+
+These emails call the back-office module **BetterClubhouse**, which is what it
+is called in the app. The marketing site was renamed to match in the same
+commit, and `/modules/betteradmin` now redirects to `/modules/betterclubhouse`,
+so older emails and blog links still resolve.
 
 The **initial** email is the one to send first. It runs the longer "we've been those volunteers" copy, carries the five-module section (each card links to its page on the site), and uses the dark background you asked for. The **follow-up** is the short two-minute nudge, on a light body.
 

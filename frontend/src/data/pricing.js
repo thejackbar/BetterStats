@@ -26,7 +26,7 @@ export const CORE = {
 export const PRICED_MODULES = [
   { key: 'select',  name: 'BetterSelect',  price: 149, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
   { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
-  { key: 'admin',   name: 'BetterAdmin',   price: 149, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and club stock tracking' },
+  { key: 'admin',   name: 'BetterClubhouse', price: 149, icon: '⬢', accent: BRAND.admin.accent, logo: BRAND.admin.logo,   blurb: 'Member directory, fees, emailing, stock, volunteers and committee' },
   { key: 'iq',      name: 'BetterIQ',      price: 249, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]
 
@@ -77,9 +77,9 @@ export const ALL_IN = priceFor(PRICED_MODULES.map((m) => m.key)).total          
 export const COMPETITOR_STACK = [
   { tool: 'Cricket stats platform', plan: 'Medium', forJob: 'Cricket stats & public site', replacedBy: 'BetterStats', cost: 399, note: '$299 to $599 by team count' },
   { tool: 'Squarespace', forJob: 'Club website', replacedBy: 'BetterSocials', cost: 300 },
-  { tool: 'Mailchimp', forJob: 'Member emails', replacedBy: 'BetterAdmin', cost: 240 },
+  { tool: 'Mailchimp', forJob: 'Member emails', replacedBy: 'BetterClubhouse', cost: 240 },
   { tool: 'Canva Pro', forJob: 'Match-day social graphics', replacedBy: 'BetterSocials', cost: 165 },
-  { tool: 'Pitchero', plan: 'Standard', forJob: 'Membership, payments & team admin', replacedBy: 'BetterAdmin & BetterSelect', cost: 800, note: '£418 a year, converted to AUD' },
+  { tool: 'Pitchero', plan: 'Standard', forJob: 'Membership, payments & team admin', replacedBy: 'BetterClubhouse & BetterSelect', cost: 800, note: '£418 a year, converted to AUD' },
 ]
 
 export const COMPETITOR_TOTAL = COMPETITOR_STACK.reduce((sum, c) => sum + c.cost, 0)  // 1904

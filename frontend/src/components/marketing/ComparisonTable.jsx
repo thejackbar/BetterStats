@@ -9,7 +9,7 @@ import Reveal from './Reveal'
  * (see src/data/marketing.js). Renders N competitor columns plus the
  * highlighted "us" column, so the same component powers the whole-platform
  * comparison on the home page and the per-module comparisons (BetterStats,
- * BetterSocials, BetterSelect, BetterAdmin).
+ * BetterSocials, BetterSelect, BetterClubhouse).
  *
  * Cell shapes (per column key, read from row.values[col.key]):
  *   true / false         → green tick / grey cross

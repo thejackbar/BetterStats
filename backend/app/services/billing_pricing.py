@@ -20,7 +20,11 @@ CORE = {"key": "core", "name": "BetterStats", "price": 399}
 PRICED_MODULES = [
     {"key": "select", "name": "BetterSelect", "price": 149},
     {"key": "socials", "name": "BetterSocials", "price": 149},
-    {"key": "admin", "name": "BetterAdmin", "price": 149},
+    # Renamed from BetterAdmin (Aug 2026). _ensure_product caches one Stripe
+    # Product per billing_key, so this mints no duplicate — but a Product created
+    # before the rename keeps its old name until it's renamed in the Stripe
+    # dashboard. New checkout line items read BetterClubhouse from here.
+    {"key": "admin", "name": "BetterClubhouse", "price": 149},
     {"key": "iq", "name": "BetterIQ", "price": 249},
 ]
 PRICED_MODULE_KEYS = {m["key"] for m in PRICED_MODULES}
