@@ -289,6 +289,7 @@ export default function SalesWorkspace() {
     if (next.has(id)) next.delete(id); else next.add(id)
     return next
   })
+  const totalContacts = useMemo(() => clubs.reduce((n, c) => n + (c.contact_count || 0), 0), [clubs])
   const allChecked = clubs.length > 0 && clubs.every(c => checkedIds.has(c.id))
   const toggleSelectAllVisible = () => setCheckedIds(allChecked ? new Set() : new Set(clubs.map(c => c.id)))
   const toggleBulkRep = (id) => setBulkReps(s => {
@@ -436,6 +437,16 @@ export default function SalesWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
         {/* Queue */}
         <div className={CARD}>
+          {!loadingList && (
+            <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
+              <span>
+                <span className="text-pb-text font-medium">{clubs.length}</span> club{clubs.length === 1 ? '' : 's'}
+              </span>
+              <span>
+                <span className="text-pb-text font-medium">{totalContacts}</span> contact{totalContacts === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
           {loadingList ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
           ) : clubs.length === 0 ? (
