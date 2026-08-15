@@ -19,7 +19,14 @@ export default function ProtectedRoute({ children, requireRole, requireModule, r
   // after a successful sign-in, instead of always dumping them on /admin.
   if (!user) return <Navigate to="/login" replace state={{ from: location }} />
 
-  if (requireRole && user.role !== requireRole && user.role !== 'super_admin') {
+  // requireRole accepts a single role string (the original shape) or an
+  // array of roles (e.g. Sales Workspace: ["super_admin", "sales"]) — a
+  // super_admin always passes either form, matching every existing
+  // single-string caller unchanged.
+  const roleAllowed = !requireRole || user.role === 'super_admin' || (
+    Array.isArray(requireRole) ? requireRole.includes(user.role) : user.role === requireRole
+  )
+  if (!roleAllowed) {
     return <Navigate to="/admin" replace />
   }
 

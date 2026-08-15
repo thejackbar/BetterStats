@@ -2015,6 +2015,62 @@ export const api = {
     request(`/club-admin/super/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   superDeleteUser: (userId) =>
     request(`/club-admin/super/users/${userId}`, { method: 'DELETE' }),
+
+  // Sales Workspace — same access for a 'sales' role user or a super admin
+  // (see routers/auth.py's require_sales_or_super); a 'sales' caller is
+  // always restricted server-side to their own assigned clubs regardless of
+  // what filters are sent here.
+  salesWorkspaceClubs: (params = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (Array.isArray(v)) { if (v.length) qs.set(k, v.join(',')); return }
+      if (v !== undefined && v !== null && v !== '' && v !== false) qs.set(k, v)
+    })
+    const q = qs.toString()
+    return request(`/club-admin/sales-workspace/clubs${q ? `?${q}` : ''}`)
+  },
+  salesWorkspaceTeam: () => request('/club-admin/sales-workspace/team'),
+  salesWorkspacePerformance: (ownerUserId) => {
+    const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
+    return request(`/club-admin/sales-workspace/performance${qs}`)
+  },
+  salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
+  salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
+  salesWorkspaceLogCall: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAddNote: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/notes`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAddContact: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAssign: (dealId, ownerUserId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
+      method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
+    }),
+  salesWorkspaceBulkAssign: (dealIds, ownerUserIds) =>
+    request('/club-admin/sales-workspace/bulk-assign', {
+      method: 'POST', body: JSON.stringify({ deal_ids: dealIds, owner_user_ids: ownerUserIds }),
+    }),
+  salesWorkspaceStartTrial: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceSetDoNotContact: (dealId, contactId, doNotContact, reason) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/contacts/${contactId}/do-not-contact`, {
+      method: 'PATCH', body: JSON.stringify({ do_not_contact: doNotContact, reason: reason || null }),
+    }),
+  salesWorkspaceFollowUps: (ownerUserId) => {
+    const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
+    return request(`/club-admin/sales-workspace/follow-ups${qs}`)
+  },
+  salesWorkspaceCompleteFollowUp: (activityId) =>
+    request(`/club-admin/sales-workspace/follow-ups/${activityId}/done`, { method: 'POST' }),
+  salesWorkspaceEmailTemplates: () => request('/club-admin/sales-workspace/email-templates'),
+  salesWorkspaceSendEmail: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/email`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceLists: () => request('/club-admin/sales-workspace/lists'),
+  salesWorkspaceList: (listId) => request(`/club-admin/sales-workspace/lists/${listId}`),
+  salesWorkspaceImportFromWizardClubs: (data) =>
+    request('/club-admin/sales-workspace/lists/from-wizard-clubs', { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceImportFromCrmDeals: (data) =>
+    request('/club-admin/sales-workspace/lists/from-crm-deals', { method: 'POST', body: JSON.stringify(data) }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',

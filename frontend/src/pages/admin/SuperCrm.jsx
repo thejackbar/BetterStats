@@ -1018,6 +1018,99 @@ function SettingsModal({ open, onClose, onManageStages }) {
   )
 }
 
+// Import the CRM's current filtered deal set into a Sales Workspace list —
+// the CRM-export source alongside Wizard Clubs (SuperWizardClubs.jsx's own
+// "Import to Sales List"). No club-directory matching needed: these are
+// already real crm_deals rows, so this is a pure grouping of their
+// marketing_club_id, never a write to the pipeline itself.
+function ImportSalesListModal({ open, onClose, deals, filterSummary = [] }) {
+  const toast = useToast()
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [result, setResult] = useState(null)
+
+  useEffect(() => {
+    if (open) { setName(''); setErr(''); setResult(null); setBusy(false) }
+  }, [open])
+
+  const withClub = (deals || []).filter(d => d.marketing_club_id)
+  const noClub = (deals || []).filter(d => !d.marketing_club_id)
+
+  const submit = async () => {
+    if (!name.trim()) { setErr('Enter a list name.'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await api.salesWorkspaceImportFromCrmDeals({
+        name: name.trim(), deal_ids: (deals || []).map(d => d.id),
+      })
+      setResult(r)
+      toast.success(`Imported "${r.name}" — ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
+    } catch (e) {
+      setErr(e.message || 'Could not import the list')
+    } finally { setBusy(false) }
+  }
+
+  const footer = result ? (
+    <Btn variant="primary" sm onClick={onClose}>Done</Btn>
+  ) : (
+    <>
+      <Btn variant="subtle" sm onClick={onClose}>Cancel</Btn>
+      <Btn variant="primary" sm onClick={submit} disabled={busy || !name.trim() || withClub.length === 0}>
+        {busy ? 'Importing…' : 'Import to Sales List'}
+      </Btn>
+    </>
+  )
+
+  return (
+    <Modal open={open} onClose={onClose} title="Import to a Sales List" footer={footer}>
+      {err && <div className="text-pb-red text-[13px] mb-3">{err}</div>}
+
+      {result ? (
+        <div className="space-y-2 text-[13px]">
+          <div className="text-pb-text">
+            Imported <span className="font-medium">"{result.name}"</span> — {result.clubs_added} club{result.clubs_added === 1 ? '' : 's'} in the list.
+            {result.clubs_unmatched?.length > 0 && <> {result.clubs_unmatched.length} deal{result.clubs_unmatched.length === 1 ? '' : 's'} had no club linked and couldn't be included.</>}
+          </div>
+          <div className="text-pb-faintest">
+            Find it in <Link to="/admin/super/crm/sales-lists" className="underline hover:text-pb-text">Sales Lists</Link>, or
+            filter the <Link to="/admin/super/crm/workspace" className="underline hover:text-pb-text">Sales Workspace</Link> queue
+            to it directly.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-[13px] text-pb-faint">
+            Groups the <span className="text-pb-text font-medium">{withClub.length}</span> deal{withClub.length === 1 ? '' : 's'} currently
+            shown into a Sales List — no new deals are created, this just makes the set easy to find again and assign as a batch.
+            {noClub.length > 0 && (
+              <> {noClub.length} deal{noClub.length === 1 ? '' : 's'} with no Club Directory link can't be included.</>
+            )}
+          </div>
+          {filterSummary.length > 0 && (
+            <div className="rounded-lg border border-pb-hairline px-3 py-2.5">
+              <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1.5">Filters applied</div>
+              <div className="flex flex-wrap gap-1.5">
+                {filterSummary.map((f, i) => (
+                  <span key={i} className="inline-flex items-center gap-1 rounded-full border border-pb-hairline2 px-2 py-0.5 text-[11.5px]">
+                    <span className="text-pb-faint">{f.label}:</span>
+                    <span className="text-pb-text font-medium">{f.value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <Field label="List name">
+            <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submit() }}
+              placeholder="e.g. Warm leads — August" />
+          </Field>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 export default function SuperCrm() {
   const toast = useToast()
   // A deep link (e.g. the Usage page's Live feed club badge) can arrive with
@@ -1050,6 +1143,7 @@ export default function SuperCrm() {
   const [recalcRunning, setRecalcRunning] = useState(false)
   const recalcPollRef = useRef(null)
   const [showCreateList, setShowCreateList] = useState(false)
+  const [showImportSales, setShowImportSales] = useState(false)
   // Per-super-admin-user stage filter persistence (server-side, so it survives
   // across sessions and devices). `prefsLoaded` gates the board so the saved
   // stage filters are applied BEFORE anything renders. `lastSavedStageRef`
@@ -1335,6 +1429,9 @@ export default function SuperCrm() {
           <span title="Create a BetterComms list from the deals currently shown (one contact per deal)">
             <Btn variant="ghost" sm onClick={() => setShowCreateList(true)} disabled={filteredDeals.length === 0}>Create List</Btn>
           </span>
+          <span title="Import the deals currently shown into a Sales Workspace list">
+            <Btn variant="ghost" sm onClick={() => setShowImportSales(true)} disabled={filteredDeals.length === 0}>Import to Sales List</Btn>
+          </span>
           <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background — takes a few minutes)">
             <Btn variant="ghost" sm onClick={runRecalc} disabled={recalcRunning}>
               {recalcRunning ? 'Recalculating…' : 'Recalculate'}
@@ -1438,6 +1535,8 @@ export default function SuperCrm() {
           the status chips narrow the List only, so the Board's list must not
           claim a Status filter it never applied. */}
       <CreateListModal open={showCreateList} onClose={() => setShowCreateList(false)} deals={shownDeals}
+        filterSummary={buildFilterSummary(filters, { owners, stages, status: view === 'list' ? status : '' })} />
+      <ImportSalesListModal open={showImportSales} onClose={() => setShowImportSales(false)} deals={shownDeals}
         filterSummary={buildFilterSummary(filters, { owners, stages, status: view === 'list' ? status : '' })} />
       <NewDealModal open={showNew} onClose={() => setShowNew(false)} stages={stages} onCreated={load} />
       <SettingsModal open={showSettings} onClose={() => setShowSettings(false)}

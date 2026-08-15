@@ -17,7 +17,7 @@ from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
-    public_club_room
+    public_club_room, sales_workspace
 # BetterScout — a separate tenant type (Scout Org) with its own login,
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
@@ -5232,6 +5232,74 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE social_media_asset ADD COLUMN IF NOT EXISTS kind TEXT"
         ))
 
+        # Migration 255: Sales Workspace — a structured call outcome +
+        # follow-up date on crm_activities, and a directory_contact_id bridge
+        # on crm_people so a lazily-materialized contact (see
+        # services/sales_workspace.resolve_or_materialize_person) traces back
+        # to the marketing_club_contacts row it came from. Byte-identical to
+        # alembic/versions/255_sales_workspace.py.
+        await conn.execute(text("ALTER TABLE crm_activities ADD COLUMN IF NOT EXISTS outcome TEXT"))
+        await conn.execute(text(
+            "ALTER TABLE crm_activities ADD COLUMN IF NOT EXISTS next_follow_up_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_activities_follow_up "
+            "ON crm_activities(next_follow_up_at) WHERE next_follow_up_at IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE crm_people ADD COLUMN IF NOT EXISTS directory_contact_id "
+            "UUID REFERENCES marketing_club_contacts(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_people_directory_contact "
+            "ON crm_people(directory_contact_id) WHERE directory_contact_id IS NOT NULL"
+        ))
+
+        # Migration 256: Sales Workspace Phase 2a — Follow-ups queue +
+        # do-not-contact. follow_up_done_at is the explicit "mark resolved"
+        # signal for a pending callback; do_not_contact/_reason is the
+        # PERSON-level "don't call me" flag (club-level reuses the existing
+        # marketing_clubs.not_interested, no new column for that). Byte-
+        # identical to alembic/versions/256_sales_workspace_followups.py.
+        await conn.execute(text("ALTER TABLE crm_activities ADD COLUMN IF NOT EXISTS follow_up_done_at TIMESTAMPTZ"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS do_not_contact "
+            "BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS do_not_contact_reason TEXT"
+        ))
+
+        # Migration 257: Sales Lists — a thin provenance/import layer over the
+        # existing CRM deals (assignment still lives on crm_deals.owner_user_id
+        # alone; a list is just "these clubs came in together, from this
+        # source"). Byte-identical to alembic/versions/257_sales_lists.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sales_lists (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                description TEXT,
+                source_type TEXT NOT NULL DEFAULT 'manual',
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sales_list_clubs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sales_list_id UUID NOT NULL REFERENCES sales_lists(id) ON DELETE CASCADE,
+                marketing_club_id UUID NOT NULL REFERENCES marketing_clubs(id) ON DELETE CASCADE,
+                added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (sales_list_id, marketing_club_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_club ON sales_list_clubs(marketing_club_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_list ON sales_list_clubs(sales_list_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -5478,6 +5546,7 @@ app.include_router(player_import.router)  # BetterImport (profiles) — bulk pla
 app.include_router(klubpro_migration.router)  # KlubPro → BetterStats migration (super-admin onboarding)
 app.include_router(marketing.router)  # Marketing club directory crawl + outreach (super-admin)
 app.include_router(crm.super_router)  # BetterCRM — BetterCricket's own internal sales pipeline (super-admin)
+app.include_router(sales_workspace.router)  # Sales Workspace — calling lens over the same platform pipeline (super-admin + 'sales' role)
 app.include_router(usage.router)
 app.include_router(login_attempts.router)
 app.include_router(meta_ads.router)  # Meta Ads HQ dashboard (super-admin) — BetterCricket's own ad spend

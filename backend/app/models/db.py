@@ -4341,6 +4341,11 @@ class MarketingClubContact(Base):
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)
     bounced_at = Column(TIMESTAMP(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
+    # Migration 256 (Sales Workspace): the PERSON-level "don't call me" flag —
+    # distinct from `subscribed`, which is email-opt-out only. The club-wide
+    # equivalent is marketing_clubs.not_interested, not a column here.
+    do_not_contact = Column(Boolean, nullable=False, server_default="false", default=False)
+    do_not_contact_reason = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -4370,6 +4375,11 @@ class CrmPerson(Base):
     email = Column(Text, nullable=True)
     phone = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Migration 255: set only when this row was lazily materialized from a
+    # Club Directory contact (see services/sales_workspace.
+    # resolve_or_materialize_person) — traces it back and is the dedupe key
+    # so touching the same directory contact twice never mints a second row.
+    directory_contact_id = Column(UUID(as_uuid=True), ForeignKey("marketing_club_contacts.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -4566,7 +4576,47 @@ class CrmActivity(Base):
     occurred_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     meta = Column(JSONB, nullable=True)
+    # Migration 255 (Sales Workspace): structured call-outcome key (see
+    # services/sales_workspace.CALL_OUTCOMES) — NULL for anything that isn't
+    # a logged call. next_follow_up_at is the callback/follow-up date
+    # captured off a call log, shown inline until a dedicated queue screen
+    # exists.
+    outcome = Column(Text, nullable=True)
+    next_follow_up_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Migration 256: explicit "resolved" marker for a pending follow-up — a
+    # follow-up is pending while next_follow_up_at is set and this is NULL.
+    follow_up_done_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SalesList(Base):
+    """Migration 257: one row per Sales Workspace import batch — a Wizard
+    Clubs pull, a CRM export, a Club Directory selection, or a manual pick.
+    A thin provenance/grouping layer: assignment still lives entirely on
+    ``crm_deals.owner_user_id``, and a club's calls/notes/stage are the same
+    wherever it's viewed from. A club can sit in several lists."""
+    __tablename__ = "sales_lists"
+
+    SOURCE_TYPES = ("wizard_clubs", "manual")
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    source_type = Column(Text, nullable=False, server_default="manual", default="manual")
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SalesListClub(Base):
+    """Migration 257: many-to-many membership of a club in a Sales List.
+    Unique per (list, club) so re-importing an overlapping selection is
+    idempotent rather than duplicating the row."""
+    __tablename__ = "sales_list_clubs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sales_list_id = Column(UUID(as_uuid=True), ForeignKey("sales_lists.id", ondelete="CASCADE"), nullable=False)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="CASCADE"), nullable=False)
+    added_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 class CrmEvent(Base):

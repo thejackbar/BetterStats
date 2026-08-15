@@ -566,6 +566,9 @@ def _activity_dict(activity: CrmActivity) -> dict:
         "organisation_id": str(activity.organisation_id) if activity.organisation_id else None,
         "type": activity.type,
         "body": activity.body,
+        "outcome": activity.outcome,
+        "next_follow_up_at": activity.next_follow_up_at.isoformat() if activity.next_follow_up_at else None,
+        "follow_up_done_at": activity.follow_up_done_at.isoformat() if activity.follow_up_done_at else None,
         "occurred_at": activity.occurred_at.isoformat() if activity.occurred_at else None,
         "created_by_user_id": str(activity.created_by_user_id) if activity.created_by_user_id else None,
         "meta": activity.meta,
@@ -629,12 +632,18 @@ def pipeline_board(pipeline: CrmPipeline, deals: list[CrmDeal],
 # ─── Deals ────────────────────────────────────────────────────────────────────
 
 async def list_deals(session: AsyncSession, pipeline_id, *,
-                     status: Optional[str] = None, include_archived: bool = False) -> list[CrmDeal]:
+                     status: Optional[str] = None, include_archived: bool = False,
+                     owner_user_id=None) -> list[CrmDeal]:
     stmt = select(CrmDeal).where(CrmDeal.pipeline_id == pipeline_id)
     if not include_archived:
         stmt = stmt.where(CrmDeal.archived_at.is_(None))
     if status:
         stmt = stmt.where(CrmDeal.status == status)
+    # Sales Workspace's row-level restriction for a 'sales'-role user — see
+    # routers/sales_workspace.py. None (the default, every other caller)
+    # applies no filter at all, same shape as list_events's owner_user_id.
+    if owner_user_id is not None:
+        stmt = stmt.where(CrmDeal.owner_user_id == owner_user_id)
     stmt = stmt.order_by(CrmDeal.updated_at.desc())
     return (await session.execute(stmt)).scalars().all()
 
@@ -1707,11 +1716,13 @@ async def unlink_deal_contact(session: AsyncSession, deal_id, person_id) -> bool
 
 async def log_activity(session: AsyncSession, *, deal_id=None, person_id=None,
                        organisation_id=None, type: str = "note", body: Optional[str] = None,
-                       created_by_user_id=None, meta: Optional[dict] = None) -> CrmActivity:
+                       created_by_user_id=None, meta: Optional[dict] = None,
+                       outcome: Optional[str] = None, next_follow_up_at=None) -> CrmActivity:
     activity = CrmActivity(
         deal_id=deal_id, person_id=person_id, organisation_id=organisation_id,
         type=type if type in ACTIVITY_TYPES else "note", body=body,
         created_by_user_id=created_by_user_id, meta=meta,
+        outcome=outcome, next_follow_up_at=next_follow_up_at,
     )
     session.add(activity)
     await session.flush()

@@ -229,6 +229,84 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
   )
 }
 
+function ImportSalesListModal({ open, onClose, clubs, onCreated }) {
+  const toast = useToast()
+  const [name, setName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [result, setResult] = useState(null)
+
+  useEffect(() => {
+    if (open) { setName(''); setErr(''); setResult(null); setBusy(false) }
+  }, [open])
+
+  const resolvable = clubs.filter(c => !c.is_query_row)
+  const unresolvedRows = clubs.filter(c => c.is_query_row)
+
+  const submit = async () => {
+    if (!name.trim()) { setErr('Enter a list name.'); return }
+    setBusy(true); setErr('')
+    try {
+      const r = await api.salesWorkspaceImportFromWizardClubs({
+        name: name.trim(), club_keys: clubs.map(c => c.key),
+      })
+      setResult(r)
+      toast.success(`Imported "${r.name}" — ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
+      onCreated?.()
+    } catch (e) {
+      setErr(e.message || 'Could not import the list')
+    } finally { setBusy(false) }
+  }
+
+  const footer = result ? (
+    <Btn variant="primary" sm onClick={onClose}>Done</Btn>
+  ) : (
+    <>
+      <Btn variant="subtle" sm onClick={onClose}>Cancel</Btn>
+      <Btn variant="primary" sm onClick={submit} disabled={busy || !name.trim() || resolvable.length === 0}>
+        {busy ? 'Importing…' : 'Import to Sales List'}
+      </Btn>
+    </>
+  )
+
+  return (
+    <Modal open={open} onClose={onClose} title="Import to a Sales List" footer={footer}>
+      {err && <div className="text-pb-red text-[13px] mb-3">{err}</div>}
+
+      {result ? (
+        <div className="space-y-2 text-[13px]">
+          <div className="text-pb-text">
+            Imported <span className="font-medium">"{result.name}"</span> — {result.clubs_matched} matched club
+            {result.clubs_matched === 1 ? '' : 's'}, each given an open deal in the queue.
+            {result.clubs_unmatched?.length > 0 && <> {result.clubs_unmatched.length} couldn't be matched to the Club Directory.</>}
+          </div>
+          <div className="text-pb-faintest">
+            Find it in <Link to="/admin/super/crm/sales-lists" className="underline hover:text-pb-text">Sales Lists</Link>, or
+            filter the <Link to="/admin/super/crm/workspace" className="underline hover:text-pb-text">Sales Workspace</Link> queue
+            to it directly.
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="text-[13px] text-pb-faint">
+            Matches <span className="text-pb-text font-medium">{resolvable.length}</span> of the {clubs.length} selected club
+            {clubs.length === 1 ? '' : 's'} to the Club Directory and gives each one an open deal at the Target stage (or
+            leaves it alone if it's already further along), so it shows up in the Sales Workspace call queue.
+            {unresolvedRows.length > 0 && (
+              <> {unresolvedRows.length} unresolved search{unresolvedRows.length === 1 ? '' : 'es'} can't be matched and will be skipped.</>
+            )}
+          </div>
+          <Field label="List name">
+            <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') submit() }}
+              placeholder="e.g. Wizard drop-offs — August" />
+          </Field>
+        </div>
+      )}
+    </Modal>
+  )
+}
+
 export default function SuperWizardClubs() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -243,6 +321,7 @@ export default function SuperWizardClubs() {
   const [sortDir, setSortDir] = useState('desc')
   const [checked, setChecked] = useState(() => new Set())
   const [showCreate, setShowCreate] = useState(false)
+  const [showImportSales, setShowImportSales] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true); setErr('')
@@ -348,9 +427,15 @@ export default function SuperWizardClubs() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link to="/admin/super/crm/sales-lists" className="font-mono text-[10px] uppercase text-pb-faint hover:text-pb-text">
+            Sales lists
+          </Link>
           <Link to="/admin/comms/lists" className="font-mono text-[10px] uppercase text-pb-faint hover:text-pb-text">
             Comms lists
           </Link>
+          <Btn variant="subtle" sm onClick={() => setShowImportSales(true)} disabled={targetRows.length === 0}>
+            Import to Sales List{selectedRows.length ? ` (${selectedRows.length})` : ''}
+          </Btn>
           <Btn variant="primary" sm onClick={() => setShowCreate(true)} disabled={targetRows.length === 0}>
             Create List{selectedRows.length ? ` (${selectedRows.length})` : ''}
           </Btn>
@@ -520,6 +605,10 @@ export default function SuperWizardClubs() {
       <CreateListModal
         open={showCreate} onClose={() => setShowCreate(false)} clubs={targetRows}
         onCreated={() => { setChecked(new Set()); load() }}
+      />
+      <ImportSalesListModal
+        open={showImportSales} onClose={() => setShowImportSales(false)} clubs={targetRows}
+        onCreated={() => setChecked(new Set())}
       />
     </AdminLayout>
   )

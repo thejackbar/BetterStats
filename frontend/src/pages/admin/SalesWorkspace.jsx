@@ -1,0 +1,819 @@
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { api } from '../../lib/api'
+import { useAuth } from '../../contexts/AuthContext'
+import { useToast } from '../../contexts/ToastContext'
+import AdminLayout from '../../components/admin/AdminLayout'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
+import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
+
+const CARD = 'pb-card p-3'
+
+// Close-on-outside-click + Escape, for the Stage multi-select popover below.
+function useDismiss(open, onClose) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open, onClose])
+  return ref
+}
+
+// Stage is a multi-select: narrowing to "Target, Contacted" is an OR within
+// the field (a club at either stage matches), same convention BetterIQ's
+// TeamPicker uses for a multi-grade filter.
+// The single real 'trial' stage reads as two things to a salesperson —
+// still running, or lapsed and worth a different kind of call — so the
+// picker splits it into two synthetic keys the backend interprets specially
+// (services/sales_workspace.py never stores these; they only ever mean
+// "stage=trial AND expired/not"). Every other stage passes through as-is.
+function displayStages(stages) {
+  const out = []
+  for (const s of stages || []) {
+    if (s.key === 'trial') {
+      out.push({ id: 'trial_current', key: 'trial_current', name: 'Trial (Current)' })
+      out.push({ id: 'trial_expired', key: 'trial_expired', name: 'Trial (Expired)' })
+    } else {
+      out.push(s)
+    }
+  }
+  return out
+}
+
+function StagePicker({ stages, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useDismiss(open, () => setOpen(false))
+  const options = useMemo(() => displayStages(stages), [stages])
+  const picked = new Set(value)
+  const toggle = (key) => {
+    const next = new Set(picked)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    onChange([...next])
+  }
+  const label = picked.size === 0 ? 'All stages'
+    : picked.size === 1 ? options.find(s => s.key === value[0])?.name || value[0]
+    : `${picked.size} stages`
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button" onClick={() => setOpen(o => !o)}
+        className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px] outline-none focus:border-pb-accent text-left flex items-center justify-between gap-2"
+      >
+        <span className={picked.size === 0 ? 'text-pb-faint' : ''}>{label}</span>
+        <span className="text-pb-faintest text-[10px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg border border-pb-hairline2 bg-pb-surface shadow-lg py-1 max-h-64 overflow-y-auto">
+          <button type="button" onClick={() => onChange([])}
+            className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${picked.size === 0 ? 'text-pb-accent' : 'text-pb-text'}`}>
+            All stages
+          </button>
+          {options.map(s => (
+            <label key={s.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
+              <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+const contactKey = (c) => c.directory_contact_id || c.crm_person_id
+
+function ScorePill({ score, tier }) {
+  if (score == null) return <span className="text-pb-faintest text-[11px]">Not scored</span>
+  const tone = { HOT: 'red', WARM: 'amber' }[tier] || 'faint'
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span className="font-display font-bold text-[13px]">{score}</span>
+      <Pill tone={tone}>{(tier || '').replace(/_/g, ' ') || 'COLD'}</Pill>
+    </span>
+  )
+}
+
+function PriorityBadge({ score }) {
+  const tone = score >= 80 ? 'red' : score >= 50 ? 'amber' : 'faint'
+  return <Pill tone={tone}>P{score}</Pill>
+}
+
+function timeAgo(iso) {
+  if (!iso) return null
+  const d = Math.round((Date.now() - new Date(iso).getTime()) / 86400000)
+  if (d <= 0) return 'today'
+  if (d === 1) return 'yesterday'
+  return `${d}d ago`
+}
+
+// ─── Engagement panel (sourced from the drawer's own already-fetched
+// `engagement` field, NOT a second fetch — club_engagement_breakdown is
+// super-admin-only server-side, so a 'sales' role must never call it
+// directly; the Workspace's own GET /clubs/{id} already embeds it). ───────────
+function EngagementPanel({ engagement }) {
+  if (!engagement) {
+    return <p className="text-[12px] text-pb-faintest">No engagement data for this club yet.</p>
+  }
+  const contribs = engagement.contributions || []
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <ScorePill score={engagement.score} tier={engagement.tier} />
+        {engagement.is_customer && <span className="text-[11px] text-pb-faint">already linked to a real club</span>}
+      </div>
+      {engagement.explanation && <p className="text-[11.5px] text-pb-faint italic">{engagement.explanation}</p>}
+      {contribs.length > 0 ? (
+        <div className="space-y-1">
+          {contribs.map((c, i) => (
+            <div key={i} className="flex items-baseline justify-between gap-2 text-[12px] border-b border-pb-hairline/50 pb-1">
+              <div>
+                <span className="text-pb-text">{c.label}</span>
+                {c.detail && <div className="text-pb-faintest text-[10.5px]">{c.detail}</div>}
+              </div>
+              <span className="font-display font-bold whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>+{c.points}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-[12px] text-pb-faintest">No tracked signals yet.</p>
+      )}
+      {engagement.signals && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+          {[
+            ['Visitors 30d', engagement.signals.sessions_30d],
+            ['Email opens', engagement.signals.email_opens],
+            ['Email clicks', engagement.signals.email_clicks],
+            ['Ad clicks', engagement.signals.ad_clicks],
+          ].map(([label, val]) => (
+            <div key={label} className="pb-card px-2.5 py-2">
+              <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">{label}</div>
+              <div className="font-display font-bold text-[15px]">{val ?? 0}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ActivityRow({ a }) {
+  const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call') : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
+  const tone = a.type === 'call' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
+  return (
+    <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
+      <div className="flex items-center justify-between gap-2">
+        <Pill tone={tone}>{kindLabel}</Pill>
+        <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
+      </div>
+      {a.body && <p className="mt-1 text-pb-text whitespace-pre-wrap">{a.body}</p>}
+      {a.next_follow_up_at && (
+        <p className="mt-1 text-[10.5px] text-pb-amber">Follow up {new Date(a.next_follow_up_at).toLocaleString('en-AU')}</p>
+      )}
+    </div>
+  )
+}
+
+export default function SalesWorkspace() {
+  const { user, logout } = useAuth()
+  const toast = useToast()
+  const isSuper = user?.role === 'super_admin'
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const [filters, setFilters] = useState({
+    q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
+    min_score: '', max_score: '', meta_selected: false, meta_searched: false,
+  })
+  const [clubs, setClubs] = useState([])
+  const [stages, setStages] = useState([])
+  const [team, setTeam] = useState([])
+  const [loadingList, setLoadingList] = useState(true)
+  const [selectedId, setSelectedId] = useState(null)
+  const [drawer, setDrawer] = useState(null)
+  const [loadingDrawer, setLoadingDrawer] = useState(false)
+
+  // Bulk assignment (super admin only) — checked deal ids from the CURRENT
+  // filtered queue, and which reps are ticked in the bulk-assign panel: one
+  // rep checked = assign everything to them, several = split evenly.
+  const [checkedIds, setCheckedIds] = useState(() => new Set())
+  const [bulkReps, setBulkReps] = useState(() => new Set())
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+
+  const [callForm, setCallForm] = useState({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+  const [savingCall, setSavingCall] = useState(false)
+  const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
+  const [savingNote, setSavingNote] = useState(false)
+  const [showAddContact, setShowAddContact] = useState(false)
+  const [contactForm, setContactForm] = useState({ full_name: '', role: '', email: '', mobile: '' })
+  const [savingContact, setSavingContact] = useState(false)
+  const [showStartTrial, setShowStartTrial] = useState(false)
+  const [trialForm, setTrialForm] = useState({
+    admin_first_name: '', admin_last_name: '', admin_display_name: '',
+    admin_username: '', admin_email: '', admin_mobile_number: '',
+  })
+  const [savingTrial, setSavingTrial] = useState(false)
+
+  const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
+  const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
+  const [savingEmail, setSavingEmail] = useState(false)
+
+  useEffect(() => {
+    api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
+  }, [])
+
+  const loadClubs = useCallback(() => {
+    setLoadingList(true)
+    api.salesWorkspaceClubs(filters).then((d) => {
+      setClubs(d.clubs || [])
+      setStages(d.stages || [])
+    }).catch(() => toast?.error('Could not load the club queue')).finally(() => setLoadingList(false))
+  }, [filters, toast])
+
+  useEffect(() => { loadClubs() }, [loadClubs])
+  useEffect(() => {
+    if (isSuper) api.salesWorkspaceTeam().then((d) => setTeam(d.team || [])).catch(() => {})
+  }, [isSuper])
+
+  const loadDrawer = useCallback((dealId) => {
+    setLoadingDrawer(true)
+    api.salesWorkspaceClub(dealId).then((d) => {
+      setDrawer(d)
+      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+    }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
+  }, [toast])
+
+  const selectClub = (dealId) => {
+    setSelectedId(dealId)
+    loadDrawer(dealId)
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('club', dealId); return n }, { replace: true })
+  }
+  const refreshBoth = () => { loadClubs(); if (selectedId) loadDrawer(selectedId) }
+
+  // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
+  useEffect(() => {
+    const clubParam = searchParams.get('club')
+    if (clubParam && clubParam !== selectedId) selectClub(clubParam)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Deep link from Sales Lists: /admin/super/crm/workspace?list_id=<id>&list_name=<name>
+  const listParam = searchParams.get('list_id')
+  const listNameParam = searchParams.get('list_name')
+  useEffect(() => {
+    if (listParam && listParam !== filters.list_id) setFilters(f => ({ ...f, list_id: listParam }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listParam])
+  const clearListFilter = () => {
+    setFilters(f => ({ ...f, list_id: '' }))
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('list_id'); n.delete('list_name'); return n }, { replace: true })
+  }
+
+  const toggleDoNotContact = async (contact) => {
+    const next = !contact.do_not_contact
+    let reason = null
+    if (next) {
+      reason = window.prompt('Reason (optional) — e.g. "Asked not to be called again"') || null
+    }
+    try {
+      await api.salesWorkspaceSetDoNotContact(drawer.deal.id, contact.directory_contact_id, next, reason)
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    }
+  }
+
+  const pinnedNotes = useMemo(
+    () => (drawer?.activities || []).filter(a => a.type === 'note' && a.meta?.pinned),
+    [drawer]
+  )
+  const timeline = useMemo(
+    () => (drawer?.activities || []).filter(a => !(a.type === 'note' && a.meta?.pinned)),
+    [drawer]
+  )
+
+  const submitCall = async (e) => {
+    e.preventDefault()
+    if (!callForm.outcome) { toast?.error('Pick an outcome'); return }
+    setSavingCall(true)
+    try {
+      const chosen = (drawer.contacts || []).find(c => contactKey(c) === callForm.contactKey)
+      const payload = {
+        outcome: callForm.outcome,
+        notes: callForm.notes || null,
+        next_follow_up_at: callForm.followUpAt ? new Date(callForm.followUpAt).toISOString() : null,
+      }
+      if (chosen?.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
+      else if (chosen?.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      const d = await api.salesWorkspaceLogCall(drawer.deal.id, payload)
+      setDrawer(d)
+      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+      toast?.success('Call logged')
+      loadClubs()
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingCall(false)
+    }
+  }
+
+  const submitNote = async (e) => {
+    e.preventDefault()
+    if (!noteForm.body.trim()) return
+    setSavingNote(true)
+    try {
+      await api.salesWorkspaceAddNote(drawer.deal.id, noteForm)
+      setNoteForm({ body: '', pinned: false })
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingNote(false)
+    }
+  }
+
+  const submitContact = async (e) => {
+    e.preventDefault()
+    if (!contactForm.full_name.trim() || !(contactForm.email.trim() || contactForm.mobile.trim())) {
+      toast?.error('Name plus an email or mobile is required')
+      return
+    }
+    setSavingContact(true)
+    try {
+      await api.salesWorkspaceAddContact(drawer.deal.id, contactForm)
+      setContactForm({ full_name: '', role: '', email: '', mobile: '' })
+      setShowAddContact(false)
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingContact(false)
+    }
+  }
+
+  const submitAssign = async (ownerUserId) => {
+    try {
+      await api.salesWorkspaceAssign(drawer.deal.id, ownerUserId)
+      toast?.success('Reassigned')
+      refreshBoth()
+    } catch (err) {
+      toast?.error(err.message)
+    }
+  }
+
+  const toggleChecked = (id) => setCheckedIds(s => {
+    const next = new Set(s)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const totalContacts = useMemo(() => clubs.reduce((n, c) => n + (c.contact_count || 0), 0), [clubs])
+  const allChecked = clubs.length > 0 && clubs.every(c => checkedIds.has(c.id))
+  const toggleSelectAllVisible = () => setCheckedIds(allChecked ? new Set() : new Set(clubs.map(c => c.id)))
+  const toggleBulkRep = (id) => setBulkReps(s => {
+    const next = new Set(s)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  const submitBulkAssign = async () => {
+    if (checkedIds.size === 0) { toast?.error('Select at least one club'); return }
+    if (bulkReps.size === 0) { toast?.error('Pick at least one salesperson'); return }
+    setBulkAssigning(true)
+    try {
+      const result = await api.salesWorkspaceBulkAssign([...checkedIds], [...bulkReps])
+      const summary = Object.entries(result.by_rep).map(([name, n]) => `${name}: ${n}`).join(', ')
+      toast?.success(`Assigned ${result.assigned} club${result.assigned === 1 ? '' : 's'} — ${summary}`)
+      setCheckedIds(new Set())
+      setBulkReps(new Set())
+      loadClubs()
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setBulkAssigning(false)
+    }
+  }
+
+  const submitStartTrial = async (e) => {
+    e.preventDefault()
+    setSavingTrial(true)
+    try {
+      const result = await api.salesWorkspaceStartTrial(drawer.deal.id, trialForm)
+      toast?.success(`Trial started for ${result.name}`)
+      setShowStartTrial(false)
+      refreshBoth()
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingTrial(false)
+    }
+  }
+
+  const submitEmail = async (e) => {
+    e.preventDefault()
+    if (!emailForm.contactKey) { toast?.error('Pick a contact to email'); return }
+    if (!emailForm.template) { toast?.error('Pick a template'); return }
+    const chosen = (drawer.contacts || []).find(c => contactKey(c) === emailForm.contactKey)
+    if (!chosen?.email) { toast?.error('That contact has no email address on file'); return }
+    setSavingEmail(true)
+    try {
+      const payload = { template: emailForm.template }
+      if (chosen.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
+      else if (chosen.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      if (emailForm.template === 'custom') {
+        payload.subject = emailForm.subject
+        payload.body = emailForm.body
+      }
+      await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
+      toast?.success(`Email sent to ${chosen.full_name}`)
+      setEmailForm({ contactKey: '', template: '', subject: '', body: '' })
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingEmail(false)
+    }
+  }
+
+  const content = (
+    <div className="max-w-7xl">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="font-display font-bold text-2xl text-pb-text">Sales Workspace</h1>
+          <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-0.5">
+            {isSuper ? 'Every assigned club' : 'Clubs assigned to you'}
+          </p>
+        </div>
+      </div>
+
+      {filters.list_id && (
+        <div className="mb-3 flex items-center gap-2 text-[12px]">
+          <span className="text-pb-faint">Filtered to list:</span>
+          <span className="text-pb-text font-medium">{listNameParam || filters.list_id}</span>
+          <button type="button" onClick={clearListFilter} className="text-pb-faintest hover:text-pb-text underline">clear</button>
+        </div>
+      )}
+
+      <div className={`${CARD} mb-3 flex flex-wrap items-end gap-3`}>
+        <Field label="Search" width="220px">
+          <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder="Club name…" />
+        </Field>
+        <Field label="Stage" width="180px">
+          <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
+        </Field>
+        {isSuper && (
+          <Field label="Owner" width="180px">
+            <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
+              <option value="">Everyone</option>
+              <option value="__unassigned__" disabled>— pick a rep —</option>
+              {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+            </Select>
+          </Field>
+        )}
+        <Field label="Engagement score" width="150px">
+          <div className="flex items-center gap-1.5">
+            <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
+              onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
+            <span className="text-pb-faintest">–</span>
+            <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
+              onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
+          </div>
+        </Field>
+        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
+          <input type="checkbox" checked={filters.never_called}
+            onChange={e => setFilters(f => ({ ...f, never_called: e.target.checked }))} />
+          Never called
+        </label>
+        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
+          <input type="checkbox" checked={filters.callback_due}
+            onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+          Callback due
+        </label>
+        <div className="flex items-center gap-3 pb-1.5" title="From the trial signup wizard — tick both to match either">
+          <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+            <input type="checkbox" checked={filters.meta_selected}
+              onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
+            Selected
+          </label>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+            <input type="checkbox" checked={filters.meta_searched}
+              onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
+            Searched
+          </label>
+        </div>
+      </div>
+
+      {isSuper && checkedIds.size > 0 && (
+        <div className={`${CARD} mb-3 flex flex-wrap items-center gap-3`}>
+          <span className="text-[12px] text-pb-text font-medium">{checkedIds.size} selected</span>
+          <div className="flex flex-wrap gap-1.5">
+            {team.map(u => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => toggleBulkRep(u.id)}
+                className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                  bulkReps.has(u.id) ? 'border-pb-accent text-pb-text' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {u.display_name || u.username}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10.5px] text-pb-faintest">
+            {bulkReps.size > 1 ? 'Splits evenly, round-robin' : bulkReps.size === 1 ? 'Assigns everyone selected to them' : ''}
+          </span>
+          <Btn sm variant="primary" onClick={submitBulkAssign} disabled={bulkAssigning}>
+            {bulkAssigning ? 'Assigning…' : 'Assign selected'}
+          </Btn>
+          <Btn sm variant="subtle" onClick={() => { setCheckedIds(new Set()); setBulkReps(new Set()) }}>Clear</Btn>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
+        {/* Queue */}
+        <div className={CARD}>
+          {!loadingList && (
+            <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
+              <span>
+                <span className="text-pb-text font-medium">{clubs.length}</span> club{clubs.length === 1 ? '' : 's'}
+              </span>
+              <span>
+                <span className="text-pb-text font-medium">{totalContacts}</span> contact{totalContacts === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
+          {loadingList ? (
+            <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
+          ) : clubs.length === 0 ? (
+            <p className="text-[12px] text-pb-faintest px-1 py-2">No clubs match these filters.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-[75vh] overflow-y-auto">
+              {isSuper && (
+                <label className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-pb-faint cursor-pointer select-none">
+                  <input type="checkbox" checked={allChecked} onChange={toggleSelectAllVisible} />
+                  Select all filtered
+                </label>
+              )}
+              {clubs.map(c => (
+                <div key={c.id} className="flex items-start gap-1.5">
+                  {isSuper && (
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.has(c.id)}
+                      onChange={() => toggleChecked(c.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="mt-3"
+                    />
+                  )}
+                  <button
+                    onClick={() => selectClub(c.id)}
+                    className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
+                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
+                    }`}
+                  >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-pb-text text-[13px] font-medium truncate">{c.marketing_club_name || c.title}</span>
+                    <PriorityBadge score={c.priority_score} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <span className="text-[10.5px] text-pb-faint">{c.stage_name}{isSuper && c.owner_name ? ` · ${c.owner_name}` : ''}</span>
+                    <ScorePill score={c.engagement_score} tier={c.engagement_tier} />
+                  </div>
+                  <div className="flex items-center justify-between gap-2 mt-1 text-[10.5px] text-pb-faintest">
+                    <span>{c.contact_count} contact{c.contact_count === 1 ? '' : 's'}</span>
+                    <span>
+                      {!c.ever_called ? 'Never called' : `Last call ${timeAgo(c.last_call?.occurred_at)}`}
+                      {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
+                    </span>
+                  </div>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Drawer */}
+        <div className="space-y-3">
+          {!selectedId ? (
+            <div className={CARD}><p className="text-[12px] text-pb-faintest">Pick a club from the queue to get started.</p></div>
+          ) : loadingDrawer || !drawer ? (
+            <div className={CARD}><p className="text-[12px] text-pb-faintest">Loading…</p></div>
+          ) : (
+            <>
+              <div className={CARD}>
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div>
+                    <h2 className="font-display font-bold text-lg">{drawer.deal.marketing_club_name || drawer.deal.title}</h2>
+                    <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-0.5">{drawer.deal.stage_name}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {drawer.can_assign && (
+                      <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
+                        <option value="">Unassigned</option>
+                        {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+                      </Select>
+                    )}
+                    {!drawer.deal.is_customer && drawer.deal.marketing_club_id && (
+                      <Btn variant="primary" sm onClick={() => setShowStartTrial(true)}>Start trial</Btn>
+                    )}
+                  </div>
+                </div>
+                {drawer.deal.not_interested && (
+                  <p className="mt-2 text-[11.5px] text-pb-red">
+                    Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
+                  </p>
+                )}
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
+                <EngagementPanel engagement={drawer.engagement} />
+              </div>
+
+              <div className={CARD}>
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="font-display font-bold text-[13px]">Contacts</h3>
+                  <Btn sm variant="subtle" onClick={() => setShowAddContact(s => !s)}>{showAddContact ? 'Cancel' : '+ Add contact'}</Btn>
+                </div>
+                {showAddContact && (
+                  <form onSubmit={submitContact} className="grid grid-cols-2 gap-2 mb-3 pb-3 border-b border-pb-hairline">
+                    <Field label="Name"><TextInput value={contactForm.full_name} onChange={e => setContactForm(f => ({ ...f, full_name: e.target.value }))} /></Field>
+                    <Field label="Role"><TextInput value={contactForm.role} onChange={e => setContactForm(f => ({ ...f, role: e.target.value }))} placeholder="e.g. Secretary" /></Field>
+                    <Field label="Email"><TextInput type="email" value={contactForm.email} onChange={e => setContactForm(f => ({ ...f, email: e.target.value }))} /></Field>
+                    <Field label="Mobile"><TextInput value={contactForm.mobile} onChange={e => setContactForm(f => ({ ...f, mobile: e.target.value }))} /></Field>
+                    <div className="col-span-2"><Btn type="submit" variant="primary" sm disabled={savingContact}>{savingContact ? 'Saving…' : 'Save contact'}</Btn></div>
+                  </form>
+                )}
+                {(drawer.contacts || []).length === 0 ? (
+                  <p className="text-[12px] text-pb-faintest">No contacts on file for this club yet.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {drawer.contacts.map(c => (
+                      <div key={contactKey(c) || c.full_name} className="flex items-center justify-between gap-2 text-[12px] border-b border-pb-hairline/50 pb-1.5">
+                        <div className="min-w-0">
+                          <span className="text-pb-text">{c.full_name}</span>
+                          {c.role && <span className="text-pb-faint ml-1.5">{c.role}</span>}
+                          {c.do_not_email && <Pill tone="red">opted out</Pill>}
+                          {c.do_not_contact && <Pill tone="red">do not contact{c.do_not_contact_reason ? ` — ${c.do_not_contact_reason}` : ''}</Pill>}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-pb-faintest text-[10.5px] text-right">
+                            {c.email && <div className="truncate max-w-[220px]">{c.email}</div>}
+                            {c.mobile && <div>{c.mobile}</div>}
+                          </div>
+                          {c.directory_contact_id && (
+                            <button
+                              onClick={() => toggleDoNotContact(c)}
+                              className="font-mono text-[9.5px] text-pb-faint hover:text-pb-red transition-colors whitespace-nowrap"
+                            >
+                              {c.do_not_contact ? 'Clear' : 'Do not contact'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Log a call</h3>
+                <form onSubmit={submitCall} className="space-y-2">
+                  <Field label="Contact">
+                    <Select value={callForm.contactKey} onChange={e => setCallForm(f => ({ ...f, contactKey: e.target.value }))}>
+                      <option value="">— no specific contact —</option>
+                      {(drawer.contacts || []).map(c => (
+                        <option key={contactKey(c)} value={contactKey(c)}>
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Outcome">
+                    <Select value={callForm.outcome} onChange={e => setCallForm(f => ({ ...f, outcome: e.target.value }))} required>
+                      <option value="">Pick an outcome…</option>
+                      {groupedOutcomes().map(g => (
+                        <optgroup key={g.category} label={g.label}>
+                          {g.options.map(o => <option key={o.key} value={o.key}>{o.label}</option>)}
+                        </optgroup>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Notes"><TextArea value={callForm.notes} onChange={e => setCallForm(f => ({ ...f, notes: e.target.value }))} /></Field>
+                  <Field label="Follow up (optional)">
+                    <TextInput type="datetime-local" value={callForm.followUpAt} onChange={e => setCallForm(f => ({ ...f, followUpAt: e.target.value }))} />
+                  </Field>
+                  <Btn type="submit" variant="primary" disabled={savingCall}>{savingCall ? 'Saving…' : 'Save call'}</Btn>
+                </form>
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
+                <form onSubmit={submitEmail} className="space-y-2">
+                  <Field label="Contact">
+                    <Select value={emailForm.contactKey} onChange={e => setEmailForm(f => ({ ...f, contactKey: e.target.value }))}>
+                      <option value="">Pick a contact…</option>
+                      {(drawer.contacts || []).filter(c => c.email).map(c => (
+                        <option key={contactKey(c)} value={contactKey(c)}>
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Template">
+                    <Select value={emailForm.template} onChange={e => setEmailForm(f => ({ ...f, template: e.target.value }))}>
+                      <option value="">Pick a template…</option>
+                      {emailTemplates.templates.map(t => (
+                        <option key={t.key} value={t.key}>
+                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {emailForm.template === 'custom' && (
+                    <>
+                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
+                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
+                    </>
+                  )}
+                  <Btn type="submit" variant="primary" disabled={savingEmail}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
+                </form>
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Notes</h3>
+                <form onSubmit={submitNote} className="flex items-start gap-2 mb-3">
+                  <TextInput value={noteForm.body} onChange={e => setNoteForm(f => ({ ...f, body: e.target.value }))}
+                    placeholder="e.g. Secretary is best contact, prefers mobile after 5pm" className="flex-1" />
+                  <label className="flex items-center gap-1 text-[11px] text-pb-faint whitespace-nowrap pt-2">
+                    <input type="checkbox" checked={noteForm.pinned} onChange={e => setNoteForm(f => ({ ...f, pinned: e.target.checked }))} /> Pin
+                  </label>
+                  <Btn type="submit" sm disabled={savingNote}>Add</Btn>
+                </form>
+                {pinnedNotes.length > 0 && (
+                  <div className="mb-3 space-y-1.5">
+                    {pinnedNotes.map(a => (
+                      <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5">{a.body}</div>
+                    ))}
+                  </div>
+                )}
+                <h4 className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1.5">History</h4>
+                {timeline.length === 0 ? (
+                  <p className="text-[12px] text-pb-faintest">No activity yet.</p>
+                ) : timeline.map(a => <ActivityRow key={a.id} a={a} />)}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      {drawer && (
+        <Modal open={showStartTrial} onClose={() => setShowStartTrial(false)} title={`Start a trial for ${drawer.deal.marketing_club_name}`}>
+          <form onSubmit={submitStartTrial} className="space-y-2">
+            <p className="text-[11.5px] text-pb-faint">
+              Sets this club up exactly like Super Admin's New Club — a trial of every module starts immediately,
+              and the person below is emailed an invite link to set their own password.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="First name"><TextInput value={trialForm.admin_first_name} onChange={e => setTrialForm(f => ({ ...f, admin_first_name: e.target.value }))} required /></Field>
+              <Field label="Last name"><TextInput value={trialForm.admin_last_name} onChange={e => setTrialForm(f => ({ ...f, admin_last_name: e.target.value }))} required /></Field>
+            </div>
+            <Field label="Display name" hint="Defaults to first + last if left blank"><TextInput value={trialForm.admin_display_name} onChange={e => setTrialForm(f => ({ ...f, admin_display_name: e.target.value }))} /></Field>
+            <div className="grid grid-cols-2 gap-2">
+              <Field label="Username"><TextInput value={trialForm.admin_username} onChange={e => setTrialForm(f => ({ ...f, admin_username: e.target.value }))} required /></Field>
+              <Field label="Mobile (optional)"><TextInput value={trialForm.admin_mobile_number} onChange={e => setTrialForm(f => ({ ...f, admin_mobile_number: e.target.value }))} /></Field>
+            </div>
+            <Field label="Email"><TextInput type="email" value={trialForm.admin_email} onChange={e => setTrialForm(f => ({ ...f, admin_email: e.target.value }))} required /></Field>
+            <Btn type="submit" variant="primary" disabled={savingTrial}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
+          </form>
+        </Modal>
+      )}
+    </div>
+  )
+
+  // A 'sales' role user doesn't get the Better HQ chrome (most of it is
+  // super-admin-only and hidden from their sidebar anyway) — a lean shell
+  // with just a logout keeps this usable without touching AdminLayout's
+  // shared, super_admin-gated sidebar rendering. A super admin gets the
+  // normal chrome, matching every other Sales section screen.
+  if (!isSuper) {
+    return (
+      <div className="min-h-screen bg-pb-bg">
+        <header className="flex items-center justify-between px-4 py-3 border-b pb-hairline-b">
+          <span className="font-display font-bold text-pb-text">BetterCricket Sales</span>
+          <div className="flex items-center gap-3">
+            <span className="font-mono text-[11px] text-pb-faint">{user?.display_name || user?.username}</span>
+            <button onClick={logout} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors border pb-hairline rounded px-3 py-1.5">
+              LOG OUT
+            </button>
+          </div>
+        </header>
+        <main className="p-4">{content}</main>
+      </div>
+    )
+  }
+  return <AdminLayout>{content}</AdminLayout>
+}
