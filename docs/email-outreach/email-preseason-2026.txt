@@ -1,119 +1,51 @@
-Subject: The season's nearly here. Get the whole club sorted now.
+Subject: {Club}: stats sorted before round one
+
+(Plain-text fallback for email-preseason-2026.html. If you are sending to a
+COLD list, use email-preseason-2026-plain.txt instead: it is written as a real
+plain-text email rather than a transcript of a designed one.)
 
 Hi [first name],
 
-Round one is a few weeks off. Somewhere at your club right now, someone is
-rebuilding last year's spreadsheet, someone else is chasing unpaid match fees
-from March, and nobody has worked out who is on the canteen roster.
+Most clubs keep their stats in a spreadsheet that four people have edited over
+ten years. The same player recorded three different ways. Hundreds filed
+against the wrong season. Career totals that quietly stopped adding up in 2019.
 
-Get it set up now and none of that lands on you in October.
+We import your full history from Cricket Australia, find those errors and fix
+them. After that you never import anything again. Every scorecard flows in on
+its own, week after week, and your site is current on Sunday morning whether
+anyone logged in or not.
 
-Set your club up: https://betterat.cricket/trial
+You are not doing the setup alone. We run a demo for your committee, set it up
+with you, and stay on hand through your first season.
 
-
-IT WAS NEVER JUST STATS
-
-The stats are what most clubs come for. What they keep using is everything
-bolted on around them, all running off the one player list, so nothing gets
-typed in twice.
-
-- BetterStats: every player, every season, reconciled and kept forever, on a
-  public site your club can be proud of.
-  https://betterat.cricket/modules/betterstats
-
-- BetterClubhouse (new): the big one this year. One member directory, match
-  fees that allocate themselves, the volunteer roster, committee meetings with
-  minutes and motions, and a season diary so nothing is remembered the week it
-  was due.
-  https://betterat.cricket/modules/betterclubhouse
-
-- BetterSelect: availability without an app, selection for every grade, and
-  best-player vote counting that adds itself up on the night.
-  https://betterat.cricket/modules/betterselect
-
-- BetterSocials: lineups, results and player-of-the-match graphics built from
-  the scorecard, so match day posts itself.
-  https://betterat.cricket/modules/bettersocials
-
-- BetterIQ: an opposition scouting report on any side you play, built from your
-  own scorecards.
-  https://betterat.cricket/modules/betteriq
+Set your club up free: https://betterat.cricket/trial
+14 days, every module included, no credit card.
+Or book a demo first: https://betterat.cricket/contact
 
 
-DON'T CUT CORNERS WITH YOUR STATS
+IT RUNS THE REST OF THE CLUB TOO
 
-A spreadsheet kept by four different people over ten years is full of errors,
-and everyone knows it. The same bloke entered three different ways. A hundred
-filed against the wrong season. Career totals that quietly stopped adding up
-in 2019.
-
-We pull your history straight from Cricket Australia, then we go looking for
-those errors. Duplicate players get merged, seasons that were recorded twice
-get reconciled, and the figures that never added up get fixed. If your old
-records only live in a spreadsheet, we bring those in and clean them up too.
-
-Most clubs end up with records more accurate than they have ever had.
-
-
-YOU'RE NOT DOING THE SETUP ON YOUR OWN
-
-Nobody at a cricket club has a spare weekend for a software rollout. So we do
-it with you.
-
-  Step 1: A demo for your committee
-  Step 2: We set it up with you
-  Step 3: Mentoring through your first season
-
-We sit down with whoever will use it most, walk your committee through it, and
-stay on hand while your first season goes through. If something looks wrong,
-you tell us and we fix it.
-
-
-SET IT UP ONCE. THEN LEAVE IT ALONE.
-
-This is the part clubs do not quite believe until they see it. Once you are set
-up, you never import anything again. Every scorecard flows in on its own after
-the game, week after week, season after season.
-
-Your site is up to date on Sunday morning whether anyone logged in or not. No
-exports, no re-keying, no end-of-season catch-up week that always falls to the
-same person.
-
-
-GIVE YOUR STATS THE PLATFORM THEY DESERVE
-
-Your club's numbers have been sitting in a spreadsheet doing nothing. Put them
-somewhere that uses them properly: player profiles that read like a career,
-all-time records and honour boards, season yearbooks, and a scouting report on
-the side you are playing on Saturday that tells your captain who to bowl at
-their number three before the toss.
-
-It is the sort of analysis that used to stop at first-class level, worked out
-from the scorecards your club already has.
+BetterClubhouse (new)  Members, fees, volunteers and committee
+                       https://betterat.cricket/modules/betterclubhouse
+BetterSelect           Availability, selection and vote counting
+                       https://betterat.cricket/modules/betterselect
+BetterSocials          Match-day graphics and your club website
+                       https://betterat.cricket/modules/bettersocials
+BetterIQ               Opposition scouting from your own scorecards
+                       https://betterat.cricket/modules/betteriq
 
 
 TRUSTED BY CLUBS AT
 
-Scarborough      https://betterat.cricket/scarborough-cricket-club
+Scarborough          https://betterat.cricket/scarborough-cricket-club
 Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
-Applecross       https://betterat.cricket/applecross
-Leeming Spartan  https://betterat.cricket/leeming-spartan-cricket-club
-
-Every one of these is a live club site. Have a look at what your club's could
-be.
-
-
-Everything is free for 14 days, every module switched on, running on your
-club's own history. Nothing is charged at the end of it and nothing is deleted.
-
-Get your club ready for round one: https://betterat.cricket/trial
-
-Would rather be walked through it first? Book a demo:
-https://betterat.cricket/contact
-
-Reply to this email with any questions and one of us will answer it.
+Applecross           https://betterat.cricket/applecross
+Leeming Spartan      https://betterat.cricket/leeming-spartan-cricket-club
 
 Jack & Elton
 BetterCricket
 support@bettersports.com.au
 https://betterat.cricket
+
+P.S. Round one is a few weeks away. Set it up now and it is done before the
+first ball.

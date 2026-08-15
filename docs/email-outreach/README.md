@@ -4,8 +4,9 @@ Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallba
 
 | File | Use | Subject | Theme |
 |------|-----|---------|-------|
-| `email-preseason-2026.html` | **The current send.** Pre-season push to the cold list (clubs in the directory who have never signed up) | The season's nearly here. Get the whole club sorted now. | Dark navy, section rules, five module cards with BetterClubhouse badged NEW, static trusted-by strip |
-| `email-preseason-2026-lapsed.html` | The same push to the warm list (past enquiries and unfinished trials) | A fair bit has changed since you last looked at us | Same shell, roughly half the length, leads on what is new |
+| `email-preseason-2026-plain.txt` | **Send this to a cold list.** Written as a real plain-text email from one person | {Club}: stats sorted before round one | No template at all, on purpose. See the format note below |
+| `email-preseason-2026.html` | The branded version, for the warm list | {Club}: stats sorted before round one | Dark navy, one CTA, compact module list, static trusted-by strip |
+| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | What's changed since you looked | Same shell, three numbered changes and nothing else |
 | `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
 | `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
@@ -19,24 +20,48 @@ share the campaign so the send reads as one line on the ad-signups report;
 `utm_content` is what separates them (`edm_*` on the cold email,
 `edm_lapsed_*` on the warm one).
 
-**Split the list before sending.** The cold email explains what BetterCricket
-is; the warm one assumes they already know and would read as condescending to
-someone who has never heard of us. Alternative subject lines are listed in the
-comment at the top of each HTML file.
+**Split the list before sending.** The cold email explains the problem from
+scratch; the re-engagement one assumes they already know what BetterCricket is
+and would read as a mailshot if it repeated the pitch. Alternative subject lines
+are in the comment at the top of each HTML file.
 
-**What each one argues, in order.** Cold: the season is close and the jobs are
-piling up, it was never just stats (the five modules), your spreadsheet has
-errors in it and we find them, you are not doing the setup alone, set it up
-once and never touch it again, then the analysis payoff, then proof, then the
-trial. Warm: here is what is new since you looked (BetterClubhouse, vote
-counting, guided setup), a short reminder of the accuracy and set-and-forget
-argument, proof, then the trial.
+### Why these are shaped the way they are
 
-**CTA structure is trial first, demo second.** Every green button goes to
-`/trial`. Under each one, a smaller "Book a demo with us" text link goes to
-`/contact`. The demo link exists because the emails promise hand-holding, and a
-committee that wants that needs somewhere to land other than a self-serve
-signup form.
+Written against published cold-email benchmarks rather than instinct. The rules
+that drove the structure, and what they cost:
+
+- **Length.** Reply rates peak at 50-125 words and fall roughly by half past 200
+  (8.2% vs 3.9% across a 4M+ email aggregate; Boomerang's 40M-email study puts
+  the sweet spot near 75). The cold email's reading copy is about 155 words,
+  which is over the ideal because the brief has six things to say. That was the
+  trade: every extra point costs reply rate. **If you cut, cut the module list,
+  not the spreadsheet-errors paragraph** — that paragraph is the hook.
+- **One CTA.** Every green button goes to `/trial` and nothing competes with it.
+  The demo option is a small text link underneath, not a second button, because
+  a rival button splits the click.
+- **Problem, then agitate, then solution.** The email opens on their spreadsheet
+  rather than on us, makes the cost of it concrete (three specific failures, not
+  "errors creep in"), and only then says what we do. Specific beats general:
+  "totals that stopped adding up in 2019" outperforms "inaccurate data".
+- **Subject lines are 3-7 words** and personalised with `{Club}`. One
+  personalised attribute is worth a real lift in opens, and the club name is the
+  one attribute we always hold. Anything past 60 characters truncates on mobile.
+- **The deadline sits in the P.S.**, which is one of the most-read lines in an
+  email. Opening on the season would have pushed the hook down the page.
+- **The old draft's section headings are gone.** Headed sections make an email
+  read as a newsletter, and a newsletter is skimmed rather than answered.
+
+### Plain text for cold, HTML for warm
+
+This is the one place the research argues against a designed template. In B2B
+outreach, plain text from a named person beats styled HTML on replies by a wide
+margin, because a designed email reads as a broadcast and people answer emails
+that look like they were written to them.
+
+So `email-preseason-2026-plain.txt` is the cold-list send: 113 words, no logo,
+no buttons, sent from Jack's own address. The HTML version is for the warm list,
+where the crests and the brand do real work and nobody is deciding whether you
+are a stranger. **If you only send one thing to strangers, send the plain one.**
 
 ### The trusted-by strip
 

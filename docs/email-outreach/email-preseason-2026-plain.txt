@@ -1,0 +1,41 @@
+Subject: {Club}: stats sorted before round one
+
+--------------------------------------------------------------------------
+THIS IS THE ONE TO SEND COLD.
+
+113 words. Send it as a genuine plain-text email from Jack's own address, not
+through a template. No logo, no buttons, no colours. It should look like a
+normal email one person wrote to another, because in B2B outreach that is what
+gets replies: plain text beats designed HTML by a wide margin on reply rate,
+and reply rates peak at 50-125 words.
+
+Use the HTML version (email-preseason-2026.html) for the warm list, where the
+brand and the club logos do real work and nobody is deciding whether you are a
+stranger.
+
+{Club} in the subject is a merge field. If your tool cannot merge it, use
+"Your stats before round one" instead. Do not send it with the braces showing.
+--------------------------------------------------------------------------
+
+
+Hi [first name],
+
+Most clubs keep their stats in a spreadsheet four people have edited over ten
+years. The same player recorded three ways, hundreds filed against the wrong
+season, totals that stopped adding up in 2019.
+
+We import your full history from Cricket Australia, fix the errors in it, and
+then you never import anything again. Every scorecard flows in on its own after
+the game.
+
+We run the demo, set it up with you, and stay on hand through your first
+season. It is free for 14 days.
+
+Worth a look before round one?
+
+Jack
+BetterCricket
+support@bettersports.com.au
+
+P.S. Applecross, Scarborough and Leeming Spartan are all running on it:
+https://betterat.cricket/applecross

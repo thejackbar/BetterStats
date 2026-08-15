@@ -1,70 +1,31 @@
-Subject: A fair bit has changed since you last looked at us
+Subject: What's changed since you looked
 
 Hi [first name],
 
-You had a look at BetterCricket a while back and it did not go anywhere. Fair
-enough, it is usually timing rather than the product.
+You looked at BetterCricket a while back and it did not go ahead. Three things
+are different now, and all three were common reasons clubs held off.
 
-It is a bigger thing than it was. Here is what is actually new, and why now is
-the week to do something about it.
+1. BetterClubhouse. A club and volunteer admin tool that did not exist before:
+   members, fees, the roster, and committee meetings with minutes and motions.
+   https://betterat.cricket/modules/betterclubhouse
 
+2. Vote counting. Players vote on their phone, the count adds itself up, and
+   the club champion standings are ready for presentation night.
+   https://betterat.cricket/modules/betterselect
 
-BETTERCLUBHOUSE (new)
-
-A whole club and volunteer admin tool that did not exist last time you looked.
-One member directory, match fees that allocate themselves, the volunteer roster
-and hours, committee meetings with minutes and motions, and a season diary.
-https://betterat.cricket/modules/betterclubhouse
-
-
-VOTE COUNTING, IN BETTERSELECT
-
-Players vote on their phone after the game, the count adds itself up, and the
-club champion standings are ready for presentation night without a shoebox of
-paper slips.
-https://betterat.cricket/modules/betterselect
-
-
-WE RUN THE SETUP WITH YOU NOW
-
-If what stopped you last time was the thought of setting it all up, that is not
-on you any more. A demo for your committee, a session with whoever will use it
-most, and we stay on hand through your first season.
-
-
-The rest is what it always was, and it still matters more than any of the
-above. We pull your history from Cricket Australia and then go looking for the
-errors in it: the same bloke entered three different ways, hundreds filed
-against the wrong season, totals that stopped adding up years ago. Those get
-merged, reconciled and fixed.
-
-Then you never import anything again. Every scorecard flows in on its own after
-the game, for good.
-
-
-TRUSTED BY CLUBS AT
-
-Scarborough      https://betterat.cricket/scarborough-cricket-club
-Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
-Applecross       https://betterat.cricket/applecross
-Leeming Spartan  https://betterat.cricket/leeming-spartan-cricket-club
-
-All live club sites. Have a look at where your club would have been by now.
-
-
-Round one is a few weeks off, which makes this the last quiet fortnight your
-committee will get. Set it up now and it is done before the first ball. Free
-for 14 days, every module on, nothing charged at the end and nothing deleted.
+3. We run the setup with you. A demo for your committee, a session with whoever
+   will use it most, and we stay on hand through your first season.
 
 Pick it back up: https://betterat.cricket/trial
+14 days, every module included, no credit card.
+Or book a demo this time: https://betterat.cricket/contact
 
-Would rather we walked you through it this time? Book a demo:
-https://betterat.cricket/contact
-
-If it is still not the right time, reply and tell me what is in the way. That
-is genuinely useful to us.
+Clubs running on it: Scarborough, Rockingham-Mandurah, Applecross and Leeming
+Spartan. https://betterat.cricket/applecross
 
 Jack & Elton
 BetterCricket
 support@bettersports.com.au
-https://betterat.cricket
+
+P.S. If it is still not the right time, reply and tell me what is in the way.
+That is genuinely useful to us.
