@@ -2023,6 +2023,7 @@ export const api = {
   salesWorkspaceClubs: (params = {}) => {
     const qs = new URLSearchParams()
     Object.entries(params).forEach(([k, v]) => {
+      if (Array.isArray(v)) { if (v.length) qs.set(k, v.join(',')); return }
       if (v !== undefined && v !== null && v !== '' && v !== false) qs.set(k, v)
     })
     const q = qs.toString()

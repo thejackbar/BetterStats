@@ -827,3 +827,25 @@ async def create_list_from_crm_deals(
         "clubs_matched": len(seen_club_ids),
         "clubs_unmatched": unmatched,
     }
+
+
+async def wizard_source_by_club(session: AsyncSession, days: int = 365) -> dict:
+    """marketing_club_id -> {'selected': bool, 'searched': bool} from the
+    Wizard Clubs / Meta Ads data — the SAME guid-first, name-fallback
+    matching the Wizard Clubs page itself uses (wizard_club_lists), never a
+    second matcher. Only called when the queue's Meta-Ad source filter is
+    actually in use — it's an extra query over the beacon tables, not worth
+    paying on every ordinary queue load."""
+    from app.services import wizard_club_lists as wcl
+
+    rows = await wcl.merged_wizard_clubs(session, days)
+    matches = await wcl._directory_matches(session, rows)
+    out: dict = {}
+    for r in rows:
+        club = matches.get(r["key"])
+        if club is None:
+            continue
+        flags = out.setdefault(club.id, {"selected": False, "searched": False})
+        flags["selected"] = flags["selected"] or bool(r.get("in_selected"))
+        flags["searched"] = flags["searched"] or bool(r.get("in_searched"))
+    return out

@@ -82,6 +82,8 @@ async def list_clubs(
     list_id: Optional[str] = None,
     min_score: Optional[int] = None,
     max_score: Optional[int] = None,
+    meta_selected: bool = False,
+    meta_searched: bool = False,
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
@@ -93,7 +95,12 @@ async def list_clubs(
     ``max_score`` filter on the club's engagement score (0-100) — a deal
     with no score (no linked club, or never scored) is excluded whenever
     either bound is set, same rule the Sales Pipeline board's own score
-    filter uses."""
+    filter uses. ``stage_key`` may hold several stage keys comma-separated
+    (a club matching ANY of them is kept — narrowing to "Target, Contacted"
+    is an OR within the field). ``meta_selected``/``meta_searched`` filter to
+    clubs that picked themselves / searched for themselves in the trial
+    signup wizard (Meta Ads' own source split); ticking both is an OR
+    ("either"), ticking one is that one alone."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -113,8 +120,16 @@ async def list_clubs(
         member_ids = set(member_rows)
         deals = [d for d in deals if d.marketing_club_id in member_ids]
     if stage_key:
-        target = stage_by_key.get(stage_key)
-        deals = [d for d in deals if target and d.stage_id == target.id]
+        wanted_stage_ids = {stage_by_key[k].id for k in stage_key.split(",") if k in stage_by_key}
+        deals = [d for d in deals if d.stage_id in wanted_stage_ids]
+    if meta_selected or meta_searched:
+        wizard_map = await sw.wizard_source_by_club(db)
+        def _meta_match(club_id):
+            flags = wizard_map.get(club_id)
+            if not flags:
+                return False
+            return (meta_selected and flags["selected"]) or (meta_searched and flags["searched"])
+        deals = [d for d in deals if d.marketing_club_id and _meta_match(d.marketing_club_id)]
     if q:
         needle = q.strip().lower()
         deals = [d for d in deals if needle in (d.title or "").lower()]

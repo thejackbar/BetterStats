@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
@@ -8,6 +8,62 @@ import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } fro
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
+
+// Close-on-outside-click + Escape, for the Stage multi-select popover below.
+function useDismiss(open, onClose) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    const onKey = (e) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open, onClose])
+  return ref
+}
+
+// Stage is a multi-select: narrowing to "Target, Contacted" is an OR within
+// the field (a club at either stage matches), same convention BetterIQ's
+// TeamPicker uses for a multi-grade filter.
+function StagePicker({ stages, value, onChange }) {
+  const [open, setOpen] = useState(false)
+  const ref = useDismiss(open, () => setOpen(false))
+  const picked = new Set(value)
+  const toggle = (key) => {
+    const next = new Set(picked)
+    if (next.has(key)) next.delete(key); else next.add(key)
+    onChange([...next])
+  }
+  const label = picked.size === 0 ? 'All stages'
+    : picked.size === 1 ? stages.find(s => s.key === value[0])?.name || value[0]
+    : `${picked.size} stages`
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button" onClick={() => setOpen(o => !o)}
+        className="w-full bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-2 text-[13.5px] outline-none focus:border-pb-accent text-left flex items-center justify-between gap-2"
+      >
+        <span className={picked.size === 0 ? 'text-pb-faint' : ''}>{label}</span>
+        <span className="text-pb-faintest text-[10px]">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-20 mt-1 w-full rounded-lg border border-pb-hairline2 bg-pb-surface shadow-lg py-1 max-h-64 overflow-y-auto">
+          <button type="button" onClick={() => onChange([])}
+            className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${picked.size === 0 ? 'text-pb-accent' : 'text-pb-text'}`}>
+            All stages
+          </button>
+          {stages.map(s => (
+            <label key={s.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
+              <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
+              {s.name}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
 
 function ScorePill({ score, tier }) {
@@ -108,8 +164,8 @@ export default function SalesWorkspace() {
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [filters, setFilters] = useState({
-    q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false, list_id: '',
-    min_score: '', max_score: '',
+    q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
+    min_score: '', max_score: '', meta_selected: false, meta_searched: false,
   })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
@@ -384,10 +440,7 @@ export default function SalesWorkspace() {
           <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder="Club name…" />
         </Field>
         <Field label="Stage" width="180px">
-          <Select value={filters.stage_key} onChange={e => setFilters(f => ({ ...f, stage_key: e.target.value }))}>
-            <option value="">All stages</option>
-            {stages.map(s => <option key={s.id} value={s.key}>{s.name}</option>)}
-          </Select>
+          <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
         </Field>
         {isSuper && (
           <Field label="Owner" width="180px">
@@ -417,6 +470,19 @@ export default function SalesWorkspace() {
             onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
           Callback due
         </label>
+        <div className="flex items-center gap-3 pb-1.5" title="From the trial signup wizard — tick both to match either">
+          <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+            <input type="checkbox" checked={filters.meta_selected}
+              onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
+            Selected
+          </label>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+            <input type="checkbox" checked={filters.meta_searched}
+              onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
+            Searched
+          </label>
+        </div>
       </div>
 
       {isSuper && checkedIds.size > 0 && (
