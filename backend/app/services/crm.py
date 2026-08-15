@@ -568,6 +568,7 @@ def _activity_dict(activity: CrmActivity) -> dict:
         "body": activity.body,
         "outcome": activity.outcome,
         "next_follow_up_at": activity.next_follow_up_at.isoformat() if activity.next_follow_up_at else None,
+        "follow_up_done_at": activity.follow_up_done_at.isoformat() if activity.follow_up_done_at else None,
         "occurred_at": activity.occurred_at.isoformat() if activity.occurred_at else None,
         "created_by_user_id": str(activity.created_by_user_id) if activity.created_by_user_id else None,
         "meta": activity.meta,

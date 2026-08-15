@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
@@ -104,6 +105,7 @@ export default function SalesWorkspace() {
   const { user, logout } = useAuth()
   const toast = useToast()
   const isSuper = user?.role === 'super_admin'
+  const [searchParams, setSearchParams] = useSearchParams()
 
   const [filters, setFilters] = useState({ q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false })
   const [clubs, setClubs] = useState([])
@@ -149,8 +151,33 @@ export default function SalesWorkspace() {
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
-  const selectClub = (dealId) => { setSelectedId(dealId); loadDrawer(dealId) }
+  const selectClub = (dealId) => {
+    setSelectedId(dealId)
+    loadDrawer(dealId)
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.set('club', dealId); return n }, { replace: true })
+  }
   const refreshBoth = () => { loadClubs(); if (selectedId) loadDrawer(selectedId) }
+
+  // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
+  useEffect(() => {
+    const clubParam = searchParams.get('club')
+    if (clubParam && clubParam !== selectedId) selectClub(clubParam)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const toggleDoNotContact = async (contact) => {
+    const next = !contact.do_not_contact
+    let reason = null
+    if (next) {
+      reason = window.prompt('Reason (optional) — e.g. "Asked not to be called again"') || null
+    }
+    try {
+      await api.salesWorkspaceSetDoNotContact(drawer.deal.id, contact.directory_contact_id, next, reason)
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    }
+  }
 
   const pinnedNotes = useMemo(
     () => (drawer?.activities || []).filter(a => a.type === 'note' && a.meta?.pinned),
@@ -351,6 +378,11 @@ export default function SalesWorkspace() {
                     )}
                   </div>
                 </div>
+                {drawer.deal.not_interested && (
+                  <p className="mt-2 text-[11.5px] text-pb-red">
+                    Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
+                  </p>
+                )}
               </div>
 
               <div className={CARD}>
@@ -382,10 +414,21 @@ export default function SalesWorkspace() {
                           <span className="text-pb-text">{c.full_name}</span>
                           {c.role && <span className="text-pb-faint ml-1.5">{c.role}</span>}
                           {c.do_not_email && <Pill tone="red">opted out</Pill>}
+                          {c.do_not_contact && <Pill tone="red">do not contact{c.do_not_contact_reason ? ` — ${c.do_not_contact_reason}` : ''}</Pill>}
                         </div>
-                        <div className="text-pb-faintest text-[10.5px] text-right shrink-0">
-                          {c.email && <div className="truncate max-w-[220px]">{c.email}</div>}
-                          {c.mobile && <div>{c.mobile}</div>}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="text-pb-faintest text-[10.5px] text-right">
+                            {c.email && <div className="truncate max-w-[220px]">{c.email}</div>}
+                            {c.mobile && <div>{c.mobile}</div>}
+                          </div>
+                          {c.directory_contact_id && (
+                            <button
+                              onClick={() => toggleDoNotContact(c)}
+                              className="font-mono text-[9.5px] text-pb-faint hover:text-pb-red transition-colors whitespace-nowrap"
+                            >
+                              {c.do_not_contact ? 'Clear' : 'Do not contact'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -400,7 +443,9 @@ export default function SalesWorkspace() {
                     <Select value={callForm.contactKey} onChange={e => setCallForm(f => ({ ...f, contactKey: e.target.value }))}>
                       <option value="">— no specific contact —</option>
                       {(drawer.contacts || []).map(c => (
-                        <option key={contactKey(c)} value={contactKey(c)}>{c.full_name}{c.role ? ` (${c.role})` : ''}</option>
+                        <option key={contactKey(c)} value={contactKey(c)}>
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                        </option>
                       ))}
                     </Select>
                   </Field>

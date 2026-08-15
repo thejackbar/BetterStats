@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import ClubMembership, CrmDeal, MarketingClub, User, get_db
+from app.models.db import ClubMembership, CrmActivity, CrmDeal, CrmPerson, MarketingClub, MarketingClubContact, User, get_db
 from app.routers.auth import SalesActor, require_sales_or_super
 from app.services import crm as crm_service
 from app.services import sales_workspace as sw
@@ -114,10 +114,12 @@ async def list_clubs(
 
     out = []
     for d in deals:
-        row = crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club_by_id.get(d.marketing_club_id))
+        club = club_by_id.get(d.marketing_club_id)
+        row = crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club)
         owner = owners.get(d.owner_user_id)
         row["owner_name"] = (owner.display_name or owner.username) if owner else None
         row["contact_count"] = contact_counts.get(d.marketing_club_id, 0)
+        row["not_interested"] = bool(club.not_interested) if club else False
         last_call = last_calls.get(d.id)
         row["ever_called"] = last_call is not None
         row["last_call"] = crm_service._activity_dict(last_call) if last_call else None
@@ -189,6 +191,7 @@ async def get_club(
     # would otherwise throw MissingGreenlet the moment _deal_dict tried to
     # read an attribute off `deal` afterward.
     deal_out = crm_service._deal_dict(deal, stage, club)
+    deal_out["not_interested"] = bool(club.not_interested) if club else False
     stage_options = [{"id": str(s.id), "key": s.key, "name": s.name} for s in (pipeline.stages if pipeline else [])]
 
     engagement = None
@@ -305,6 +308,109 @@ async def add_contact(
         db, marketing_club_id=deal.marketing_club_id, full_name=body.full_name.strip(),
         role=body.role, email=body.email, mobile=body.mobile,
     )
+    await db.commit()
+    return {"status": "ok"}
+
+
+class DoNotContactBody(BaseModel):
+    do_not_contact: bool
+    reason: Optional[str] = None
+
+
+@router.patch("/clubs/{deal_id}/contacts/{contact_id}/do-not-contact")
+async def set_contact_do_not_contact(
+    deal_id: str,
+    contact_id: str,
+    body: DoNotContactBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Scoped through the deal (not a bare contact id) so the same ownership
+    check every other write here uses applies — a sales rep can only flag a
+    contact belonging to a club that's actually theirs."""
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    cid = _uuid_or_none(contact_id)
+    contact = await db.get(MarketingClubContact, cid) if cid else None
+    if contact is None or contact.marketing_club_id != deal.marketing_club_id:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    await sw.set_contact_do_not_contact(db, contact, body.do_not_contact, body.reason)
+    await db.commit()
+    return {"status": "ok"}
+
+
+# ─── Follow-ups queue ──────────────────────────────────────────────────────────
+
+@router.get("/follow-ups")
+async def follow_ups(
+    owner_user_id: Optional[str] = None,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    effective_owner = actor.user.id if actor.role == "sales" else (_uuid_or_none(owner_user_id) if owner_user_id else None)
+    rows = await sw.list_follow_ups(db, owner_user_id=effective_owner)
+
+    deal_ids = {a.deal_id for a in rows if a.deal_id}
+    deals = {}
+    if deal_ids:
+        deal_rows = (await db.execute(select(CrmDeal).where(CrmDeal.id.in_(deal_ids)))).scalars().all()
+        deals = {d.id: d for d in deal_rows}
+    club_by_id = await crm_service.clubs_by_ids(db, (d.marketing_club_id for d in deals.values()))
+    person_ids = {a.person_id for a in rows if a.person_id}
+    people = {}
+    if person_ids:
+        person_rows = (await db.execute(select(CrmPerson).where(CrmPerson.id.in_(person_ids)))).scalars().all()
+        people = {p.id: p for p in person_rows}
+    owner_ids = {d.owner_user_id for d in deals.values() if d.owner_user_id}
+    owners = {}
+    if owner_ids:
+        owner_rows = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
+        owners = {u.id: u for u in owner_rows}
+
+    out = []
+    for a in rows:
+        deal = deals.get(a.deal_id)
+        club = club_by_id.get(deal.marketing_club_id) if deal else None
+        person = people.get(a.person_id) if a.person_id else None
+        owner = owners.get(deal.owner_user_id) if deal and deal.owner_user_id else None
+        due_at = a.next_follow_up_at
+        bucket = "upcoming"
+        if due_at is not None:
+            due_naive = due_at.replace(tzinfo=None) if due_at.tzinfo else due_at
+            today = datetime.utcnow().date()
+            if due_naive.date() < today:
+                bucket = "overdue"
+            elif due_naive.date() == today:
+                bucket = "today"
+        out.append({
+            "activity_id": str(a.id),
+            "deal_id": str(a.deal_id) if a.deal_id else None,
+            "club_name": club.name if club else (deal.title if deal else None),
+            "contact_name": person.full_name if person else None,
+            "owner_name": (owner.display_name or owner.username) if owner else None,
+            "outcome": a.outcome,
+            "notes": a.body,
+            "due_at": due_at.isoformat() if due_at else None,
+            "bucket": bucket,
+        })
+    return {"follow_ups": out}
+
+
+@router.post("/follow-ups/{activity_id}/done")
+async def complete_follow_up(
+    activity_id: str,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    aid = _uuid_or_none(activity_id)
+    activity = await db.get(CrmActivity, aid) if aid else None
+    if activity is None:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    deal = await _load_deal(db, str(activity.deal_id)) if activity.deal_id else None
+    if deal is None:
+        raise HTTPException(status_code=404, detail="Follow-up not found")
+    _assert_can_touch(actor, deal)
+    await sw.mark_follow_up_done(db, activity)
     await db.commit()
     return {"status": "ok"}
 

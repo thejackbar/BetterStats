@@ -5255,6 +5255,21 @@ async def lifespan(app: FastAPI):
             "ON crm_people(directory_contact_id) WHERE directory_contact_id IS NOT NULL"
         ))
 
+        # Migration 256: Sales Workspace Phase 2a — Follow-ups queue +
+        # do-not-contact. follow_up_done_at is the explicit "mark resolved"
+        # signal for a pending callback; do_not_contact/_reason is the
+        # PERSON-level "don't call me" flag (club-level reuses the existing
+        # marketing_clubs.not_interested, no new column for that). Byte-
+        # identical to alembic/versions/256_sales_workspace_followups.py.
+        await conn.execute(text("ALTER TABLE crm_activities ADD COLUMN IF NOT EXISTS follow_up_done_at TIMESTAMPTZ"))
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS do_not_contact "
+            "BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS do_not_contact_reason TEXT"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

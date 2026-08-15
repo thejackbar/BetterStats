@@ -24,7 +24,7 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClubContact
+from app.models.db import CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact
 from app.services import crm as crm_service
 
 # ─── Call outcome taxonomy ───────────────────────────────────────────────────
@@ -75,6 +75,14 @@ _LOST_OUTCOMES = ("not_interested", "dont_call_again", "remove_from_list")
 # Stages a deal can still be auto-advanced FROM on a positive outcome — never
 # regresses a deal already at engaged/trial/proposal/won.
 _ADVANCEABLE_STAGE_KEYS = ("manually_added", "target", "contacted")
+
+# Outcomes that also mean "stop contacting this person/club", not merely
+# "we didn't win this cycle" — deliberately narrower than _LOST_OUTCOMES.
+# 'not_interested' closes the deal (see _LOST_OUTCOMES above) but a club
+# not interested in trialling TODAY is legitimately worth another look in
+# six months, so it does NOT flip do_not_contact/not_interested on its own —
+# only an explicit stop request does.
+_DO_NOT_CONTACT_OUTCOMES = ("dont_call_again", "remove_from_list")
 
 
 def outcome_options() -> list[dict]:
@@ -130,6 +138,8 @@ async def merged_contacts(session: AsyncSession, marketing_club_id) -> list[dict
             "mobile": c.mobile,
             "subscribed": c.subscribed,
             "do_not_email": bool(c.unsubscribed_at) or bool(c.bounced) or not c.subscribed,
+            "do_not_contact": bool(c.do_not_contact),
+            "do_not_contact_reason": c.do_not_contact_reason,
         }
         out.append(row)
         if key:
@@ -163,6 +173,8 @@ async def merged_contacts(session: AsyncSession, marketing_club_id) -> list[dict
             "mobile": p.phone,
             "subscribed": None,
             "do_not_email": False,
+            "do_not_contact": False,
+            "do_not_contact_reason": None,
         })
 
     out.sort(key=lambda r: (r["role_rank"] if r["role_rank"] is not None else 99))
@@ -286,7 +298,34 @@ async def log_call(
         # (section 15's "call recorded -> contacted" rule).
         await _move_to_stage_key(session, deal, "contacted")
 
+    if outcome in _DO_NOT_CONTACT_OUTCOMES:
+        # An explicit stop request propagates to BOTH axes: the person (if
+        # this call was logged against one, and it's bridged to a directory
+        # contact — a lazily-materialized CRM-only person has no directory
+        # row to flag) and the club as a whole, via the existing
+        # marketing_clubs.not_interested flag (see migration 256's docstring
+        # for why that's reused rather than a new column).
+        if person is not None and person.directory_contact_id is not None:
+            contact = await session.get(MarketingClubContact, person.directory_contact_id)
+            if contact is not None:
+                contact.do_not_contact = True
+                contact.do_not_contact_reason = CALL_OUTCOMES[outcome]["label"]
+        if deal.marketing_club_id is not None:
+            club = await session.get(MarketingClub, deal.marketing_club_id)
+            if club is not None:
+                club.not_interested = True
+        await session.flush()
+
     return activity
+
+
+async def set_contact_do_not_contact(
+    session: AsyncSession, contact: MarketingClubContact, flag: bool, reason: Optional[str],
+) -> MarketingClubContact:
+    contact.do_not_contact = flag
+    contact.do_not_contact_reason = (reason or None) if flag else None
+    await session.flush()
+    return contact
 
 
 async def _move_to_stage_key(session: AsyncSession, deal: CrmDeal, stage_key: str) -> None:
@@ -364,7 +403,9 @@ async def last_calls_by_deal(session: AsyncSession, deal_ids) -> dict:
 
 
 async def next_follow_ups_by_deal(session: AsyncSession, deal_ids) -> dict:
-    """deal_id -> the earliest still-pending next_follow_up_at, batched."""
+    """deal_id -> the earliest still-PENDING next_follow_up_at, batched. A
+    follow-up marked done (follow_up_done_at set) no longer counts — a
+    resolved callback shouldn't keep nagging the queue row."""
     ids = {d for d in deal_ids if d is not None}
     if not ids:
         return {}
@@ -373,10 +414,42 @@ async def next_follow_ups_by_deal(session: AsyncSession, deal_ids) -> dict:
         .where(
             CrmActivity.deal_id.in_(ids),
             CrmActivity.next_follow_up_at.isnot(None),
+            CrmActivity.follow_up_done_at.is_(None),
         )
         .group_by(CrmActivity.deal_id)
     )).all()
     return {r[0]: r[1] for r in rows}
+
+
+# ─── Follow-ups queue ─────────────────────────────────────────────────────────
+
+async def list_follow_ups(session: AsyncSession, *, owner_user_id=None) -> list[CrmActivity]:
+    """Every PENDING follow-up (next_follow_up_at set, follow_up_done_at
+    NULL), oldest-due first — the caller categorises into overdue/today/
+    upcoming, since "today" depends on the caller's own clock/timezone
+    handling, not something to bake in here. owner_user_id restricts to one
+    rep's own deals (a 'sales'-role caller always passes their own id; a
+    super admin passes None for everyone, or a specific rep to inspect their
+    queue)."""
+    stmt = (
+        select(CrmActivity)
+        .join(CrmDeal, CrmDeal.id == CrmActivity.deal_id)
+        .where(
+            CrmActivity.next_follow_up_at.isnot(None),
+            CrmActivity.follow_up_done_at.is_(None),
+            CrmDeal.archived_at.is_(None),
+        )
+        .order_by(CrmActivity.next_follow_up_at.asc())
+    )
+    if owner_user_id is not None:
+        stmt = stmt.where(CrmDeal.owner_user_id == owner_user_id)
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def mark_follow_up_done(session: AsyncSession, activity: CrmActivity) -> CrmActivity:
+    activity.follow_up_done_at = func.now()
+    await session.flush()
+    return activity
 
 
 async def contact_counts_by_club(session: AsyncSession, marketing_club_ids) -> dict:

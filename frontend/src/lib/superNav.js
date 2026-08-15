@@ -63,6 +63,7 @@ export const SUPER_SECTIONS = [
       { to: '/admin/super/crm/wizard-clubs', label: 'Clubs Searched or Selected in the Wizard', blurb: 'Warm prospects from the trial signup wizard, and the outreach sent to them.' },
       { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
       { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
+      { to: '/admin/super/crm/follow-ups', label: 'Sales Follow-ups', blurb: 'Overdue, due today and upcoming callbacks.' },
       { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },
       { to: '/admin/super/crm/targets', label: 'Sales Targets', blurb: 'Revenue and signup goals.' },
       { to: '/admin/super/crm/workspace', label: 'Sales Workspace', blurb: 'Call queue, contacts and engagement intel for the clubs assigned to you.' },

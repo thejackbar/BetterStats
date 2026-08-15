@@ -4341,6 +4341,11 @@ class MarketingClubContact(Base):
     bounced = Column(Boolean, nullable=False, server_default="false", default=False)
     bounced_at = Column(TIMESTAMP(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
+    # Migration 256 (Sales Workspace): the PERSON-level "don't call me" flag —
+    # distinct from `subscribed`, which is email-opt-out only. The club-wide
+    # equivalent is marketing_clubs.not_interested, not a column here.
+    do_not_contact = Column(Boolean, nullable=False, server_default="false", default=False)
+    do_not_contact_reason = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -4578,6 +4583,9 @@ class CrmActivity(Base):
     # exists.
     outcome = Column(Text, nullable=True)
     next_follow_up_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    # Migration 256: explicit "resolved" marker for a pending follow-up — a
+    # follow-up is pending while next_follow_up_at is set and this is NULL.
+    follow_up_done_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 

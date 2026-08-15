@@ -2043,6 +2043,16 @@ export const api = {
     }),
   salesWorkspaceStartTrial: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceSetDoNotContact: (dealId, contactId, doNotContact, reason) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/contacts/${contactId}/do-not-contact`, {
+      method: 'PATCH', body: JSON.stringify({ do_not_contact: doNotContact, reason: reason || null }),
+    }),
+  salesWorkspaceFollowUps: (ownerUserId) => {
+    const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
+    return request(`/club-admin/sales-workspace/follow-ups${qs}`)
+  },
+  salesWorkspaceCompleteFollowUp: (activityId) =>
+    request(`/club-admin/sales-workspace/follow-ups/${activityId}/done`, { method: 'POST' }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',
