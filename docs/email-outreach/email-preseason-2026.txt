@@ -1,0 +1,69 @@
+Subject: {Club}: is your history online yet?
+
+(Plain-text fallback for email-preseason-2026.html. If you are sending to a
+COLD list, use email-preseason-2026-plain.txt instead: it is written as a real
+plain-text email rather than a transcript of a designed one.)
+
+Hi [first name],
+
+Every game your club has ever played is already sitting with Cricket Australia.
+We pull the lot and turn it into a live site: a profile for every player,
+leaderboards, all-time records, every scorecard and a yearbook for each season.
+
+We fix the errors on the way through. The same player recorded three ways,
+hundreds filed against the wrong season, totals that stopped adding up years
+ago. Old spreadsheets come in too.
+
+Then you never import anything again. We set it up with you, demo it for your
+committee, and stay on hand through your first season.
+
+Find your club and have a look: https://betterat.cricket/trial
+Free, no card needed, about 3 minutes to set up.
+Or book a demo first: https://betterat.cricket/contact
+
+TRUSTED BY CLUBS AT
+
+Scarborough      https://betterat.cricket/scarborough-cricket-club
+Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
+Applecross       https://betterat.cricket/applecross
+Leeming Spartan  https://betterat.cricket/leeming-spartan-cricket-club
+
+EXPLORE THE MODULES
+
+BetterStats  Your club's consolidated history: every player, every season.
+   https://betterat.cricket/modules/betterstats
+
+BetterSelect  Availability, team selection and best-player vote counting,
+   sorted for every grade in minutes.
+   https://betterat.cricket/modules/betterselect
+
+BetterSocials  Your automated match-day posts and your own easy-to-build club
+   website.
+   https://betterat.cricket/modules/bettersocials
+
+BetterAdmin (expanded)  Run the back office: one member directory, fees, comms,
+   stock, the volunteer roster and the committee.
+   https://betterat.cricket/modules/betteradmin
+
+BetterIQ  Professional-grade analytics and an opposition scout for your club.
+   https://betterat.cricket/modules/betteriq
+
+BetterFantasyCricket  A fantasy cricket comp for your club, scored off your own
+   games.
+   https://betterat.cricket/modules/betterfantasy
+
+
+TRUSTED BY CLUBS AT
+
+Scarborough          https://betterat.cricket/scarborough-cricket-club
+Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
+Applecross           https://betterat.cricket/applecross
+Leeming Spartan      https://betterat.cricket/leeming-spartan-cricket-club
+
+Jack & Elton
+BetterCricket
+support@bettersports.com.au
+https://betterat.cricket
+
+P.S. Round one is a few weeks away. Set it up now and it is done before the
+first ball.

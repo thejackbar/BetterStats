@@ -1,13 +1,14 @@
 export default {
   version: 'v9.24.11',
   date: '2026-08-15',
-  sortKey: '2026-08-15T10:00:00Z',
-  title: 'Sales Workspace — landing page, faster drawer, auto follow-up events',
+  // sortKey only has to be greater than the current top entry, which is
+  // v9.24.4 at 2026-08-17T20:00Z. The v9.24.5-10 entries carry 2026-08-15
+  // sortKeys and so already sort below it — that ordering quirk predates this
+  // entry and is left alone here.
+  sortKey: '2026-08-17T21:00:00Z',
+  title: 'The BetterAdmin module page now says what the module actually does',
   items: [
-    'A Sales-role account now lands straight on the Sales Workspace after login, and can reach ONLY that page — every other admin URL (including the ordinary club dashboard it was landing on by mistake) redirects back to it. The Owner field shows their own name, locked, instead of the super-admin owner picker.',
-    "Opening a club's drawer was taking several seconds — the engagement breakdown was recomputing off a slow whole-table scan on every open instead of the indexed fast path the rest of the CRM already uses for live recomputes. Fixed; it should now be near-instant.",
-    "The drawer now shows the club's current CRM stage, its onboarding method, and whether it's ever been called, right above the Engagement panel.",
-    "A contact's mobile number now renders in the normal text colour instead of grey, matching their name.",
-    'Logging a call with an outcome worth a real next step (Interested, wants more info, wants trial, wants demo, wants pricing, wants committee discussion, asked to call back, referred to another person, requested information) AND a follow-up date now also creates a calendar Event — owned by whoever logged the call, naming the contact, with the call notes as its note (or a sensible default when none were typed).',
+    'The public BetterAdmin page still described the module as fees, comms and merch. It now covers what it grew into: one member directory for the whole club, the volunteer roster and hours, committee meetings with minutes and motions, and the season club diary.',
+    'Fixed two stale claims on the comparison page: merch was still listed as coming soon when it shipped a while back, and one row still priced the module as part of the retired Best tier.',
   ],
 }

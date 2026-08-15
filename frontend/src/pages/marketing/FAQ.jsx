@@ -71,7 +71,7 @@ const CATEGORIES = [
     items: [
       {
         q: 'What is BetterCricket?',
-        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (member fee management, bulk emailing, and merch and stock management, coming soon) and BetterIQ (deep analytics and opposition scouting).",
+        a: "BetterCricket is a modular platform for Australian club cricket, owned by BetterSports. Every club starts with BetterStats: it brings in every batting, bowling and fielding stat and turns it into a beautiful public club website with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. On top of BetterStats you can add modules: BetterSelect (player availability, team selection and net manager), BetterSocials (social-post generation and a CRM to manage your club's website), BetterAdmin (one member directory, fee management, bulk emailing, stock, the volunteer roster and committee meetings) and BetterIQ (deep analytics and opposition scouting).",
       },
       {
         q: 'Do we have to change how our club scores or registers to use BetterCricket?',
@@ -119,7 +119,7 @@ const CATEGORIES = [
       },
       {
         q: 'What does each module include?',
-        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds member fee management, bulk emailing, and merch and stock management (coming soon). BetterIQ adds deep analytics and opposition scouting.",
+        a: "BetterStats brings in every batting, bowling and fielding stat and turns it into your public club site, with player profiles, leaderboards, all-time records, partnerships, awards, season yearbooks and shareable stat cards. BetterSelect adds player availability, team selection and the net manager. BetterSocials adds social-post generation and a CRM with template pages and your club stats to run your public website. BetterAdmin adds one member directory for the whole club, fee management, bulk emailing, stock, the volunteer roster and committee meetings with minutes and motions. BetterIQ adds deep analytics and opposition scouting.",
       },
       {
         q: 'Can I add just one module?',
