@@ -64,6 +64,7 @@ export const SUPER_SECTIONS = [
       { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
       { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
       { to: '/admin/super/crm/follow-ups', label: 'Sales Follow-ups', blurb: 'Overdue, due today and upcoming callbacks.' },
+      { to: '/admin/super/crm/performance', label: 'Sales Performance', blurb: 'Call volume, conversion funnel and results by salesperson.' },
       { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },
       { to: '/admin/super/crm/targets', label: 'Sales Targets', blurb: 'Revenue and signup goals.' },
       { to: '/admin/super/crm/workspace', label: 'Sales Workspace', blurb: 'Call queue, contacts and engagement intel for the clubs assigned to you.' },

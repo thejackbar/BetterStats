@@ -165,6 +165,22 @@ async def team(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSes
     ]}
 
 
+@router.get("/performance")
+async def performance(
+    owner_user_id: Optional[str] = None,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Today/this-week activity + the assigned -> attempted -> contacted ->
+    engaged -> trial -> won funnel, per rep. A 'sales'-role caller always
+    sees only their own numbers (owner_user_id is honoured for a super
+    admin only, same restriction pattern as the queue list)."""
+    effective_owner = actor.user.id if actor.role == "sales" else (_uuid_or_none(owner_user_id) if owner_user_id else None)
+    summary = await sw.performance_summary(db, owner_user_id=effective_owner)
+    by_rep = await sw.funnel_by_rep(db, owner_user_id=effective_owner)
+    return {"summary": summary, "by_rep": by_rep}
+
+
 # ─── Club drawer ──────────────────────────────────────────────────────────────
 
 @router.get("/clubs/{deal_id}")

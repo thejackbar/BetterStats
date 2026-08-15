@@ -18,13 +18,13 @@ directory-only contact, bridged via ``crm_people.directory_contact_id``
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact
+from app.models.db import CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact, User
 from app.services import crm as crm_service
 
 # ─── Call outcome taxonomy ───────────────────────────────────────────────────
@@ -484,3 +484,119 @@ async def contact_counts_by_club(session: AsyncSession, marketing_club_ids) -> d
         .group_by(MarketingClubContact.marketing_club_id)
     )).all()
     return {r[0]: r[1] for r in rows}
+
+
+# ─── Performance reporting ─────────────────────────────────────────────────────
+# Deliberately NOT "calls per rep" as the headline (see the brief's section 19 —
+# raw volume rewards low-value dialling, not qualified clubs). The funnel below
+# is the real measure; the daily/weekly counts are activity context alongside it.
+
+TRIAL_STARTED_ACTIVITY_PREFIX = "Trial started for"  # matches log line in routers/sales_workspace.py::start_trial
+
+# bucket -> the stage keys that count as "reached this far" (never regresses
+# past lost_dormant into counting as a later bucket — lost_dormant isn't in
+# any of these lists). 'attempted' is handled separately (>=1 call ever).
+_FUNNEL_STAGE_KEYS = {
+    "contacted": ("contacted", "engaged", "trial", "self_serve_trial", "proposal", "won"),
+    "engaged": ("engaged", "trial", "self_serve_trial", "proposal", "won"),
+    "trial": ("trial", "self_serve_trial", "proposal", "won"),
+    "won": ("won",),
+}
+
+
+async def performance_summary(session: AsyncSession, *, owner_user_id=None) -> dict:
+    """Today + this-week activity counts (calls, distinct clubs contacted,
+    positive-outcome conversations, callbacks created, trials started).
+    owner_user_id restricts to one rep; None covers everyone (super admin
+    only — enforced by the caller, not here)."""
+    now = datetime.now(timezone.utc)
+    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    week_start = today_start - timedelta(days=today_start.weekday())
+
+    async def _window(start) -> dict:
+        call_stmt = select(CrmActivity).where(CrmActivity.type == "call", CrmActivity.occurred_at >= start)
+        if owner_user_id is not None:
+            call_stmt = call_stmt.join(CrmDeal, CrmDeal.id == CrmActivity.deal_id).where(CrmDeal.owner_user_id == owner_user_id)
+        calls = (await session.execute(call_stmt)).scalars().all()
+        deal_ids = {c.deal_id for c in calls if c.deal_id}
+        positive = sum(1 for c in calls if c.outcome and CALL_OUTCOMES.get(c.outcome, {}).get("category") == "positive")
+        callbacks = sum(1 for c in calls if c.next_follow_up_at is not None)
+
+        trial_stmt = select(func.count()).select_from(CrmActivity).where(
+            CrmActivity.type == "system", CrmActivity.occurred_at >= start,
+            CrmActivity.body.like(f"{TRIAL_STARTED_ACTIVITY_PREFIX}%"),
+        )
+        if owner_user_id is not None:
+            trial_stmt = trial_stmt.join(CrmDeal, CrmDeal.id == CrmActivity.deal_id).where(CrmDeal.owner_user_id == owner_user_id)
+        trials_started = (await session.execute(trial_stmt)).scalar() or 0
+
+        return {
+            "calls": len(calls),
+            "clubs_contacted": len(deal_ids),
+            "positive_conversations": positive,
+            "callbacks_created": callbacks,
+            "trials_started": trials_started,
+        }
+
+    return {"today": await _window(today_start), "week": await _window(week_start)}
+
+
+async def funnel_by_rep(session: AsyncSession, *, owner_user_id=None) -> list[dict]:
+    """Assigned -> Attempted -> Contacted -> Engaged -> Trial -> Won, per
+    rep, from currently-assigned OPEN-OR-CLOSED platform deals (a won/lost
+    deal still counts in its rep's funnel — that's the point of the funnel).
+    Archived deals are excluded. owner_user_id restricts to one rep."""
+    pipeline = await crm_service.ensure_platform_pipeline(session)
+    stage_by_id = {s.id: s for s in pipeline.stages}
+
+    deals_stmt = select(CrmDeal).where(
+        CrmDeal.pipeline_id == pipeline.id, CrmDeal.archived_at.is_(None), CrmDeal.owner_user_id.isnot(None),
+    )
+    if owner_user_id is not None:
+        deals_stmt = deals_stmt.where(CrmDeal.owner_user_id == owner_user_id)
+    deals = (await session.execute(deals_stmt)).scalars().all()
+
+    ever_called_deal_ids = set()
+    if deals:
+        rows = (await session.execute(
+            select(CrmActivity.deal_id)
+            .where(CrmActivity.deal_id.in_([d.id for d in deals]), CrmActivity.type == "call")
+            .distinct()
+        )).scalars().all()
+        ever_called_deal_ids = set(rows)
+
+    by_owner: dict = {}
+    for d in deals:
+        b = by_owner.setdefault(d.owner_user_id, {"assigned": 0, "attempted": 0, "contacted": 0, "engaged": 0, "trial": 0, "won": 0})
+        b["assigned"] += 1
+        if d.id in ever_called_deal_ids:
+            b["attempted"] += 1
+        stage = stage_by_id.get(d.stage_id)
+        key = stage.key if stage else None
+        for bucket, keys in _FUNNEL_STAGE_KEYS.items():
+            if key in keys:
+                b[bucket] += 1
+
+    owners = {}
+    if by_owner:
+        rows = (await session.execute(select(User).where(User.id.in_(by_owner.keys())))).scalars().all()
+        owners = {u.id: u for u in rows}
+
+    def _rate(n: int, d: int) -> int:
+        return round(100 * n / d) if d else 0
+
+    out = []
+    for oid, b in by_owner.items():
+        owner = owners.get(oid)
+        out.append({
+            "owner_user_id": str(oid),
+            "owner_name": (owner.display_name or owner.username) if owner else "Unknown",
+            **b,
+            "attempt_rate": _rate(b["attempted"], b["assigned"]),
+            "contact_rate": _rate(b["contacted"], b["assigned"]),
+            "engaged_rate": _rate(b["engaged"], b["assigned"]),
+            "trial_rate": _rate(b["trial"], b["assigned"]),
+            "win_rate": _rate(b["won"], b["assigned"]),
+        })
+    out.sort(key=lambda r: r["assigned"], reverse=True)
+    return out

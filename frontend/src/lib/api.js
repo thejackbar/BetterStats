@@ -2029,6 +2029,10 @@ export const api = {
     return request(`/club-admin/sales-workspace/clubs${q ? `?${q}` : ''}`)
   },
   salesWorkspaceTeam: () => request('/club-admin/sales-workspace/team'),
+  salesWorkspacePerformance: (ownerUserId) => {
+    const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
+    return request(`/club-admin/sales-workspace/performance${qs}`)
+  },
   salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
   salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
   salesWorkspaceLogCall: (dealId, data) =>
