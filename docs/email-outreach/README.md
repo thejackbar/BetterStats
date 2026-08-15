@@ -1,14 +1,182 @@
 # BetterCricket outreach emails
 
-Two pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallbacks.
+Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallbacks.
 
 | File | Use | Subject | Theme |
 |------|-----|---------|-------|
-| `email-initial-demo.html` | First email in the sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
+| `email-preseason-2026-plain.txt` | **Send this to a cold list.** Written as a real plain-text email from one person | {Club}: stats sorted before round one | No template at all, on purpose. See the format note below |
+| `email-preseason-2026.html` | The branded version, for the warm list | {Club}: stats sorted before round one | Dark navy, one CTA, compact module list, static trusted-by strip |
+| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | Come and see what you're missing | Same shell. The example clubs ARE the pitch and sit above the button |
+| `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
+| `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
-| `email-selfserve-launch.html` | The self-serve launch (re-engagement, sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page: headline, three horizontal steps, module cards, club grid, hidden preheader |
 
-Each has a matching `.txt` plain-text fallback (`email-initial-demo.txt`, `email-followup-demo.txt`).
+Each has a matching `.txt` plain-text fallback.
+
+## The pre-season send (Aug 2026)
+
+### Campaign name and UTM scheme
+
+**`BC_AU_PreSeason_EDM_Aug2026`** is the campaign. Both variants carry it, so
+the push reads as one line in reporting; `utm_content` is what separates them
+and tells you which link was clicked.
+
+The name follows the convention the Meta campaigns already use
+(`BC_AU_SelfServe_EDM_Aug2026`, `BC_AU_Trials_CBO_Aug2026`):
+`BC` + `AU` + theme + channel (`EDM` for email, omitted for paid social) +
+month and year.
+
+Every link in every file carries all four tags:
+
+| Tag | Value | Why |
+|-----|-------|-----|
+| `utm_source` | `ca` | Per-club placeholder. `make_sends.py` swaps it for the recipient club's `utm_code`, which is what ties a visit back to that club. |
+| `utm_medium` | `email` | Separates this from paid social. |
+| `utm_campaign` | `BC_AU_PreSeason_EDM_Aug2026` | The campaign. Same on both variants. |
+| `utm_content` | see below | Which link, in which variant. |
+
+`utm_content` values, all prefixed so a wildcard picks up a whole variant:
+
+| Value | Where |
+|-------|-------|
+| `edm_primary_cta` | The main trial button |
+| `edm_demo_cta` | "Book a demo first" under it |
+| `edm_module_<slug>` | One per module card (`betterstats`, `betterselect`, `bettersocials`, `betteradmin`, `betteriq`, `betterfantasy`) |
+| `edm_trust_strip` | The four club crests |
+| `edm_lapsed_*` | The same set in the re-engagement variant |
+
+**Where it shows up.** `usePageView.js` writes `utm_campaign` into
+`usage_events` on every page view, so the Usage page reports the campaign
+without anything being registered first. A completed signup stores the whole
+attribution blob on `organisations.signup_attribution`, which is what the
+ad-signups panel on the Meta Ads page lists.
+
+Two things worth knowing. A signup from this email is stamped
+`signup_source = 'self_serve_ad'` rather than something email-specific, because
+that flag keys on "was there any campaign signal", and our links carry one.
+Read `utm_campaign` in the attribution to tell email from paid. And these
+signups are correctly **excluded** from the Meta campaign's own registration
+count: `_attribution_matches_campaign` only accepts a `utm_source` in
+`{fb, facebook, meta, ig, instagram}`, and ours is `ca`.
+
+**Split the list before sending.** The cold email explains the problem from
+scratch; the re-engagement one assumes they already know what BetterCricket is
+and would read as a mailshot if it repeated the pitch. Alternative subject lines
+are in the comment at the top of each HTML file.
+
+### What the ad account says actually converts
+
+Pulled from the live Meta account rather than assumed. Two ads carry the whole
+lesson, and it is exactly the clicks-but-no-conversions problem:
+
+| Ad | Headline | Ask | CTR | Landing views | Club picks | Registrations |
+|----|----------|-----|-----|---------------|------------|---------------|
+| `Ad_CheckOutYourClub_v2` | "Is your club's history online yet?" | "Have a look at your own club's page" (SEE_DETAILS) | 2.53% | 348 | 62 | **12** at A$43.51 |
+| `Ad_ClubHistory_Trial_Hero_v3` | "Your club's full history, kept up to date for you" | Feature list, then SIGN_UP | 1.99% | **420** | 0 | **0** |
+
+The second ad has the best outbound CTR in the whole account (1.90%) and the
+most landing-page views, and it has never produced a single registration. The
+first ad produced every registration the account has ever had.
+
+Three things separate them, and all three are now in the email:
+
+1. **A question about THEIR club beats a statement about our product.** The
+   winner's headline is the email's headline and subject line.
+2. **"Have a look" beats "sign up".** The winner's button was SEE_DETAILS, not
+   SIGN_UP. The email's button is now "Find your club and have a look", which
+   is also literally what `/trial` opens on, so the promise and the page agree.
+   Asking a volunteer committee member to commit in an email is a bigger ask
+   than asking them to be curious about their own club.
+3. **Short beats a feature list.** The winner's body is two sentences. The
+   zero-conversion ad lists six features across five sentences.
+
+The proven reassurance line is "free, no card needed, about 3 minutes", and it
+sits directly under the button in both emails. **Do not swap the button back to
+a commitment ask without a test** — that is the one change the account already
+has evidence against.
+
+### Why these are shaped the way they are
+
+Written against published cold-email benchmarks rather than instinct. The rules
+that drove the structure, and what they cost:
+
+- **Length.** Reply rates peak at 50-125 words and fall roughly by half past 200
+  (8.2% vs 3.9% across a 4M+ email aggregate; Boomerang's 40M-email study puts
+  the sweet spot near 75). The cold email's reading copy is **124 words**, inside
+  that band. Each of the three paragraphs is one idea: your history already
+  exists and we make a site of it, we fix its errors, then it runs itself. **If
+  something new has to go in, take a paragraph out.**
+- **Order: headline, copy, CTA, proof, then modules.** The trusted-by strip sits
+  directly under the button so the crests land while someone is deciding whether
+  to click, rather than three screens down. The module cards come after the ask,
+  because anyone still scrolling past the CTA is browsing and the stats are what
+  is being sold. The whole pitch now fits on one phone screen before the cards.
+- **The re-engagement email inverts that on purpose.** Its clubs sit ABOVE the
+  button under an "Already online" heading, because there they are not
+  reassurance next to an ask, they are the ask: these clubs are live and this one
+  is not, go and look at one. The button follows as the obvious next step once
+  someone has seen what a finished club looks like. That email is a "what you're
+  missing" pitch rather than a changelog — an earlier version led with three
+  things we had built, which is us talking about ourselves to someone who has
+  already said no once. What we have built since is one supporting sentence now.
+- **One CTA.** Every green button goes to `/trial` and nothing competes with it.
+  The demo option is a small text link underneath, not a second button, because
+  a rival button splits the click.
+- **Problem, then agitate, then solution.** The email opens on their spreadsheet
+  rather than on us, makes the cost of it concrete (three specific failures, not
+  "errors creep in"), and only then says what we do. Specific beats general:
+  "totals that stopped adding up in 2019" outperforms "inaccurate data".
+- **Subject lines are 3-7 words** and personalised with `{Club}`. One
+  personalised attribute is worth a real lift in opens, and the club name is the
+  one attribute we always hold. Anything past 60 characters truncates on mobile.
+- **The deadline sits in the P.S.**, which is one of the most-read lines in an
+  email. Opening on the season would have pushed the hook down the page.
+- **The old draft's section headings are gone.** Headed sections make an email
+  read as a newsletter, and a newsletter is skimmed rather than answered.
+
+### Plain text for cold, HTML for warm
+
+This is the one place the research argues against a designed template. In B2B
+outreach, plain text from a named person beats styled HTML on replies by a wide
+margin, because a designed email reads as a broadcast and people answer emails
+that look like they were written to them.
+
+So `email-preseason-2026-plain.txt` is the cold-list send: 113 words, no logo,
+no buttons, sent from Jack's own address. The HTML version is for the warm list,
+where the crests and the brand do real work and nobody is deciding whether you
+are a stranger. **If you only send one thing to strangers, send the plain one.**
+
+### The trusted-by strip
+
+The site's `TrustedByStrip` scrolls with a CSS marquee. **That cannot work in
+email** — Gmail strips `<style>` so there are no keyframes, and Outlook has no
+animation at all. The strip in these emails is the same four clubs laid out
+statically, styled to match. Each crest links to that club's live public site,
+which is the part that actually builds trust.
+
+Clubs shown: Scarborough, Rockingham-Mandurah, Applecross, Leeming Spartan. To
+swap one, replace the crest `<img>`, the club name and the `/{slug}` link, and
+add a matching PNG under `frontend/public/email/`.
+
+**Two crests are new and must be deployed before the send.**
+`scarborough-cc.png` and `rockingham-mandurah-cc.png` were added to
+`frontend/public/email/` in the same commit as these emails and currently 404
+on production. They were downscaled to 88px square (2x the 44px display size)
+from the clubs' own uploaded logos, which are up to 700KB at full size. Send
+yourself a test after the deploy and confirm all four crests render.
+
+### Naming
+
+These emails call the back-office module **BetterAdmin**, matching the public
+site. The app calls the same module BetterClubhouse, and that split is
+deliberate and long-standing (see the note in the root `CLAUDE.md`). A prospect
+only ever sees the public name, so the emails and the site agree; a club that
+signs up will see BetterClubhouse once they are inside the admin app.
+
+The emails describe it as **expanded** rather than new, because BetterAdmin
+itself is not new. What is new is what it covers: the member directory, the
+volunteer roster, committee meetings and the club diary, on top of the fees and
+comms it always had. The module page was updated to say so.
 
 The **initial** email is the one to send first. It runs the longer "we've been those volunteers" copy, carries the five-module section (each card links to its page on the site), and uses the dark background you asked for. The **follow-up** is the short two-minute nudge, on a light body.
 
