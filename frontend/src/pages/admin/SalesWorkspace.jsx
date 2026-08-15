@@ -15,6 +15,17 @@ const CARD = 'pb-card p-3'
 // instead of defaulting to whoever logged the call.
 const ASSIGNABLE_EVENT_OUTCOMES = ['wants_pricing', 'wants_more_info', 'wants_demo']
 
+// The Follow up field's default value — "now", in the local-time string a
+// <input type="datetime-local"> needs (YYYY-MM-DDTHH:mm, no timezone) — so
+// the picker opens on today/now instead of blank, and a rep only has to
+// adjust it rather than fill in every field from scratch.
+function nowLocalDatetimeValue() {
+  const d = new Date()
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+const emptyCallForm = () => ({ contactKey: '', outcome: '', notes: '', followUpAt: nowLocalDatetimeValue(), eventOwnerUserId: '' })
+
 // Close-on-outside-click + Escape, for the Stage multi-select popover below.
 function useDismiss(open, onClose) {
   const ref = useRef(null)
@@ -233,6 +244,13 @@ export default function SalesWorkspace() {
   const [selectedId, setSelectedId] = useState(null)
   const [drawer, setDrawer] = useState(null)
   const [loadingDrawer, setLoadingDrawer] = useState(false)
+  // Kept in sync with selectedId below, but read from inside loadClubs'/
+  // refreshBoth's async callbacks — a plain closure over `selectedId` there
+  // would see whatever it was when the callback was CREATED, not the latest
+  // value, which is exactly the kind of stale-read that let the drawer keep
+  // showing a club that had just dropped out of the filtered queue.
+  const selectedIdRef = useRef(null)
+  useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
 
   // Bulk assignment (super admin only) — checked deal ids from the CURRENT
   // filtered queue, and which reps are ticked in the bulk-assign panel: one
@@ -241,7 +259,7 @@ export default function SalesWorkspace() {
   const [bulkReps, setBulkReps] = useState(() => new Set())
   const [bulkAssigning, setBulkAssigning] = useState(false)
 
-  const [callForm, setCallForm] = useState({ contactKey: '', outcome: '', notes: '', followUpAt: '', eventOwnerUserId: '' })
+  const [callForm, setCallForm] = useState(emptyCallForm)
   const [savingCall, setSavingCall] = useState(false)
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
@@ -265,11 +283,24 @@ export default function SalesWorkspace() {
 
   const loadClubs = useCallback(() => {
     setLoadingList(true)
-    api.salesWorkspaceClubs(filters).then((d) => {
-      setClubs(d.clubs || [])
+    return api.salesWorkspaceClubs(filters).then((d) => {
+      const rows = d.clubs || []
+      setClubs(rows)
       setStages(d.stages || [])
-    }).catch(() => toast?.error('Could not load the club queue')).finally(() => setLoadingList(false))
-  }, [filters, toast])
+      // The currently-open drawer belongs to a club that just dropped out of
+      // the filtered queue (a filter changed, or the club itself was
+      // reassigned/updated out of the current filter) — clear it rather than
+      // leave a deal detail on screen for something no longer in the list.
+      if (selectedIdRef.current && !rows.some(c => c.id === selectedIdRef.current)) {
+        selectedIdRef.current = null
+        setSelectedId(null)
+        setDrawer(null)
+        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+      }
+      return rows
+    }).catch(() => { toast?.error('Could not load the club queue'); return [] })
+      .finally(() => setLoadingList(false))
+  }, [filters, toast, setSearchParams])
 
   useEffect(() => { loadClubs() }, [loadClubs])
   useEffect(() => {
@@ -286,16 +317,24 @@ export default function SalesWorkspace() {
     setLoadingDrawer(true)
     api.salesWorkspaceClub(dealId).then((d) => {
       setDrawer(d)
-      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+      setCallForm(emptyCallForm())
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
   const selectClub = (dealId) => {
+    selectedIdRef.current = dealId
     setSelectedId(dealId)
     loadDrawer(dealId)
     setSearchParams((p) => { const n = new URLSearchParams(p); n.set('club', dealId); return n }, { replace: true })
   }
-  const refreshBoth = () => { loadClubs(); if (selectedId) loadDrawer(selectedId) }
+  // Awaits the queue reload FIRST — loadClubs itself clears the selection
+  // when the club no longer matches the current filter, and reading the ref
+  // only after that settles is what stops the drawer briefly refetching a
+  // club it's about to (or already did) drop.
+  const refreshBoth = async () => {
+    await loadClubs()
+    if (selectedIdRef.current) loadDrawer(selectedIdRef.current)
+  }
 
   // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
   useEffect(() => {
@@ -357,7 +396,7 @@ export default function SalesWorkspace() {
       }
       const d = await api.salesWorkspaceLogCall(drawer.deal.id, payload)
       setDrawer(d)
-      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '', eventOwnerUserId: '' })
+      setCallForm(emptyCallForm())
       toast?.success('Call logged')
       loadClubs()
     } catch (err) {
