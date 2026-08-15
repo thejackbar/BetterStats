@@ -291,7 +291,14 @@ async def login(data: LoginRequest, response: Response, request: Request, db: As
         raise HTTPException(status_code=403, detail="No club membership found")
 
     club = await db.get(Organisation, membership.club_id)
-    if membership.role != "super_admin":
+    # super_admin and sales both bypass the is_active check — neither is an
+    # ordinary club admin logging into a subscribing club's own dashboard.
+    # A 'sales' user's membership is pinned to the platform's designated
+    # outreach org (see services/marketing_org.get_outreach_org), an internal
+    # bookkeeping org that was never meant to be "activated" like a real
+    # club, so gating their login on it would make provisioning a sales
+    # account depend on an unrelated admin action.
+    if membership.role not in ("super_admin", "sales"):
         if not club or not club.is_active:
             await _log(False, login_audit.REASON_CLUB_INACTIVE,
                        user_id=user.id, org_id=membership.club_id)
