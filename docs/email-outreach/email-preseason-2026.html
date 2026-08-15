@@ -1,14 +1,30 @@
 <!DOCTYPE html>
 <!-- Subject options (3-7 words, under 60 chars so it survives on mobile):
-       A. {Club}: stats sorted before round one     <- personalised, best performer
-       B. Your stats before round one
-       C. The spreadsheet problem, before round one
-       D. Sorted before round one
-     Recommended: A. Personalising the subject with one attribute lifts opens
-     materially, and the club name is the one attribute we always hold. It needs
-     a {Club} merge field at send time; use B if the tool can't merge.
+       A. Is your club's history online yet?        <- the winning ad's headline
+       B. {Club}: is your history online yet?       <- A, personalised
+       C. Your stats before round one
+     Recommended: B, falling back to A if the tool can't merge {Club}.
+
+     WHY THIS COPY: taken from the live Meta account, not invented. Two ads
+     tell the whole story.
+       Ad_CheckOutYourClub_v2 — headline "Is your club's history online yet?",
+       ask "Have a look at your own club's page", CTA button SEE_DETAILS.
+       47.9k impressions, 2.53% CTR, 62 club-picks, 12 completed registrations
+       at A$43.51 each. Every registration the account has ever produced came
+       from this ad and its v1 sibling.
+       Ad_ClubHistory_Trial_Hero_v3 — headline "Your club's full history, kept
+       up to date for you", a long feature list, CTA button SIGN_UP.
+       BEST outbound CTR in the account at 1.90% and 420 landing-page views,
+       and ZERO club-picks and ZERO registrations.
+     So: a question about THEIR club beats a statement about our product, a
+     low-commitment "have a look" beats "sign up", and short beats a feature
+     list. That is exactly the click-but-no-convert problem, and the fix is in
+     the ask, not the traffic. This email now mirrors the winner: question
+     headline, their club first, and a button that asks them to look rather
+     than to commit.
+
      Preheader (the hidden div after <body>) adds to the subject, never repeats it:
-       We import your full history, fix the errors in it, and you never import anything again.
+       Every game your club has ever played, pulled straight from Cricket Australia. Free, no card, about 3 minutes.
      Campaign: utm_campaign=BC_AU_PreSeason_EDM_Aug2026.
      make_sends.py works unchanged: utm_source=ca is the per-club placeholder,
      greeting is "Hi [first name],".
@@ -44,7 +60,7 @@
 <!-- Hidden preheader. The second block of &zwnj;&nbsp; is deliberate padding so
      the client doesn't pull the "Hi [first name]," greeting into the preview. -->
 <div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
-We import your full history, fix the errors in it, and you never import anything again.
+Every game your club has ever played, pulled straight from Cricket Australia. Free, no card, about 3 minutes.
 </div>
 <div style="display:none; font-size:1px; line-height:1px; max-height:0px; max-width:0px; opacity:0; overflow:hidden; mso-hide:all;">
 &zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;
@@ -69,7 +85,7 @@ We import your full history, fix the errors in it, and you never import anything
         <!-- Headline -->
         <tr>
           <td style="padding:26px 36px 0 36px;">
-            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:25px; line-height:32px; font-weight:bold; letter-spacing:-0.4px; color:#e6e8ef;">Your club&rsquo;s stats, sorted<br>before round one.</span>
+            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:25px; line-height:32px; font-weight:bold; letter-spacing:-0.4px; color:#e6e8ef;">Is your club&rsquo;s history<br>online yet?</span>
           </td>
         </tr>
 
@@ -84,12 +100,12 @@ We import your full history, fix the errors in it, and you never import anything
               </tr>
               <tr>
                 <td style="padding-bottom:16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  Most clubs keep their stats in a spreadsheet that four people have edited over ten years. The same player recorded three different ways. Hundreds filed against the wrong season. Career totals that quietly stopped adding up in 2019.
+                  Every game your club has ever played is already sitting with Cricket Australia, as far back as the records go. We pull the lot and turn it into a live site: a profile for every player who has turned out for the club, leaderboards, all-time records, every scorecard and a yearbook for each season.
                 </td>
               </tr>
               <tr>
                 <td style="padding-bottom:16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  We import your full history from Cricket Australia, find those errors and fix them. Then we give it somewhere to live: a profile for every player who has turned out for your club, leaderboards, all-time records, every scorecard back as far as the records go, and a yearbook for each season, on your own public club site.
+                  We find the errors in it too. Most clubs have the same player recorded three different ways, hundreds filed against the wrong season, and career totals that quietly stopped adding up years ago. Those get merged, reconciled and fixed, and if your older records only live in a spreadsheet we bring those in as well.
                 </td>
               </tr>
               <tr>
@@ -101,14 +117,21 @@ We import your full history, fix the errors in it, and you never import anything
           </td>
         </tr>
 
-        <!-- One CTA. A second competing destination measurably costs clicks, so
-             the demo option is a text link under it rather than a rival button. -->
+        <!-- One CTA, and it asks them to LOOK rather than to commit. That is
+             the single biggest difference between the ad that produced every
+             registration this account has ever had ("have a look at your own
+             club's page", CTA SEE_DETAILS) and the one that produced the most
+             traffic and no registrations at all ("sign up"). /trial opens on a
+             club search, so "find your club" is also literally the first thing
+             that happens — the promise and the page agree.
+             A second competing destination costs clicks, so the demo option is
+             a text link underneath rather than a rival button. -->
         <tr>
           <td align="center" style="padding:0 36px 10px 36px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
                 <td align="center" bgcolor="#16C784" style="background-color:#16C784; border-radius:8px;">
-                  <a href="https://betterat.cricket/trial?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_primary_cta" style="display:inline-block; padding:15px 34px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:19px; font-weight:bold; color:#0b1220; text-decoration:none; border-radius:8px;">Set your club up free&nbsp;&nbsp;&#8594;</a>
+                  <a href="https://betterat.cricket/trial?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_primary_cta" style="display:inline-block; padding:15px 34px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:19px; font-weight:bold; color:#0b1220; text-decoration:none; border-radius:8px;">Find your club and have a look&nbsp;&nbsp;&#8594;</a>
                 </td>
               </tr>
             </table>
@@ -116,21 +139,146 @@ We import your full history, fix the errors in it, and you never import anything
         </tr>
         <tr>
           <td align="center" style="padding:0 36px 24px 36px;">
-            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#8a90a2;">14 days, every module included, no credit card<br>or <a href="https://betterat.cricket/contact?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_demo_cta" style="color:#16C784; text-decoration:none;">book a demo first</a></span>
+            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#8a90a2;">Free, no card needed, about 3 minutes to set up<br>or <a href="https://betterat.cricket/contact?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_demo_cta" style="color:#16C784; text-decoration:none;">book a demo first</a></span>
           </td>
         </tr>
 
-        <!-- The other modules, one sentence. Deliberately NOT a card list or a
-             box: the stats are the pitch, and a four-row panel here competed
-             with them for the eye. Named and linked so they are discoverable,
-             sized so nobody mistakes them for the point of the email. -->
+        <!-- Module cards. They sit AFTER the CTA on purpose: the stats pitch and
+             the ask get read first, and anyone still scrolling is browsing. Every
+             card links to its own /modules/ page and carries its own utm_content
+             (edm_module_<slug>), so the report shows which module pulled the
+             click, not just that the email was clicked. -->
         <tr>
-          <td style="padding:0 36px 0 36px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:14px; line-height:23px; color:#8a90a2;">
-            The same match data also runs
-            <a href="https://betterat.cricket/modules/betterselect?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_select" style="color:#3B82F6; text-decoration:underline;">availability, selection and vote counting</a>,
-            <a href="https://betterat.cricket/modules/bettersocials?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_socials" style="color:#EC4899; text-decoration:underline;">match-day posts</a>,
-            <a href="https://betterat.cricket/modules/betteriq?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_iq" style="color:#A855F7; text-decoration:underline;">opposition scouting</a>
-            and a newly expanded <a href="https://betterat.cricket/modules/betteradmin?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_list_admin" style="color:#F59E0B; text-decoration:underline;">club and volunteer back office</a>, when you want them.
+          <td style="padding:0 36px 14px 36px;">
+            <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2;">Explore the modules</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 36px 0 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+
+              <!-- BetterStats -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betterstats?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_betterstats" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#16C784" style="background-color:#16C784; border-radius:10px;"><img src="https://betterat.cricket/email/betterstats.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#16C784;">Stats</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Your club&rsquo;s consolidated history: every player, every season.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#16C784;">Explore BetterStats &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterSelect -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betterselect?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_betterselect" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#3B82F6" style="background-color:#3B82F6; border-radius:10px;"><img src="https://betterat.cricket/email/betterselect.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#3B82F6;">Select</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Availability, team selection and best-player vote counting, sorted for every grade in minutes.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#3B82F6;">Explore BetterSelect &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterSocials -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/bettersocials?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_bettersocials" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#EC4899" style="background-color:#EC4899; border-radius:10px;"><img src="https://betterat.cricket/email/bettersocials.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#EC4899;">Socials</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Your automated match-day posts and your own easy-to-build club website.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#EC4899;">Explore BetterSocials &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterAdmin. Tagline updated from "fees, comms and merch" to
+                   match the expanded module page: a card that undersells what
+                   the page then shows is a wasted click. -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betteradmin?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_betteradmin" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#F59E0B" style="background-color:#F59E0B; border-radius:10px;"><img src="https://betterat.cricket/email/betteradmin.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#F59E0B;">Admin</span>&nbsp;&nbsp;<span style="font-size:10px; line-height:14px; letter-spacing:1px; color:#0b1220; background-color:#F59E0B; padding:2px 7px; border-radius:4px;">EXPANDED</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Run the back office: one member directory, fees, comms, stock, the volunteer roster and the committee.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#F59E0B;">Explore BetterAdmin &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterIQ -->
+              <tr>
+                <td style="padding-bottom:12px;">
+                  <a href="https://betterat.cricket/modules/betteriq?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_betteriq" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#A855F7" style="background-color:#A855F7; border-radius:10px;"><img src="https://betterat.cricket/email/betteriq.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#A855F7;">IQ</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">Professional-grade analytics and an opposition scout for your club.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#A855F7;">Explore BetterIQ &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+
+              <!-- BetterFantasyCricket -->
+              <tr>
+                <td style="padding-bottom:4px;">
+                  <a href="https://betterat.cricket/modules/betterfantasy?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_module_betterfantasy" style="text-decoration:none; display:block;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#131c2e; border:1px solid #243352; border-radius:12px;">
+                      <tr>
+                        <td width="40" valign="top" style="padding:16px 0 16px 16px;">
+                          <table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td width="40" height="40" bgcolor="#22D3EE" style="background-color:#22D3EE; border-radius:10px;"><img src="https://betterat.cricket/email/betterfantasy.png" width="40" height="40" alt="" style="display:block; border:0; border-radius:10px;"></td></tr></table>
+                        </td>
+                        <td valign="top" style="padding:15px 16px 15px 12px;">
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:16px; line-height:20px; font-weight:bold; color:#ffffff; padding-bottom:3px;">Better<span style="color:#22D3EE;">FantasyCricket</span></div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:19px; color:#aab1c2; padding-bottom:7px;">A fantasy cricket comp for your club, scored off your own games.</div>
+                          <div style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:13px; line-height:16px; font-weight:bold; color:#22D3EE;">Explore BetterFantasyCricket &#8594;</div>
+                        </td>
+                      </tr>
+                    </table>
+                  </a>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
 

@@ -15,15 +15,85 @@ Each has a matching `.txt` plain-text fallback.
 
 ## The pre-season send (Aug 2026)
 
-Two variants of one campaign, `utm_campaign=BC_AU_PreSeason_EDM_Aug2026`. They
-share the campaign so the send reads as one line on the ad-signups report;
-`utm_content` is what separates them (`edm_*` on the cold email,
-`edm_lapsed_*` on the warm one).
+### Campaign name and UTM scheme
+
+**`BC_AU_PreSeason_EDM_Aug2026`** is the campaign. Both variants carry it, so
+the push reads as one line in reporting; `utm_content` is what separates them
+and tells you which link was clicked.
+
+The name follows the convention the Meta campaigns already use
+(`BC_AU_SelfServe_EDM_Aug2026`, `BC_AU_Trials_CBO_Aug2026`):
+`BC` + `AU` + theme + channel (`EDM` for email, omitted for paid social) +
+month and year.
+
+Every link in every file carries all four tags:
+
+| Tag | Value | Why |
+|-----|-------|-----|
+| `utm_source` | `ca` | Per-club placeholder. `make_sends.py` swaps it for the recipient club's `utm_code`, which is what ties a visit back to that club. |
+| `utm_medium` | `email` | Separates this from paid social. |
+| `utm_campaign` | `BC_AU_PreSeason_EDM_Aug2026` | The campaign. Same on both variants. |
+| `utm_content` | see below | Which link, in which variant. |
+
+`utm_content` values, all prefixed so a wildcard picks up a whole variant:
+
+| Value | Where |
+|-------|-------|
+| `edm_primary_cta` | The main trial button |
+| `edm_demo_cta` | "Book a demo first" under it |
+| `edm_module_<slug>` | One per module card (`betterstats`, `betterselect`, `bettersocials`, `betteradmin`, `betteriq`, `betterfantasy`) |
+| `edm_trust_strip` | The four club crests |
+| `edm_lapsed_*` | The same set in the re-engagement variant |
+
+**Where it shows up.** `usePageView.js` writes `utm_campaign` into
+`usage_events` on every page view, so the Usage page reports the campaign
+without anything being registered first. A completed signup stores the whole
+attribution blob on `organisations.signup_attribution`, which is what the
+ad-signups panel on the Meta Ads page lists.
+
+Two things worth knowing. A signup from this email is stamped
+`signup_source = 'self_serve_ad'` rather than something email-specific, because
+that flag keys on "was there any campaign signal", and our links carry one.
+Read `utm_campaign` in the attribution to tell email from paid. And these
+signups are correctly **excluded** from the Meta campaign's own registration
+count: `_attribution_matches_campaign` only accepts a `utm_source` in
+`{fb, facebook, meta, ig, instagram}`, and ours is `ca`.
 
 **Split the list before sending.** The cold email explains the problem from
 scratch; the re-engagement one assumes they already know what BetterCricket is
 and would read as a mailshot if it repeated the pitch. Alternative subject lines
 are in the comment at the top of each HTML file.
+
+### What the ad account says actually converts
+
+Pulled from the live Meta account rather than assumed. Two ads carry the whole
+lesson, and it is exactly the clicks-but-no-conversions problem:
+
+| Ad | Headline | Ask | CTR | Landing views | Club picks | Registrations |
+|----|----------|-----|-----|---------------|------------|---------------|
+| `Ad_CheckOutYourClub_v2` | "Is your club's history online yet?" | "Have a look at your own club's page" (SEE_DETAILS) | 2.53% | 348 | 62 | **12** at A$43.51 |
+| `Ad_ClubHistory_Trial_Hero_v3` | "Your club's full history, kept up to date for you" | Feature list, then SIGN_UP | 1.99% | **420** | 0 | **0** |
+
+The second ad has the best outbound CTR in the whole account (1.90%) and the
+most landing-page views, and it has never produced a single registration. The
+first ad produced every registration the account has ever had.
+
+Three things separate them, and all three are now in the email:
+
+1. **A question about THEIR club beats a statement about our product.** The
+   winner's headline is the email's headline and subject line.
+2. **"Have a look" beats "sign up".** The winner's button was SEE_DETAILS, not
+   SIGN_UP. The email's button is now "Find your club and have a look", which
+   is also literally what `/trial` opens on, so the promise and the page agree.
+   Asking a volunteer committee member to commit in an email is a bigger ask
+   than asking them to be curious about their own club.
+3. **Short beats a feature list.** The winner's body is two sentences. The
+   zero-conversion ad lists six features across five sentences.
+
+The proven reassurance line is "free, no card needed, about 3 minutes", and it
+sits directly under the button in both emails. **Do not swap the button back to
+a commitment ask without a test** — that is the one change the account already
+has evidence against.
 
 ### Why these are shaped the way they are
 

@@ -1,9 +1,9 @@
-Subject: {Club}: stats sorted before round one
+Subject: {Club}: is your history online yet?
 
 --------------------------------------------------------------------------
 THIS IS THE ONE TO SEND COLD.
 
-113 words. Send it as a genuine plain-text email from Jack's own address, not
+99 words. Send it as a genuine plain-text email from Jack's own address, not
 through a template. No logo, no buttons, no colours. It should look like a
 normal email one person wrote to another, because in B2B outreach that is what
 gets replies: plain text beats designed HTML by a wide margin on reply rate,
@@ -14,25 +14,20 @@ brand and the club logos do real work and nobody is deciding whether you are a
 stranger.
 
 {Club} in the subject is a merge field. If your tool cannot merge it, use
-"Your stats before round one" instead. Do not send it with the braces showing.
+"Is your club's history online yet?" instead. Do not send it with the braces showing.
 --------------------------------------------------------------------------
 
 
 Hi [first name],
 
-Most clubs keep their stats in a spreadsheet four people have edited over ten
-years. The same player recorded three ways, hundreds filed against the wrong
-season, totals that stopped adding up in 2019.
+Every game your club has ever played is already sitting with Cricket Australia.
+We pull the lot and turn it into a profile for every player, leaderboards,
+all-time records and a yearbook for every season, on your own club site.
 
-We import your full history from Cricket Australia, fix the errors in it, and
-turn it into a profile for every player, leaderboards, all-time records and a
-yearbook for every season, on your own club site. After that you never import
-anything again.
+We fix the errors in it on the way through, and after that you never import
+anything again. We run the demo and set it up with you.
 
-We run the demo, set it up with you, and stay on hand through your first
-season. It is free for 14 days.
-
-Worth a look before round one?
+Free, no card needed, about 3 minutes. Worth a look before round one?
 
 Jack
 BetterCricket
