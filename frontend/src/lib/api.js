@@ -2041,6 +2041,10 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
       method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
     }),
+  salesWorkspaceBulkAssign: (dealIds, ownerUserIds) =>
+    request('/club-admin/sales-workspace/bulk-assign', {
+      method: 'POST', body: JSON.stringify({ deal_ids: dealIds, owner_user_ids: ownerUserIds }),
+    }),
   salesWorkspaceStartTrial: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceSetDoNotContact: (dealId, contactId, doNotContact, reason) =>

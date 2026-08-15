@@ -360,6 +360,28 @@ async def log_reassignment(session: AsyncSession, *, deal: CrmDeal, owner_name: 
     )
 
 
+async def bulk_assign(
+    session: AsyncSession, *, deals: list[CrmDeal], owner_ids: list, owner_names: dict,
+    created_by_user_id,
+) -> dict:
+    """Assigns every deal in `deals` across `owner_ids` round-robin (a single
+    id assigns everything to that one rep; several ids split evenly, in the
+    order given — "Sam / Jake / Sarah" per the brief's section 26). Logs the
+    same reassignment activity per deal as the single-deal PATCH, so the two
+    paths leave an identical audit trail. Returns a per-rep count. There is
+    no separate "duplicate assignment" guard to build here — a deal has
+    exactly one owner_user_id by construction, so re-running this over the
+    same selection just overwrites it, same as the single-deal action."""
+    counts: dict = {str(o): 0 for o in owner_ids}
+    for i, deal in enumerate(deals):
+        owner_id = owner_ids[i % len(owner_ids)]
+        await crm_service.update_deal(session, deal, owner_user_id=owner_id)
+        await log_reassignment(session, deal=deal, owner_name=owner_names.get(owner_id), created_by_user_id=created_by_user_id)
+        counts[str(owner_id)] += 1
+    await session.flush()
+    return counts
+
+
 # ─── Queue row shaping ────────────────────────────────────────────────────────
 
 def priority_score(*, engagement_score: Optional[int], ever_called: bool,

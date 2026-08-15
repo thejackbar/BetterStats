@@ -563,6 +563,56 @@ async def assign(
     return crm_service._deal_dict(deal, stage, club)
 
 
+class BulkAssignBody(BaseModel):
+    deal_ids: list[str]
+    owner_user_ids: list[str]  # one id = assign all to them; several = split evenly, round-robin
+
+
+@router.post("/bulk-assign")
+async def bulk_assign(
+    body: BulkAssignBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Filter the queue down to a batch (never called, a state, a stage,
+    unassigned…) then assign the whole selection in one action — "Assign
+    selected -> Sam" or "Split evenly among Sam / Jake / Sarah", per the
+    brief. Super-admin only, same as the single-deal PATCH .../assign."""
+    _require_super(actor)
+    if not body.deal_ids:
+        raise HTTPException(status_code=422, detail="Select at least one club")
+    owner_ids = [_uuid_or_none(o) for o in body.owner_user_ids if o]
+    if not owner_ids:
+        raise HTTPException(status_code=422, detail="Pick at least one salesperson")
+
+    owners = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
+    found_ids = {u.id for u in owners}
+    missing = [str(o) for o in owner_ids if o not in found_ids]
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Unknown salesperson id(s): {', '.join(missing)}")
+    owner_names = {u.id: (u.display_name or u.username) for u in owners}
+
+    deal_uuids = [_uuid_or_none(d) for d in body.deal_ids]
+    deals = (await db.execute(
+        select(CrmDeal).where(
+            CrmDeal.id.in_(deal_uuids), CrmDeal.scope == crm_service.SCOPE_PLATFORM,
+            CrmDeal.archived_at.is_(None),
+        )
+    )).scalars().all()
+    if not deals:
+        raise HTTPException(status_code=404, detail="None of the selected clubs could be found")
+
+    counts = await sw.bulk_assign(
+        db, deals=deals, owner_ids=owner_ids, owner_names=owner_names, created_by_user_id=actor.user.id,
+    )
+    await db.commit()
+    return {
+        "assigned": len(deals),
+        "skipped": len(body.deal_ids) - len(deals),
+        "by_rep": {owner_names.get(uuid.UUID(k), k): v for k, v in counts.items()},
+    }
+
+
 # ─── Start a trial on the contact's behalf ────────────────────────────────────
 
 class StartTrialBody(BaseModel):

@@ -116,6 +116,13 @@ export default function SalesWorkspace() {
   const [drawer, setDrawer] = useState(null)
   const [loadingDrawer, setLoadingDrawer] = useState(false)
 
+  // Bulk assignment (super admin only) — checked deal ids from the CURRENT
+  // filtered queue, and which reps are ticked in the bulk-assign panel: one
+  // rep checked = assign everything to them, several = split evenly.
+  const [checkedIds, setCheckedIds] = useState(() => new Set())
+  const [bulkReps, setBulkReps] = useState(() => new Set())
+  const [bulkAssigning, setBulkAssigning] = useState(false)
+
   const [callForm, setCallForm] = useState({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
   const [savingCall, setSavingCall] = useState(false)
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
@@ -265,6 +272,37 @@ export default function SalesWorkspace() {
     }
   }
 
+  const toggleChecked = (id) => setCheckedIds(s => {
+    const next = new Set(s)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  const allChecked = clubs.length > 0 && clubs.every(c => checkedIds.has(c.id))
+  const toggleSelectAllVisible = () => setCheckedIds(allChecked ? new Set() : new Set(clubs.map(c => c.id)))
+  const toggleBulkRep = (id) => setBulkReps(s => {
+    const next = new Set(s)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  const submitBulkAssign = async () => {
+    if (checkedIds.size === 0) { toast?.error('Select at least one club'); return }
+    if (bulkReps.size === 0) { toast?.error('Pick at least one salesperson'); return }
+    setBulkAssigning(true)
+    try {
+      const result = await api.salesWorkspaceBulkAssign([...checkedIds], [...bulkReps])
+      const summary = Object.entries(result.by_rep).map(([name, n]) => `${name}: ${n}`).join(', ')
+      toast?.success(`Assigned ${result.assigned} club${result.assigned === 1 ? '' : 's'} — ${summary}`)
+      setCheckedIds(new Set())
+      setBulkReps(new Set())
+      loadClubs()
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setBulkAssigning(false)
+    }
+  }
+
   const submitStartTrial = async (e) => {
     e.preventDefault()
     setSavingTrial(true)
@@ -348,6 +386,33 @@ export default function SalesWorkspace() {
         </label>
       </div>
 
+      {isSuper && checkedIds.size > 0 && (
+        <div className={`${CARD} mb-3 flex flex-wrap items-center gap-3`}>
+          <span className="text-[12px] text-pb-text font-medium">{checkedIds.size} selected</span>
+          <div className="flex flex-wrap gap-1.5">
+            {team.map(u => (
+              <button
+                key={u.id}
+                type="button"
+                onClick={() => toggleBulkRep(u.id)}
+                className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                  bulkReps.has(u.id) ? 'border-pb-accent text-pb-text' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+                }`}
+              >
+                {u.display_name || u.username}
+              </button>
+            ))}
+          </div>
+          <span className="text-[10.5px] text-pb-faintest">
+            {bulkReps.size > 1 ? 'Splits evenly, round-robin' : bulkReps.size === 1 ? 'Assigns everyone selected to them' : ''}
+          </span>
+          <Btn sm variant="primary" onClick={submitBulkAssign} disabled={bulkAssigning}>
+            {bulkAssigning ? 'Assigning…' : 'Assign selected'}
+          </Btn>
+          <Btn sm variant="subtle" onClick={() => { setCheckedIds(new Set()); setBulkReps(new Set()) }}>Clear</Btn>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
         {/* Queue */}
         <div className={CARD}>
@@ -357,14 +422,29 @@ export default function SalesWorkspace() {
             <p className="text-[12px] text-pb-faintest px-1 py-2">No clubs match these filters.</p>
           ) : (
             <div className="space-y-1.5 max-h-[75vh] overflow-y-auto">
+              {isSuper && (
+                <label className="flex items-center gap-1.5 px-2.5 py-1 text-[10.5px] text-pb-faint cursor-pointer select-none">
+                  <input type="checkbox" checked={allChecked} onChange={toggleSelectAllVisible} />
+                  Select all filtered
+                </label>
+              )}
               {clubs.map(c => (
-                <button
-                  key={c.id}
-                  onClick={() => selectClub(c.id)}
-                  className={`w-full text-left rounded-lg px-2.5 py-2 border transition-colors ${
-                    selectedId === c.id ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
-                  }`}
-                >
+                <div key={c.id} className="flex items-start gap-1.5">
+                  {isSuper && (
+                    <input
+                      type="checkbox"
+                      checked={checkedIds.has(c.id)}
+                      onChange={() => toggleChecked(c.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="mt-3"
+                    />
+                  )}
+                  <button
+                    onClick={() => selectClub(c.id)}
+                    className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
+                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
+                    }`}
+                  >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-pb-text text-[13px] font-medium truncate">{c.marketing_club_name || c.title}</span>
                     <PriorityBadge score={c.priority_score} />
@@ -380,7 +460,8 @@ export default function SalesWorkspace() {
                       {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
                     </span>
                   </div>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
           )}
