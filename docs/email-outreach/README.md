@@ -6,7 +6,7 @@ Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallba
 |------|-----|---------|-------|
 | `email-preseason-2026-plain.txt` | **Send this to a cold list.** Written as a real plain-text email from one person | {Club}: stats sorted before round one | No template at all, on purpose. See the format note below |
 | `email-preseason-2026.html` | The branded version, for the warm list | {Club}: stats sorted before round one | Dark navy, one CTA, compact module list, static trusted-by strip |
-| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | What's changed since you looked | Same shell, three numbered changes and nothing else |
+| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | Come and see what you're missing | Same shell. The example clubs ARE the pitch and sit above the button |
 | `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
 | `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
@@ -111,6 +111,14 @@ that drove the structure, and what they cost:
   to click, rather than three screens down. The module cards come after the ask,
   because anyone still scrolling past the CTA is browsing and the stats are what
   is being sold. The whole pitch now fits on one phone screen before the cards.
+- **The re-engagement email inverts that on purpose.** Its clubs sit ABOVE the
+  button under an "Already online" heading, because there they are not
+  reassurance next to an ask, they are the ask: these clubs are live and this one
+  is not, go and look at one. The button follows as the obvious next step once
+  someone has seen what a finished club looks like. That email is a "what you're
+  missing" pitch rather than a changelog — an earlier version led with three
+  things we had built, which is us talking about ourselves to someone who has
+  already said no once. What we have built since is one supporting sentence now.
 - **One CTA.** Every green button goes to `/trial` and nothing competes with it.
   The demo option is a small text link underneath, not a second button, because
   a rival button splits the click.

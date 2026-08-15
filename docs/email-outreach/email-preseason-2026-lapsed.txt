@@ -1,36 +1,32 @@
-Subject: What's changed since you looked
+Subject: Come and see what you're missing
 
 Hi [first name],
 
-You looked at BetterCricket a while back and it did not go ahead. The reason to
-do it has not changed: your full history from Cricket Australia, the errors in
-it fixed, turned into a profile for every player, leaderboards, all-time records
-and a yearbook per season. Then it keeps itself up to date, for good.
+You had a look at BetterCricket a while back and it did not go ahead. We have
+not stopped building since. Vote counting, a full club and volunteer back
+office, and we now run the setup with you rather than handing it over.
 
-Three things HAVE changed, and all three were common reasons clubs held off.
+Everything needed to get your club's whole history online is there now. These
+clubs have already done it. Have a look at what theirs turned into.
 
-1. BetterAdmin, expanded. It runs the whole club now, not just fees and email:
-   one member directory, the volunteer roster, and committee meetings with
-   minutes and motions.
-   https://betterat.cricket/modules/betteradmin
 
-2. Vote counting. Players vote on their phone, the count adds itself up, and
-   the club champion standings are ready for presentation night.
-   https://betterat.cricket/modules/betterselect
+ALREADY ONLINE
 
-3. We run the setup with you. A demo for your committee, a session with whoever
-   will use it most, and we stay on hand through your first season.
+Scarborough          https://betterat.cricket/scarborough-cricket-club
+Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
+Applecross           https://betterat.cricket/applecross
+Leeming Spartan      https://betterat.cricket/leeming-spartan-cricket-club
 
-Pick it back up: https://betterat.cricket/trial
-14 days, every module included, no credit card.
+Every one of these was a spreadsheet not long ago.
+
+
+Get your club on there: https://betterat.cricket/trial
+Free, no card needed, about 3 minutes to set up.
 Or book a demo this time: https://betterat.cricket/contact
-
-Clubs running on it: Scarborough, Rockingham-Mandurah, Applecross and Leeming
-Spartan. https://betterat.cricket/applecross
 
 Jack & Elton
 BetterCricket
 support@bettersports.com.au
 
-P.S. If it is still not the right time, reply and tell me what is in the way.
-That is genuinely useful to us.
+P.S. Round one is a few weeks away. If it is still not the right time, reply and
+tell me what is in the way.
