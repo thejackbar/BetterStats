@@ -324,11 +324,35 @@ class CallLogBody(BaseModel):
     outcome: str
     notes: Optional[str] = None
     next_follow_up_at: Optional[datetime] = None
+    # Only meaningful (and only honoured — see sw.log_call) for the three
+    # outcomes in sw._ASSIGNABLE_EVENT_OUTCOMES: who the resulting follow-up
+    # Event should be owned by, instead of whoever logged the call. Must be
+    # one of the staff GET /staff returns (validated below).
+    event_owner_user_id: Optional[str] = None
 
 
 @router.get("/call-outcomes")
 async def call_outcomes(_: SalesActor = Depends(require_sales_or_super)):
     return {"groups": sw.outcome_options()}
+
+
+@router.get("/staff")
+async def staff(_: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
+    """Super-admin staff a follow-up event can be handed to (the "speak to
+    someone about pricing/info/a demo" outcomes) — open to a 'sales' caller
+    too, unlike /team (the sales-rep bulk-assign picker, super-admin only),
+    since this is who a REP hands a call off to, not who a manager assigns
+    deals to."""
+    rows = (await db.execute(
+        select(User, ClubMembership)
+        .join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.role == "super_admin")
+        .order_by(User.display_name, User.username)
+    )).all()
+    return {"staff": [
+        {"id": str(u.id), "username": u.username, "display_name": u.display_name}
+        for u, _m in rows
+    ]}
 
 
 @router.post("/clubs/{deal_id}/calls")
@@ -354,9 +378,22 @@ async def log_call(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
+    event_owner_id = None
+    if body.event_owner_user_id:
+        owner_id = _uuid_or_none(body.event_owner_user_id)
+        is_staff = owner_id and (await db.execute(
+            select(ClubMembership).where(
+                ClubMembership.user_id == owner_id, ClubMembership.role == "super_admin",
+            )
+        )).scalar_one_or_none() is not None
+        if not is_staff:
+            raise HTTPException(status_code=422, detail="Unknown staff member")
+        event_owner_id = owner_id
+
     await sw.log_call(
         db, deal=deal, person=person, outcome=body.outcome, notes=body.notes,
         next_follow_up_at=body.next_follow_up_at, created_by_user_id=actor.user.id,
+        event_owner_user_id=event_owner_id,
     )
     await db.commit()
     return await get_club(deal_id, actor, db)

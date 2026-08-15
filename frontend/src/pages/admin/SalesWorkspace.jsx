@@ -9,6 +9,12 @@ import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
 
+// Mirrors services/sales_workspace.py's _ASSIGNABLE_EVENT_OUTCOMES — these
+// three specifically ask to speak with "someone" about pricing/info/a demo,
+// so the resulting follow-up Event can be handed to a named staff member
+// instead of defaulting to whoever logged the call.
+const ASSIGNABLE_EVENT_OUTCOMES = ['wants_pricing', 'wants_more_info', 'wants_demo']
+
 // Close-on-outside-click + Escape, for the Stage multi-select popover below.
 function useDismiss(open, onClose) {
   const ref = useRef(null)
@@ -222,6 +228,7 @@ export default function SalesWorkspace() {
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
   const [team, setTeam] = useState([])
+  const [staff, setStaff] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
   const [drawer, setDrawer] = useState(null)
@@ -234,7 +241,7 @@ export default function SalesWorkspace() {
   const [bulkReps, setBulkReps] = useState(() => new Set())
   const [bulkAssigning, setBulkAssigning] = useState(false)
 
-  const [callForm, setCallForm] = useState({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+  const [callForm, setCallForm] = useState({ contactKey: '', outcome: '', notes: '', followUpAt: '', eventOwnerUserId: '' })
   const [savingCall, setSavingCall] = useState(false)
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
@@ -268,6 +275,12 @@ export default function SalesWorkspace() {
   useEffect(() => {
     if (isSuper) api.salesWorkspaceTeam().then((d) => setTeam(d.team || [])).catch(() => {})
   }, [isSuper])
+  // Every caller (sales included) needs the staff list — it's who a "wants
+  // pricing/more info/a demo" follow-up can be handed off to, not a
+  // super-admin-only assignment tool.
+  useEffect(() => {
+    api.salesWorkspaceStaff().then((d) => setStaff(d.staff || [])).catch(() => {})
+  }, [])
 
   const loadDrawer = useCallback((dealId) => {
     setLoadingDrawer(true)
@@ -339,9 +352,12 @@ export default function SalesWorkspace() {
       }
       if (chosen?.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
       else if (chosen?.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      if (ASSIGNABLE_EVENT_OUTCOMES.includes(callForm.outcome) && callForm.eventOwnerUserId) {
+        payload.event_owner_user_id = callForm.eventOwnerUserId
+      }
       const d = await api.salesWorkspaceLogCall(drawer.deal.id, payload)
       setDrawer(d)
-      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '' })
+      setCallForm({ contactKey: '', outcome: '', notes: '', followUpAt: '', eventOwnerUserId: '' })
       toast?.success('Call logged')
       loadClubs()
     } catch (err) {
@@ -748,6 +764,14 @@ export default function SalesWorkspace() {
                   <Field label="Follow up (optional)">
                     <TextInput type="datetime-local" value={callForm.followUpAt} onChange={e => setCallForm(f => ({ ...f, followUpAt: e.target.value }))} />
                   </Field>
+                  {ASSIGNABLE_EVENT_OUTCOMES.includes(callForm.outcome) && callForm.followUpAt && (
+                    <Field label="Hand this follow-up to" hint="Leave as 'Me' to keep it on your own calendar">
+                      <Select value={callForm.eventOwnerUserId} onChange={e => setCallForm(f => ({ ...f, eventOwnerUserId: e.target.value }))}>
+                        <option value="">Me</option>
+                        {staff.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+                      </Select>
+                    </Field>
+                  )}
                   <Btn type="submit" variant="primary" disabled={savingCall}>{savingCall ? 'Saving…' : 'Save call'}</Btn>
                 </form>
               </div>
