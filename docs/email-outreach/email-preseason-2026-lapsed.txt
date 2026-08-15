@@ -3,10 +3,9 @@ Subject: What's changed since you looked
 Hi [first name],
 
 You looked at BetterCricket a while back and it did not go ahead. The reason to
-do it has not changed: your full history imported from Cricket Australia, the
-errors in it found and fixed, and every season of it turned into a profile for
-each player, leaderboards, all-time records and a yearbook. Then it keeps itself
-up to date, for good.
+do it has not changed: your full history from Cricket Australia, the errors in
+it fixed, turned into a profile for every player, leaderboards, all-time records
+and a yearbook per season. Then it keeps itself up to date, for good.
 
 Three things HAVE changed, and all three were common reasons clubs held off.
 

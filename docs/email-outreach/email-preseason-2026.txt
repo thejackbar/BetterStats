@@ -6,23 +6,27 @@ plain-text email rather than a transcript of a designed one.)
 
 Hi [first name],
 
-Every game your club has ever played is already sitting with Cricket Australia,
-as far back as the records go. We pull the lot and turn it into a live site: a
-profile for every player who has turned out for the club, leaderboards,
-all-time records, every scorecard and a yearbook for each season.
+Every game your club has ever played is already sitting with Cricket Australia.
+We pull the lot and turn it into a live site: a profile for every player,
+leaderboards, all-time records, every scorecard and a yearbook for each season.
 
-We find the errors in it too. Most clubs have the same player recorded three
-different ways, hundreds filed against the wrong season, and career totals that
-quietly stopped adding up years ago. Those get merged, reconciled and fixed, and
-if your older records only live in a spreadsheet we bring those in as well.
+We fix the errors on the way through. The same player recorded three ways,
+hundreds filed against the wrong season, totals that stopped adding up years
+ago. Old spreadsheets come in too.
 
-After that you never import anything again. Every scorecard flows in on its own
-after the game. We set it up with you, run a demo for your committee, and stay
-on hand through your first season.
+Then you never import anything again. We set it up with you, demo it for your
+committee, and stay on hand through your first season.
 
 Find your club and have a look: https://betterat.cricket/trial
 Free, no card needed, about 3 minutes to set up.
 Or book a demo first: https://betterat.cricket/contact
+
+TRUSTED BY CLUBS AT
+
+Scarborough      https://betterat.cricket/scarborough-cricket-club
+Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
+Applecross       https://betterat.cricket/applecross
+Leeming Spartan  https://betterat.cricket/leeming-spartan-cricket-club
 
 EXPLORE THE MODULES
 

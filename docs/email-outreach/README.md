@@ -102,10 +102,15 @@ that drove the structure, and what they cost:
 
 - **Length.** Reply rates peak at 50-125 words and fall roughly by half past 200
   (8.2% vs 3.9% across a 4M+ email aggregate; Boomerang's 40M-email study puts
-  the sweet spot near 75). The cold email's reading copy is about 155 words,
-  which is over the ideal because the brief has six things to say. That was the
-  trade: every extra point costs reply rate. **If you cut, cut the module list,
-  not the spreadsheet-errors paragraph** — that paragraph is the hook.
+  the sweet spot near 75). The cold email's reading copy is **124 words**, inside
+  that band. Each of the three paragraphs is one idea: your history already
+  exists and we make a site of it, we fix its errors, then it runs itself. **If
+  something new has to go in, take a paragraph out.**
+- **Order: headline, copy, CTA, proof, then modules.** The trusted-by strip sits
+  directly under the button so the crests land while someone is deciding whether
+  to click, rather than three screens down. The module cards come after the ask,
+  because anyone still scrolling past the CTA is browsing and the stats are what
+  is being sold. The whole pitch now fits on one phone screen before the cards.
 - **One CTA.** Every green button goes to `/trial` and nothing competes with it.
   The demo option is a small text link underneath, not a second button, because
   a rival button splits the click.

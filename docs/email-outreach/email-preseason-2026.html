@@ -29,18 +29,17 @@
      make_sends.py works unchanged: utm_source=ca is the per-club placeholder,
      greeting is "Hi [first name],".
 
-     FOCUS: the stats are the pitch and everything else is one sentence. The
-     three body paragraphs are the whole argument in order — the spreadsheet is
-     wrong, we fix it and turn it into a real stats site, then it runs itself.
-     The other four modules get a single grey line below the CTA, deliberately
-     not a card list or a panel: those competed with the stats for the eye and
-     made the email read as a product catalogue.
+     ORDER: headline, three short paragraphs, CTA, PROOF, then the modules.
+     The trusted-by strip sits directly under the button so the proof lands
+     while someone is deciding whether to click, not three screens later. The
+     module cards come after the ask on purpose — anyone still scrolling past
+     the CTA is browsing, and the stats are what is being sold.
 
-     LENGTH: body copy is ~175 words. Reply rates peak at 50-125 words and fall
-     off a cliff past 200 (8.2% vs 3.9% across 4M+ emails), so this is already
-     at the limit. If you add anything, take something out. The one line to cut
-     first is the module sentence; the spreadsheet-errors paragraph is the hook
-     and the stats paragraph is what is actually being sold.
+     LENGTH: body copy is ~95 words, inside the 50-125 band where reply rates
+     peak (8.2% there vs 3.9% past 200, across 4M+ emails). Keep it there. The
+     three paragraphs are the whole argument and each is one idea: your history
+     already exists and we make a site of it, we fix its errors, then it runs
+     itself. If something new has to go in, take a paragraph out.
      A shorter plain-text version is in email-preseason-2026-plain.txt and is the
      one to send to a cold list.
 
@@ -53,7 +52,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="dark light">
 <meta name="supported-color-schemes" content="dark light">
-<title>Your stats before round one</title>
+<title>Is your club's history online yet?</title>
 </head>
 <body style="margin:0; padding:0; background-color:#0b1220;">
 
@@ -100,17 +99,17 @@ Every game your club has ever played, pulled straight from Cricket Australia. Fr
               </tr>
               <tr>
                 <td style="padding-bottom:16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  Every game your club has ever played is already sitting with Cricket Australia, as far back as the records go. We pull the lot and turn it into a live site: a profile for every player who has turned out for the club, leaderboards, all-time records, every scorecard and a yearbook for each season.
+                  Every game your club has ever played is already sitting with Cricket Australia. We pull the lot and turn it into a live site: a profile for every player, leaderboards, all-time records, every scorecard and a yearbook for each season.
                 </td>
               </tr>
               <tr>
                 <td style="padding-bottom:16px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  We find the errors in it too. Most clubs have the same player recorded three different ways, hundreds filed against the wrong season, and career totals that quietly stopped adding up years ago. Those get merged, reconciled and fixed, and if your older records only live in a spreadsheet we bring those in as well.
+                  We fix the errors on the way through. The same player recorded three ways, hundreds filed against the wrong season, totals that stopped adding up years ago. Old spreadsheets come in too.
                 </td>
               </tr>
               <tr>
                 <td style="padding-bottom:24px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
-                  After that you never import anything again. Every scorecard flows in on its own after the game. We set it up with you, run a demo for your committee, and stay on hand through your first season.
+                  Then you never import anything again. We set it up with you, demo it for your committee, and stay on hand through your first season.
                 </td>
               </tr>
             </table>
@@ -140,6 +139,53 @@ Every game your club has ever played, pulled straight from Cricket Australia. Fr
         <tr>
           <td align="center" style="padding:0 36px 24px 36px;">
             <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#8a90a2;">Free, no card needed, about 3 minutes to set up<br>or <a href="https://betterat.cricket/contact?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_demo_cta" style="color:#16C784; text-decoration:none;">book a demo first</a></span>
+          </td>
+        </tr>
+
+        <!-- Trusted by clubs at. Sits directly under the CTA on purpose: the
+             proof lands at the moment someone is deciding whether to click, not
+             three screens later after the module cards. -->
+        <tr>
+          <td style="padding:4px 36px 26px 36px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td align="center" style="padding-bottom:12px;">
+                  <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2;">Trusted by clubs at</span>
+                </td>
+              </tr>
+              <tr>
+                <td>
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                    <tr>
+                      <td width="25%" valign="top" align="center">
+                        <a href="https://betterat.cricket/scarborough-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
+                          <img src="https://betterat.cricket/email/scarborough-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
+                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Scarborough</span>
+                        </a>
+                      </td>
+                      <td width="25%" valign="top" align="center">
+                        <a href="https://betterat.cricket/rockingham-mandurah-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
+                          <img src="https://betterat.cricket/email/rockingham-mandurah-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
+                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Rockingham<br>Mandurah</span>
+                        </a>
+                      </td>
+                      <td width="25%" valign="top" align="center">
+                        <a href="https://betterat.cricket/applecross?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
+                          <img src="https://betterat.cricket/email/applecross-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
+                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Applecross</span>
+                        </a>
+                      </td>
+                      <td width="25%" valign="top" align="center">
+                        <a href="https://betterat.cricket/leeming-spartan-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
+                          <img src="https://betterat.cricket/email/leeming-spartan-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
+                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Leeming<br>Spartan</span>
+                        </a>
+                      </td>
+                    </tr>
+                  </table>
+                </td>
+              </tr>
+            </table>
           </td>
         </tr>
 
@@ -276,51 +322,6 @@ Every game your club has ever played, pulled straight from Cricket Australia. Fr
                       </tr>
                     </table>
                   </a>
-                </td>
-              </tr>
-            </table>
-          </td>
-        </tr>
-
-        <!-- Trusted by clubs at -->
-        <tr>
-          <td style="padding:26px 36px 0 36px;">
-            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-              <tr>
-                <td align="center" style="padding-bottom:12px;">
-                  <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:16px; font-weight:bold; letter-spacing:1.5px; text-transform:uppercase; color:#8a90a2;">Trusted by clubs at</span>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                    <tr>
-                      <td width="25%" valign="top" align="center">
-                        <a href="https://betterat.cricket/scarborough-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
-                          <img src="https://betterat.cricket/email/scarborough-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
-                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Scarborough</span>
-                        </a>
-                      </td>
-                      <td width="25%" valign="top" align="center">
-                        <a href="https://betterat.cricket/rockingham-mandurah-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
-                          <img src="https://betterat.cricket/email/rockingham-mandurah-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
-                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Rockingham<br>Mandurah</span>
-                        </a>
-                      </td>
-                      <td width="25%" valign="top" align="center">
-                        <a href="https://betterat.cricket/applecross?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
-                          <img src="https://betterat.cricket/email/applecross-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
-                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Applecross</span>
-                        </a>
-                      </td>
-                      <td width="25%" valign="top" align="center">
-                        <a href="https://betterat.cricket/leeming-spartan-cricket-club?utm_source=ca&amp;utm_medium=email&amp;utm_campaign=BC_AU_PreSeason_EDM_Aug2026&amp;utm_content=edm_trust_strip" style="text-decoration:none; display:block;">
-                          <img src="https://betterat.cricket/email/leeming-spartan-cc.png" width="40" height="40" alt="" style="display:block; border:0; margin:0 auto 6px auto;">
-                          <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:11px; line-height:15px; font-weight:bold; color:#aab1c2;">Leeming<br>Spartan</span>
-                        </a>
-                      </td>
-                    </tr>
-                  </table>
                 </td>
               </tr>
             </table>
