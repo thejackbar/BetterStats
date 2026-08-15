@@ -198,13 +198,17 @@ export default function SuperUsers() {
                   className={INPUT_CLS} />
               </div>
               <div>
-                <label className="font-mono text-[10px] text-pb-faint block mb-1">Club *</label>
-                <select required value={form.club_id}
-                  onChange={e => setForm(f => ({ ...f, club_id: e.target.value }))}
-                  className={INPUT_CLS}>
-                  <option value="">Select club…</option>
-                  {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Club {form.role !== 'sales' && '*'}</label>
+                {form.role === 'sales' ? (
+                  <div className={INPUT_CLS + ' text-pb-faint'}>Outreach org (automatic)</div>
+                ) : (
+                  <select required value={form.club_id}
+                    onChange={e => setForm(f => ({ ...f, club_id: e.target.value }))}
+                    className={INPUT_CLS}>
+                    <option value="">Select club…</option>
+                    {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                )}
               </div>
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Role</label>
@@ -213,6 +217,7 @@ export default function SuperUsers() {
                   className={INPUT_CLS}>
                   <option value="club_admin">Club Admin</option>
                   <option value="super_admin">Super Admin</option>
+                  <option value="sales">Sales</option>
                 </select>
               </div>
             </div>
@@ -274,6 +279,7 @@ export default function SuperUsers() {
                 <option value="">All roles</option>
                 <option value="club_admin">Club Admin</option>
                 <option value="super_admin">Super Admin</option>
+                <option value="sales">Sales</option>
               </select>
             </div>
             <div>
@@ -403,12 +409,16 @@ export default function SuperUsers() {
                       </div>
                       <div>
                         <label className="font-mono text-[10px] text-pb-faint block mb-1">Club</label>
-                        <select value={editForm.club_id}
-                          onChange={e => setEditForm(f => ({ ...f, club_id: e.target.value }))}
-                          className={INPUT_CLS}>
-                          <option value="">Select club…</option>
-                          {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                        </select>
+                        {editForm.role === 'sales' ? (
+                          <div className={INPUT_CLS + ' text-pb-faint'}>Outreach org (automatic)</div>
+                        ) : (
+                          <select value={editForm.club_id}
+                            onChange={e => setEditForm(f => ({ ...f, club_id: e.target.value }))}
+                            className={INPUT_CLS}>
+                            <option value="">Select club…</option>
+                            {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                          </select>
+                        )}
                       </div>
                       <div>
                         <label className="font-mono text-[10px] text-pb-faint block mb-1">Role</label>
@@ -417,6 +427,7 @@ export default function SuperUsers() {
                           className={INPUT_CLS}>
                           <option value="club_admin">Club Admin</option>
                           <option value="super_admin">Super Admin</option>
+                          <option value="sales">Sales</option>
                         </select>
                       </div>
                     </div>

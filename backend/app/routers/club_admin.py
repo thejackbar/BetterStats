@@ -4094,9 +4094,27 @@ async def create_user(
     if len(data.password) < 10:
         raise HTTPException(status_code=422, detail="Password must be at least 10 characters")
 
-    club = await db.get(Organisation, uuid.UUID(data.club_id))
-    if not club:
-        raise HTTPException(status_code=404, detail="Club not found")
+    role = data.role if data.role in ("super_admin", "club_admin", "sales") else "club_admin"
+
+    if role == "sales":
+        # A 'sales' membership only ever makes sense against the platform's
+        # own outreach org (Sales Workspace's require_sales_or_super checks
+        # the ROLE, not the club — but a real cricket club's own admin list
+        # is not where an internal sales rep account belongs, and reusing
+        # the outreach org keeps this consistent with how it already anchors
+        # BetterComms' directory sends — see services/marketing_org.py).
+        from app.services.marketing_org import get_outreach_org
+        outreach = await get_outreach_org(db)
+        if outreach is None:
+            raise HTTPException(
+                status_code=422,
+                detail="No outreach organisation is configured — designate one from BetterComms first",
+            )
+        club = outreach
+    else:
+        club = await db.get(Organisation, uuid.UUID(data.club_id))
+        if not club:
+            raise HTTPException(status_code=404, detail="Club not found")
 
     user = User(
         username=username,
@@ -4106,11 +4124,7 @@ async def create_user(
     db.add(user)
     await db.flush()
 
-    membership = ClubMembership(
-        club_id=club.id,
-        user_id=user.id,
-        role=data.role if data.role in ("super_admin", "club_admin") else "club_admin",
-    )
+    membership = ClubMembership(club_id=club.id, user_id=user.id, role=role)
     db.add(membership)
     await db.flush()
     # The first club_admin of a club is its primary/owner admin.
@@ -4119,7 +4133,7 @@ async def create_user(
         await ensure_primary_admin(db, club.id)
     await db.commit()
 
-    return {"id": str(user.id), "username": user.username, "club_id": data.club_id, "role": membership.role}
+    return {"id": str(user.id), "username": user.username, "club_id": str(club.id), "role": membership.role}
 
 
 class PasswordReset(BaseModel):
@@ -4208,8 +4222,8 @@ async def patch_user(
     membership = membership_res.scalar_one_or_none()
 
     new_role = fields.get("role")
-    if new_role is not None and new_role not in ("super_admin", "club_admin"):
-        raise HTTPException(status_code=422, detail="Role must be super_admin or club_admin")
+    if new_role is not None and new_role not in ("super_admin", "club_admin", "sales"):
+        raise HTTPException(status_code=422, detail="Role must be super_admin, club_admin or sales")
 
     # Block removing the last super admin via a role demotion.
     if (
@@ -4220,7 +4234,23 @@ async def patch_user(
     ):
         raise HTTPException(status_code=400, detail="Cannot demote the last super admin")
 
-    if "club_id" in fields:
+    if new_role == "sales":
+        # A 'sales' membership always anchors to the outreach org — see
+        # create_user's own comment above — regardless of whatever club_id
+        # the edit form's (unrelated) dropdown happens to be showing.
+        from app.services.marketing_org import get_outreach_org
+        outreach = await get_outreach_org(db)
+        if outreach is None:
+            raise HTTPException(
+                status_code=422,
+                detail="No outreach organisation is configured — designate one from BetterComms first",
+            )
+        if membership:
+            membership.club_id = outreach.id
+        else:
+            membership = ClubMembership(club_id=outreach.id, user_id=user.id, role="sales")
+            db.add(membership)
+    elif "club_id" in fields:
         club = await db.get(Organisation, uuid.UUID(fields["club_id"]))
         if not club:
             raise HTTPException(status_code=404, detail="Club not found")

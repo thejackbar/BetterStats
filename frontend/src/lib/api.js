@@ -2015,6 +2015,34 @@ export const api = {
     request(`/club-admin/super/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   superDeleteUser: (userId) =>
     request(`/club-admin/super/users/${userId}`, { method: 'DELETE' }),
+
+  // Sales Workspace — same access for a 'sales' role user or a super admin
+  // (see routers/auth.py's require_sales_or_super); a 'sales' caller is
+  // always restricted server-side to their own assigned clubs regardless of
+  // what filters are sent here.
+  salesWorkspaceClubs: (params = {}) => {
+    const qs = new URLSearchParams()
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '' && v !== false) qs.set(k, v)
+    })
+    const q = qs.toString()
+    return request(`/club-admin/sales-workspace/clubs${q ? `?${q}` : ''}`)
+  },
+  salesWorkspaceTeam: () => request('/club-admin/sales-workspace/team'),
+  salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
+  salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
+  salesWorkspaceLogCall: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAddNote: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/notes`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAddContact: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceAssign: (dealId, ownerUserId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
+      method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
+    }),
+  salesWorkspaceStartTrial: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',

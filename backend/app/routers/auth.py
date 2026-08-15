@@ -123,6 +123,35 @@ async def require_super_admin(
     return current_user
 
 
+class SalesActor:
+    """The current user + their membership role, for the Sales Workspace
+    (routers/sales_workspace.py) — the one place in the app a non-super-admin
+    role gets cross-club platform access, restricted to what they own
+    (crm_deals.owner_user_id). A super_admin using the Workspace gets the
+    unrestricted view; role is what the route handlers key their row-level
+    filtering off, since there's no capability-boolean for "only my own
+    rows" to reuse from auth/capabilities.py."""
+    __slots__ = ("user", "role")
+
+    def __init__(self, user: User, role: str):
+        self.user = user
+        self.role = role
+
+
+async def require_sales_or_super(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SalesActor:
+    result = await db.execute(
+        select(ClubMembership).where(ClubMembership.user_id == current_user.id)
+    )
+    membership = result.scalar_one_or_none()
+    role = membership.role if membership else None
+    if role not in ("super_admin", "sales"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sales access required")
+    return SalesActor(user=current_user, role=role)
+
+
 async def require_self_serve_registration_enabled(db: AsyncSession = Depends(get_db)) -> None:
     """Route dependency for the *public* self-serve club trial registration
     flow (routers/public_self_serve.py — the /trial ad-campaign landing page

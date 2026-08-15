@@ -4370,6 +4370,11 @@ class CrmPerson(Base):
     email = Column(Text, nullable=True)
     phone = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Migration 255: set only when this row was lazily materialized from a
+    # Club Directory contact (see services/sales_workspace.
+    # resolve_or_materialize_person) — traces it back and is the dedupe key
+    # so touching the same directory contact twice never mints a second row.
+    directory_contact_id = Column(UUID(as_uuid=True), ForeignKey("marketing_club_contacts.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
@@ -4566,6 +4571,13 @@ class CrmActivity(Base):
     occurred_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     meta = Column(JSONB, nullable=True)
+    # Migration 255 (Sales Workspace): structured call-outcome key (see
+    # services/sales_workspace.CALL_OUTCOMES) — NULL for anything that isn't
+    # a logged call. next_follow_up_at is the callback/follow-up date
+    # captured off a call log, shown inline until a dedicated queue screen
+    # exists.
+    outcome = Column(Text, nullable=True)
+    next_follow_up_at = Column(TIMESTAMP(timezone=True), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
