@@ -202,6 +202,8 @@ export default function AdminImport() {
   const [expandedBatch, setExpandedBatch] = useState(null)
   const [batchPlayers, setBatchPlayers] = useState({}) // batchId -> [{player_id, name, rows}]
   const [loadingBatchPlayers, setLoadingBatchPlayers] = useState(false)
+  const [undoingBatch, setUndoingBatch] = useState(null)   // batchId currently undoing, or null
+  const [undoingPlayer, setUndoingPlayer] = useState(null) // "batchId:playerId" currently undoing, or null
 
   const loadHistory = useCallback(() => {
     api.importList().then(d => setHistory(d.imports || [])).catch(() => {})
@@ -349,12 +351,16 @@ export default function AdminImport() {
 
   async function undo(batchId) {
     if (!window.confirm('Remove this import and rebuild the affected players’ stats?')) return
+    // A big historical import (hundreds/thousands of rows) has to re-check every
+    // candidate player against ~40 tables before it's safe to delete them — this
+    // can take a real few seconds, and with no feedback at all it reads as broken.
+    setUndoingBatch(batchId)
     try {
       const r = await api.importUndo(batchId)
       toast.success(`Removed ${r.rows_removed} imported rows`
         + (r.players_deleted ? ` and ${r.players_deleted} player record${r.players_deleted === 1 ? '' : 's'} this import created` : ''))
       loadHistory()
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(e.message) } finally { setUndoingBatch(null) }
   }
 
   async function toggleBatch(batchId) {
@@ -375,13 +381,15 @@ export default function AdminImport() {
   // in that batch should be left alone.
   async function undoPlayer(batchId, playerId, playerName) {
     if (!window.confirm(`Remove ${playerName}'s imported rows from this import and rebuild their stats? Other players in this import are untouched.`)) return
+    const key = `${batchId}:${playerId}`
+    setUndoingPlayer(key)
     try {
       const r = await api.importUndoPlayer(batchId, playerId)
       toast.success(`Removed ${r.rows_removed} imported rows for ${playerName}`
         + (r.player_deleted ? ' and deleted the player record this import created' : ''))
       setBatchPlayers(b => ({ ...b, [batchId]: (b[batchId] || []).filter(p => p.player_id !== playerId) }))
       loadHistory()
-    } catch (e) { toast.error(e.message) }
+    } catch (e) { toast.error(e.message) } finally { setUndoingPlayer(k => k === key ? null : k) }
   }
 
   function reset() {
@@ -622,7 +630,14 @@ export default function AdminImport() {
                       <td className="py-2 pr-2 text-right">
                         {h.undone_at
                           ? <span className="font-mono text-[9px] text-pb-faint">UNDONE</span>
-                          : <button onClick={() => undo(h.id)} className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5">UNDO ALL</button>}
+                          : undoingBatch === h.id
+                            ? <span className="inline-flex items-center gap-1.5 font-mono text-[9px] tracking-wide2 text-pb-faint px-2 py-0.5">
+                                <span className="w-3 h-3 rounded-full border-2 border-pb-hairline2 border-t-pb-accent animate-spin" /> UNDOING…
+                              </span>
+                            : <button onClick={() => undo(h.id)} disabled={!!undoingBatch}
+                                className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5 disabled:opacity-40 disabled:pointer-events-none">
+                                UNDO ALL
+                              </button>}
                       </td>
                     </tr>
                     {expandedBatch === h.id && (
@@ -637,10 +652,16 @@ export default function AdminImport() {
                                   <span className="text-pb-dim">{p.name}</span>
                                   <span className="flex items-center gap-2">
                                     <span className="font-mono text-[10px] text-pb-faintest">{p.rows} rows</span>
-                                    <button onClick={() => undoPlayer(h.id, p.player_id, p.name)}
-                                      className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5">
-                                      UNDO JUST THIS PLAYER
-                                    </button>
+                                    {undoingPlayer === `${h.id}:${p.player_id}` ? (
+                                      <span className="inline-flex items-center gap-1.5 font-mono text-[9px] tracking-wide2 text-pb-faint px-2 py-0.5">
+                                        <span className="w-3 h-3 rounded-full border-2 border-pb-hairline2 border-t-pb-accent animate-spin" /> UNDOING…
+                                      </span>
+                                    ) : (
+                                      <button onClick={() => undoPlayer(h.id, p.player_id, p.name)} disabled={!!undoingPlayer}
+                                        className="font-mono text-[9px] tracking-wide2 text-pb-red/70 hover:text-pb-red border border-pb-red/30 rounded px-2 py-0.5 disabled:opacity-40 disabled:pointer-events-none">
+                                        UNDO JUST THIS PLAYER
+                                      </button>
+                                    )}
                                   </span>
                                 </div>
                               ))}
