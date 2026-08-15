@@ -2064,6 +2064,10 @@ export const api = {
   salesWorkspaceEmailTemplates: () => request('/club-admin/sales-workspace/email-templates'),
   salesWorkspaceSendEmail: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/email`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceLists: () => request('/club-admin/sales-workspace/lists'),
+  salesWorkspaceList: (listId) => request(`/club-admin/sales-workspace/lists/${listId}`),
+  salesWorkspaceImportFromWizardClubs: (data) =>
+    request('/club-admin/sales-workspace/lists/from-wizard-clubs', { method: 'POST', body: JSON.stringify(data) }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',

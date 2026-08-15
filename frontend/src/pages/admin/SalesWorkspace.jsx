@@ -107,7 +107,7 @@ export default function SalesWorkspace() {
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [filters, setFilters] = useState({ q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false })
+  const [filters, setFilters] = useState({ q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false, list_id: '' })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
   const [team, setTeam] = useState([])
@@ -179,6 +179,18 @@ export default function SalesWorkspace() {
     if (clubParam && clubParam !== selectedId) selectClub(clubParam)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Deep link from Sales Lists: /admin/super/crm/workspace?list_id=<id>&list_name=<name>
+  const listParam = searchParams.get('list_id')
+  const listNameParam = searchParams.get('list_name')
+  useEffect(() => {
+    if (listParam && listParam !== filters.list_id) setFilters(f => ({ ...f, list_id: listParam }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listParam])
+  const clearListFilter = () => {
+    setFilters(f => ({ ...f, list_id: '' }))
+    setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('list_id'); n.delete('list_name'); return n }, { replace: true })
+  }
 
   const toggleDoNotContact = async (contact) => {
     const next = !contact.do_not_contact
@@ -354,6 +366,14 @@ export default function SalesWorkspace() {
           </p>
         </div>
       </div>
+
+      {filters.list_id && (
+        <div className="mb-3 flex items-center gap-2 text-[12px]">
+          <span className="text-pb-faint">Filtered to list:</span>
+          <span className="text-pb-text font-medium">{listNameParam || filters.list_id}</span>
+          <button type="button" onClick={clearListFilter} className="text-pb-faintest hover:text-pb-text underline">clear</button>
+        </div>
+      )}
 
       <div className={`${CARD} mb-3 flex flex-wrap items-end gap-3`}>
         <Field label="Search" width="220px">

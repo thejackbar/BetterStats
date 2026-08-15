@@ -4589,6 +4589,36 @@ class CrmActivity(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
+class SalesList(Base):
+    """Migration 257: one row per Sales Workspace import batch — a Wizard
+    Clubs pull, a CRM export, a Club Directory selection, or a manual pick.
+    A thin provenance/grouping layer: assignment still lives entirely on
+    ``crm_deals.owner_user_id``, and a club's calls/notes/stage are the same
+    wherever it's viewed from. A club can sit in several lists."""
+    __tablename__ = "sales_lists"
+
+    SOURCE_TYPES = ("wizard_clubs", "manual")
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, nullable=False)
+    description = Column(Text, nullable=True)
+    source_type = Column(Text, nullable=False, server_default="manual", default="manual")
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SalesListClub(Base):
+    """Migration 257: many-to-many membership of a club in a Sales List.
+    Unique per (list, club) so re-importing an overlapping selection is
+    idempotent rather than duplicating the row."""
+    __tablename__ = "sales_list_clubs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sales_list_id = Column(UUID(as_uuid=True), ForeignKey("sales_lists.id", ondelete="CASCADE"), nullable=False)
+    marketing_club_id = Column(UUID(as_uuid=True), ForeignKey("marketing_clubs.id", ondelete="CASCADE"), nullable=False)
+    added_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
 class CrmEvent(Base):
     """A scheduled calendar event on the platform Sales Pipeline (migration
     196) — a Call/Demo/Meeting/Review Deal/Other planned for a future date &

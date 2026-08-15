@@ -24,7 +24,10 @@ from typing import Optional
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact, User
+from app.models.db import (
+    CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact,
+    SalesList, SalesListClub, User,
+)
 from app.services import crm as crm_service
 
 # ─── Call outcome taxonomy ───────────────────────────────────────────────────
@@ -600,3 +603,178 @@ async def funnel_by_rep(session: AsyncSession, *, owner_user_id=None) -> list[di
         })
     out.sort(key=lambda r: r["assigned"], reverse=True)
     return out
+
+
+# ─── Sales Lists (migration 257) ─────────────────────────────────────────────
+# A thin provenance/import layer, not a parallel data model. Assignment still
+# lives entirely on crm_deals.owner_user_id — POST /bulk-assign is what
+# actually assigns a list's clubs to a rep, reused rather than duplicated
+# here. A list is just "these clubs came in together, from this source";
+# a club's calls/notes/stage are the same wherever it's viewed from.
+
+async def list_sales_lists(session: AsyncSession) -> list[dict]:
+    """Every Sales List, newest first, with its club count."""
+    lists = (await session.execute(select(SalesList).order_by(SalesList.created_at.desc()))).scalars().all()
+    if not lists:
+        return []
+    count_rows = (await session.execute(
+        select(SalesListClub.sales_list_id, func.count())
+        .where(SalesListClub.sales_list_id.in_([l.id for l in lists]))
+        .group_by(SalesListClub.sales_list_id)
+    )).all()
+    counts = {row[0]: row[1] for row in count_rows}
+    creator_ids = {l.created_by_user_id for l in lists if l.created_by_user_id}
+    creators = {}
+    if creator_ids:
+        rows = (await session.execute(select(User).where(User.id.in_(creator_ids)))).scalars().all()
+        creators = {u.id: (u.display_name or u.username) for u in rows}
+    return [{
+        "id": str(l.id),
+        "name": l.name,
+        "description": l.description,
+        "source_type": l.source_type,
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+        "created_by_name": creators.get(l.created_by_user_id),
+        "club_count": counts.get(l.id, 0),
+    } for l in lists]
+
+
+async def get_sales_list(session: AsyncSession, list_id) -> Optional[dict]:
+    """One Sales List's own record plus every club in it, each carrying its
+    CURRENT deal state (stage, owner) — a list never freezes a snapshot, it
+    just remembers which clubs came in together and when."""
+    sales_list = await session.get(SalesList, list_id)
+    if sales_list is None:
+        return None
+
+    memberships = (await session.execute(
+        select(SalesListClub).where(SalesListClub.sales_list_id == list_id)
+        .order_by(SalesListClub.added_at.desc())
+    )).scalars().all()
+    club_ids = [m.marketing_club_id for m in memberships]
+    added_at_by_club = {m.marketing_club_id: m.added_at for m in memberships}
+
+    clubs_by_id = {}
+    if club_ids:
+        rows = (await session.execute(select(MarketingClub).where(MarketingClub.id.in_(club_ids)))).scalars().all()
+        clubs_by_id = {c.id: c for c in rows}
+
+    pipeline = await crm_service.ensure_platform_pipeline(session)
+    stage_by_id = {s.id: s for s in pipeline.stages}
+    deals_by_club: dict = {}
+    if club_ids:
+        rows = (await session.execute(
+            select(CrmDeal).where(
+                CrmDeal.pipeline_id == pipeline.id,
+                CrmDeal.marketing_club_id.in_(club_ids),
+                CrmDeal.archived_at.is_(None),
+            ).order_by(CrmDeal.created_at.desc())
+        )).scalars().all()
+        for d in rows:
+            deals_by_club.setdefault(d.marketing_club_id, d)  # newest open deal wins
+
+    owner_ids = {d.owner_user_id for d in deals_by_club.values() if d.owner_user_id}
+    owners = {}
+    if owner_ids:
+        rows = (await session.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
+        owners = {u.id: (u.display_name or u.username) for u in rows}
+
+    rows_out = []
+    for club_id in club_ids:
+        club = clubs_by_id.get(club_id)
+        if club is None:
+            continue
+        deal = deals_by_club.get(club_id)
+        stage = stage_by_id.get(deal.stage_id) if deal else None
+        added_at = added_at_by_club.get(club_id)
+        rows_out.append({
+            "marketing_club_id": str(club_id),
+            "club_name": club.name,
+            "deal_id": str(deal.id) if deal else None,
+            "stage_key": stage.key if stage else None,
+            "stage_name": stage.name if stage else None,
+            "owner_user_id": str(deal.owner_user_id) if deal and deal.owner_user_id else None,
+            "owner_name": owners.get(deal.owner_user_id) if deal else None,
+            "added_at": added_at.isoformat() if added_at else None,
+        })
+
+    creator_name = None
+    if sales_list.created_by_user_id:
+        creator = await session.get(User, sales_list.created_by_user_id)
+        creator_name = (creator.display_name or creator.username) if creator else None
+
+    return {
+        "id": str(sales_list.id),
+        "name": sales_list.name,
+        "description": sales_list.description,
+        "source_type": sales_list.source_type,
+        "created_at": sales_list.created_at.isoformat() if sales_list.created_at else None,
+        "created_by_name": creator_name,
+        "clubs": rows_out,
+    }
+
+
+async def create_list_from_wizard_clubs(
+    session: AsyncSession, *, name: str, description: Optional[str], days: int,
+    club_keys: list[str], created_by_user_id=None,
+) -> dict:
+    """Import a Wizard Clubs selection into a Sales List. Each club_key is
+    resolved to its Club Directory row with the SAME guid-first,
+    case-insensitive-name-fallback matching the Wizard Clubs page itself
+    uses (wizard_club_lists._directory_matches — never a second, drifting
+    matcher), and every matched club is given an open platform deal via
+    sync_platform_deal_for_club(stage_key='target', advance_only=True), so
+    the club shows up in the workspace queue and a re-import can never push
+    a club that's already further along (e.g. Engaged from an earlier call)
+    back down to Target."""
+    from app.services import wizard_club_lists as wcl
+
+    if not (name or "").strip():
+        return {"error": "no_name", "detail": "Name the list."}
+    wanted = {wcl.norm_key(k) for k in (club_keys or []) if wcl.norm_key(k)}
+    if not wanted:
+        return {"error": "no_clubs", "detail": "No clubs were selected."}
+
+    rows = [r for r in await wcl.merged_wizard_clubs(session, days) if r["key"] in wanted]
+    if not rows:
+        return {"error": "no_clubs", "detail": "None of those clubs are in the wizard list."}
+
+    matches = await wcl._directory_matches(session, rows)
+
+    sales_list = SalesList(
+        name=name.strip(), description=(description or "").strip() or None,
+        source_type="wizard_clubs", created_by_user_id=created_by_user_id,
+    )
+    session.add(sales_list)
+    await session.flush()  # need sales_list.id for the membership rows
+
+    added = 0
+    matched_count = 0
+    seen_club_ids: set = set()
+    unmatched: list[str] = []
+    for r in rows:
+        club = matches.get(r["key"])
+        if club is None:
+            unmatched.append(r["name"])
+            continue
+        matched_count += 1
+        # Two distinct wizard rows (different spellings/queries) can resolve
+        # to the SAME directory club — a membership row per list+club is
+        # unique by construction, so only add it once per import.
+        if club.id not in seen_club_ids:
+            seen_club_ids.add(club.id)
+            session.add(SalesListClub(sales_list_id=sales_list.id, marketing_club_id=club.id))
+            added += 1
+        # Ensure a deal exists so the club shows up in the workspace queue —
+        # never regresses a deal already past 'target' (see docstring).
+        await crm_service.sync_platform_deal_for_club(
+            session, club, stage_key="target", source="sales_list_import",
+        )
+
+    return {
+        "id": str(sales_list.id),
+        "name": sales_list.name,
+        "clubs_added": added,
+        "clubs_matched": matched_count,
+        "clubs_unmatched": unmatched,
+    }

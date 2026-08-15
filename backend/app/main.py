@@ -5270,6 +5270,36 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE marketing_club_contacts ADD COLUMN IF NOT EXISTS do_not_contact_reason TEXT"
         ))
 
+        # Migration 257: Sales Lists — a thin provenance/import layer over the
+        # existing CRM deals (assignment still lives on crm_deals.owner_user_id
+        # alone; a list is just "these clubs came in together, from this
+        # source"). Byte-identical to alembic/versions/257_sales_lists.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sales_lists (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT NOT NULL,
+                description TEXT,
+                source_type TEXT NOT NULL DEFAULT 'manual',
+                created_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sales_list_clubs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                sales_list_id UUID NOT NULL REFERENCES sales_lists(id) ON DELETE CASCADE,
+                marketing_club_id UUID NOT NULL REFERENCES marketing_clubs(id) ON DELETE CASCADE,
+                added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                UNIQUE (sales_list_id, marketing_club_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_club ON sales_list_clubs(marketing_club_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_list ON sales_list_clubs(sales_list_id)"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

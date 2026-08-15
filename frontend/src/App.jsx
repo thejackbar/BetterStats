@@ -150,6 +150,7 @@ const SuperCrmAutomation = lazy(() => import('./pages/admin/SuperCrmAutomation')
 const SalesWorkspace = lazy(() => import('./pages/admin/SalesWorkspace'))
 const SalesFollowUps = lazy(() => import('./pages/admin/SalesFollowUps'))
 const SalesPerformance = lazy(() => import('./pages/admin/SalesPerformance'))
+const SalesLists = lazy(() => import('./pages/admin/SalesLists'))
 const SuperWizardClubs = lazy(() => import('./pages/admin/SuperWizardClubs'))
 const AdminSponsors = lazy(() => import('./pages/admin/AdminSponsors'))
 const AdminClubRoom = lazy(() => import('./pages/admin/AdminClubRoom'))
@@ -471,6 +472,7 @@ export default function App() {
           <Route path="/admin/super/crm/workspace" element={<ProtectedRoute requireRole={["super_admin", "sales"]}><SalesWorkspace /></ProtectedRoute>} />
           <Route path="/admin/super/crm/follow-ups" element={<ProtectedRoute requireRole={["super_admin", "sales"]}><SalesFollowUps /></ProtectedRoute>} />
           <Route path="/admin/super/crm/performance" element={<ProtectedRoute requireRole={["super_admin", "sales"]}><SalesPerformance /></ProtectedRoute>} />
+          <Route path="/admin/super/crm/sales-lists" element={<ProtectedRoute requireRole={["super_admin", "sales"]}><SalesLists /></ProtectedRoute>} />
           <Route path="/admin/fantasy" element={<ProtectedRoute requireModule="fantasy"><FantasyHome /></ProtectedRoute>} />
           <Route path="/admin/fantasy/settings" element={<ProtectedRoute requireModule="fantasy"><FantasySettings /></ProtectedRoute>} />
           <Route path="/admin/fantasy/scoring" element={<ProtectedRoute requireModule="fantasy"><FantasyScoring /></ProtectedRoute>} />

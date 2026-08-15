@@ -19,7 +19,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import ClubMembership, CrmActivity, CrmDeal, CrmPerson, MarketingClub, MarketingClubContact, User, get_db
+from app.models.db import (
+    ClubMembership, CrmActivity, CrmDeal, CrmPerson, MarketingClub, MarketingClubContact,
+    SalesListClub, User, get_db,
+)
 from app.routers.auth import SalesActor, require_sales_or_super
 from app.services import crm as crm_service
 from app.services import sales_workspace as sw
@@ -76,12 +79,15 @@ async def list_clubs(
     owner_user_id: Optional[str] = None,
     never_called: bool = False,
     callback_due: bool = False,
+    list_id: Optional[str] = None,
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
     """One row per club (an open platform deal), sorted by a simple priority
     heuristic by default. A 'sales'-role caller only ever sees their own
-    deals — the owner_user_id query param is honoured for a super admin only."""
+    deals — the owner_user_id query param is honoured for a super admin only.
+    ``list_id`` narrows the queue to one Sales List's clubs (still whatever
+    deal each one currently is, not a frozen snapshot)."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -93,6 +99,13 @@ async def list_clubs(
         effective_owner = _uuid_or_none(owner_user_id)
 
     deals = await crm_service.list_deals(db, pipeline.id, status="open", owner_user_id=effective_owner)
+    if list_id:
+        lid = _uuid_or_none(list_id)
+        member_rows = (await db.execute(
+            select(SalesListClub.marketing_club_id).where(SalesListClub.sales_list_id == lid)
+        )).scalars().all()
+        member_ids = set(member_rows)
+        deals = [d for d in deals if d.marketing_club_id in member_ids]
     if stage_key:
         target = stage_by_key.get(stage_key)
         deals = [d for d in deals if target and d.stage_id == target.id]
@@ -699,5 +712,60 @@ async def start_trial(
         body=f"Trial started for {result['name']} by {actor.user.display_name or actor.user.username}",
         created_by_user_id=actor.user.id,
     )
+    await db.commit()
+    return result
+
+
+# ─── Sales Lists ──────────────────────────────────────────────────────────────
+# A thin provenance/import layer over the same crm_deals rows — importing a
+# list never creates a second record of a club's history, and assigning one
+# reuses the existing POST /bulk-assign (filter the queue to ?list_id=..,
+# select, assign) rather than a second assignment code path.
+
+@router.get("/lists")
+async def sales_lists(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
+    """Every Sales List, for the picker on the Sales Lists page and the
+    queue's list filter. Open to both roles — a rep narrowing their own
+    queue to one list is a read, not an admin action."""
+    return {"lists": await sw.list_sales_lists(db)}
+
+
+@router.get("/lists/{list_id}")
+async def sales_list_detail(
+    list_id: str, actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db),
+):
+    lid = _uuid_or_none(list_id)
+    result = await sw.get_sales_list(db, lid) if lid else None
+    if result is None:
+        raise HTTPException(status_code=404, detail="List not found")
+    return result
+
+
+class ImportWizardClubsBody(BaseModel):
+    name: str
+    description: str = ""
+    days: int = 90
+    club_keys: list[str]
+
+
+@router.post("/lists/from-wizard-clubs")
+async def import_from_wizard_clubs(
+    body: ImportWizardClubsBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-import a Wizard Clubs selection into a new Sales List — matches
+    each one to its Club Directory row and ensures it has an open platform
+    deal, so it shows up in the queue immediately. Super-admin only, same
+    posture as bulk-assign (this is sales-ops list-building, not a rep's
+    daily calling work)."""
+    _require_super(actor)
+    days = max(1, min(body.days, 730))
+    result = await sw.create_list_from_wizard_clubs(
+        db, name=body.name, description=body.description, days=days,
+        club_keys=body.club_keys, created_by_user_id=actor.user.id,
+    )
+    if result.get("error"):
+        raise HTTPException(status_code=422, detail=result.get("detail") or result["error"])
     await db.commit()
     return result
