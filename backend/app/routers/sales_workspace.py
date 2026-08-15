@@ -80,6 +80,8 @@ async def list_clubs(
     never_called: bool = False,
     callback_due: bool = False,
     list_id: Optional[str] = None,
+    min_score: Optional[int] = None,
+    max_score: Optional[int] = None,
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
@@ -87,7 +89,11 @@ async def list_clubs(
     heuristic by default. A 'sales'-role caller only ever sees their own
     deals — the owner_user_id query param is honoured for a super admin only.
     ``list_id`` narrows the queue to one Sales List's clubs (still whatever
-    deal each one currently is, not a frozen snapshot)."""
+    deal each one currently is, not a frozen snapshot). ``min_score``/
+    ``max_score`` filter on the club's engagement score (0-100) — a deal
+    with no score (no linked club, or never scored) is excluded whenever
+    either bound is set, same rule the Sales Pipeline board's own score
+    filter uses."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -153,6 +159,10 @@ async def list_clubs(
     if callback_due:
         now_iso = datetime.utcnow().isoformat()
         out = [r for r in out if r["next_follow_up_at"] and r["next_follow_up_at"] <= now_iso]
+    if min_score is not None:
+        out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] >= min_score]
+    if max_score is not None:
+        out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] <= max_score]
 
     out.sort(key=lambda r: r["priority_score"], reverse=True)
     return {

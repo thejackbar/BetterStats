@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { Modal, Field, TextInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
@@ -107,7 +107,10 @@ export default function SalesWorkspace() {
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const [filters, setFilters] = useState({ q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false, list_id: '' })
+  const [filters, setFilters] = useState({
+    q: '', stage_key: '', owner_user_id: '', never_called: false, callback_due: false, list_id: '',
+    min_score: '', max_score: '',
+  })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
   const [team, setTeam] = useState([])
@@ -395,6 +398,15 @@ export default function SalesWorkspace() {
             </Select>
           </Field>
         )}
+        <Field label="Engagement score" width="150px">
+          <div className="flex items-center gap-1.5">
+            <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
+              onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
+            <span className="text-pb-faintest">–</span>
+            <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
+              onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
+          </div>
+        </Field>
         <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
           <input type="checkbox" checked={filters.never_called}
             onChange={e => setFilters(f => ({ ...f, never_called: e.target.checked }))} />
