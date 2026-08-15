@@ -2053,6 +2053,9 @@ export const api = {
   },
   salesWorkspaceCompleteFollowUp: (activityId) =>
     request(`/club-admin/sales-workspace/follow-ups/${activityId}/done`, { method: 'POST' }),
+  salesWorkspaceEmailTemplates: () => request('/club-admin/sales-workspace/email-templates'),
+  salesWorkspaceSendEmail: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/email`, { method: 'POST', body: JSON.stringify(data) }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',

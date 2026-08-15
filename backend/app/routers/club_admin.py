@@ -2334,6 +2334,7 @@ async def get_general_settings(
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
         "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
+        "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
     }
 
@@ -2358,6 +2359,10 @@ class GeneralSettingsUpdate(BaseModel):
     # discount. See platform_settings.update_bundle_discount_schedule — this
     # REPLACES the whole table, it's not a merge.
     bundle_discount_schedule: Optional[dict] = None
+    # Sales Workspace "Book a demo" email template — rep display name -> their
+    # Calendly (or similar) booking URL. Same whole-table-replace semantics
+    # as bundle_discount_schedule above.
+    demo_booking_links: Optional[dict] = None
     # Daily automated backup — read by the host backup script on every timer
     # tick (see ops/backup/backup.sh), not enforced by anything in-process.
     backup_hour: Optional[int] = None
@@ -2374,6 +2379,7 @@ async def patch_general_settings(
     from app.services import platform_settings as ps
     patch = body.model_dump(exclude_unset=True)
     schedule = patch.pop("bundle_discount_schedule", None)
+    demo_links = patch.pop("demo_booking_links", None)
     backup_hour = patch.pop("backup_hour", None)
     backup_minute = patch.pop("backup_minute", None)
     backup_retention_days = patch.pop("backup_retention_days", None)
@@ -2381,6 +2387,8 @@ async def patch_general_settings(
         await ps.update_settings(db, patch)
         if schedule is not None:
             await ps.update_bundle_discount_schedule(db, schedule)
+        if demo_links is not None:
+            await ps.update_demo_booking_links(db, demo_links)
         if backup_hour is not None or backup_minute is not None or backup_retention_days is not None:
             await ps.update_backup_schedule(
                 db, hour=backup_hour, minute=backup_minute, retention_days=backup_retention_days,
@@ -2397,6 +2405,7 @@ async def patch_general_settings(
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
         "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
+        "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
     }
 

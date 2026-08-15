@@ -135,6 +135,7 @@ export default function SuperClubs() {
     trial_nudges_enabled: false, billing_checkout_enabled: false, member_portal_enabled: false,
     merch_storefront_enabled: false,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
+    demo_booking_links: [],
     backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
@@ -230,6 +231,7 @@ export default function SuperClubs() {
         member_portal_enabled: !!s?.member_portal_enabled,
         merch_storefront_enabled: !!s?.merch_storefront_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
+        demo_booking_links: Object.entries(s?.demo_booking_links || {}).map(([name, url]) => ({ name, url })),
         // Stored/returned by the API in UTC — shown to the admin in Perth time.
         backup_hour: utcHourToPerth(s?.backup_schedule?.hour ?? 19), // 19:00 UTC = 03:00 Perth
         backup_minute: s?.backup_schedule?.minute ?? 0,
@@ -255,6 +257,11 @@ export default function SuperClubs() {
         merch_storefront_enabled: !!settingsForm.merch_storefront_enabled,
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
+        ),
+        demo_booking_links: Object.fromEntries(
+          settingsForm.demo_booking_links
+            .filter(r => r.name.trim() && r.url.trim())
+            .map(r => [r.name.trim(), r.url.trim()])
         ),
         // Convert the admin's Perth-time entry back to UTC for storage.
         backup_hour: perthHourToUtc(Math.min(23, Math.max(0, Number(settingsForm.backup_hour) || 0))),
@@ -911,6 +918,53 @@ export default function SuperClubs() {
                       />
                     </label>
                   ))}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t pb-hairline space-y-2">
+                <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">
+                  Sales demo booking links
+                </p>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Rep display name (must match exactly) -&gt; their Calendly/booking URL, used by the
+                  Sales Workspace's "Book a demo" email template. A rep with no link here still sends
+                  the template — it just asks the contact to reply and arrange a time instead.
+                </p>
+                <div className="space-y-2">
+                  {settingsForm.demo_booking_links.map((row, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <input
+                        type="text" placeholder="Rep display name" value={row.name}
+                        onChange={e => setSettingsForm(f => ({
+                          ...f,
+                          demo_booking_links: f.demo_booking_links.map((r, j) => j === i ? { ...r, name: e.target.value } : r),
+                        }))}
+                        className={INPUT_CLS + ' flex-1'}
+                      />
+                      <input
+                        type="text" placeholder="https://calendly.com/..." value={row.url}
+                        onChange={e => setSettingsForm(f => ({
+                          ...f,
+                          demo_booking_links: f.demo_booking_links.map((r, j) => j === i ? { ...r, url: e.target.value } : r),
+                        }))}
+                        className={INPUT_CLS + ' flex-[2]'}
+                      />
+                      <button type="button"
+                        onClick={() => setSettingsForm(f => ({
+                          ...f, demo_booking_links: f.demo_booking_links.filter((_, j) => j !== i),
+                        }))}
+                        className="font-mono text-[10px] text-pb-red/80 hover:text-pb-red transition-colors shrink-0"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button"
+                    onClick={() => setSettingsForm(f => ({ ...f, demo_booking_links: [...f.demo_booking_links, { name: '', url: '' }] }))}
+                    className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors underline"
+                  >
+                    + Add a rep
+                  </button>
                 </div>
               </div>
 

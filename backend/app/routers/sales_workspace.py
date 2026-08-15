@@ -282,6 +282,118 @@ async def add_note(
     return {"status": "ok"}
 
 
+# ─── Email actions ─────────────────────────────────────────────────────────────
+
+@router.get("/email-templates")
+async def email_templates(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
+    from app.services import platform_settings as ps
+    from app.services import sales_email as se
+    links = await ps.get_demo_booking_links(db)
+    rep_name = actor.user.display_name or actor.user.username
+    return {
+        "templates": [{"key": k, "label": v} for k, v in se.TEMPLATE_LABELS.items()],
+        "demo_link_configured": bool(links.get(rep_name)),
+    }
+
+
+class EmailBody(BaseModel):
+    directory_contact_id: Optional[str] = None
+    crm_person_id: Optional[str] = None
+    template: str  # 'information' | 'trial_information' | 'demo' | 'custom'
+    subject: Optional[str] = None  # required for 'custom'
+    body: Optional[str] = None  # required for 'custom'
+
+
+@router.post("/clubs/{deal_id}/email")
+async def send_email(
+    deal_id: str,
+    body: EmailBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services import platform_settings as ps
+    from app.services import sales_email as se
+
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+
+    if not (body.directory_contact_id or body.crm_person_id):
+        raise HTTPException(status_code=422, detail="Pick a contact to email")
+    try:
+        person = await sw.resolve_or_materialize_person(
+            db, marketing_club_id=deal.marketing_club_id,
+            directory_contact_id=_uuid_or_none(body.directory_contact_id),
+            crm_person_id=_uuid_or_none(body.crm_person_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    to_email = (person.email or "").strip()
+    if not to_email:
+        raise HTTPException(status_code=422, detail="This contact has no email address on file")
+
+    # Refuse an opted-out / do-not-contact contact — the same rule the
+    # drawer's badge/toggle enforces, re-checked server-side so a stale
+    # client can't route around it.
+    if person.directory_contact_id:
+        contact_row = await db.get(MarketingClubContact, person.directory_contact_id)
+        if contact_row is not None:
+            if contact_row.do_not_contact:
+                raise HTTPException(status_code=422, detail="This contact has asked not to be contacted")
+            if not contact_row.subscribed or contact_row.unsubscribed_at or contact_row.bounced:
+                raise HTTPException(status_code=422, detail="This contact has opted out of email")
+
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    club_name = club.name if club else deal.title
+    rep_name = actor.user.display_name or actor.user.username
+    template = body.template
+
+    if template == "custom":
+        if not (body.subject or "").strip() or not (body.body or "").strip():
+            raise HTTPException(status_code=422, detail="Subject and body are required for a custom email")
+        subject, html_body, text_body = se.render_custom(body.subject.strip(), body.body.strip(), rep_name)
+    elif template in se.BUILT_IN_TEMPLATES:
+        calendly_url = None
+        if template == "demo":
+            links = await ps.get_demo_booking_links(db)
+            calendly_url = links.get(rep_name)
+        subject, html_body, text_body = se.render_template(
+            template, contact_name=person.full_name, club_name=club_name, rep_name=rep_name,
+            calendly_url=calendly_url,
+        )
+    else:
+        raise HTTPException(status_code=422, detail="Unknown email template")
+
+    # utm_code: auto-generate + persist the same way club_directory.py does
+    # for a crawled club, so a link sent before the club had one still gets
+    # tracked attribution from here on — both to the club (utm_id) and to
+    # this sending rep (utm_content), per direct instruction.
+    utm_code = None
+    if club is not None:
+        if not club.utm_code:
+            from app.services.club_directory import _default_utm
+            club.utm_code = _default_utm(club.name)
+        utm_code = club.utm_code or None
+    html_body = se.apply_sales_utm(html_body, template_key=template, rep_username=actor.user.username, utm_code=utm_code)
+
+    try:
+        await se.send_sales_email(
+            to_email=to_email, to_name=person.full_name, subject=subject, html=html_body, text=text_body,
+            rep_name=rep_name, rep_email=actor.user.email,
+        )
+    except Exception as e:  # noqa: BLE001 - surfaced to the rep, this is an explicit action, not best-effort
+        raise HTTPException(status_code=502, detail=f"Could not send email: {e}")
+
+    await crm_service.log_activity(
+        db, deal_id=deal.id, person_id=person.id, type="email",
+        body=f"{se.TEMPLATE_LABELS.get(template, template)} sent to {to_email}",
+        created_by_user_id=actor.user.id,
+        meta={"template": template, "subject": subject},
+    )
+    await db.commit()
+    return {"status": "sent"}
+
+
 class ContactBody(BaseModel):
     full_name: str
     role: Optional[str] = None

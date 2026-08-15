@@ -130,6 +130,14 @@ export default function SalesWorkspace() {
   })
   const [savingTrial, setSavingTrial] = useState(false)
 
+  const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
+  const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
+  const [savingEmail, setSavingEmail] = useState(false)
+
+  useEffect(() => {
+    api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
+  }, [])
+
   const loadClubs = useCallback(() => {
     setLoadingList(true)
     api.salesWorkspaceClubs(filters).then((d) => {
@@ -269,6 +277,32 @@ export default function SalesWorkspace() {
       toast?.error(err.message)
     } finally {
       setSavingTrial(false)
+    }
+  }
+
+  const submitEmail = async (e) => {
+    e.preventDefault()
+    if (!emailForm.contactKey) { toast?.error('Pick a contact to email'); return }
+    if (!emailForm.template) { toast?.error('Pick a template'); return }
+    const chosen = (drawer.contacts || []).find(c => contactKey(c) === emailForm.contactKey)
+    if (!chosen?.email) { toast?.error('That contact has no email address on file'); return }
+    setSavingEmail(true)
+    try {
+      const payload = { template: emailForm.template }
+      if (chosen.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
+      else if (chosen.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      if (emailForm.template === 'custom') {
+        payload.subject = emailForm.subject
+        payload.body = emailForm.body
+      }
+      await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
+      toast?.success(`Email sent to ${chosen.full_name}`)
+      setEmailForm({ contactKey: '', template: '', subject: '', body: '' })
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingEmail(false)
     }
   }
 
@@ -464,6 +498,39 @@ export default function SalesWorkspace() {
                     <TextInput type="datetime-local" value={callForm.followUpAt} onChange={e => setCallForm(f => ({ ...f, followUpAt: e.target.value }))} />
                   </Field>
                   <Btn type="submit" variant="primary" disabled={savingCall}>{savingCall ? 'Saving…' : 'Save call'}</Btn>
+                </form>
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
+                <form onSubmit={submitEmail} className="space-y-2">
+                  <Field label="Contact">
+                    <Select value={emailForm.contactKey} onChange={e => setEmailForm(f => ({ ...f, contactKey: e.target.value }))}>
+                      <option value="">Pick a contact…</option>
+                      {(drawer.contacts || []).filter(c => c.email).map(c => (
+                        <option key={contactKey(c)} value={contactKey(c)}>
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Template">
+                    <Select value={emailForm.template} onChange={e => setEmailForm(f => ({ ...f, template: e.target.value }))}>
+                      <option value="">Pick a template…</option>
+                      {emailTemplates.templates.map(t => (
+                        <option key={t.key} value={t.key}>
+                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {emailForm.template === 'custom' && (
+                    <>
+                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
+                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
+                    </>
+                  )}
+                  <Btn type="submit" variant="primary" disabled={savingEmail}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
                 </form>
               </div>
 

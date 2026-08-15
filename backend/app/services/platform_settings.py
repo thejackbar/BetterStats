@@ -591,6 +591,40 @@ async def update_bundle_discount_schedule(db: AsyncSession, schedule: dict) -> d
     return await get_bundle_discount_schedule(db)
 
 
+# ─── Sales demo-booking links (name -> Calendly/booking URL) ─────────────────
+# Edited from General Settings alongside bundle_discount_schedule — same
+# whole-table-replace pattern. Empty until a super admin sets one; the
+# "Book a demo" sales email template falls back to "reply to arrange a
+# time" when no link is configured for the sending rep.
+
+async def get_demo_booking_links(db: AsyncSession) -> dict[str, str]:
+    settings = await get_settings(db)
+    raw = settings.get("demo_booking_links")
+    return dict(raw) if isinstance(raw, dict) else {}
+
+
+async def update_demo_booking_links(db: AsyncSession, links: dict) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for name, url in (links or {}).items():
+        name = (name or "").strip()
+        url = (url or "").strip()
+        if not name:
+            continue
+        if url and not (url.startswith("http://") or url.startswith("https://")):
+            raise ValueError(f"Booking link for {name!r} must be a full http(s) URL")
+        if url:
+            out[name] = url
+    s = await get_settings(db)
+    merged = dict(s)
+    merged["demo_booking_links"] = out
+    await db.execute(
+        text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+        {"s": json.dumps(merged)},
+    )
+    await db.commit()
+    return await get_demo_booking_links(db)
+
+
 # ─── Background-process idle limits (Usage page "Current background processes") ─
 # Two super-admin-tunable idle thresholds, in whole minutes, that decide when a
 # mid-flow prospect/club is considered to have ABANDONED and is dropped from the
