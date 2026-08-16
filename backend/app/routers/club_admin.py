@@ -4849,6 +4849,47 @@ async def cleanup_opposition_stats(
     return {"org_id": org_id, "deleted": deleted}
 
 
+@router.get("/sync-drift")
+async def get_sync_drift(
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Past seasons whose stored figures no longer match Cricket Australia's.
+
+    Written by the monthly drift check (services/sync_drift.py), which is the
+    only thing that looks at a club's older seasons now that the scheduled
+    sync pulls recent fixtures only. An empty list is the normal answer.
+    Read-only: acting on a finding means running a Full Rebuild.
+    """
+    from app.services import sync_drift
+    findings = await sync_drift.open_findings(db, club.id)
+    last_checked = (await db.execute(
+        _text("SELECT MAX(checked_at) FROM sync_drift_findings WHERE organisation_id = :oid"),
+        {"oid": str(club.id)},
+    )).scalar()
+    return {
+        "findings": findings,
+        "last_checked_at": last_checked.isoformat() if last_checked else None,
+    }
+
+
+@router.post("/sync-drift/acknowledge")
+async def acknowledge_sync_drift(
+    current_user: User = Depends(require_cap(RUN_SYNC)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Dismiss the drift notice without rebuilding.
+
+    The figures still differ — this only records that someone has looked. The
+    next check that finds a season clean clears it again by itself.
+    """
+    from app.services import sync_drift
+    dismissed = await sync_drift.acknowledge(db, club.id)
+    return {"dismissed": dismissed}
+
+
 @router.delete("/sync-runs")
 async def clear_sync_runs(
     current_user: User = Depends(get_current_user),

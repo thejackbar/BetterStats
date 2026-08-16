@@ -17,7 +17,7 @@ from app.models.db import (
     PlayerSeasonStats, PlayerSeasonGradeStats, Milestone,
     SyncRun, async_session_maker
 )
-from app.services import playhq_client
+from app.services import auto_sync, playhq_client
 from app.services.grade_labels import suggest_category
 
 logger = logging.getLogger(__name__)
@@ -643,28 +643,56 @@ async def sync_organisation(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
     kind: str = "org_full",
+    since: Optional[date] = None,
 ) -> dict:
     """Thin concurrency gate in front of ``_sync_organisation_impl`` — every
     caller (weekly cron, manual Sync Now, Full Rebuild, self-serve trial
     registration) goes through here so the governor above applies uniformly,
     at the one place that actually talks to the shared proxy, rather than
-    each call site needing to know about it."""
+    each call site needing to know about it.
+
+    ``since`` switches the run to INCREMENTAL mode — see
+    ``_sync_organisation_impl``. The scheduled runs pass it; every manual
+    action leaves it None and gets exactly the sync it always did."""
     if run_id is not None and _SYNC_GOVERNOR.locked():
         await update_sync_run(run_id, {
             "progress_phase": "Queued — waiting for another club's sync to finish",
             "progress_pct": 0, "progress_done": None, "progress_total": None,
         })
     async with _SYNC_GOVERNOR:
-        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind)
+        return await _sync_organisation_impl(org_id_str, run_id=run_id, kind=kind, since=since)
 
 
 async def _sync_organisation_impl(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
     kind: str = "org_full",
+    since: Optional[date] = None,
 ) -> dict:
-    """Full historical sync for an organisation using season-aggregate stats."""
-    logger.info(f"Starting sync for org {org_id_str} (run_id={run_id}, kind={kind})")
+    """Full historical sync for an organisation using season-aggregate stats.
+
+    With ``since`` set the run is INCREMENTAL: only seasons that could still
+    have been in play on or after that date have their aggregates refreshed,
+    and only fixtures played on or after it are discovered. Everything else —
+    how a scorecard is parsed, how a player or grade is resolved, what gets
+    written — is byte-for-byte the same code as a full run, so an incremental
+    run can only ever be a full run with a smaller input set, never a
+    different one.
+
+    Two things are scaled back to match, both because they are DB-side scans
+    over the club's ENTIRE history and running them twice a week per club is
+    the difference between a light job and a heavy one. Milestones are
+    SCOPED — recomputed for the players whose aggregates this run rewrote,
+    not every player the club has ever had. The aggregate backfill, the
+    BetterImport reconcile and the post-sync ANALYZE are SKIPPED outright
+    when the run added no games, since all three derive from per-game data
+    that by definition did not change.
+    """
+    incremental = since is not None
+    logger.info(
+        f"Starting sync for org {org_id_str} (run_id={run_id}, kind={kind}"
+        + (f", since={since}" if incremental else "") + ")"
+    )
 
     org_uuid = _parse_uuid(org_id_str)
     owns_run = run_id is None
@@ -680,6 +708,8 @@ async def _sync_organisation_impl(
     stats = {"seasons": 0, "player_seasons": 0, "season_stats": 0,
              "games_new": 0, "batting": 0, "bowling": 0, "partnerships": 0,
              "playhq_games_found": 0, "playhq_games_final": 0}
+    if incremental:
+        stats["incremental_since"] = since.isoformat()
 
     async with async_session_maker() as session:
         org = await upsert_organisation(session, org_data)
@@ -695,6 +725,31 @@ async def _sync_organisation_impl(
 
         seasons = await playhq_client.get_seasons(org_id_str)
         logger.info(f"Found {len(seasons)} seasons")
+
+        # Incremental: keep only the seasons that could still have been in
+        # play when the window opens. This is the single biggest saving in the
+        # run — an established club has ~52 seasons, each costing three CA
+        # aggregate calls plus three more per grade, and all but the current
+        # one or two would be re-fetched only to be written back identical.
+        # Every dropped season keeps its stored player_season_stats untouched
+        # (the delete+reinsert below is per season), so nothing is lost.
+        if incremental:
+            kept = []
+            for s in seasons:
+                sd = (s.get("startDate") or "")[:10]
+                try:
+                    start = date.fromisoformat(sd) if sd else None
+                except ValueError:
+                    start = None
+                if auto_sync.season_in_window(start, since):
+                    kept.append(s)
+            stats["seasons_skipped_out_of_window"] = len(seasons) - len(kept)
+            seasons = kept
+            logger.info(
+                f"Incremental sync: {len(seasons)} season(s) in play since {since}, "
+                f"{stats['seasons_skipped_out_of_window']} skipped"
+            )
+
         if run_id:
             _progress(stats, "Season totals", 1, 0, len(seasons))
             await update_sync_run(run_id, stats)
@@ -728,6 +783,13 @@ async def _sync_organisation_impl(
             if _ggid:
                 org_grade_map[str(_ggid)] = _grid
 
+        # The seasons this run actually touched, and the players whose season
+        # aggregates it rewrote. Both are the whole club on a full run and a
+        # short list on an incremental one, which is what lets the passes
+        # below scope themselves to what changed.
+        active_season_ids: list[uuid.UUID] = []
+        touched_player_ids: set[uuid.UUID] = set()
+
         for season_idx, season_data in enumerate(seasons, start=1):
             await _check_sync_control(run_id, stats)
             raw_season_id = (season_data.get("id") or "").strip()
@@ -739,6 +801,7 @@ async def _sync_organisation_impl(
             # overwrite its stats. Derive a per-club season id instead, and
             # keep the raw CA GUID in grassroots_id for the stats API calls.
             season_id = uuid.uuid5(org_id, raw_season_id)
+            active_season_ids.append(season_id)
 
             start_date_str = season_data.get("startDate", "")
             year = int(start_date_str[:4]) if start_date_str else None
@@ -872,6 +935,7 @@ async def _sync_organisation_impl(
                     continue
                 processed_in_season.add(effective_pid)
                 pid = effective_pid
+                touched_player_ids.add(pid)
                 # Safety: skip if the target player doesn't exist in DB (e.g. merge chain issue)
                 if not await session.get(Player, pid):
                     logger.warning(f"Skipping stats for player {pid}: not found in players table")
@@ -1037,16 +1101,25 @@ async def _sync_organisation_impl(
                 logger.error(f"Per-grade aggregate sync failed for season {raw_season_id}: {e}\n{_tbg.format_exc()}")
                 await session.rollback()
 
-        # Recompute milestones for all players in this org
+        # Recompute milestones. _compute_milestones runs a query per player, so
+        # a full run over an established club is a loop over ~1,500 of them —
+        # fine once a week, wasteful twice a week for a club where only this
+        # weekend's squad could possibly have moved. An incremental run
+        # therefore recomputes only the players whose season aggregates it just
+        # rewrote, which is exactly the set whose career totals can have
+        # changed; everyone else's stored milestones are still correct.
         if run_id:
             _progress(stats, "Milestones", 41)
             await update_sync_run(run_id, stats)
-        all_pids_res = await session.execute(
-            select(Player.id).where(Player.organisation_id == org_id)
-        )
-        all_player_ids = [r[0] for r in all_pids_res]
-        if all_player_ids:
-            await _compute_milestones(session, all_player_ids, org_id)
+        if incremental:
+            milestone_pids = sorted(touched_player_ids)
+        else:
+            all_pids_res = await session.execute(
+                select(Player.id).where(Player.organisation_id == org_id)
+            )
+            milestone_pids = [r[0] for r in all_pids_res]
+        if milestone_pids:
+            await _compute_milestones(session, milestone_pids, org_id)
 
         # Grassroots /scores/* — game-level scorecards for all seasons.
         # The PlayHQ Partner game-level sync was removed (May 2026) — see git history
@@ -1055,7 +1128,13 @@ async def _sync_organisation_impl(
         # outer session has been through hundreds of commits during PlayHQ
         # phase and can leave ORM state in a bad spot for async I/O.
         try:
-            gr_stats = await sync_grassroots_game_level_data(org_id_str, run_id=run_id)
+            # An incremental run scopes the scorecard pass to the same seasons
+            # the aggregate pass just refreshed, so the two halves of the run
+            # can never disagree about what period they cover.
+            gr_stats = await sync_grassroots_game_level_data(
+                org_id_str, run_id=run_id, since=since,
+                season_ids=active_season_ids if incremental else None,
+            )
             stats.update(gr_stats)
         except SyncControlSignal:
             # A pause/cancel checkpoint fired inside the game-level loop —
@@ -1072,32 +1151,45 @@ async def _sync_organisation_impl(
             _progress(stats, "Finalising", 99)
             await update_sync_run(run_id, stats)
 
+        # The three passes below (aggregate backfill, BetterImport reconcile,
+        # ANALYZE) are whole-club scans that derive from the per-game tables.
+        # An incremental run that added no games changed nothing they read, so
+        # running them would be pure cost — twice a week, per club, over a
+        # club's entire history. A run that DID add games gets all three, same
+        # as a full run.
+        wrote_games = bool(stats.get("gr_games_new") or stats.get("games_new"))
+        run_tail_passes = (not incremental) or wrote_games
+        if incremental and not run_tail_passes:
+            logger.info(f"Incremental sync for {org_id_str}: no new games, skipping whole-club derivations")
+
         # CA's aggregate API sometimes omits low-volume players for old seasons,
         # leaving them with scorecard rows but no player_season_stats row. Every
         # career number on the player page sums from player_season_stats, so
         # those players show "0 matches" despite having real innings. Synthesise
         # the missing aggregate from the per-game tables we already have.
-        try:
-            backfilled = await _backfill_missing_season_stats(org_id_str)
-            stats["aggregate_backfill"] = backfilled
-            if run_id:
-                await update_sync_run(run_id, stats)
-        except Exception as e:
-            import traceback as _tb3
-            logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
+        if run_tail_passes:
+            try:
+                backfilled = await _backfill_missing_season_stats(org_id_str)
+                stats["aggregate_backfill"] = backfilled
+                if run_id:
+                    await update_sync_run(run_id, stats)
+            except Exception as e:
+                import traceback as _tb3
+                logger.error(f"Aggregate backfill failed for {org_id_str}: {e}\n{_tb3.format_exc()}")
 
         # BetterImport: re-derive the non-GR remainder of any uploaded historical
         # summaries against the GR data we just (re)synced. Runs last so the
         # residual shrinks automatically as GR coverage grows — no re-import. A
         # no-op for orgs that have never imported (migration 070).
-        try:
-            from app.services.import_reconcile import reconcile_imported_totals
-            stats["import_reconciled"] = await reconcile_imported_totals(org_id_str)
-            if run_id:
-                await update_sync_run(run_id, stats)
-        except Exception as e:
-            import traceback as _tb4
-            logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
+        if run_tail_passes:
+            try:
+                from app.services.import_reconcile import reconcile_imported_totals
+                stats["import_reconciled"] = await reconcile_imported_totals(org_id_str)
+                if run_id:
+                    await update_sync_run(run_id, stats)
+            except Exception as e:
+                import traceback as _tb4
+                logger.error(f"Import reconcile failed for {org_id_str}: {e}\n{_tb4.format_exc()}")
 
         logger.info(f"Sync complete: {stats}")
 
@@ -1110,12 +1202,16 @@ async def _sync_organisation_impl(
         # on a freshly-synced club while a player search (a light query) works.
         # ANALYZE is seconds against a multi-minute sync and makes the heavy
         # aggregate reads return in ~1s. Best-effort: never fail a sync over it.
-        try:
-            async with async_session_maker() as analyze_session:
-                await analyze_session.execute(text("ANALYZE"))
-                await analyze_session.commit()
-        except Exception as e:
-            logger.warning(f"Post-sync ANALYZE failed for {org_id_str}: {e}")
+        # ANALYZE takes no table argument here, so it walks the whole database —
+        # worth it after a run that rewrote a club's tables, wasted after an
+        # incremental run that wrote nothing.
+        if run_tail_passes:
+            try:
+                async with async_session_maker() as analyze_session:
+                    await analyze_session.execute(text("ANALYZE"))
+                    await analyze_session.commit()
+            except Exception as e:
+                logger.warning(f"Post-sync ANALYZE failed for {org_id_str}: {e}")
 
         if run_id and owns_run:
             await finish_sync_run(run_id, stats)
@@ -1582,8 +1678,21 @@ def _derive_partnerships_grassroots(batting_rows: list, fow_rows: list) -> list:
 async def sync_grassroots_game_level_data(
     org_id_str: str,
     run_id: Optional[uuid.UUID] = None,
+    since: Optional[date] = None,
+    season_ids: Optional[list] = None,
 ) -> dict:
     """Pull game-level scorecards from the Grassroots /scores/* API.
+
+    ``since`` and ``season_ids`` scope an INCREMENTAL run (see
+    ``_sync_organisation_impl``): only grades belonging to ``season_ids`` are
+    asked for their match list, and within those only fixtures played on or
+    after ``since`` are processed. Both default to None, which is the
+    unrestricted whole-history pass this has always done.
+
+    The saving is in the grade fan-out as much as the scorecards: an
+    established club has hundreds of grades across its seasons, and each one
+    costs a call to /scores/grades/{id}/matches on every single run before a
+    single scorecard is fetched.
 
     Covers pre-PlayHQ-migration history (~2002 onwards). Post-migration games
     can return 204 (Grassroots doesn't have them) and are silently skipped.
@@ -1608,6 +1717,7 @@ async def sync_grassroots_game_level_data(
         "gr_games_new": 0, "gr_games_skipped_done": 0, "gr_games_skipped_no_data": 0,
         "gr_batting": 0, "gr_bowling": 0, "gr_fielding": 0,
         "gr_partnerships": 0, "gr_fow": 0, "gr_appearances": 0,
+        "gr_matches_out_of_window": 0,
     }
     org_uuid = _parse_uuid(org_id_str)
     if not org_uuid:
@@ -1625,11 +1735,14 @@ async def sync_grassroots_game_level_data(
             logger.warning(f"GR-sync: org {org_id_str} not found")
             return stats
 
-        grades_res = await session.execute(
+        grades_q = (
             select(Grade.id, Grade.season_id, Grade.name, Grade.grassroots_id)
             .join(Season, Grade.season_id == Season.id)
             .where(Season.organisation_id == org_uuid)
         )
+        if season_ids:
+            grades_q = grades_q.where(Grade.season_id.in_(list(season_ids)))
+        grades_res = await session.execute(grades_q)
         grades_rows = grades_res.all()
         # (raw_grade_guid, season_id, grade_name, our_grade_id). The grassroots
         # /scores/grades/{id}/matches API is keyed on the shared raw GUID, while
@@ -1718,6 +1831,18 @@ async def sync_grassroots_game_level_data(
             mid = m.get("id")
             if not mid or mid in seen_match_ids:
                 continue
+            if since is not None:
+                # The fixture's own date, not when its result was entered —
+                # that is the only date the match list carries. A result typed
+                # in days late is still found, because OVERLAP_HOURS keeps the
+                # fixture inside the next run's window; a correction to a
+                # fixture older than the window is what the drift check
+                # (services/sync_drift.py) is for.
+                sched = m.get("matchSchedule") or []
+                day = ((sched[0].get("startDateTime") if sched else "") or "")[:10]
+                if not day or day < since.isoformat():
+                    stats["gr_matches_out_of_window"] = stats.get("gr_matches_out_of_window", 0) + 1
+                    continue
             teams = m.get("teams") or []
             our_team_m = next(
                 (t for t in teams if (t.get("owningOrganisation") or {}).get("id", "").lower() == org_id_str_lower),

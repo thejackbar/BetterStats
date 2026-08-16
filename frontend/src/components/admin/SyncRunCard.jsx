@@ -29,6 +29,15 @@ export function syncProgressLabel(s) {
   return phase
 }
 
+// A sync_runs.kind is a stored value, not copy — give it a readable label
+// here rather than showing an admin the raw key.
+const KIND_LABEL = {
+  org_full: 'sync now',
+  org_recent: 'results sync',
+  org_hard_refresh: 'full rebuild',
+  player_deep: 'player deep sync',
+}
+
 export function StatPill({ label, value, highlight }) {
   return (
     <span className={`inline-flex items-center gap-1 font-mono text-[10px] px-2 py-0.5 rounded border ${
@@ -70,7 +79,7 @@ export default function SyncRunCard({ entry, isLatest = false }) {
             <p className="text-pb-text text-sm font-medium">{fmtTime(entry.started_at)}</p>
             {entry.kind && (
               <span className="font-mono text-[10px] px-1.5 py-0.5 rounded border pb-hairline text-pb-faint">
-                {entry.kind}
+                {KIND_LABEL[entry.kind] || entry.kind}
               </span>
             )}
           </div>
@@ -102,6 +111,13 @@ export default function SyncRunCard({ entry, isLatest = false }) {
 
       {isError ? (
         <p className="font-mono text-[10px] text-pb-red">{entry.error}</p>
+      ) : s.no_fixtures_in_window ? (
+        /* The scheduled run checked the club's card, found nothing played
+           since last time, and pulled nothing. Worth showing as its own line
+           rather than an empty row of zeroed pills. */
+        <p className="font-mono text-[10px] text-pb-faint">
+          No fixtures played since {s.incremental_since || 'the last sync'}, nothing to pull
+        </p>
       ) : (
         <div className="flex flex-wrap gap-1.5">
           {s.seasons != null && <StatPill label="seasons" value={s.seasons} />}

@@ -1617,6 +1617,12 @@ export const api = {
   adminClearResolvedSyncRequests: () =>
     request('/club-admin/sync-requests/resolved', { method: 'DELETE' }),
   adminGetMilestones: () => request('/club-admin/milestones'),
+  // Seasons where Cricket Australia's figures no longer match ours — written
+  // by the monthly drift check, since the scheduled sync only pulls recent
+  // fixtures and never revisits older seasons on its own.
+  adminGetSyncDrift: () => request('/club-admin/sync-drift'),
+  adminAcknowledgeSyncDrift: () =>
+    request('/club-admin/sync-drift/acknowledge', { method: 'POST' }),
 
   // Manual stat entries — historical backfill (v1.0.0.0 Beta)
   adminListSeasonAdjustments: () => request('/club-admin/manual-entries/season-adjustments'),

@@ -1575,6 +1575,7 @@ async def visitor_journey(
 # How a raw sync_runs.kind maps to a human label on the panel.
 _SYNC_KIND_LABEL = {
     "org_full": "Sync (Sync Now)",
+    "org_recent": "Results sync (scheduled)",
     "org_hard_refresh": "Full Rebuild",
     "player_deep": "Player deep sync",
 }

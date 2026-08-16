@@ -5,7 +5,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from app.models.db import Organisation, async_session_maker
+from app.models.db import async_session_maker
 from app.services.sync import sync_organisation
 from app.services.fees import recompute_fee_match_days
 from app.services.square_sync import sync_all_square
@@ -13,27 +13,148 @@ from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# The club-facing jobs run on the clubs' own clock. Everything already
+# timezone-pinned in this file uses Perth; the sync jobs used to be the
+# exception and silently ran on UTC.
+PERTH = ZoneInfo("Australia/Perth")
+
 scheduler = AsyncIOScheduler()
 
 
 async def sync_all_organisations():
-    logger.info("Starting scheduled sync for all organisations")
+    """Pull each eligible club's recent results.
+
+    Runs Sunday and Monday at 03:00 Perth time. Both firings do the same
+    thing — fetch the fixtures played since this club's last successful sync —
+    so Sunday picks up the weekend and Monday picks up anything entered
+    during Sunday, without either needing to know which day it is. See
+    services/auto_sync.py for the eligibility rule and the window.
+
+    A club with no history yet, or one far enough behind that the window
+    would be a full pull anyway, gets a full sync instead. That is decided
+    per club by auto_sync.plan_run, not by the schedule.
+
+    Clubs are synced one at a time, and a club with a sync already in flight
+    (a manual Sync Now, a Full Rebuild, a self-heal resumed at boot) is
+    skipped rather than raced — the in-memory guard the manual endpoints
+    already share.
+    """
+    from app.services import auto_sync
+    from app.routers.organisations import _org_sync_running
+    from app.routers.club_admin import _hard_refresh_running
+
     async with async_session_maker() as session:
-        result = await session.execute(select(Organisation))
-        orgs = result.scalars().all()
+        orgs, skipped = await auto_sync.eligible_clubs(session)
+
+    if skipped:
+        by_reason: dict[str, int] = {}
+        for _org, reason in skipped:
+            by_reason[reason] = by_reason.get(reason, 0) + 1
+        logger.info("Scheduled sync: skipping %d club(s) — %s", len(skipped),
+                    ", ".join(f"{n} {r}" for r, n in sorted(by_reason.items())))
+    logger.info(f"Starting scheduled sync for {len(orgs)} eligible organisation(s)")
 
     for org in orgs:
+        org_id = str(org.id)
+        if org_id in _org_sync_running or org_id in _hard_refresh_running:
+            logger.info(f"Scheduled sync: {org.name} already has a sync in flight, skipping")
+            continue
+        synced = False
         try:
-            logger.info(f"Syncing org: {org.name} ({org.id})")
-            await sync_organisation(str(org.id))
+            async with async_session_maker() as session:
+                plan = await auto_sync.plan_run(session, org.id)
+            if plan["mode"] == "full":
+                logger.info(f"Syncing org (full — {plan['reason']}): {org.name} ({org.id})")
+                await sync_organisation(org_id, kind="org_full")
+                synced = True
+            else:
+                # Ask whether the club has played anything before pulling
+                # anything. A club whose season finished in March has no
+                # fixtures until September, and the sync machinery would cost
+                # a season-aggregate pass twice a week to find that out.
+                probe = await auto_sync.fixtures_in_window(org_id, plan["since"])
+                if not probe["sync"]:
+                    logger.info("No fixtures for %s since %s (%s) — skipping",
+                                org.name, plan["since"], probe["reason"])
+                    await _record_idle_run(org.id, plan["since"], probe["reason"])
+                    continue
+                logger.info(f"Syncing org ({probe['fixtures']} fixture(s) since {plan['since']}): "
+                            f"{org.name} ({org.id})")
+                await sync_organisation(org_id, kind=auto_sync.RECENT_KIND, since=plan["since"])
+                synced = True
         except Exception as e:
             logger.error(f"Sync failed for org {org.id}: {e}")
+        if not synced:
+            continue
         # Refresh auto-derived fee match-days off the freshly synced games.
         # Isolated from the sync above so a fee error never fails the sync.
         try:
-            await recompute_fee_match_days(str(org.id))
+            await recompute_fee_match_days(org_id)
         except Exception as e:
             logger.error(f"Fee recompute failed for org {org.id}: {e}")
+
+
+async def _record_idle_run(org_id, since, reason: str) -> None:
+    """Record that a club was checked and had nothing to pull.
+
+    This is not bookkeeping for its own sake — it is what moves the club's
+    watermark. Without it an off-season club's window grows every week until
+    it crosses MAX_LOOKBACK_DAYS, at which point the club is judged "too far
+    behind" and handed a full historical rebuild, quarterly, forever, for
+    having done nothing wrong.
+
+    The run is genuinely successful: it asked the question and got an answer.
+    Never raises — a club must not be skipped from the sync loop because its
+    bookkeeping row failed to write.
+    """
+    from app.services.sync import start_sync_run, finish_sync_run
+    from app.services import auto_sync
+    try:
+        run_id = await start_sync_run(org_id, auto_sync.RECENT_KIND)
+        await finish_sync_run(run_id, {
+            "incremental_since": since.isoformat(),
+            "no_fixtures_in_window": True,
+            "skip_reason": reason,
+            "progress_phase": "No fixtures played in this period",
+            "progress_pct": 100,
+        })
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"Could not record idle sync run for org {org_id}: {e}")
+
+
+async def check_all_organisations_drift():
+    """Ask whether Cricket Australia has revised a season we already hold.
+
+    The counterpart to the incremental sync above: that job never looks at a
+    fixture older than its window, so an upstream correction to a past season
+    would otherwise sit undetected forever. This reads season aggregates only
+    (three calls per season, no scorecards) for a slice of each club's
+    history, and records a finding an admin acts on with Full Rebuild — see
+    services/sync_drift.py. It never writes to a club's stats itself.
+
+    Same eligibility rule as the sync, so a club we have stopped syncing is
+    not one we keep checking.
+    """
+    from app.services import auto_sync, sync_drift
+
+    async with async_session_maker() as session:
+        orgs, _skipped = await auto_sync.eligible_clubs(session)
+    logger.info(f"Starting monthly drift check for {len(orgs)} club(s)")
+
+    flagged: list[str] = []
+    for org in orgs:
+        try:
+            summary = await sync_drift.check_org(str(org.id))
+        except Exception as e:
+            logger.error(f"Drift check failed for org {org.id}: {e}")
+            continue
+        if summary["drifted"]:
+            flagged.append(f"{org.name} ({summary['drifted']}/{summary['checked']} seasons)")
+    if flagged:
+        logger.warning("Drift check: historical data has changed upstream for %d club(s): %s",
+                       len(flagged), "; ".join(flagged))
+    else:
+        logger.info("Drift check: no club's stored history disagrees with Cricket Australia")
 
 
 async def settle_all_fantasy():
@@ -391,15 +512,45 @@ async def _run_marketing_continuous():
 
 
 def start_scheduler():
-    # Weekly sync every Sunday at 3am
+    # Results sync, Sunday and Monday at 03:00 PERTH time — the club's own
+    # morning, not UTC. Untimezoned this fired at 03:00 UTC, which is 11:00
+    # Sunday morning in WA, so a club's weekend results landed most of a day
+    # after they were played. Sunday covers the weekend's fixtures, Monday
+    # catches anything a scorer entered during Sunday.
+    #
+    # Neither run pulls the club's whole history any more; each asks only for
+    # the fixtures played since that club's last successful sync. Same job for
+    # both days, same id prefix, replace_existing so the old UTC "weekly_sync"
+    # job is retired on deploy.
+    for _day, _job_id in (("sun", "weekly_sync"), ("mon", "monday_results_sync")):
+        scheduler.add_job(
+            sync_all_organisations,
+            trigger="cron",
+            day_of_week=_day,
+            hour=3,
+            minute=0,
+            timezone=PERTH,
+            id=_job_id,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+    # Historical drift check — monthly, and it pulls nothing but season
+    # aggregates. Detects that Cricket Australia has revised a past season
+    # since we last synced it and flags the club for a Full Rebuild, instead
+    # of blindly re-pulling every club's whole history on a timer.
     scheduler.add_job(
-        sync_all_organisations,
+        check_all_organisations_drift,
         trigger="cron",
+        day="1-7",
         day_of_week="sun",
-        hour=3,
+        hour=5,
         minute=0,
-        id="weekly_sync",
+        timezone=PERTH,
+        id="monthly_drift_check",
         replace_existing=True,
+        max_instances=1,
+        coalesce=True,
     )
     # BetterMerch — pull Square canteen/bar stock + sales daily for connected clubs.
     scheduler.add_job(
@@ -487,7 +638,7 @@ def start_scheduler():
         snapshot_meta_ads,
         trigger="cron",
         minute=5,
-        timezone=ZoneInfo("Australia/Perth"),
+        timezone=PERTH,
         id="daily_meta_ads_snapshot",
         replace_existing=True,
     )
@@ -581,10 +732,11 @@ def start_scheduler():
         )
         marketing_mode = "nightly batch 02:00"
     scheduler.start()
-    logger.info("Scheduler started — marketing crawl %s, weekly sync Sun 03:00, "
-                "Square 04:00, fantasy settle 05:00, Twenty engagement 06:00, "
-                "trial lifecycle nudges 08:00, BetterScout refresh 09:00, "
-                "Meta Ads snapshot hourly at :05, draft tick /15min", marketing_mode)
+    logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 03:00 Perth, "
+                "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
+                "Twenty engagement 06:00, trial lifecycle nudges 08:00, "
+                "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "
+                "draft tick /15min", marketing_mode)
 
 
 def stop_scheduler():

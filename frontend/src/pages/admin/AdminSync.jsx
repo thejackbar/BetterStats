@@ -18,6 +18,7 @@ export default function AdminSync() {
   const [backfilling, setBackfilling] = useState(false)
   const [cleaningOpp, setCleaningOpp] = useState(false)
   const [syncWarnings, setSyncWarnings] = useState({})
+  const [drift, setDrift] = useState(null)
 
   const orgId = settings?.id
 
@@ -36,13 +37,20 @@ export default function AdminSync() {
     } catch { /* silent */ }
   }, [])
 
+  const fetchDrift = useCallback(async () => {
+    try {
+      setDrift(await api.adminGetSyncDrift())
+    } catch { /* silent — the notice is advisory, never blocks the page */ }
+  }, [])
+
   useEffect(() => {
     api.adminGetSettings().then(s => {
       setSettings(s)
       if (s?.id) fetchLogs(s.id)
     }).catch(() => {})
     fetchSyncRequests()
-  }, [fetchLogs, fetchSyncRequests])
+    fetchDrift()
+  }, [fetchLogs, fetchSyncRequests, fetchDrift])
 
   const handleSyncRequestAction = async (id, action, forceNote) => {
     setActionLoading(id)
@@ -175,10 +183,31 @@ export default function AdminSync() {
 
   const runningLog = logs.find(l => l.status === 'running')
 
+  const handleDismissDrift = async () => {
+    try {
+      await api.adminAcknowledgeSyncDrift()
+      await fetchDrift()
+    } catch (e) {
+      toast.error(`Could not dismiss: ${e.message}`)
+    }
+  }
+
+  const driftFindings = drift?.findings || []
+
   return (
     <BetterStatsLayout>
       <div className="max-w-3xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-6">Data Sync</h1>
+
+        {driftFindings.length > 0 && (
+          <DriftNotice
+            findings={driftFindings}
+            checkedAt={drift?.last_checked_at}
+            onRebuild={handleHardRefresh}
+            onDismiss={handleDismissDrift}
+            busy={hardRefreshing || syncing || backfilling || cleaningOpp || !orgId}
+          />
+        )}
 
         {/* Trigger card */}
         <div className="pb-card p-5 mb-8">
@@ -452,5 +481,75 @@ export default function AdminSync() {
         </div>
       </div>
     </BetterStatsLayout>
+  )
+}
+
+/**
+ * "Cricket Australia has changed a season you already hold."
+ *
+ * The scheduled sync only pulls fixtures played since the club's last run, so
+ * nothing revisits an older season on its own. The monthly drift check
+ * compares the season totals we stored against CA's current ones and raises
+ * this when they no longer agree — a Full Rebuild is the fix, and dismissing
+ * only records that someone has looked.
+ */
+function DriftNotice({ findings, checkedAt, onRebuild, onDismiss, busy }) {
+  const seasons = findings.map(f => f.season).filter(Boolean)
+  const examples = findings.flatMap(f => f.examples || []).slice(0, 3)
+  const checked = checkedAt ? new Date(checkedAt).toLocaleDateString() : null
+
+  return (
+    <div
+      className="pb-card p-5 mb-8 border"
+      style={{ borderColor: 'var(--pb-amber)', background: 'color-mix(in srgb, var(--pb-amber) 7%, transparent)' }}
+    >
+      <p className="font-mono text-[10px] tracking-wide3 uppercase mb-2" style={{ color: 'var(--pb-amber)' }}>
+        Historical data has changed
+      </p>
+      <p className="text-pb-text text-sm font-medium mb-1">
+        {seasons.length === 1
+          ? `${seasons[0]} no longer matches Cricket Australia`
+          : `${seasons.length} past seasons no longer match Cricket Australia`}
+      </p>
+      <p className="text-pb-faint text-xs leading-relaxed mb-3">
+        Cricket Australia has revised {seasons.length === 1 ? 'this season' : 'these seasons'} since
+        BetterStats last pulled {seasons.length === 1 ? 'it' : 'them'}. The scheduled sync only fetches
+        recent fixtures, so it will not pick the changes up. A Full Rebuild re-pulls the club&apos;s whole
+        history and brings the figures back into line.
+        {seasons.length > 1 && <> Affected: {seasons.join(', ')}.</>}
+      </p>
+
+      {examples.length > 0 && (
+        <ul className="mb-3 space-y-0.5">
+          {examples.map((ex, i) => (
+            <li key={i} className="font-mono text-[10px] text-pb-faint">
+              {ex.player} · {ex.field === 'missing'
+                ? 'we hold no season record'
+                : `${ex.field}: we have ${ex.ours}, they have ${ex.theirs}`}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex items-center gap-4">
+        <button
+          onClick={onRebuild}
+          disabled={busy}
+          className="px-4 py-2 rounded font-mono text-[11px] tracking-wide2 font-semibold border transition disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ borderColor: 'var(--pb-amber)', color: 'var(--pb-amber)', background: 'transparent' }}
+        >
+          RUN FULL REBUILD
+        </button>
+        <button
+          onClick={onDismiss}
+          className="font-mono text-[10px] text-pb-faint hover:text-pb-text transition-colors"
+        >
+          Dismiss
+        </button>
+        {checked && (
+          <span className="font-mono text-[10px] text-pb-faintest ml-auto">Checked {checked}</span>
+        )}
+      </div>
+    </div>
   )
 }

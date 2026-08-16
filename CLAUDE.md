@@ -1,5 +1,92 @@
 # BetterStats — Claude Session Notes
 
+## The scheduled sync pulls recent results, not the club's whole history (migration 258, v9.25.0, Aug 2026)
+
+`jobs/scheduler.py::sync_all_organisations` was `select(Organisation)` with no
+WHERE and a full historical `sync_organisation` per club, at 03:00 **UTC** —
+11:00 Sunday morning in WA, so a club's weekend results landed most of a day
+late. Four separate problems, and the fix for each lives in
+**`services/auto_sync.py`**, which is now the one place "who gets synced, and
+how far back" is decided.
+
+- **Perth, not UTC.** `PERTH` is module-level in scheduler.py and every
+  club-facing job uses it. Sunday AND Monday 03:00 — same job both days, since
+  each run asks the same question ("what has happened since this club's last
+  sync") and doesn't need to know which day it is.
+- **Eligibility reuses `auth.modules.org_core_live`** rather than inventing a
+  second idea of "lapsed". That function already knows about a cancelled or
+  paused Core row, an expired Core trial and the org-level master switch, and
+  **it fails OPEN** for a club whose subscription rows predate the per-module
+  scheme — so no long-established club is dropped by accident. Plus
+  `archived_at IS NULL` and `is_active`. Skips are counted and logged by
+  reason; a club quietly falling out of the sync with no trace is how you end
+  up debugging "why is this club three months old" from scratch.
+- **The watermark is the last SUCCESSFUL run** of `org_recent`/`org_full`/
+  `org_hard_refresh` — a manual Sync Now counts, and an errored, cancelled or
+  restart-interrupted run does NOT, so the next run automatically re-covers
+  the gap instead of leaving a hole. `OVERLAP_HOURS = 26` is subtracted, which
+  is what catches a result typed in hours after the last ball and makes
+  Monday re-cover Sunday's fixtures.
+- **`kind = 'org_recent'` is deliberately NOT one of the existing kinds.**
+  `org_full`/`org_hard_refresh` mean "this club's whole history has been
+  pulled", which the Setup Wizard's own sync gate (`onboarding_wizard._sync_ready`),
+  `wizard_analytics` and All Clubs' `_FULL_SYNC_KINDS` all read as their
+  ready signal. An incremental run must not satisfy those. Same reason
+  `main.py`'s restart self-heal still only resumes the two full kinds — a
+  dropped incremental run needs no resume, because its watermark never moved.
+- **Incremental mode is the SAME code path with a smaller input set**, never a
+  different one: `since` filters the API season list through
+  `auto_sync.season_in_window` (400-day span, so a straddling season or a late
+  final can't be filtered out), and `sync_grassroots_game_level_data` takes
+  `since` + `season_ids` to restrict the grade fan-out and drop out-of-window
+  fixtures. **The grade fan-out is as much of the saving as the scorecards** —
+  an established club has hundreds of grades across its seasons, each costing a
+  `/scores/grades/{id}/matches` call on every run before a single scorecard.
+- **Three whole-club tail passes are skipped when an incremental run added no
+  games** (`_backfill_missing_season_stats`, `reconcile_imported_totals`, the
+  bare `ANALYZE` that walks the whole DB). They derive from per-game data that
+  by definition did not change. **Milestones are scoped, not skipped**:
+  `_compute_milestones` runs a query per player, so an incremental run passes
+  only the players whose season aggregates it just rewrote.
+- **An off-season club is not synced at all.** `auto_sync.fixtures_in_window`
+  asks the cheap question first — are there fixtures on this club's card in
+  the window — and the grade match lists it fetches are cached in-process, so
+  when the answer is yes the sync that follows reuses them. **Every branch that
+  returns "sync anyway" is load-bearing**: a CA season we don't hold yet or
+  hold with no grades (deciding "no fixtures" from grades we haven't created
+  is how a club silently stops syncing the day its new season opens), and
+  every grade returning an empty list (`get_grade_matches` returns `[]` for a
+  transient failure and for a genuinely empty grade alike, so "whole card
+  empty" is "could not tell", never "season over"). A fixture dated in the
+  future doesn't count — it's not a result to pull.
+- **An idle check still records a successful `org_recent` run, and that is not
+  bookkeeping for its own sake** — it moves the watermark. Without it an
+  off-season club's window grows every week until it crosses
+  `MAX_LOOKBACK_DAYS` (90) and the club is handed a full historical rebuild,
+  quarterly, forever, for having done nothing.
+- **Historical drift is DETECTED, not blindly re-pulled** (per direct
+  instruction — no periodic full sync). `services/sync_drift.py` compares CA's
+  season aggregates against our stored `player_season_stats`, monthly, ~12
+  seasons per club per run rotating oldest-checked-first, three calls per
+  season and no scorecards. **The naive "sum the season and compare" reports
+  drift on healthy clubs**, so it compares per player and only for
+  participants CA itself reports: `_backfill_missing_season_stats` rows (for
+  players CA omits) are ignored, and any participant caught up in a live merge
+  is skipped, since the aggregate pass keeps one side's figures and drops the
+  other's. CA returning nothing is `unavailable`, never drift. Surfaced as a
+  banner on Data Sync with a Full Rebuild button; **acknowledging survives a
+  re-check that still finds drift** (no monthly nag) and is cleared by one
+  that finds the season clean.
+- **Verified against a real Postgres** (64 checks: migration 258 applied three
+  times and matching the lifespan mirror, every eligibility branch incl. the
+  fail-open legacy club, the watermark ignoring an errored run, the season and
+  fixture filtering asserted inside the real `sync_grassroots_game_level_data`
+  against stubbed CA responses, every off-season probe branch, the drift
+  check's backfill/merge false-positive guards, the acknowledge semantics, and
+  the scheduler choosing the right run per club) and **driven in Chromium**
+  (13: the notice's copy and examples, dismiss posting to the endpoint, no
+  page errors, no overflow at 390px).
+
 ## A picker inside a `<label>` cancels its own selection (v9.23.1.1, Aug 2026)
 
 Reported from Accounts → Add member → Find in club: picking a player from the

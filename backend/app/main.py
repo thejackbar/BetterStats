@@ -5300,6 +5300,33 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_list ON sales_list_clubs(sales_list_id)"
         ))
 
+        # Migration 258: historical-drift findings. The scheduled sync only
+        # pulls fixtures since a club's last run, so a Cricket Australia
+        # revision to an older season is never re-read; the monthly drift
+        # check records its verdict here instead (one row per club+season,
+        # updated in place). Byte-identical to
+        # alembic/versions/258_sync_drift_findings.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sync_drift_findings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                season_name TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'ok',
+                players_compared INTEGER NOT NULL DEFAULT 0,
+                players_differing INTEGER NOT NULL DEFAULT 0,
+                examples JSONB NOT NULL DEFAULT '[]'::jsonb,
+                checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                acknowledged_at TIMESTAMPTZ,
+                UNIQUE (organisation_id, season_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sync_drift_findings_open "
+            "ON sync_drift_findings(organisation_id) "
+            "WHERE status = 'drift' AND acknowledged_at IS NULL"
+        ))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
