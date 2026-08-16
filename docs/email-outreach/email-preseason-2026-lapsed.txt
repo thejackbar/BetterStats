@@ -28,25 +28,25 @@ Or book a demo this time: https://betterat.cricket/contact
 
 NEW SINCE YOU LAST LOOKED
 
-Junior stats (new)
-  Junior grades are split out, so an Under 14s season stops sitting inside a
-  first grade average.
-  https://betterat.cricket/modules/betterstats
+BetterSocials (redesigned)
+  Works like Canva, with your scores, players, photos and club colours already
+  in the template.
+  https://betterat.cricket/modules/bettersocials
 
 Vote counting (new)
   Players vote from their phone. Run 3-2-1 or set your own values, counted as
   the season goes.
   https://betterat.cricket/modules/betterselect
 
-BetterSocials (redesigned)
-  Works like Canva, with your scores, players, photos and club colours already
-  in the template.
-  https://betterat.cricket/modules/bettersocials
-
 BetterAdmin (updated)
   New club and volunteer management: member directory, committee, rosters and
   the season diary.
   https://betterat.cricket/modules/betteradmin
+
+Junior stats (new)
+  Junior grades are split out, so an Under 14s season stops sitting inside a
+  first grade average.
+  https://betterat.cricket/modules/betterstats
 
 
 Jack & Elton

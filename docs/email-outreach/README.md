@@ -130,10 +130,10 @@ that drove the structure, and what they cost:
   things we had built, which is us talking about ourselves to someone who has
   already said no once. What we have built since is one sentence in the body,
   and the detail sits in three cards BELOW the button.
-- **The re-engagement email's new-feature cards** (junior stats, vote counting,
-  the BetterSocials rebuild, the updated BetterAdmin) reuse the cold email's
-  module-card styling and sit after the CTA for the same reason its module cards
-  do. They are a feature list, and a feature list read before the reason to
+- **The re-engagement email's new-feature cards** (the BetterSocials rebuild,
+  vote counting, the updated BetterAdmin, junior stats, in that order) reuse the
+  cold email's module-card styling and sit after the CTA for the same reason its
+  module cards do. They are a feature list, and a feature list read before the reason to
   click is what turns this into the changelog the angle is meant to avoid. Each
   card links to the module page that feature lives on.
 - **They are a 2x2 grid, not a stack**, which is what let a fourth card go in
