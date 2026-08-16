@@ -6,7 +6,7 @@ Pasteable HTML emails for the Cricket Australia outreach, plus plain-text fallba
 |------|-----|---------|-------|
 | `email-preseason-2026-plain.txt` | **Send this to a cold list.** Written as a real plain-text email from one person | {Club}: stats sorted before round one | No template at all, on purpose. See the format note below |
 | `email-preseason-2026.html` | The branded version, for the warm list | {Club}: stats sorted before round one | Dark navy, one CTA, compact module list, static trusted-by strip |
-| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | Come and see what you're missing | Same shell. The example clubs ARE the pitch and sit above the button |
+| `email-preseason-2026-lapsed.html` | Re-engagement: past enquiries and unfinished trials | Come and see what you're missing | Same shell. The example clubs ARE the pitch and sit above the button, new-feature cards below it |
 | `email-selfserve-launch.html` | The self-serve launch (sent alongside the BC_AU_SelfServe_Aug2026 Meta campaign) | Get all of your club's stats online today! Free 14 day trial, no strings attached | Dark navy, echoes the /trial page |
 | `email-initial-demo.html` | First email of the original sequence | How many volunteer hours did your club burn this week? | Dark navy, with the module section |
 | `email-followup-demo.html` | The short follow-up | Worth two minutes of your time | Light body, navy header/footer |
@@ -44,6 +44,16 @@ Every link in every file carries all four tags:
 | `edm_module_<slug>` | One per module card (`betterstats`, `betterselect`, `bettersocials`, `betteradmin`, `betteriq`, `betterfantasy`) |
 | `edm_trust_strip` | The four club crests |
 | `edm_lapsed_*` | The same set in the re-engagement variant |
+| `edm_lapsed_new_<slug>` | One per new-feature card in the re-engagement variant (`juniorstats`, `votecounting`, `bettersocials`) |
+
+**The re-engagement variant has drifted, on purpose.** It is sent through
+BetterComms rather than pasted, so its `utm_source` carries the `{{utm_code}}`
+merge variable instead of the `ca` placeholder (the pattern the root
+`CLAUDE.md` documents for a template that places its own UTM tags), and its
+campaign is **`BC_AU_PreSeason_lapsed_EDM_16Aug2026`** rather than the shared
+`BC_AU_PreSeason_EDM_Aug2026`. Its greeting and club name are `{{first_name}}`
+and `{{club}}`. `make_sends.py` only ever rewrites `email-initial-demo.html`,
+so none of this affects it.
 
 **Where it shows up.** `usePageView.js` writes `utm_campaign` into
 `usage_events` on every page view, so the Usage page reports the campaign
@@ -118,7 +128,20 @@ that drove the structure, and what they cost:
   someone has seen what a finished club looks like. That email is a "what you're
   missing" pitch rather than a changelog — an earlier version led with three
   things we had built, which is us talking about ourselves to someone who has
-  already said no once. What we have built since is one supporting sentence now.
+  already said no once. What we have built since is one sentence in the body,
+  and the detail sits in three cards BELOW the button.
+- **The re-engagement email's new-feature cards** (junior stats, vote counting,
+  the BetterSocials rebuild) reuse the cold email's module-card styling and sit
+  after the CTA for the same reason its module cards do. They are a feature
+  list, and a feature list read before the reason to click is what turns this
+  into the changelog the angle is meant to avoid. The body names all three in
+  one line and says they are further down, so a top-down reader knows to scroll
+  without having to read the detail first. Each card links to the module page
+  that feature lives on.
+- **The range line under the crests** ("single team country sides to the top
+  Premier Cricket clubs") answers the objection those four crests raise on
+  their own: all metro, all a similar size. It is placed with the crests rather
+  than in the body because that is where the objection is formed.
 - **One CTA.** Every green button goes to `/trial` and nothing competes with it.
   The demo option is a small text link underneath, not a second button, because
   a rival button splits the click.

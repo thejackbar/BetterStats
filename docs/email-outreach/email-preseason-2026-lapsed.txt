@@ -1,13 +1,21 @@
 Subject: Come and see what you're missing
 
-Hi [first name],
+Hi {{first_name}},
 
-You had a look at BetterCricket a while back and it did not go ahead. We have
-not stopped building since. Vote counting, a full club and volunteer back
-office, and we now run the setup with you rather than handing it over.
+You had a look at BetterCricket a while ago. A lot has changed since then.
 
-Everything needed to get your club's whole history online is there now. These
-clubs have already done it. Have a look at what theirs turned into.
+We've built out a comprehensive back office for managing your club, committee
+and volunteers, and the setup now walks you through getting everything in
+place. Three of the bigger additions are further down: junior stats you can
+keep out of your senior records, vote counting that runs itself, and a rebuilt
+BetterSocials.
+
+Getting started is easier than ever. BetterCricket can bring your club's
+history online, including past seasons, players, matches, records, scorecards,
+awards and honours.
+
+Here are a few clubs that have come onboard recently. Take a quick look at what
+BetterCricket has created for them.
 
 
 ALREADY ONLINE
@@ -17,16 +25,40 @@ Rockingham-Mandurah  https://betterat.cricket/rockingham-mandurah-cricket-club
 Applecross           https://betterat.cricket/applecross
 Leeming Spartan      https://betterat.cricket/leeming-spartan-cricket-club
 
-Every one of these was a spreadsheet not long ago.
+Every one of these was a spreadsheet not long ago. Our clubs run from single
+team country sides to the top Premier Cricket clubs, Australia wide, and we're
+built for everything in between.
 
 
-Get your club on there: https://betterat.cricket/trial
+Get {{club}} on BetterCricket today: https://betterat.cricket/trial
 Free, no card needed, about 3 minutes to set up.
 Or book a demo this time: https://betterat.cricket/contact
+
+
+NEW SINCE YOU LAST LOOKED
+
+Junior stats, kept separate
+  Junior grades are picked out for you and can be left out of senior records,
+  so an Under 14s season stops sitting inside a first grade average. Your club
+  sets which grades count.
+  https://betterat.cricket/modules/betterstats
+
+Vote counting that runs itself
+  Players vote from their phone after the game and the count keeps itself up to
+  date. Run 3-2-1 or set your own values, decide who votes and how ties are
+  broken, then read the season out on presentation night.
+  https://betterat.cricket/modules/betterselect
+
+BetterSocials, rebuilt
+  It now works like Canva, with your scores, players, photos and club colours
+  already in the template. Drag things where you want them and the post is done
+  before you have left the ground.
+  https://betterat.cricket/modules/bettersocials
+
 
 Jack & Elton
 BetterCricket
 support@bettersports.com.au
 
-P.S. Round one is a few weeks away. If it is still not the right time, reply and
-tell me what is in the way.
+P.S. Round one is just a few weeks away. If it's still not the right time,
+reply and tell us what's in the way.
