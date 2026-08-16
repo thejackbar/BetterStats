@@ -191,13 +191,19 @@ async def plan_run(session: AsyncSession, org_id, now: datetime | None = None) -
 
 
 async def fixtures_in_window(org_id_str: str, since: date, now: date | None = None) -> dict:
-    """Has this club actually played anything since ``since``?
+    """Did this club play anything in the period since its last pull?
 
-    A club whose season has finished has no fixtures for months, and running
-    the full sync machinery twice a week to discover that costs the shared
-    Cricket Australia proxy a season-aggregate pass per club per run for
-    nothing. This asks the cheap question first: are there fixtures on this
-    club's card in the window at all.
+    That is the whole rule, and it is deliberately NOT a notion of "is this
+    club's season over". A club has no fixtures in a period for all sorts of
+    ordinary reasons — the off-season, the Christmas break, a bye, a washed-out
+    round, a team between grades — and every one of them has the same right
+    answer: there is nothing to pull, so do not pull. Asking the narrower
+    question would mean modelling where a season starts and ends per club and
+    per competition, and getting the same outcome only some of the time.
+
+    Running the sync machinery to discover an empty period costs the shared
+    Cricket Australia proxy a season-aggregate pass per club per run, so this
+    asks the cheap question first.
 
     Returns ``{"sync": bool, "reason": str, "fixtures": int}``.
 
@@ -212,7 +218,7 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
       returns ``[]`` for a transient upstream failure as well as for a
       genuinely empty grade, and those two are indistinguishable here — so a
       club whose whole card reads empty is treated as "could not tell",
-      never as "season over".
+      never as "nothing was played".
 
     The grade match lists this fetches are cached in-process by
     ``grassroots_scores_client``, so when the answer is "sync", the sync that
@@ -238,6 +244,9 @@ async def fixtures_in_window(org_id_str: str, since: date, now: date | None = No
             if sid:
                 in_play.append(sid)
 
+    # No season could even have been running across the window, so there is
+    # certainly nothing played in it. A short-circuit, not a season judgement:
+    # it saves the grade round-trips below and reaches the same answer.
     if not in_play:
         return {"sync": False, "reason": "no_season_in_play", "fixtures": 0}
 

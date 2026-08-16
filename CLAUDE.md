@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## The scheduled sync pulls recent results, not the club's whole history (migration 258, v9.25.0, Aug 2026)
+## The scheduled sync pulls the period's results, not the club's whole history (migration 258, v9.25.0, Aug 2026)
 
 `jobs/scheduler.py::sync_all_organisations` was `select(Organisation)` with no
 WHERE and a full historical `sync_organisation` per club, at 03:00 **UTC** —
@@ -48,21 +48,26 @@ how far back" is decided.
   by definition did not change. **Milestones are scoped, not skipped**:
   `_compute_milestones` runs a query per player, so an incremental run passes
   only the players whose season aggregates it just rewrote.
-- **An off-season club is not synced at all.** `auto_sync.fixtures_in_window`
-  asks the cheap question first — are there fixtures on this club's card in
-  the window — and the grade match lists it fetches are cached in-process, so
-  when the answer is yes the sync that follows reuses them. **Every branch that
-  returns "sync anyway" is load-bearing**: a CA season we don't hold yet or
-  hold with no grades (deciding "no fixtures" from grades we haven't created
-  is how a club silently stops syncing the day its new season opens), and
-  every grade returning an empty list (`get_grade_matches` returns `[]` for a
-  transient failure and for a genuinely empty grade alike, so "whole card
-  empty" is "could not tell", never "season over"). A fixture dated in the
-  future doesn't count — it's not a result to pull.
+- **Nothing played in the period, nothing pulled.**
+  `auto_sync.fixtures_in_window` asks the cheap question first — did this club
+  play anything since its last pull — and the grade match lists it fetches are
+  cached in-process, so when the answer is yes the sync that follows reuses
+  them. **This is deliberately NOT a notion of "is the season over".** A club
+  has an empty period for many ordinary reasons (the off-season, the Christmas
+  break, a bye, a washed-out round, a team between grades) and every one has
+  the same right answer. Modelling season boundaries per club and per
+  competition would be more code reaching the same outcome only some of the
+  time. **Every branch that returns "sync anyway" is load-bearing**: a CA
+  season we don't hold yet or hold with no grades (deciding "nothing played"
+  from grades we haven't created is how a club silently stops syncing the day
+  its new season opens), and every grade returning an empty list
+  (`get_grade_matches` returns `[]` for a transient failure and for a
+  genuinely empty grade alike, so "whole card empty" is "could not tell").
+  A fixture dated in the future doesn't count — it isn't a result to pull.
 - **An idle check still records a successful `org_recent` run, and that is not
-  bookkeeping for its own sake** — it moves the watermark. Without it an
-  off-season club's window grows every week until it crosses
-  `MAX_LOOKBACK_DAYS` (90) and the club is handed a full historical rebuild,
+  bookkeeping for its own sake** — it moves the watermark. Without it a club
+  that plays nothing for a stretch has its window grow every run until it
+  crosses `MAX_LOOKBACK_DAYS` (90) and is handed a full historical rebuild,
   quarterly, forever, for having done nothing.
 - **Historical drift is DETECTED, not blindly re-pulled** (per direct
   instruction — no periodic full sync). `services/sync_drift.py` compares CA's

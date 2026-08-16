@@ -68,13 +68,14 @@ async def sync_all_organisations():
                 await sync_organisation(org_id, kind="org_full")
                 synced = True
             else:
-                # Ask whether the club has played anything before pulling
-                # anything. A club whose season finished in March has no
-                # fixtures until September, and the sync machinery would cost
-                # a season-aggregate pass twice a week to find that out.
+                # Did anything get played in this period? An empty period is
+                # ordinary — the off-season, the Christmas break, a bye, a
+                # washed-out round — and all of them mean there is nothing to
+                # pull. Running the sync machinery to find that out would cost
+                # a season-aggregate pass per club twice a week.
                 probe = await auto_sync.fixtures_in_window(org_id, plan["since"])
                 if not probe["sync"]:
-                    logger.info("No fixtures for %s since %s (%s) — skipping",
+                    logger.info("Nothing played for %s since %s (%s) — skipping",
                                 org.name, plan["since"], probe["reason"])
                     await _record_idle_run(org.id, plan["since"], probe["reason"])
                     continue
@@ -98,10 +99,10 @@ async def _record_idle_run(org_id, since, reason: str) -> None:
     """Record that a club was checked and had nothing to pull.
 
     This is not bookkeeping for its own sake — it is what moves the club's
-    watermark. Without it an off-season club's window grows every week until
-    it crosses MAX_LOOKBACK_DAYS, at which point the club is judged "too far
-    behind" and handed a full historical rebuild, quarterly, forever, for
-    having done nothing wrong.
+    watermark. Without it, a club that plays nothing for a stretch has its
+    window grow every run until it crosses MAX_LOOKBACK_DAYS, at which point
+    it is judged "too far behind" and handed a full historical rebuild,
+    quarterly, forever, for having done nothing wrong.
 
     The run is genuinely successful: it asked the question and got an answer.
     Never raises — a club must not be skipped from the sync loop because its
