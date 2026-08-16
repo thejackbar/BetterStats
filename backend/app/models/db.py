@@ -4039,7 +4039,14 @@ class CommsRecipient(Base):
     contact_id = Column(UUID(as_uuid=True), ForeignKey("comms_contacts.id", ondelete="SET NULL"), nullable=True)
     email = Column(Text, nullable=False)
     name = Column(Text, nullable=True)
-    status = Column(Text, nullable=False, server_default="queued")  # queued | sent | failed | skipped
+    # queued | in_flight | sent | failed | deferred | skipped.
+    # 'in_flight' is set immediately before a chunk is handed to the email
+    # provider and replaced by sent/failed as soon as the outcome is written
+    # back (routers/comms.py::_run_send). A row LEFT at 'in_flight' means the
+    # process died in between, so we genuinely don't know whether it was
+    # delivered — it is never re-sent, because a duplicate to a real recipient
+    # is worse than a gap in our own records.
+    status = Column(Text, nullable=False, server_default="queued")
     provider_message_id = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=True)

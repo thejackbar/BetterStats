@@ -169,6 +169,13 @@ async def account_daily_remaining(session: AsyncSession) -> int:
     try:
         usable = int(await platform_settings.get_daily_send_limit(session))
     except Exception:
+        # Roll back before falling back. Swallowing the error is right — a
+        # missing setting should not stop a club sending — but Postgres has
+        # already aborted the transaction, so without this every later query on
+        # this session (starting with sends_today one line down) dies with
+        # InFailedSQLTransactionError and takes the whole send with it. Same
+        # trap audit_log's own catch-and-continue hit.
+        await session.rollback()
         usable = int(settings.ses_daily_send_limit)
     used = await sends_today(session, org_id=None)
     return max(0, usable - used)
@@ -254,6 +261,47 @@ async def deliverability_metrics(session: AsyncSession, org_id, *,
         "complaint_rate": round(complaint_rate, 5),
         "min_sample": int(settings.comms_metrics_min_sample),
         "sufficient_sample": sent >= int(settings.comms_metrics_min_sample),
+    }
+
+
+async def ses_events_health(session: AsyncSession, *, window_days: int = 7) -> dict:
+    """Is SES event publishing actually reaching us?
+
+    Every deliverability signal this module computes — bounce rate, complaint
+    rate, and therefore the circuit breaker itself — is derived from
+    ``email_events``, which is filled by SNS posting to
+    ``/public/ses/webhook``. If that was never wired up on the AWS side the
+    table stays empty, every rate reads 0.0, ``breaker_reason`` can never fire,
+    and ``add_suppression`` (called only from services/ses_events.py) never runs
+    — so hard bounces and complaints are never suppressed and the same dead
+    addresses are mailed again. Nothing surfaced any of that: a club looked
+    perfectly healthy precisely BECAUSE no data was arriving.
+
+    Discovered 16 Aug 2026 after five weeks of sending with an empty
+    suppression list. ``unsubscribe`` events are excluded from the count because
+    routers/public_comms.py writes those itself, so they arrive whether or not
+    SES is connected — counting them would mask exactly the failure this looks
+    for.
+
+    A club-agnostic, account-wide check: healthy when we have not sent anything
+    recently (nothing to expect events about) or SES events are arriving."""
+    since = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=int(window_days))
+    sent = await _sends_since(session, since)
+    recent_events = int((await session.scalar(text("""
+        SELECT COUNT(*) FROM email_events
+        WHERE event_type <> 'unsubscribe' AND created_at >= :since
+    """), {"since": since})) or 0)
+    ever = int((await session.scalar(text("""
+        SELECT COUNT(*) FROM email_events WHERE event_type <> 'unsubscribe'
+    """))) or 0)
+    return {
+        "window_days": int(window_days),
+        "sent": sent,
+        "events": recent_events,
+        "events_ever": ever,
+        "connected": recent_events > 0,
+        # Only a real problem once we've actually sent something in the window.
+        "healthy": recent_events > 0 or sent == 0,
     }
 
 

@@ -5362,6 +5362,50 @@ async def lifespan(app: FastAPI):
         logger.info(f"Self-heal: {len(_to_resume)} interrupted sync(s) to resume after restart")
         asyncio.create_task(_resume_interrupted_syncs(_to_resume))
 
+    # Self-heal: finish any BetterComms campaign cut off mid-send by the previous
+    # shutdown. A send is a detached asyncio task, so a restart kills it and
+    # nothing else was ever going to pick it up — on 16 Aug 2026 two campaigns
+    # sat at 'sending' with 9,868 recipients stranded at 'queued'. Backgrounded,
+    # not awaited: it makes outbound SES calls, and boot must never wait on the
+    # network. Recipients already handed to the provider are 'in_flight' and are
+    # never re-sent, so this cannot duplicate a delivered email.
+    async def _resume_sends() -> None:
+        try:
+            from app.routers.comms import resume_interrupted_sends
+            n = await resume_interrupted_sends()
+            if n:
+                logger.info("Self-heal: resumed %d interrupted campaign send(s)", n)
+        except Exception:
+            logger.exception("Self-heal: failed to resume interrupted campaign sends")
+
+    asyncio.create_task(_resume_sends())
+
+    # Warn loudly if SES event publishing looks dead. email_events feeds every
+    # deliverability figure AND is the only caller path into add_suppression, so
+    # when SNS isn't wired up hard bounces and complaints are never suppressed,
+    # the circuit breaker can never trip, and everything reads as healthy because
+    # no data is arriving at all. That went unnoticed for five weeks and ~10,000
+    # contacts; it should never be able to hide again.
+    async def _check_ses_events() -> None:
+        try:
+            from app.services import comms_limits
+            from app.models.db import async_session_maker
+            async with async_session_maker() as _s:
+                health = await comms_limits.ses_events_health(_s)
+            if not health["healthy"]:
+                logger.warning(
+                    "BetterComms: SES event publishing looks DISCONNECTED — %d send(s) in the "
+                    "last %dd but 0 SES events received (%d ever). Bounce/complaint suppression "
+                    "and the deliverability breaker are both inert. Check that SNS is subscribed "
+                    "to %s/api/public/ses/webhook and that the SES configuration set publishes "
+                    "delivery, bounce and complaint events.",
+                    health["sent"], health["window_days"], health["events_ever"],
+                    settings.public_base_url)
+        except Exception:
+            logger.exception("BetterComms: SES event health check failed")
+
+    asyncio.create_task(_check_ses_events())
+
     start_scheduler()
     # Apply the super-admin-set CRM sweep cadences (Tier 2 / Tier 3) to the
     # just-started scheduler — the jobs were registered with the defaults, this

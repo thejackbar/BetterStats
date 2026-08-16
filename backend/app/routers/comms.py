@@ -72,6 +72,16 @@ _require = Depends(require_cap(MANAGE_COMMS))
 # pattern as the hard-refresh / dossier builders).
 _SEND_TASKS: set[asyncio.Task] = set()
 
+# How many recipients a send loop hands to the provider before committing their
+# outcomes. A restart or crash mid-run therefore loses attribution for at most
+# this many rows instead of the whole campaign — see _run_send.
+SEND_CHUNK = 100
+
+# Campaigns actively being sent by THIS process, so the daily resume job can't
+# re-dispatch a campaign whose loop is still working through it (which would
+# send its not-yet-reached recipients twice).
+_SENDING_CAMPAIGNS: set[str] = set()
+
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 UNSUB_TYP = "comms_unsub"
 
@@ -1582,16 +1592,53 @@ async def campaign_status(
     return {"status": c.status, "stats": c.stats or {}, "error": c.error}
 
 
+async def _campaign_tallies(s: AsyncSession, campaign_id) -> dict:
+    """Recompute a campaign's counters from its recipient rows, so the numbers
+    stay right however many resume passes have run.
+
+    ``unconfirmed`` counts rows left ``in_flight`` — handed to the provider but
+    never written back, because the process died between dispatch and commit.
+    They are neither 'sent' nor safe to re-send, so they are reported separately
+    rather than being folded into either total."""
+    totals = (await s.execute(select(
+        func.count(CommsRecipient.id),
+        func.count(CommsRecipient.id).filter(CommsRecipient.status == "sent"),
+        func.count(CommsRecipient.id).filter(CommsRecipient.status == "failed"),
+        func.count(CommsRecipient.id).filter(CommsRecipient.status == "deferred"),
+        func.count(CommsRecipient.id).filter(CommsRecipient.status == "in_flight"),
+    ).where(CommsRecipient.campaign_id == campaign_id))).one()
+    total, sent, failed, deferred, unconfirmed = (int(x) for x in totals)
+    return {"recipients": total, "sent": sent, "failed": failed,
+            "deferred": deferred, "unconfirmed": unconfirmed}
+
+
 async def _run_send(campaign_id: str, org_id: str) -> None:
     """Detached send loop. Reads recipient data first, performs the provider
     sends concurrently OUTSIDE the session (async sessions aren't concurrency
-    safe), then writes results back sequentially.
+    safe), then writes results back in chunks of ``SEND_CHUNK``.
+
+    Results are committed as the run goes, NOT once at the end. On 16 Aug 2026 a
+    backend restart during a 9,868-recipient send left every recipient 'queued'
+    with roughly 4,969 already delivered, and nothing in our data could say which
+    — the whole batch's outcomes were still sitting in memory waiting for a
+    single write-back that never came. Committing per chunk bounds that loss to
+    one chunk, and has a second benefit: today's usage becomes visible to
+    comms_limits.sends_today WHILE the run is going, so two campaigns sending at
+    once can no longer each claim the full daily allowance.
 
     Daily-cap aware: only today's remaining allowance (the tighter of the club
     cap and the account ceiling) is sent now; the overflow is marked ``deferred``
     and the campaign stays ``sending`` so the daily resume job finishes it
     tomorrow. Every provider send is paced through the account-wide rate limiter
     so we stay under the AWS per-second ceiling across all clubs at once."""
+    if campaign_id in _SENDING_CAMPAIGNS:
+        # The daily resume job and a live send loop can otherwise both work the
+        # same campaign: the live loop's later chunks are still 'queued', so the
+        # second dispatch would pick them up and send them a second time.
+        logger.info("BetterComms: campaign %s already sending in this process — skipped",
+                    campaign_id)
+        return
+    _SENDING_CAMPAIGNS.add(campaign_id)
     try:
         async with async_session_maker() as s:
             camp = await s.get(CommsCampaign, uuid.UUID(campaign_id))
@@ -1671,47 +1718,70 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                 res = await provider.send(msg)
                 return rid, res
 
-        results = await asyncio.gather(*[_send_one(rid, m) for rid, m in messages.items()])
-
+        items = list(messages.items())
         sent = failed = 0
+        for start in range(0, len(items), SEND_CHUNK):
+            chunk = items[start:start + SEND_CHUNK]
+            # Mark the chunk in flight BEFORE dispatching it, so a crash leaves
+            # these rows distinguishable from the untouched 'queued' ones behind
+            # them. 'in_flight' means "handed to the provider, outcome unknown":
+            # the resume path deliberately never re-sends those, since a
+            # duplicate to a real club is worse than a gap in our records.
+            async with async_session_maker() as s:
+                await s.execute(
+                    update(CommsRecipient)
+                    .where(CommsRecipient.id.in_([rid for rid, _ in chunk]))
+                    .values(status="in_flight"))
+                await s.commit()
+
+            results = await asyncio.gather(*[_send_one(rid, m) for rid, m in chunk])
+
+            async with async_session_maker() as s:
+                now = datetime.now(timezone.utc)
+                for rid, res in results:
+                    r = await s.get(CommsRecipient, rid)
+                    if not r:
+                        continue
+                    if res.ok:
+                        r.status = "sent"
+                        r.provider_message_id = res.message_id
+                        r.sent_at = now
+                        sent += 1
+                    else:
+                        r.status = "failed"
+                        r.error = (res.error or "")[:500]
+                        failed += 1
+                # Keep the campaign's own counters moving so the Emails screen
+                # shows real progress instead of sitting on 0 until the very end.
+                camp = await s.get(CommsCampaign, uuid.UUID(campaign_id))
+                if camp:
+                    camp.stats = await _campaign_tallies(s, camp.id)
+                await s.commit()
+
         async with async_session_maker() as s:
             now = datetime.now(timezone.utc)
-            for rid, res in results:
-                r = await s.get(CommsRecipient, rid)
-                if not r:
-                    continue
-                if res.ok:
-                    r.status = "sent"
-                    r.provider_message_id = res.message_id
-                    r.sent_at = now
-                    sent += 1
-                else:
-                    r.status = "failed"
-                    r.error = (res.error or "")[:500]
-                    failed += 1
             camp = await s.get(CommsCampaign, uuid.UUID(campaign_id))
             if camp:
                 # Cumulative tallies across runs (a resumed campaign adds to what
                 # earlier runs already sent). Recompute from the recipient rows so
                 # the numbers stay right regardless of how many resume passes ran.
-                totals = (await s.execute(select(
-                    func.count(CommsRecipient.id),
-                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "sent"),
-                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "failed"),
-                    func.count(CommsRecipient.id).filter(CommsRecipient.status == "deferred"),
-                ).where(CommsRecipient.campaign_id == camp.id))).one()
-                total_all, total_sent, total_failed, total_deferred = (int(x) for x in totals)
-                camp.stats = {"recipients": total_all, "sent": total_sent,
-                              "failed": total_failed, "deferred": total_deferred}
-                if total_deferred > 0:
+                tallies = camp.stats = await _campaign_tallies(s, camp.id)
+                if tallies["deferred"] > 0:
                     # More to go tomorrow — stay 'sending' so the resume job finds it.
                     camp.status = "sending"
                 else:
                     camp.status = "sent"
                     camp.sent_at = now
-                    if total_failed and not total_sent:
+                    if tallies["failed"] and not tallies["sent"]:
                         camp.status = "error"
                         camp.error = "All sends failed — check the email provider configuration."
+                    elif tallies["unconfirmed"]:
+                        # Finished everything we could, but an earlier run died
+                        # mid-chunk. Say so rather than reporting a clean send.
+                        camp.error = (
+                            f"{tallies['unconfirmed']} recipient(s) were handed to the email "
+                            "provider during an interrupted send and never confirmed. They may "
+                            "or may not have been delivered, and were not re-sent.")
             # Reflect a marketing-outreach send back onto the directory: any club
             # whose exported contact was just sent to is flagged emailed_via=
             # 'campaign' so it isn't re-exported. No-op for ordinary club sends
@@ -1760,23 +1830,32 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     await s.commit()
         except Exception:
             pass
+    finally:
+        _SENDING_CAMPAIGNS.discard(campaign_id)
 
 
-async def resume_deferred_campaigns() -> int:
-    """Re-dispatch campaigns that still have deferred recipients (daily job).
+async def resume_deferred_campaigns(reason: str = "daily") -> int:
+    """Re-dispatch campaigns with recipients still waiting to be sent.
 
     Runs after the AWS quota window rolls over, so each club gets a fresh daily
-    allowance. Re-uses ``_run_send`` per campaign, which re-caps to the new
-    allowance and defers anything still over — so a very large campaign drains
-    over several days without ever breaching a cap. Returns the number of
-    campaigns it kicked."""
+    allowance, and again at boot (see ``resume_interrupted_sends``). Re-uses
+    ``_run_send`` per campaign, which re-caps to the new allowance and defers
+    anything still over — so a very large campaign drains over several days
+    without ever breaching a cap. Returns the number of campaigns it kicked.
+
+    Matches ``queued`` as well as ``deferred``. It used to look for ``deferred``
+    alone, which quietly stranded every campaign interrupted mid-send: a restart
+    leaves its untouched recipients at ``queued``, so nothing ever picked them up
+    and the campaign sat at 'sending' forever (16 Aug 2026). ``in_flight`` is
+    deliberately NOT matched — those were already handed to the provider and
+    re-sending them would mean a duplicate to a real recipient."""
     kicked = 0
     async with async_session_maker() as s:
         rows = (await s.execute(text("""
             SELECT DISTINCT c.id, c.organisation_id
             FROM comms_campaigns c
             JOIN comms_recipients r ON r.campaign_id = c.id
-            WHERE c.status = 'sending' AND r.status = 'deferred'
+            WHERE c.status = 'sending' AND r.status IN ('deferred', 'queued')
         """))).all()
     for cid, org_id in rows:
         try:
@@ -1785,8 +1864,32 @@ async def resume_deferred_campaigns() -> int:
         except Exception as e:
             logger.error("BetterComms resume failed for %s: %s", cid, e, exc_info=True)
     if kicked:
-        logger.info("BetterComms: resumed %d deferred campaign(s)", kicked)
+        logger.info("BetterComms: resumed %d unfinished campaign(s) (%s)", kicked, reason)
     return kicked
+
+
+async def resume_interrupted_sends() -> int:
+    """Boot-time resume for campaigns cut off mid-send by a restart or crash.
+
+    A send is a detached ``asyncio`` task, so a restart kills it outright and
+    nothing else was ever going to finish it — the sync side has had
+    ``_resume_interrupted_syncs`` for exactly this reason and comms had no
+    equivalent. Safe to run at startup: this process is fresh, so no send loop
+    can be live, and anything already handed to the provider is ``in_flight``
+    and is never re-sent.
+
+    Also reports any unconfirmed recipients it finds, since those are the rows a
+    person has to make a judgement call about."""
+    async with async_session_maker() as s:
+        stranded = int((await s.scalar(text("""
+            SELECT COUNT(*) FROM comms_recipients WHERE status = 'in_flight'
+        """))) or 0)
+    if stranded:
+        logger.warning(
+            "BetterComms: %d recipient(s) left in flight by an interrupted send — "
+            "handed to the provider but never confirmed. They will NOT be re-sent.",
+            stranded)
+    return await resume_deferred_campaigns(reason="restart")
 
 
 # ─── Sending limits + tier-increase request ──────────────────────────────────
@@ -1826,6 +1929,11 @@ async def get_limits(
         "can_request": pf["tier"] == comms_limits.TIER_SANDBOX and open_req is None,
         "open_request": _limit_request_out(open_req) if open_req else None,
         "history": [_limit_request_out(r) for r in history],
+        # Whether SES is actually reporting deliveries/bounces back to us. When
+        # this is false every rate on this card reads 0.0 because no data is
+        # arriving, which looks identical to perfect deliverability — so the
+        # card has to be able to say so.
+        "ses_events": await comms_limits.ses_events_health(db),
     }
 
 
