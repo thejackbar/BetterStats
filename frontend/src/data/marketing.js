@@ -169,6 +169,7 @@ export const COMPARISONS = {
           { feature: 'Partnership records', values: { clubstats: 'partial', cstatz: true, us: true } },
           { feature: 'Head-to-head player splits', tip: 'How a player has performed versus every club they have played against', values: { clubstats: false, cstatz: 'partial', us: true } },
           { feature: 'Caught-behind & dismissal breakdowns', values: { clubstats: false, cstatz: 'partial', us: true } },
+          { feature: 'Junior grades kept out of senior careers', tip: 'An Under-14 season does not flatter a senior average, and you can add juniors back in with one tap', values: { clubstats: false, cstatz: 'manual', us: true } },
         ],
       },
       {
@@ -256,6 +257,14 @@ export const COMPARISONS = {
           { feature: 'Live fixtures & grade ladders', values: { chats: false, teamapps: 'partial', us: true } },
         ],
       },
+      {
+        section: 'After the game',
+        rows: [
+          { feature: 'Best-player votes collected from players', tip: '3-2-1 votes from the same link players use for availability', values: { chats: 'manual', teamapps: false, us: true } },
+          { feature: 'Season count kept for you', tip: 'Points, 3s, 2s and 1s, and movement round to round', values: { chats: 'manual', teamapps: false, us: true } },
+          { feature: 'Presentation mode for awards night', tip: 'Reveal the count a round at a time on the screen', values: { chats: false, teamapps: false, us: true } },
+        ],
+      },
     ],
     cta: { line: 'Turn the weekly "who’s in?" scramble into a few taps.', label: 'Explore BetterSelect →', to: '/modules/betterselect' },
   },
@@ -294,7 +303,9 @@ export const COMPARISONS = {
           { feature: 'One member directory', tip: 'Players, parents, life members, volunteers and sponsor contacts', values: { mailchimp: 'partial', sheets: 'manual', us: true } },
           { feature: 'Volunteer roster & hours', tip: 'Roster the canteen, bar and gate, and log hours for grants', values: { mailchimp: false, sheets: 'manual', us: true } },
           { feature: 'Committee meetings, minutes & motions', values: { mailchimp: false, sheets: 'manual', us: true } },
-          { feature: 'Season club diary', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Season club diary', tip: 'Affiliation fees, the AGM, renewals and ground work across the year, with owners and due dates', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Strategic plan tracked against the work', tip: 'Objectives under your own pillars, with the actions serving them reporting back', values: { mailchimp: false, sheets: 'manual', us: true } },
+          { feature: 'Committee roles that hand over at the AGM', values: { mailchimp: false, sheets: 'manual', us: true } },
           { feature: 'One back office, one bill', textRow: true, values: { mailchimp: '~$20+/mo', sheets: 'Free + your time', us: '$149 a year' } },
         ],
       },
