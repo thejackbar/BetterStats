@@ -4,18 +4,9 @@ Hi {{first_name}},
 
 You had a look at BetterCricket a while ago. A lot has changed since then.
 
-We've built out a comprehensive back office for managing your club, committee
-and volunteers, and the setup now walks you through getting everything in
-place. Three of the bigger additions are further down: junior stats you can
-keep out of your senior records, vote counting that runs itself, and a rebuilt
-BetterSocials.
-
-Getting started is easier than ever. BetterCricket can bring your club's
-history online, including past seasons, players, matches, records, scorecards,
-awards and honours.
-
-Here are a few clubs that have come onboard recently. Take a quick look at what
-BetterCricket has created for them.
+Your club's whole history can be online in a few minutes: past seasons,
+players, scorecards, records and honours. Here is what a few clubs that came
+onboard recently ended up with.
 
 
 ALREADY ONLINE
@@ -37,23 +28,25 @@ Or book a demo this time: https://betterat.cricket/contact
 
 NEW SINCE YOU LAST LOOKED
 
-Junior stats, kept separate
-  Junior grades are picked out for you and can be left out of senior records,
-  so an Under 14s season stops sitting inside a first grade average. Your club
-  sets which grades count.
+Junior stats (new)
+  Junior grades are split out, so an Under 14s season stops sitting inside a
+  first grade average.
   https://betterat.cricket/modules/betterstats
 
-Vote counting that runs itself
-  Players vote from their phone after the game and the count keeps itself up to
-  date. Run 3-2-1 or set your own values, decide who votes and how ties are
-  broken, then read the season out on presentation night.
+Vote counting (new)
+  Players vote from their phone. Run 3-2-1 or set your own values, counted as
+  the season goes.
   https://betterat.cricket/modules/betterselect
 
-BetterSocials, rebuilt
-  It now works like Canva, with your scores, players, photos and club colours
-  already in the template. Drag things where you want them and the post is done
-  before you have left the ground.
+BetterSocials (redesigned)
+  Works like Canva, with your scores, players, photos and club colours already
+  in the template.
   https://betterat.cricket/modules/bettersocials
+
+BetterAdmin (updated)
+  New club and volunteer management: member directory, committee, rosters and
+  the season diary.
+  https://betterat.cricket/modules/betteradmin
 
 
 Jack & Elton

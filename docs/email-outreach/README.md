@@ -44,7 +44,7 @@ Every link in every file carries all four tags:
 | `edm_module_<slug>` | One per module card (`betterstats`, `betterselect`, `bettersocials`, `betteradmin`, `betteriq`, `betterfantasy`) |
 | `edm_trust_strip` | The four club crests |
 | `edm_lapsed_*` | The same set in the re-engagement variant |
-| `edm_lapsed_new_<slug>` | One per new-feature card in the re-engagement variant (`juniorstats`, `votecounting`, `bettersocials`) |
+| `edm_lapsed_new_<slug>` | One per new-feature card in the re-engagement variant (`juniorstats`, `votecounting`, `bettersocials`, `betteradmin`). The two screenshots under the grid share the tag of the card they belong to, since the click means the same thing |
 
 **The re-engagement variant has drifted, on purpose.** It is sent through
 BetterComms rather than pasted, so its `utm_source` carries the `{{utm_code}}`
@@ -131,13 +131,19 @@ that drove the structure, and what they cost:
   already said no once. What we have built since is one sentence in the body,
   and the detail sits in three cards BELOW the button.
 - **The re-engagement email's new-feature cards** (junior stats, vote counting,
-  the BetterSocials rebuild) reuse the cold email's module-card styling and sit
-  after the CTA for the same reason its module cards do. They are a feature
-  list, and a feature list read before the reason to click is what turns this
-  into the changelog the angle is meant to avoid. The body names all three in
-  one line and says they are further down, so a top-down reader knows to scroll
-  without having to read the detail first. Each card links to the module page
-  that feature lives on.
+  the BetterSocials rebuild, the updated BetterAdmin) reuse the cold email's
+  module-card styling and sit after the CTA for the same reason its module cards
+  do. They are a feature list, and a feature list read before the reason to
+  click is what turns this into the changelog the angle is meant to avoid. Each
+  card links to the module page that feature lives on.
+- **They are a 2x2 grid, not a stack**, which is what let a fourth card go in
+  for no extra height. Cells are 50% with their own padding rather than a
+  spacer column, because email has no grid-gap and Outlook collapses an empty
+  column. The card is the full-width one shrunk: 32px icon tile, 14px title,
+  one line of copy.
+- **The reading copy above the crests is 51 words**, down from about 110. The
+  four things we have built were a paragraph and are now the grid, so nothing
+  was lost by cutting it.
 - **The range line under the crests** ("single team country sides to the top
   Premier Cricket clubs") answers the objection those four crests raise on
   their own: all metro, all a similar size. It is placed with the crests rather
@@ -187,6 +193,28 @@ add a matching PNG under `frontend/public/email/`.
 on production. They were downscaled to 88px square (2x the 44px display size)
 from the clubs' own uploaded logos, which are up to 700KB at full size. Send
 yourself a test after the deploy and confirm all four crests render.
+
+### The two screenshots in the re-engagement email
+
+`frontend/public/email/shot-votes.png` and `shot-clubdiary.png` are cropped and
+downscaled from the marketing shots in `frontend/public/screenshots/`
+(`BetterSelect - Voting.png` and `BetterComms.png`, which despite its name is
+the Club Diary screen). Both are 504x219, around 25-30KB, displayed at 252 wide
+so they stay sharp on a retina screen. The crop drops the gradient border and
+holds both to the same aspect so the two sit level.
+
+**They must be deployed before the send**, same as the two crests above.
+
+Only two of the four cards have a screenshot because only two have an honest
+one: junior stats and the rebuilt BetterSocials have no current shot, and the
+older ones under `BetterStats Screenshots/` predate both. That is also why the
+shots are a strip under the grid rather than a thumbnail per card, where at
+252px nothing would be legible anyway.
+
+**Do not resize these with headless Chromium.** It returns a part-painted image
+for a file:// PNG this size, which reads as a screenshot with an empty band
+across the bottom and looks like the app failing to load. Crop and resample the
+PNG directly instead.
 
 ### Naming
 
