@@ -513,10 +513,10 @@ async def _run_marketing_continuous():
 
 
 def start_scheduler():
-    # Results sync, Sunday and Monday at 03:00 PERTH time — the club's own
-    # morning, not UTC. Untimezoned this fired at 03:00 UTC, which is 11:00
-    # Sunday morning in WA, so a club's weekend results landed most of a day
-    # after they were played. Sunday covers the weekend's fixtures, Monday
+    # Results sync, Sunday and Monday at 01:00 PERTH time — the club's own
+    # small hours, not UTC. Untimezoned this fired at 03:00 UTC, which is
+    # 11:00 Sunday morning in WA, so a club's weekend results landed most of a
+    # day after they were played. Sunday covers the weekend's fixtures, Monday
     # catches anything a scorer entered during Sunday.
     #
     # Neither run pulls the club's whole history any more; each asks only for
@@ -528,7 +528,7 @@ def start_scheduler():
             sync_all_organisations,
             trigger="cron",
             day_of_week=_day,
-            hour=3,
+            hour=1,
             minute=0,
             timezone=PERTH,
             id=_job_id,
@@ -733,7 +733,7 @@ def start_scheduler():
         )
         marketing_mode = "nightly batch 02:00"
     scheduler.start()
-    logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 03:00 Perth, "
+    logger.info("Scheduler started — marketing crawl %s, results sync Sun+Mon 01:00 Perth, "
                 "drift check first Sun 05:00 Perth, Square 04:00, fantasy settle 05:00, "
                 "Twenty engagement 06:00, trial lifecycle nudges 08:00, "
                 "BetterScout refresh 09:00, Meta Ads snapshot hourly at :05, "

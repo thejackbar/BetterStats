@@ -122,15 +122,34 @@ def skip_reason(org: Organisation, now: datetime | None = None) -> str | None:
     return None
 
 
-async def last_sync_at(session: AsyncSession, org_id, kinds=_WATERMARK_KINDS) -> datetime | None:
+def _pulled_matches_ok():
+    """SQL for "this run's match pull did not fail".
+
+    ``sync.py`` swallows a failure of the game-level pass so the season
+    aggregates it already wrote are kept, and stamps ``match_pull_failed`` on
+    the run instead. A run carrying it is a successful run that did not
+    actually pull any match results.
+    """
+    return SyncRun.stats.op("->>")("match_pull_failed").is_distinct_from("true")
+
+
+async def last_sync_at(session: AsyncSession, org_id, kinds=_WATERMARK_KINDS,
+                       require_matches: bool = True) -> datetime | None:
     """When a sync of one of ``kinds`` last SUCCEEDED for this club.
 
     Success only: a run that errored, was cancelled, paused, or was cut off by
     a restart pulled some unknown fraction of its window, so treating it as a
     watermark would silently skip whatever it hadn't reached. Leaving it out
     means the next run re-covers the same ground, which is cheap and correct.
+
+    ``require_matches`` (the default, and what the watermark uses) additionally
+    ignores a run whose game-level pass blew up. That run reads as a success —
+    its season aggregates landed — but it pulled no scorecards, so treating it
+    as "results are current to here" would step the window straight over the
+    period it failed on. This is what makes a club whose last run failed come
+    back and ask for fourteen days rather than seven.
     """
-    return (await session.execute(
+    q = (
         select(SyncRun.completed_at)
         .where(
             SyncRun.org_id == org_id,
@@ -140,7 +159,10 @@ async def last_sync_at(session: AsyncSession, org_id, kinds=_WATERMARK_KINDS) ->
         )
         .order_by(SyncRun.completed_at.desc())
         .limit(1)
-    )).scalar_one_or_none()
+    )
+    if require_matches:
+        q = q.where(_pulled_matches_ok())
+    return (await session.execute(q)).scalar_one_or_none()
 
 
 async def plan_run(session: AsyncSession, org_id, now: datetime | None = None) -> dict:
@@ -163,7 +185,12 @@ async def plan_run(session: AsyncSession, org_id, now: datetime | None = None) -
     """
     now = now or datetime.now(timezone.utc)
 
-    ever_full = await last_sync_at(session, org_id, _FULL_KINDS)
+    # "Has this club's history ever been pulled" is about whether its seasons
+    # and grades were seeded, so it deliberately does NOT require the match
+    # pull to have succeeded — otherwise a club whose game-level pass keeps
+    # failing would be handed a fresh full historical sync twice a week
+    # forever, each one failing the same way.
+    ever_full = await last_sync_at(session, org_id, _FULL_KINDS, require_matches=False)
     if ever_full is None:
         return {"mode": "full", "since": None, "reason": "no_full_sync_yet", "watermark": None}
 
@@ -180,6 +207,14 @@ async def plan_run(session: AsyncSession, org_id, now: datetime | None = None) -
 
     behind = now - watermark
     if behind > timedelta(days=MAX_LOOKBACK_DAYS):
+        # ...unless a full run has already been tried since that watermark and
+        # left the club still this far behind. Another one will do the same
+        # thing at the same cost. Fall back to an incremental run over the
+        # widest window we allow, so the club keeps being asked for its
+        # recent results rather than being put on a full-rebuild loop.
+        if ever_full > watermark:
+            return {"mode": "recent", "since": (now - timedelta(days=MAX_LOOKBACK_DAYS)).date(),
+                    "reason": "full_sync_did_not_catch_up", "watermark": watermark}
         return {"mode": "full", "since": None, "reason": "too_far_behind", "watermark": watermark}
 
     since = (watermark - timedelta(hours=OVERLAP_HOURS)).date()

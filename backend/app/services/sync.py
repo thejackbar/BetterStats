@@ -1146,6 +1146,16 @@ async def _sync_organisation_impl(
         except Exception as e:
             import traceback as _tb2
             logger.error(f"Grassroots game-level sync failed for {org_id_str}: {e}\n{_tb2.format_exc()}")
+            # The run continues (the season aggregates it already wrote are
+            # real and worth keeping) but it must NOT read as "this club's
+            # match results are pulled up to here". Without this flag the run
+            # finishes as a plain success and the next run's window starts
+            # after it, so the period whose scorecards just failed is never
+            # asked for again — the club is quietly short those results
+            # forever. auto_sync.last_sync_at skips a run carrying it, so the
+            # next run re-covers the gap by itself.
+            stats["match_pull_failed"] = True
+            stats["match_pull_error"] = str(e)[:500]
 
         if run_id:
             _progress(stats, "Finalising", 99)

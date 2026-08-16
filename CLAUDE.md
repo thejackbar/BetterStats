@@ -10,7 +10,7 @@ late. Four separate problems, and the fix for each lives in
 how far back" is decided.
 
 - **Perth, not UTC.** `PERTH` is module-level in scheduler.py and every
-  club-facing job uses it. Sunday AND Monday 03:00 — same job both days, since
+  club-facing job uses it. Sunday AND Monday 01:00 — same job both days, since
   each run asks the same question ("what has happened since this club's last
   sync") and doesn't need to know which day it is.
 - **Eligibility reuses `auth.modules.org_core_live`** rather than inventing a
@@ -21,12 +21,28 @@ how far back" is decided.
   `archived_at IS NULL` and `is_active`. Skips are counted and logged by
   reason; a club quietly falling out of the sync with no trace is how you end
   up debugging "why is this club three months old" from scratch.
-- **The watermark is the last SUCCESSFUL run** of `org_recent`/`org_full`/
-  `org_hard_refresh` — a manual Sync Now counts, and an errored, cancelled or
-  restart-interrupted run does NOT, so the next run automatically re-covers
-  the gap instead of leaving a hole. `OVERLAP_HOURS = 26` is subtracted, which
-  is what catches a result typed in hours after the last ball and makes
-  Monday re-cover Sunday's fixtures.
+- **The watermark is the last run that actually PULLED MATCHES** — of
+  `org_recent`/`org_full`/`org_hard_refresh`, a manual Sync Now counts, and an
+  errored, cancelled or restart-interrupted run does NOT, so the next run
+  automatically re-covers the gap instead of leaving a hole. A club whose last
+  run failed therefore asks for fourteen days rather than seven, with no state
+  to keep. `OVERLAP_HOURS = 26` is subtracted, which catches a result typed in
+  hours after the last ball and makes Monday re-cover Sunday's fixtures.
+- **"Successful run" is NOT the same as "pulled matches", and that gap was a
+  real hole.** `sync.py` deliberately swallows a failure of the game-level
+  pass so the season aggregates it already wrote are kept — which meant the
+  run finished as a plain success, the watermark stepped over the period whose
+  scorecards had just failed, and the club was quietly short those results
+  forever. It now stamps **`match_pull_failed`** on the run's stats, and
+  `auto_sync.last_sync_at` ignores a run carrying it (`_pulled_matches_ok`).
+  **`ever_full` deliberately does NOT apply that filter** — "has this club's
+  history ever been pulled" is about whether seasons and grades were seeded,
+  and filtering it would hand a club whose game-level pass keeps failing a
+  fresh full historical sync twice a week forever. For the same reason
+  `plan_run` will not escalate to a full run twice: if a full run has already
+  completed since the watermark and the club is still behind, it returns
+  `full_sync_did_not_catch_up` and stays incremental at the `MAX_LOOKBACK_DAYS`
+  cap rather than looping.
 - **`kind = 'org_recent'` is deliberately NOT one of the existing kinds.**
   `org_full`/`org_hard_refresh` mean "this club's whole history has been
   pulled", which the Setup Wizard's own sync gate (`onboarding_wizard._sync_ready`),
@@ -82,11 +98,13 @@ how far back" is decided.
   banner on Data Sync with a Full Rebuild button; **acknowledging survives a
   re-check that still finds drift** (no monthly nag) and is cleared by one
   that finds the season clean.
-- **Verified against a real Postgres** (64 checks: migration 258 applied three
+- **Verified against a real Postgres** (77 checks: migration 258 applied three
   times and matching the lifespan mirror, every eligibility branch incl. the
-  fail-open legacy club, the watermark ignoring an errored run, the season and
-  fixture filtering asserted inside the real `sync_grassroots_game_level_data`
-  against stubbed CA responses, every off-season probe branch, the drift
+  fail-open legacy club, the watermark ignoring an errored run AND a
+  successful run whose match pull failed, the anti-escalation guard, the
+  season and fixture filtering asserted inside the real
+  `sync_grassroots_game_level_data` against stubbed CA responses, every
+  empty-period probe branch incl. a mid-season break and a bye, the drift
   check's backfill/merge false-positive guards, the acknowledge semantics, and
   the scheduler choosing the right run per club) and **driven in Chromium**
   (13: the notice's copy and examples, dismiss posting to the endpoint, no

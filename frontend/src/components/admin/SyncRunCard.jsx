@@ -109,6 +109,17 @@ export default function SyncRunCard({ entry, isLatest = false }) {
         />
       )}
 
+      {/* The run finished and its season totals landed, but the scorecard
+          pass blew up, so it pulled no match results. Shown on its own
+          because an OK badge over a row of zeroed pills reads as "nothing
+          happened this week" rather than "this did not work". The next run
+          re-covers the period by itself — see services/auto_sync.py. */}
+      {!isError && s.match_pull_failed && (
+        <p className="font-mono text-[10px] text-pb-amber mb-1.5">
+          Match results could not be pulled this run. The next sync will cover this period again.
+        </p>
+      )}
+
       {isError ? (
         <p className="font-mono text-[10px] text-pb-red">{entry.error}</p>
       ) : s.no_fixtures_in_window ? (
