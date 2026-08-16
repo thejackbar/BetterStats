@@ -44,7 +44,7 @@ Every link in every file carries all four tags:
 | `edm_module_<slug>` | One per module card (`betterstats`, `betterselect`, `bettersocials`, `betteradmin`, `betteriq`, `betterfantasy`) |
 | `edm_trust_strip` | The four club crests |
 | `edm_lapsed_*` | The same set in the re-engagement variant |
-| `edm_lapsed_new_<slug>` | One per new-feature card in the re-engagement variant (`juniorstats`, `votecounting`, `bettersocials`, `betteradmin`). The two screenshots under the grid share the tag of the card they belong to, since the click means the same thing |
+| `edm_lapsed_new_<slug>` | One per new-feature card in the re-engagement variant (`juniorstats`, `votecounting`, `bettersocials`, `betteradmin`) |
 
 **The re-engagement variant has drifted, on purpose.** It is sent through
 BetterComms rather than pasted, so its `utm_source` carries the `{{utm_code}}`
@@ -194,27 +194,19 @@ on production. They were downscaled to 88px square (2x the 44px display size)
 from the clubs' own uploaded logos, which are up to 700KB at full size. Send
 yourself a test after the deploy and confirm all four crests render.
 
-### The two screenshots in the re-engagement email
+### No product screenshots in these emails
 
-`frontend/public/email/shot-votes.png` and `shot-clubdiary.png` are cropped and
-downscaled from the marketing shots in `frontend/public/screenshots/`
-(`BetterSelect - Voting.png` and `BetterComms.png`, which despite its name is
-the Club Diary screen). Both are 504x219, around 25-30KB, displayed at 252 wide
-so they stay sharp on a retina screen. The crop drops the gradient border and
-holds both to the same aspect so the two sit level.
+Tried and pulled from the re-engagement email: a strip of two app screenshots
+under the new-feature grid, cropped from `frontend/public/screenshots/`. The
+emails carry club crests and module icons only.
 
-**They must be deployed before the send**, same as the two crests above.
-
-Only two of the four cards have a screenshot because only two have an honest
-one: junior stats and the rebuilt BetterSocials have no current shot, and the
-older ones under `BetterStats Screenshots/` predate both. That is also why the
-shots are a strip under the grid rather than a thumbnail per card, where at
-252px nothing would be legible anyway.
-
-**Do not resize these with headless Chromium.** It returns a part-painted image
-for a file:// PNG this size, which reads as a screenshot with an empty band
-across the bottom and looks like the app failing to load. Crop and resample the
-PNG directly instead.
+Two things worth keeping if it ever comes back. Only two of the four new
+features have an honest current screenshot, so a shot per card was never on,
+and at the 252px a grid cell allows, none of the UI is legible anyway. And
+**do not resize a screenshot with headless Chromium** - it returns a
+part-painted image for a file:// PNG that size, which reads as an empty band
+across the bottom of the shot and looks like the app failing to load. Crop and
+resample the PNG directly.
 
 ### Naming
 
