@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
+import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
@@ -133,6 +134,52 @@ const ONBOARDING_METHOD_LABELS = {
   none: 'Not onboarded',
 }
 
+// The onboarded-club facts line (state/seasons/grades/players/setup/active
+// since) — mirrors the Sales Pipeline card's own `stateLine` construction in
+// components/admin/crm/PipelineBoard.jsx so the two surfaces never disagree
+// about what these numbers mean. `stats` is `deal.club_stats`, absent for a
+// bare prospect that's never been onboarded.
+function clubStatsLine(state, stats) {
+  return [
+    state,
+    stats && `${stats.seasons_count ?? 0} season${(stats.seasons_count ?? 0) === 1 ? '' : 's'}`,
+    stats && `${stats.grades_count ?? 0} grade${(stats.grades_count ?? 0) === 1 ? '' : 's'}`,
+    stats && `${stats.players_count ?? 0} player${(stats.players_count ?? 0) === 1 ? '' : 's'}`,
+    stats && stats.setup_total > 0 && `setup ${stats.setup_done}/${stats.setup_total}`,
+    stats && stats.active_since && `active since ${new Date(stats.active_since).toLocaleDateString('en-AU')}`,
+  ].filter(Boolean).join(' · ')
+}
+
+// This club's trial and registration story — only rendered once a club is
+// actually onboarded (subscriber or trialing); a bare prospect has neither a
+// trial countdown nor a registrant. `min_trial_days_remaining` is SIGNED
+// (see crm.trial_days_remaining_by_club) — negative means the trial's own
+// end date has already passed, which is what tells "13 days left" apart
+// from "expired 3 days ago" instead of both reading as a plain countdown.
+function ClubSummaryCard({ deal }) {
+  const stats = deal.club_stats
+  const hasFacts = deal.is_customer || deal.min_trial_days_remaining != null || stats
+  if (!hasFacts && !deal.registrant) return null
+  const line = clubStatsLine(deal.marketing_club_state, stats)
+  const days = deal.min_trial_days_remaining
+  return (
+    <div className="space-y-1.5 mt-2 pt-2 border-t border-pb-hairline">
+      {line && <p className="text-[12px] text-pb-faint">{line}</p>}
+      {days != null && (
+        days >= 0
+          ? <p className="text-[12.5px] text-pb-text">Trial: <span className="font-medium">{days} day{days === 1 ? '' : 's'} left</span></p>
+          : <p className="text-[12.5px] text-pb-red">Trial: <span className="font-medium">EXPIRED ({Math.abs(days)} day{Math.abs(days) === 1 ? '' : 's'} ago)</span></p>
+      )}
+      {deal.registrant?.name && (
+        <p className="text-[12px] text-pb-faint">
+          Registered by <span className="text-pb-text">{deal.registrant.name}</span>
+          {deal.registrant.role ? <span className="text-pb-faintest"> ({deal.registrant.role})</span> : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
 // Stage / onboarding method / call status — the three things a rep asks
 // first before reading the engagement breakdown below it.
 function DealSummaryStrip({ deal }) {
@@ -231,6 +278,20 @@ export default function SalesWorkspace() {
   const toast = useToast()
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Queue (the daily calling list + drawer) vs Events (List/Calendar of
+  // every event a call outcome created plus anything added by hand).
+  const [tab, setTab] = useState('queue')
+  // Every club currently in scope for THIS user (unfiltered by the Queue
+  // tab's own search/stage/owner filters) — just the "which club is this
+  // event about" picker in the New Event form, so narrowing the queue view
+  // doesn't also narrow what a rep can link a new event to.
+  const [dealOptions, setDealOptions] = useState([])
+  useEffect(() => {
+    api.salesWorkspaceClubs({}).then(d => setDealOptions(
+      (d.clubs || []).map(c => ({ id: c.id, name: c.marketing_club_name || c.title }))
+    )).catch(() => {})
+  }, [])
 
   const [filters, setFilters] = useState({
     q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
@@ -525,15 +586,31 @@ export default function SalesWorkspace() {
 
   const content = (
     <div className="max-w-7xl">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="font-display font-bold text-2xl text-pb-text">Sales Workspace</h1>
           <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-0.5">
             {isSuper ? 'Every assigned club' : 'Clubs assigned to you'}
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setTab('queue')}
+            className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+              tab === 'queue' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+            Queue
+          </button>
+          <button type="button" onClick={() => setTab('events')}
+            className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+              tab === 'events' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+            Events
+          </button>
+        </div>
       </div>
 
+      {tab === 'events' ? (
+        <SalesEventsView dealOptions={dealOptions} staffOptions={staff} />
+      ) : (
+      <>
       {filters.list_id && (
         <div className="mb-3 flex items-center gap-2 text-[12px]">
           <span className="text-pb-faint">Filtered to list:</span>
@@ -719,6 +796,7 @@ export default function SalesWorkspace() {
                     Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
                   </p>
                 )}
+                <ClubSummaryCard deal={drawer.deal} />
               </div>
 
               <div className={CARD}>
@@ -895,6 +973,8 @@ export default function SalesWorkspace() {
             <Btn type="submit" variant="primary" disabled={savingTrial}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
           </form>
         </Modal>
+      )}
+      </>
       )}
     </div>
   )

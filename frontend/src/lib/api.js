@@ -2078,6 +2078,14 @@ export const api = {
     request('/club-admin/sales-workspace/lists/from-wizard-clubs', { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceImportFromCrmDeals: (data) =>
     request('/club-admin/sales-workspace/lists/from-crm-deals', { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceListEvents: () => request('/club-admin/sales-workspace/events'),
+  salesWorkspaceClubContacts: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}/contacts`),
+  salesWorkspaceCreateEvent: (data) =>
+    request('/club-admin/sales-workspace/events', { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceUpdateEvent: (eventId, data) =>
+    request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  salesWorkspaceDeleteEvent: (eventId) =>
+    request(`/club-admin/sales-workspace/events/${eventId}`, { method: 'DELETE' }),
   superResetPassword: (userId, newPassword) =>
     request(`/club-admin/super/users/${userId}/reset-password`, {
       method: 'POST',
