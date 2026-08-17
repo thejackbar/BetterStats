@@ -198,9 +198,10 @@ export default function SeasonSelector({
         />
       )}
 
-      {/* Match type — the format the grade plays. Renders only for a club whose
-          grades can actually be told apart, so nobody is offered a filter that
-          would empty the page. */}
+      {/* Match type — read from each FIXTURE's own recorded format, not from the
+          grade: a 1st Grade season routinely mixes one-day and two-day games,
+          so a grade-level answer would be wrong for most of them. Renders only
+          for a club whose matches can actually be told apart. */}
       {showMatchFormatFilter && (
         <PillRow
           label="Match Type"

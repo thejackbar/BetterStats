@@ -41,6 +41,7 @@ from app.services.grade_labels import (
     GRADE_CATEGORIES,
     MATCH_FORMATS,
     categories_for_name,
+    format_sql_case,
     formats_for_name,
     normalise_category,
     normalise_formats,
@@ -131,8 +132,8 @@ class GradeScope:
     """
 
     __slots__ = (
-        "categories", "formats", "excluded_ids",
-        "excluded_categories", "excluded_formats", "param",
+        "categories", "formats", "excluded_ids", "excluded_categories",
+        "format_fallback_ids", "param",
     )
 
     def __init__(
@@ -142,35 +143,112 @@ class GradeScope:
         excluded_categories: Sequence[str],
         param: str = "gs_excluded_grade_ids",
         formats: Optional[Sequence[str]] = None,
-        excluded_formats: Sequence[str] = (),
+        format_fallback_ids: Sequence = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
         self.excluded_ids = list(excluded_ids)
         self.excluded_categories = tuple(excluded_categories)
-        self.excluded_formats = tuple(excluded_formats)
+        # Grades whose format is unambiguous, for a game whose own match_format
+        # was never recorded. See :meth:`format_clause`.
+        self.format_fallback_ids = list(format_fallback_ids)
         self.param = param
 
     @property
-    def active(self) -> bool:
+    def category_active(self) -> bool:
         return bool(self.excluded_ids)
 
-    def clause(self, column: str = "g.grade_id") -> str:
-        """A WHERE fragment (leading AND) excluding the out-of-scope grades.
+    @property
+    def format_active(self) -> bool:
+        return self.formats is not None
+
+    @property
+    def active(self) -> bool:
+        """Is this scope doing anything at all?
+
+        Includes the format axis, which emits no grade exclusions of its own —
+        every caller gates the switch to per-game sources on this, and a format
+        filter is only answerable from per-game rows.
+        """
+        return self.category_active or self.format_active
+
+    @property
+    def _fmt_param(self) -> str:
+        return f"{self.param}_formats"
+
+    @property
+    def _fmt_fallback_param(self) -> str:
+        return f"{self.param}_fmt_grades"
+
+    def clause(self, column: str = "g.grade_id", kind: str = "game") -> str:
+        """A WHERE fragment (leading AND) narrowing to what is in scope.
 
         ``column IS NULL OR NOT (...)`` rather than a bare ``NOT (...)``: with a
         NULL grade_id the ANY(...) comparison is NULL and NOT NULL is NULL, so a
         grade-less manual game would be dropped by a filter that has no opinion
         about it.
+
+        ``kind`` says what the row is, because the FORMAT half of a scope can
+        only be asked of a row that has a format:
+
+        - ``'game'`` (the default, and what all ~22 per-game call sites pass
+          implicitly): the column's own alias is a games row, so the per-fixture
+          format condition is appended.
+        - ``'aggregate'``: a ``player_season_stats`` residual. It has no game
+          behind it and so no format at all — under a format filter it drops out
+          rather than being counted as whichever format is being asked for.
+        - ``'grade'``: a grades listing. A grade is in scope if it has at least
+          one game of a wanted format.
         """
-        if not self.active:
+        out = ""
+        if self.category_active:
+            out += f" AND ({column} IS NULL OR NOT ({column} = ANY(:{self.param})))"
+        if not self.format_active:
+            return out
+        if kind == "game":
+            out += self.format_clause(column.split(".")[0])
+        elif kind == "aggregate":
+            out += " AND FALSE"
+        elif kind == "grade":
+            out += (
+                " AND EXISTS (SELECT 1 FROM v_effective_games gsf"
+                f" WHERE gsf.grade_id = {column}{self.format_clause('gsf')})"
+            )
+        return out
+
+    def format_clause(self, alias: str = "g") -> str:
+        """The per-fixture format condition for a games row.
+
+        A grade is NOT the unit here, and that is the whole point: Applecross
+        1st Grade plays 32 one-day and 26 two-day games inside one season, so
+        asking for the two-day figures has to read each fixture's own
+        ``match_format``.
+
+        A game whose format was never recorded (every game synced before that
+        column had a writer) falls back to its GRADE'S format, but only when the
+        grade plays exactly one format — an unrecorded game in a mixed grade
+        genuinely cannot be placed, and guessing would put one-day runs in the
+        two-day column.
+        """
+        if not self.format_active:
             return ""
-        return f" AND ({column} IS NULL OR NOT ({column} = ANY(:{self.param})))"
+        expr = format_sql_case(alias)
+        cond = f"({expr}) = ANY(:{self._fmt_param})"
+        if self.format_fallback_ids:
+            cond += (
+                f" OR (({expr}) IS NULL AND {alias}.grade_id ="
+                f" ANY(:{self._fmt_fallback_param}))"
+            )
+        return f" AND ({cond})"
 
     def bind(self, params: dict) -> dict:
-        """Add this scope's bind parameter to a params dict, in place."""
-        if self.active:
+        """Add this scope's bind parameters to a params dict, in place."""
+        if self.category_active:
             params[self.param] = self.excluded_ids
+        if self.format_active:
+            params[self._fmt_param] = list(self.formats)
+            if self.format_fallback_ids:
+                params[self._fmt_fallback_param] = self.format_fallback_ids
         return params
 
     def as_meta(self) -> dict:
@@ -179,8 +257,9 @@ class GradeScope:
             "categories": list(self.categories),
             "excluded_categories": list(self.excluded_categories),
             "formats": list(self.formats) if self.formats is not None else None,
-            "excluded_formats": list(self.excluded_formats),
             "active": self.active,
+            "category_active": self.category_active,
+            "format_active": self.format_active,
         }
 
 
@@ -200,16 +279,17 @@ async def resolve_scope(
 
     ``formats`` None means no format filter at all, which is the default — a
     format is something someone asks for, never something applied on their
-    behalf. The two axes are independent: a grade has to pass both to stay in.
+    behalf.
 
-    **The two axes fail differently on an unclassified grade, deliberately.** A
-    grade always has a category (the name suggestion falls back to men's
-    senior), so the category test always has something to judge. A grade's
-    format is frequently unknowable — most names say nothing and older games
-    carry no ``match_format`` — so a grade we cannot place is left OUT of an
-    explicit format filter rather than swept in. Asking for T20 and being shown
-    every grade the club has ever run is worse than being shown the ones we can
-    actually vouch for, and the Grades screen is where a club fills the gap.
+    **The two axes work at different granularities, and that is deliberate.**
+    A CATEGORY belongs to a grade: every game in "Under 14s" is junior cricket,
+    so the category filter resolves to a list of grade ids and stays out of the
+    per-game rows. A FORMAT belongs to a FIXTURE: Applecross 1st Grade plays 32
+    one-day and 26 two-day games inside one season, so a grade-level answer
+    would be wrong for most of them. The format half is therefore a condition on
+    each game's own ``match_format`` (see :meth:`GradeScope.format_clause`), and
+    the grade's declared format only stands in for a game whose own was never
+    recorded — and then only when the grade plays exactly one format.
     """
     # An explicit selection is an INCLUSION ("show me the women's grades") and
     # matches on any of a grade's categories. The club default is an EXCLUSION
@@ -247,7 +327,7 @@ async def resolve_scope(
     )
     excluded_ids = []
     excluded_categories = set()
-    excluded_formats = set()
+    fallback_ids = []
     for grade_id, name in res.fetchall():
         cats = categories_for_name(name_categories, name)
         # A grade carrying several categories is in scope if ANY of them is
@@ -260,17 +340,20 @@ async def resolve_scope(
             excluded_categories.update(cats)
             continue
         if wanted_formats is not None:
+            # Only a single-format grade can stand in for a game whose own
+            # match_format was never recorded. A mixed grade (Applecross 1st
+            # Grade: 32 one-day, 26 two-day) says nothing useful about one
+            # unlabelled fixture in it, so that game stays out.
             fmts = formats_for_name(name_formats, name)
-            if not (fmts & set(wanted_formats)):
-                excluded_ids.append(grade_id)
-                excluded_formats.update(fmts)
+            if len(fmts) == 1 and (fmts & set(wanted_formats)):
+                fallback_ids.append(grade_id)
     return GradeScope(
         wanted,
         excluded_ids,
         tuple(c for c in GRADE_CATEGORIES if c in excluded_categories),
         param,
         formats=wanted_formats,
-        excluded_formats=tuple(f for f in MATCH_FORMATS if f in excluded_formats),
+        format_fallback_ids=fallback_ids,
     )
 
 

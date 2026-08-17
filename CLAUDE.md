@@ -52,12 +52,33 @@ go.
   the default is an EXCLUSION and should not. `primary_category()` is the same
   junior-first precedence `suggest_category` already used, so the default path
   is byte-for-byte what it was.
-- **Grade-level, not per-fixture, and that is the granularity the club asked
-  for.** A mixed-format grade (see the `match_format` note below — Applecross
-  5th Grade is 32 one-day and 26 two-day) is tagged with both and appears under
-  either. Filtering per fixture would mean a `games.match_format` clause in
-  every one of those 25 call sites, several of which read `pss.grade_id` where
-  no format exists at all.
+- **FORMAT IS PER FIXTURE, CATEGORY IS PER GRADE, and the two are not
+  symmetrical.** The first cut filtered format at grade level and was wrong:
+  Applecross 1st Grade plays 32 one-day and 26 two-day games inside ONE season,
+  so a grade-level answer files most of a season under the wrong heading.
+  `GradeScope.format_clause()` is a condition on each game's own
+  `match_format`; `clause()` gained a `kind` argument so the ~22 per-game call
+  sites needed no edit at all (`kind='game'` is the default) and only the five
+  that are not per-game did:
+  - **`kind='aggregate'`** (3 sites, `pss.grade_id`) emits `AND FALSE` under a
+    format filter. A `player_season_stats` residual has no game and therefore no
+    format — counting it towards "his T20 record" would be inventing a figure
+    rather than filtering one. A CATEGORY-only scope still keeps residuals, per
+    the `_RESIDUAL_SOURCES` rule below.
+  - **`kind='grade'`** (2 sites, `gr.id`, the grade listings) becomes an EXISTS
+    over that grade's games.
+  - **`scope.active` now includes `format_active`**, so a format filter switches
+    every reader to the per-game path even when no grade is excluded. That is
+    what makes it work at all: the aggregates cannot answer it.
+- **A game with no recorded `match_format` falls back to its GRADE's format,
+  but only when the grade plays exactly one.** A mixed grade says nothing useful
+  about one unlabelled fixture, and guessing would put one-day runs in the
+  two-day column. So the Grades screen's Match Type ticks are a FALLBACK for
+  pre-`match_format` history, not the filter itself — the copy says so.
+- **`format_sql_case()` is the SQL mirror of `format_from_match_type`**, and the
+  verification asserts they agree on a table of 18 real strings ("Two Day+",
+  "TWENTY20", "40-over", "BYE", "2-day", …). Change one and change the other, or
+  the dashboard's filter and the profile's split file the same game differently.
 - **Fixed while here, and it was a real one**: `_JUNIOR`/`_MASTERS` ended their
   age patterns `\d+\b`, and a word boundary cannot match before a letter — so
   **"Under 14s", "U14s", "Year 9s" and "Over 40s" all classified as SENIOR**.
@@ -65,6 +86,19 @@ go.
   plural is how clubs actually write them. Junior seasons have been sitting
   inside senior career averages for every club that spells it that way. Now
   `\d+s?`.
+- **`GET /players/{id}/formats` (`services/player_formats.py`) is the
+  per-format profile page** — two-day vs one-day vs T20 batting, bowling and
+  fielding, rendered as a FORMATS sub-tab under the profile's Analysis tab
+  (self-fetching and lazy, so a visitor reading the batting tab never pays for
+  the query). Reads per-innings rows only, groups on the same
+  `format_sql_case`, recomputes every average from its own column's counts
+  (never an average of averages), and converts cricket-notation overs to balls
+  before any economy. **A match we cannot place gets its own `not_recorded`
+  bucket and a coverage line** rather than being folded into one of the three —
+  a club whose history predates the `match_format` writer sees most of its games
+  there until `backfill_match_format` has run, and the page says so.
+  Deliberately takes no `categories` scope: slicing a career two ways at once
+  buys nothing.
 - **`get_club_summary` switches source under a scope**, the same trade the
   leaderboards and career totals already make: CA's season aggregates carry no
   grade (`v_effective_player_season_stats`'s `api` branch hardcodes NULL), so a
@@ -89,18 +123,25 @@ go.
   the two array columns into the existing aggregate multiplies every batting row
   by the number of tags and silently inflates the RUNS column — written that way
   first, caught before it shipped, and asserted against.
-- **Verified against a real Postgres** (93 checks: migration 259 applied three
+- **Verified against a real Postgres** (148 checks: migration 259 applied three
   times to a populated pre-259 table and matching the lifespan mirror, the
   plural age-group spellings, both org resolvers' three-step fallbacks, every
   branch of the two axes composing, a senior-only club coming out inactive and
   emitting no clause, the scoped summary, and the route bodies incl. the
   runs-inflation guard, the `category` column staying in step, an empty list
   clearing back to the suggestion and apply-suggestions refusing to guess a
-  format, plus the every-write-site-pairs-both-columns guard) and
-  **driven in Chromium** (32: the pills that render and the ones
+  format, plus the every-write-site-pairs-both-columns guard; and the
+  per-fixture suite: the reported mixed grade splitting 180/60 rather than
+  double-counting, an unlabelled game in a mixed grade landing in NO column, the
+  Python/SQL format mappings agreeing on 18 real strings, an import residual
+  contributing nothing to a format column while still counting under a category
+  filter, and every figure on the new profile page) and
+  **driven in Chromium** (50: the pills that render and the ones
   that no longer do, the exact params on the wire for all four dashboard
   fetches, the two filters composing, clearing one without the other, the
-  Grades screen's chips and its PATCH, no page errors, no overflow at 390px).
+  Grades screen's chips and its PATCH, plus the profile's FORMATS tab — lazy
+  fetch, all three columns, the strongest-format callout picking the LOWEST
+  bowling average, the coverage line, no page errors, no overflow at 390px).
 
 ## `games.match_format` was never written, so every match was a one-dayer (v9.25.2, Aug 2026)
 

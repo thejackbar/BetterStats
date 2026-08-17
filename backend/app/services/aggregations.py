@@ -13,11 +13,15 @@ from app.services.season_aliases import (
 
 
 def _scoped(scope: Optional[GradeScope]) -> bool:
-    """Is there actually a grade category being excluded?
+    """Is this scope doing anything — a category excluded, or a format asked for?
 
     An inactive scope must emit no SQL and take no alternate code path, so a club
     with nothing out of scope keeps running exactly the queries it ran before
     grade categories existed. Every caller gates on this, not on `scope is None`.
+
+    True for a format filter even when no grade is excluded: a format belongs to
+    the FIXTURE, so the clause lands on each game's own `match_format` and the
+    per-game path is the only one that can answer it.
     """
     return bool(scope is not None and scope.active)
 
@@ -121,7 +125,7 @@ def _residual_totals_cte(scope: GradeScope, season_ids, params: dict) -> str:
                 COALESCE(SUM(pss.run_outs), 0) AS total_run_outs,
                 COALESCE(SUM(pss.stumpings), 0) AS total_stumpings
             FROM v_effective_player_season_stats pss
-            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id")}
+            WHERE pss.source = ANY(:residual_sources){season_clause}{scope.clause("pss.grade_id", "aggregate")}
             GROUP BY pss.player_id
         )
     """
@@ -139,6 +143,11 @@ async def _career_residuals(
     adjustment, an import delta) and are filtered by it. The career-level lump
     has none, and is kept: exclusion semantics mean a row we cannot categorise is
     not a row we know to be out of scope.
+
+    A FORMAT filter is different and drops all three. An aggregate row has no
+    game behind it and therefore no format at all, so counting it towards "his
+    T20 record" would be inventing a figure rather than filtering one — the
+    `kind='aggregate'` clause says so in SQL.
     """
     params: dict = {"pid": player_id, "sources": list(_RESIDUAL_SOURCES)}
     season_ids = await resolve_season_filter_no_org(session, season_id)
@@ -147,7 +156,7 @@ async def _career_residuals(
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
     if season_ids:
         params["sids"] = season_ids
-    scope_clause = scope.clause("pss.grade_id") if _scoped(scope) else ""
+    scope_clause = scope.clause("pss.grade_id", "aggregate") if _scoped(scope) else ""
     if _scoped(scope):
         scope.bind(params)
     res = await session.execute(
@@ -1319,7 +1328,7 @@ async def get_batting_by_grade(
     # Public views drop grades a club has opted out of sharing; admin/internal
     # callers (public_only=False) still see every grade.
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
-    scope_clause = scope.clause("gr.id") if _scoped(scope) else ""
+    scope_clause = scope.clause("gr.id", "grade") if _scoped(scope) else ""
     params: dict = {"pid": player_id, "org_id": org_id}
     if _scoped(scope):
         scope.bind(params)
@@ -1673,7 +1682,7 @@ async def _season_by_season_scoped(
     params: dict = {"pid": player_id, "residual_sources": list(_RESIDUAL_SOURCES)}
     scope.bind(params)
     clause = scope.clause("g.grade_id")
-    resid_clause = scope.clause("pss.grade_id")
+    resid_clause = scope.clause("pss.grade_id", "aggregate")
     res = await session.execute(
         text(f"""
             WITH scoped_games AS (
@@ -3252,7 +3261,7 @@ async def get_bowling_by_grade(
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
-    scope_clause = scope.clause("gr.id") if _scoped(scope) else ""
+    scope_clause = scope.clause("gr.id", "grade") if _scoped(scope) else ""
     params: dict = {"pid": player_id, "org_id": org_id}
     if _scoped(scope):
         scope.bind(params)

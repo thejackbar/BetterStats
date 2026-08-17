@@ -32,6 +32,7 @@ from app.services.milestone_rules import (
 from app.services import iq_teammates
 from app.services import grade_scope
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
+from app.services.player_formats import player_format_splits
 
 router = APIRouter(prefix="/players", tags=["players"])
 
@@ -189,6 +190,33 @@ async def get_player_stats(
             # rest of the site.
             "auto_shown": auto_shown,
         },
+    }
+
+
+@router.get("/{player_id}/formats")
+async def get_player_formats(
+    player_id: str,
+    season_id: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """This player's batting, bowling and fielding split by match format.
+
+    Read per FIXTURE, off each game's own `match_format` — a grade is not a
+    format (Applecross 1st Grade plays both one-day and two-day cricket in one
+    season), so grouping by grade would file most games under the wrong heading.
+
+    Deliberately takes no `categories` scope. This is a breakdown of everything
+    the player has played, and a category filter on top of a format split would
+    slice the same career two ways at once for no gain. `season_id` is offered
+    because "what is he like in T20 this season" is a real selection question.
+    """
+    player = await db.get(Player, uuid.UUID(player_id))
+    if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    data = await player_format_splits(db, player_id, season_id)
+    return {
+        "player": {"id": str(player.id), "name": player.display_name},
+        **data,
     }
 
 

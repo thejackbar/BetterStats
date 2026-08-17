@@ -186,6 +186,12 @@ export const api = {
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
+  playerFormats: (playerId, { seasonId } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    const qs = params.toString()
+    return request(`/players/${playerId}/formats${qs ? `?${qs}` : ''}`)
+  },
   getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

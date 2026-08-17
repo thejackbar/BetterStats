@@ -10,7 +10,7 @@ import { usePlayerStats } from '../hooks/usePlayerStats'
 import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, categoriesParam, scopeNote, autoShownNote } from '../lib/gradeCategories'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
-  AnimatedNum, Sparkline, Label, Card, Btn,
+  AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
 import '../styles/honour-badge.css'
@@ -961,12 +961,196 @@ const ANALYSIS_SUBTABS = [
   { key: 'profile',  label: 'PROFILE' },
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
+  { key: 'formats',  label: 'FORMATS' },
   { key: 'team',     label: 'TEAM' },
   { key: 'teammates', label: 'TEAMMATES' },
   { key: 'captain',  label: 'CAPTAIN' },
   { key: 'venue',    label: 'VENUE' },
   { key: 'opposition', label: 'OPPOSITION' },
 ]
+
+// ── Formats: two-day vs one-day vs T20 ───────────────────────────────────
+// Self-fetching off the public /players/{id}/formats endpoint, so it doesn't
+// touch the parent's data flow — same shape as TeammatesSection.
+//
+// Every figure here is per FIXTURE. A grade is not a format: a 1st Grade season
+// routinely mixes one-day and two-day cricket, so this reads each match's own
+// recorded format. Matches we can't place get their own column rather than
+// being folded into one of the three.
+function FormatCompareTable({ rows, cols, title }) {
+  const shown = cols.filter(c => rows.some(r => r.value(c) != null && r.value(c) !== ''))
+  if (!shown.length) return null
+  return (
+    <Card title={title} pad="p-0">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
+              <th className="font-medium py-2.5 pl-4 sm:pl-[18px]"> </th>
+              {shown.map(c => (
+                <th key={c.format} className="font-medium py-2.5 pr-4 text-right whitespace-nowrap">
+                  {c.label.toUpperCase()}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.label} className={i ? 'pb-hairline-t' : ''}>
+                <th scope="row" className="py-2 pl-4 sm:pl-[18px] font-mono text-[10px] tracking-wide2 text-pb-faint text-left font-medium whitespace-nowrap">
+                  {r.label}
+                </th>
+                {shown.map(c => {
+                  const v = r.value(c)
+                  return (
+                    <td key={c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
+                      {v == null || v === '' ? '—' : v}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+function FormatsSection({ playerId, seasonId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api.playerFormats(playerId, { seasonId })
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(e => { if (!cancelled) setError(e.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [playerId, seasonId])
+
+  if (loading) return <PbSpinner message="Loading format splits…" />
+  if (error) return <p className="text-pb-red text-sm py-4">Couldn't load format splits: {error}</p>
+
+  const cols = data?.formats || []
+  if (!cols.length) {
+    return (
+      <p className="text-pb-faint text-sm py-4">
+        No matches yet with a recorded format. A club's older games only carry one once the
+        match-format backfill has run, and every new game gets it on sync.
+      </p>
+    )
+  }
+
+  const cov = data.coverage || {}
+  const bestOf = (key, pick) => {
+    // Which format this player is strongest in, on one measure. Only claimed
+    // when there is something to compare, so a one-format player is not told
+    // that format is their best.
+    const withVal = cols.filter(c => pick(c) != null)
+    if (withVal.length < 2) return null
+    return withVal.reduce((a, b) => (pick(b) > pick(a) ? b : a))
+  }
+  const bestBat = bestOf('bat', c => c.batting.average)
+  const bestBowl = (() => {
+    const withVal = cols.filter(c => c.bowling.average != null)
+    if (withVal.length < 2) return null
+    return withVal.reduce((a, b) => (b.bowling.average < a.bowling.average ? b : a))
+  })()
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {cols.map(c => (
+          <Kpi
+            key={c.format}
+            label={c.label.toUpperCase()}
+            value={c.matches}
+            sub={`${c.matches === 1 ? 'match' : 'matches'}${c.finals ? ` · ${c.finals} final${c.finals === 1 ? '' : 's'}` : ''}`}
+          />
+        ))}
+      </div>
+
+      {(bestBat || bestBowl) && (
+        <Card title="WHERE THEY'RE STRONGEST">
+          <ul className="space-y-1.5 text-[13px] text-pb-dim">
+            {bestBat && (
+              <li>
+                Best batting average in <span className="text-pb-text font-semibold">{bestBat.label}</span> cricket
+                {' '}({fmtDec(bestBat.batting.average)} from {bestBat.batting.innings} innings).
+              </li>
+            )}
+            {bestBowl && (
+              <li>
+                Best bowling average in <span className="text-pb-text font-semibold">{bestBowl.label}</span> cricket
+                {' '}({fmtDec(bestBowl.bowling.average)} from {bestBowl.bowling.wickets} wickets).
+              </li>
+            )}
+          </ul>
+        </Card>
+      )}
+
+      <FormatCompareTable
+        title="BATTING BY FORMAT"
+        cols={cols}
+        rows={[
+          { label: 'INNINGS', value: c => c.batting.innings || null },
+          { label: 'RUNS', value: c => fmtNum(c.batting.runs), strong: true },
+          { label: 'AVERAGE', value: c => fmtDec(c.batting.average), strong: true },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate) },
+          { label: 'HIGH SCORE', value: c => fmtNum(c.batting.high_score) },
+          { label: 'NOT OUTS', value: c => c.batting.not_outs || null },
+          { label: '50s', value: c => c.batting.fifties || null },
+          { label: '100s', value: c => c.batting.hundreds || null },
+          { label: 'DUCKS', value: c => c.batting.ducks || null },
+          { label: '4s', value: c => fmtNum(c.batting.fours) },
+          { label: '6s', value: c => fmtNum(c.batting.sixes) },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="BOWLING BY FORMAT"
+        cols={cols}
+        rows={[
+          { label: 'INNINGS', value: c => c.bowling.innings || null },
+          { label: 'OVERS', value: c => fmtDec(c.bowling.overs, 1) },
+          { label: 'WICKETS', value: c => fmtNum(c.bowling.wickets), strong: true },
+          { label: 'AVERAGE', value: c => fmtDec(c.bowling.average), strong: true },
+          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy) },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.bowling.strike_rate, 1) },
+          { label: 'BEST', value: c => (c.bowling.best_wickets ? `${c.bowling.best_wickets}w` : null) },
+          { label: '5 WICKETS', value: c => c.bowling.five_fors || null },
+          { label: 'MAIDENS', value: c => c.bowling.maidens || null },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="FIELDING BY FORMAT"
+        cols={cols}
+        rows={[
+          { label: 'CATCHES', value: c => c.fielding.catches_non_wk || null },
+          { label: 'CT (WK)', value: c => c.fielding.catches_wk || null },
+          { label: 'STUMPINGS', value: c => c.fielding.stumpings || null },
+          { label: 'RUN OUTS', value: c => c.fielding.run_outs || null },
+          { label: 'DISMISSALS', value: c => c.fielding.dismissals || null, strong: true },
+        ]}
+      />
+
+      {/* Honest about coverage rather than quietly showing a partial career as
+          if it were the whole one. */}
+      <p className="text-[11px] text-pb-faint leading-relaxed">
+        Worked out from each match's own format, not from the grade — a grade often plays more
+        than one. {cov.matches_not_recorded
+          ? `${cov.matches_placed} of ${cov.matches_placed + cov.matches_not_recorded} matches (${fmtDec(cov.percent_placed, 1)}%) have a format recorded; the other ${cov.matches_not_recorded} aren't counted in any column above.`
+          : 'Every match here has a recorded format.'}
+      </p>
+    </div>
+  )
+}
 
 // ── Teammates: who a player has played alongside, and the with-vs-without split.
 // Self-fetching (public /players/{id}/teammates), so it doesn't touch the
@@ -1244,7 +1428,7 @@ function CaptainTab({ captainStats }) {
   )
 }
 
-function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1589,6 +1773,8 @@ function AnalysisTab({ playerId, dismissals, partnerships, byGrade, byPosition, 
           )}
         </div>
       )}
+
+      {subTab === 'formats' && <FormatsSection playerId={playerId} seasonId={seasonId} />}
 
       {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
 
@@ -2707,7 +2893,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>

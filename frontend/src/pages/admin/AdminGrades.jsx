@@ -239,9 +239,11 @@ function GradeList({ grades, onChanged }) {
         unchanged.
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
-        Match type is worked out from the matches themselves where we have them, so most grades are already
-        right. A grade we can't place is left out of the dashboard's Match Type filter rather than guessed
-        into the wrong one — tick it here and it shows up.
+        Match type here is a fallback, not the filter itself. Leaderboards and the dashboard read each
+        match's own recorded format, because a grade often plays more than one — a 1st Grade season is
+        usually a mix of one-day and two-day games. What you tick here only fills in for older matches
+        synced before we started recording the format, and only when a grade plays a single format, since
+        a mixed grade says nothing useful about one unlabelled game.
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
         The order here is also the order BetterPosts uses for a Fixtures or Results roundup post — move a

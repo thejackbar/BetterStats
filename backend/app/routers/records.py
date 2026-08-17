@@ -116,8 +116,9 @@ async def get_records(
         None,
         description=(
             "Comma-separated match formats to count — two_day, one_day, t20, or "
-            "'all'. Omitted applies no format filter. Ignored when an explicit "
-            "grade is picked."
+            "'all'. Matched per FIXTURE against each game's own match_format, "
+            "not per grade, so a grade that plays both is split correctly. "
+            "Omitted applies no format filter."
         ),
     ),
     db: AsyncSession = Depends(get_db),

@@ -162,6 +162,32 @@ def format_from_match_type(value) -> str | None:
     return None
 
 
+def format_sql_case(alias: str = "g", column: str = "match_format") -> str:
+    """SQL that maps a game's own ``match_format`` text to a format key.
+
+    The SQL mirror of :func:`format_from_match_type`, and the reason a game's
+    format is decided in ONE place: the column holds CA's raw ``matchType``
+    ("One Day" / "Two Day" / "T20") for a synced game and whatever a club typed
+    for a manual one, so every reader substring-parses it. Yields NULL for a
+    string it cannot place — the filter then leaves that game out rather than
+    calling it a one-dayer, which is the opposite of what
+    ``fees.derive_fee_format`` has to do.
+
+    The two are asserted to agree on a table of real strings in the verification
+    suite; change one and change the other.
+    """
+    v = f"LOWER(COALESCE({alias}.{column}, ''))"
+    return (
+        "CASE"
+        f" WHEN {v} LIKE '%t20%' OR {v} LIKE '%twenty%' THEN 't20'"
+        f" WHEN {v} LIKE '%two%' OR {v} LIKE '2 %' OR {v} LIKE '2-%'"
+        f" OR {v} LIKE '2d%' THEN 'two_day'"
+        f" WHEN {v} LIKE '%one%' OR {v} LIKE '%limited%' OR {v} LIKE '1 %'"
+        f" OR {v} LIKE '1-%' THEN 'one_day'"
+        " ELSE NULL END"
+    )
+
+
 def normalise_formats(value) -> tuple[str, ...] | None:
     """Coerce a format selection to a sorted-by-canonical-order tuple, or None.
 

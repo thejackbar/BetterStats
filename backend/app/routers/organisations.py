@@ -398,7 +398,8 @@ async def get_org_summary(
         None,
         description=(
             "Comma-separated match formats to count — two_day, one_day, t20, or "
-            "'all'. Omit for no format filter."
+            "'all'. Matched per fixture off each game's own match_format. "
+            "Omit for no format filter."
         ),
     ),
     db: AsyncSession = Depends(get_db),
