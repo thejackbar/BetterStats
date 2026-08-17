@@ -1,0 +1,28 @@
+source,player,where,note
+BattingHistory A-M,"Forsyth, Phil",Summer 2018/19 / Border Cup,innings 3 does not equal retired-not-out 0 + not out 0 + out 1
+BattingHistory A-M,"Joyce, Robey",Summer 2019/20 / Border Cup,innings 2 does not equal retired-not-out 0 + not out 1 + out 2
+BattingHistory N-Z,"Robinson, Ray",Summer 2019/20 / WillowFest,innings 3 does not equal retired-not-out 1 + not out 1 + out 2
+BattingHistory Extras,"Ashby, Gary [South East Coasters]",Summer 2016/17 / VCV,innings 1 does not equal retired-not-out 1 + not out 0 + out 1
+BattingHistory Extras,John Costello [Geelong],13/15,unreadable season label — row skipped
+Bowling History A-M,"Hutchins, Chris",Summer 2018/19 / Peter Phyland Trophy,best figures 2-25 claim more wickets than the 1 recorded for the season
+names,Arthur McPhan,arhur mcphan → arthur mcphan,the Games Played tab spells this player's name differently — read as the same person
+names,Gary Ashby,asbhy gary → ashby gary,the Games Played tab spells this player's name differently — read as the same person
+names,Peter Willoughby,peter wiiloughby → peter willoughby,the Games Played tab spells this player's name differently — read as the same person
+names,Kearney,"Kearney, ???",no first name on file — worth naming before the import so they are not mistaken for another player of the same surname
+check,Steve Sambrook,batting,"seasons add to 2 innings / 14 runs, the workbook's own total row says 4 / 58"
+check,Tom Gorman,batting,"seasons add to 3 innings / 1 runs, the workbook's own total row says 4 / 11"
+check,Colin Baulch,Summer 2020/21 / VCV,has batting or bowling but no games recorded on the Games Played tab
+check,Colin Murdoch,Summer 2024/25 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
+check,David Spencer,Summer 2024/25 / Peter Phyland Trophy,has batting or bowling but no games recorded on the Games Played tab
+check,Graeme Freshwater,Summer 2019/20 / WillowFest,has batting or bowling but no games recorded on the Games Played tab
+check,Greg Williams,Summer 2024/25 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
+check,J Tonkin,Summer 2016/17 / VCV,has batting or bowling but no games recorded on the Games Played tab
+check,J Tonkin,Summer 2016/17 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
+check,John Caulfield,Summer 2023/24 / VCV,has batting or bowling but no games recorded on the Games Played tab
+check,Phil Dickson,Summer 2020/21 / VCV,has batting or bowling but no games recorded on the Games Played tab
+check,Robert Scott,Summer 2019/20 / VCV,4 innings against 1 games played
+check,Steve Sambrook,Summer 2024/25 / One Off Games,has batting or bowling but no games recorded on the Games Played tab
+check,Terry Willoughby,Summer 2024/25 / VCV,has batting or bowling but no games recorded on the Games Played tab
+check,Terry Willoughby,Summer 2024/25 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
+check,Tom Gorman,Summer 2024/25 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
+check,Tony Legoe,Summer 2024/25 / Border Cup,has batting or bowling but no games recorded on the Games Played tab
