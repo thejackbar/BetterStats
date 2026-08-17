@@ -1,5 +1,66 @@
 # BetterStats — Claude Session Notes
 
+## A duplicate whose first name is shortened is invisible to edit distance (v9.26.1, Aug 2026)
+
+Reported from the Leaderboard: "Brad K Mant" (15,542 runs) and "Bradley Mant"
+(10,341, same high score of 194) are one person, Manual Merge finds them in a
+second, and Merge Duplicates never suggested them.
+
+- **Nothing was broken — the pair scores 0.78 and the gate is 0.90.** They pass
+  every other gate in `_fuzzy_name_pairs` (same first-letter block, length
+  difference 1), so the miss is purely the threshold.
+- **Edit distance degrades MULTIPLICATIVELY, which is the whole lesson.** Two
+  differences stack here: a short form and a middle initial. Alone, `brad mant`
+  vs `bradley mant` is **0.857** and `brad k mant` vs `brad mant` is **0.90** —
+  either would have been caught. Together they are **0.783**. So a
+  two-difference duplicate is not "slightly harder" to catch than a
+  one-difference one, it is off the scale, and **lowering
+  `FUZZY_MERGE_THRESHOLD` is not the fix** — 0.78 across a 1,500-player roster
+  buries the real pairs in strangers.
+- **`_name_variant_pairs` compares the name's PARTS instead of the whole
+  string**, blocked on (surname, first initial) — free, because every rule in
+  `_first_name_link` already requires the first letter to agree. It is a THIRD
+  tier (`kind: "name_variant"`), beside exact and fuzzy, not a loosening of
+  either.
+- **`_first_name_link` is deliberately narrow: a bare initial, or a genuine
+  prefix of at least 3 characters.** A nickname that is not a prefix
+  ("Bob"/"Robert", "Bill"/"William") is NOT claimed. It would need a curated
+  list, and every entry on such a list is a judgement call that produces a
+  confidently wrong pair the day it misses. Two characters is too short —
+  "Jo"/"John"/"Joe" are three people.
+- **Never bulk-mergeable, and that is not caution for its own sake.** A surname
+  plus one initial is exactly the shape of two brothers, or a father and son.
+  The screen says so in the badge rather than implying a match it cannot make.
+- **`_name_parts`/`_middles_compatible` are IMPORTED from
+  `services/import_ingest.py`**, not re-typed. That module is the
+  historical-import matcher and already decides whether two sets of middle
+  initials could be one person; a second copy is how the two start disagreeing
+  about what a name is. It is DB-free, so importing it into a router is cheap.
+  **Its own `match_players` would ALSO have missed this pair** — the first+last
+  tier needs identical first names, and `_parse_initial_form` needs a bare
+  single-letter token in first or last position, which "Brad K Mant" (initial in
+  the middle) does not have.
+- **Detection grouped on `p.name` while the cards render `p.display_name`.**
+  So a renamed player was only ever compared under the name the sync wrote, and
+  their duplicate read as unlisted even though both cards on screen said the
+  same thing. `_name_keys(p)` files a player under BOTH spellings; a player
+  therefore enters several blocks, which is why the fuzzy pass now keeps the
+  BEST ratio per pair rather than whichever was reached first, and why the
+  endpoint carries an `emitted` set so one pair cannot be listed twice.
+- **Bulk Approve is an allowlist now (`isExactPair`), not `kind !== 'fuzzy'`.**
+  The denylist meant this new tier would have been silently bulk-mergeable the
+  moment it shipped. A tier added later must be manual-confirm by default.
+- **Verified** against the real shipped functions (39 checks: the reported pair,
+  every shape it should and should not catch, the ignore and de-dup rules, one
+  read per player however many pairs they are in, and 8ms over a 1,500-player
+  roster returning 1 pair) and **driven in Chromium** (16: all three tiers'
+  labels, the reason text, Bulk Approve counting only the exact pair, no page
+  errors, no overflow at 390px).
+- **Not addressed**: `_enrich_player` counts `player_season_stats` and
+  `batting_innings` only, so a BetterImport club's player reads 0/0/0/0 on these
+  cards even when they have a career in `imported_stats` (the
+  `_RESIDUAL_SOURCES` split the junior-stats note describes). That is a display
+  gap on the merge screen, not a detection one.
 ## A grade is several things at once, and the dashboard filters on that (migration 259, v9.26.0, Aug 2026)
 
 Reported off the club dashboard: the GENDER filter should be a **Grade Type**

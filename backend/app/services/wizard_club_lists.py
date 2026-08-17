@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 import uuid
 from datetime import timedelta
 from typing import Optional
@@ -433,10 +434,37 @@ async def resolved_searched_clubs(session: AsyncSession, days: int) -> list[dict
 
 # ── merge the two Meta Ads tables ────────────────────────────────────────────
 
+# In-process, per-`days` cache — this is a whole-Meta-ads-beacon-table scan
+# (get_selected_clubs + resolved_searched_clubs's run-collapsing), the same
+# cost class the engagement score's `fast_web` flag exists to dodge. Unlike
+# that flag, there's no cheap indexed rewrite here (the "collapse one
+# visitor's typing into one run" logic needs the full beacon set), so this is
+# cached instead. First added because services/sales_workspace.py's
+# wizard_signal_for_club started calling this UNCONDITIONALLY on every Sales
+# Workspace drawer open (previously only paid when a queue filter checkbox
+# was ticked) — a live click-through timed the whole-scan cost at several
+# seconds, matching the "detail pane is slow again" report. A few minutes'
+# staleness on "did someone search for this club" is a non-issue; it's a
+# warm-lead signal, not the live drawer data.
+_MERGED_WIZARD_TTL = 180
+_merged_wizard_cache: dict[int, tuple[float, list[dict]]] = {}
+
+
 async def merged_wizard_clubs(session: AsyncSession, days: int) -> list[dict]:
     """One row per club across the selected AND searched wizard tables, keyed on
     the normalised name both already group by. A club present in both is one
-    row carrying both sets of facts."""
+    row carrying both sets of facts. Cached per `days` window — see
+    _MERGED_WIZARD_TTL above."""
+    now = time.time()
+    hit = _merged_wizard_cache.get(days)
+    if hit and now - hit[0] < _MERGED_WIZARD_TTL:
+        return hit[1]
+    rows = await _merged_wizard_clubs_uncached(session, days)
+    _merged_wizard_cache[days] = (now, rows)
+    return rows
+
+
+async def _merged_wizard_clubs_uncached(session: AsyncSession, days: int) -> list[dict]:
     from app.services import meta_ads
 
     selected = await meta_ads.get_selected_clubs(session, days)

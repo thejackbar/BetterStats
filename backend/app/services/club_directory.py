@@ -1757,6 +1757,24 @@ _RESOLVED_VISITS = (
     "AND split_part(ue.path, '?', 1) !~* '^/admin'"
 )
 
+# Same shape as _RESOLVED_VISITS (both feed club_visit_detail's `base` below,
+# same output columns) but reads the pre-stamped resolved_marketing_club_id
+# column directly (an indexed equality) instead of recomputing _RESOLVED_CID's
+# 7-branch COALESCE per row — the identical fast_web=True trade twenty_sync.
+# _engagement already makes for the SAME resolution (resolve_prospect_club_id
+# stamps this column at write time using the exact same logic, see above), just
+# applied here to the Website Analytics panel's per-club query instead of the
+# engagement score.
+_RESOLVED_VISITS_FAST = (
+    "SELECT ue.resolved_marketing_club_id::text AS cid, "
+    "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, ue.ip_hash AS ip_hash, "
+    "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
+    "FROM usage_events ue WHERE ue.event_type = 'page_view' "
+    "AND ue.user_id IS NULL "
+    "AND split_part(ue.path, '?', 1) !~* '^/admin' "
+    "AND ue.resolved_marketing_club_id IS NOT NULL"
+)
+
 # Single-pass form for the directory "visited" filter + the dashboard count.
 # Resolve every page_view to ONE club (the same single-attribution priority the
 # visit stats use), then keep clubs that are some visit's resolved club. This is a
@@ -1953,13 +1971,20 @@ async def top_clubs_by_visits(session: AsyncSession, metric: str, n: int,
             for r in rows]
 
 
-async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> dict:
+async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50, fast_web: bool = False) -> dict:
     """Full breadcrumb trail for one club: overall totals, the pages they viewed
     (top first), the most-recent visits, an IP-distribution snapshot, whether
     the Contact page was ever hit, and an analytics-derived Product Interest
     ranking (see infer_product_interest_from_pages). Resolves visits through
     the alias map the same way the list does. Powers the expanded-row
-    'visited the site' panel AND the CRM card's Website Analytics panel."""
+    'visited the site' panel AND the CRM card's Website Analytics panel.
+
+    ``fast_web`` swaps the resolution for the pre-stamped, indexed
+    resolved_marketing_club_id column (see _RESOLVED_VISITS_FAST above) — the
+    same trade twenty_sync._engagement's own fast_web makes, needed here
+    because the Sales Workspace drawer calls this on every club open and the
+    live 7-branch resolution over the whole usage_events table was the
+    dominant cost in a "detail pane is slow" report."""
     cid = str(club_id or "").strip()
     empty = {"club_id": cid, "views": 0, "visitors": 0,
              "first_seen": None, "last_seen": None, "pages": [], "recent": [],
@@ -1967,7 +1992,8 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50) -> 
              "contact_page_visited": False, "inferred_modules": []}
     if not cid:
         return empty
-    base = f"FROM ({_RESOLVED_VISITS}) v WHERE v.cid = :cid"
+    resolved = _RESOLVED_VISITS_FAST if fast_web else _RESOLVED_VISITS
+    base = f"FROM ({resolved}) v WHERE v.cid = :cid"
     summary = (await session.execute(text(
         "SELECT COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors, "
         "COUNT(DISTINCT v.ip_hash) AS unique_ips, COUNT(DISTINCT v.created_at::date) AS distinct_days, "
