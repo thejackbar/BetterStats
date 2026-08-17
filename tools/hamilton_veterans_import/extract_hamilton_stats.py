@@ -79,6 +79,15 @@ GAMES_DETAIL_LAST_COL = 11
 GAMES_SUMMARY_NAME_COL = 16
 GAMES_SUMMARY_DEBUT_COL = 17
 
+# Cricket Australia's own record for this club starts here, so the seasons from
+# this year on are already held per game and per season online. A club's sheet
+# row for a season CA covers is compared against CA's coverage rather than added
+# to it — but only when the row's competition can be matched to a CA grade, and
+# most of this club's cannot. Writing the pre-online years to their own file
+# takes that whole question off the table: nothing in it overlaps anything
+# online, so there is nothing to reconcile and nothing to double up.
+ONLINE_FROM_SEASON = 2023
+
 TOTAL_LABELS = {"total", "totals", "career", "career total"}
 JUNK = {"", "#div/0!", "#value!", "#ref!", "#n/a", "-", "none"}
 
@@ -635,6 +644,11 @@ def main(src: str, outdir: str):
     write_csv(out / "hamilton_import_season_by_season_guests.csv", ROW_FIELDS, guest_rows)
     write_csv(out / "hamilton_import_season_totals_guests.csv", ROW_FIELDS, guest_seasons)
 
+    pre = [r for r in club_rows if season_sort(r["season_label"]) < ONLINE_FROM_SEASON]
+    pre_guest = [r for r in guest_rows if season_sort(r["season_label"]) < ONLINE_FROM_SEASON]
+    write_csv(out / "hamilton_import_pre_online.csv", ROW_FIELDS, pre)
+    write_csv(out / "hamilton_import_pre_online_guests.csv", ROW_FIELDS, pre_guest)
+
     # Roster
     player_fields = ["player_name", "sheet_name", "guest_club", "debut", "seasons", "games", "runs", "wickets"]
     per_player: dict = defaultdict(lambda: {"seasons": set(), "games": 0, "runs": 0, "wickets": 0})
@@ -699,6 +713,8 @@ def main(src: str, outdir: str):
     print(f"rows per comp      {len(club_rows)} club, {len(guest_rows)} guest")
     print(f"rows per season    {len(club_seasons)} club, {len(guest_seasons)} guest")
     print(f"runs / wickets     {sum(r['runs'] for r in roster)} / {sum(r['wickets'] for r in roster)}")
+    print(f"pre-online rows    {len(pre)} club, {len(pre_guest)} guest "
+          f"(seasons before {ONLINE_FROM_SEASON}/{str(ONLINE_FROM_SEASON + 1)[2:]})")
     print(f"notes              {len(notes)}")
 
 

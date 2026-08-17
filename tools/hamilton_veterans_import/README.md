@@ -10,10 +10,12 @@ were not needed.
 
 | File | What it is |
 |---|---|
-| `hamilton_import_season_by_season.csv` | **The one to upload.** A row per player, season and competition: 497 rows, 92 players, 2010/11 to 2024/25. |
+| `hamilton_import_season_by_season.csv` | A row per player, season and competition: 497 rows, 92 players, 2010/11 to 2024/25. |
 | `hamilton_import_season_totals.csv` | The same figures with the competitions added together, one row per player and season. Use this instead if the club would rather not carry a competition label. |
 | `hamilton_import_season_by_season_guests.csv` | The 38 players from the "Extras" tabs who turned out for Hamilton but belong to Geelong, Ballarat, South East Coasters and so on. |
 | `hamilton_import_season_totals_guests.csv` | Those same guests, competitions added together. |
+| `hamilton_import_pre_online.csv` | **The one to upload.** The same per-competition rows, stopping at 2022/23 where Cricket Australia's own record begins, so nothing in it can overlap what is already online. |
+| `hamilton_import_pre_online_guests.csv` | The guests' half of the same. |
 | `hamilton_players.csv` | The roster the CSVs name, with debut date, seasons, games, runs and wickets. |
 | `hamilton_seasons.csv` | The 14 seasons the data covers. |
 | `hamilton_data_notes.csv` | Every figure worth a second look before importing. |
@@ -21,25 +23,45 @@ were not needed.
 
 ## Before you upload
 
-Hamilton currently holds Summer 2023/24, 2024/25 and 2025/26, so the other
-eleven seasons in `hamilton_seasons.csv` do not exist yet. Create them as you go:
-the Seasons step of the wizard has "+ Create new season" in the dropdown beside
-each unmatched label, which mints the season on the spot. Any season left
-unmatched is not lost either. It lands in the career "Prior Seasons &
-Adjustments" line, so the career total stays right but the season-by-season table
-stops at 2023/24.
-
-The six competitions in the Grade column are the same story: none of them exist
-online, so the Grades step will show all six as NO MATCH. Use "+ Add as a new
-historical grade" on each one, which creates it across the seasons the sheet
-records it in, so VCV and Border Cup become grades you can filter the
-Leaderboard and Records by. "No online equivalent" is the lighter option: it
-keeps the label on the figures without creating a grade.
+Create the seasons first. The wizard matches a season by name, and the Seasons
+step has "+ Create new season" in the dropdown beside each unmatched label, so
+you can mint them as you go. Hamilton holds 2010/11, 2011/12, 2012/13, 2016/17,
+2017/18, 2018/19, 2019/20 and the three synced ones, so the five still to create
+are **2013/14, 2015/16, 2020/21, 2021/22 and 2022/23**. A season left unmatched
+is not lost, but its figures arrive as one "Prior Seasons & Adjustments" line
+rather than under their own year.
 
 Then upload at `/admin/import`. The column names are already the ones the wizard
-maps itself; `grade_label` carries the competition, which is a display label only.
-Nothing is added on top of what Cricket Australia already holds. The reconciler
-takes the club's figure as the truth and derives only the part CA is missing.
+maps itself; `grade_label` carries the competition.
+
+### Which file
+
+**`hamilton_import_pre_online.csv` is the one to use.** It stops at 2022/23,
+which is where Cricket Australia's own record for this club begins. Nothing in
+it overlaps anything already online, so there is nothing to reconcile: the
+club's own figures stand for 2010/11 to 2022/23, and CA's stand for 2023/24
+onwards.
+
+The full `hamilton_import_season_by_season.csv` also carries 2023/24 and
+2024/25, which CA already holds. A row for a season CA covers is only recognised
+as overlapping when its competition matches a CA grade, and most of this club's
+competitions have no CA equivalent, so those two seasons would be added on top
+of CA's figures rather than deferring to them. Use the full file only if the
+club decides its own book should replace CA's for those years, and match the
+grades carefully if so.
+
+### The competitions
+
+All six read NO MATCH, because CA carries none of them under these names. Use
+"+ Add as a new historical grade" on each: it creates the competition across the
+seasons the sheet records it in, so VCV and Border Cup become grades the
+Leaderboard and Records can filter by. "No online equivalent" is the lighter
+option, keeping the label on the figures without creating a grade.
+
+CA does hold a grade called **Border Cup** (and "Over 60 Mixed", "Echuca
+Division 2 Murray", "Echuca Division 3 Goulburn") from 2023/24 on. Adding Border
+Cup as a historical grade for the earlier seasons is correct and does not clash:
+a grade row is per season, and filters group by name.
 
 ## How the workbook was read
 
