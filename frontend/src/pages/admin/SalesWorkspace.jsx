@@ -143,6 +143,19 @@ const SORT_OPTIONS = [
 const _SORT_DEFAULT_DIR_FE = { recent: 'desc', club_name: 'asc', engagement_score: 'desc', trial_days: 'asc' }
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
 const NEW_CONTACT_VALUE = '__new__'
+// Start trial now requires picking a real club contact with a valid email as
+// the primary admin (see the contact-picker in the Start trial modal below),
+// rather than a rep hand-typing a name and address. Hidden entirely while
+// that's under consideration — flip back to true to restore the button; the
+// rest of the flow is left fully wired so this is a one-line toggle.
+const START_TRIAL_ENABLED = false
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const splitFullName = (fullName) => {
+  const parts = (fullName || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { first: '', last: '' }
+  if (parts.length === 1) return { first: parts[0], last: parts[0] }
+  return { first: parts[0], last: parts.slice(1).join(' ') }
+}
 
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
@@ -505,11 +518,25 @@ export default function SalesWorkspace() {
   const [contactForm, setContactForm] = useState({ full_name: '', role: '', email: '', mobile: '' })
   const [savingContact, setSavingContact] = useState(false)
   const [showStartTrial, setShowStartTrial] = useState(false)
-  const [trialForm, setTrialForm] = useState({
-    admin_first_name: '', admin_last_name: '', admin_display_name: '',
+  const blankTrialForm = {
+    contactKey: '', admin_first_name: '', admin_last_name: '', admin_display_name: '',
     admin_username: '', admin_email: '', admin_mobile_number: '',
-  })
+  }
+  const [trialForm, setTrialForm] = useState(blankTrialForm)
   const [savingTrial, setSavingTrial] = useState(false)
+  // Only a club contact carrying a real email address can be handed the
+  // Primary Admin invite — a rep can no longer type an arbitrary name/email.
+  const trialEligibleContacts = (drawer?.contacts || []).filter(c => EMAIL_RE.test(c.email || ''))
+  const pickTrialContact = (key) => {
+    const picked = trialEligibleContacts.find(c => contactKey(c) === key)
+    if (!picked) { setTrialForm(f => ({ ...f, contactKey: key })); return }
+    const { first, last } = splitFullName(picked.full_name)
+    setTrialForm(f => ({
+      ...f, contactKey: key,
+      admin_first_name: first, admin_last_name: last, admin_display_name: picked.full_name,
+      admin_email: picked.email, admin_mobile_number: picked.mobile || '',
+    }))
+  }
 
   const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
   const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
@@ -1099,8 +1126,8 @@ export default function SalesWorkspace() {
                         {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
                       </Select>
                     )}
-                    {!drawer.deal.is_customer && drawer.deal.marketing_club_id && (
-                      <Btn variant="primary" sm onClick={() => setShowStartTrial(true)}>Start trial</Btn>
+                    {START_TRIAL_ENABLED && !drawer.deal.is_customer && drawer.deal.marketing_club_id && (
+                      <Btn variant="primary" sm onClick={() => { setTrialForm(blankTrialForm); setShowStartTrial(true) }}>Start trial</Btn>
                     )}
                   </div>
                 </div>
@@ -1343,19 +1370,40 @@ export default function SalesWorkspace() {
           <form onSubmit={submitStartTrial} className="space-y-2">
             <p className="text-[11.5px] text-pb-faint">
               Sets this club up exactly like Super Admin's New Club — a trial of every module starts immediately,
-              and the person below is emailed an invite link to set their own password.
+              and the contact picked below is emailed an invite link to set their own password as this club's
+              Primary Admin.
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="First name"><TextInput value={trialForm.admin_first_name} onChange={e => setTrialForm(f => ({ ...f, admin_first_name: e.target.value }))} required /></Field>
-              <Field label="Last name"><TextInput value={trialForm.admin_last_name} onChange={e => setTrialForm(f => ({ ...f, admin_last_name: e.target.value }))} required /></Field>
-            </div>
-            <Field label="Display name" hint="Defaults to first + last if left blank"><TextInput value={trialForm.admin_display_name} onChange={e => setTrialForm(f => ({ ...f, admin_display_name: e.target.value }))} /></Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Username"><TextInput value={trialForm.admin_username} onChange={e => setTrialForm(f => ({ ...f, admin_username: e.target.value }))} required /></Field>
-              <Field label="Mobile (optional)"><TextInput value={trialForm.admin_mobile_number} onChange={e => setTrialForm(f => ({ ...f, admin_mobile_number: e.target.value }))} /></Field>
-            </div>
-            <Field label="Email"><TextInput type="email" value={trialForm.admin_email} onChange={e => setTrialForm(f => ({ ...f, admin_email: e.target.value }))} required /></Field>
-            <Btn type="submit" variant="primary" disabled={savingTrial}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
+            <Field label="Primary admin contact" hint="Only contacts with a valid email address on file are listed">
+              <Select value={trialForm.contactKey} onChange={e => pickTrialContact(e.target.value)} required>
+                <option value="" disabled>— select a contact —</option>
+                {trialEligibleContacts.map(c => (
+                  <option key={contactKey(c)} value={contactKey(c)}>
+                    {c.full_name}{c.role ? ` (${c.role})` : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {trialEligibleContacts.length === 0 && (
+              <p className="text-[11.5px] text-pb-red">
+                No contact with a valid email address is on file for this club yet — add one under Contacts above
+                before starting a trial.
+              </p>
+            )}
+            {trialForm.contactKey && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="First name"><TextInput value={trialForm.admin_first_name} onChange={e => setTrialForm(f => ({ ...f, admin_first_name: e.target.value }))} required /></Field>
+                  <Field label="Last name"><TextInput value={trialForm.admin_last_name} onChange={e => setTrialForm(f => ({ ...f, admin_last_name: e.target.value }))} required /></Field>
+                </div>
+                <Field label="Display name" hint="Defaults to first + last if left blank"><TextInput value={trialForm.admin_display_name} onChange={e => setTrialForm(f => ({ ...f, admin_display_name: e.target.value }))} /></Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Username"><TextInput value={trialForm.admin_username} onChange={e => setTrialForm(f => ({ ...f, admin_username: e.target.value }))} required /></Field>
+                  <Field label="Mobile (optional)"><TextInput value={trialForm.admin_mobile_number} onChange={e => setTrialForm(f => ({ ...f, admin_mobile_number: e.target.value }))} /></Field>
+                </div>
+                <Field label="Email" hint="From the contact picked above"><TextInput type="email" value={trialForm.admin_email} readOnly disabled /></Field>
+              </>
+            )}
+            <Btn type="submit" variant="primary" disabled={savingTrial || !trialForm.contactKey}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
           </form>
         </Modal>
       )}
