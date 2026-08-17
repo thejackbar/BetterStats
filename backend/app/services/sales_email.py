@@ -57,11 +57,14 @@ def _button(label: str, url: str) -> str:
     )
 
 
-def render_template(
+def _render_template_hardcoded(
     key: str, *, contact_name: Optional[str], club_name: str, rep_name: str,
     calendly_url: Optional[str] = None,
 ) -> tuple[str, str, str]:
-    """Returns (subject, html, text) for a BUILT_IN_TEMPLATES key. Raises
+    """The original hardcoded Python builder for a BUILT_IN_TEMPLATES key —
+    kept as the fallback ``render_template`` (below) uses when the outreach
+    org isn't configured yet, or its seeded CommsTemplate row is missing
+    (e.g. a fresh/local environment with no marketing org set up). Raises
     ValueError for 'custom' or an unknown key — those have no template body,
     the caller supplies subject/text/html directly."""
     if key not in BUILT_IN_TEMPLATES:
@@ -127,6 +130,174 @@ def render_template(
 
     signoff_html = f'<p style="font-size:13px;color:#555;margin-top:24px">{rep_name}</p>'
     return subject, _wrap(subject, body + signoff_html), f"{text}\n\n{rep_name}"
+
+
+# ─── Editable templates (BetterAdmin -> Comms -> Templates) ──────────────────
+# The three built-in emails are seeded as ordinary comms_templates rows in the
+# platform's marketing outreach org (services/marketing_org.get_outreach_org)
+# rather than staying hardcoded Python — a super admin edits them from the
+# normal Templates screen, with the normal HTML/Design/Preview editor, same as
+# every other email template in the app. {{first_name}}/{{club}} reuse the
+# SAME merge-variable names BetterComms campaigns already use
+# (routers/comms.py's MERGE_VARIABLES); {{rep_name}} and {{booking_block}} are
+# two sales-specific tokens (not in that list — they're irrelevant to a club's
+# own campaign editor) substituted the same way via routers/comms.py's _merge.
+_SEED_BODY = {
+    "information": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>Thanks for your interest in BetterCricket — stats, team selection, availability, "
+        "social posts and more, all in one place for {{club}}.</p>"
+        "<p>Have a look through what's on offer:</p>"
+        '<p><a href="{base}" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">See BetterCricket</a></p>'
+        "<p>Happy to answer any questions — just reply to this email.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+    "trial_information": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>Here's how to get {{club}} started on a free trial:</p>"
+        '<ol style="padding-left:20px">'
+        "<li>Go to BetterCricket</li><li>Search for your club</li>"
+        "<li>Select your club</li><li>Create your admin account</li>"
+        "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+        "</ol>"
+        '<p><a href="{base}/trial" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Start your trial</a></p>'
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+    "demo": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>Happy to walk you through BetterCricket for {{club}}.</p>"
+        "{{booking_block}}"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+}
+_SEED_SUBJECT = {
+    "information": "BetterCricket for {{club}}",
+    "trial_information": "Start your free BetterCricket trial — {{club}}",
+    "demo": "Book a demo — BetterCricket for {{club}}",
+}
+
+
+async def seed_sales_templates(session) -> int:
+    """Insert the three built-in templates into the outreach org's
+    comms_templates library, once — called on demand (email_templates GET) so
+    it self-heals for an environment that only just configured its outreach
+    org, same "call it cheaply and let it no-op" pattern comms.py's own
+    seed_starter_templates uses. A same-named row a super admin has since
+    edited is left alone (ON CONFLICT DO NOTHING) — unlike the general
+    starter-template seed, there's no "empty skeleton" self-heal here, since
+    these three are never auto-created empty. Returns the count inserted."""
+    from app.services.marketing_org import get_outreach_org
+    org = await get_outreach_org(session)
+    if org is None:
+        return 0
+    from sqlalchemy import text as _text
+    base = settings.public_base_url
+    total = 0
+    for key in BUILT_IN_TEMPLATES:
+        result = await session.execute(
+            _text("""
+                INSERT INTO comms_templates (id, organisation_id, name, subject, html)
+                VALUES (gen_random_uuid(), :org_id, :name, :subject, :html)
+                ON CONFLICT (organisation_id, name) DO NOTHING
+            """),
+            {
+                "org_id": org.id, "name": TEMPLATE_LABELS[key],
+                "subject": _SEED_SUBJECT[key],
+                # Plain substring replace, NOT str.format() — the body also
+                # holds {{merge_token}} placeholders for _merge() to resolve
+                # at render time, and .format() treats "{{"/"}}" as an escape
+                # sequence for a literal brace, silently collapsing every
+                # {{first_name}} down to a bare {first_name} before it's even
+                # stored. Found by the verification script, not by reading
+                # the code — the corruption is invisible until you look at
+                # what actually landed in the row.
+                "html": _SEED_BODY[key].replace("{base}", base),
+            },
+        )
+        total += result.rowcount or 0
+    return total
+
+
+async def _load_template_row(session, key: str):
+    from sqlalchemy import select as _select
+    from app.services.marketing_org import get_outreach_org
+    from app.models.db import CommsTemplate
+    org = await get_outreach_org(session)
+    if org is None:
+        return None
+    return await session.scalar(
+        _select(CommsTemplate).where(
+            CommsTemplate.organisation_id == org.id,
+            CommsTemplate.name == TEMPLATE_LABELS.get(key),
+        )
+    )
+
+
+def _booking_block(club_name: str, calendly_url: Optional[str]) -> str:
+    if calendly_url:
+        return (
+            f'<p><a href="{calendly_url}" style="display:inline-block;background:#16C784;'
+            'color:#fff;text-decoration:none;padding:12px 24px;border-radius:6px;'
+            'font-weight:bold;font-size:14px">Book a time</a></p>'
+        )
+    return (
+        f"<p>Reply to this email with a couple of times that suit {club_name} and I'll lock one in.</p>"
+    )
+
+
+async def render_template(
+    session, key: str, *, contact_name: Optional[str], club_name: str, rep_name: str,
+    calendly_url: Optional[str] = None,
+) -> tuple[str, str, str]:
+    """Returns (subject, html, text) for a BUILT_IN_TEMPLATES key — from the
+    editable outreach-org CommsTemplate row when one exists, else the
+    original hardcoded builder (see _render_template_hardcoded's docstring
+    for when that fallback applies). Raises ValueError for 'custom' or an
+    unknown key, same as the hardcoded builder."""
+    if key not in BUILT_IN_TEMPLATES:
+        raise ValueError(f"'{key}' is not a built-in template")
+    row = await _load_template_row(session, key)
+    if row is None or not (row.html or "").strip():
+        return _render_template_hardcoded(
+            key, contact_name=contact_name, club_name=club_name, rep_name=rep_name,
+            calendly_url=calendly_url,
+        )
+    from app.routers.comms import _merge, _is_full_doc, _html_to_text
+    name_parts = (contact_name or "").strip().split()
+    ctx = {
+        # first_name/name/club keep the SAME meaning comms.py's own merge
+        # variables have (bare values, not a pre-built greeting phrase) —
+        # the seeded body spells out "Hi {{first_name}}," itself.
+        "first_name": name_parts[0] if name_parts else "there",
+        "name": (contact_name or "").strip() or "there",
+        "club": club_name,
+        "rep_name": rep_name,
+        "booking_block": _booking_block(club_name, calendly_url),
+    }
+    subject = _merge(row.subject or TEMPLATE_LABELS[key], ctx)
+    merged_body = _merge(row.html or "", ctx)
+    html = merged_body if _is_full_doc(merged_body) else _wrap(subject, merged_body)
+    text = _html_to_text(html)
+    return subject, html, text
+
+
+async def render_template_preview(
+    session, key: str, *, contact_name: Optional[str], club_name: str, rep_name: str,
+    calendly_url: Optional[str] = None,
+) -> tuple[str, str]:
+    """Same rendering as render_template, without sending — the Sales
+    Workspace's Send Email form uses this to pre-fill the Design editor with
+    real, already-merged content once a template is picked, which the rep
+    then edits before Send actually fires."""
+    subject, html, _text = await render_template(
+        session, key, contact_name=contact_name, club_name=club_name,
+        rep_name=rep_name, calendly_url=calendly_url,
+    )
+    return subject, html
 
 
 def render_custom(subject: str, body_text: str, rep_name: str) -> tuple[str, str, str]:

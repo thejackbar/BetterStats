@@ -4,7 +4,8 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel } from '../../components/admin/crm/ui'
+import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
@@ -102,6 +103,49 @@ function StagePicker({ stages, value, onChange }) {
   )
 }
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
+const NEW_CONTACT_VALUE = '__new__'
+
+// Inline "not in the list" contact entry, shared by both the Log a Call and
+// Send an Email contact pickers — a rep shouldn't have to leave the form
+// they're in to add someone first. Writes straight to the canonical Club
+// Directory (routers/sales_workspace.py's add_contact, same table the
+// dedicated Contacts tab's own "+ Add contact" form uses), and hands the
+// created contact back so the caller can both select it immediately and
+// merge it into drawer.contacts for the OTHER picker too.
+function InlineNewContact({ dealId, onCreated, onCancel, toast }) {
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '' })
+  const [saving, setSaving] = useState(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    const full_name = `${form.firstName.trim()} ${form.lastName.trim()}`.trim()
+    if (!full_name) { toast?.error('First and last name are required'); return }
+    if (!form.email.trim() && !form.mobile.trim()) { toast?.error('An email or mobile number is required'); return }
+    setSaving(true)
+    try {
+      const res = await api.salesWorkspaceAddContact(dealId, {
+        full_name, email: form.email.trim() || null, mobile: form.mobile.trim() || null,
+      })
+      if (res.contact) onCreated(res.contact)
+      else toast?.error('Contact saved, but could not be added to this list yet — reopen the club to see it')
+    } catch (err) {
+      toast?.error(err.message || 'Could not add contact')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <div className="grid grid-cols-2 gap-1.5 p-2 rounded-lg border border-pb-hairline2 bg-pb-surface2">
+      <TextInput placeholder="First name" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
+      <TextInput placeholder="Last name" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+      <TextInput placeholder="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+      <TextInput placeholder="Mobile" value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
+      <div className="col-span-2 flex justify-end gap-2">
+        <Btn type="button" sm variant="ghost" onClick={onCancel}>Cancel</Btn>
+        <Btn type="button" sm variant="primary" disabled={saving} onClick={submit}>{saving ? 'Adding…' : 'Add contact'}</Btn>
+      </div>
+    </div>
+  )
+}
 
 function ScorePill({ score, tier }) {
   if (score == null) return <span className="text-pb-faintest text-[11px]">Not scored</span>
@@ -380,8 +424,8 @@ export default function SalesWorkspace() {
   }, [])
 
   const [filters, setFilters] = useState({
-    q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
-    min_score: '', max_score: '', meta_selected: false, meta_searched: false,
+    q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, list_id: '',
+    min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
   })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
@@ -408,6 +452,13 @@ export default function SalesWorkspace() {
 
   const [callForm, setCallForm] = useState(emptyCallForm)
   const [savingCall, setSavingCall] = useState(false)
+  // Merges a freshly-added contact into the shared drawer.contacts list (so
+  // it's immediately selectable from BOTH the Log a Call and Send an Email
+  // pickers, not just the one it was added from) and returns its key.
+  const mergeNewContact = (contact) => {
+    setDrawer(d => d ? { ...d, contacts: [...(d.contacts || []), contact] } : d)
+    return contactKey(contact)
+  }
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
   const [showAddContact, setShowAddContact] = useState(false)
@@ -423,6 +474,17 @@ export default function SalesWorkspace() {
   const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
   const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
   const [savingEmail, setSavingEmail] = useState(false)
+  const [showNewCallContact, setShowNewCallContact] = useState(false)
+  const [showNewEmailContact, setShowNewEmailContact] = useState(false)
+  // Design-mode editor for a BUILT-IN template's body (see BUILT_IN template
+  // keys below) — 'custom' keeps the old plain Subject/Body text fields.
+  // Bumped whenever a freshly-picked template's preview lands, since
+  // EmailEditorTabs seeds its Design iframe once on mount (same reason
+  // CommsTemplates.jsx bumps its own editorKey).
+  const emailEditorRef = useRef(null)
+  const [emailEditorKey, setEmailEditorKey] = useState(0)
+  const [loadingEmailPreview, setLoadingEmailPreview] = useState(false)
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo']
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
@@ -524,6 +586,21 @@ export default function SalesWorkspace() {
     () => (drawer?.activities || []).filter(a => !(a.type === 'note' && a.meta?.pinned)),
     [drawer]
   )
+
+  // Saved immediately on click (not batched with Save Call) — the same
+  // module_keys/product_interest_source fields the CRM Pipeline board's own
+  // Product Interest chips write (DealDetailModal.jsx's toggleModule), so a
+  // pick made here shows up there too.
+  const toggleInterest = async (key) => {
+    if (!drawer?.deal) return
+    const cur = drawer.deal.module_keys || []
+    const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]
+    try {
+      const d = await api.salesWorkspaceSetInterest(drawer.deal.id, next)
+      setDrawer(d)
+      loadClubs()
+    } catch (e) { toast?.error(e.message || 'Could not save module interest') }
+  }
 
   const submitCall = async (e) => {
     e.preventDefault()
@@ -644,6 +721,28 @@ export default function SalesWorkspace() {
     }
   }
 
+  // Fired when the Template picker lands on a built-in key — fetches the
+  // real, already-merged content (contact's name, club name, the rep's own
+  // Calendly link) so the rep edits real text in Design mode rather than raw
+  // {{tokens}}. Deliberately NOT re-run on a later contact change, so
+  // switching contacts can't silently wipe an edit the rep has already made.
+  const loadEmailPreview = async (templateKey, contactKeyValue) => {
+    setLoadingEmailPreview(true)
+    try {
+      const chosen = (drawer.contacts || []).find(c => contactKey(c) === contactKeyValue)
+      const payload = { template: templateKey }
+      if (chosen?.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
+      else if (chosen?.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      const r = await api.salesWorkspaceEmailPreview(drawer.deal.id, payload)
+      setEmailForm(f => ({ ...f, subject: r.subject, body: r.body }))
+      setEmailEditorKey(k => k + 1)
+    } catch (err) {
+      toast?.error(err.message || 'Could not load that template')
+    } finally {
+      setLoadingEmailPreview(false)
+    }
+  }
+
   const submitEmail = async (e) => {
     e.preventDefault()
     if (!emailForm.contactKey) { toast?.error('Pick a contact to email'); return }
@@ -658,6 +757,12 @@ export default function SalesWorkspace() {
       if (emailForm.template === 'custom') {
         payload.subject = emailForm.subject
         payload.body = emailForm.body
+      } else {
+        // The rep's (possibly edited) Design-mode content — flush() reads
+        // the iframe's current state synchronously, since onChange's state
+        // update may not have landed yet.
+        payload.subject = emailForm.subject
+        payload.body = emailEditorRef.current?.flush() ?? emailForm.body
       }
       await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
       toast?.success(`Email sent to ${chosen.full_name}`)
@@ -735,14 +840,17 @@ export default function SalesWorkspace() {
               onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
           </div>
         </Field>
-        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-          <input type="checkbox" checked={filters.never_called}
-            onChange={e => setFilters(f => ({ ...f, never_called: e.target.checked }))} />
-          Never called
+        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5"
+          title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
+          <input type="checkbox" checked={filters.called_clubs}
+            onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
+          <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
+          Called clubs
         </label>
         <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
           <input type="checkbox" checked={filters.callback_due}
             onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+          <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
           Callback due
         </label>
         <div className="flex items-center gap-3 pb-1.5" title="From the trial signup wizard — tick both to match either">
@@ -758,6 +866,24 @@ export default function SalesWorkspace() {
             Searched
           </label>
         </div>
+        <Field label="Interested in" width="100%">
+          <div className="flex flex-wrap gap-1.5">
+            {MODULE_ORDER.map(key => {
+              const on = filters.modules.includes(key)
+              return (
+                <button key={key} type="button"
+                  onClick={() => setFilters(f => ({
+                    ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
+                  }))}
+                  className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                    on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                       : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                  {moduleLabel(key)}
+                </button>
+              )
+            })}
+          </div>
+        </Field>
       </div>
 
       {isSuper && checkedIds.size > 0 && (
@@ -826,7 +952,10 @@ export default function SalesWorkspace() {
                   <button
                     onClick={() => selectClub(c.id)}
                     className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
-                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
+                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2'
+                      : c.callback_due ? 'border-blue-500/60 hover:bg-pb-surface2'
+                      : c.ever_called ? 'border-orange-500/60 hover:bg-pb-surface2'
+                      : 'border-transparent hover:bg-pb-surface2'
                     }`}
                   >
                   <div className="flex items-center justify-between gap-2">
@@ -844,6 +973,15 @@ export default function SalesWorkspace() {
                       {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
                     </span>
                   </div>
+                  {(c.module_keys || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {c.module_keys.map(k => (
+                        <span key={k} className="px-1.5 py-0.5 rounded-full text-[9.5px] bg-pb-accent/10 text-pb-accent">
+                          {moduleLabel(k)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   </button>
                 </div>
               ))}
@@ -949,14 +1087,30 @@ export default function SalesWorkspace() {
                 <h3 className="font-display font-bold text-[13px] mb-2">Log a call</h3>
                 <form onSubmit={submitCall} className="space-y-2">
                   <Field label="Contact">
-                    <Select value={callForm.contactKey} onChange={e => setCallForm(f => ({ ...f, contactKey: e.target.value }))}>
+                    <Select value={showNewCallContact ? NEW_CONTACT_VALUE : callForm.contactKey}
+                      onChange={e => {
+                        if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
+                        setCallForm(f => ({ ...f, contactKey: e.target.value }))
+                      }}>
                       <option value="">— no specific contact —</option>
                       {(drawer.contacts || []).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
                           {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
                         </option>
                       ))}
+                      <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
                     </Select>
+                    {showNewCallContact && (
+                      <div className="mt-1.5">
+                        <InlineNewContact dealId={drawer.deal.id} toast={toast}
+                          onCancel={() => setShowNewCallContact(false)}
+                          onCreated={(contact) => {
+                            const key = mergeNewContact(contact)
+                            setCallForm(f => ({ ...f, contactKey: key }))
+                            setShowNewCallContact(false)
+                          }} />
+                      </div>
+                    )}
                   </Field>
                   <Field label="Outcome">
                     <Select value={callForm.outcome} onChange={e => setCallForm(f => ({ ...f, outcome: e.target.value }))} required>
@@ -967,6 +1121,21 @@ export default function SalesWorkspace() {
                         </optgroup>
                       ))}
                     </Select>
+                  </Field>
+                  <Field label="Interested in">
+                    <div className="flex flex-wrap gap-1.5">
+                      {MODULE_ORDER.map(key => {
+                        const on = (drawer.deal.module_keys || []).includes(key)
+                        return (
+                          <button key={key} type="button" onClick={() => toggleInterest(key)}
+                            className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                              on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                                 : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                            {moduleLabel(key)}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </Field>
                   <Field label="Notes"><TextArea value={callForm.notes} onChange={e => setCallForm(f => ({ ...f, notes: e.target.value }))} /></Field>
                   <Field label="Follow up (optional)">
@@ -988,17 +1157,38 @@ export default function SalesWorkspace() {
                 <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
                 <form onSubmit={submitEmail} className="space-y-2">
                   <Field label="Contact">
-                    <Select value={emailForm.contactKey} onChange={e => setEmailForm(f => ({ ...f, contactKey: e.target.value }))}>
+                    <Select value={showNewEmailContact ? NEW_CONTACT_VALUE : emailForm.contactKey}
+                      onChange={e => {
+                        if (e.target.value === NEW_CONTACT_VALUE) { setShowNewEmailContact(true); return }
+                        setEmailForm(f => ({ ...f, contactKey: e.target.value }))
+                      }}>
                       <option value="">Pick a contact…</option>
                       {(drawer.contacts || []).filter(c => c.email).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
                           {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
                         </option>
                       ))}
+                      <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
                     </Select>
+                    {showNewEmailContact && (
+                      <div className="mt-1.5">
+                        <InlineNewContact dealId={drawer.deal.id} toast={toast}
+                          onCancel={() => setShowNewEmailContact(false)}
+                          onCreated={(contact) => {
+                            if (!contact.email) { toast?.error('That contact has no email address — add one to email them'); return }
+                            const key = mergeNewContact(contact)
+                            setEmailForm(f => ({ ...f, contactKey: key }))
+                            setShowNewEmailContact(false)
+                          }} />
+                      </div>
+                    )}
                   </Field>
                   <Field label="Template">
-                    <Select value={emailForm.template} onChange={e => setEmailForm(f => ({ ...f, template: e.target.value }))}>
+                    <Select value={emailForm.template} onChange={e => {
+                      const key = e.target.value
+                      setEmailForm(f => ({ ...f, template: key, subject: '', body: '' }))
+                      if (BUILT_IN_EMAIL_TEMPLATES.includes(key)) loadEmailPreview(key, emailForm.contactKey)
+                    }}>
                       <option value="">Pick a template…</option>
                       {emailTemplates.templates.map(t => (
                         <option key={t.key} value={t.key}>
@@ -1013,7 +1203,20 @@ export default function SalesWorkspace() {
                       <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
                     </>
                   )}
-                  <Btn type="submit" variant="primary" disabled={savingEmail}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
+                  {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && (
+                    loadingEmailPreview ? (
+                      <p className="text-[12px] text-pb-faintest py-2">Loading template…</p>
+                    ) : (
+                      <Field label="Subject">
+                        <TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} />
+                      </Field>
+                    )
+                  )}
+                  {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && !loadingEmailPreview && (
+                    <EmailEditorTabs key={emailEditorKey} ref={emailEditorRef} html={emailForm.body}
+                      onChange={v => setEmailForm(f => ({ ...f, body: v }))} height={380} />
+                  )}
+                  <Btn type="submit" variant="primary" disabled={savingEmail || loadingEmailPreview}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
                 </form>
               </div>
 

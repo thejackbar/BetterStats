@@ -95,13 +95,14 @@ async def list_clubs(
     q: Optional[str] = None,
     stage_key: Optional[str] = None,
     owner_user_id: Optional[str] = None,
-    never_called: bool = False,
+    called_clubs: bool = False,
     callback_due: bool = False,
     list_id: Optional[str] = None,
     min_score: Optional[int] = None,
     max_score: Optional[int] = None,
     meta_selected: bool = False,
     meta_searched: bool = False,
+    modules: Optional[str] = None,
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
@@ -123,7 +124,19 @@ async def list_clubs(
     ``meta_selected``/``meta_searched`` filter to clubs that picked
     themselves / searched for themselves in the trial signup wizard (Meta
     Ads' own source split); ticking both is an OR ("either"), ticking one is
-    that one alone."""
+    that one alone. ``modules`` is a comma-list of module keys (core/select/
+    socials/admin/iq/fantasy) — a club matching ANY of them (its own
+    module_keys intersects the requested set) is kept, an OR within the
+    field same as ``stage_key``.
+
+    The called/callback filters are mutually exclusive, most-specific first:
+    ``callback_due`` (a due/overdue follow-up — inherently a called club,
+    since a follow-up can only exist once a call has been logged) takes
+    precedence when both are set; else ``called_clubs`` narrows to every
+    club that's ever been called; else — the default, with neither
+    ticked — the queue shows only clubs that have NEVER been called, which
+    is what a rep actually wants to see by default (a calling QUEUE, not a
+    call log)."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -198,6 +211,9 @@ async def list_clubs(
     if q:
         needle = q.strip().lower()
         deals = [d for d in deals if needle in (d.title or "").lower()]
+    if modules:
+        wanted_modules = {m for m in modules.split(",") if m}
+        deals = [d for d in deals if wanted_modules & set(d.module_keys or [])]
 
     deal_ids = [d.id for d in deals]
     last_calls = await sw.last_calls_by_deal(db, deal_ids)
@@ -210,6 +226,11 @@ async def list_clubs(
         rows = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
         owners = {u.id: u for u in rows}
 
+    # String comparison (not datetime), matching next_follow_up_at's own
+    # isoformat() below — CrmActivity.next_follow_up_at is TIMESTAMPTZ, so a
+    # naive datetime.utcnow() can't be compared against it directly without
+    # tripping over tz-awareness; ISO strings compare correctly either way.
+    now_iso = datetime.utcnow().isoformat()
     out = []
     for d in deals:
         club = club_by_id.get(d.marketing_club_id)
@@ -230,6 +251,10 @@ async def list_clubs(
         row["last_call"] = crm_service._activity_dict(last_call) if last_call else None
         follow_up_at = follow_ups.get(d.id)
         row["next_follow_up_at"] = follow_up_at.isoformat() if follow_up_at else None
+        # Precomputed for the queue row's own highlight colour (blue = a
+        # due/overdue follow-up, orange = called with nothing pending) so the
+        # frontend doesn't re-derive the date comparison itself.
+        row["callback_due"] = bool(row["next_follow_up_at"] and row["next_follow_up_at"] <= now_iso)
         # deal.updated_at is a cheap proxy for "recent signal" (it also moves
         # on engagement-driven auto-promotion elsewhere in the CRM engine) —
         # a full multi-source recency query per row isn't worth it for a v1
@@ -240,11 +265,13 @@ async def list_clubs(
         )
         out.append(row)
 
-    if never_called:
-        out = [r for r in out if not r["ever_called"]]
+    # Most-specific-first, mutually exclusive — see the docstring above.
     if callback_due:
-        now_iso = datetime.utcnow().isoformat()
-        out = [r for r in out if r["next_follow_up_at"] and r["next_follow_up_at"] <= now_iso]
+        out = [r for r in out if r["callback_due"]]
+    elif called_clubs:
+        out = [r for r in out if r["ever_called"]]
+    else:
+        out = [r for r in out if not r["ever_called"]]
     if min_score is not None:
         out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] >= min_score]
     if max_score is not None:
@@ -411,6 +438,32 @@ async def get_club(
     }
 
 
+class InterestBody(BaseModel):
+    module_keys: list[str]
+
+
+@router.patch("/clubs/{deal_id}/interest")
+async def set_interest(
+    deal_id: str,
+    body: InterestBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Which modules a rep has flagged the club as interested in — the SAME
+    ``module_keys``/``product_interest_source`` fields the Sales Pipeline
+    board's own Product Interest chips edit (DealDetailModal.jsx), so a pick
+    made here shows up there too and vice versa. Reusing that PATCH endpoint
+    directly isn't possible: it's super-admin only, and a 'sales' caller must
+    only be able to touch their own deals — this is the same restriction
+    every other write in this router applies via ``_assert_can_touch``."""
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    keys = sorted({k for k in (body.module_keys or []) if k in sw.VALID_MODULE_KEYS})
+    await crm_service.update_deal(db, deal, module_keys=keys, product_interest_source="manual")
+    await db.commit()
+    return await get_club(deal_id, actor, db)
+
+
 # ─── Calls ────────────────────────────────────────────────────────────────────
 
 class CallLogBody(BaseModel):
@@ -511,6 +564,11 @@ async def add_note(
 async def email_templates(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
     from app.services import platform_settings as ps
     from app.services import sales_email as se
+    # Self-heals the outreach org's editable copies of the three built-in
+    # templates (cheap no-op once seeded) — same "call it on the read path"
+    # pattern as comms.py's own seed_starter_templates.
+    await se.seed_sales_templates(db)
+    await db.commit()
     links = await ps.get_demo_booking_links(db)
     rep_name = actor.user.display_name or actor.user.username
     return {
@@ -523,8 +581,64 @@ class EmailBody(BaseModel):
     directory_contact_id: Optional[str] = None
     crm_person_id: Optional[str] = None
     template: str  # 'information' | 'trial_information' | 'demo' | 'custom'
-    subject: Optional[str] = None  # required for 'custom'
-    body: Optional[str] = None  # required for 'custom'
+    # Required for 'custom' (plain text, wrapped+escaped server-side). For a
+    # built-in template these carry the rep's EDITED copy of what
+    # /email-preview handed back (already-final HTML, sent as-is) — omitted,
+    # the server re-renders the template fresh from scratch.
+    subject: Optional[str] = None
+    body: Optional[str] = None
+
+
+class EmailPreviewBody(BaseModel):
+    directory_contact_id: Optional[str] = None
+    crm_person_id: Optional[str] = None
+    template: str
+
+
+@router.post("/clubs/{deal_id}/email-preview")
+async def email_preview(
+    deal_id: str,
+    body: EmailPreviewBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Renders a built-in template's real, merged content (contact's name,
+    club name, the picked calendly link) for the Send Email form's Design
+    editor — the rep edits this before Send actually fires. Never sends
+    anything; 'custom' has no template body to preview (the form's own
+    Subject/Body fields ARE the content there)."""
+    from app.services import platform_settings as ps
+    from app.services import sales_email as se
+
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    if body.template not in se.BUILT_IN_TEMPLATES:
+        raise HTTPException(status_code=422, detail="No preview for this template")
+
+    person = None
+    if body.directory_contact_id or body.crm_person_id:
+        try:
+            person = await sw.resolve_or_materialize_person(
+                db, marketing_club_id=deal.marketing_club_id,
+                directory_contact_id=_uuid_or_none(body.directory_contact_id),
+                crm_person_id=_uuid_or_none(body.crm_person_id),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+    await db.commit()
+
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+    club_name = club.name if club else deal.title
+    rep_name = actor.user.display_name or actor.user.username
+    calendly_url = None
+    if body.template == "demo":
+        links = await ps.get_demo_booking_links(db)
+        calendly_url = links.get(rep_name)
+    subject, html_body = await se.render_template_preview(
+        db, body.template, contact_name=person.full_name if person else None,
+        club_name=club_name, rep_name=rep_name, calendly_url=calendly_url,
+    )
+    return {"subject": subject, "body": html_body}
 
 
 @router.post("/clubs/{deal_id}/email")
@@ -576,14 +690,25 @@ async def send_email(
             raise HTTPException(status_code=422, detail="Subject and body are required for a custom email")
         subject, html_body, text_body = se.render_custom(body.subject.strip(), body.body.strip(), rep_name)
     elif template in se.BUILT_IN_TEMPLATES:
-        calendly_url = None
-        if template == "demo":
-            links = await ps.get_demo_booking_links(db)
-            calendly_url = links.get(rep_name)
-        subject, html_body, text_body = se.render_template(
-            template, contact_name=person.full_name, club_name=club_name, rep_name=rep_name,
-            calendly_url=calendly_url,
-        )
+        # The rep's own edited copy of what /email-preview handed back (the
+        # normal path — the Design editor always sends its current content)
+        # is trusted as final HTML, no re-wrapping/escaping: it's the same
+        # merged template content the rep was just shown, only possibly
+        # edited by them in the editor. Absent, fall back to a fresh
+        # server-side render (a caller that skipped the preview step).
+        if (body.subject or "").strip() and (body.body or "").strip():
+            from app.routers.comms import _html_to_text
+            subject, html_body = body.subject.strip(), body.body
+            text_body = _html_to_text(html_body)
+        else:
+            calendly_url = None
+            if template == "demo":
+                links = await ps.get_demo_booking_links(db)
+                calendly_url = links.get(rep_name)
+            subject, html_body, text_body = await se.render_template(
+                db, template, contact_name=person.full_name, club_name=club_name, rep_name=rep_name,
+                calendly_url=calendly_url,
+            )
     else:
         raise HTTPException(status_code=422, detail="Unknown email template")
 
@@ -639,12 +764,30 @@ async def add_contact(
         raise HTTPException(status_code=422, detail="A name is required")
     if not ((body.email or "").strip() or (body.mobile or "").strip()):
         raise HTTPException(status_code=422, detail="An email or mobile number is required")
-    await sw.add_directory_contact(
+    contact = await sw.add_directory_contact(
         db, marketing_club_id=deal.marketing_club_id, full_name=body.full_name.strip(),
         role=body.role, email=body.email, mobile=body.mobile,
     )
     await db.commit()
-    return {"status": "ok"}
+    # Return the new contact in the same shape merged_contacts() uses, so the
+    # caller can push it straight into the Log Call / Send Email pickers
+    # without a full drawer reload.
+    if contact is None:
+        return {"status": "ok", "contact": None}
+    return {"status": "ok", "contact": {
+        "origin": "directory",
+        "directory_contact_id": str(contact.id),
+        "crm_person_id": None,
+        "full_name": contact.full_name,
+        "role": contact.role,
+        "role_rank": contact.role_rank,
+        "email": contact.email,
+        "mobile": contact.mobile,
+        "subscribed": contact.subscribed,
+        "do_not_email": bool(contact.unsubscribed_at) or bool(contact.bounced) or not contact.subscribed,
+        "do_not_contact": bool(contact.do_not_contact),
+        "do_not_contact_reason": contact.do_not_contact_reason,
+    }}
 
 
 class DoNotContactBody(BaseModel):

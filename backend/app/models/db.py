@@ -4132,6 +4132,11 @@ class CommsTemplate(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
+    # NULL for a template that's only ever used as a campaign's starting body
+    # (the campaign supplies its own subject) — set for a template that is
+    # itself sent as a self-contained email (migration 260; the Sales
+    # Workspace's built-in one-to-one templates).
+    subject = Column(Text, nullable=True)
     html = Column(Text, nullable=False, server_default="")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

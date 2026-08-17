@@ -3070,7 +3070,7 @@ async def seed_starter_templates(conn) -> int:
 
 
 def _template_out(t: CommsTemplate, *, full: bool = False) -> dict:
-    d = {"id": str(t.id), "name": t.name,
+    d = {"id": str(t.id), "name": t.name, "subject": t.subject,
          "updated_at": t.updated_at.isoformat() if t.updated_at else None}
     if full:
         d["html"] = t.html or ""
@@ -3093,6 +3093,7 @@ async def list_templates(
 class TemplateIn(BaseModel):
     name: str
     html: str = ""
+    subject: Optional[str] = None
 
 
 @router.post("/templates")
@@ -3105,7 +3106,8 @@ async def create_template(
     name = (data.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="A template name is required")
-    t = CommsTemplate(organisation_id=club.id, name=name, html=data.html or "")
+    t = CommsTemplate(organisation_id=club.id, name=name, html=data.html or "",
+                       subject=(data.subject or "").strip() or None)
     db.add(t)
     try:
         await db.commit()
@@ -3142,6 +3144,7 @@ async def duplicate_template(
         organisation_id=club.id,
         name=_copy_name(src.name, existing),
         html=src.html or "",
+        subject=src.subject,
     )
     db.add(t)
     try:
@@ -3187,6 +3190,7 @@ async def update_template(
     if name:
         t.name = name
     t.html = data.html or ""
+    t.subject = (data.subject or "").strip() or None
     t.updated_at = datetime.now(timezone.utc)
     try:
         await db.commit()
