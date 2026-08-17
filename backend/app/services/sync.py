@@ -18,7 +18,7 @@ from app.models.db import (
     SyncRun, async_session_maker
 )
 from app.services import auto_sync, playhq_client
-from app.services.grade_labels import suggest_category
+from app.services.grade_labels import suggest_categories, suggest_category
 
 logger = logging.getLogger(__name__)
 
@@ -166,7 +166,14 @@ async def _resolve_org_grade(
     new_id = uuid.uuid5(org_id, grassroots_guid) if clash is not None else guid_uuid
     session.add(Grade(
         id=new_id, season_id=season_id, name=name, grassroots_id=grassroots_guid,
+        # Both classification columns are written together, always. Writing only
+        # the single one would NARROW a grade the name says two things about —
+        # "Girls Under 16" would land as junior and lose its women's half, where
+        # leaving both blank reads as both. `match_formats` is deliberately left
+        # NULL: a brand-new grade has no games yet, and leaving it unset keeps
+        # the derive-from-games step live so it self-corrects as they arrive.
         category=suggest_category(name),
+        categories=list(suggest_categories(name)),
     ))
     org_grade_map[grassroots_guid] = new_id
     return new_id
@@ -2176,6 +2183,7 @@ async def sync_grassroots_game_level_data(
                                 grassroots_id=grade_guid_str,
                                 playhq_id=grade_guid_str,
                                 category=suggest_category(_gname),
+                                categories=list(suggest_categories(_gname)),
                             ))
                             try:
                                 await session.flush()

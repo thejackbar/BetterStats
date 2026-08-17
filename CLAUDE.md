@@ -74,18 +74,30 @@ go.
   the same question two ways, and the dashboard briefly drew both. "All" on the
   Grade Type row means the club's own default, and the note under the bar says
   what that leaves out rather than dropping a club's juniors quietly.
+- **Auto-suggestion is untouched and now covers both axes.** An unclassified
+  grade still resolves on the fly, `POST /grades/apply-suggestions` still fills
+  the blanks (category from the name, format from the grade's own games, and it
+  refuses to guess a format it cannot tell), and the sync still persists a guess
+  for a brand-new grade. **Every site that writes `category=suggest_category(...)`
+  must ALSO write `categories=`** — sync ×2 and manual_entries ×2 — or a synced
+  "Girls Under 16" lands as junior alone and loses its women's half, which is
+  NARROWER than leaving both blank. Asserted structurally so a new write site
+  can't skip it. `match_formats` is deliberately left NULL on creation: a new
+  grade has no games yet, and leaving it unset keeps the derive-from-games step
+  live so it self-corrects as they arrive.
 - **`grades-with-stats` computes classification in its OWN query.** Unnesting
   the two array columns into the existing aggregate multiplies every batting row
   by the number of tags and silently inflates the RUNS column — written that way
   first, caught before it shipped, and asserted against.
-- **Verified against a real Postgres** (92 checks: migration 259 applied three
+- **Verified against a real Postgres** (93 checks: migration 259 applied three
   times to a populated pre-259 table and matching the lifespan mirror, the
   plural age-group spellings, both org resolvers' three-step fallbacks, every
   branch of the two axes composing, a senior-only club coming out inactive and
   emitting no clause, the scoped summary, and the route bodies incl. the
   runs-inflation guard, the `category` column staying in step, an empty list
   clearing back to the suggestion and apply-suggestions refusing to guess a
-  format) and **driven in Chromium** (32: the pills that render and the ones
+  format, plus the every-write-site-pairs-both-columns guard) and
+  **driven in Chromium** (32: the pills that render and the ones
   that no longer do, the exact params on the wire for all four dashboard
   fetches, the two filters composing, clearing one without the other, the
   Grades screen's chips and its PATCH, no page errors, no overflow at 390px).

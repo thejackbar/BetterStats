@@ -9,6 +9,7 @@ export default {
     'Both filters move the whole dashboard together — the win rate, runs, wickets and player counts, the top batters and bowlers, and the recent games list.',
     'The Captain filter is gone from the dashboard.',
     'A grade can now be several things at once on Admin → Grades. "Women\'s T20 Grade 2" is a women\'s grade and a T20 grade; an Under 14 girls\' side is both juniors and women\'s. Tick as many as apply on each row.',
+    'Grades are still labelled for you automatically — a new grade picks up its type on sync, and "Confirm all suggestions" now fills in both the grade type and the match type in one go.',
     'Match type is worked out from the matches already played in each grade, so most clubs will find their grades are already labelled correctly. A grade we cannot place is left out of the Match Type filter rather than guessed into the wrong one.',
     'Fixed: grade names written the way clubs actually write them — "Under 14s", "U14s", "Year 9s", "Over 40s" — were being read as senior grades. Those junior and masters seasons were landing inside senior career averages. The singular spellings always worked, which is why it went unnoticed.',
     'Tidied up: the Gender and Captain filters also appeared on Players, Games and Ladders, where they had never been connected to anything. They are gone from those pages too.',
