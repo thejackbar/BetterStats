@@ -24,6 +24,10 @@ from app.services.grade_labels import (
     GRADE_CATEGORIES, MATCH_FORMATS, format_from_match_type, normalise_category,
     normalise_format, suggest_categories, suggest_category, suggest_formats,
 )
+# The historical-import matcher already knows how to split a name into its parts
+# and decide whether two sets of middle initials could belong to one person.
+# Reused rather than copied so the two never disagree about what a name is.
+from app.services.import_ingest import _name_parts, _middles_compatible
 from app.services.player_aliases import seed_alias_on_rename
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -87,6 +91,25 @@ async def get_player_info(player_id: str, org_id: str, db: AsyncSession = Depend
 
 FUZZY_MERGE_THRESHOLD = 0.90
 MAX_FUZZY_PAIRS = 500
+MAX_VARIANT_PAIRS = 300
+MIN_SHORT_FORM_LEN = 3
+
+
+def _name_keys(p: Player) -> list[str]:
+    """Every normalised name this player is known by — the raw synced ``name``
+    plus, when it differs, the admin's ``display_name_override``.
+
+    Detection used to group on ``name`` alone while the screen renders
+    ``display_name``, so a renamed player was only ever compared under the name
+    the sync wrote. Their duplicate then read as unlisted even though the two
+    cards on screen said the same thing.
+    """
+    keys: list[str] = []
+    for raw in (p.name, p.display_name_override):
+        k = _normalise(raw or "")
+        if k and k not in keys:
+            keys.append(k)
+    return keys
 
 
 def _fuzzy_name_pairs(players: list, ignored: set) -> list:
@@ -102,38 +125,116 @@ def _fuzzy_name_pairs(players: list, ignored: set) -> list:
     """
     blocks: dict[str, list] = {}
     for p in players:
-        key = _normalise(p.name)
-        if not key or _is_redacted_name(p.name):
+        if _is_redacted_name(p.name):
             continue
-        blocks.setdefault(key[:1], []).append((p, key))
+        for key in _name_keys(p):
+            blocks.setdefault(key[:1], []).append((p, key))
 
-    seen_pairs: set = set()
-    scored = []
+    # A player carrying a display-name override enters more than one block, so
+    # the same pair can be scored twice under different spellings — keep the
+    # strongest reading of the two rather than whichever was reached first.
+    best: dict[tuple, tuple] = {}
     for block in blocks.values():
         for i in range(len(block)):
             p1, k1 = block[i]
             for j in range(i + 1, len(block)):
                 p2, k2 = block[j]
-                if k1 == k2 or abs(len(k1) - len(k2)) > 3:
+                if p1.id == p2.id or k1 == k2 or abs(len(k1) - len(k2)) > 3:
                     continue
                 ratio = SequenceMatcher(None, k1, k2).ratio()
                 if ratio < FUZZY_MERGE_THRESHOLD:
                     continue
                 pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
-                if pair_key in ignored or pair_key in seen_pairs:
+                if pair_key in ignored:
                     continue
-                seen_pairs.add(pair_key)
-                scored.append((ratio, p1, p2))
-    scored.sort(key=lambda t: t[0], reverse=True)
+                if pair_key not in best or ratio > best[pair_key][0]:
+                    best[pair_key] = (ratio, p1, p2)
+    scored = sorted(best.values(), key=lambda t: t[0], reverse=True)
     return scored[:MAX_FUZZY_PAIRS]
+
+
+def _first_name_link(f1: str, f2: str):
+    """``(confidence, reason)`` when two given names could be one person's, else
+    ``None``. Both names are assumed to already share a first letter.
+
+    Deliberately narrow: a bare initial, or a short form that is a genuine
+    prefix of the longer name. A nickname that is not a prefix ("Bob"/"Robert",
+    "Bill"/"William") is NOT claimed here — it would need a curated list, and
+    every entry on such a list is a judgement call that produces a confident
+    wrong pair when it misses.
+    """
+    if f1 == f2:
+        return (0.9, "same first name, middle initial differs")
+    if len(f1) == 1 or len(f2) == 1:
+        return (0.7, "one record has only an initial")
+    short, long_ = (f1, f2) if len(f1) < len(f2) else (f2, f1)
+    if len(short) >= MIN_SHORT_FORM_LEN and long_.startswith(short):
+        return (0.8, "short form of the same first name")
+    return None
+
+
+def _name_variant_pairs(players: list, ignored: set, already: set) -> list:
+    """Same surname, compatible first name and compatible middle initials —
+    the duplicates full-string similarity structurally cannot see.
+
+    "Brad K Mant" and "Mant, Bradley" are one person, but two differences stack
+    (a short form AND a middle initial), and edit-distance degrades
+    multiplicatively: each difference alone scores 0.86 and 0.90, together only
+    0.78, well under ``FUZZY_MERGE_THRESHOLD``. Dropping that threshold far
+    enough to catch it floods a 1,500-player roster with genuinely different
+    people, so this compares the name's PARTS instead of the whole string.
+
+    Blocked on (surname, first initial), which costs nothing: every rule in
+    ``_first_name_link`` already requires the first letter to agree.
+
+    Never bulk-mergeable. A surname and one initial is not a unique identity —
+    two brothers, or a father and son, are exactly this shape.
+    """
+    groups: dict[tuple, list] = {}
+    for p in players:
+        if _is_redacted_name(p.name):
+            continue
+        for key in _name_keys(p):
+            parts = _name_parts(key)
+            if not parts:
+                continue
+            first, last, middles = parts
+            if len(last) < 2:
+                continue
+            groups.setdefault((last, first[0]), []).append((p, key, first, middles))
+
+    best: dict[tuple, tuple] = {}
+    for group in groups.values():
+        for i in range(len(group)):
+            p1, k1, f1, m1 = group[i]
+            for j in range(i + 1, len(group)):
+                p2, k2, f2, m2 = group[j]
+                if p1.id == p2.id or k1 == k2:
+                    continue
+                pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
+                if pair_key in ignored or pair_key in already:
+                    continue
+                link = _first_name_link(f1, f2)
+                if not link or not _middles_compatible(m1, m2):
+                    continue
+                conf, reason = link
+                if pair_key not in best or conf > best[pair_key][0]:
+                    best[pair_key] = (conf, reason, p1, p2)
+    scored = sorted(best.values(), key=lambda t: t[0], reverse=True)
+    return scored[:MAX_VARIANT_PAIRS]
 
 
 @router.get("/merge-candidates")
 async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    """Return pairs of players within an org that look like duplicates: exact
-    normalised-name matches (``kind: "exact"``, safe for Bulk Approve) plus,
-    tagged separately, near-miss spelling pairs (``kind: "fuzzy"``) that only
-    ever reach a manual Confirm."""
+    """Return pairs of players within an org that look like duplicates.
+
+    Three tiers, tagged so the screen can treat them differently:
+    ``exact`` (identical normalised names, safe for Bulk Approve), ``fuzzy``
+    (a near-miss spelling, e.g. Malcolm/Malcom) and ``name_variant`` (same
+    surname, a short form or initial standing in for the first name). Only
+    ``exact`` is ever bulk-mergeable; the other two always need a human to
+    confirm it is one person.
+    """
     result = await db.execute(
         select(Player).where(Player.organisation_id == uuid.UUID(org_id))
     )
@@ -146,36 +247,68 @@ async def get_merge_candidates(org_id: str, db: AsyncSession = Depends(get_db), 
     )
     ignored = {(r.player_a_id, r.player_b_id) for r in ignored_res.mappings().all()}
 
-    # Group by normalised name
+    # Enriching a player costs two queries, and the tiers below overlap on the
+    # same people — cache per player so a player in several pairs is read once.
+    enriched_cache: dict = {}
+
+    async def enrich(p: Player) -> dict:
+        if p.id not in enriched_cache:
+            enriched_cache[p.id] = await _enrich_player(db, p)
+        return enriched_cache[p.id]
+
+    # Group by normalised name. A player with a display-name override is filed
+    # under both spellings, so `emitted` stops one pair being listed twice.
     groups: dict[str, list[Player]] = {}
     for p in players:
-        key = _normalise(p.name)
-        groups.setdefault(key, []).append(p)
+        for key in _name_keys(p):
+            groups.setdefault(key, []).append(p)
 
     candidate_pairs = []
+    emitted: set = set()
     for key, group in groups.items():
         if len(group) < 2:
             continue
-        enriched = [await _enrich_player(db, p) for p in group]
-
-        for i in range(len(enriched)):
-            for j in range(i + 1, len(enriched)):
-                pair_key = tuple(sorted([enriched[i]["id"], enriched[j]["id"]]))
-                if pair_key in ignored:
+        for i in range(len(group)):
+            for j in range(i + 1, len(group)):
+                p1, p2 = group[i], group[j]
+                if p1.id == p2.id:
                     continue
+                pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
+                if pair_key in ignored or pair_key in emitted:
+                    continue
+                emitted.add(pair_key)
+                a, b = await enrich(p1), await enrich(p2)
                 candidate_pairs.append({
                     "kind": "exact",
                     "normalised_name": key,
-                    "redacted": _is_redacted_name(enriched[i]["name"]) or _is_redacted_name(enriched[j]["name"]),
-                    "player_a": enriched[i],
-                    "player_b": enriched[j],
+                    "redacted": _is_redacted_name(p1.name) or _is_redacted_name(p2.name),
+                    "player_a": a,
+                    "player_b": b,
                 })
 
     for ratio, p1, p2 in _fuzzy_name_pairs(players, ignored):
-        a, b = await _enrich_player(db, p1), await _enrich_player(db, p2)
+        pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
+        if pair_key in emitted:
+            continue
+        emitted.add(pair_key)
+        a, b = await enrich(p1), await enrich(p2)
         candidate_pairs.append({
             "kind": "fuzzy",
             "confidence": round(ratio, 2),
+            "normalised_name": None,
+            "redacted": False,
+            "player_a": a,
+            "player_b": b,
+        })
+
+    for conf, reason, p1, p2 in _name_variant_pairs(players, ignored, emitted):
+        pair_key = tuple(sorted([str(p1.id), str(p2.id)]))
+        emitted.add(pair_key)
+        a, b = await enrich(p1), await enrich(p2)
+        candidate_pairs.append({
+            "kind": "name_variant",
+            "confidence": conf,
+            "reason": reason,
             "normalised_name": None,
             "redacted": False,
             "player_a": a,
