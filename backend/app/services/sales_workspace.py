@@ -885,6 +885,25 @@ async def create_list_from_crm_deals(
     }
 
 
+async def wizard_signal_for_club(session: AsyncSession, marketing_club_id, days: int = 365) -> Optional[dict]:
+    """The Wizard Clubs page's own row for THIS one club — search terms,
+    selected/searched flags, whether it arrived via a Meta ad, registration
+    progress and last-seen date — for the drawer's "someone from this club
+    searched/selected it in the trial wizard" card. Same guid-first,
+    name-fallback match `wizard_source_by_club` uses; this just narrows the
+    whole-platform result down to one club rather than a bool per club, so
+    the drawer can show WHAT the interest was, not just that there was some."""
+    from app.services import wizard_club_lists as wcl
+
+    rows = await wcl.merged_wizard_clubs(session, days)
+    matches = await wcl._directory_matches(session, rows)
+    for r in rows:
+        club = matches.get(r["key"])
+        if club is not None and club.id == marketing_club_id:
+            return r
+    return None
+
+
 async def wizard_source_by_club(session: AsyncSession, days: int = 365) -> dict:
     """marketing_club_id -> {'selected': bool, 'searched': bool} from the
     Wizard Clubs / Meta Ads data — the SAME guid-first, name-fallback

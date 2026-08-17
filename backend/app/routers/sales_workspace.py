@@ -345,6 +345,13 @@ async def get_club(
         registrant = {"name": poc["name"], "email": poc.get("email"), "role": role}
     deal_out["registrant"] = registrant
 
+    # Did anyone from this club search for it or pick it in the trial signup
+    # wizard? A real buying signal worth a rep seeing, even before anything
+    # else has happened — same source the Wizard Clubs page reads, narrowed
+    # to this one club.
+    deal_out["wizard_signal"] = await sw.wizard_signal_for_club(db, deal.marketing_club_id) \
+        if deal.marketing_club_id else None
+
     # Same shape the queue list already carries, so the drawer's own "Called
     # / Never called" reads off the identical field the queue row does.
     last_call = (await sw.last_calls_by_deal(db, [deal.id])).get(deal.id)

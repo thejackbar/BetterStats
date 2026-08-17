@@ -180,6 +180,42 @@ function ClubSummaryCard({ deal }) {
   )
 }
 
+const WIZARD_SOURCE_LABEL = {
+  both: 'Searched & selected in the trial wizard',
+  selected: 'Selected itself in the trial wizard',
+  searched: 'Searched for itself in the trial wizard',
+}
+
+// Someone from this club typed its name into the trial signup search, or
+// picked it — a real buying signal worth a rep seeing even before anything
+// else has happened. Same data (and the same guid-first, name-fallback
+// match) the Wizard Clubs page itself reads, narrowed to this one club.
+function WizardSignalCard({ signal }) {
+  if (!signal) return null
+  const queries = (signal.queries || []).filter(Boolean)
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 flex-wrap mb-1">
+        <h3 className="font-display font-bold text-[13px]">{WIZARD_SOURCE_LABEL[signal.source] || 'Trial wizard activity'}</h3>
+        {signal.via_meta && <Pill tone="accent">META AD</Pill>}
+      </div>
+      {queries.length > 0 && (
+        <p className="text-[12px] text-pb-faint">
+          Searched: {queries.map((q, i) => (
+            <span key={q}>{i > 0 && ' · '}<span className="text-pb-text">&ldquo;{q}&rdquo;</span></span>
+          ))}
+        </p>
+      )}
+      {signal.furthest_step && (
+        <p className="text-[12px] text-pb-faint mt-0.5">Progress: <span className="text-pb-text">{signal.furthest_step}</span></p>
+      )}
+      {signal.last_at && (
+        <p className="text-[11px] text-pb-faintest mt-0.5">Last seen {new Date(signal.last_at).toLocaleDateString('en-AU')}</p>
+      )}
+    </div>
+  )
+}
+
 // Stage / onboarding method / call status — the three things a rep asks
 // first before reading the engagement breakdown below it.
 function DealSummaryStrip({ deal }) {
@@ -798,6 +834,8 @@ export default function SalesWorkspace() {
                 )}
                 <ClubSummaryCard deal={drawer.deal} />
               </div>
+
+              <WizardSignalCard signal={drawer.deal.wizard_signal} />
 
               <div className={CARD}>
                 <DealSummaryStrip deal={drawer.deal} />
