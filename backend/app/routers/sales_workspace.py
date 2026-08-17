@@ -359,14 +359,33 @@ async def get_club(
     deal_out["last_call"] = crm_service._activity_dict(last_call) if last_call else None
 
     engagement = None
+    website_visits = None
     if club is not None:
+        club_id_for_reads = club.id  # captured now: club_engagement_breakdown
+                                      # below commits, which expires every ORM
+                                      # object in this session (see its own
+                                      # docstring) — read anything else off
+                                      # `club` before calling it, not after.
+        # Website analytics (page views/days visited/unique IPs/contact-page
+        # hit) — the CRM card's own panel, `components/admin/crm/ui.jsx`'s
+        # `WebsiteAnalyticsPanel`, fetches this itself via a super-admin-only
+        # endpoint a 'sales' caller can't reach directly, so it's embedded in
+        # the drawer payload here instead (same reasoning as `engagement`
+        # below), via the exact service function that endpoint calls. Read
+        # BEFORE the engagement breakdown for the same expiry reason.
+        try:
+            from app.services import club_directory as cd
+            website_visits = await cd.club_visit_detail(db, club_id_for_reads)
+        except Exception:  # noqa: BLE001 - the drawer must still render without it
+            logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
+            website_visits = None
         try:
             from app.routers.marketing import club_engagement_breakdown
-            engagement = await club_engagement_breakdown(str(club.id), db)
+            engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
         except HTTPException:
             engagement = None
         except Exception:  # noqa: BLE001 - the drawer must still render without it
-            logger.exception("sales_workspace: engagement breakdown failed for club %s", club.id)
+            logger.exception("sales_workspace: engagement breakdown failed for club %s", club_id_for_reads)
             engagement = None
 
     return {
@@ -374,6 +393,7 @@ async def get_club(
         "contacts": contacts,
         "activities": activities_out,
         "engagement": engagement,
+        "website_visits": website_visits,
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
     }

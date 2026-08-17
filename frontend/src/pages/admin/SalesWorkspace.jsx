@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel } from '../../components/admin/crm/ui'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
@@ -286,6 +286,47 @@ function EngagementPanel({ engagement }) {
               <div className="font-display font-bold text-[15px]">{val ?? 0}</div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Same panel the Sales Pipeline card shows (components/admin/crm/ui.jsx's
+// WebsiteAnalyticsPanel) but reading off the drawer's own already-fetched
+// `website_visits` field instead of fetching it itself — that component's
+// own fetch (api.mktClubVisits) hits a super-admin-only endpoint a 'sales'
+// caller can't reach, so the Sales Workspace drawer embeds the same data
+// server-side instead (see routers/sales_workspace.py::get_club).
+function WebsiteAnalyticsCard({ data }) {
+  if (!data?.views) {
+    return <p className="text-[12px] text-pb-faintest">No tracked site visits for this club yet.</p>
+  }
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Page views</div>
+        <div className="font-display font-bold text-[15px]">{data.views}</div>
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Days visited</div>
+        <div className="font-display font-bold text-[15px]">{data.distinct_days}</div>
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Unique IPs</div>
+        <div className="font-display font-bold text-[15px]">{data.unique_ips}</div>
+        {data.visits_per_ip != null && <div className="text-pb-faintest text-[10.5px]">{data.visits_per_ip}/IP avg</div>}
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Contact page</div>
+        <div className="font-display font-bold text-[15px]">{data.contact_page_visited ? 'Visited' : 'No'}</div>
+      </div>
+      {data.inferred_modules?.length > 0 && (
+        <div className="col-span-2 sm:col-span-4 pb-card px-2.5 py-2">
+          <div className="text-pb-faint text-[10.5px] uppercase tracking-wide mb-1">Analytics-derived product interest</div>
+          <div className="flex flex-wrap gap-1">
+            {data.inferred_modules.map(k => <Pill key={k} tone="accent">{moduleLabel(k)}</Pill>)}
+          </div>
         </div>
       )}
     </div>
@@ -845,6 +886,13 @@ export default function SalesWorkspace() {
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
                 <EngagementPanel engagement={drawer.engagement} />
               </div>
+
+              {drawer.deal.marketing_club_id && (
+                <div className={CARD}>
+                  <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
+                  <WebsiteAnalyticsCard data={drawer.website_visits} />
+                </div>
+              )}
 
               <div className={CARD}>
                 <div className="flex items-center justify-between mb-2">
