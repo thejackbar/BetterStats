@@ -1249,6 +1249,29 @@ export default function SalesWorkspace() {
               </div>
 
               <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Notes</h3>
+                <form onSubmit={submitNote} className="flex items-start gap-2 mb-3">
+                  <TextInput value={noteForm.body} onChange={e => setNoteForm(f => ({ ...f, body: e.target.value }))}
+                    placeholder="e.g. Secretary is best contact, prefers mobile after 5pm" className="flex-1" />
+                  <label className="flex items-center gap-1 text-[11px] text-pb-faint whitespace-nowrap pt-2">
+                    <input type="checkbox" checked={noteForm.pinned} onChange={e => setNoteForm(f => ({ ...f, pinned: e.target.checked }))} /> Pin
+                  </label>
+                  <Btn type="submit" sm disabled={savingNote}>Add</Btn>
+                </form>
+                {pinnedNotes.length > 0 && (
+                  <div className="mb-3 space-y-1.5">
+                    {pinnedNotes.map(a => (
+                      <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5">{a.body}</div>
+                    ))}
+                  </div>
+                )}
+                <h4 className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1.5">History</h4>
+                {timeline.length === 0 ? (
+                  <p className="text-[12px] text-pb-faintest">No activity yet.</p>
+                ) : timeline.map(a => <ActivityRow key={a.id} a={a} />)}
+              </div>
+
+              <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
                 <form onSubmit={submitEmail} className="space-y-2">
                   <Field label="Contact">
@@ -1309,33 +1332,15 @@ export default function SalesWorkspace() {
                   )}
                   {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && !loadingEmailPreview && (
                     <EmailEditorTabs key={emailEditorKey} ref={emailEditorRef} html={emailForm.body}
-                      onChange={v => setEmailForm(f => ({ ...f, body: v }))} height={380} />
+                      onChange={v => setEmailForm(f => ({ ...f, body: v }))} height={380} simple
+                      // The body here is already a finished email (contact/
+                      // club names substituted server-side by /email-preview)
+                      // — Preview just shows exactly what's about to be
+                      // sent, no second server round trip needed.
+                      onEnterPreview={async ({ html }) => ({ html, total: 1, index: 0 })} />
                   )}
                   <Btn type="submit" variant="primary" disabled={savingEmail || loadingEmailPreview}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
                 </form>
-              </div>
-
-              <div className={CARD}>
-                <h3 className="font-display font-bold text-[13px] mb-2">Notes</h3>
-                <form onSubmit={submitNote} className="flex items-start gap-2 mb-3">
-                  <TextInput value={noteForm.body} onChange={e => setNoteForm(f => ({ ...f, body: e.target.value }))}
-                    placeholder="e.g. Secretary is best contact, prefers mobile after 5pm" className="flex-1" />
-                  <label className="flex items-center gap-1 text-[11px] text-pb-faint whitespace-nowrap pt-2">
-                    <input type="checkbox" checked={noteForm.pinned} onChange={e => setNoteForm(f => ({ ...f, pinned: e.target.checked }))} /> Pin
-                  </label>
-                  <Btn type="submit" sm disabled={savingNote}>Add</Btn>
-                </form>
-                {pinnedNotes.length > 0 && (
-                  <div className="mb-3 space-y-1.5">
-                    {pinnedNotes.map(a => (
-                      <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5">{a.body}</div>
-                    ))}
-                  </div>
-                )}
-                <h4 className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1.5">History</h4>
-                {timeline.length === 0 ? (
-                  <p className="text-[12px] text-pb-faintest">No activity yet.</p>
-                ) : timeline.map(a => <ActivityRow key={a.id} a={a} />)}
               </div>
             </>
           )}
