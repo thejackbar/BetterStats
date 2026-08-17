@@ -412,6 +412,20 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     if exceed:
         warnings.append("Online (GR) data already shows more than your sheet for: "
                         + ", ".join(exceed[:5]) + " — we'll show the higher online figure.")
+    # An unmatched season is not an error — its figures still count towards the
+    # career — but they stop being a season, so the season-by-season table goes
+    # quiet about years the club can see in its own book. Reported live by a
+    # club whose sheet ran back to 2010/11 while only three seasons existed.
+    season_unmatched = [lb for lb, m in smatch.items()
+                        if not m.get("season_id") and not m.get("is_prior")]
+    if season_unmatched:
+        warnings.append(
+            f"{len(season_unmatched)} season(s) in your sheet don't exist yet: "
+            + ", ".join(season_unmatched[:8]) + ("…" if len(season_unmatched) > 8 else "")
+            + " — create them on the Seasons step to keep those years on the season-by-season "
+              "table. Left as they are, their figures still count towards each player's career "
+              "but arrive as one 'Prior Seasons & Adjustments' line instead of their own seasons."
+        )
     grade_unresolved = [lb for lb, m in gmatch.items() if m.get("status") in ("fuzzy", "none")]
     if grade_unresolved:
         warnings.append(
