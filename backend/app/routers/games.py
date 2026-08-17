@@ -8,6 +8,7 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.db import Game, Grade, Season, Organisation, BattingInnings, BowlingSpell, FieldingStat, Player, ManualGame, ManualBattingInnings, ManualBowlingSpell, ManualFieldingStat, get_db
+from app.services import grade_scope
 from app.services.aggregations import get_game_fall_of_wickets, get_game_partnerships
 from app.services.sync import _caught_by_keeper, _innings_keeper_names
 
@@ -59,6 +60,22 @@ async def list_games(
     grade_id: Optional[str] = Query(None),
     limit: int = Query(20, le=100),
     finals_only: Optional[bool] = Query(None),
+    categories: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default. "
+            "Ignored when an explicit grade is picked."
+        ),
+    ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     manual_games = await _fetch_manual_games_as_list(
@@ -123,6 +140,16 @@ async def list_games(
         params["grade_id"] = grade_id
     if finals_only:
         clauses.append("g.is_final = TRUE")
+    # Grade-type / match-type scope. An explicitly picked grade beats it, the
+    # same rule the leaderboards follow. Manual games are fetched separately
+    # above and a manual game may have no grade at all, so they are deliberately
+    # left alone — the scope clause's own `IS NULL OR` half makes the same call
+    # for a grade-less row on this side.
+    if not grade_id:
+        scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+        if scope.active:
+            clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+            scope.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first
     # (classify_match_result computes it against that syncing org's own

@@ -1,5 +1,95 @@
 # BetterStats — Claude Session Notes
 
+## A grade is several things at once, and the dashboard filters on that (migration 259, v9.26.0, Aug 2026)
+
+Reported off the club dashboard: the GENDER filter should be a **Grade Type**
+filter (Men's / Juniors / Women's / Masters), T20 needs to exist, a grade should
+be able to hold several classifications at once, there should be a second
+**Match Type** filter (Two Day / One Day / T20), and the CAPTAIN filter should
+go.
+
+- **The Gender filter was reading a player attribute to answer a question about
+  the grade.** `p.gender` is free text, every writer stores it lowercase, and
+  the leaderboard SQL compared `p.gender = :gender` against the `'Male'` /
+  `'Female'` the pill sent — so it returned an empty board wherever it was
+  actually wired, and on the dashboard it was a **dead control** (no state, a
+  no-op setter). Same for CAPTAIN there, and on Players, Games and Ladders.
+  Those pills are off on all four screens now. **Gender is left in place on
+  Leaderboard and Records**, where it is wired; the casing bug is theirs and was
+  not chased here.
+- **`grades.categories` and `grades.match_formats` (TEXT[], migration 259)**,
+  and **`grades.category` stays and is kept in step with the first entry of
+  `categories`** in canonical order. That is what makes this additive: the
+  public grade grouping, `grade_labels.org_grade_categories`, the AFL silo's own
+  single-label readers and everything else that reads one value are untouched.
+  Send `category` alone to `PATCH /admin/grades/classify` and it still works.
+- **The two axes resolve into ONE `GradeScope` and one exclusion list**, so
+  adding a whole second filter changed no query — `resolve_scope` gained a
+  `formats=` argument and every one of the ~25 `scope.clause(...)` call sites is
+  as it was. A grade has to pass both tests to stay in.
+- **The axes fail differently on an unclassified grade, deliberately.** Every
+  grade has a category (the name suggestion bottoms out at men's senior), so
+  that test always has something to judge. A grade's FORMAT is often genuinely
+  unknowable, so a grade we cannot place is left OUT of an explicit format
+  filter rather than swept in — asking for T20 and being shown everything the
+  club has ever run is worse than being shown what we can vouch for.
+- **Format is derived, not asked for.** `org_grade_format_sets` falls: what the
+  club ticked → **the formats actually recorded on that grade's games
+  (`games.match_format`)** → the grade name. The middle step is the one that
+  matters: it is accurate for a single-format grade and needs no admin action,
+  which is why most clubs will find their grades already right. `fee_format` is
+  read too, but `'exclude'`/`'women'` are billing answers and map to nothing.
+- **`format_from_match_type` returns None for an unrecognised string, and must
+  keep doing so.** `fees.derive_fee_format` has to pick something ("everything
+  else is a single day") because a match day must be billed; a filter that
+  cannot tell has to say so instead.
+- **An explicit pick matches ANY of a grade's categories; the club DEFAULT
+  matches only the primary one.** Load-bearing, and the browser found it: with
+  ANY-matching everywhere, a "Girls Under 16" grade sneaks back into a default
+  that leaves junior out, on its women's half — junior seasons back inside
+  senior careers, which is the exact bug migration 228 exists to prevent. An
+  explicit "show me the women's grades" is an INCLUSION and should find it;
+  the default is an EXCLUSION and should not. `primary_category()` is the same
+  junior-first precedence `suggest_category` already used, so the default path
+  is byte-for-byte what it was.
+- **Grade-level, not per-fixture, and that is the granularity the club asked
+  for.** A mixed-format grade (see the `match_format` note below — Applecross
+  5th Grade is 32 one-day and 26 two-day) is tagged with both and appears under
+  either. Filtering per fixture would mean a `games.match_format` clause in
+  every one of those 25 call sites, several of which read `pss.grade_id` where
+  no format exists at all.
+- **Fixed while here, and it was a real one**: `_JUNIOR`/`_MASTERS` ended their
+  age patterns `\d+\b`, and a word boundary cannot match before a letter — so
+  **"Under 14s", "U14s", "Year 9s" and "Over 40s" all classified as SENIOR**.
+  The singular spellings always worked, which is why nobody noticed, and the
+  plural is how clubs actually write them. Junior seasons have been sitting
+  inside senior career averages for every club that spells it that way. Now
+  `\d+s?`.
+- **`get_club_summary` switches source under a scope**, the same trade the
+  leaderboards and career totals already make: CA's season aggregates carry no
+  grade (`v_effective_player_season_stats`'s `api` branch hardcodes NULL), so a
+  filtered figure is only answerable from the per-innings scorecards.
+- **The additive "Include" row and the pick-one "Grade Type" row are never
+  shown together** (`showCategoryFilter && !showGradeTypeFilter`). They answer
+  the same question two ways, and the dashboard briefly drew both. "All" on the
+  Grade Type row means the club's own default, and the note under the bar says
+  what that leaves out rather than dropping a club's juniors quietly.
+- **`grades-with-stats` computes classification in its OWN query.** Unnesting
+  the two array columns into the existing aggregate multiplies every batting row
+  by the number of tags and silently inflates the RUNS column — written that way
+  first, caught before it shipped, and asserted against.
+- **Verified against a real Postgres** (92 checks: migration 259 applied three
+  times to a populated pre-259 table and matching the lifespan mirror, the
+  plural age-group spellings, both org resolvers' three-step fallbacks, every
+  branch of the two axes composing, a senior-only club coming out inactive and
+  emitting no clause, the scoped summary, and the route bodies incl. the
+  runs-inflation guard, the `category` column staying in step, an empty list
+  clearing back to the suggestion and apply-suggestions refusing to guess a
+  format) and **driven in Chromium** (32: the pills that render and the ones
+  that no longer do, the exact params on the wire for all four dashboard
+  fetches, the two filters composing, clearing one without the other, the
+  Grades screen's chips and its PATCH, no page errors, no overflow at 390px).
+
 ## `games.match_format` was never written, so every match was a one-dayer (v9.25.2, Aug 2026)
 
 Reported from Applecross Accounts: grades that play two-day cricket all showed a

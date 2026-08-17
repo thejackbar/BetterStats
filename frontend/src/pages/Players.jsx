@@ -125,6 +125,8 @@ export default function Players() {
             setSelectedGrade={setSelectedGrade}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            showGenderFilter={false}
+            showCaptainFilter={false}
           />
         </div>
 

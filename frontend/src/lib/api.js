@@ -154,10 +154,12 @@ export const api = {
   getSeasonGrades: (orgId, seasonId) => request(`/organisations/${orgId}/seasons/${seasonId}/grades`),
   triggerSync: (orgId) => request(`/organisations/${orgId}/sync`, { method: 'POST' }),
   getSyncLogs: (orgId) => request(`/organisations/${orgId}/sync-logs`),
-  getOrgSummary: (orgId, { seasonId, gradeId } = {}) => {
+  getOrgSummary: (orgId, { seasonId, gradeId, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
+    if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/organisations/${orgId}/summary?${params}`)
   },
   getUpcomingMilestones: (orgId, limit = 20) =>
@@ -184,7 +186,7 @@ export const api = {
   // Players
   listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
-  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories } = {}) => {
+  getPlayerStats: (playerId, { seasonId, gradeId, lastNGames, startDate, endDate, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -192,6 +194,7 @@ export const api = {
     if (startDate) params.set('start_date', startDate)
     if (endDate) params.set('end_date', endDate)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/players/${playerId}/stats?${params}`)
   },
   // `categories` is the same comma-separated grade-category selection the
@@ -240,12 +243,14 @@ export const api = {
     request(`/players/${playerId}/request-sync`, { method: 'POST', body: JSON.stringify({ note }) }),
 
   // Games
-  listGames: (orgId, { seasonId, gradeId, limit, finalsOnly } = {}) => {
+  listGames: (orgId, { seasonId, gradeId, limit, finalsOnly, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (limit) params.set('limit', limit)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/games?${params}`)
   },
   getOrgResults: (orgId, { seasonId, gradeId, finalsOnly } = {}) => {
@@ -347,10 +352,20 @@ export const api = {
     }),
 
   // Grade category label + public visibility
-  classifyGrade: (gradeName, { category, is_public, display_order } = {}) =>
+  classifyGrade: (gradeName, { category, categories, match_formats, is_public, display_order } = {}) =>
     request('/admin/grades/classify', {
       method: 'PATCH',
-      body: JSON.stringify({ grade_name: gradeName, category, is_public, display_order }),
+      // Only send what the caller actually set: the endpoint reads an omitted
+      // field as "leave unchanged" and an empty array as "clear this back to
+      // the suggestion", so a JSON `null` for an untouched axis would wipe it.
+      body: JSON.stringify({
+        grade_name: gradeName,
+        ...(category !== undefined ? { category } : {}),
+        ...(categories !== undefined ? { categories } : {}),
+        ...(match_formats !== undefined ? { match_formats } : {}),
+        ...(is_public !== undefined ? { is_public } : {}),
+        ...(display_order !== undefined ? { display_order } : {}),
+      }),
     }),
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
@@ -2471,7 +2486,7 @@ export const api = {
     request(`/club-admin/website/gallery/images/${id}`, { method: 'DELETE' }),
 
   // Records
-  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories } = {}) => {
+  getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2480,6 +2495,7 @@ export const api = {
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/records/${orgId}?${params}`)
   },
   getRecordsGrades: (orgId, seasonId) => {
@@ -2494,7 +2510,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender, overseas, categories } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2507,9 +2523,10 @@ export const api = {
     if (gender) params.set('gender', gender)
     if (overseas) params.set('overseas', overseas)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender, overseas, categories } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2523,9 +2540,10 @@ export const api = {
     if (gender) params.set('gender', gender)
     if (overseas) params.set('overseas', overseas)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/leaderboard/bowling?${params}`)
   },
-  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender, overseas, categories } = {}) => {
+  fieldingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2537,9 +2555,10 @@ export const api = {
     if (gender) params.set('gender', gender)
     if (overseas) params.set('overseas', overseas)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/leaderboard/fielding?${params}`)
   },
-  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender, overseas, categories } = {}) => {
+  sirsLeaderboard: (orgId, type, { seasonId, gradeName, finalsOnly, captainOnly, limit, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeName) params.set('grade_name', gradeName)
@@ -2549,6 +2568,7 @@ export const api = {
     if (gender) params.set('gender', gender)
     if (overseas) params.set('overseas', overseas)
     if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/leaderboard/sirs/${type}?${params}`)
   },
   getPlayerCaptainStats: (playerId) => request(`/players/${playerId}/captain-stats`),

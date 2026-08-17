@@ -325,16 +325,20 @@ async def get_org_grades(
 
 @router.get("/{org_id}/grade-categories")
 async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_db)):
-    """Which grade categories this club actually runs, and what counts by default.
+    """Which grade categories and formats this club runs, and what counts by default.
 
-    Public and cheap: every stats page needs it to decide which category toggles
-    to draw at all. A club with no junior programme gets an empty `available`
-    and therefore no toggles, which is also the case where the filter itself is
-    a no-op — the two answers agree by construction.
+    Public and cheap: every stats page needs it to decide which toggles to draw
+    at all. A club with no junior programme gets an empty `available` and
+    therefore no toggles, which is also the case where the filter itself is a
+    no-op — the two answers agree by construction. `available_formats` follows
+    the same rule for the match-type axis, and is legitimately empty for a club
+    whose games predate `games.match_format` being recorded and whose grade
+    names say nothing about format.
     """
     return {
         "available": await grade_scope.org_available_categories(db, org_id),
         "default": list(await grade_scope.club_default_categories(db, org_id)),
+        "available_formats": await grade_scope.org_available_formats(db, org_id),
     }
 
 
@@ -383,11 +387,28 @@ async def get_org_summary(
     org_id: str,
     season_id: str | None = None,
     grade_id: str | None = None,
+    categories: str | None = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omit for the club's own default."
+        ),
+    ),
+    formats: str | None = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omit for no format filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
-    return await get_club_summary(db, org_id, season_id, grade_id)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
+    summary["scope"] = scope.as_meta()
+    return summary
 
 
 @router.get("/{org_id}/fixtures")

@@ -20,7 +20,10 @@ from app.models.db import (
 )
 from app.routers.auth import get_current_user, get_current_club
 from app.auth.capabilities import require_cap, MANAGE_MERGES
-from app.services.grade_labels import suggest_category, normalise_category
+from app.services.grade_labels import (
+    GRADE_CATEGORIES, MATCH_FORMATS, format_from_match_type, normalise_category,
+    normalise_format, suggest_categories, suggest_category, suggest_formats,
+)
 from app.services.player_aliases import seed_alias_on_rename
 from app.services.import_reconcile import reconcile_imported_totals
 from app.auth.modules import require_module
@@ -598,6 +601,31 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     )
     raw_rows = [dict(r) for r in raw.mappings().all()]
 
+    # Classification is its own query on purpose. Unnesting the two array
+    # columns into the aggregate above would multiply every batting row by the
+    # number of tags on the grade and silently inflate the runs column.
+    class_rows = await db.execute(
+        text("""
+            SELECT gr.name AS grade_name,
+                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT c), NULL)  AS categories,
+                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT f), NULL)  AS match_formats,
+                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT mf), NULL) AS seen_formats
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN LATERAL unnest(COALESCE(gr.categories, '{}'::text[])) AS c ON TRUE
+            LEFT JOIN LATERAL unnest(COALESCE(gr.match_formats, '{}'::text[])) AS f ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT DISTINCT g2.match_format AS mf
+                FROM v_effective_games g2
+                WHERE g2.grade_id = gr.id AND g2.match_format IS NOT NULL
+            ) obs ON TRUE
+            WHERE s.organisation_id = :org_id
+            GROUP BY gr.name
+        """),
+        {"org_id": org_id},
+    )
+    classification = {r["grade_name"]: dict(r) for r in class_rows.mappings().all()}
+
     log_rows = await db.execute(
         text("""
             SELECT alias_name, canonical_name
@@ -628,9 +656,22 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
             "runs": 0,
             "aliases": [],
             "category": None,
+            "categories": set(),
+            "match_formats": set(),
+            "seen_formats": set(),
             "is_public": True,
             "display_order": None,
         })
+        cls = classification.get(name) or {}
+        slot["categories"].update(
+            c for c in (normalise_category(v) for v in (cls.get("categories") or [])) if c
+        )
+        slot["match_formats"].update(
+            f for f in (normalise_format(v) for v in (cls.get("match_formats") or [])) if f
+        )
+        slot["seen_formats"].update(
+            f for f in (format_from_match_type(v) for v in (cls.get("seen_formats") or [])) if f
+        )
         slot["games"] += int(row["games"] or 0)
         slot["runs"] += int(row["runs"] or 0)
         slot["players"] = max(slot["players"], int(row["players"] or 0))
@@ -652,10 +693,36 @@ async def list_grades_with_stats(org_id: str, db: AsyncSession = Depends(get_db)
     for canonical, slot in bucket.items():
         if category_by_name.get(canonical):
             slot["category"] = category_by_name[canonical]
-        slot["suggested_category"] = suggest_category(slot["display_name"] or canonical)
+        label = slot["display_name"] or canonical
+        slot["suggested_category"] = suggest_category(label)
         slot["category_confirmed"] = slot["category"] is not None
         # Effective category readers/UI use when nothing is confirmed yet.
         slot["category"] = slot["category"] or slot["suggested_category"]
+
+        # The two multi-valued axes. Each reports what is CONFIRMED, what would
+        # be suggested, and which of the two the effective answer came from, so
+        # the screen can mark a row as a guess rather than pass one off as the
+        # club's own decision.
+        suggested_cats = list(suggest_categories(label))
+        confirmed_cats = [c for c in GRADE_CATEGORIES if c in slot["categories"]]
+        if not confirmed_cats and slot["category_confirmed"]:
+            # A club that only ever used the single-value dropdown.
+            confirmed_cats = [slot["category"]]
+        slot["categories"] = confirmed_cats or suggested_cats
+        slot["suggested_categories"] = suggested_cats
+        slot["categories_confirmed"] = bool(confirmed_cats)
+
+        # Format falls back the same way grade_scope reads it: what the club
+        # ticked, else what this grade's games actually were, else the name.
+        suggested_fmts = [
+            f for f in MATCH_FORMATS
+            if f in (set(suggest_formats(label)) | slot["seen_formats"])
+        ]
+        confirmed_fmts = [f for f in MATCH_FORMATS if f in slot["match_formats"]]
+        slot["match_formats"] = confirmed_fmts or suggested_fmts
+        slot["suggested_formats"] = suggested_fmts
+        slot["formats_confirmed"] = bool(confirmed_fmts)
+        slot.pop("seen_formats", None)
 
     out = list(bucket.values())
     # The club's own reading order first (unordered sorts after every ordered
@@ -741,6 +808,15 @@ async def merge_grades(req: MergeGradesRequest, db: AsyncSession = Depends(get_d
 class GradeClassifyRequest(BaseModel):
     grade_name: str                 # canonical grade name (as shown in grades-with-stats)
     category: str | None = None     # omit to leave unchanged; one of GRADE_CATEGORIES
+    # Every category this grade belongs to — a grade can be more than one
+    # ("Girls Under 14" is junior AND women's). Omit to leave unchanged; an
+    # empty list clears back to the name-based suggestion. `category` is kept in
+    # step with the first entry so every reader of the single column is
+    # unaffected, and sending `category` alone still works.
+    categories: list[str] | None = None
+    # Which format(s) this grade plays — two_day / one_day / t20. Omit to leave
+    # unchanged; an empty list clears back to what the games themselves say.
+    match_formats: list[str] | None = None
     is_public: bool | None = None   # omit to leave unchanged
     # The club's reading order for this grade — 1 = first. Pass -1 to clear it
     # back to unordered (a plain None can't mean "clear" here, since None is
@@ -783,12 +859,35 @@ async def classify_grade(
 
     sets: list[str] = []
     params: dict = {"org": org_id, "names": names}
-    if req.category is not None:
+    if req.categories is not None:
+        picked = {c for c in (normalise_category(c) for c in req.categories) if c}
+        if req.categories and not picked:
+            raise HTTPException(status_code=400, detail="Invalid grade category")
+        ordered = [c for c in GRADE_CATEGORIES if c in picked]
+        sets.append("categories = :categories")
+        params["categories"] = ordered or None
+        # `category` is the one-answer view of the same decision and stays in
+        # step, so the public grade grouping, the AFL-style single-label readers
+        # and grade_labels.org_grade_categories all keep working. Cleared to
+        # NULL when the selection is cleared, which is what puts the row back on
+        # its name-based suggestion rather than stranding a stale label.
+        sets.append("category = :category")
+        params["category"] = ordered[0] if ordered else None
+    elif req.category is not None:
         cat = normalise_category(req.category)
         if cat is None:
             raise HTTPException(status_code=400, detail="Invalid grade category")
         sets.append("category = :category")
         params["category"] = cat
+        sets.append("categories = :categories")
+        params["categories"] = [cat]
+    if req.match_formats is not None:
+        picked_f = {f for f in (normalise_format(f) for f in req.match_formats) if f}
+        if req.match_formats and not picked_f:
+            raise HTTPException(status_code=400, detail="Invalid match format")
+        ordered_f = [f for f in MATCH_FORMATS if f in picked_f]
+        sets.append("match_formats = :match_formats")
+        params["match_formats"] = ordered_f or None
     if req.is_public is not None:
         sets.append("is_public = :is_public")
         params["is_public"] = req.is_public
@@ -814,6 +913,8 @@ async def classify_grade(
         "updated": result.rowcount,
         "grade_name": req.grade_name,
         "category": params.get("category"),
+        "categories": params.get("categories"),
+        "match_formats": params.get("match_formats"),
         "is_public": params.get("is_public"),
     }
 
@@ -927,35 +1028,68 @@ async def apply_grade_suggestions(
     current_user: User = Depends(require_cap(MANAGE_MERGES)),
     club: Organisation = Depends(get_current_club),
 ):
-    """Persist the name-based category suggestion for every not-yet-categorised
-    grade in the club. One-click starting point; admins can still correct any."""
+    """Persist the suggested classification for every not-yet-classified grade.
+
+    One-click starting point; admins can still correct any. Covers both axes:
+    the category comes from the grade name, the format from the formats actually
+    recorded on that grade's games (``games.match_format``) falling back to the
+    name. A grade whose format still can't be told is left alone rather than
+    given a guess — an unclassified grade drops out of a match-type filter,
+    and a wrong tag would put it in the wrong one instead.
+    """
     org_id = str(club.id)
     rows = await db.execute(
         text("""
-            SELECT DISTINCT gr.name FROM grades gr
+            SELECT gr.name,
+                   bool_or(gr.category IS NULL)      AS needs_category,
+                   bool_or(gr.match_formats IS NULL) AS needs_formats,
+                   ARRAY_REMOVE(ARRAY_AGG(DISTINCT g.match_format), NULL) AS seen
+            FROM grades gr
             JOIN seasons s ON s.id = gr.season_id
-            WHERE s.organisation_id = :org AND gr.category IS NULL
+            LEFT JOIN v_effective_games g ON g.grade_id = gr.id
+            WHERE s.organisation_id = :org
+              AND (gr.category IS NULL OR gr.match_formats IS NULL)
+            GROUP BY gr.name
         """),
         {"org": org_id},
     )
-    names = [r[0] for r in rows.all()]
+    pending = rows.mappings().all()
     updated = 0
-    for name in names:
-        res = await db.execute(
-            text("""
-                UPDATE grades gr
-                SET category = :cat
-                FROM seasons s
-                WHERE gr.season_id = s.id
-                  AND s.organisation_id = :org
-                  AND gr.name = :name
-                  AND gr.category IS NULL
-            """),
-            {"cat": suggest_category(name), "org": org_id, "name": name},
-        )
-        updated += res.rowcount or 0
+    for row in pending:
+        name = row["name"]
+        if row["needs_category"]:
+            cats = list(suggest_categories(name))
+            res = await db.execute(
+                text("""
+                    UPDATE grades gr
+                    SET category = :cat, categories = :cats
+                    FROM seasons s
+                    WHERE gr.season_id = s.id
+                      AND s.organisation_id = :org
+                      AND gr.name = :name
+                      AND gr.category IS NULL
+                """),
+                {"cat": cats[0], "cats": cats, "org": org_id, "name": name},
+            )
+            updated += res.rowcount or 0
+        seen = {f for f in (format_from_match_type(v) for v in (row["seen"] or [])) if f}
+        fmts = [f for f in MATCH_FORMATS if f in (seen | set(suggest_formats(name)))]
+        if row["needs_formats"] and fmts:
+            res = await db.execute(
+                text("""
+                    UPDATE grades gr
+                    SET match_formats = :fmts
+                    FROM seasons s
+                    WHERE gr.season_id = s.id
+                      AND s.organisation_id = :org
+                      AND gr.name = :name
+                      AND gr.match_formats IS NULL
+                """),
+                {"fmts": fmts, "org": org_id, "name": name},
+            )
+            updated += res.rowcount or 0
     await db.commit()
-    return {"updated": updated, "grades": len(names)}
+    return {"updated": updated, "grades": len(pending)}
 
 
 @router.get("/grade-merge-history")

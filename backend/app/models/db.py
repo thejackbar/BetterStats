@@ -2,7 +2,7 @@ from sqlalchemy import (
     Column, Boolean, Integer, BigInteger, Numeric, Date, Text, ForeignKey,
     TIMESTAMP, JSON, UniqueConstraint, LargeBinary, Index, text
 )
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.sql import func
@@ -1116,6 +1116,19 @@ class Grade(Base):
     # name-based suggestion). Attaches to a grade name club-wide, like the
     # display-name override.
     category = Column(Text, nullable=True)
+    # Every category this grade belongs to (migration 259). A grade is not one
+    # thing: "Girls Under 14" is junior AND women's. Keys are the same
+    # GRADE_CATEGORIES set as `category`, which stays in step with the first
+    # entry here so nothing that reads the single column has to change.
+    # NULL = not classified, and readers fall back to the name suggestion.
+    categories = Column(ARRAY(Text), nullable=True)
+    # Which format(s) this grade plays (migration 259) — 'two_day' | 'one_day' |
+    # 't20', from app/services/grade_labels.MATCH_FORMATS. A grade that plays
+    # more than one carries more than one. NULL = not classified, and readers
+    # fall back to the formats actually recorded on this grade's games
+    # (games.match_format), then to the grade name. Distinct from `fee_format`,
+    # which is a BetterFees billing override with its own extra values.
+    match_formats = Column(ARRAY(Text), nullable=True)
     # Whether this grade is shared on the club's public site (migration 123).
     # Defaults true so nothing is hidden until a club explicitly opts a grade
     # (e.g. their whole junior programme) out of public grade surfaces.

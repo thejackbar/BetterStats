@@ -327,6 +327,20 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS "
             "is_public BOOLEAN NOT NULL DEFAULT true"
         ))
+        # A grade is not one thing (migration 259). "Women's T20 Grade 2" is a
+        # women's grade AND a T20 grade, so the type and the format each get
+        # their own multi-valued column. `category` stays, kept in step with the
+        # first entry of `categories`, so every existing reader is untouched.
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS categories TEXT[]"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS match_formats TEXT[]"
+        ))
+        await conn.execute(text(
+            "UPDATE grades SET categories = ARRAY[category] "
+            "WHERE categories IS NULL AND category IS NOT NULL AND category <> ''"
+        ))
         # A club's own default for which of those categories count towards its
         # stats (migration 228). NULL = no preference, so the platform default
         # (everything except junior) applies. See services/grade_scope.py.

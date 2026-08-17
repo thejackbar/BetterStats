@@ -1,5 +1,36 @@
 import { formatSeason } from '../lib/cricketFormat'
-import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, scopeNote } from '../lib/gradeCategories'
+import {
+  CATEGORY_LABELS, FORMAT_LABELS, GRADE_CATEGORIES, MATCH_FORMATS,
+  TOGGLEABLE_CATEGORIES, scopeNote,
+} from '../lib/gradeCategories'
+
+// One pill row, All + one option each. Used for the two grade axes, which are
+// pick-one-or-everything questions rather than the additive Include row below.
+function PillRow({ label, options, value, onChange, title }) {
+  if (!options.length) return null
+  return (
+    <div className="flex items-center gap-2">
+      <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">{label}</label>
+      <div className="flex items-center border pb-hairline rounded overflow-hidden">
+        {[{ key: '', label: 'All' }, ...options].map(opt => (
+          <button
+            key={opt.key || 'all'}
+            onClick={() => onChange(opt.key || null)}
+            aria-pressed={(value || '') === opt.key}
+            title={opt.key ? title?.(opt) : `Every ${label.toLowerCase()}`}
+            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+              (value || '') === opt.key
+                ? 'bg-pb-accent/15 text-pb-accent'
+                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 export default function SeasonSelector({
   seasons = [],
@@ -27,6 +58,22 @@ export default function SeasonSelector({
   setCategories = () => {},
   availableCategories = [],
   showCategoryFilter = true,
+  // The two grade axes, as pick-one filters. `gradeType` is a single category
+  // key (or null for "whatever the club counts by default"); `matchFormat` is a
+  // single format key (or null for every format). Both are what a club actually
+  // asks the dashboard — "show me the women's grades", "show me the T20s" —
+  // whereas the additive `categories` Include row above answers a different
+  // question and stays where it is for the Leaderboard and Records pages.
+  gradeType = null,
+  setGradeType = () => {},
+  matchFormat = null,
+  setMatchFormat = () => {},
+  availableFormats = [],
+  // What the club counts when no grade type is picked, so "All" can say what it
+  // actually leaves out instead of quietly dropping a club's juniors.
+  defaultCategories = null,
+  showGradeTypeFilter = false,
+  showMatchFormatFilter = false,
 }) {
   // Senior is not offered as a toggle: it is the baseline every other category
   // is added to, and letting someone switch it off would mostly produce an
@@ -47,6 +94,26 @@ export default function SeasonSelector({
   const excluded = availableCategories.filter(c => !counted.includes(c))
   const note = categories
     ? scopeNote({ active: excluded.length > 0, excluded_categories: excluded })
+    : null
+
+  const gradeTypeOptions = GRADE_CATEGORIES
+    .filter(c => availableCategories.includes(c))
+    .map(c => ({ key: c, label: CATEGORY_LABELS[c] || c }))
+  const formatOptions = MATCH_FORMATS
+    .filter(f => availableFormats.includes(f))
+    .map(f => ({ key: f, label: FORMAT_LABELS[f] || f }))
+
+  // "All" means the club's own default, which normally leaves juniors out. Say
+  // so, and only while it is actually true — a club with no junior programme
+  // never reads about a filter that is doing nothing.
+  const defaultNote = (showGradeTypeFilter && !gradeType && defaultCategories)
+    ? scopeNote(
+        {
+          active: true,
+          excluded_categories: availableCategories.filter(c => !defaultCategories.includes(c)),
+        },
+        'Grade Type',
+      )
     : null
 
   return (
@@ -87,10 +154,11 @@ export default function SeasonSelector({
         </div>
       )}
 
-      {/* Grade categories - one on/off pill each. Distinct from Gender below:
-          this is how the GRADE is classified, not a player attribute, so a
-          woman playing in a men's grade is caught by Gender and not by this. */}
-      {showCategoryFilter && toggleable.length > 0 && (
+      {/* Grade categories - one on/off pill each, added on top of a baseline.
+          Hidden when the pick-one Grade Type row below is shown: the two answer
+          the same question in two different ways, and a screen offering both
+          just invites them to disagree. */}
+      {showCategoryFilter && !showGradeTypeFilter && toggleable.length > 0 && (
         <div className="flex items-center gap-2">
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">Include</label>
           <div className="flex items-center border pb-hairline rounded overflow-hidden">
@@ -113,6 +181,34 @@ export default function SeasonSelector({
             ))}
           </div>
         </div>
+      )}
+
+      {/* Grade type — how the GRADE is classified (men's / juniors / women's /
+          masters), not a player attribute. This is what replaced the Gender
+          pills on the club dashboard: a woman playing in a men's grade was
+          being counted as women's cricket, and a men's grade with a
+          mis-recorded player gender vanished from the men's figures. */}
+      {showGradeTypeFilter && (
+        <PillRow
+          label="Grade Type"
+          options={gradeTypeOptions}
+          value={gradeType}
+          onChange={setGradeType}
+          title={opt => `Only ${opt.label} grades`}
+        />
+      )}
+
+      {/* Match type — the format the grade plays. Renders only for a club whose
+          grades can actually be told apart, so nobody is offered a filter that
+          would empty the page. */}
+      {showMatchFormatFilter && (
+        <PillRow
+          label="Match Type"
+          options={formatOptions}
+          value={matchFormat}
+          onChange={setMatchFormat}
+          title={opt => `Only ${opt.label} matches`}
+        />
       )}
 
       {/* Gender filter - pill toggle */}
@@ -220,7 +316,7 @@ export default function SeasonSelector({
     {/* Says what the figures currently leave out, and where to change it. Only
         renders while something is actually excluded, so a club with only senior
         grades never reads about a filter that is doing nothing. */}
-    {note && <p className="text-[11px] text-pb-faint">{note}</p>}
+    {(note || defaultNote) && <p className="text-[11px] text-pb-faint">{note || defaultNote}</p>}
     </div>
   )
 }

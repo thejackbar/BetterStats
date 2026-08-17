@@ -4,12 +4,37 @@
 
 export const GRADE_CATEGORIES = ['senior', 'junior', 'womens', 'masters', 'mixed']
 
+// "senior" is the stored key and reads as "Men's": once juniors, women's and
+// masters each have a key of their own, the senior grades are the men's ones,
+// and that is what a club is asking for when it filters. The key is untouched.
 export const CATEGORY_LABELS = {
-  senior: 'Senior',
+  senior: "Men's",
   junior: 'Juniors',
   womens: "Women's",
   masters: 'Masters',
   mixed: 'Mixed',
+}
+
+// The format a grade is played in — a second, independent axis. A grade is a
+// Men's grade or a Women's grade; it is separately a T20 or a two-day grade.
+// Mirrors backend/app/services/grade_labels.py's MATCH_FORMATS/FORMAT_LABELS.
+export const MATCH_FORMATS = ['two_day', 'one_day', 't20']
+
+export const FORMAT_LABELS = {
+  two_day: 'Two Day',
+  one_day: 'One Day',
+  t20: 'T20',
+}
+
+// The wire format: a comma-separated include list, or null for no filter at
+// all. Unlike categories there is no club default to fall back to — a match
+// type is something someone asks for, never applied on their behalf.
+export function formatsParam(formats) {
+  if (!formats || formats.length === 0) return null
+  const set = new Set(formats)
+  if (MATCH_FORMATS.every(f => set.has(f))) return null
+  const picked = MATCH_FORMATS.filter(f => set.has(f))
+  return picked.length ? picked.join(',') : null
 }
 
 // Senior is deliberately absent: it is the baseline the others are added to.
@@ -40,12 +65,13 @@ function joinLabels(keys) {
 
 // A short line for a page to explain what its figures currently cover.
 // Returns null when nothing is excluded, so a club with no junior grades never
-// sees a note about a filter that is not doing anything.
-export function scopeNote(scope) {
+// sees a note about a filter that is not doing anything. `control` names the
+// filter that changes it, since the same note sits under two different pickers.
+export function scopeNote(scope, control = 'Include') {
   if (!scope || !scope.active) return null
   const left = joinLabels(scope.excluded_categories)
   if (!left) return null
-  return `${left} grades are not counted here. Use Include above to add them back.`
+  return `${left} grades are not counted here. Use ${control} above to add them back.`
 }
 
 // The profile-only case: this player has never played in any category the club

@@ -16,15 +16,17 @@ import { categoriesParam } from '../lib/gradeCategories'
  */
 export function useGradeCategories(orgId) {
   const [available, setAvailable] = useState([])
+  const [availableFormats, setAvailableFormats] = useState([])
   const [categories, setCategories] = useState(null)
 
   useEffect(() => {
     if (!orgId) return
     let cancelled = false
     api.orgGradeCategories(orgId)
-      .then(({ available: av, default: def }) => {
+      .then(({ available: av, default: def, available_formats: fmts }) => {
         if (cancelled) return
         setAvailable(av || [])
+        setAvailableFormats(fmts || [])
         setCategories(def || [])
       })
       .catch(() => {
@@ -32,6 +34,7 @@ export function useGradeCategories(orgId) {
         // No categories offered means no toggles drawn, which is the same
         // outcome as a club with only senior grades — a safe place to fail to.
         setAvailable([])
+        setAvailableFormats([])
         setCategories([])
       })
     return () => { cancelled = true }
@@ -39,9 +42,62 @@ export function useGradeCategories(orgId) {
 
   return {
     available,
+    availableFormats,
     categories,
     setCategories,
     param: categories == null ? null : categoriesParam(categories),
     ready: categories != null,
+  }
+}
+
+/**
+ * The club dashboard's two pick-one grade filters.
+ *
+ * Deliberately NOT seeded from the club default the way `useGradeCategories`
+ * is. "All" here means the club's own default — whatever it counts normally —
+ * so the dashboard's opening numbers are the ones it has always shown, and
+ * picking a grade type is a narrowing from there. Passing the default back as
+ * an explicit selection would instead pin the page to a list that the club
+ * could later change without the page noticing.
+ */
+export function useGradeFilters(orgId) {
+  const [available, setAvailable] = useState([])
+  const [availableFormats, setAvailableFormats] = useState([])
+  const [defaultCategories, setDefaultCategories] = useState(null)
+  const [gradeType, setGradeType] = useState(null)
+  const [matchFormat, setMatchFormat] = useState(null)
+
+  useEffect(() => {
+    if (!orgId) return
+    let cancelled = false
+    api.orgGradeCategories(orgId)
+      .then(({ available: av, default: def, available_formats: fmts }) => {
+        if (cancelled) return
+        setAvailable(av || [])
+        setAvailableFormats(fmts || [])
+        setDefaultCategories(def || [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        setAvailable([])
+        setAvailableFormats([])
+        setDefaultCategories(null)
+      })
+    return () => { cancelled = true }
+  }, [orgId])
+
+  return {
+    available,
+    availableFormats,
+    defaultCategories,
+    gradeType,
+    setGradeType,
+    matchFormat,
+    setMatchFormat,
+    // Both go on the wire as the same comma-separated params every stats
+    // endpoint already takes; null means "no filter", which for categories is
+    // the club's own default and for formats is every format.
+    categoriesParam: gradeType || null,
+    formatsParam: matchFormat || null,
   }
 }

@@ -3623,6 +3623,7 @@ async def _club_results(
     org_id: str,
     season_ids: Optional[list] = None,
     grade_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> dict:
     """W/L/D and win-rate over the org's own completed games.
 
@@ -3679,6 +3680,13 @@ async def _club_results(
             ))
         )""")
         params["sids"] = season_ids
+
+    # Grade-type / match-type scope. Dropped when a single grade is picked —
+    # an explicitly chosen grade beats the category default, the same rule the
+    # leaderboards follow.
+    if _scoped(scope) and not grade_id:
+        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        scope.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first
     # (classify_match_result computes it against that syncing org's own
@@ -3737,6 +3745,7 @@ async def get_club_summary(
     org_id: str,
     season_id: Optional[str] = None,
     grade_id: Optional[str] = None,
+    scope: Optional[GradeScope] = None,
 ) -> dict:
     base = {
         "total_games": 0,
@@ -3813,9 +3822,84 @@ async def get_club_summary(
         base.update(await _club_results(session, org_id, grade_id=grade_id))
         return base
 
+    season_ids = await resolve_season_filter(session, org_id, season_id)
+
+    # A grade-type or match-type filter is only answerable from the per-innings
+    # scorecards: CA's season aggregates carry no grade at all (the `api` branch
+    # of v_effective_player_season_stats hardcodes grade_id NULL), so filtering
+    # them by grade would silently return the whole club's totals under a
+    # filtered heading. An active scope therefore switches source, the same
+    # trade the leaderboards and career totals already make.
+    if _scoped(scope):
+        params = {"org_id": org_id}
+        game_season_clause = ""
+        if season_ids:
+            game_season_clause = " AND g.season_id = ANY(:season_ids)"
+            params["season_ids"] = season_ids
+        scope.bind(params)
+        res = await session.execute(
+            text(f"""
+                WITH gg AS (
+                    SELECT g.id, g.season_id FROM v_effective_games g
+                    WHERE (
+                        g.organisation_id = CAST(:org_id AS UUID)
+                        OR g.home_org_id = CAST(:org_id AS UUID)
+                        OR g.away_org_id = CAST(:org_id AS UUID)
+                        OR EXISTS (
+                            SELECT 1 FROM grades gr JOIN seasons s ON s.id = gr.season_id
+                            WHERE gr.id = g.grade_id AND s.organisation_id = CAST(:org_id AS UUID)
+                        )
+                    ){game_season_clause}{scope.clause("g.grade_id")}
+                ),
+                bat AS (
+                    SELECT bi.player_id, bi.runs
+                    FROM v_effective_batting_innings bi
+                    JOIN gg ON gg.id = bi.game_id
+                    JOIN players p ON p.id = bi.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                    WHERE NOT COALESCE(bi.did_not_bat, FALSE)
+                      AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                ),
+                bowl AS (
+                    SELECT bs.player_id, bs.wickets
+                    FROM v_effective_bowling_spells bs
+                    JOIN gg ON gg.id = bs.game_id
+                    JOIN players p ON p.id = bs.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                ),
+                fld AS (
+                    SELECT fs.player_id
+                    FROM v_effective_fielding_stats fs
+                    JOIN gg ON gg.id = fs.game_id
+                    JOIN players p ON p.id = fs.player_id
+                        AND p.organisation_id = CAST(:org_id AS UUID)
+                )
+                SELECT
+                    (SELECT COALESCE(SUM(runs), 0) FROM bat)     AS total_runs,
+                    (SELECT MAX(runs) FROM bat)                  AS highest_score,
+                    (SELECT COALESCE(SUM(wickets), 0) FROM bowl) AS total_wickets,
+                    (SELECT COUNT(DISTINCT season_id) FROM gg)   AS seasons,
+                    (SELECT COUNT(*) FROM (
+                        SELECT player_id FROM bat
+                        UNION SELECT player_id FROM bowl
+                        UNION SELECT player_id FROM fld
+                     ) u)                                        AS total_players
+            """),
+            params,
+        )
+        row = dict(res.mappings().first() or {})
+        base.update({
+            "total_runs": int(row.get("total_runs") or 0),
+            "total_wickets": int(row.get("total_wickets") or 0),
+            "highest_score": int(row.get("highest_score") or 0),
+            "total_players": int(row.get("total_players") or 0),
+            "seasons": int(row.get("seasons") or 0),
+        })
+        base.update(await _club_results(session, org_id, season_ids=season_ids, scope=scope))
+        return base
+
     where = "WHERE p.organisation_id = :org_id"
     params: dict = {"org_id": org_id}
-    season_ids = await resolve_season_filter(session, org_id, season_id)
     if season_ids:
         where += " AND pss.season_id = ANY(:season_ids)"
         params["season_ids"] = season_ids

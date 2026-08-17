@@ -84,6 +84,9 @@ export default function Ladders() {
             setSelectedSeason={setSelectedSeason}
             selectedGrade={selectedGrade}
             setSelectedGrade={setSelectedGrade}
+            showGenderFilter={false}
+            showFinalsFilter={false}
+            showCaptainFilter={false}
           />
         </div>
 
