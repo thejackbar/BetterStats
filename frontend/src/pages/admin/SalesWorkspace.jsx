@@ -218,12 +218,15 @@ function WizardSignalCard({ signal }) {
 
 // Stage / onboarding method / call status — the three things a rep asks
 // first before reading the engagement breakdown below it.
+// Stage / Onboarding / Called / Engagement — the four things a rep reads
+// first, together at the top of the drawer rather than the score being
+// buried in its own card further down.
 function DealSummaryStrip({ deal }) {
   const called = deal.ever_called
     ? `Yes — ${timeAgo(deal.last_call?.occurred_at) || 'logged'}`
     : 'Never called'
   return (
-    <div className="grid grid-cols-3 gap-3 text-center">
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
       <div>
         <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Stage</div>
         <div className="text-[13px] text-pb-text font-medium">{deal.stage_name || '—'}</div>
@@ -237,6 +240,12 @@ function DealSummaryStrip({ deal }) {
       <div>
         <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Called</div>
         <div className={`text-[13px] font-medium ${deal.ever_called ? 'text-pb-text' : 'text-pb-amber'}`}>{called}</div>
+      </div>
+      <div>
+        <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Engagement</div>
+        <div className="flex items-center justify-center">
+          <ScorePill score={deal.engagement_score} tier={deal.engagement_tier} />
+        </div>
       </div>
     </div>
   )
@@ -852,10 +861,7 @@ export default function SalesWorkspace() {
             <>
               <div className={CARD}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <div>
-                    <h2 className="font-display font-bold text-lg">{drawer.deal.marketing_club_name || drawer.deal.title}</h2>
-                    <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-0.5">{drawer.deal.stage_name}</p>
-                  </div>
+                  <h2 className="font-display font-bold text-lg">{drawer.deal.marketing_club_name || drawer.deal.title}</h2>
                   <div className="flex items-center gap-2">
                     {drawer.can_assign && (
                       <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
@@ -868,8 +874,11 @@ export default function SalesWorkspace() {
                     )}
                   </div>
                 </div>
+                <div className="mt-3">
+                  <DealSummaryStrip deal={drawer.deal} />
+                </div>
                 {drawer.deal.not_interested && (
-                  <p className="mt-2 text-[11.5px] text-pb-red">
+                  <p className="mt-3 text-[11.5px] text-pb-red">
                     Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
                   </p>
                 )}
@@ -877,10 +886,6 @@ export default function SalesWorkspace() {
               </div>
 
               <WizardSignalCard signal={drawer.deal.wizard_signal} />
-
-              <div className={CARD}>
-                <DealSummaryStrip deal={drawer.deal} />
-              </div>
 
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>

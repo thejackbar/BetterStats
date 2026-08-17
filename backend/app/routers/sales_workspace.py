@@ -387,7 +387,7 @@ async def get_club(
         # BEFORE the engagement breakdown for the same expiry reason.
         try:
             from app.services import club_directory as cd
-            website_visits = await cd.club_visit_detail(db, club_id_for_reads)
+            website_visits = await cd.club_visit_detail(db, club_id_for_reads, fast_web=True)
         except Exception:  # noqa: BLE001 - the drawer must still render without it
             logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
             website_visits = None
