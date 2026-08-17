@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.24.16',
-  date: '2026-08-16',
-  sortKey: '2026-08-18T02:00:00Z',
+  version: 'v9.26.1',
+  date: '2026-08-17',
+  sortKey: '2026-08-20T04:00:00Z',
   title: 'The public site now covers vote counting, the club diary and the junior stats filter',
   items: [
     'BetterSelect has a new section on best-player votes: how the 3-2-1 count is collected from the same link players use for availability, the season leaderboard with points, form and each player\'s 3s, 2s and 1s, and presentation mode for the awards night. The comparison table gained an "After the game" section for it.',
