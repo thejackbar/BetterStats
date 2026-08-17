@@ -140,6 +140,20 @@ go.
   verification asserts they agree on a table of 18 real strings ("Two Day+",
   "TWENTY20", "40-over", "BYE", "2-day", …). Change one and change the other, or
   the dashboard's filter and the profile's split file the same game differently.
+- **Confirmed against live CA data for the reported grade.**
+  `/scores/grades/94159f73-…/matches` (Applecross 1st Grade 25/26) returns
+  **39 One Day and 32 Two Day in the ONE grade**, and the fixture the club
+  linked (`/scores/matches/4dbd37f7-…`) reads `matchType: 'Two Day'`,
+  `matchTypeId: 1`. That is the field PlayHQ shows as **Match Info → Format**,
+  it is on the match record AND on every row of the grade match list, and it is
+  what `games.match_format` stores.
+- **A bare curl of that endpoint returns PascalCase, and it will send you
+  chasing a bug that isn't there.** `grassroots_scores_client._get` always
+  sends `jsconfig=eccn:true` (a ServiceStack formatting flag), which is what
+  camelCases the payload — WITH it the envelope is `{"matches": [...]}` and rows
+  carry `matchType`; WITHOUT it they are `{"Matches": [...]}` and `MatchType`,
+  so `data.get("matches")` and `m.get("matchType")` both read empty. Reproduce
+  through the client, or pass `jsconfig=eccn:true` by hand.
 - **Fixed while here, and it was a real one**: `_JUNIOR`/`_MASTERS` ended their
   age patterns `\d+\b`, and a word boundary cannot match before a letter — so
   **"Under 14s", "U14s", "Year 9s" and "Over 40s" all classified as SENIOR**.
