@@ -738,10 +738,22 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     """Explain a club's engagement score: which signals produced it (recency,
     web page views, email opens vs clicks, Meta ad clicks) and which flags fired
     (a direct enquiry, a trial request/in-trial, an ad-sourced signup, product
-    setup depth). Recomputes _engagement live for the breakdown fields, then rolls
-    back — read-only, nothing is persisted. Powers the deal-detail panel so a
-    score like 70 with no web activity is self-explaining (e.g. the trial-depth
-    registration floor) instead of a mystery number."""
+    setup depth). Recomputes _engagement live for the breakdown fields, AND
+    persists it — _apply_engagement_cache (called inside _engagement) stages
+    marketing_clubs.engagement_score/.engagement_tier/.engagement_scored_at on
+    the ORM object precisely so its caller's commit can write it through, the
+    same contract every other _engagement() call site (export, bulk export,
+    "Refresh Twenty scores"/"leads") already follows.
+    Without this, a club outside the Twenty-only nightly refresh_engagement
+    job (never exported, or Twenty unconfigured) could carry a score frozen
+    at whatever it was the one time it was first computed — e.g. a direct-
+    enquiry Hot-100 that outlives its own hot-days window — while every
+    detail view (this panel, and the Sales Workspace drawer that calls it)
+    shows the honest, currently-decayed number. Opening the panel is now
+    itself a self-heal: the kanban card/queue row picks up the correction on
+    its next load. Powers the deal-detail panel so a score like 70 with no
+    web activity is self-explaining (e.g. the trial-depth registration
+    floor) instead of a mystery number."""
     from sqlalchemy.orm import selectinload
     from app.models.db import Organisation
 
@@ -798,7 +810,11 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     opens_all, clicks_all, opens_30d, clicks_30d = (em[0] or 0, em[1] or 0, em[2] or 0, em[3] or 0)
     open_pts, click_pts = (float(em[4] or 0), float(em[5] or 0))
 
-    await db.rollback()  # read-only: don't persist this recompute
+    # Persist the freshly-recomputed score/tier _engagement() already staged
+    # onto `club` (see the docstring above) — everything from here on reads
+    # off local variables/dicts, never a `club.<attr>` access, so the
+    # post-commit expiry this triggers is safe.
+    await db.commit()
 
     # Itemised contributions that RECONCILE to the score. Frequency = reach +
     # depth, both LINEAR, so each is shown at its real scaled point value:

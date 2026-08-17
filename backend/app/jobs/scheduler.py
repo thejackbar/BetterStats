@@ -262,6 +262,7 @@ async def crm_incremental_pipeline_sweep():
     leave a gap."""
     from app.services import crm as crm_service
     from app.services import platform_settings
+    result = {"error": "did not run"}
     try:
         async with async_session_maker() as session:
             interval = await platform_settings.get_crm_incremental_sweep_seconds(session)
@@ -270,19 +271,37 @@ async def crm_incremental_pipeline_sweep():
             logger.info(f"CRM incremental pipeline sweep: {result}")
     except Exception as e:  # noqa: BLE001
         logger.error(f"CRM incremental pipeline sweep failed: {e}")
+        result = {"error": str(e)}
+    finally:
+        try:
+            async with async_session_maker() as session:
+                await platform_settings.set_crm_sweep_status(session, "incremental", result)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record incremental sweep status")
 
 
 async def crm_global_engagement_sweep():
     """Tier 3 — the full Club-Directory recompute (app.scripts.recalc_engagement),
-    the backstop that catches slow time-decay drift and anything the incremental
-    sweep missed."""
+    the backstop that catches slow time-decay drift (a club whose score should
+    have DECAYED from pure inactivity — e.g. an expired direct-enquiry Hot-100
+    floor — which Tier 2 above can never catch, since it only re-scores a club
+    with NEW telemetry) and anything the incremental sweep missed."""
     from app.scripts.recalc_engagement import recalc
+    from app.services import platform_settings
     logger.info("Starting scheduled CRM global engagement sweep")
+    stats = {"error": "did not run"}
     try:
         stats = await recalc()
         logger.info(f"CRM global engagement sweep done: {stats}")
     except Exception as e:  # noqa: BLE001
         logger.error(f"CRM global engagement sweep failed: {e}")
+        stats = {"error": str(e)}
+    finally:
+        try:
+            async with async_session_maker() as session:
+                await platform_settings.set_crm_sweep_status(session, "global", stats)
+        except Exception:  # noqa: BLE001
+            logger.exception("could not record global sweep status")
 
 
 def reschedule_crm_sweeps(*, incremental_seconds=None, global_minutes=None) -> None:
