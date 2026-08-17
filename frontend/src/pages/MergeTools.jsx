@@ -5,6 +5,17 @@ import { PbSpinner } from '../lib/presskit'
 import Dropdown from '../components/Dropdown'
 import { ProgressBar } from '../components/ProgressBar'
 
+const KIND_LABEL = {
+  exact: 'POSSIBLE DUPLICATE',
+  fuzzy: 'POSSIBLE SPELLING MISTAKE',
+  name_variant: 'POSSIBLE NAME VARIANT',
+}
+
+// Bulk Approve is an allowlist, not "everything except fuzzy" — a tier added
+// later must be manual-confirm by default rather than silently bulk-mergeable.
+// A missing kind is an older response shape, which only ever meant exact.
+const isExactPair = (pair) => !pair.kind || pair.kind === 'exact'
+
 function StatBadge({ label, value }) {
   return (
     <div className="text-center">
@@ -293,11 +304,17 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
     <div className="pb-card p-5">
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <span className="font-mono text-[10px] tracking-wide3 text-pb-faint">
-          {pair.kind === 'fuzzy' ? 'POSSIBLE SPELLING MISTAKE' : 'POSSIBLE DUPLICATE'}
+          {KIND_LABEL[pair.kind] || KIND_LABEL.exact}
         </span>
-        {pair.kind === 'fuzzy'
-          ? <span className="font-mono text-[10px] text-pb-faintest">{Math.round((pair.confidence || 0) * 100)}% similar name</span>
-          : <span className="font-mono text-[10px] text-pb-faintest">"{pair.normalised_name}"</span>}
+        {pair.kind === 'fuzzy' && (
+          <span className="font-mono text-[10px] text-pb-faintest">{Math.round((pair.confidence || 0) * 100)}% similar name</span>
+        )}
+        {pair.kind === 'name_variant' && (
+          <span className="font-mono text-[10px] text-pb-faintest">{pair.reason}</span>
+        )}
+        {isExactPair(pair) && (
+          <span className="font-mono text-[10px] text-pb-faintest">"{pair.normalised_name}"</span>
+        )}
         {pair.redacted && (
           <span
             className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
@@ -307,11 +324,13 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
             Manual review only
           </span>
         )}
-        {pair.kind === 'fuzzy' && (
+        {!isExactPair(pair) && (
           <span
             className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
             style={{ borderColor: 'var(--pb-amber)' }}
-            title="Names are close but not identical — could be two different people (e.g. Steve vs Steven). Excluded from Bulk Approve."
+            title={pair.kind === 'name_variant'
+              ? "The names could be one person or two — brothers, or a father and son, look exactly like this. Excluded from Bulk Approve."
+              : "Names are close but not identical — could be two different people (e.g. Steve vs Steven). Excluded from Bulk Approve."}
           >
             Check it's the same person
           </span>
@@ -495,13 +514,13 @@ export default function MergeTools({ embeddedOrgId }) {
   useEffect(() => { load() }, [orgId])
 
   const visible = candidates?.filter(c => !skipped.has(`${c.player_a.id}:${c.player_b.id}`)) ?? []
-  const bulkEligible = visible.filter(c => !c.redacted && c.kind !== 'fuzzy')
+  const bulkEligible = visible.filter(c => !c.redacted && isExactPair(c))
   const bulkReviewCount = visible.length - bulkEligible.length
 
   async function handleBulkApprove() {
     if (bulkEligible.length === 0) return
     const reviewNote = bulkReviewCount > 0
-      ? ` ${bulkReviewCount} pair${bulkReviewCount !== 1 ? 's' : ''} will be left for manual review (redacted names or a spelling guess).`
+      ? ` ${bulkReviewCount} pair${bulkReviewCount !== 1 ? 's' : ''} will be left for manual review (redacted names, or the names are close but not identical).`
       : ''
     if (!window.confirm(
       `Bulk merge ${bulkEligible.length} exact-name-match pair${bulkEligible.length !== 1 ? 's' : ''}?${reviewNote}`
@@ -548,8 +567,9 @@ export default function MergeTools({ embeddedOrgId }) {
         <h1 className="font-display font-bold text-3xl text-pb-text tracking-tight mb-2">Merge Duplicates</h1>
         <p className="text-pb-faint text-sm leading-relaxed">
           Players with the same name from different data sources are shown below, along with names that are close
-          but not identical (a likely typo somewhere, e.g. "Malcolm" vs "Malcom") for you to check by hand. Use
-          Manual Merge for name changes (e.g. after marriage).
+          but not identical for you to check by hand — a likely typo ("Malcolm" vs "Malcom"), or one record using a
+          shorter first name or an initial ("Brad K Mant" vs "Mant, Bradley"). Use Manual Merge for name changes
+          (e.g. after marriage).
         </p>
       </div>
 
@@ -568,7 +588,7 @@ export default function MergeTools({ embeddedOrgId }) {
       {bulkResult && (
         <div className="mb-4 font-mono text-[11px] border pb-hairline rounded px-4 py-3 text-pb-dim">
           Bulk approve: {bulkResult.merged} merged
-          {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} skipped (redacted names or a spelling guess)` : ''}
+          {bulkResult.skipped > 0 ? `, ${bulkResult.skipped} left for manual review` : ''}
           {bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ''}.
         </div>
       )}
