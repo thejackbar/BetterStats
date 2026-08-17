@@ -1,36 +1,8 @@
 import { formatSeason } from '../lib/cricketFormat'
+import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, scopeNote } from '../lib/gradeCategories'
 import {
-  CATEGORY_LABELS, FORMAT_LABELS, GRADE_CATEGORIES, MATCH_FORMATS,
-  TOGGLEABLE_CATEGORIES, scopeNote,
-} from '../lib/gradeCategories'
-
-// One pill row, All + one option each. Used for the two grade axes, which are
-// pick-one-or-everything questions rather than the additive Include row below.
-function PillRow({ label, options, value, onChange, title }) {
-  if (!options.length) return null
-  return (
-    <div className="flex items-center gap-2">
-      <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block">{label}</label>
-      <div className="flex items-center border pb-hairline rounded overflow-hidden">
-        {[{ key: '', label: 'All' }, ...options].map(opt => (
-          <button
-            key={opt.key || 'all'}
-            onClick={() => onChange(opt.key || null)}
-            aria-pressed={(value || '') === opt.key}
-            title={opt.key ? title?.(opt) : `Every ${label.toLowerCase()}`}
-            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
-              (value || '') === opt.key
-                ? 'bg-pb-accent/15 text-pb-accent'
-                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
-            }`}
-          >
-            {opt.label}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
+  FilterPillRow, gradeTypeOptions, matchFormatOptions,
+} from './GradeFilterPills'
 
 export default function SeasonSelector({
   seasons = [],
@@ -96,12 +68,8 @@ export default function SeasonSelector({
     ? scopeNote({ active: excluded.length > 0, excluded_categories: excluded })
     : null
 
-  const gradeTypeOptions = GRADE_CATEGORIES
-    .filter(c => availableCategories.includes(c))
-    .map(c => ({ key: c, label: CATEGORY_LABELS[c] || c }))
-  const formatOptions = MATCH_FORMATS
-    .filter(f => availableFormats.includes(f))
-    .map(f => ({ key: f, label: FORMAT_LABELS[f] || f }))
+  const typeOptions = gradeTypeOptions(availableCategories)
+  const formatOptions = matchFormatOptions(availableFormats)
 
   // "All" means the club's own default, which normally leaves juniors out. Say
   // so, and only while it is actually true — a club with no junior programme
@@ -189,9 +157,9 @@ export default function SeasonSelector({
           being counted as women's cricket, and a men's grade with a
           mis-recorded player gender vanished from the men's figures. */}
       {showGradeTypeFilter && (
-        <PillRow
+        <FilterPillRow
           label="Grade Type"
-          options={gradeTypeOptions}
+          options={typeOptions}
           value={gradeType}
           onChange={setGradeType}
           title={opt => `Only ${opt.label} grades`}
@@ -203,7 +171,7 @@ export default function SeasonSelector({
           so a grade-level answer would be wrong for most of them. Renders only
           for a club whose matches can actually be told apart. */}
       {showMatchFormatFilter && (
-        <PillRow
+        <FilterPillRow
           label="Match Type"
           options={formatOptions}
           value={matchFormat}

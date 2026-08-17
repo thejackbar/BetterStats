@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
-import { useGradeCategories } from '../hooks/useGradeCategories'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
@@ -723,10 +723,12 @@ export default function Records() {
   const [finalsOnly, setFinalsOnly] = useState(false)
   const [captainOnly, setCaptainOnly] = useState(false)
   const [gender, setGender] = useState(null)
+  // Grade type and match type, the same two rows every other stats screen has.
   const {
-    available: availableCategories, categories, setCategories,
-    param: categoriesParam, ready: categoriesReady,
-  } = useGradeCategories(orgId)
+    available: availableCategories, availableFormats, defaultCategories,
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    categoriesParam, formatsParam,
+  } = useGradeFilters(orgId)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -744,13 +746,13 @@ export default function Records() {
   }, [orgId, selectedSeason])
 
   useEffect(() => {
-    if (!orgId || !categoriesReady) return
+    if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, categoriesReady])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -790,9 +792,15 @@ export default function Records() {
             setCaptainOnly={setCaptainOnly}
             gender={gender}
             setGender={setGender}
-            categories={categories}
-            setCategories={setCategories}
+            gradeType={gradeType}
+            setGradeType={setGradeType}
+            matchFormat={matchFormat}
+            setMatchFormat={setMatchFormat}
             availableCategories={availableCategories}
+            availableFormats={availableFormats}
+            defaultCategories={defaultCategories}
+            showGradeTypeFilter
+            showMatchFormatFilter
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">

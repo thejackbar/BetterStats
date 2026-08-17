@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import SeasonSelector from '../components/SeasonSelector'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { Card, PageHeader, PbSpinner } from '../lib/presskit'
 
 function ResultPill({ result }) {
@@ -101,6 +102,11 @@ export default function GamesPage() {
     finalsOnly, setFinalsOnly,
     loading: clubLoading,
   } = useClubData(orgId)
+  const {
+    available: availableCategories, availableFormats, defaultCategories,
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    categoriesParam, formatsParam,
+  } = useGradeFilters(orgId)
 
   // Deep-link support: ?season=<id>&grade=<gradeId> (e.g. from the Ladders page).
   const [searchParams] = useSearchParams()
@@ -130,11 +136,11 @@ export default function GamesPage() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly })
+    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly, categories: categoriesParam, formats: formatsParam })
       .then(setGames)
       .catch(() => setGames([]))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
 
   // Group by grade_name, preserving played_at DESC order within each group
   const byGrade = useMemo(() => {
@@ -183,6 +189,15 @@ export default function GamesPage() {
             setSelectedGrade={setSelectedGrade}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            gradeType={gradeType}
+            setGradeType={setGradeType}
+            matchFormat={matchFormat}
+            setMatchFormat={setMatchFormat}
+            availableCategories={availableCategories}
+            availableFormats={availableFormats}
+            defaultCategories={defaultCategories}
+            showGradeTypeFilter
+            showMatchFormatFilter
             showGenderFilter={false}
             showCaptainFilter={false}
           />

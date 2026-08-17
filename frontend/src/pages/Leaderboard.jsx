@@ -4,7 +4,7 @@ import { useClubData } from '../hooks/useClubData'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { usePageMeta } from '../hooks/usePageMeta'
-import { useGradeCategories } from '../hooks/useGradeCategories'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
@@ -373,10 +373,15 @@ export default function Leaderboard() {
   const [captainOnly, setCaptainOnly] = useState(false)
   const [gender, setGender] = useState(null)
   const [overseas, setOverseas] = useState(null)
+  // The same two pick-one rows the club dashboard uses — grade type and match
+  // type — rather than the old additive Include row. One control across every
+  // stats screen, and Match Type is only answerable here now that it is read
+  // per fixture.
   const {
-    available: availableCategories, categories, setCategories,
-    param: categoriesParam, ready: categoriesReady,
-  } = useGradeCategories(orgId)
+    available: availableCategories, availableFormats, defaultCategories,
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    categoriesParam, formatsParam,
+  } = useGradeFilters(orgId)
 
   const [mainTab, setMainTab] = useState('batting')
   const [battingSort, setBattingSort] = useState('total_runs')
@@ -432,32 +437,32 @@ export default function Leaderboard() {
   const effectiveMinWickets = bowlingSort === 'average' ? minWickets : 0
 
   useEffect(() => {
-    if (!orgId || !categoriesReady) return
+    if (!orgId) return
     setLoading(true)
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
-      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: battingSort, limit: 30, minRuns: effectiveMinRuns, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: bowlingSort, limit: 30, minOvers: effectiveMinOvers, minWickets: effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.fieldingLeaderboard(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, sortBy: fieldingSort, limit: 30, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
     ]).then(([b, bw, f]) => {
       if (b.status === 'fulfilled') setBattingRows(b.value)
       if (bw.status === 'fulfilled') setBowlingRows(bw.value)
       if (f.status === 'fulfilled') setFieldingRows(f.value)
     }).finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categoriesParam, categoriesReady])
+  }, [orgId, selectedSeason, selectedGradeName, battingSort, bowlingSort, fieldingSort, effectiveMinRuns, effectiveMinOvers, effectiveMinWickets, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam])
 
   useEffect(() => {
-    if (!orgId || !categoriesReady || mainTab !== 'sirs') return
+    if (!orgId || mainTab !== 'sirs') return
     setSirsLoading(true)
     Promise.allSettled([
-      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
-      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
-      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam }),
+      api.sirsLeaderboard(orgId, 'batting', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.sirsLeaderboard(orgId, 'bowling-innings', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
+      api.sirsLeaderboard(orgId, 'bowling-match', { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, overseas, categories: categoriesParam, formats: formatsParam }),
     ]).then(([sc, sbi, sbm]) => {
       if (sc.status === 'fulfilled') setCenturiesRows(sc.value)
       if (sbi.status === 'fulfilled') setBowlingInningsRows(sbi.value)
       if (sbm.status === 'fulfilled') setBowlingMatchRows(sbm.value)
     }).finally(() => setSirsLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, categoriesParam, categoriesReady, mainTab])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, overseas, categoriesParam, formatsParam, mainTab])
 
   if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />
   if (inactive) return <ClubInactive slug={clubSlug} />
@@ -494,9 +499,15 @@ export default function Leaderboard() {
             overseas={overseas}
             setOverseas={setOverseas}
             showOverseasFilter
-            categories={categories}
-            setCategories={setCategories}
+            gradeType={gradeType}
+            setGradeType={setGradeType}
+            matchFormat={matchFormat}
+            setMatchFormat={setMatchFormat}
             availableCategories={availableCategories}
+            availableFormats={availableFormats}
+            defaultCategories={defaultCategories}
+            showGradeTypeFilter
+            showMatchFormatFilter
           />
           {orgGrades.length > 0 && (
             <div className="flex items-center gap-2">

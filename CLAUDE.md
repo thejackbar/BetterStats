@@ -126,8 +126,15 @@ go.
     format — counting it towards "his T20 record" would be inventing a figure
     rather than filtering one. A CATEGORY-only scope still keeps residuals, per
     the `_RESIDUAL_SOURCES` rule below.
-  - **`kind='grade'`** (2 sites, `gr.id`, the grade listings) becomes an EXISTS
-    over that grade's games.
+  - **`kind='grade'`** is an EXISTS over that grade's games, for a genuine grade
+    LISTING with no game in the query. **The two `gr.id` sites are NOT that** —
+    `get_batting_by_grade`/`get_bowling_by_grade` join games and express only the
+    CATEGORY exclusion against `gr.id`, so they pass `game_alias="g"` and read
+    format per fixture. Classifying them as `'grade'` was the first cut and the
+    verification caught it: a two-day filter returned every innings in a grade
+    that *sometimes* plays two-day, i.e. the exact bug this design exists to
+    prevent. If a query joins `v_effective_games`, its format is per fixture,
+    whatever column the category half happens to use.
   - **`scope.active` now includes `format_active`**, so a format filter switches
     every reader to the per-game path even when no grade is excluded. That is
     what makes it work at all: the aggregates cannot answer it.
@@ -161,6 +168,23 @@ go.
   plural is how clubs actually write them. Junior seasons have been sitting
   inside senior career averages for every club that spells it that way. Now
   `\d+s?`.
+- **The filter is on every stats surface, from one control.** Leaderboard,
+  Records, Players, Games and the player profile all draw the same two pill rows
+  (`components/GradeFilterPills.jsx`, shared with `SeasonSelector`) and send the
+  same two params. The additive "Include" row is gone from all of them — it and
+  Grade Type answer the same question, and `SeasonSelector` refuses to draw both.
+- **The profile threads the scope into every Analysis panel, not just the
+  header.** `_resolve_player_scope` gained `formats`, so dismissals, by-grade,
+  by-position, by-venue, by-opposition, partnerships, bowling breakdowns and the
+  season-by-season table all move together — a header that says T20 above a
+  by-venue panel counting two-day games is worse than no filter.
+- **`resolve_scope_for_player` never widens a FORMAT.** The junior auto-widen
+  exists so a junior-only player doesn't open on zeroes; a player with no T20
+  matches asking for T20 SHOULD see an empty page, because that is the answer.
+  Gated on `scope.category_active`, not `scope.active`.
+- **`api.js` has one `scopeQuery()` helper** for the ten player sub-endpoints,
+  which previously each hand-built `?categories=`. Ten copies of a URL builder
+  is how one of them ends up not sending the new param.
 - **`GET /players/{id}/formats` (`services/player_formats.py`) is the
   per-format profile page** — two-day vs one-day vs T20 batting, bowling and
   fielding, rendered as a FORMATS sub-tab under the profile's Analysis tab
@@ -198,7 +222,7 @@ go.
   the two array columns into the existing aggregate multiplies every batting row
   by the number of tags and silently inflates the RUNS column — written that way
   first, caught before it shipped, and asserted against.
-- **Verified against a real Postgres** (148 checks: migration 259 applied three
+- **Verified against a real Postgres** (182 checks: migration 259 applied three
   times to a populated pre-259 table and matching the lifespan mirror, the
   plural age-group spellings, both org resolvers' three-step fallbacks, every
   branch of the two axes composing, a senior-only club coming out inactive and
@@ -216,7 +240,14 @@ go.
   fetches, the two filters composing, clearing one without the other, the
   Grades screen's chips and its PATCH, plus the profile's FORMATS tab — lazy
   fetch, all three columns, the strongest-format callout picking the LOWEST
-  bowling average, the coverage line, no page errors, no overflow at 390px).
+  bowling average, the coverage line, and the same two rows on Leaderboard,
+  Records, Players, Games and the profile with the exact params on the wire —
+  no page errors, no overflow at 390px on any of them).
+- **The harness builds its tables from the ORM models, not by hand, and that is
+  load-bearing.** A hand-written test schema spelled `bowling_spells.runs` as
+  `runs_conceded`, the new format-split service made the same mistake, and 51
+  checks passed against the shared error. The real column is `runs` (runs
+  conceded).
 
 ## `games.match_format` was never written, so every match was a one-dayer (v9.25.2, Aug 2026)
 

@@ -95,6 +95,20 @@ function _appendContext(params, context) {
   })
 }
 
+// Grade-type / match-type scope as a query string. Takes {categories, formats},
+// or a bare string meaning categories alone (what the pre-format callers passed).
+// Returns '' when nothing is selected, so the URL is byte-identical to what it
+// was before either filter existed.
+function scopeQuery(scope) {
+  if (!scope) return ''
+  const { categories, formats } = typeof scope === 'string' ? { categories: scope } : scope
+  const params = new URLSearchParams()
+  if (categories) params.set('categories', categories)
+  if (formats) params.set('formats', formats)
+  const qs = params.toString()
+  return qs ? `?${qs}` : ''
+}
+
 export const api = {
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
@@ -203,26 +217,28 @@ export const api = {
     if (formats) params.set('formats', formats)
     return request(`/players/${playerId}/stats?${params}`)
   },
-  // `categories` is the same comma-separated grade-category selection the
-  // career stats call takes (see getPlayerStats) — every one of these reads
-  // the same per-game rows the scoped career totals do, so a player with the
-  // Junior toggle off must not see a junior game reappear in one of these.
-  getPlayerDismissals: (playerId, categories) =>
-    request(`/players/${playerId}/dismissals` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerByPosition: (playerId, categories) =>
-    request(`/players/${playerId}/by-position` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerByGrade: (playerId, categories) =>
-    request(`/players/${playerId}/by-grade` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerBowlingByGrade: (playerId, categories) =>
-    request(`/players/${playerId}/bowling-by-grade` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerBowlingDismissals: (playerId, categories) =>
-    request(`/players/${playerId}/bowling-dismissals` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerBowlingByBatterPosition: (playerId, categories) =>
-    request(`/players/${playerId}/bowling-by-batter-position` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerByVenue: (playerId, categories) =>
-    request(`/players/${playerId}/by-venue` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
-  getPlayerByOpposition: (playerId, categories) =>
-    request(`/players/${playerId}/by-opposition` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  // `scope` is the same grade-type / match-type selection the career stats call
+  // takes (see getPlayerStats) — every one of these reads the same per-game rows
+  // the scoped career totals do, so a profile filtered to Women's or to T20 must
+  // not have an out-of-scope game reappear in one of these panels.
+  // Accepts a {categories, formats} object; a bare string is read as
+  // `categories`, which is what the older call sites passed.
+  getPlayerDismissals: (playerId, scope) =>
+    request(`/players/${playerId}/dismissals${scopeQuery(scope)}`),
+  getPlayerByPosition: (playerId, scope) =>
+    request(`/players/${playerId}/by-position${scopeQuery(scope)}`),
+  getPlayerByGrade: (playerId, scope) =>
+    request(`/players/${playerId}/by-grade${scopeQuery(scope)}`),
+  getPlayerBowlingByGrade: (playerId, scope) =>
+    request(`/players/${playerId}/bowling-by-grade${scopeQuery(scope)}`),
+  getPlayerBowlingDismissals: (playerId, scope) =>
+    request(`/players/${playerId}/bowling-dismissals${scopeQuery(scope)}`),
+  getPlayerBowlingByBatterPosition: (playerId, scope) =>
+    request(`/players/${playerId}/bowling-by-batter-position${scopeQuery(scope)}`),
+  getPlayerByVenue: (playerId, scope) =>
+    request(`/players/${playerId}/by-venue${scopeQuery(scope)}`),
+  getPlayerByOpposition: (playerId, scope) =>
+    request(`/players/${playerId}/by-opposition${scopeQuery(scope)}`),
   // Public teammates: who this player has shared a side with, and the with-vs-
   // without split of the player's output alongside one teammate.
   getPlayerTeammates: (playerId) => request(`/players/${playerId}/teammates`),
@@ -233,11 +249,11 @@ export const api = {
     const qs = params.toString()
     return request(`/players/${playerId}/team-breakdown${qs ? `?${qs}` : ''}`)
   },
-  getPlayerSeasons: (playerId, categories) =>
-    request(`/players/${playerId}/seasons` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerSeasons: (playerId, scope) =>
+    request(`/players/${playerId}/seasons${scopeQuery(scope)}`),
   getPlayerMilestones: (playerId) => request(`/players/${playerId}/milestones`),
-  getPlayerPartnerships: (playerId, categories) =>
-    request(`/players/${playerId}/partnerships` + (categories ? `?categories=${encodeURIComponent(categories)}` : '')),
+  getPlayerPartnerships: (playerId, scope) =>
+    request(`/players/${playerId}/partnerships${scopeQuery(scope)}`),
   getPlayerActivity: (playerId) => request(`/players/${playerId}/activity`),
   getPlayerUpcomingMilestones: (playerId) => request(`/players/${playerId}/upcoming-milestones`),
   getPlayerRankings: (playerId, { seasonId } = {}) => {
@@ -259,11 +275,13 @@ export const api = {
     if (formats) params.set('formats', formats)
     return request(`/games?${params}`)
   },
-  getOrgResults: (orgId, { seasonId, gradeId, finalsOnly } = {}) => {
+  getOrgResults: (orgId, { seasonId, gradeId, finalsOnly, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
     if (finalsOnly) params.set('finals_only', 'true')
+    if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
     return request(`/organisations/${orgId}/results?${params}`)
   },
   getScorecard: (gameId) => request(`/games/${gameId}/scorecard`),

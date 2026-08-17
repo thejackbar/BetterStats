@@ -7,7 +7,9 @@ import { useNameFormat } from '../lib/nameFormat'
 import { usePageMeta } from '../hooks/usePageMeta'
 import { getSubcategoriesFromDefs, getAchievementsFromDefs, resolveAwardLabel } from '../lib/achievementOptions'
 import { usePlayerStats } from '../hooks/usePlayerStats'
-import { CATEGORY_LABELS, TOGGLEABLE_CATEGORIES, categoriesParam, scopeNote, autoShownNote } from '../lib/gradeCategories'
+import { scopeNote, autoShownNote } from '../lib/gradeCategories'
+import { GradeFilterPills } from '../components/GradeFilterPills'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { CATEGORY_ICON_SRC, MILESTONE_ICON_SRC, ThiingIcon, thiings } from '../assets/thiings'
 import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
@@ -2397,38 +2399,6 @@ function AchievementsSection({ playerId, orgId, playerName }) {
   )
 }
 
-// Which grade categories these career figures count. Senior is not offered:
-// it is the baseline the rest are added to. Drawn only when the club actually
-// runs grades in another category, which is also exactly when the filter does
-// anything at all.
-function GradeCategoryToggles({ categories, setCategories, available }) {
-  const toggleable = TOGGLEABLE_CATEGORIES.filter(c => available.includes(c))
-  if (!categories || toggleable.length === 0) return null
-  const flip = (key) => setCategories(
-    categories.includes(key) ? categories.filter(c => c !== key) : [...categories, key]
-  )
-  return (
-    <div className="flex items-center gap-2">
-      <Label>INCLUDE</Label>
-      <div className="flex items-center border border-pb-hairline2 rounded overflow-hidden">
-        {toggleable.map(key => (
-          <button
-            key={key}
-            onClick={() => flip(key)}
-            aria-pressed={categories.includes(key)}
-            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r border-pb-hairline2 last:border-r-0 ${
-              categories.includes(key)
-                ? 'bg-pb-accent/15 text-pb-accent'
-                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
-            }`}
-          >
-            {CATEGORY_LABELS[key]}
-          </button>
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ── Main component ────────────────────────────────────────────────────────
 export default function PlayerProfile() {
@@ -2440,15 +2410,25 @@ export default function PlayerProfile() {
   // to. Seeding from the server rather than a hardcoded list means the opening
   // fetch carries no filter at all, so a junior club that has set its default to
   // count juniors renders correctly first time instead of correcting itself.
-  const [categories, setCategories] = useState(null)
+  // Grade type and match type, the same two rows every other stats screen has.
+  // orgId isn't known until the first stats fetch lands, which is fine — the
+  // hook no-ops on null and the pills simply aren't drawn until then.
+  const [profileOrgId, setProfileOrgId] = useState(null)
+  const {
+    available: availableCategories, availableFormats,
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    categoriesParam: catParam, formatsParam: fmtParam,
+  } = useGradeFilters(profileOrgId)
   const { data, loading, error } = usePlayerStats(playerId, {
     seasonId,
-    categories: categories == null ? null : categoriesParam(categories),
+    categories: catParam,
+    formats: fmtParam,
   })
   const gradeScope = data?.grade_scope
   useEffect(() => {
-    if (categories == null && gradeScope?.categories) setCategories(gradeScope.categories)
-  }, [gradeScope, categories])
+    const oid = data?.player?.organisation_id
+    if (oid && oid !== profileOrgId) setProfileOrgId(oid)
+  }, [data?.player?.organisation_id, profileOrgId])
   const [org, setOrg] = useState(null)
   const [seasons, setSeasons] = useState([])
   const [seasonStats, setSeasonStats] = useState([])
@@ -2519,11 +2499,11 @@ export default function PlayerProfile() {
 
   useEffect(() => {
     if (!playerId) return
-    api.getPlayerSeasons(playerId, categories == null ? null : categoriesParam(categories))
+    api.getPlayerSeasons(playerId, { categories: catParam, formats: fmtParam })
       .then(setSeasonStats).catch(() => setSeasonStats([]))
     api.getPlayerUpcomingMilestones(playerId).then(setUpcomingMilestones).catch(() => setUpcomingMilestones([]))
     api.getPlayerCaptainStats(playerId).then(setCaptainStats).catch(() => setCaptainStats({}))
-  }, [playerId, categories])
+  }, [playerId, catParam, fmtParam])
 
   useEffect(() => {
     if (!data?.player?.organisation_id) return
@@ -2548,8 +2528,8 @@ export default function PlayerProfile() {
     // (a new object reference every time the season filter refetches career
     // stats) — so this only re-runs when the player changes or the Junior/
     // Senior/etc toggle actually changes, not on every unrelated re-render.
-    const catKey = categories == null ? null : categoriesParam(categories)
-    const key = `${playerId}|${catKey || ''}`
+    const scope = { categories: catParam, formats: fmtParam }
+    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}`
     if (lastAuxFetchRef.current === key) return
     lastAuxFetchRef.current = key
     // Reset stale state from previously-viewed player — otherwise navigating
@@ -2564,15 +2544,15 @@ export default function PlayerProfile() {
     setByVenue([])
     setByOpposition([])
     Promise.allSettled([
-      api.getPlayerPartnerships(playerId, catKey),
-      api.getPlayerDismissals(playerId, catKey),
-      api.getPlayerByGrade(playerId, catKey),
-      api.getPlayerByPosition(playerId, catKey),
-      api.getPlayerBowlingByGrade(playerId, catKey),
-      api.getPlayerBowlingDismissals(playerId, catKey),
-      api.getPlayerBowlingByBatterPosition(playerId, catKey),
-      api.getPlayerByVenue(playerId, catKey),
-      api.getPlayerByOpposition(playerId, catKey),
+      api.getPlayerPartnerships(playerId, scope),
+      api.getPlayerDismissals(playerId, scope),
+      api.getPlayerByGrade(playerId, scope),
+      api.getPlayerByPosition(playerId, scope),
+      api.getPlayerBowlingByGrade(playerId, scope),
+      api.getPlayerBowlingDismissals(playerId, scope),
+      api.getPlayerBowlingByBatterPosition(playerId, scope),
+      api.getPlayerByVenue(playerId, scope),
+      api.getPlayerByOpposition(playerId, scope),
     ]).then(([p, d, g, pos, bg, bd, bbp, bv, bo]) => {
       if (p.status === 'fulfilled') setPartnerships(p.value)
       if (d.status === 'fulfilled') setDismissals(d.value)
@@ -2584,7 +2564,7 @@ export default function PlayerProfile() {
       if (bv.status === 'fulfilled') setByVenue(Array.isArray(bv.value) ? bv.value : [])
       if (bo.status === 'fulfilled') setByOpposition(Array.isArray(bo.value) ? bo.value : [])
     })
-  }, [playerId, data?.player, categories])
+  }, [playerId, data?.player, catParam, fmtParam])
 
   useEffect(() => {
     if (!playerId || !data?.player) return
@@ -2748,10 +2728,13 @@ export default function PlayerProfile() {
                 <option key={s.id} value={s.id}>{formatSeason(s)}</option>
               ))}
             </select>
-            <GradeCategoryToggles
-              categories={categories}
-              setCategories={setCategories}
-              available={gradeScope?.available || []}
+            <GradeFilterPills
+              gradeType={gradeType}
+              setGradeType={setGradeType}
+              matchFormat={matchFormat}
+              setMatchFormat={setMatchFormat}
+              availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
+              availableFormats={availableFormats}
             />
           </div>
         )}

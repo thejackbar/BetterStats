@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import SeasonSelector from '../components/SeasonSelector'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { PageHeader, PbSpinner, Card } from '../lib/presskit'
 import { useNameFormat, nameMatchesSearch } from '../lib/nameFormat'
 import { fmt2, fmtCount } from '../lib/cricketFormat'
@@ -32,6 +33,11 @@ export default function Players() {
   useClubTheme(club)
   const fmt = useNameFormat(club)
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading: clubLoading } = useClubData(orgId)
+  const {
+    available: availableCategories, availableFormats, defaultCategories,
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    categoriesParam, formatsParam,
+  } = useGradeFilters(orgId)
 
   const [players, setPlayers] = useState([])
   const [battingStats, setBattingStats] = useState({})
@@ -50,21 +56,21 @@ export default function Players() {
 
   useEffect(() => {
     if (!orgId) return
-    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly })
+    api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBattingStats(map)
       })
       .catch(() => {})
-    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly })
+    api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5000, finalsOnly, categories: categoriesParam, formats: formatsParam })
       .then(rows => {
         const map = {}
         rows.forEach(r => { map[r.player_id] = r })
         setBowlingStats(map)
       })
       .catch(() => {})
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
 
   const filtered = useMemo(() => {
     if (!search.trim()) return players
@@ -125,6 +131,15 @@ export default function Players() {
             setSelectedGrade={setSelectedGrade}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            gradeType={gradeType}
+            setGradeType={setGradeType}
+            matchFormat={matchFormat}
+            setMatchFormat={setMatchFormat}
+            availableCategories={availableCategories}
+            availableFormats={availableFormats}
+            defaultCategories={defaultCategories}
+            showGradeTypeFilter
+            showMatchFormatFilter
             showGenderFilter={false}
             showCaptainFilter={false}
           />

@@ -180,7 +180,13 @@ class GradeScope:
     def _fmt_fallback_param(self) -> str:
         return f"{self.param}_fmt_grades"
 
-    def clause(self, column: str = "g.grade_id", kind: str = "game") -> str:
+    def clause(
+        self,
+        column: str = "g.grade_id",
+        kind: str = "game",
+        *,
+        game_alias: Optional[str] = None,
+    ) -> str:
         """A WHERE fragment (leading AND) narrowing to what is in scope.
 
         ``column IS NULL OR NOT (...)`` rather than a bare ``NOT (...)``: with a
@@ -192,13 +198,20 @@ class GradeScope:
         only be asked of a row that has a format:
 
         - ``'game'`` (the default, and what all ~22 per-game call sites pass
-          implicitly): the column's own alias is a games row, so the per-fixture
-          format condition is appended.
+          implicitly): the row is a game, so the per-fixture format condition is
+          appended. The games alias is taken from ``column`` unless
+          ``game_alias`` names a different one — which two call sites need,
+          because they express the CATEGORY exclusion against the joined
+          ``grades`` row (``gr.id``) while the format still has to be read off
+          each game's own ``match_format``.
         - ``'aggregate'``: a ``player_season_stats`` residual. It has no game
           behind it and so no format at all — under a format filter it drops out
           rather than being counted as whichever format is being asked for.
-        - ``'grade'``: a grades listing. A grade is in scope if it has at least
-          one game of a wanted format.
+        - ``'grade'``: a genuine grade LISTING, with no game in the query at all.
+          A grade is in scope if it has at least one game of a wanted format.
+          Do NOT use this for a per-innings query that merely joins grades: it
+          would let every innings in a grade that sometimes plays two-day cricket
+          count as two-day, which is the whole bug this design exists to avoid.
         """
         out = ""
         if self.category_active:
@@ -206,7 +219,7 @@ class GradeScope:
         if not self.format_active:
             return out
         if kind == "game":
-            out += self.format_clause(column.split(".")[0])
+            out += self.format_clause(game_alias or column.split(".")[0])
         elif kind == "aggregate":
             out += " AND FALSE"
         elif kind == "grade":
@@ -410,6 +423,7 @@ async def resolve_scope_for_player(
     player_id,
     categories=None,
     *,
+    formats=None,
     auto_widen: bool = True,
     param: str = "gs_excluded_grade_ids",
 ) -> tuple[GradeScope, bool]:
@@ -425,16 +439,23 @@ async def resolve_scope_for_player(
     choice someone made and is honoured even when it comes back empty — otherwise
     switching juniors off for a junior-only player would silently switch them on
     again, and the toggle would look broken instead.
+
+    **Widening is a CATEGORY question only.** A format filter is never widened:
+    a player with no T20 matches asking for T20 should see an empty T20 page,
+    because that IS the answer. Widening it would quietly show them their two-day
+    record under a T20 heading. The `scope.category_active` gate is what keeps
+    the two apart — a format-only scope is `active` but has nothing to widen.
     """
     explicit = normalise_categories(categories) is not None
-    scope = await resolve_scope(session, org_id, categories, param=param)
-    if explicit or not auto_widen or not scope.active:
+    scope = await resolve_scope(session, org_id, categories, formats=formats, param=param)
+    if explicit or not auto_widen or not scope.category_active:
         return scope, False
     played = await player_categories(session, player_id, org_id)
     if not played or played & set(scope.categories):
         return scope, False
     widened = await resolve_scope(
-        session, org_id, sorted(set(scope.categories) | played), param=param
+        session, org_id, sorted(set(scope.categories) | played),
+        formats=formats, param=param,
     )
     return widened, True
 

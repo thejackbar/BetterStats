@@ -127,7 +127,9 @@ async def player_format_splits(
             SELECT COALESCE({_FMT}, '{UNKNOWN}') AS fmt,
                    COUNT(*) AS spells,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
-                   COALESCE(SUM(bs.runs_conceded), 0) AS runs_conceded,
+                   -- `runs` on bowling_spells is runs CONCEDED. Named plainly on
+                   -- the table, so alias it here rather than in the reader.
+                   COALESCE(SUM(bs.runs), 0) AS runs_conceded,
                    COALESCE(SUM(
                        FLOOR(COALESCE(bs.overs, 0))::int * 6
                        + ROUND((COALESCE(bs.overs, 0) - FLOOR(COALESCE(bs.overs, 0))) * 10)::int

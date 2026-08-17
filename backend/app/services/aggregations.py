@@ -1328,7 +1328,10 @@ async def get_batting_by_grade(
     # Public views drop grades a club has opted out of sharing; admin/internal
     # callers (public_only=False) still see every grade.
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
-    scope_clause = scope.clause("gr.id", "grade") if _scoped(scope) else ""
+    # Category is expressed against the joined grades row, but the FORMAT is
+    # still per fixture: `g` is in scope here, and a grade that sometimes
+    # plays two-day cricket must not make every innings in it two-day.
+    scope_clause = scope.clause("gr.id", game_alias="g") if _scoped(scope) else ""
     params: dict = {"pid": player_id, "org_id": org_id}
     if _scoped(scope):
         scope.bind(params)
@@ -3261,7 +3264,10 @@ async def get_bowling_by_grade(
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
     public_clause = " AND gr.is_public IS NOT FALSE" if public_only else ""
-    scope_clause = scope.clause("gr.id", "grade") if _scoped(scope) else ""
+    # Category is expressed against the joined grades row, but the FORMAT is
+    # still per fixture: `g` is in scope here, and a grade that sometimes
+    # plays two-day cricket must not make every innings in it two-day.
+    scope_clause = scope.clause("gr.id", game_alias="g") if _scoped(scope) else ""
     params: dict = {"pid": player_id, "org_id": org_id}
     if _scoped(scope):
         scope.bind(params)

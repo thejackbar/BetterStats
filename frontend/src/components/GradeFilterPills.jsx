@@ -1,0 +1,80 @@
+import {
+  CATEGORY_LABELS, FORMAT_LABELS, GRADE_CATEGORIES, MATCH_FORMATS,
+} from '../lib/gradeCategories'
+
+// One pill row: All, plus one option each. The shape both grade axes use —
+// "show me the women's grades", "show me the T20s" — as opposed to the older
+// additive Include row, which asked the same question a less direct way.
+//
+// Shared by SeasonSelector (the club dashboard, Leaderboard, Records, Players,
+// Games) and the player profile, which draws its own filter bar. One component
+// so the two cannot drift into looking or behaving differently.
+export function FilterPillRow({ label, options, value, onChange, title, labelClass }) {
+  if (!options.length) return null
+  return (
+    <div className="flex items-center gap-2">
+      <label className={labelClass || 'font-mono text-[10px] tracking-wide3 text-pb-faint uppercase whitespace-nowrap hidden sm:block'}>
+        {label}
+      </label>
+      <div className="flex items-center border pb-hairline rounded overflow-hidden">
+        {[{ key: '', label: 'All' }, ...options].map(opt => (
+          <button
+            key={opt.key || 'all'}
+            onClick={() => onChange(opt.key || null)}
+            aria-pressed={(value || '') === opt.key}
+            title={opt.key ? title?.(opt) : `Every ${label.toLowerCase()}`}
+            className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
+              (value || '') === opt.key
+                ? 'bg-pb-accent/15 text-pb-accent'
+                : 'text-pb-faint hover:text-pb-dim hover:bg-pb-surface2'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// The options a club's own grades justify offering. A club with no junior
+// programme is never shown a Juniors pill, which is also exactly when the
+// filter would do nothing.
+export function gradeTypeOptions(availableCategories = []) {
+  return GRADE_CATEGORIES
+    .filter(c => availableCategories.includes(c))
+    .map(c => ({ key: c, label: CATEGORY_LABELS[c] || c }))
+}
+
+export function matchFormatOptions(availableFormats = []) {
+  return MATCH_FORMATS
+    .filter(f => availableFormats.includes(f))
+    .map(f => ({ key: f, label: FORMAT_LABELS[f] || f }))
+}
+
+// The two rows together, for a screen that just wants both.
+export function GradeFilterPills({
+  gradeType, setGradeType, matchFormat, setMatchFormat,
+  availableCategories = [], availableFormats = [], labelClass,
+}) {
+  return (
+    <>
+      <FilterPillRow
+        label="Grade Type"
+        options={gradeTypeOptions(availableCategories)}
+        value={gradeType}
+        onChange={setGradeType}
+        title={opt => `Only ${opt.label} grades`}
+        labelClass={labelClass}
+      />
+      <FilterPillRow
+        label="Match Type"
+        options={matchFormatOptions(availableFormats)}
+        value={matchFormat}
+        onChange={setMatchFormat}
+        title={opt => `Only ${opt.label} matches`}
+        labelClass={labelClass}
+      />
+    </>
+  )
+}

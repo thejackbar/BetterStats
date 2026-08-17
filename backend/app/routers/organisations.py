@@ -664,6 +664,21 @@ async def get_org_results(
     season_id: str | None = None,
     grade_id: str | None = None,
     finals_only: bool = False,
+    categories: str | None = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omit for the club's own default."
+        ),
+    ),
+    formats: str | None = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Matched per fixture off each game's own match_format. "
+            "Omit for no format filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
@@ -725,6 +740,7 @@ async def get_org_results(
                g.winning_team,
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                gr.id AS grade_id,
+               g.match_format,
                s.id AS season_id, s.name AS season_name
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
@@ -761,6 +777,13 @@ async def get_org_results(
         params["grade_id"] = grade_id
     if finals_only:
         query += " AND g.is_final = TRUE"
+    # Grade-type / match-type scope. An explicitly picked grade beats it, the
+    # same rule the leaderboards follow.
+    if not grade_id:
+        scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+        if scope.active:
+            query += scope.clause("g.grade_id")
+            scope.bind(params)
     query += " ORDER BY g.played_at DESC"
     rows = await db.execute(text(query), params)
     return [
@@ -773,6 +796,9 @@ async def get_org_results(
             "winning_team": r.winning_team,
             "grade_name": r.grade_name,
             "grade_id": str(r.grade_id) if r.grade_id else None,
+            # The fixture's own format, so a results list can label a game
+            # rather than making the reader guess from the grade name.
+            "match_format": r.match_format,
             "season_id": str(r.season_id) if r.season_id else None,
             "season_name": r.season_name,
         }
