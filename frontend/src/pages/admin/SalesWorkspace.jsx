@@ -63,19 +63,20 @@ function displayStages(stages) {
   return out
 }
 
-function StagePicker({ stages, value, onChange }) {
+// Shared popover multi-select — Stage and State pickers are both this with a
+// different option list, rather than two near-identical popovers.
+function MultiSelectPicker({ options, value, onChange, allLabel, noun }) {
   const [open, setOpen] = useState(false)
   const ref = useDismiss(open, () => setOpen(false))
-  const options = useMemo(() => displayStages(stages), [stages])
   const picked = new Set(value)
   const toggle = (key) => {
     const next = new Set(picked)
     if (next.has(key)) next.delete(key); else next.add(key)
     onChange([...next])
   }
-  const label = picked.size === 0 ? 'All stages'
-    : picked.size === 1 ? options.find(s => s.key === value[0])?.name || value[0]
-    : `${picked.size} stages`
+  const label = picked.size === 0 ? allLabel
+    : picked.size === 1 ? options.find(o => o.key === value[0])?.name || value[0]
+    : `${picked.size} ${noun}`
   return (
     <div className="relative" ref={ref}>
       <button
@@ -89,12 +90,12 @@ function StagePicker({ stages, value, onChange }) {
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-pb-hairline2 bg-pb-surface shadow-lg py-1 max-h-64 overflow-y-auto">
           <button type="button" onClick={() => onChange([])}
             className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${picked.size === 0 ? 'text-pb-accent' : 'text-pb-text'}`}>
-            All stages
+            {allLabel}
           </button>
-          {options.map(s => (
-            <label key={s.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
-              <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
-              {s.name}
+          {options.map(o => (
+            <label key={o.key} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
+              <input type="checkbox" checked={picked.has(o.key)} onChange={() => toggle(o.key)} />
+              {o.name}
             </label>
           ))}
         </div>
@@ -102,6 +103,43 @@ function StagePicker({ stages, value, onChange }) {
     </div>
   )
 }
+function StagePicker({ stages, value, onChange }) {
+  const options = useMemo(() => displayStages(stages), [stages])
+  return <MultiSelectPicker options={options} value={value} onChange={onChange} allLabel="All stages" noun="stages" />
+}
+
+// The state abbreviations PlayHQ stores on a club (mirrors SuperMarketing.jsx's
+// own STATES list — kept local rather than shared, since it's an 8-item const).
+const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+const STATE_OPTIONS = STATES.map(s => ({ key: s, name: s }))
+function StatePicker({ value, onChange }) {
+  return <MultiSelectPicker options={STATE_OPTIONS} value={value} onChange={onChange} allLabel="All states" noun="states" />
+}
+
+// One labelled row of filter controls inside the filter card — a small mono
+// caption above a flex-wrap row, separated from the row before it by a
+// hairline. Keeps "what filters what" legible as the control count grows,
+// instead of one long unbroken row.
+function FilterSection({ label, children, first = false }) {
+  return (
+    <div className={first ? '' : 'pt-3 mt-3 border-t border-pb-hairline'}>
+      <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase mb-2">{label}</p>
+      <div className="flex flex-wrap items-end gap-3">{children}</div>
+    </div>
+  )
+}
+
+const SORT_OPTIONS = [
+  { key: '', name: 'Recommended' },
+  { key: 'recent', name: 'Recent' },
+  { key: 'club_name', name: 'Club name' },
+  { key: 'engagement_score', name: 'Engagement score' },
+  { key: 'trial_days', name: 'Trial days' },
+]
+// Mirrors services/sales_workspace.py's _SORT_DEFAULT_DIR — each field's
+// sensible default direction, so the ▲/▼ toggle knows which way is "back to
+// default" without a round trip to the server.
+const _SORT_DEFAULT_DIR_FE = { recent: 'desc', club_name: 'asc', engagement_score: 'desc', trial_days: 'asc' }
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
 const NEW_CONTACT_VALUE = '__new__'
 
@@ -426,6 +464,7 @@ export default function SalesWorkspace() {
   const [filters, setFilters] = useState({
     q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, list_id: '',
     min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
+    states: [], sort: '', sort_dir: '',
   })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
@@ -563,6 +602,15 @@ export default function SalesWorkspace() {
     setFilters(f => ({ ...f, list_id: '' }))
     setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('list_id'); n.delete('list_name'); return n }, { replace: true })
   }
+
+  // Current Trials / Expired Trials are their own checkboxes (matching the
+  // Called clubs / Callback due treatment) even though under the hood
+  // they're just the trial_current/trial_expired synthetic stage keys the
+  // Stage picker already understands — toggles one entry in stage_key
+  // without disturbing whatever real stages are also picked there.
+  const toggleTrialFilter = (key) => setFilters(f => ({
+    ...f, stage_key: f.stage_key.includes(key) ? f.stage_key.filter(k => k !== key) : [...f.stage_key, key],
+  }))
 
   const toggleDoNotContact = async (contact) => {
     const next = !contact.do_not_contact
@@ -810,63 +858,76 @@ export default function SalesWorkspace() {
         </div>
       )}
 
-      <div className={`${CARD} mb-3 flex flex-wrap items-end gap-3`}>
-        <Field label="Search" width="220px">
-          <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder="Club name…" />
-        </Field>
-        <Field label="Stage" width="180px">
-          <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
-        </Field>
-        <Field label="Owner" width="180px">
-          {isSuper ? (
-            <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
-              <option value="">Everyone</option>
-              <option value="__unassigned__" disabled>— pick a rep —</option>
-              {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
-            </Select>
-          ) : (
-            // The server already restricts a sales caller to their own deals
-            // regardless of what's sent here — this is a locked display, not
-            // a real filter control, so there's nothing else it could show.
-            <TextInput value={user?.display_name || user?.username || ''} disabled readOnly />
-          )}
-        </Field>
-        <Field label="Engagement score" width="150px">
-          <div className="flex items-center gap-1.5">
-            <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-              onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
-            <span className="text-pb-faintest">–</span>
-            <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-              onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
-          </div>
-        </Field>
-        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5"
-          title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
-          <input type="checkbox" checked={filters.called_clubs}
-            onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
-          <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
-          Called clubs
-        </label>
-        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-          <input type="checkbox" checked={filters.callback_due}
-            onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
-          <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
-          Callback due
-        </label>
-        <div className="flex items-center gap-3 pb-1.5" title="From the trial signup wizard — tick both to match either">
-          <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-            <input type="checkbox" checked={filters.meta_selected}
-              onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
-            Selected
+      <div className={`${CARD} mb-3`}>
+        <FilterSection label="Search" first>
+          <Field label="Club or contact" width="320px">
+            <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))}
+              placeholder="Club name, or a contact's name…" />
+          </Field>
+        </FilterSection>
+
+        <FilterSection label="Pipeline">
+          <Field label="Stage" width="180px">
+            <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
+          </Field>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
+            <input type="checkbox" checked={filters.stage_key.includes('trial_current')}
+              onChange={() => toggleTrialFilter('trial_current')} />
+            Current trials
           </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-            <input type="checkbox" checked={filters.meta_searched}
-              onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
-            Searched
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
+            <input type="checkbox" checked={filters.stage_key.includes('trial_expired')}
+              onChange={() => toggleTrialFilter('trial_expired')} />
+            Expired trials
           </label>
-        </div>
-        <Field label="Interested in" width="100%">
+          <Field label="Owner" width="180px">
+            {isSuper ? (
+              <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
+                <option value="">Everyone</option>
+                <option value="__unassigned__" disabled>— pick a rep —</option>
+                {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+              </Select>
+            ) : (
+              // The server already restricts a sales caller to their own deals
+              // regardless of what's sent here — this is a locked display, not
+              // a real filter control, so there's nothing else it could show.
+              <TextInput value={user?.display_name || user?.username || ''} disabled readOnly />
+            )}
+          </Field>
+        </FilterSection>
+
+        <FilterSection label="Call status">
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5"
+            title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
+            <input type="checkbox" checked={filters.called_clubs}
+              onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
+            <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
+            Called clubs
+          </label>
+          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
+            <input type="checkbox" checked={filters.callback_due}
+              onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+            <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
+            Callback due
+          </label>
+        </FilterSection>
+
+        <FilterSection label="Engagement & location">
+          <Field label="Engagement score" width="150px">
+            <div className="flex items-center gap-1.5">
+              <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
+              <span className="text-pb-faintest">–</span>
+              <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
+            </div>
+          </Field>
+          <Field label="State" width="160px">
+            <StatePicker value={filters.states} onChange={v => setFilters(f => ({ ...f, states: v }))} />
+          </Field>
+        </FilterSection>
+
+        <FilterSection label="Interested in">
           <div className="flex flex-wrap gap-1.5">
             {MODULE_ORDER.map(key => {
               const on = filters.modules.includes(key)
@@ -883,7 +944,23 @@ export default function SalesWorkspace() {
               )
             })}
           </div>
-        </Field>
+        </FilterSection>
+
+        <FilterSection label="Source">
+          <div className="flex items-center gap-3" title="From the trial signup wizard — tick both to match either">
+            <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+              <input type="checkbox" checked={filters.meta_selected}
+                onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
+              Selected
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
+              <input type="checkbox" checked={filters.meta_searched}
+                onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
+              Searched
+            </label>
+          </div>
+        </FilterSection>
       </div>
 
       {isSuper && checkedIds.size > 0 && (
@@ -916,6 +993,24 @@ export default function SalesWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
         {/* Queue */}
         <div className={CARD}>
+          <div className="flex items-center gap-1.5 pb-2 mb-1.5">
+            <span className="text-[10.5px] text-pb-faintest">Sort</span>
+            <Select value={filters.sort} onChange={e => setFilters(f => ({ ...f, sort: e.target.value, sort_dir: '' }))}
+              className="!w-auto !py-1 !text-[12px]">
+              {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.name}</option>)}
+            </Select>
+            {filters.sort && (
+              <button type="button"
+                onClick={() => setFilters(f => ({
+                  ...f, sort_dir: f.sort_dir === 'asc' ? 'desc' : f.sort_dir === 'desc' ? 'asc'
+                    : (_SORT_DEFAULT_DIR_FE[f.sort] === 'asc' ? 'desc' : 'asc'),
+                }))}
+                title={`Sorted ${((filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc') ? 'ascending' : 'descending'} — click to reverse`}
+                className="px-1.5 py-1 rounded border border-pb-hairline2 text-pb-faint hover:text-pb-text text-[11px] leading-none">
+                {(filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc' ? '▲' : '▼'}
+              </button>
+            )}
+          </div>
           {!loadingList && (
             <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
               <span>

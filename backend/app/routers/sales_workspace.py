@@ -16,7 +16,7 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -88,6 +88,44 @@ async def _validated_staff_id(db: AsyncSession, raw: Optional[str]):
     return owner_id
 
 
+_SORT_KEYS = ("recent", "club_name", "engagement_score", "trial_days")
+_SORT_DEFAULT_DIR = {"recent": "desc", "club_name": "asc", "engagement_score": "desc", "trial_days": "asc"}
+
+
+def _sort_rows(rows: list, sort_key: Optional[str], sort_dir: Optional[str]) -> None:
+    """Sorts ``rows`` (the queue's output dicts) in place. An unrecognised
+    ``sort_key`` keeps the existing priority_score heuristic — the queue's
+    long-standing default, unaffected by this ever being called with
+    sort=None. For engagement_score/trial_days, a row with nothing to sort
+    on (None) is placed dead last via a (is_missing, value) tuple key rather
+    than a bare ``reverse=``, since reversing the whole key would also flip
+    missing rows to the front."""
+    if sort_key not in _SORT_KEYS:
+        rows.sort(key=lambda r: r["priority_score"], reverse=True)
+        return
+    descending = (sort_dir if sort_dir in ("asc", "desc") else _SORT_DEFAULT_DIR[sort_key]) == "desc"
+
+    if sort_key == "recent":
+        rows.sort(key=lambda r: r["updated_at"] or "", reverse=descending)
+    elif sort_key == "club_name":
+        rows.sort(key=lambda r: (r["marketing_club_name"] or r["title"] or "").lower(), reverse=descending)
+    elif sort_key == "engagement_score":
+        rows.sort(key=lambda r: (
+            r["engagement_score"] is None,
+            -(r["engagement_score"] or 0) if descending else (r["engagement_score"] or 0),
+        ))
+    elif sort_key == "trial_days":
+        # Signed already (negative = days since a trial expired, positive =
+        # days remaining on a current one) — see crm_service.
+        # trial_days_remaining_by_club. Ascending naturally clusters a
+        # just-lapsed trial (a small negative) next to one about to lapse (a
+        # small positive) around zero.
+        rows.sort(key=lambda r: (
+            r["min_trial_days_remaining"] is None,
+            -(r["min_trial_days_remaining"] or 0) if descending else (r["min_trial_days_remaining"] or 0),
+        ))
+
+
 # ─── Queue ────────────────────────────────────────────────────────────────────
 
 @router.get("/clubs")
@@ -103,6 +141,9 @@ async def list_clubs(
     meta_selected: bool = False,
     meta_searched: bool = False,
     modules: Optional[str] = None,
+    states: Optional[str] = None,
+    sort: Optional[str] = None,
+    sort_dir: Optional[str] = None,
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
@@ -127,7 +168,21 @@ async def list_clubs(
     that one alone. ``modules`` is a comma-list of module keys (core/select/
     socials/admin/iq/fantasy) — a club matching ANY of them (its own
     module_keys intersects the requested set) is kept, an OR within the
-    field same as ``stage_key``.
+    field same as ``stage_key``. ``states`` is a comma-list of the club's own
+    ``MarketingClub.state`` (e.g. "WA,NSW") — an OR, same shape again; a deal
+    with no linked club (and so no state) never matches a non-empty list.
+
+    ``sort`` picks the ordering: ``recent`` (deal.updated_at, newest first),
+    ``club_name`` (A-Z), ``engagement_score`` (highest first), ``trial_days``
+    (soonest-concern first — an expired trial's negative "days ago" sorts
+    before a current trial's positive "days left", so a just-lapsed trial and
+    an about-to-lapse one land next to each other around zero); omitted or
+    unrecognised falls back to the existing ``priority_score`` heuristic. A
+    row with nothing to sort on (no engagement score / no trial data) always
+    sorts last, whichever direction is picked, since "unknown" isn't
+    meaningfully high or low. ``sort_dir`` ('asc'|'desc') overrides each
+    field's own sensible default (recent/engagement_score default to desc,
+    club_name/trial_days default to asc).
 
     The called/callback filters are mutually exclusive, most-specific first:
     ``callback_due`` (a due/overdue follow-up — inherently a called club,
@@ -183,6 +238,10 @@ async def list_clubs(
         days = min_trial_by_club.get(club_id)
         return days is not None and days < 0
 
+    if states:
+        wanted_states = {s for s in states.split(",") if s}
+        deals = [d for d in deals
+                 if club_by_id.get(d.marketing_club_id) and club_by_id[d.marketing_club_id].state in wanted_states]
     if stage_key:
         requested = [k for k in stage_key.split(",") if k]
         wants_trial_current = "trial_current" in requested
@@ -210,7 +269,22 @@ async def list_clubs(
         deals = [d for d in deals if d.marketing_club_id and _meta_match(d.marketing_club_id)]
     if q:
         needle = q.strip().lower()
-        deals = [d for d in deals if needle in (d.title or "").lower()]
+        # Matches the club/deal title OR any of that club's contacts' names —
+        # a rep searching "Pat Smith" should find the club Pat is the
+        # secretary of, not just a club literally named "Pat Smith". Scoped
+        # to the clubs already in scope at this point (post list/stage/meta
+        # filters), so this never becomes an unbounded contact scan.
+        candidate_club_ids = [d.marketing_club_id for d in deals if d.marketing_club_id]
+        contact_match_ids = set()
+        if candidate_club_ids:
+            contact_match_ids = set((await db.execute(
+                select(MarketingClubContact.marketing_club_id).where(
+                    MarketingClubContact.marketing_club_id.in_(candidate_club_ids),
+                    func.lower(MarketingClubContact.full_name).contains(needle),
+                )
+            )).scalars().all())
+        deals = [d for d in deals if needle in (d.title or "").lower()
+                 or (d.marketing_club_id and d.marketing_club_id in contact_match_ids)]
     if modules:
         wanted_modules = {m for m in modules.split(",") if m}
         deals = [d for d in deals if wanted_modules & set(d.module_keys or [])]
@@ -277,7 +351,7 @@ async def list_clubs(
     if max_score is not None:
         out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] <= max_score]
 
-    out.sort(key=lambda r: r["priority_score"], reverse=True)
+    _sort_rows(out, sort, sort_dir)
     return {
         "clubs": out,
         "stages": [{"id": str(s.id), "key": s.key, "name": s.name} for s in pipeline.stages],
