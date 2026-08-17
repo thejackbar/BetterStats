@@ -136,6 +136,18 @@ async def list_clubs(
         effective_owner = _uuid_or_none(owner_user_id)
 
     deals = await crm_service.list_deals(db, pipeline.id, status="open", owner_user_id=effective_owner)
+    # Belt-and-braces on top of the status="open" filter above: a deal can be
+    # sitting in a Won/Lost stage while its own `status` column still reads
+    # "open" (e.g. one created directly into that stage — see create_deal,
+    # which doesn't derive `status` from the target stage the way move_stage
+    # does for an existing deal's transition). The queue is a calling list —
+    # a club that's already Won or Lost/Dormant is not a call to make, so
+    # filter on the STAGE's own terminal flags directly rather than trusting
+    # `status` alone stays in sync with it.
+    def _is_terminal_stage(d):
+        s = stage_by_id.get(d.stage_id)
+        return bool(s and (s.is_won or s.is_lost))
+    deals = [d for d in deals if not _is_terminal_stage(d)]
     if list_id:
         lid = _uuid_or_none(list_id)
         member_rows = (await db.execute(

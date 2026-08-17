@@ -713,11 +713,28 @@ async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_i
     # and keeps value_cents fully manual, same as before.
     if scope == SCOPE_PLATFORM and keys:
         value_cents = value_from_modules(keys)
+    # A deal created directly INTO a Won/Lost stage must not default to the
+    # model's plain "open" — move_stage already derives status from the
+    # target stage's terminal flags for an existing deal's transition; a
+    # brand-new deal minted straight into that stage needs the same
+    # derivation, or it reads "open" forever until something happens to move
+    # it again (a real desync a stage-scoped filter elsewhere then has to
+    # work around — see routers/sales_workspace.py's queue).
+    stage = await session.get(CrmStage, stage_id)
+    status = "won" if (stage and stage.is_won) else "lost" if (stage and stage.is_lost) else "open"
+    # A plain Python value here, NOT func.now() (what move_stage/close_deal use
+    # for the same field) — assigning a raw SQL expression to a mapped column
+    # marks it expired after flush, and this function's callers routinely
+    # serialise the deal (reading .closed_at) right after create_deal returns,
+    # with no refresh in between. A real datetime avoids that MissingGreenlet
+    # trap entirely; the couple of seconds it might lag an immediately-following
+    # commit's clock doesn't matter for a "when was this closed" field.
     deal = CrmDeal(
         scope=scope, organisation_id=organisation_id, marketing_club_id=marketing_club_id,
         pipeline_id=pipeline_id, stage_id=stage_id, title=(title or "Untitled deal")[:300],
         value_cents=max(0, int(value_cents or 0)), currency=currency or "AUD",
-        probability=probability, module_keys=keys,
+        probability=probability, module_keys=keys, status=status,
+        closed_at=datetime.now(timezone.utc) if status != "open" else None,
         expected_close_date=expected_close_date, owner_user_id=owner_user_id, source=source,
         onboarding_method=onboarding_method, lead_source=lead_source,
     )
