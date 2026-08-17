@@ -1,7 +1,7 @@
 export default {
   version: 'v9.28.0',
   date: '2026-08-17',
-  sortKey: '2026-08-22T03:00:00Z',
+  sortKey: '2026-08-24T03:00:00Z',
   title: 'Grade Type and Match Type on every stats page',
   items: [
     'The Leaderboard, Club Records, Players and Games pages now have the same Grade Type and Match Type filters as the club dashboard. Filter the batting leaderboard to the women\'s grades, or the club records to two-day cricket, and every board on the page follows.',
