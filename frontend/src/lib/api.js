@@ -1238,6 +1238,8 @@ export const api = {
     request('/club-admin/imports/resolve', { method: 'POST', body: JSON.stringify(payload) }),
   importCommit: (payload) =>
     request('/club-admin/imports/commit', { method: 'POST', body: JSON.stringify(payload) }),
+  importCreateGrade: (payload) =>
+    request('/club-admin/imports/grades', { method: 'POST', body: JSON.stringify(payload) }),
   importList: () => request('/club-admin/imports'),
   importUndo: (batchId) =>
     request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
@@ -2088,6 +2090,10 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/notes`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceAddContact: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceSetInterest: (dealId, moduleKeys) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/interest`, {
+      method: 'PATCH', body: JSON.stringify({ module_keys: moduleKeys }),
+    }),
   salesWorkspaceAssign: (dealId, ownerUserId) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
       method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
@@ -2109,6 +2115,8 @@ export const api = {
   salesWorkspaceCompleteFollowUp: (activityId) =>
     request(`/club-admin/sales-workspace/follow-ups/${activityId}/done`, { method: 'POST' }),
   salesWorkspaceEmailTemplates: () => request('/club-admin/sales-workspace/email-templates'),
+  salesWorkspaceEmailPreview: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/email-preview`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceSendEmail: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/email`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceLists: () => request('/club-admin/sales-workspace/lists'),
@@ -3084,10 +3092,10 @@ export const api = {
   // Email templates (Phase 3).
   commsListTemplates: () => request('/club-admin/comms/templates'),
   commsGetTemplate: (id) => request(`/club-admin/comms/templates/${id}`),
-  commsCreateTemplate: (name, html) =>
-    request('/club-admin/comms/templates', { method: 'POST', body: JSON.stringify({ name, html }) }),
-  commsUpdateTemplate: (id, name, html) =>
-    request(`/club-admin/comms/templates/${id}`, { method: 'PUT', body: JSON.stringify({ name, html }) }),
+  commsCreateTemplate: (name, html, subject) =>
+    request('/club-admin/comms/templates', { method: 'POST', body: JSON.stringify({ name, html, subject }) }),
+  commsUpdateTemplate: (id, name, html, subject) =>
+    request(`/club-admin/comms/templates/${id}`, { method: 'PUT', body: JSON.stringify({ name, html, subject }) }),
   commsDeleteTemplate: (id) => request(`/club-admin/comms/templates/${id}`, { method: 'DELETE' }),
   commsDuplicateTemplate: (id) =>
     request(`/club-admin/comms/templates/${id}/duplicate`, { method: 'POST' }),

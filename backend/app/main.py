@@ -5341,6 +5341,12 @@ async def lifespan(app: FastAPI):
             "WHERE status = 'drift' AND acknowledged_at IS NULL"
         ))
 
+        # Migration 260: comms_templates gains a subject line — used by the
+        # Sales Workspace's three built-in emails, now editable BetterComms
+        # templates in the outreach org rather than hardcoded Python strings.
+        # Byte-identical to alembic/versions/260_comms_template_subject.py.
+        await conn.execute(text("ALTER TABLE comms_templates ADD COLUMN IF NOT EXISTS subject TEXT"))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

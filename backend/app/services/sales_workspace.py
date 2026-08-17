@@ -119,6 +119,14 @@ _FOLLOW_UP_NOTE_TEMPLATES = {
 }
 
 
+# The six modules a rep can flag a club as interested in — same keys/order
+# components/admin/crm/ui.jsx's MODULE_ORDER uses, kept independent (not
+# imported) since that's frontend-only; billing_pricing.py is the backend's
+# own source of truth for the four priced bolt-ons + core + fantasy, so this
+# is just their union rather than a fourth definition of "what's a module".
+VALID_MODULE_KEYS = {"core", "select", "socials", "admin", "iq", "fantasy"}
+
+
 def outcome_options() -> list[dict]:
     """The vocabulary, grouped for a dropdown — CATEGORY_ORDER first."""
     return [
@@ -284,12 +292,23 @@ async def add_directory_contact(
         role_rank=99, email=email, phone=mobile, selected=True,
     )
     await session.flush()
+    email_norm = (email or "").strip().lower()
+    if email_norm:
+        return await session.scalar(
+            select(MarketingClubContact).where(
+                MarketingClubContact.marketing_club_id == marketing_club_id,
+                func.lower(MarketingClubContact.email) == email_norm,
+            )
+        )
+    # No email — _store_contact dedupes a phone-only contact on (club, name)
+    # instead, so look it up the same way.
     return await session.scalar(
         select(MarketingClubContact).where(
             MarketingClubContact.marketing_club_id == marketing_club_id,
-            func.lower(MarketingClubContact.email) == (email or "").strip().lower(),
+            MarketingClubContact.email.is_(None),
+            func.lower(MarketingClubContact.full_name) == full_name.strip().lower(),
         )
-    ) if email else None
+    )
 
 
 # ─── Calls ────────────────────────────────────────────────────────────────────

@@ -16,8 +16,18 @@ import { isFullHtmlDoc, tidyHtml, wrapFragmentForEditing, serializeIframeDocumen
 // and use its return value — it synchronously returns the latest content
 // (design-iframe edits read back, or tidied code) rather than relying on the
 // onChange callback's state update having landed yet.
+//
+// `simple` (default false) is for a caller that only wants "edit the text,
+// or preview it" — the Sales Workspace's Send Email form, where the body is
+// already a finished, real email (contact/club names already substituted
+// server-side) and a rep shouldn't be restructuring its HTML or inserting
+// {{merge}} tokens meant for a club-wide campaign. It hides the HTML/code
+// tab and the whole formatting toolbar (bold/headings/lists/links/images/
+// table rows) and skips the Insert-variable bar entirely — Design mode
+// still edits the real DOM via the same iframe, just with no chrome around
+// it. BetterComms' own Template/Compose screens keep the full editor.
 const EmailEditorTabs = forwardRef(function EmailEditorTabs(
-  { html, onChange, onEnterPreview, height = 640, subject, onSubjectChange, subjectInputRef },
+  { html, onChange, onEnterPreview, height = 640, subject, onSubjectChange, subjectInputRef, simple = false },
   ref
 ) {
   const [mode, setMode] = useState('design') // 'design' | 'preview' | 'code'
@@ -51,7 +61,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     canRedo: historyIndexRef.current < historyRef.current.length - 1,
   })
 
-  useEffect(() => { api.commsMergeVariables().then(setVars).catch(() => {}) }, [])
+  useEffect(() => { if (!simple) api.commsMergeVariables().then(setVars).catch(() => {}) }, [simple])
 
   // Design mode defaults to open on mount, but designSrcDoc is otherwise only
   // populated by changeMode's explicit "switching into design" transition —
@@ -413,11 +423,13 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
               {preview.loading ? 'Refreshing…' : 'Refresh'}
             </button>
           )}
-          <button type="button" onClick={() => changeMode('code')}
-            className={`px-3 py-1.5 rounded text-xs font-medium border pb-hairline ${mode === 'code' ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
-            style={mode === 'code' ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : {}}>
-            HTML
-          </button>
+          {!simple && (
+            <button type="button" onClick={() => changeMode('code')}
+              className={`px-3 py-1.5 rounded text-xs font-medium border pb-hairline ${mode === 'code' ? 'text-white' : 'text-pb-faint hover:text-pb-text'}`}
+              style={mode === 'code' ? { background: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : {}}>
+              HTML
+            </button>
+          )}
         </div>
       </div>
 
@@ -434,30 +446,32 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
 
       {mode === 'design' && (
         <div>
-          <div className="flex flex-wrap items-center gap-1 mb-2 pb-card p-1.5">
-            <ToolbarBtn onClick={undo} disabled={!historyFlags.canUndo} title="Undo (Cmd/Ctrl+Z)">↶ Undo</ToolbarBtn>
-            <ToolbarBtn onClick={redo} disabled={!historyFlags.canRedo} title="Redo (Cmd/Ctrl+Shift+Z)">↷ Redo</ToolbarBtn>
-            <Divider />
-            <ToolbarBtn onClick={() => exec('bold')} title="Bold"><b>B</b></ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('italic')} title="Italic"><i>I</i></ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('underline')} title="Underline"><u>U</u></ToolbarBtn>
-            <Divider />
-            <ToolbarBtn onClick={() => exec('formatBlock', '<h2>')} title="Heading">H2</ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('formatBlock', '<h3>')} title="Subheading">H3</ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('formatBlock', '<p>')} title="Paragraph">P</ToolbarBtn>
-            <Divider />
-            <ToolbarBtn onClick={() => exec('insertUnorderedList')} title="Bullet list">• List</ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('insertOrderedList')} title="Numbered list">1. List</ToolbarBtn>
-            <Divider />
-            <ToolbarBtn onClick={insertLink} title="Insert a link, or click inside an existing link/button to edit its URL">Link</ToolbarBtn>
-            <ToolbarBtn onClick={() => exec('unlink')} title="Remove link">Unlink</ToolbarBtn>
-            <ToolbarBtn onClick={insertImage} title="Insert image">Image</ToolbarBtn>
-            <ToolbarBtn onClick={insertButton} title="Insert a button-styled link">Button</ToolbarBtn>
-            <Divider />
-            <ToolbarBtn onClick={() => insertTableRow(false)} title="Insert a table row above the current one">Row ↑+</ToolbarBtn>
-            <ToolbarBtn onClick={() => insertTableRow(true)} title="Insert a table row below the current one">Row ↓+</ToolbarBtn>
-            <ToolbarBtn onClick={deleteTableRow} title="Delete the current table row">Row −</ToolbarBtn>
-          </div>
+          {!simple && (
+            <div className="flex flex-wrap items-center gap-1 mb-2 pb-card p-1.5">
+              <ToolbarBtn onClick={undo} disabled={!historyFlags.canUndo} title="Undo (Cmd/Ctrl+Z)">↶ Undo</ToolbarBtn>
+              <ToolbarBtn onClick={redo} disabled={!historyFlags.canRedo} title="Redo (Cmd/Ctrl+Shift+Z)">↷ Redo</ToolbarBtn>
+              <Divider />
+              <ToolbarBtn onClick={() => exec('bold')} title="Bold"><b>B</b></ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('italic')} title="Italic"><i>I</i></ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('underline')} title="Underline"><u>U</u></ToolbarBtn>
+              <Divider />
+              <ToolbarBtn onClick={() => exec('formatBlock', '<h2>')} title="Heading">H2</ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('formatBlock', '<h3>')} title="Subheading">H3</ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('formatBlock', '<p>')} title="Paragraph">P</ToolbarBtn>
+              <Divider />
+              <ToolbarBtn onClick={() => exec('insertUnorderedList')} title="Bullet list">• List</ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('insertOrderedList')} title="Numbered list">1. List</ToolbarBtn>
+              <Divider />
+              <ToolbarBtn onClick={insertLink} title="Insert a link, or click inside an existing link/button to edit its URL">Link</ToolbarBtn>
+              <ToolbarBtn onClick={() => exec('unlink')} title="Remove link">Unlink</ToolbarBtn>
+              <ToolbarBtn onClick={insertImage} title="Insert image">Image</ToolbarBtn>
+              <ToolbarBtn onClick={insertButton} title="Insert a button-styled link">Button</ToolbarBtn>
+              <Divider />
+              <ToolbarBtn onClick={() => insertTableRow(false)} title="Insert a table row above the current one">Row ↑+</ToolbarBtn>
+              <ToolbarBtn onClick={() => insertTableRow(true)} title="Insert a table row below the current one">Row ↓+</ToolbarBtn>
+              <ToolbarBtn onClick={deleteTableRow} title="Delete the current table row">Row −</ToolbarBtn>
+            </div>
+          )}
           <iframe
             ref={designFrameRef}
             title="design"

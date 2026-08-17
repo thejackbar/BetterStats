@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-import { Button, Note, Empty, Toast, SectionHeading } from '../../../components/admin/ui'
+import { Button, Note, Empty, Toast, SectionHeading, Field, TextInput } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
@@ -112,7 +112,7 @@ export default function CommsTemplates() {
     let live = true
     setLoadingDraft(true); setError(''); setNotice('')
     api.commsGetTemplate(selId)
-      .then(t => { if (!live) return; setDraft({ id: t.id, name: t.name || '', html: t.html ?? '' }); setEditorKey(k => k + 1) })
+      .then(t => { if (!live) return; setDraft({ id: t.id, name: t.name || '', subject: t.subject || '', html: t.html ?? '' }); setEditorKey(k => k + 1) })
       .catch(e => { if (live) setError(e.message) })
       .finally(() => { if (live) setLoadingDraft(false) })
     return () => { live = false }
@@ -120,7 +120,7 @@ export default function CommsTemplates() {
 
   const startNew = () => {
     setSelId(null)
-    setDraft({ id: null, name: '', html: STARTER })
+    setDraft({ id: null, name: '', subject: '', html: STARTER })
     setEditorKey(k => k + 1)
     setError(''); setNotice('')
   }
@@ -155,15 +155,16 @@ export default function CommsTemplates() {
     setBusy(true); setError('')
     try {
       const finalHtml = editorRef.current?.flush() ?? draft.html
+      const subject = draft.subject || ''
       const saved = draft.id
-        ? await api.commsUpdateTemplate(draft.id, name, finalHtml)
-        : await api.commsCreateTemplate(name, finalHtml)
+        ? await api.commsUpdateTemplate(draft.id, name, finalHtml, subject)
+        : await api.commsCreateTemplate(name, finalHtml, subject)
       setToast({ title: draft.id ? 'Template saved' : 'Template created', body: `${name} is ready to use on an email.` })
       await load()
       setSelId(saved.id)
       // Selecting the id it already had won't re-run the loader, so keep the
       // draft in step with what was just written.
-      setDraft({ id: saved.id, name, html: finalHtml })
+      setDraft({ id: saved.id, name, subject, html: finalHtml })
     } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
@@ -249,6 +250,11 @@ export default function CommsTemplates() {
                   )}
                 </>}
               />
+
+              <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
+                <TextInput value={draft.subject}
+                  onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
+              </Field>
 
               <CountBar>
                 <span className="text-pb-dim">

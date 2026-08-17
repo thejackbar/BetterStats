@@ -4,7 +4,8 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel } from '../../components/admin/crm/ui'
+import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
@@ -62,19 +63,20 @@ function displayStages(stages) {
   return out
 }
 
-function StagePicker({ stages, value, onChange }) {
+// Shared popover multi-select — Stage and State pickers are both this with a
+// different option list, rather than two near-identical popovers.
+function MultiSelectPicker({ options, value, onChange, allLabel, noun }) {
   const [open, setOpen] = useState(false)
   const ref = useDismiss(open, () => setOpen(false))
-  const options = useMemo(() => displayStages(stages), [stages])
   const picked = new Set(value)
   const toggle = (key) => {
     const next = new Set(picked)
     if (next.has(key)) next.delete(key); else next.add(key)
     onChange([...next])
   }
-  const label = picked.size === 0 ? 'All stages'
-    : picked.size === 1 ? options.find(s => s.key === value[0])?.name || value[0]
-    : `${picked.size} stages`
+  const label = picked.size === 0 ? allLabel
+    : picked.size === 1 ? options.find(o => o.key === value[0])?.name || value[0]
+    : `${picked.size} ${noun}`
   return (
     <div className="relative" ref={ref}>
       <button
@@ -88,12 +90,12 @@ function StagePicker({ stages, value, onChange }) {
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-pb-hairline2 bg-pb-surface shadow-lg py-1 max-h-64 overflow-y-auto">
           <button type="button" onClick={() => onChange([])}
             className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${picked.size === 0 ? 'text-pb-accent' : 'text-pb-text'}`}>
-            All stages
+            {allLabel}
           </button>
-          {options.map(s => (
-            <label key={s.id} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
-              <input type="checkbox" checked={picked.has(s.key)} onChange={() => toggle(s.key)} />
-              {s.name}
+          {options.map(o => (
+            <label key={o.key} className="flex items-center gap-2 px-2.5 py-1.5 text-[12.5px] text-pb-text hover:bg-pb-surface2 cursor-pointer select-none">
+              <input type="checkbox" checked={picked.has(o.key)} onChange={() => toggle(o.key)} />
+              {o.name}
             </label>
           ))}
         </div>
@@ -101,7 +103,88 @@ function StagePicker({ stages, value, onChange }) {
     </div>
   )
 }
+function StagePicker({ stages, value, onChange }) {
+  const options = useMemo(() => displayStages(stages), [stages])
+  return <MultiSelectPicker options={options} value={value} onChange={onChange} allLabel="All stages" noun="stages" />
+}
+
+// The state abbreviations PlayHQ stores on a club (mirrors SuperMarketing.jsx's
+// own STATES list — kept local rather than shared, since it's an 8-item const).
+const STATES = ['NSW', 'VIC', 'QLD', 'WA', 'SA', 'TAS', 'ACT', 'NT']
+const STATE_OPTIONS = STATES.map(s => ({ key: s, name: s }))
+function StatePicker({ value, onChange }) {
+  return <MultiSelectPicker options={STATE_OPTIONS} value={value} onChange={onChange} allLabel="All states" noun="states" />
+}
+
+// One labelled group of filter controls — sits side by side with its
+// siblings in a flex-wrap row (a vertical hairline separates one group from
+// the next), only dropping to its own line once the row genuinely runs out
+// of width. That's what keeps the whole bar to one or two lines instead of
+// one full-width row per group stacked all the way down the page.
+function FilterGroup({ label, children, first = false }) {
+  return (
+    <div className={`flex flex-col gap-1.5 ${first ? '' : 'pl-4 border-l border-pb-hairline'}`}>
+      <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">{label}</p>
+      <div className="flex flex-wrap items-end gap-2">{children}</div>
+    </div>
+  )
+}
+
+const SORT_OPTIONS = [
+  { key: '', name: 'Recommended' },
+  { key: 'recent', name: 'Recent' },
+  { key: 'club_name', name: 'Club name' },
+  { key: 'engagement_score', name: 'Engagement score' },
+  { key: 'trial_days', name: 'Trial days' },
+]
+// Mirrors services/sales_workspace.py's _SORT_DEFAULT_DIR — each field's
+// sensible default direction, so the ▲/▼ toggle knows which way is "back to
+// default" without a round trip to the server.
+const _SORT_DEFAULT_DIR_FE = { recent: 'desc', club_name: 'asc', engagement_score: 'desc', trial_days: 'asc' }
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
+const NEW_CONTACT_VALUE = '__new__'
+
+// Inline "not in the list" contact entry, shared by both the Log a Call and
+// Send an Email contact pickers — a rep shouldn't have to leave the form
+// they're in to add someone first. Writes straight to the canonical Club
+// Directory (routers/sales_workspace.py's add_contact, same table the
+// dedicated Contacts tab's own "+ Add contact" form uses), and hands the
+// created contact back so the caller can both select it immediately and
+// merge it into drawer.contacts for the OTHER picker too.
+function InlineNewContact({ dealId, onCreated, onCancel, toast }) {
+  const [form, setForm] = useState({ firstName: '', lastName: '', email: '', mobile: '' })
+  const [saving, setSaving] = useState(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    const full_name = `${form.firstName.trim()} ${form.lastName.trim()}`.trim()
+    if (!full_name) { toast?.error('First and last name are required'); return }
+    if (!form.email.trim() && !form.mobile.trim()) { toast?.error('An email or mobile number is required'); return }
+    setSaving(true)
+    try {
+      const res = await api.salesWorkspaceAddContact(dealId, {
+        full_name, email: form.email.trim() || null, mobile: form.mobile.trim() || null,
+      })
+      if (res.contact) onCreated(res.contact)
+      else toast?.error('Contact saved, but could not be added to this list yet — reopen the club to see it')
+    } catch (err) {
+      toast?.error(err.message || 'Could not add contact')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return (
+    <div className="grid grid-cols-2 gap-1.5 p-2 rounded-lg border border-pb-hairline2 bg-pb-surface2">
+      <TextInput placeholder="First name" value={form.firstName} onChange={e => setForm(f => ({ ...f, firstName: e.target.value }))} />
+      <TextInput placeholder="Last name" value={form.lastName} onChange={e => setForm(f => ({ ...f, lastName: e.target.value }))} />
+      <TextInput placeholder="Email" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} />
+      <TextInput placeholder="Mobile" value={form.mobile} onChange={e => setForm(f => ({ ...f, mobile: e.target.value }))} />
+      <div className="col-span-2 flex justify-end gap-2">
+        <Btn type="button" sm variant="ghost" onClick={onCancel}>Cancel</Btn>
+        <Btn type="button" sm variant="primary" disabled={saving} onClick={submit}>{saving ? 'Adding…' : 'Add contact'}</Btn>
+      </div>
+    </div>
+  )
+}
 
 function ScorePill({ score, tier }) {
   if (score == null) return <span className="text-pb-faintest text-[11px]">Not scored</span>
@@ -380,8 +463,9 @@ export default function SalesWorkspace() {
   }, [])
 
   const [filters, setFilters] = useState({
-    q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
-    min_score: '', max_score: '', meta_selected: false, meta_searched: false,
+    q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, list_id: '',
+    min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
+    states: [], sort: '', sort_dir: '',
   })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
@@ -408,6 +492,13 @@ export default function SalesWorkspace() {
 
   const [callForm, setCallForm] = useState(emptyCallForm)
   const [savingCall, setSavingCall] = useState(false)
+  // Merges a freshly-added contact into the shared drawer.contacts list (so
+  // it's immediately selectable from BOTH the Log a Call and Send an Email
+  // pickers, not just the one it was added from) and returns its key.
+  const mergeNewContact = (contact) => {
+    setDrawer(d => d ? { ...d, contacts: [...(d.contacts || []), contact] } : d)
+    return contactKey(contact)
+  }
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
   const [showAddContact, setShowAddContact] = useState(false)
@@ -423,6 +514,17 @@ export default function SalesWorkspace() {
   const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
   const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
   const [savingEmail, setSavingEmail] = useState(false)
+  const [showNewCallContact, setShowNewCallContact] = useState(false)
+  const [showNewEmailContact, setShowNewEmailContact] = useState(false)
+  // Design-mode editor for a BUILT-IN template's body (see BUILT_IN template
+  // keys below) — 'custom' keeps the old plain Subject/Body text fields.
+  // Bumped whenever a freshly-picked template's preview lands, since
+  // EmailEditorTabs seeds its Design iframe once on mount (same reason
+  // CommsTemplates.jsx bumps its own editorKey).
+  const emailEditorRef = useRef(null)
+  const [emailEditorKey, setEmailEditorKey] = useState(0)
+  const [loadingEmailPreview, setLoadingEmailPreview] = useState(false)
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo']
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
@@ -502,6 +604,15 @@ export default function SalesWorkspace() {
     setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('list_id'); n.delete('list_name'); return n }, { replace: true })
   }
 
+  // Current Trials / Expired Trials are their own checkboxes (matching the
+  // Called clubs / Callback due treatment) even though under the hood
+  // they're just the trial_current/trial_expired synthetic stage keys the
+  // Stage picker already understands — toggles one entry in stage_key
+  // without disturbing whatever real stages are also picked there.
+  const toggleTrialFilter = (key) => setFilters(f => ({
+    ...f, stage_key: f.stage_key.includes(key) ? f.stage_key.filter(k => k !== key) : [...f.stage_key, key],
+  }))
+
   const toggleDoNotContact = async (contact) => {
     const next = !contact.do_not_contact
     let reason = null
@@ -524,6 +635,21 @@ export default function SalesWorkspace() {
     () => (drawer?.activities || []).filter(a => !(a.type === 'note' && a.meta?.pinned)),
     [drawer]
   )
+
+  // Saved immediately on click (not batched with Save Call) — the same
+  // module_keys/product_interest_source fields the CRM Pipeline board's own
+  // Product Interest chips write (DealDetailModal.jsx's toggleModule), so a
+  // pick made here shows up there too.
+  const toggleInterest = async (key) => {
+    if (!drawer?.deal) return
+    const cur = drawer.deal.module_keys || []
+    const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]
+    try {
+      const d = await api.salesWorkspaceSetInterest(drawer.deal.id, next)
+      setDrawer(d)
+      loadClubs()
+    } catch (e) { toast?.error(e.message || 'Could not save module interest') }
+  }
 
   const submitCall = async (e) => {
     e.preventDefault()
@@ -644,6 +770,28 @@ export default function SalesWorkspace() {
     }
   }
 
+  // Fired when the Template picker lands on a built-in key — fetches the
+  // real, already-merged content (contact's name, club name, the rep's own
+  // Calendly link) so the rep edits real text in Design mode rather than raw
+  // {{tokens}}. Deliberately NOT re-run on a later contact change, so
+  // switching contacts can't silently wipe an edit the rep has already made.
+  const loadEmailPreview = async (templateKey, contactKeyValue) => {
+    setLoadingEmailPreview(true)
+    try {
+      const chosen = (drawer.contacts || []).find(c => contactKey(c) === contactKeyValue)
+      const payload = { template: templateKey }
+      if (chosen?.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
+      else if (chosen?.crm_person_id) payload.crm_person_id = chosen.crm_person_id
+      const r = await api.salesWorkspaceEmailPreview(drawer.deal.id, payload)
+      setEmailForm(f => ({ ...f, subject: r.subject, body: r.body }))
+      setEmailEditorKey(k => k + 1)
+    } catch (err) {
+      toast?.error(err.message || 'Could not load that template')
+    } finally {
+      setLoadingEmailPreview(false)
+    }
+  }
+
   const submitEmail = async (e) => {
     e.preventDefault()
     if (!emailForm.contactKey) { toast?.error('Pick a contact to email'); return }
@@ -658,6 +806,12 @@ export default function SalesWorkspace() {
       if (emailForm.template === 'custom') {
         payload.subject = emailForm.subject
         payload.body = emailForm.body
+      } else {
+        // The rep's (possibly edited) Design-mode content — flush() reads
+        // the iframe's current state synchronously, since onChange's state
+        // update may not have landed yet.
+        payload.subject = emailForm.subject
+        payload.body = emailEditorRef.current?.flush() ?? emailForm.body
       }
       await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
       toast?.success(`Email sent to ${chosen.full_name}`)
@@ -705,58 +859,105 @@ export default function SalesWorkspace() {
         </div>
       )}
 
-      <div className={`${CARD} mb-3 flex flex-wrap items-end gap-3`}>
-        <Field label="Search" width="220px">
-          <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))} placeholder="Club name…" />
-        </Field>
-        <Field label="Stage" width="180px">
-          <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
-        </Field>
-        <Field label="Owner" width="180px">
-          {isSuper ? (
-            <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
-              <option value="">Everyone</option>
-              <option value="__unassigned__" disabled>— pick a rep —</option>
-              {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
-            </Select>
-          ) : (
-            // The server already restricts a sales caller to their own deals
-            // regardless of what's sent here — this is a locked display, not
-            // a real filter control, so there's nothing else it could show.
-            <TextInput value={user?.display_name || user?.username || ''} disabled readOnly />
+      <div className={`${CARD} mb-3`}>
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <FilterGroup label="Search" first>
+            <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))}
+              placeholder="Club or contact name…" style={{ width: 200 }} />
+          </FilterGroup>
+
+          <FilterGroup label="Stage">
+            <div style={{ width: 150 }}>
+              <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
+            </div>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.stage_key.includes('trial_current')}
+                onChange={() => toggleTrialFilter('trial_current')} />
+              Current trials
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.stage_key.includes('trial_expired')}
+                onChange={() => toggleTrialFilter('trial_expired')} />
+              Expired trials
+            </label>
+          </FilterGroup>
+
+          {isSuper && (
+            <FilterGroup label="Owner">
+              <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}
+                style={{ width: 150 }}>
+                <option value="">Everyone</option>
+                <option value="__unassigned__" disabled>— pick a rep —</option>
+                {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+              </Select>
+            </FilterGroup>
           )}
-        </Field>
-        <Field label="Engagement score" width="150px">
-          <div className="flex items-center gap-1.5">
-            <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-              onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
-            <span className="text-pb-faintest">–</span>
-            <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-              onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
-          </div>
-        </Field>
-        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-          <input type="checkbox" checked={filters.never_called}
-            onChange={e => setFilters(f => ({ ...f, never_called: e.target.checked }))} />
-          Never called
-        </label>
-        <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-          <input type="checkbox" checked={filters.callback_due}
-            onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
-          Callback due
-        </label>
-        <div className="flex items-center gap-3 pb-1.5" title="From the trial signup wizard — tick both to match either">
-          <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-            <input type="checkbox" checked={filters.meta_selected}
-              onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
-            Selected
-          </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-            <input type="checkbox" checked={filters.meta_searched}
-              onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
-            Searched
-          </label>
+
+          <FilterGroup label="Call status">
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
+              title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
+              <input type="checkbox" checked={filters.called_clubs}
+                onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
+              Called clubs
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.callback_due}
+                onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
+              Callback due
+            </label>
+          </FilterGroup>
+
+          <FilterGroup label="Engagement score">
+            <div className="flex items-center gap-1.5">
+              <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 56 }} />
+              <span className="text-pb-faintest">–</span>
+              <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 56 }} />
+            </div>
+          </FilterGroup>
+
+          <FilterGroup label="State">
+            <div style={{ width: 130 }}>
+              <StatePicker value={filters.states} onChange={v => setFilters(f => ({ ...f, states: v }))} />
+            </div>
+          </FilterGroup>
+
+          <FilterGroup label="Interested in">
+            <div className="flex flex-wrap gap-1.5">
+              {MODULE_ORDER.map(key => {
+                const on = filters.modules.includes(key)
+                return (
+                  <button key={key} type="button"
+                    onClick={() => setFilters(f => ({
+                      ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
+                    }))}
+                    className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                      on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                         : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                    {moduleLabel(key)}
+                  </button>
+                )
+              })}
+            </div>
+          </FilterGroup>
+
+          <FilterGroup label="Meta ad">
+            <div className="flex items-center gap-3" title="From the trial signup wizard — tick both to match either">
+              <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                <input type="checkbox" checked={filters.meta_selected}
+                  onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
+                Selected
+              </label>
+              <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                <input type="checkbox" checked={filters.meta_searched}
+                  onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
+                Searched
+              </label>
+            </div>
+          </FilterGroup>
         </div>
       </div>
 
@@ -790,6 +991,24 @@ export default function SalesWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
         {/* Queue */}
         <div className={CARD}>
+          <div className="flex items-center gap-1.5 pb-2 mb-1.5">
+            <span className="text-[10.5px] text-pb-faintest">Sort</span>
+            <Select value={filters.sort} onChange={e => setFilters(f => ({ ...f, sort: e.target.value, sort_dir: '' }))}
+              className="!w-auto !py-1 !text-[12px]">
+              {SORT_OPTIONS.map(o => <option key={o.key} value={o.key}>{o.name}</option>)}
+            </Select>
+            {filters.sort && (
+              <button type="button"
+                onClick={() => setFilters(f => ({
+                  ...f, sort_dir: f.sort_dir === 'asc' ? 'desc' : f.sort_dir === 'desc' ? 'asc'
+                    : (_SORT_DEFAULT_DIR_FE[f.sort] === 'asc' ? 'desc' : 'asc'),
+                }))}
+                title={`Sorted ${((filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc') ? 'ascending' : 'descending'} — click to reverse`}
+                className="px-1.5 py-1 rounded border border-pb-hairline2 text-pb-faint hover:text-pb-text text-[11px] leading-none">
+                {(filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc' ? '▲' : '▼'}
+              </button>
+            )}
+          </div>
           {!loadingList && (
             <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
               <span>
@@ -826,7 +1045,10 @@ export default function SalesWorkspace() {
                   <button
                     onClick={() => selectClub(c.id)}
                     className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
-                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2' : 'border-transparent hover:bg-pb-surface2'
+                      selectedId === c.id ? 'border-pb-accent bg-pb-surface2'
+                      : c.callback_due ? 'border-blue-500/60 hover:bg-pb-surface2'
+                      : c.ever_called ? 'border-orange-500/60 hover:bg-pb-surface2'
+                      : 'border-transparent hover:bg-pb-surface2'
                     }`}
                   >
                   <div className="flex items-center justify-between gap-2">
@@ -844,6 +1066,15 @@ export default function SalesWorkspace() {
                       {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
                     </span>
                   </div>
+                  {(c.module_keys || []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {c.module_keys.map(k => (
+                        <span key={k} className="px-1.5 py-0.5 rounded-full text-[9.5px] bg-pb-accent/10 text-pb-accent">
+                          {moduleLabel(k)}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   </button>
                 </div>
               ))}
@@ -949,14 +1180,30 @@ export default function SalesWorkspace() {
                 <h3 className="font-display font-bold text-[13px] mb-2">Log a call</h3>
                 <form onSubmit={submitCall} className="space-y-2">
                   <Field label="Contact">
-                    <Select value={callForm.contactKey} onChange={e => setCallForm(f => ({ ...f, contactKey: e.target.value }))}>
+                    <Select value={showNewCallContact ? NEW_CONTACT_VALUE : callForm.contactKey}
+                      onChange={e => {
+                        if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
+                        setCallForm(f => ({ ...f, contactKey: e.target.value }))
+                      }}>
                       <option value="">— no specific contact —</option>
                       {(drawer.contacts || []).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
                           {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
                         </option>
                       ))}
+                      <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
                     </Select>
+                    {showNewCallContact && (
+                      <div className="mt-1.5">
+                        <InlineNewContact dealId={drawer.deal.id} toast={toast}
+                          onCancel={() => setShowNewCallContact(false)}
+                          onCreated={(contact) => {
+                            const key = mergeNewContact(contact)
+                            setCallForm(f => ({ ...f, contactKey: key }))
+                            setShowNewCallContact(false)
+                          }} />
+                      </div>
+                    )}
                   </Field>
                   <Field label="Outcome">
                     <Select value={callForm.outcome} onChange={e => setCallForm(f => ({ ...f, outcome: e.target.value }))} required>
@@ -967,6 +1214,21 @@ export default function SalesWorkspace() {
                         </optgroup>
                       ))}
                     </Select>
+                  </Field>
+                  <Field label="Interested in">
+                    <div className="flex flex-wrap gap-1.5">
+                      {MODULE_ORDER.map(key => {
+                        const on = (drawer.deal.module_keys || []).includes(key)
+                        return (
+                          <button key={key} type="button" onClick={() => toggleInterest(key)}
+                            className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                              on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                                 : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                            {moduleLabel(key)}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </Field>
                   <Field label="Notes"><TextArea value={callForm.notes} onChange={e => setCallForm(f => ({ ...f, notes: e.target.value }))} /></Field>
                   <Field label="Follow up (optional)">
@@ -981,39 +1243,6 @@ export default function SalesWorkspace() {
                     </Field>
                   )}
                   <Btn type="submit" variant="primary" disabled={savingCall}>{savingCall ? 'Saving…' : 'Save call'}</Btn>
-                </form>
-              </div>
-
-              <div className={CARD}>
-                <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
-                <form onSubmit={submitEmail} className="space-y-2">
-                  <Field label="Contact">
-                    <Select value={emailForm.contactKey} onChange={e => setEmailForm(f => ({ ...f, contactKey: e.target.value }))}>
-                      <option value="">Pick a contact…</option>
-                      {(drawer.contacts || []).filter(c => c.email).map(c => (
-                        <option key={contactKey(c)} value={contactKey(c)}>
-                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  <Field label="Template">
-                    <Select value={emailForm.template} onChange={e => setEmailForm(f => ({ ...f, template: e.target.value }))}>
-                      <option value="">Pick a template…</option>
-                      {emailTemplates.templates.map(t => (
-                        <option key={t.key} value={t.key}>
-                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
-                        </option>
-                      ))}
-                    </Select>
-                  </Field>
-                  {emailForm.template === 'custom' && (
-                    <>
-                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
-                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
-                    </>
-                  )}
-                  <Btn type="submit" variant="primary" disabled={savingEmail}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
                 </form>
               </div>
 
@@ -1038,6 +1267,78 @@ export default function SalesWorkspace() {
                 {timeline.length === 0 ? (
                   <p className="text-[12px] text-pb-faintest">No activity yet.</p>
                 ) : timeline.map(a => <ActivityRow key={a.id} a={a} />)}
+              </div>
+
+              <div className={CARD}>
+                <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
+                <form onSubmit={submitEmail} className="space-y-2">
+                  <Field label="Contact">
+                    <Select value={showNewEmailContact ? NEW_CONTACT_VALUE : emailForm.contactKey}
+                      onChange={e => {
+                        if (e.target.value === NEW_CONTACT_VALUE) { setShowNewEmailContact(true); return }
+                        setEmailForm(f => ({ ...f, contactKey: e.target.value }))
+                      }}>
+                      <option value="">Pick a contact…</option>
+                      {(drawer.contacts || []).filter(c => c.email).map(c => (
+                        <option key={contactKey(c)} value={contactKey(c)}>
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                        </option>
+                      ))}
+                      <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
+                    </Select>
+                    {showNewEmailContact && (
+                      <div className="mt-1.5">
+                        <InlineNewContact dealId={drawer.deal.id} toast={toast}
+                          onCancel={() => setShowNewEmailContact(false)}
+                          onCreated={(contact) => {
+                            if (!contact.email) { toast?.error('That contact has no email address — add one to email them'); return }
+                            const key = mergeNewContact(contact)
+                            setEmailForm(f => ({ ...f, contactKey: key }))
+                            setShowNewEmailContact(false)
+                          }} />
+                      </div>
+                    )}
+                  </Field>
+                  <Field label="Template">
+                    <Select value={emailForm.template} onChange={e => {
+                      const key = e.target.value
+                      setEmailForm(f => ({ ...f, template: key, subject: '', body: '' }))
+                      if (BUILT_IN_EMAIL_TEMPLATES.includes(key)) loadEmailPreview(key, emailForm.contactKey)
+                    }}>
+                      <option value="">Pick a template…</option>
+                      {emailTemplates.templates.map(t => (
+                        <option key={t.key} value={t.key}>
+                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  {emailForm.template === 'custom' && (
+                    <>
+                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
+                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
+                    </>
+                  )}
+                  {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && (
+                    loadingEmailPreview ? (
+                      <p className="text-[12px] text-pb-faintest py-2">Loading template…</p>
+                    ) : (
+                      <Field label="Subject">
+                        <TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} />
+                      </Field>
+                    )
+                  )}
+                  {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && !loadingEmailPreview && (
+                    <EmailEditorTabs key={emailEditorKey} ref={emailEditorRef} html={emailForm.body}
+                      onChange={v => setEmailForm(f => ({ ...f, body: v }))} height={380} simple
+                      // The body here is already a finished email (contact/
+                      // club names substituted server-side by /email-preview)
+                      // — Preview just shows exactly what's about to be
+                      // sent, no second server round trip needed.
+                      onEnterPreview={async ({ html }) => ({ html, total: 1, index: 0 })} />
+                  )}
+                  <Btn type="submit" variant="primary" disabled={savingEmail || loadingEmailPreview}>{savingEmail ? 'Sending…' : 'Send email'}</Btn>
+                </form>
               </div>
             </>
           )}

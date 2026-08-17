@@ -604,12 +604,42 @@ def match_seasons(labels: list, seasons: list, threshold: float = 0.84) -> dict:
                           "auto_status": "exact", "is_prior": False, "confidence": 1.0, "candidates": []}
             continue
         yrs = _season_years(label)
+        if yrs:
+            # A label that names its own year belongs to that year and no other.
+            # Season names are near-identical strings by construction, so string
+            # similarity is meaningless here: "Summer 2020/21" and "Summer
+            # 2010/11" differ by two digits out of fourteen and score 0.86,
+            # over the auto-accept threshold. That silently filed a club's
+            # 2020/21 history under 2010/11 — or, for a club that had only its
+            # synced seasons when it imported, under this season. Reported live:
+            # a season-by-season upload where three of the club's own seasons
+            # were absent, so their figures landed on the wrong years and the
+            # career read well over what the club's own book said.
+            same_year = sorted(
+                ((SequenceMatcher(None, ln, _norm_season(nm)).ratio(), sid, nm)
+                 for sid, nm, yr in seasons
+                 if (yr is not None and yr in yrs) or (_season_years(nm) & yrs)),
+                key=lambda t: t[0], reverse=True,
+            )
+            cands = [{"season_id": str(sid), "name": nm, "confidence": round(max(sc, 0.92), 2)}
+                     for sc, sid, nm in same_year[:5]]
+            if len(same_year) == 1 or (same_year and same_year[0][0] >= threshold):
+                out[label] = {"season_id": str(same_year[0][1]), "matched_name": same_year[0][2],
+                              "status": "matched", "auto_status": "matched", "is_prior": False,
+                              "confidence": 0.92, "candidates": cands}
+            elif same_year:
+                # Several of this club's seasons carry that year — a person picks.
+                out[label] = {"season_id": None, "status": "none", "auto_status": "none",
+                              "is_prior": False, "candidates": cands}
+            else:
+                # No season for that year yet. Create it on this step, or send it
+                # to the career bucket — never quietly onto a different year.
+                out[label] = {"season_id": None, "status": "none", "auto_status": "none",
+                              "is_prior": False, "candidates": []}
+            continue
         scored = []
         for sid, nm, yr in seasons:
-            if yrs and (yr in yrs or _season_years(nm) & yrs):
-                score = 0.92
-            else:
-                score = SequenceMatcher(None, ln, _norm_season(nm)).ratio()
+            score = SequenceMatcher(None, ln, _norm_season(nm)).ratio()
             scored.append((score, sid, nm))
         scored.sort(key=lambda t: t[0], reverse=True)
         top = scored[:5]

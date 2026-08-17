@@ -65,6 +65,7 @@ class DealUpdate(BaseModel):
     currency: Optional[str] = None
     probability: Optional[int] = None
     module_keys: Optional[List[str]] = None
+    product_interest_source: Optional[str] = None
     expected_close_date: Optional[date] = None
     owner_user_id: Optional[str] = None
     onboarding_method: Optional[str] = None
