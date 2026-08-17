@@ -860,6 +860,26 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
   )
 }
 
+// The configured cadence is a promise, not a fact — this renders whether a
+// sweep has actually been keeping it, so a stale-looking score can be told
+// apart from "the sweep just hasn't reached this club yet" and "the sweep
+// is broken and nobody has noticed."
+function SweepStatusLine({ status }) {
+  if (!status?.last_run_at) {
+    return <p className="text-[10.5px] text-pb-faintest mt-1">Not run yet since the app last started.</p>
+  }
+  const mins = Math.round((Date.now() - new Date(status.last_run_at).getTime()) / 60000)
+  const ago = mins < 1 ? 'just now' : mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`
+  const err = status.stats?.error
+  return (
+    <p className={`text-[10.5px] mt-1 ${err ? 'text-pb-red' : 'text-pb-faintest'}`}>
+      {err ? `Last run ${ago} FAILED: ${err}` : `Last ran ${ago}${
+        status.stats?.processed != null ? ` — ${status.stats.processed} processed` : ''}${
+        status.stats?.promoted ? `, ${status.stats.promoted} promoted` : ''}`}
+    </p>
+  )
+}
+
 // Landing page for the pipeline's settings — Sales Automation (its own route),
 // Manage Stages (a modal opened right from here), and the auto-recompute
 // cadence (how often the pipeline re-scores itself in the background).
@@ -964,17 +984,22 @@ function SettingsModal({ open, onClose, onManageStages }) {
                   <NumberInput min={0} max={59} value={incSec} onChange={e => setIncSec(e.target.value)} style={{ width: '58px' }} />
                   <span className="text-[11px] text-pb-faint">sec</span>
                 </div>
+                <SweepStatusLine status={cadence?.sweep_status?.incremental} />
               </div>
               <div>
                 <div className="text-[12px] font-medium">Full directory sweep (periodic)</div>
                 <div className="text-[11px] text-pb-faint mb-1">
-                  Recomputes every Club Directory club, to catch anything the frequent sweep missed.
+                  Recomputes every Club Directory club, to catch anything the frequent sweep missed —
+                  including a score that should have DECAYED from a club going quiet, which the
+                  frequent sweep above can never catch on its own (it only re-scores a club with new
+                  activity).
                   {globB ? ` Between ${globB.min} and ${globB.max} min.` : ''}
                 </div>
                 <div className="flex items-center gap-1.5">
                   <NumberInput min={0} value={globMin} onChange={e => setGlobMin(e.target.value)} style={{ width: '66px' }} />
                   <span className="text-[11px] text-pb-faint">min</span>
                 </div>
+                <SweepStatusLine status={cadence?.sweep_status?.global} />
               </div>
               <div className="flex justify-end">
                 <Btn variant="primary" sm onClick={saveCadence} disabled={saving || !cadence}>

@@ -253,6 +253,40 @@ async def get_crm_global_sweep_minutes(db: AsyncSession) -> int:
     return max(CRM_GLOBAL_SWEEP_MIN_MINUTES, min(CRM_GLOBAL_SWEEP_MAX_MINUTES, v))
 
 
+_CRM_SWEEP_STATUS_KEY = "crm_sweep_status"
+
+
+async def set_crm_sweep_status(db: AsyncSession, tier: str, stats: dict) -> None:
+    """Record the last-run outcome of a CRM auto-recompute sweep — read by
+    the pipeline Settings modal so a super admin can SEE the sweep is
+    actually alive (last ran when, processed how many), rather than trusting
+    a configured cadence that could be silently failing. ``tier`` is
+    'incremental' or 'global' (the two jobs in jobs/scheduler.py); callers
+    pass a literal, never anything user-supplied. Best-effort: swallows its
+    own failure so a bookkeeping write can never take the sweep itself down.
+    Commits (a short-lived write, same pattern as _write_hidden_meta_selections)."""
+    try:
+        current = await get_settings(db)
+        out = dict(current)
+        status = dict(out.get(_CRM_SWEEP_STATUS_KEY) or {})
+        status[tier] = {"last_run_at": datetime.utcnow().isoformat() + "Z", "stats": stats}
+        out[_CRM_SWEEP_STATUS_KEY] = status
+        await db.execute(
+            text("UPDATE platform_settings SET settings = CAST(:s AS jsonb), updated_at = NOW() WHERE id = 1"),
+            {"s": json.dumps(out)},
+        )
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        logger.exception("set_crm_sweep_status failed for tier %s", tier)
+
+
+async def get_crm_sweep_status(db: AsyncSession) -> dict:
+    """{'incremental': {...}, 'global': {...}}, each entry present only once
+    that sweep has run at least once since the platform_settings row existed
+    (a fresh install shows neither until the scheduler's first tick)."""
+    return dict((await get_settings(db)).get(_CRM_SWEEP_STATUS_KEY) or {})
+
+
 async def get_active_meta_campaign_id(db: AsyncSession) -> str:
     """The super-admin-selected active Meta campaign id for the Meta Ads HQ
     dashboard, falling back to the env seed default (settings.meta_campaign_id)

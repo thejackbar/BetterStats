@@ -918,6 +918,10 @@ async def super_crm_settings(db: AsyncSession = Depends(get_db)):
         "global_sweep_minutes": await ps.get_crm_global_sweep_minutes(db),
         "event_stale_hours": await ps.get_crm_event_stale_hours(db),
         "show_past_events": await ps.get_crm_show_past_events(db),
+        # When each sweep last actually ran and what it did — so "the cadence
+        # says hourly" is something a super admin can verify rather than
+        # trust, if a score still looks stale.
+        "sweep_status": await ps.get_crm_sweep_status(db),
         "bounds": {
             "incremental_seconds": {"min": ps.CRM_INCREMENTAL_SWEEP_MIN_SECONDS,
                                     "max": ps.CRM_INCREMENTAL_SWEEP_MAX_SECONDS},
