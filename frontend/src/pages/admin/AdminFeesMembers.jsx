@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
@@ -312,7 +312,12 @@ export default function AdminFeesMembers() {
   const people = usePeopleFilters()
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
-  const [seasonId, setSeasonId] = useState('')
+  // The season lives in the URL so it survives a trip into a member and back.
+  // The member page's "← MEMBERS" link carries ?season=, and this screen used
+  // to ignore it and snap to the newest season instead — so an admin working
+  // through 2025/26 was thrown into 2026/27 on every return.
+  const [params, setParams] = useSearchParams()
+  const [seasonId, setSeasonId] = useState(params.get('season') || '')
   const [data, setData] = useState(null)
   const [tiers, setTiers] = useState([])
   const [membershipTypes, setMembershipTypes] = useState([])
@@ -332,10 +337,27 @@ export default function AdminFeesMembers() {
 
   useEffect(() => {
     api.adminListSeasons()
-      .then(s => { const sorted = sortSeasons(s); setSeasons(sorted); if (sorted[0]) setSeasonId(sorted[0].id) })
+      .then(s => {
+        const sorted = sortSeasons(s)
+        setSeasons(sorted)
+        // Keep a season named in the URL, and only fall back to the newest
+        // when there is none — or when the one named is no longer a season
+        // this club holds, which would otherwise leave the screen empty with
+        // no obvious way back.
+        setSeasonId(cur => (cur && sorted.some(x => x.id === cur) ? cur : (sorted[0]?.id || '')))
+      })
       .catch(e => toast.error(e.message))
     api.feeListMembershipTypes().then(d => setMembershipTypes(d.types || [])).catch(() => {})
   }, [])
+
+  // Mirror the chosen season back into the URL (replace, not push, so the back
+  // button still leaves the screen instead of walking the season history).
+  useEffect(() => {
+    if (!seasonId || params.get('season') === seasonId) return
+    const next = new URLSearchParams(params)
+    next.set('season', seasonId)
+    setParams(next, { replace: true })
+  }, [seasonId, params, setParams])
 
   const load = useCallback(() => {
     if (!seasonId) return

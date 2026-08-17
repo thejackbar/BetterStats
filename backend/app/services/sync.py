@@ -1829,6 +1829,7 @@ async def sync_grassroots_game_level_data(
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
+    match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
     for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
@@ -1864,6 +1865,23 @@ async def sync_grassroots_game_level_data(
             match_to_season[mid] = season_id
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
+            # The match list carries the format ("One Day" / "Two Day" / "T20")
+            # per FIXTURE, and that granularity is the whole point: a WA turf
+            # grade plays both across one season (Applecross 5th Grade 25/26 is
+            # 32 one-day and 26 two-day), so the grade cannot answer this and a
+            # grade-level fee_format override would charge every one-day fixture
+            # as two days. Read here rather than from the scorecard because the
+            # list is already fetched — no extra call — and because it covers a
+            # fixture whose scorecard we never open.
+            # "BYE" comes back here as a matchType too (48 of Colts T20's 87
+            # entries in 25/26). It is not a format — every consumer of this
+            # column substring-parses it as one, so storing it would make a
+            # non-match read as a one-dayer. A bye has no scorecard and so
+            # never becomes a games row anyway; skipping it keeps the column
+            # honest either way.
+            _mt = (m.get("matchType") or "").strip()
+            if _mt and _mt.upper() != "BYE":
+                match_to_format[mid] = _mt
             opp_team_m = next((t for t in teams if t is not our_team_m), None)
             if opp_team_m:
                 opp_org = opp_team_m.get("owningOrganisation") or {}
@@ -1915,6 +1933,34 @@ async def sync_grassroots_game_level_data(
                 )
             await upd_session.commit()
         logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
+
+    # Bulk-update match_format the same way, and for the same reason: an
+    # already-synced game never reaches the per-game block below (the
+    # appearances-done gate short-circuits it), so setting this only on the
+    # Game() constructor would fix new fixtures and leave a club's existing
+    # season reading as though every match were a one-dayer. CA is the only
+    # writer of this column for a synced game, so overwriting is safe — a
+    # hand-typed format lives on manual_games, a different table entirely.
+    if match_to_format:
+        by_format: dict[str, list[uuid.UUID]] = {}
+        for mid, fmt in match_to_format.items():
+            try:
+                by_format.setdefault(fmt, []).append(uuid.UUID(mid))
+            except ValueError:
+                pass
+        if by_format:
+            async with async_session_maker() as upd_session:
+                for fmt, ids in by_format.items():
+                    await upd_session.execute(
+                        text("UPDATE games SET match_format = :fmt "
+                             "WHERE id = ANY(:ids) AND match_format IS DISTINCT FROM :fmt"),
+                        {"fmt": fmt, "ids": ids},
+                    )
+                await upd_session.commit()
+            logger.info(
+                "GR-sync: bulk-updated match_format (%s)",
+                ", ".join(f"{f}×{len(i)}" for f, i in by_format.items()),
+            )
 
     if match_to_opp:
         opp_rows = []
@@ -2189,6 +2235,7 @@ async def sync_grassroots_game_level_data(
                         result=result_text,
                         winning_team=winner_name,
                         is_final=match_to_is_final.get(match_id_str, False),
+                        match_format=match_to_format.get(match_id_str),
                         venue=venue_name,
                     ))
                     try:

@@ -1,5 +1,76 @@
 # BetterStats — Claude Session Notes
 
+## `games.match_format` was never written, so every match was a one-dayer (v9.25.2, Aug 2026)
+
+Reported from Applecross Accounts: grades that play two-day cricket all showed a
+Fee Format of One Day, and it "used to be right". Every match day was being
+charged as one day.
+
+- **The column has no writer.** `derive_fee_format(grade.fee_format,
+  game.match_format)` is correct and always was; `games.match_format` was NULL
+  for every synced row, and its own fallback is "everything else (One Day,
+  blank, unknown) is treated as a single day". So the bug reads as a wrong
+  format rather than a missing one, which is why it looks like a settings
+  problem and isn't. **Migration 033's docstring claims the sync backfills this
+  ("also opportunistically backfilled during incremental syncs") — that code
+  does not exist in this tree.** The docstring is the only trace of it; treat a
+  migration's prose as intent, not proof, and grep for the writer.
+- **The format is per FIXTURE, and a grade cannot answer it.** Applecross 5th
+  Grade 2025/26 is **32 One Day and 26 Two Day** fixtures (verified live against
+  `/scores/grades/{id}/matches`); 1st Grade is 39/32. So the grade-level
+  `fee_format` override is NOT the fix — setting a mixed grade to `two_day`
+  would double-charge its one-day half. Leave that override for what it is for:
+  telling a women's grade from a men's one, and excluding a grade from fees.
+- **Read from the match LIST, not the scorecard.** `get_grade_matches` already
+  returns `matchType` ("One Day" / "Two Day" / "T20") and the discovery loop
+  already fetches it, so this costs no extra call and also covers a fixture
+  whose scorecard is never opened. `matchTypeId` (1 = Two Day, 2 = One Day) is
+  there too; the string is stored because every consumer substring-parses this
+  column (`fees.derive_fee_format`, `iq_team._fmt_of`) and the manual-entry form
+  writes free text into it.
+- **"BYE" is also a `matchType`** (48 of Colts T20's 87 entries) and is
+  deliberately NOT stored — it is not a format, and every consumer would parse
+  it as a one-dayer. A bye has no scorecard so it never becomes a `games` row
+  anyway; the guard just keeps the column honest.
+- **Setting it on `Game()` alone would have fixed almost nothing.** An
+  already-synced game never reaches the per-game block (the appearances-done
+  gate short-circuits it), so the write is ALSO a bulk pass beside the existing
+  `is_final` one — the same reason that one exists. That is what corrects a
+  club's existing season on an ordinary Sync Now.
+- **`python -m app.scripts.backfill_match_format <org-id-or-slug>`** (dry-run,
+  `--apply`, `--recompute`, `--season YYYY`) is the retroactive half: it walks
+  every season the club holds rather than the window an incremental run scans.
+  It restricts writes to games under the club's OWN grades — a grade match list
+  is competition-wide and names plenty of fixtures that are not ours.
+- **Fee rows are not edited directly** — `recompute_fee_match_days` re-derives
+  them and already leaves an admin-overridden (`auto_derived=False`) or
+  already-paid row alone. Nothing new was needed for that; don't reimplement it.
+- **Verified against live Cricket Australia data** (7 checks over six real
+  Applecross 25/26 grades through the shipped `derive_fee_format`: the bug
+  reproduced from a NULL, all three formats mapping, the mixed grade proving the
+  per-fixture requirement, and the women's/exclude overrides still winning).
+
+## Accounts kept resetting to the newest season (v9.25.2, Aug 2026)
+
+Same report: work through 2025/26, open a member, come back, and you are in
+2026/27.
+
+- **`AdminFeeMemberDetail` already linked back with `?season=`; the Accounts
+  screen just ignored it** — `useState('')` then "set `sorted[0]`" on every
+  mount, unconditionally. Half the round trip had been built.
+- **The season is URL state now**, seeded from `?season=` and mirrored back on
+  change (`replace`, so the back button leaves the screen instead of walking the
+  season history). It survives a refresh and is shareable, which is what the
+  reported URL was.
+- **A season named in the URL that the club no longer holds falls back to the
+  newest** rather than leaving an empty screen with no way out.
+- **Driven in Chromium** against the real screens with the API stubbed (11
+  checks: the round trip holding 25/26, the back link, the no-param default, the
+  stale-id fallback, the dropdown writing the URL, no page errors). The one
+  failing check, horizontal overflow at 390px, was confirmed **pre-existing** by
+  re-running it with the change stashed — the members table is wide, and that is
+  not this fix's to solve.
+
 ## The scheduled sync pulls the period's results, not the club's whole history (migration 258, v9.25.0, Aug 2026)
 
 `jobs/scheduler.py::sync_all_organisations` was `select(Organisation)` with no
