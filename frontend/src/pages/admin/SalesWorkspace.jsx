@@ -6,6 +6,7 @@ import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
+import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
@@ -156,6 +157,16 @@ const splitFullName = (fullName) => {
   if (parts.length === 1) return { first: parts[0], last: parts[0] }
   return { first: parts[0], last: parts.slice(1).join(' ') }
 }
+// min_trial_days_remaining is SIGNED (see crm.trial_days_remaining_by_club) —
+// negative means the trial's own end date has already passed, which is what
+// tells "13 days left" apart from "expired 3 days ago" instead of both
+// reading as a plain countdown. Shared by the queue card and the drawer's
+// own ClubSummaryCard so the two never phrase this differently.
+const trialDaysLabel = (days) => {
+  const n = Math.abs(days)
+  const unit = `day${n === 1 ? '' : 's'}`
+  return days >= 0 ? `${n} ${unit} left` : `EXPIRED (${n} ${unit} ago)`
+}
 
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
@@ -262,9 +273,9 @@ function ClubSummaryCard({ deal }) {
     <div className="space-y-1.5 mt-2 pt-2 border-t border-pb-hairline">
       {line && <p className="text-[12px] text-pb-faint">{line}</p>}
       {days != null && (
-        days >= 0
-          ? <p className="text-[12.5px] text-pb-text">Trial: <span className="font-medium">{days} day{days === 1 ? '' : 's'} left</span></p>
-          : <p className="text-[12.5px] text-pb-red">Trial: <span className="font-medium">EXPIRED ({Math.abs(days)} day{Math.abs(days) === 1 ? '' : 's'} ago)</span></p>
+        <p className={`text-[12.5px] ${days >= 0 ? 'text-pb-text' : 'text-pb-red'}`}>
+          Trial: <span className="font-medium">{trialDaysLabel(days)}</span>
+        </p>
       )}
       {deal.registrant?.name && (
         <p className="text-[12px] text-pb-faint">
@@ -1092,6 +1103,14 @@ export default function SalesWorkspace() {
                       {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
                     </span>
                   </div>
+                  {c.min_trial_days_remaining != null && (
+                    <div className={`flex items-center gap-1 mt-1 text-[10.5px] ${
+                      c.min_trial_days_remaining >= 0 ? 'text-pb-text' : 'text-pb-red'}`}>
+                      <TrialHourglassIcon className="w-3 h-3 shrink-0"
+                        color={c.min_trial_days_remaining >= 0 ? TRIAL_AMBER : '#ef4444'} />
+                      <span>Trial: <span className="font-medium">{trialDaysLabel(c.min_trial_days_remaining)}</span></span>
+                    </div>
+                  )}
                   {(c.module_keys || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {c.module_keys.map(k => (
