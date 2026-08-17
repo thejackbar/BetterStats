@@ -10,9 +10,23 @@ single day. A club running turf grades was under-charging half its season.
 
 The sync writes it now, for new fixtures and (via the bulk pass beside
 ``is_final``) for the games each run rediscovers. This script is the
-retroactive half: it covers every season the club holds, not just the window
-an incremental run happens to scan, so a club's history corrects without a
-Full Rebuild.
+retroactive half, for the seasons an incremental run no longer scans.
+
+A club onboarded after this shipped has nothing to fix — its games get the
+format at creation.
+
+HOW FAR BACK
+------------
+By default: the seasons that actually carry fee data, plus the club's latest
+season. That is the honest answer to "how far back does this matter" — a club
+processes fees for the season it is in and perhaps the one before, so a
+2011/12 grade costs a CA call and corrects money nobody is collecting. The
+latest season is included because a club setting up THIS season's fees has no
+fee rows in it yet.
+
+``--all-seasons`` does the full history. Worth it only for a club that wants
+the format filters right across StatLab and BetterIQ, which is what migration
+033 originally added the column for — it is stats tidiness, not money.
 
 WHY THE FIXTURE AND NOT THE GRADE
 ---------------------------------
@@ -37,6 +51,7 @@ USAGE
     python -m app.scripts.backfill_match_format <org-id-or-slug> --apply
     python -m app.scripts.backfill_match_format <org-id-or-slug> --apply --recompute
     python -m app.scripts.backfill_match_format <org-id-or-slug> --apply --season 2025
+    python -m app.scripts.backfill_match_format <org-id-or-slug> --apply --all-seasons
 """
 from __future__ import annotations
 
@@ -51,7 +66,8 @@ from app.models.db import async_session_maker
 from app.services import grassroots_scores_client as gr
 
 
-async def run(org_ref: str, apply: bool, recompute: bool, season_year: int | None) -> int:
+async def run(org_ref: str, apply: bool, recompute: bool,
+              season_year: int | None, all_seasons: bool) -> int:
     async with async_session_maker() as db:
         try:
             org_id = str(uuid.UUID(org_ref))
@@ -71,7 +87,20 @@ async def run(org_ref: str, apply: bool, recompute: bool, season_year: int | Non
         # COALESCE(grassroots_id, id) is the raw CA grade GUID — the per-club
         # uuid5 id minted on a cross-club grade collision is ours alone and
         # means nothing to /scores/grades/{id}/matches.
-        season_clause = "AND s.year = :yr" if season_year is not None else ""
+        # Season scope. The default is deliberately narrow — see HOW FAR BACK.
+        if season_year is not None:
+            season_clause = "AND s.year = :yr"
+            scope_label = f"season {season_year}"
+        elif all_seasons:
+            season_clause = ""
+            scope_label = "every season this club holds"
+        else:
+            season_clause = """
+                AND (EXISTS (SELECT 1 FROM fee_member_seasons f WHERE f.season_id = s.id)
+                     OR s.year = (SELECT MAX(year) FROM seasons
+                                   WHERE organisation_id = CAST(:org AS UUID)))
+            """
+            scope_label = "seasons with fee data, plus the latest season"
         grades = (await db.execute(
             text(f"""
                 SELECT g.id AS grade_id,
@@ -87,10 +116,14 @@ async def run(org_ref: str, apply: bool, recompute: bool, season_year: int | Non
         )).mappings().all()
 
         if not grades:
-            print("No grades found for that club (or that season).")
+            print(f"No grades found for that club within: {scope_label}.")
             return 1
 
-        print(f"Scanning {len(grades)} grade(s) …\n")
+        seasons_in_scope = sorted({g["season_name"] for g in grades})
+        print(f"Scope: {scope_label}")
+        print(f"  {len(seasons_in_scope)} season(s): {', '.join(seasons_in_scope[:6])}"
+              + (" …" if len(seasons_in_scope) > 6 else ""))
+        print(f"Scanning {len(grades)} grade(s) — one CA call each …\n")
 
         # match id → format, gathered across every grade before a single write:
         # two clubs in one grade share a match row, and one fixture can be
@@ -211,6 +244,7 @@ def main() -> None:
     args = [a for a in sys.argv[1:]]
     apply = "--apply" in args
     recompute = "--recompute" in args
+    all_seasons = "--all-seasons" in args
     season_year = None
     if "--season" in args:
         i = args.index("--season")
@@ -227,7 +261,11 @@ def main() -> None:
     if not positional:
         print(__doc__)
         raise SystemExit(2)
-    raise SystemExit(asyncio.run(run(positional[0], apply, recompute, season_year)))
+    if season_year is not None and all_seasons:
+        print("--season and --all-seasons contradict each other; pick one.")
+        raise SystemExit(2)
+    raise SystemExit(asyncio.run(
+        run(positional[0], apply, recompute, season_year, all_seasons)))
 
 
 if __name__ == "__main__":

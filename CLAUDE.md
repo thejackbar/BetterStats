@@ -38,10 +38,19 @@ charged as one day.
   `is_final` one — the same reason that one exists. That is what corrects a
   club's existing season on an ordinary Sync Now.
 - **`python -m app.scripts.backfill_match_format <org-id-or-slug>`** (dry-run,
-  `--apply`, `--recompute`, `--season YYYY`) is the retroactive half: it walks
-  every season the club holds rather than the window an incremental run scans.
-  It restricts writes to games under the club's OWN grades — a grade match list
-  is competition-wide and names plenty of fixtures that are not ours.
+  `--apply`, `--recompute`, `--season YYYY`, `--all-seasons`) is the retroactive
+  half, for the seasons an incremental run no longer scans. It restricts writes
+  to games under the club's OWN grades — a grade match list is competition-wide
+  and names plenty of fixtures that are not ours.
+- **It deliberately does NOT default to the whole history.** A club collects
+  fees for the season it is in and maybe the one before, so the default scope is
+  **the seasons carrying `fee_member_seasons` rows, plus the club's latest
+  season** — the latter because a club setting up this season's fees has no fee
+  rows in it yet. Reaching back to 2011 spends a CA call per grade correcting
+  money nobody is collecting. `--all-seasons` is there for the stats side
+  (StatLab / BetterIQ format filters, migration 033's original purpose), not for
+  fees. **A club onboarded after this shipped needs none of it** — its games get
+  the format at creation.
 - **Fee rows are not edited directly** — `recompute_fee_match_days` re-derives
   them and already leaves an admin-overridden (`auto_derived=False`) or
   already-paid row alone. Nothing new was needed for that; don't reimplement it.

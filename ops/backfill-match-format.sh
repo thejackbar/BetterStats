@@ -10,6 +10,7 @@
 #   ./backfill-match-format.sh --all                       # dry run, every club
 #   ./backfill-match-format.sh --all --apply --recompute
 #   ./backfill-match-format.sh applecross --apply --season 2025
+#   ./backfill-match-format.sh applecross --apply --all-seasons  # full history
 #
 # WHY
 #   games.match_format was never written by the sync, so every synced game was
@@ -17,8 +18,20 @@
 #   day" default. Every two-day fixture was billed as a single day.
 #
 #   The sync records it now, and also bulk-fills the games it rediscovers on
-#   each run — but an incremental run only scans a recent window. This walks
-#   every season a club holds, which is what fixes the back catalogue.
+#   each run — but an incremental run only scans a recent window, so the back
+#   catalogue needs this.
+#
+# HOW FAR BACK
+#   Per club, the default is the seasons that carry fee data plus that club's
+#   latest season — a club collects fees for the season it is in and maybe the
+#   one before, so reaching further back spends CA calls correcting money
+#   nobody is collecting. The latest season is included because a club setting
+#   up THIS season's fees has no fee rows in it yet. --all-seasons opts into
+#   the full history, which is stats tidiness (StatLab / BetterIQ format
+#   filters) rather than money.
+#
+#   A club onboarded after this shipped needs none of it — its games get the
+#   format at creation.
 #
 # WHAT IT TOUCHES
 #   games.match_format only, for games under the named club's OWN grades, and
@@ -30,9 +43,11 @@
 #   before you --apply.
 #
 # COST
-#   One /scores/grades/{id}/matches call per grade per club. A club with a long
-#   history has hundreds of grades, so --all is a slow, chatty pass against
-#   CA's proxy — run it out of hours, and prefer naming the clubs that need it.
+#   One /scores/grades/{id}/matches call per grade in scope. The default scope
+#   keeps that to a handful of seasons per club; --all-seasons is where it gets
+#   expensive, since an established club has hundreds of grades across its
+#   history. Combining --all with --all-seasons is a long, chatty pass against
+#   CA's proxy — run that out of hours, if at all.
 #
 set -euo pipefail
 
@@ -47,7 +62,7 @@ PASSTHRU=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --all)                 ALL=1 ;;
-    --apply|--recompute)   PASSTHRU+=("$1") ;;
+    --apply|--recompute|--all-seasons) PASSTHRU+=("$1") ;;
     --season)              PASSTHRU+=("$1" "${2:?--season needs a year, e.g. --season 2025}"); shift ;;
     -h|--help)             sed -n '2,36p' "$0"; exit 0 ;;
     -*)                    echo "Unknown option: $1 (try --help)" >&2; exit 2 ;;
