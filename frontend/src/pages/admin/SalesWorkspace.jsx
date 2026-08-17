@@ -524,7 +524,10 @@ export default function SalesWorkspace() {
   const emailEditorRef = useRef(null)
   const [emailEditorKey, setEmailEditorKey] = useState(0)
   const [loadingEmailPreview, setLoadingEmailPreview] = useState(false)
-  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo']
+  // 'custom' opens the same way as the other three now — pre-filled from its
+  // own editable template ("Custom sales rep email" in Comms -> Templates)
+  // in the Design editor, not a blank plain-text form.
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo', 'custom']
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
@@ -803,16 +806,12 @@ export default function SalesWorkspace() {
       const payload = { template: emailForm.template }
       if (chosen.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
       else if (chosen.crm_person_id) payload.crm_person_id = chosen.crm_person_id
-      if (emailForm.template === 'custom') {
-        payload.subject = emailForm.subject
-        payload.body = emailForm.body
-      } else {
-        // The rep's (possibly edited) Design-mode content — flush() reads
-        // the iframe's current state synchronously, since onChange's state
-        // update may not have landed yet.
-        payload.subject = emailForm.subject
-        payload.body = emailEditorRef.current?.flush() ?? emailForm.body
-      }
+      // Every template (including Custom, which now also opens pre-filled in
+      // the Design editor) sends the rep's possibly-edited copy — flush()
+      // reads the iframe's current state synchronously, since onChange's
+      // state update may not have landed yet.
+      payload.subject = emailForm.subject
+      payload.body = emailEditorRef.current?.flush() ?? emailForm.body
       await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
       toast?.success(`Email sent to ${chosen.full_name}`)
       setEmailForm({ contactKey: '', template: '', subject: '', body: '' })
@@ -912,10 +911,10 @@ export default function SalesWorkspace() {
           <FilterGroup label="Engagement score">
             <div className="flex items-center gap-1.5">
               <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 56 }} />
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 72 }} />
               <span className="text-pb-faintest">–</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 56 }} />
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 72 }} />
             </div>
           </FilterGroup>
 
@@ -1313,12 +1312,6 @@ export default function SalesWorkspace() {
                       ))}
                     </Select>
                   </Field>
-                  {emailForm.template === 'custom' && (
-                    <>
-                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
-                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
-                    </>
-                  )}
                   {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && (
                     loadingEmailPreview ? (
                       <p className="text-[12px] text-pb-faintest py-2">Loading template…</p>
