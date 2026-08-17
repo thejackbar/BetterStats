@@ -116,15 +116,16 @@ function StatePicker({ value, onChange }) {
   return <MultiSelectPicker options={STATE_OPTIONS} value={value} onChange={onChange} allLabel="All states" noun="states" />
 }
 
-// One labelled row of filter controls inside the filter card — a small mono
-// caption above a flex-wrap row, separated from the row before it by a
-// hairline. Keeps "what filters what" legible as the control count grows,
-// instead of one long unbroken row.
-function FilterSection({ label, children, first = false }) {
+// One labelled group of filter controls — sits side by side with its
+// siblings in a flex-wrap row (a vertical hairline separates one group from
+// the next), only dropping to its own line once the row genuinely runs out
+// of width. That's what keeps the whole bar to one or two lines instead of
+// one full-width row per group stacked all the way down the page.
+function FilterGroup({ label, children, first = false }) {
   return (
-    <div className={first ? '' : 'pt-3 mt-3 border-t border-pb-hairline'}>
-      <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase mb-2">{label}</p>
-      <div className="flex flex-wrap items-end gap-3">{children}</div>
+    <div className={`flex flex-col gap-1.5 ${first ? '' : 'pl-4 border-l border-pb-hairline'}`}>
+      <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">{label}</p>
+      <div className="flex flex-wrap items-end gap-2">{children}</div>
     </div>
   )
 }
@@ -859,108 +860,105 @@ export default function SalesWorkspace() {
       )}
 
       <div className={`${CARD} mb-3`}>
-        <FilterSection label="Search" first>
-          <Field label="Club or contact" width="320px">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
+          <FilterGroup label="Search" first>
             <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))}
-              placeholder="Club name, or a contact's name…" />
-          </Field>
-        </FilterSection>
+              placeholder="Club or contact name…" style={{ width: 200 }} />
+          </FilterGroup>
 
-        <FilterSection label="Pipeline">
-          <Field label="Stage" width="180px">
-            <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
-          </Field>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-            <input type="checkbox" checked={filters.stage_key.includes('trial_current')}
-              onChange={() => toggleTrialFilter('trial_current')} />
-            Current trials
-          </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-            <input type="checkbox" checked={filters.stage_key.includes('trial_expired')}
-              onChange={() => toggleTrialFilter('trial_expired')} />
-            Expired trials
-          </label>
-          <Field label="Owner" width="180px">
-            {isSuper ? (
-              <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}>
+          <FilterGroup label="Stage">
+            <div style={{ width: 150 }}>
+              <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
+            </div>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.stage_key.includes('trial_current')}
+                onChange={() => toggleTrialFilter('trial_current')} />
+              Current trials
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.stage_key.includes('trial_expired')}
+                onChange={() => toggleTrialFilter('trial_expired')} />
+              Expired trials
+            </label>
+          </FilterGroup>
+
+          {isSuper && (
+            <FilterGroup label="Owner">
+              <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}
+                style={{ width: 150 }}>
                 <option value="">Everyone</option>
                 <option value="__unassigned__" disabled>— pick a rep —</option>
                 {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
               </Select>
-            ) : (
-              // The server already restricts a sales caller to their own deals
-              // regardless of what's sent here — this is a locked display, not
-              // a real filter control, so there's nothing else it could show.
-              <TextInput value={user?.display_name || user?.username || ''} disabled readOnly />
-            )}
-          </Field>
-        </FilterSection>
+            </FilterGroup>
+          )}
 
-        <FilterSection label="Call status">
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5"
-            title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
-            <input type="checkbox" checked={filters.called_clubs}
-              onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
-            <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
-            Called clubs
-          </label>
-          <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none pb-1.5">
-            <input type="checkbox" checked={filters.callback_due}
-              onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
-            <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
-            Callback due
-          </label>
-        </FilterSection>
+          <FilterGroup label="Call status">
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
+              title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
+              <input type="checkbox" checked={filters.called_clubs}
+                onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
+              Called clubs
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.callback_due}
+                onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
+              Callback due
+            </label>
+          </FilterGroup>
 
-        <FilterSection label="Engagement & location">
-          <Field label="Engagement score" width="150px">
+          <FilterGroup label="Engagement score">
             <div className="flex items-center gap-1.5">
               <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 64 }} />
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 56 }} />
               <span className="text-pb-faintest">–</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 64 }} />
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 56 }} />
             </div>
-          </Field>
-          <Field label="State" width="160px">
-            <StatePicker value={filters.states} onChange={v => setFilters(f => ({ ...f, states: v }))} />
-          </Field>
-        </FilterSection>
+          </FilterGroup>
 
-        <FilterSection label="Interested in">
-          <div className="flex flex-wrap gap-1.5">
-            {MODULE_ORDER.map(key => {
-              const on = filters.modules.includes(key)
-              return (
-                <button key={key} type="button"
-                  onClick={() => setFilters(f => ({
-                    ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
-                  }))}
-                  className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
-                    on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
-                       : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
-                  {moduleLabel(key)}
-                </button>
-              )
-            })}
-          </div>
-        </FilterSection>
+          <FilterGroup label="State">
+            <div style={{ width: 130 }}>
+              <StatePicker value={filters.states} onChange={v => setFilters(f => ({ ...f, states: v }))} />
+            </div>
+          </FilterGroup>
 
-        <FilterSection label="Source">
-          <div className="flex items-center gap-3" title="From the trial signup wizard — tick both to match either">
-            <span className="text-[11px] text-pb-faintest">Meta Ad:</span>
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-              <input type="checkbox" checked={filters.meta_selected}
-                onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
-              Selected
-            </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none">
-              <input type="checkbox" checked={filters.meta_searched}
-                onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
-              Searched
-            </label>
-          </div>
-        </FilterSection>
+          <FilterGroup label="Interested in">
+            <div className="flex flex-wrap gap-1.5">
+              {MODULE_ORDER.map(key => {
+                const on = filters.modules.includes(key)
+                return (
+                  <button key={key} type="button"
+                    onClick={() => setFilters(f => ({
+                      ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
+                    }))}
+                    className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                      on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
+                         : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                    {moduleLabel(key)}
+                  </button>
+                )
+              })}
+            </div>
+          </FilterGroup>
+
+          <FilterGroup label="Meta ad">
+            <div className="flex items-center gap-3" title="From the trial signup wizard — tick both to match either">
+              <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                <input type="checkbox" checked={filters.meta_selected}
+                  onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
+                Selected
+              </label>
+              <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                <input type="checkbox" checked={filters.meta_searched}
+                  onChange={e => setFilters(f => ({ ...f, meta_searched: e.target.checked }))} />
+                Searched
+              </label>
+            </div>
+          </FilterGroup>
+        </div>
       </div>
 
       {isSuper && checkedIds.size > 0 && (
