@@ -192,6 +192,7 @@ export default function AdminImport() {
   const [playerOverrides, setPlayerOverrides] = useState({})
   const [seasonOverrides, setSeasonOverrides] = useState({})
   const [gradeOverrides, setGradeOverrides] = useState({})
+  const [extraGrades, setExtraGrades] = useState([])   // grades minted on this screen, offered before the next resolve returns
   const [resolved, setResolved] = useState(null)
   const [resolving, setResolving] = useState(false)
   const [committing, setCommitting] = useState(false)
@@ -322,6 +323,33 @@ export default function AdminImport() {
     const s = await api.adminCreateManualSeason(data)
     setAllSeasons(prev => [...prev, s])
     return s
+  }
+
+  // Same problem one level down: a club whose whole history is competitions the
+  // CA sync never carried (a veterans cup, a country carnival) has nothing
+  // online to match its grade labels to. "No online equivalent" keeps such a
+  // label as its own bucket, but only as text on the import rows — it never
+  // becomes a grade you can filter by. This mints the real thing.
+  //
+  // A grade row is per season, so a competition played across a decade needs
+  // one row per season. We send the seasons the sheet's own rows carry for
+  // this label; a career-totals sheet has no season column, so the server
+  // falls back to every season the club holds.
+  async function createGrade(rawLabel, name) {
+    const gradeCol = mapping.grade_label
+    const seasonCol = mapping.season_label
+    const labels = new Set()
+    if (gradeCol && seasonCol) {
+      for (const row of parsed?.rows || []) {
+        if (String(row[gradeCol] ?? '').trim() === rawLabel) labels.add(String(row[seasonCol] ?? '').trim())
+      }
+    }
+    const seasonIds = (resolved?.seasons || [])
+      .filter(s => labels.has(s.raw_label) && s.season_id)
+      .map(s => s.season_id)
+    const res = await api.importCreateGrade({ name, season_ids: seasonIds })
+    setExtraGrades(prev => prev.some(g => g.name === res.option.name) ? prev : [...prev, res.option])
+    return res
   }
 
   // Season is only required when the sheet is season-by-season — career totals
@@ -580,9 +608,10 @@ export default function AdminImport() {
         {step === 'grades' && (
           <MatchTable
             title="Match grades / teams"
-            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If a grade genuinely predates online records, confirm “no online equivalent” so it's kept as its own historical figure."
+            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If the club played a competition nothing online carries, add it as a historical grade: it becomes a real grade you can filter and report by, and its figures are kept as their own historical record."
             rows={(resolved?.grades) || []} kind="grade"
-            allOptions={(resolved?.grade_options || []).map(g => ({ id: g.name, name: g.name, games: g.games, players: g.players, runs: g.runs }))}
+            allOptions={[...(resolved?.grade_options || []), ...extraGrades.filter(e => !(resolved?.grade_options || []).some(g => g.name === e.name))]
+              .map(g => ({ id: g.name, name: g.name, games: g.games, players: g.players, runs: g.runs }))}
             loading={resolving}
             valueFor={(r) => {
               const ov = gradeOverrides[r.raw_label]
@@ -591,7 +620,7 @@ export default function AdminImport() {
               return ''
             }}
             onChange={(r, v) => setGOverride(r.raw_label, v)}
-            cell={cell}
+            cell={cell} onCreateGrade={createGrade}
             nextLabel="NEXT: REVIEW →" onNext={() => setStep('review')}
             onBack={() => setStep(granularity === 'season' ? 'seasons' : 'players')}
           />
@@ -698,7 +727,7 @@ function valueLabel(value, idName, kind) {
   return idName.get(value) || '(selected)'
 }
 
-function SearchSelect({ value, idName, candidates, options, onChange, kind, cell, onCreateSeason }) {
+function SearchSelect({ value, idName, candidates, options, onChange, kind, cell, onCreateSeason, onCreateGrade, createDefault }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const [creating, setCreating] = useState(false)
@@ -714,6 +743,17 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
   }, [q, options])
   const pick = v => { onChange(v); setOpen(false); setQ('') }
   const closeAll = () => { setOpen(false); setCreating(false); setCreateErr(null) }
+
+  async function submitNewGrade() {
+    const n = newName.trim()
+    if (!n) { setCreateErr('Name is required'); return }
+    setCreatingBusy(true); setCreateErr(null)
+    try {
+      const res = await onCreateGrade(n)
+      setNewName('')
+      pick(res.name)
+    } catch (e) { setCreateErr(e.message) } finally { setCreatingBusy(false) }
+  }
 
   async function submitNewSeason() {
     const n = newName.trim()
@@ -744,22 +784,29 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
         maxHeight={288}
         className="bg-pb-surface border pb-hairline rounded shadow-xl p-1"
       >
-        {kind === 'season' && creating ? (
+        {creating ? (
           <div className="p-2">
             <div className="flex flex-wrap items-center gap-1.5 mb-2">
-              <input autoFocus placeholder="e.g. Summer 1972/73" value={newName}
+              <input autoFocus placeholder={kind === 'grade' ? 'e.g. Border Cup' : 'e.g. Summer 1972/73'} value={newName}
                 onChange={e => setNewName(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                onKeyDown={e => { if (e.key === 'Enter') (kind === 'grade' ? submitNewGrade() : submitNewSeason()) }}
                 className="flex-1 min-w-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
-              <input placeholder="Year" value={newYear}
-                onChange={e => setNewYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
-                className="w-16 shrink-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+              {kind === 'season' && (
+                <input placeholder="Year" value={newYear}
+                  onChange={e => setNewYear(e.target.value.replace(/\D/g, '').slice(0, 4))}
+                  onKeyDown={e => { if (e.key === 'Enter') submitNewSeason() }}
+                  className="w-16 shrink-0 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-[12px] text-pb-text focus:outline-none focus:border-pb-accent" />
+              )}
             </div>
+            {kind === 'grade' && (
+              <p className="text-[10px] text-pb-faint mb-2 leading-snug">
+                Added to every season this sheet records it in, so you can filter by it like any other grade.
+              </p>
+            )}
             <div className="flex items-center gap-2">
-              <button type="button" onClick={submitNewSeason} disabled={creatingBusy}
+              <button type="button" onClick={kind === 'grade' ? submitNewGrade : submitNewSeason} disabled={creatingBusy}
                 className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1 text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
-                {creatingBusy ? 'ADDING…' : 'ADD SEASON'}
+                {creatingBusy ? 'ADDING…' : (kind === 'grade' ? 'ADD GRADE' : 'ADD SEASON')}
               </button>
               <button type="button" onClick={() => { setCreating(false); setCreateErr(null) }}
                 className="font-mono text-[10px] text-pb-faint hover:text-pb-text">Cancel</button>
@@ -777,7 +824,12 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
               <button className={item} onClick={() => setCreating(true)}>+ Create new season</button>
             )}
             {kind === 'grade' && (
-              <button className={item} onClick={() => pick('__none__')}>↪ No online equivalent (its own historical grade)</button>
+              <>
+                <button className={item} onClick={() => { setNewName(createDefault || ''); setCreating(true) }}>
+                  + Add as a new historical grade
+                </button>
+                <button className={item} onClick={() => pick('__none__')}>↪ No online equivalent (keep as a label only)</button>
+              </>
             )}
             {kind !== 'grade' && (
               <button className={item} onClick={() => pick('__skip__')}>Skip this {kind}</button>
@@ -813,7 +865,7 @@ function SearchSelect({ value, idName, candidates, options, onChange, kind, cell
 }
 
 // ── shared match table for players + seasons (filter + paginate for scale) ────
-function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading, onCreateSeason }) {
+function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChange, cell, nextLabel, onNext, onBack, loading, onCreateSeason, onCreateGrade }) {
   const [onlyReview, setOnlyReview] = useState(true)
   const [page, setPage] = useState(0)
 
@@ -893,7 +945,9 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
                     <td className="py-2 pr-2"><StatusBadge status={r.status} /></td>
                     <td className="py-2 pr-2">
                       <SearchSelect value={value} idName={idName} candidates={candidates} options={allOptions}
-                        onChange={v => onChange(r, v)} kind={kind} cell={cell} onCreateSeason={onCreateSeason} />
+                        onChange={v => onChange(r, v)} kind={kind} cell={cell} onCreateSeason={onCreateSeason}
+                        onCreateGrade={onCreateGrade ? (name => onCreateGrade(r.raw_label, name)) : undefined}
+                        createDefault={r.raw_label} />
                     </td>
                   </tr>
                 )

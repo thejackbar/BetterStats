@@ -34,13 +34,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_MANUAL_ENTRIES, require_cap
 from app.models.db import (
-    ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
+    Grade, ImportBatch, ImportedStat, Organisation, Player, Season, User, get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
 from app.routers.manual_entries import _log_edit, _recompute_milestones
 from app.services import import_cleanup as cleanup
 from app.services import import_ingest as ingest
 from app.services import import_reconcile as recon
+from app.services.grade_labels import suggest_categories, suggest_category
 
 router = APIRouter(prefix="/club-admin/imports", tags=["imports"])
 
@@ -411,6 +412,20 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     if exceed:
         warnings.append("Online (GR) data already shows more than your sheet for: "
                         + ", ".join(exceed[:5]) + " — we'll show the higher online figure.")
+    # An unmatched season is not an error — its figures still count towards the
+    # career — but they stop being a season, so the season-by-season table goes
+    # quiet about years the club can see in its own book. Reported live by a
+    # club whose sheet ran back to 2010/11 while only three seasons existed.
+    season_unmatched = [lb for lb, m in smatch.items()
+                        if not m.get("season_id") and not m.get("is_prior")]
+    if season_unmatched:
+        warnings.append(
+            f"{len(season_unmatched)} season(s) in your sheet don't exist yet: "
+            + ", ".join(season_unmatched[:8]) + ("…" if len(season_unmatched) > 8 else "")
+            + " — create them on the Seasons step to keep those years on the season-by-season "
+              "table. Left as they are, their figures still count towards each player's career "
+              "but arrive as one 'Prior Seasons & Adjustments' line instead of their own seasons."
+        )
     grade_unresolved = [lb for lb, m in gmatch.items() if m.get("status") in ("fuzzy", "none")]
     if grade_unresolved:
         warnings.append(
@@ -643,6 +658,104 @@ async def commit(
         "deltas_written": written,
         "rows_skipped": resolved["totals"]["rows_skipped"],
         "preview": resolved["preview"][:50],
+    }
+
+
+class GradeCreateIn(BaseModel):
+    name: str
+    # The seasons this grade should exist in. A grade row is per season (CA
+    # mints a fresh "1st Grade" row every year), so a historical grade the
+    # club played across a decade needs one row per season for a grade filter
+    # to reach all of it. The wizard sends the seasons the upload's own rows
+    # carry for this label; an empty list means "every season this club holds"
+    # — the right answer for a career-totals sheet, which has no season column
+    # to narrow it with.
+    season_ids: list[str] = []
+
+
+@router.post("/grades")
+async def create_import_grade(
+    data: GradeCreateIn,
+    current_user: User = Depends(require_cap(MANAGE_MANUAL_ENTRIES)),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Mint a historical grade the club played but nothing online holds.
+
+    The match-grades step could previously only point a sheet label at a grade
+    the CA sync already created, or park it as a free-text bucket. A veterans or
+    social club whose whole history is competitions CA never carried (VCV, a
+    country carnival, an invitational cup) had no third answer, so its figures
+    could never be filtered by the competition they were actually scored in.
+
+    Mirrors ``manual_entries.create_manual_grade`` — same table, same
+    capability, same suggested categories, and deletable from Manual Entries
+    the same way — but takes several seasons at once, since one sheet label
+    spans every season the club played that competition. A season that already
+    holds a grade of this name is left alone, so pressing this twice is safe.
+    """
+    name = (data.name or "").strip()
+    if not name:
+        raise HTTPException(422, "Grade name is required.")
+    if len(name) > 120:
+        raise HTTPException(422, "Grade name is too long (120 characters max).")
+
+    seasons = (await db.execute(
+        select(Season).where(Season.organisation_id == club.id)
+    )).scalars().all()
+    if not seasons:
+        raise HTTPException(422, "This club has no seasons yet — add one on the previous step first.")
+    if data.season_ids:
+        wanted = set()
+        for raw in data.season_ids:
+            try:
+                wanted.add(uuid.UUID(str(raw)))
+            except (ValueError, AttributeError, TypeError):
+                continue
+        chosen = [s for s in seasons if s.id in wanted]
+        if not chosen:
+            raise HTTPException(422, "None of those seasons belong to this club.")
+    else:
+        chosen = list(seasons)
+
+    existing = {
+        (row.season_id, (row.name or "").lower())
+        for row in (await db.execute(
+            select(Grade).where(Grade.season_id.in_([s.id for s in chosen]))
+        )).scalars().all()
+    }
+    created_ids = []
+    for season in chosen:
+        if (season.id, name.lower()) in existing:
+            continue
+        grade = Grade(
+            id=uuid.uuid4(),
+            season_id=season.id,
+            grassroots_id=None,          # the documented "not from a sync" marker
+            name=name,
+            category=suggest_category(name),
+            categories=list(suggest_categories(name)),
+        )
+        db.add(grade)
+        created_ids.append(str(grade.id))
+    created = len(created_ids)
+    if created:
+        await db.flush()
+        await _log_edit(
+            db, org_id=club.id, user_id=current_user.id, action="create",
+            target_table="grades", target_id=created_ids[0],
+            summary=f"Added historical grade '{name}' to {created} season(s) from the stats import",
+            before=None, after={"name": name, "seasons": created, "grade_ids": created_ids},
+        )
+    await db.commit()
+    return {
+        "name": name,
+        "created": created,
+        "seasons": len(chosen),
+        "already_existed": len(chosen) - created,
+        # Same shape as an entry in the resolve response's grade_options, so the
+        # wizard can offer it immediately instead of waiting on a re-resolve.
+        "option": {"name": name, "games": 0, "players": 0, "runs": 0},
     }
 
 

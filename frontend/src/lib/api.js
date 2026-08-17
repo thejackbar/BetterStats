@@ -1220,6 +1220,8 @@ export const api = {
     request('/club-admin/imports/resolve', { method: 'POST', body: JSON.stringify(payload) }),
   importCommit: (payload) =>
     request('/club-admin/imports/commit', { method: 'POST', body: JSON.stringify(payload) }),
+  importCreateGrade: (payload) =>
+    request('/club-admin/imports/grades', { method: 'POST', body: JSON.stringify(payload) }),
   importList: () => request('/club-admin/imports'),
   importUndo: (batchId) =>
     request(`/club-admin/imports/${batchId}/undo`, { method: 'POST' }),
