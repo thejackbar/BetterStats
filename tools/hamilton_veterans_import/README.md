@@ -21,12 +21,20 @@ were not needed.
 
 ## Before you upload
 
-The import matches a season by name and cannot create one. Hamilton currently
-holds Summer 2023/24, 2024/25 and 2025/26, so the other eleven seasons in
-`hamilton_seasons.csv` need creating under Admin → Seasons first. Any season the
-import cannot match is not lost. It lands in the career "Prior Seasons &
-Adjustments" line instead, so the career total stays right but the season-by-season
-table stops at 2023/24.
+Hamilton currently holds Summer 2023/24, 2024/25 and 2025/26, so the other
+eleven seasons in `hamilton_seasons.csv` do not exist yet. Create them as you go:
+the Seasons step of the wizard has "+ Create new season" in the dropdown beside
+each unmatched label, which mints the season on the spot. Any season left
+unmatched is not lost either. It lands in the career "Prior Seasons &
+Adjustments" line, so the career total stays right but the season-by-season table
+stops at 2023/24.
+
+The six competitions in the Grade column are the same story: none of them exist
+online, so the Grades step will show all six as NO MATCH. Use "+ Add as a new
+historical grade" on each one, which creates it across the seasons the sheet
+records it in, so VCV and Border Cup become grades you can filter the
+Leaderboard and Records by. "No online equivalent" is the lighter option: it
+keeps the label on the figures without creating a grade.
 
 Then upload at `/admin/import`. The column names are already the ones the wizard
 maps itself; `grade_label` carries the competition, which is a display label only.
