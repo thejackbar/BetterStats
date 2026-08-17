@@ -4,7 +4,8 @@ import { api } from '../../lib/api'
 import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill } from '../../components/admin/crm/ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel } from '../../components/admin/crm/ui'
+import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
@@ -133,6 +134,88 @@ const ONBOARDING_METHOD_LABELS = {
   none: 'Not onboarded',
 }
 
+// The onboarded-club facts line (state/seasons/grades/players/setup/active
+// since) — mirrors the Sales Pipeline card's own `stateLine` construction in
+// components/admin/crm/PipelineBoard.jsx so the two surfaces never disagree
+// about what these numbers mean. `stats` is `deal.club_stats`, absent for a
+// bare prospect that's never been onboarded.
+function clubStatsLine(state, stats) {
+  return [
+    state,
+    stats && `${stats.seasons_count ?? 0} season${(stats.seasons_count ?? 0) === 1 ? '' : 's'}`,
+    stats && `${stats.grades_count ?? 0} grade${(stats.grades_count ?? 0) === 1 ? '' : 's'}`,
+    stats && `${stats.players_count ?? 0} player${(stats.players_count ?? 0) === 1 ? '' : 's'}`,
+    stats && stats.setup_total > 0 && `setup ${stats.setup_done}/${stats.setup_total}`,
+    stats && stats.active_since && `active since ${new Date(stats.active_since).toLocaleDateString('en-AU')}`,
+  ].filter(Boolean).join(' · ')
+}
+
+// This club's trial and registration story — only rendered once a club is
+// actually onboarded (subscriber or trialing); a bare prospect has neither a
+// trial countdown nor a registrant. `min_trial_days_remaining` is SIGNED
+// (see crm.trial_days_remaining_by_club) — negative means the trial's own
+// end date has already passed, which is what tells "13 days left" apart
+// from "expired 3 days ago" instead of both reading as a plain countdown.
+function ClubSummaryCard({ deal }) {
+  const stats = deal.club_stats
+  const hasFacts = deal.is_customer || deal.min_trial_days_remaining != null || stats
+  if (!hasFacts && !deal.registrant) return null
+  const line = clubStatsLine(deal.marketing_club_state, stats)
+  const days = deal.min_trial_days_remaining
+  return (
+    <div className="space-y-1.5 mt-2 pt-2 border-t border-pb-hairline">
+      {line && <p className="text-[12px] text-pb-faint">{line}</p>}
+      {days != null && (
+        days >= 0
+          ? <p className="text-[12.5px] text-pb-text">Trial: <span className="font-medium">{days} day{days === 1 ? '' : 's'} left</span></p>
+          : <p className="text-[12.5px] text-pb-red">Trial: <span className="font-medium">EXPIRED ({Math.abs(days)} day{Math.abs(days) === 1 ? '' : 's'} ago)</span></p>
+      )}
+      {deal.registrant?.name && (
+        <p className="text-[12px] text-pb-faint">
+          Registered by <span className="text-pb-text">{deal.registrant.name}</span>
+          {deal.registrant.role ? <span className="text-pb-faintest"> ({deal.registrant.role})</span> : ''}
+        </p>
+      )}
+    </div>
+  )
+}
+
+const WIZARD_SOURCE_LABEL = {
+  both: 'Searched & selected in the trial wizard',
+  selected: 'Selected itself in the trial wizard',
+  searched: 'Searched for itself in the trial wizard',
+}
+
+// Someone from this club typed its name into the trial signup search, or
+// picked it — a real buying signal worth a rep seeing even before anything
+// else has happened. Same data (and the same guid-first, name-fallback
+// match) the Wizard Clubs page itself reads, narrowed to this one club.
+function WizardSignalCard({ signal }) {
+  if (!signal) return null
+  const queries = (signal.queries || []).filter(Boolean)
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 flex-wrap mb-1">
+        <h3 className="font-display font-bold text-[13px]">{WIZARD_SOURCE_LABEL[signal.source] || 'Trial wizard activity'}</h3>
+        {signal.via_meta && <Pill tone="accent">META AD</Pill>}
+      </div>
+      {queries.length > 0 && (
+        <p className="text-[12px] text-pb-faint">
+          Searched: {queries.map((q, i) => (
+            <span key={q}>{i > 0 && ' · '}<span className="text-pb-text">&ldquo;{q}&rdquo;</span></span>
+          ))}
+        </p>
+      )}
+      {signal.furthest_step && (
+        <p className="text-[12px] text-pb-faint mt-0.5">Progress: <span className="text-pb-text">{signal.furthest_step}</span></p>
+      )}
+      {signal.last_at && (
+        <p className="text-[11px] text-pb-faintest mt-0.5">Last seen {new Date(signal.last_at).toLocaleDateString('en-AU')}</p>
+      )}
+    </div>
+  )
+}
+
 // Stage / onboarding method / call status — the three things a rep asks
 // first before reading the engagement breakdown below it.
 function DealSummaryStrip({ deal }) {
@@ -209,6 +292,47 @@ function EngagementPanel({ engagement }) {
   )
 }
 
+// Same panel the Sales Pipeline card shows (components/admin/crm/ui.jsx's
+// WebsiteAnalyticsPanel) but reading off the drawer's own already-fetched
+// `website_visits` field instead of fetching it itself — that component's
+// own fetch (api.mktClubVisits) hits a super-admin-only endpoint a 'sales'
+// caller can't reach, so the Sales Workspace drawer embeds the same data
+// server-side instead (see routers/sales_workspace.py::get_club).
+function WebsiteAnalyticsCard({ data }) {
+  if (!data?.views) {
+    return <p className="text-[12px] text-pb-faintest">No tracked site visits for this club yet.</p>
+  }
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Page views</div>
+        <div className="font-display font-bold text-[15px]">{data.views}</div>
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Days visited</div>
+        <div className="font-display font-bold text-[15px]">{data.distinct_days}</div>
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Unique IPs</div>
+        <div className="font-display font-bold text-[15px]">{data.unique_ips}</div>
+        {data.visits_per_ip != null && <div className="text-pb-faintest text-[10.5px]">{data.visits_per_ip}/IP avg</div>}
+      </div>
+      <div className="pb-card px-2.5 py-2">
+        <div className="text-pb-faint text-[10.5px] uppercase tracking-wide">Contact page</div>
+        <div className="font-display font-bold text-[15px]">{data.contact_page_visited ? 'Visited' : 'No'}</div>
+      </div>
+      {data.inferred_modules?.length > 0 && (
+        <div className="col-span-2 sm:col-span-4 pb-card px-2.5 py-2">
+          <div className="text-pb-faint text-[10.5px] uppercase tracking-wide mb-1">Analytics-derived product interest</div>
+          <div className="flex flex-wrap gap-1">
+            {data.inferred_modules.map(k => <Pill key={k} tone="accent">{moduleLabel(k)}</Pill>)}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ActivityRow({ a }) {
   const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call') : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
   const tone = a.type === 'call' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
@@ -231,6 +355,20 @@ export default function SalesWorkspace() {
   const toast = useToast()
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Queue (the daily calling list + drawer) vs Events (List/Calendar of
+  // every event a call outcome created plus anything added by hand).
+  const [tab, setTab] = useState('queue')
+  // Every club currently in scope for THIS user (unfiltered by the Queue
+  // tab's own search/stage/owner filters) — just the "which club is this
+  // event about" picker in the New Event form, so narrowing the queue view
+  // doesn't also narrow what a rep can link a new event to.
+  const [dealOptions, setDealOptions] = useState([])
+  useEffect(() => {
+    api.salesWorkspaceClubs({}).then(d => setDealOptions(
+      (d.clubs || []).map(c => ({ id: c.id, name: c.marketing_club_name || c.title }))
+    )).catch(() => {})
+  }, [])
 
   const [filters, setFilters] = useState({
     q: '', stage_key: [], owner_user_id: '', never_called: false, callback_due: false, list_id: '',
@@ -525,15 +663,31 @@ export default function SalesWorkspace() {
 
   const content = (
     <div className="max-w-7xl">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="font-display font-bold text-2xl text-pb-text">Sales Workspace</h1>
           <p className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mt-0.5">
             {isSuper ? 'Every assigned club' : 'Clubs assigned to you'}
           </p>
         </div>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={() => setTab('queue')}
+            className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+              tab === 'queue' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+            Queue
+          </button>
+          <button type="button" onClick={() => setTab('events')}
+            className={`px-3 py-1.5 rounded-full text-[12px] border transition ${
+              tab === 'events' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+            Events
+          </button>
+        </div>
       </div>
 
+      {tab === 'events' ? (
+        <SalesEventsView dealOptions={dealOptions} staffOptions={staff} />
+      ) : (
+      <>
       {filters.list_id && (
         <div className="mb-3 flex items-center gap-2 text-[12px]">
           <span className="text-pb-faint">Filtered to list:</span>
@@ -719,7 +873,10 @@ export default function SalesWorkspace() {
                     Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
                   </p>
                 )}
+                <ClubSummaryCard deal={drawer.deal} />
               </div>
+
+              <WizardSignalCard signal={drawer.deal.wizard_signal} />
 
               <div className={CARD}>
                 <DealSummaryStrip deal={drawer.deal} />
@@ -729,6 +886,13 @@ export default function SalesWorkspace() {
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
                 <EngagementPanel engagement={drawer.engagement} />
               </div>
+
+              {drawer.deal.marketing_club_id && (
+                <div className={CARD}>
+                  <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
+                  <WebsiteAnalyticsCard data={drawer.website_visits} />
+                </div>
+              )}
 
               <div className={CARD}>
                 <div className="flex items-center justify-between mb-2">
@@ -895,6 +1059,8 @@ export default function SalesWorkspace() {
             <Btn type="submit" variant="primary" disabled={savingTrial}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
           </form>
         </Modal>
+      )}
+      </>
       )}
     </div>
   )

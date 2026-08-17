@@ -4,20 +4,22 @@ import { useToast } from '../../../contexts/ToastContext'
 import { Modal, Field, TextInput, Select, Btn, Pill } from './ui'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
 
-const EVENT_COLOR = '#8b7cf6'  // the calendar/date accent, matching the board card
+export const EVENT_COLOR = '#8b7cf6'  // the calendar/date accent, matching the board card
 
-// ─── date helpers (no library) ──────────────────────────────────────────────
-const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
-const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x }
-const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
-const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x }
+// ─── date helpers (no library) — exported so SalesEventsView (the Sales
+// Workspace's own, more narrowly-scoped Events tab) can build the identical
+// calendar grid without a second copy of this arithmetic drifting from it. ──
+export const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
+export const endOfDay = (d) => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x }
+export const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
+export const addMonths = (d, n) => { const x = new Date(d); x.setMonth(x.getMonth() + n); return x }
 // Monday-based week (AU convention).
-const startOfWeek = (d) => { const x = startOfDay(d); const dow = (x.getDay() + 6) % 7; return addDays(x, -dow) }
-const startOfMonth = (d) => { const x = startOfDay(d); x.setDate(1); return x }
-const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-const isToday = (d) => sameDay(new Date(d), new Date())
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+export const startOfWeek = (d) => { const x = startOfDay(d); const dow = (x.getDay() + 6) % 7; return addDays(x, -dow) }
+export const startOfMonth = (d) => { const x = startOfDay(d); x.setDate(1); return x }
+export const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+export const isToday = (d) => sameDay(new Date(d), new Date())
+export const fmtTime = (iso) => new Date(iso).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' })
+export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 // ─── standalone add/edit modal (also reused for a deal-less event) ───────────
 function EventModal({ open, onClose, ownerOptions, event, seed, onSaved }) {
@@ -109,7 +111,7 @@ function EventModal({ open, onClose, ownerOptions, event, seed, onSaved }) {
 }
 
 // ─── a single event card (list rows + calendar day/week panels) ──────────────
-function EventCard({ ev, onEdit, onDelete, compact }) {
+export function EventCard({ ev, onEdit, onDelete, compact }) {
   const alerts = [ev.first_alert, ev.second_alert].filter(Boolean).map(alertLabel)
   const today = isToday(ev.starts_at)
   return (
@@ -154,7 +156,7 @@ function EventCard({ ev, onEdit, onDelete, compact }) {
 // contact name. `compact` (month grid, where cells are kept short so the whole
 // month fits the viewport) shows the first line only; week columns show all
 // three lines. The full detail is always in the title tooltip and on click.
-function EventChip({ ev, onClick, compact }) {
+export function EventChip({ ev, onClick, compact }) {
   const line1 = `${fmtTime(ev.starts_at)} ${eventTypeLabel(ev.event_type)}${ev.title ? ` · ${ev.title}` : ''}`
   const tip = [line1, ev.marketing_club_name, ev.contact_name].filter(Boolean).join('\n')
   return (
@@ -169,7 +171,7 @@ function EventChip({ ev, onClick, compact }) {
 }
 
 // ─── calendar month grid ─────────────────────────────────────────────────────
-function MonthView({ cursor, events, onPick, onDayAdd }) {
+export function MonthView({ cursor, events, onPick, onDayAdd }) {
   const first = startOfMonth(cursor)
   const gridStart = startOfWeek(first)
   const cells = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i))
@@ -218,7 +220,7 @@ function MonthView({ cursor, events, onPick, onDayAdd }) {
 }
 
 // ─── calendar week / day columns ─────────────────────────────────────────────
-function WeekDayView({ cursor, mode, events, onPick, onEdit, onDelete }) {
+export function WeekDayView({ cursor, mode, events, onPick, onEdit, onDelete }) {
   const days = mode === 'day' ? [startOfDay(cursor)]
     : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(cursor), i))
   const byDay = useMemo(() => {

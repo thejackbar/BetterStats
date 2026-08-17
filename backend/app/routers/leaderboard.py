@@ -39,9 +39,17 @@ async def batting_leaderboard(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(rows)
 
@@ -68,9 +76,17 @@ async def bowling_leaderboard(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(rows)
 
@@ -95,9 +111,17 @@ async def fielding_leaderboard(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(rows)
 
@@ -120,9 +144,17 @@ async def sirs_batting(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     return await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
 
 
@@ -144,9 +176,17 @@ async def sirs_bowling_innings(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     return await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
 
 
@@ -168,7 +208,15 @@ async def sirs_bowling_match(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     return await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)

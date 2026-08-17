@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    ClubMembership, CrmActivity, CrmDeal, CrmPerson, MarketingClub, MarketingClubContact,
+    ClubMembership, CrmActivity, CrmDeal, CrmEvent, CrmPerson, MarketingClub, MarketingClubContact,
     SalesListClub, User, get_db,
 )
 from app.routers.auth import SalesActor, require_sales_or_super
@@ -68,6 +68,24 @@ def _assert_can_touch(actor: SalesActor, deal: CrmDeal) -> None:
 def _require_super(actor: SalesActor) -> None:
     if actor.role != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin only")
+
+
+async def _validated_staff_id(db: AsyncSession, raw: Optional[str]):
+    """Resolve+validate a staff-picker value (the "Me" / GET /staff pool used
+    by both the assignable-follow-up-owner call form and manual Event
+    creation) against the real super_admin pool. Returns None for a blank
+    value; 422s for anyone else."""
+    if not raw:
+        return None
+    owner_id = _uuid_or_none(raw)
+    is_staff = owner_id and (await db.execute(
+        select(ClubMembership).where(
+            ClubMembership.user_id == owner_id, ClubMembership.role == "super_admin",
+        )
+    )).scalar_one_or_none() is not None
+    if not is_staff:
+        raise HTTPException(status_code=422, detail="Unknown staff member")
+    return owner_id
 
 
 # ─── Queue ────────────────────────────────────────────────────────────────────
@@ -289,6 +307,51 @@ async def get_club(
     deal_out["not_interested"] = bool(club.not_interested) if club else False
     stage_options = [{"id": str(s.id), "key": s.key, "name": s.name} for s in (pipeline.stages if pipeline else [])]
 
+    # Onboarded-club facts (state/seasons/grades/players/setup/active-since +
+    # trial countdown) — same batched helpers the Sales Pipeline card and
+    # list use, just called with a single-club map since this is one deal.
+    # Absent (None) for a bare prospect that's never been onboarded.
+    deal_out["marketing_club_state"] = club.state if club else None
+    club_stats = None
+    trial_days = None
+    min_trial_days = None
+    if club is not None:
+        stats_map = await crm_service.club_stats_by_club(db, {club.id: club})
+        club_stats = stats_map.get(club.id)
+        trial_map = await crm_service.trial_days_remaining_by_club(db, {club.id: club})
+        trial_days = trial_map.get(club.id)
+        min_trial_days = min(trial_days.values()) if trial_days else None
+    deal_out["club_stats"] = club_stats
+    deal_out["trial_days_remaining"] = trial_days
+    deal_out["min_trial_days_remaining"] = min_trial_days
+
+    # Who registered for the trial (the deal's point of contact — set to the
+    # registering admin at signup, see crm.sync_self_serve_trial_registration/
+    # sync_super_admin_trial_registration), plus their committee role if a
+    # Club Directory contact shares their email (the officer-list crawl is
+    # what actually carries a role like "President" — the registration form
+    # itself never asks for one).
+    registrant = None
+    poc_map = await crm_service.poc_contacts_by_deal(db, [deal.id])
+    poc = poc_map.get(deal.id)
+    if poc and poc.get("name"):
+        role = None
+        poc_email = (poc.get("email") or "").strip().lower()
+        if poc_email:
+            match = next((c for c in contacts
+                          if (c.get("email") or "").strip().lower() == poc_email and c.get("role")), None)
+            if match:
+                role = match["role"]
+        registrant = {"name": poc["name"], "email": poc.get("email"), "role": role}
+    deal_out["registrant"] = registrant
+
+    # Did anyone from this club search for it or pick it in the trial signup
+    # wizard? A real buying signal worth a rep seeing, even before anything
+    # else has happened — same source the Wizard Clubs page reads, narrowed
+    # to this one club.
+    deal_out["wizard_signal"] = await sw.wizard_signal_for_club(db, deal.marketing_club_id) \
+        if deal.marketing_club_id else None
+
     # Same shape the queue list already carries, so the drawer's own "Called
     # / Never called" reads off the identical field the queue row does.
     last_call = (await sw.last_calls_by_deal(db, [deal.id])).get(deal.id)
@@ -296,14 +359,33 @@ async def get_club(
     deal_out["last_call"] = crm_service._activity_dict(last_call) if last_call else None
 
     engagement = None
+    website_visits = None
     if club is not None:
+        club_id_for_reads = club.id  # captured now: club_engagement_breakdown
+                                      # below commits, which expires every ORM
+                                      # object in this session (see its own
+                                      # docstring) — read anything else off
+                                      # `club` before calling it, not after.
+        # Website analytics (page views/days visited/unique IPs/contact-page
+        # hit) — the CRM card's own panel, `components/admin/crm/ui.jsx`'s
+        # `WebsiteAnalyticsPanel`, fetches this itself via a super-admin-only
+        # endpoint a 'sales' caller can't reach directly, so it's embedded in
+        # the drawer payload here instead (same reasoning as `engagement`
+        # below), via the exact service function that endpoint calls. Read
+        # BEFORE the engagement breakdown for the same expiry reason.
+        try:
+            from app.services import club_directory as cd
+            website_visits = await cd.club_visit_detail(db, club_id_for_reads)
+        except Exception:  # noqa: BLE001 - the drawer must still render without it
+            logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
+            website_visits = None
         try:
             from app.routers.marketing import club_engagement_breakdown
-            engagement = await club_engagement_breakdown(str(club.id), db)
+            engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
         except HTTPException:
             engagement = None
         except Exception:  # noqa: BLE001 - the drawer must still render without it
-            logger.exception("sales_workspace: engagement breakdown failed for club %s", club.id)
+            logger.exception("sales_workspace: engagement breakdown failed for club %s", club_id_for_reads)
             engagement = None
 
     return {
@@ -311,6 +393,7 @@ async def get_club(
         "contacts": contacts,
         "activities": activities_out,
         "engagement": engagement,
+        "website_visits": website_visits,
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
     }
@@ -378,17 +461,7 @@ async def log_call(
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
-    event_owner_id = None
-    if body.event_owner_user_id:
-        owner_id = _uuid_or_none(body.event_owner_user_id)
-        is_staff = owner_id and (await db.execute(
-            select(ClubMembership).where(
-                ClubMembership.user_id == owner_id, ClubMembership.role == "super_admin",
-            )
-        )).scalar_one_or_none() is not None
-        if not is_staff:
-            raise HTTPException(status_code=422, detail="Unknown staff member")
-        event_owner_id = owner_id
+    event_owner_id = await _validated_staff_id(db, body.event_owner_user_id)
 
     await sw.log_call(
         db, deal=deal, person=person, outcome=body.outcome, notes=body.notes,
@@ -917,3 +990,169 @@ async def import_from_crm_deals(
         raise HTTPException(status_code=422, detail=result.get("detail") or result["error"])
     await db.commit()
     return result
+
+
+# ─── Events ─────────────────────────────────────────────────────────────────
+# Reuses crm_service's event functions (the SAME crm_events rows the Sales
+# Pipeline's own Events tab reads/writes) with a narrower, rep-appropriate
+# surface: a manual event can only be linked to a club already in the actor's
+# own queue (never an arbitrary Club Directory search — that's the Pipeline's
+# job), and a 'sales' caller only ever sees events they own or created.
+
+def _assert_can_touch_event(actor: SalesActor, event: CrmEvent) -> None:
+    if actor.role == "sales" and (
+        (event.owner_user_id is None or str(event.owner_user_id) != str(actor.user.id))
+        and (event.created_by_user_id is None or str(event.created_by_user_id) != str(actor.user.id))
+    ):
+        raise HTTPException(status_code=403, detail="This event isn't yours")
+
+
+@router.get("/events")
+async def list_events(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
+    """Every platform event, resolved with display names — same shape and
+    same "fetch everything, filter client-side" posture as the Sales
+    Pipeline's own Events tab (crm.py::super_list_events / CrmEventsView.jsx
+    — the event set is small enough that per-keystroke filtering isn't worth
+    a round trip). A 'sales' caller is narrowed server-side to events they
+    own or created; a super admin sees the whole platform calendar."""
+    events = await crm_service.list_events(db)
+    if actor.role == "sales":
+        mine = str(actor.user.id)
+        events = [e for e in events if e.get("owner_user_id") == mine or e.get("created_by_user_id") == mine]
+    return {"events": events}
+
+
+@router.get("/clubs/{deal_id}/contacts")
+async def club_contacts(
+    deal_id: str, actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db),
+):
+    """The contact picker for the New Event form — same merged Club
+    Directory + CRM contact list the drawer's Contacts section already
+    shows, fetched standalone so the Events tab doesn't need a full drawer
+    load just to populate a dropdown."""
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    return {"contacts": await sw.merged_contacts(db, deal.marketing_club_id)}
+
+
+class SalesEventCreate(BaseModel):
+    event_type: str = "meeting"          # call | demo | meeting | review_deal | follow_up | other
+    starts_at: datetime
+    title: Optional[str] = None
+    location: Optional[str] = None
+    body: Optional[str] = None
+    owner_user_id: Optional[str] = None  # blank = the creator themselves
+    directory_contact_id: Optional[str] = None
+    crm_person_id: Optional[str] = None
+    deal_id: Optional[str] = None        # one of the actor's OWN clubs
+    first_alert: Optional[str] = None
+    second_alert: Optional[str] = None
+
+
+class SalesEventUpdate(BaseModel):
+    event_type: Optional[str] = None
+    starts_at: Optional[datetime] = None
+    title: Optional[str] = None
+    location: Optional[str] = None
+    body: Optional[str] = None
+    owner_user_id: Optional[str] = None
+    directory_contact_id: Optional[str] = None
+    crm_person_id: Optional[str] = None
+    first_alert: Optional[str] = None
+    second_alert: Optional[str] = None
+
+
+@router.post("/events")
+async def create_event(
+    body: SalesEventCreate,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    deal = None
+    if body.deal_id:
+        deal = await _load_deal(db, body.deal_id)
+        _assert_can_touch(actor, deal)
+
+    owner_id = await _validated_staff_id(db, body.owner_user_id) or actor.user.id
+
+    contact_id = None
+    if body.directory_contact_id or body.crm_person_id:
+        if deal is None or deal.marketing_club_id is None:
+            raise HTTPException(status_code=422, detail="Pick a club before adding a contact")
+        try:
+            person = await sw.resolve_or_materialize_person(
+                db, marketing_club_id=deal.marketing_club_id,
+                directory_contact_id=_uuid_or_none(body.directory_contact_id),
+                crm_person_id=_uuid_or_none(body.crm_person_id),
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        contact_id = person.id
+
+    event = await crm_service.create_event(
+        db, deal_id=deal.id if deal else None,
+        marketing_club_id=deal.marketing_club_id if deal else None,
+        contact_person_id=contact_id, owner_user_id=owner_id,
+        event_type=body.event_type, title=body.title, location=body.location,
+        body=body.body, starts_at=body.starts_at,
+        first_alert=body.first_alert, second_alert=body.second_alert,
+        created_by_user_id=actor.user.id,
+    )
+    await db.commit()
+    await db.refresh(event)
+    return await crm_service.serialize_event(db, event)
+
+
+@router.patch("/events/{event_id}")
+async def update_event(
+    event_id: str,
+    body: SalesEventUpdate,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    event = await crm_service.get_event(db, _uuid_or_none(event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    _assert_can_touch_event(actor, event)
+
+    src = body.model_dump(exclude_unset=True)
+    fields = {f: src[f] for f in
+              ("event_type", "title", "location", "body", "starts_at", "first_alert", "second_alert") if f in src}
+    if "owner_user_id" in src:
+        fields["owner_user_id"] = await _validated_staff_id(db, src["owner_user_id"])
+    if "directory_contact_id" in src or "crm_person_id" in src:
+        # The event's club is fixed at creation (see create_event above) —
+        # only WHICH contact at that same club is editable afterward.
+        if event.marketing_club_id is None:
+            raise HTTPException(status_code=422, detail="This event has no linked club to pick a contact from")
+        directory_contact_id, crm_person_id = src.get("directory_contact_id"), src.get("crm_person_id")
+        if not (directory_contact_id or crm_person_id):
+            fields["contact_person_id"] = None
+        else:
+            try:
+                person = await sw.resolve_or_materialize_person(
+                    db, marketing_club_id=event.marketing_club_id,
+                    directory_contact_id=_uuid_or_none(directory_contact_id),
+                    crm_person_id=_uuid_or_none(crm_person_id),
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=422, detail=str(e))
+            fields["contact_person_id"] = person.id
+
+    await crm_service.update_event(db, event, **fields)
+    await db.commit()
+    await db.refresh(event)
+    return await crm_service.serialize_event(db, event)
+
+
+@router.delete("/events/{event_id}")
+async def delete_event(
+    event_id: str, actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db),
+):
+    event = await crm_service.get_event(db, _uuid_or_none(event_id))
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    _assert_can_touch_event(actor, event)
+    await crm_service.delete_event(db, event)
+    await db.commit()
+    return {"deleted": True}

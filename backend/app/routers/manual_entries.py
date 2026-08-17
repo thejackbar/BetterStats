@@ -48,7 +48,7 @@ from app.models.db import (
     get_db,
 )
 from app.routers.auth import get_current_club, get_current_user
-from app.services.grade_labels import suggest_category
+from app.services.grade_labels import suggest_categories, suggest_category
 from app.services.sync import _compute_milestones
 
 router = APIRouter(prefix="/club-admin/manual-entries", tags=["manual-entries"])
@@ -556,6 +556,7 @@ async def create_manual_grade(
         grassroots_id=None,
         name=name,
         category=suggest_category(name),
+        categories=list(suggest_categories(name)),
     )
     db.add(grade)
     await db.flush()
@@ -1826,6 +1827,8 @@ async def undo_edit(
             db.add(Grade(
                 id=uuid.UUID(snap["id"]), season_id=season_id, grassroots_id=None,
                 name=snap.get("name"), category=snap.get("category") or suggest_category(snap.get("name") or ""),
+                categories=snap.get("categories") or list(suggest_categories(snap.get("name") or "")),
+                match_formats=snap.get("match_formats"),
             ))
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo delete on {table}")

@@ -83,12 +83,66 @@ function MergeBuilder({ orgId, grades, onMerged }) {
 }
 
 const GRADE_CATEGORIES = [
-  ['senior', 'Senior'],
-  ['junior', 'Junior'],
+  ['senior', "Men's"],
+  ['junior', 'Juniors'],
   ['womens', "Women's"],
   ['masters', 'Masters'],
   ['mixed', 'Mixed / Other'],
 ]
+
+const MATCH_FORMATS = [
+  ['two_day', 'Two Day'],
+  ['one_day', 'One Day'],
+  ['t20', 'T20'],
+]
+
+// A grade is several things at once — "Women's T20 Grade 2" is a women's grade
+// AND a T20 grade — so each axis is a set of toggles rather than a dropdown.
+// Clearing every chip puts the row back on its suggestion, which is why the
+// empty state reads as a suggestion rather than as "none".
+function TagPicker({ options, value, suggested, confirmed, disabled, onChange, emptyHint }) {
+  const picked = value || []
+  const shown = confirmed ? picked : (suggested || [])
+  function flip(key) {
+    const next = shown.includes(key)
+      ? shown.filter(k => k !== key)
+      : [...shown, key]
+    onChange(options.map(([k]) => k).filter(k => next.includes(k)))
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {options.map(([key, label]) => {
+        const on = shown.includes(key)
+        return (
+          <button
+            key={key}
+            onClick={() => flip(key)}
+            disabled={disabled}
+            aria-pressed={on}
+            className={`font-mono text-[10px] tracking-wide2 rounded px-2 py-1 border transition-colors disabled:opacity-50 ${
+              on
+                ? 'text-pb-accent border-pb-accent/40 bg-pb-accent/10'
+                : 'text-pb-faint pb-hairline hover:text-pb-text'
+            }`}
+          >
+            {label}
+          </button>
+        )
+      })}
+      {!confirmed && (
+        <span
+          className="font-mono text-[9px] text-pb-amber uppercase tracking-wide ml-1"
+          title="Worked out from the grade name and the matches played — click to confirm or change"
+        >
+          suggested
+        </span>
+      )}
+      {!confirmed && shown.length === 0 && emptyHint && (
+        <span className="font-mono text-[9px] text-pb-faintest ml-1">{emptyHint}</span>
+      )}
+    </div>
+  )
+}
 
 function GradeList({ grades, onChanged }) {
   const [savingName, setSavingName] = useState(null)
@@ -173,14 +227,21 @@ function GradeList({ grades, onChanged }) {
 
   if (!grades.length) return <p className="font-mono text-[11px] text-pb-faint">No grades found for this club.</p>
 
-  const anyUnconfirmed = grades.some(g => !g.category_confirmed)
+  const anyUnconfirmed = grades.some(g => !g.category_confirmed || !g.formats_confirmed)
 
   return (
     <div>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
-        Label each grade so the public site can split them (Senior / Junior / Women's ...), and choose which
-        ones to share. A hidden grade drops off the public grade filters, ladders and per-grade breakdowns;
-        your admin views and whole-club career totals are unchanged.
+        Label each grade so the club dashboard and public site can split them, and choose which ones to
+        share. A grade can be more than one of each: "Women's T20 Grade 2" is a women's grade and a T20
+        grade, and an Under 14 girls' side is both juniors and women's. A hidden grade drops off the public
+        grade filters, ladders and per-grade breakdowns; your admin views and whole-club career totals are
+        unchanged.
+      </p>
+      <p className="text-pb-dim text-sm mb-3 leading-relaxed">
+        Match type is worked out from the matches themselves where we have them, so most grades are already
+        right. A grade we can't place is left out of the dashboard's Match Type filter rather than guessed
+        into the wrong one — tick it here and it shows up.
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
         The order here is also the order BetterPosts uses for a Fixtures or Results roundup post — move a
@@ -234,7 +295,8 @@ function GradeList({ grades, onChanged }) {
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-2.5 pl-5 w-16">ORDER</th>
               <th className="font-medium py-2.5">GRADE</th>
-              <th className="font-medium py-2.5">CATEGORY</th>
+              <th className="font-medium py-2.5">GRADE TYPE</th>
+              <th className="font-medium py-2.5">MATCH TYPE</th>
               <th className="font-medium py-2.5 text-center">PUBLIC</th>
               <th className="font-medium py-2.5 text-right">GAMES</th>
               <th className="font-medium py-2.5 pr-5 text-right">RUNS</th>
@@ -281,21 +343,25 @@ function GradeList({ grades, onChanged }) {
                     )}
                   </td>
                   <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <select
-                        value={g.category || 'senior'}
-                        disabled={busy}
-                        onChange={e => save(g.grade_name, { category: e.target.value })}
-                        className="bg-pb-surface2 border pb-hairline text-pb-text text-xs rounded px-2 py-1 focus:outline-none focus:border-pb-accent disabled:opacity-50"
-                      >
-                        {GRADE_CATEGORIES.map(([key, label]) => (
-                          <option key={key} value={key}>{label}</option>
-                        ))}
-                      </select>
-                      {!g.category_confirmed && (
-                        <span className="font-mono text-[9px] text-pb-amber uppercase tracking-wide" title="Auto-detected from the grade name — pick to confirm">suggested</span>
-                      )}
-                    </div>
+                    <TagPicker
+                      options={GRADE_CATEGORIES}
+                      value={g.categories}
+                      suggested={g.suggested_categories}
+                      confirmed={g.categories_confirmed}
+                      disabled={busy}
+                      onChange={categories => save(g.grade_name, { categories })}
+                    />
+                  </td>
+                  <td className="py-2 pr-3">
+                    <TagPicker
+                      options={MATCH_FORMATS}
+                      value={g.match_formats}
+                      suggested={g.suggested_formats}
+                      confirmed={g.formats_confirmed}
+                      disabled={busy}
+                      onChange={match_formats => save(g.grade_name, { match_formats })}
+                      emptyHint="not known"
+                    />
                   </td>
                   <td className="py-2.5 text-center">
                     <button

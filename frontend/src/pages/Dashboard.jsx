@@ -1,6 +1,7 @@
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useClubData, useRecentGames } from '../hooks/useClubData'
+import { useGradeFilters } from '../hooks/useGradeCategories'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
 import { useAuth } from '../contexts/AuthContext'
@@ -124,7 +125,18 @@ export default function Dashboard() {
   })
 
   const { org, seasons, grades, selectedSeason, setSelectedSeason, selectedGrade, setSelectedGrade, finalsOnly, setFinalsOnly, loading, error } = useClubData(orgId)
-  const { games, loading: gamesLoading } = useRecentGames(orgId, { seasonId: selectedSeason, gradeId: selectedGrade })
+  const gradeFilters = useGradeFilters(orgId)
+  const {
+    gradeType, setGradeType, matchFormat, setMatchFormat,
+    available: availableCategories, availableFormats, defaultCategories,
+    categoriesParam, formatsParam,
+  } = gradeFilters
+  const { games, loading: gamesLoading } = useRecentGames(orgId, {
+    seasonId: selectedSeason,
+    gradeId: selectedGrade,
+    categories: categoriesParam,
+    formats: formatsParam,
+  })
 
   const [topBatters, setTopBatters] = useState([])
   const [topBowlers, setTopBowlers] = useState([])
@@ -147,10 +159,11 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
+    const scope = { categories: categoriesParam, formats: formatsParam }
     Promise.allSettled([
-      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly }),
-      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly }),
-      api.getOrgSummary(orgId, { seasonId: selectedSeason, gradeId: selectedGrade }),
+      api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
+      api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
+      api.getOrgSummary(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, ...scope }),
     ])
       .then(([b, bw, s]) => {
         if (b.status === 'fulfilled') setTopBatters(b.value)
@@ -158,7 +171,7 @@ export default function Dashboard() {
         if (s.status === 'fulfilled') setSummary(s.value)
       })
       .finally(() => setStatsLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -229,6 +242,17 @@ export default function Dashboard() {
             setSelectedGrade={setSelectedGrade}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            gradeType={gradeType}
+            setGradeType={setGradeType}
+            matchFormat={matchFormat}
+            setMatchFormat={setMatchFormat}
+            availableCategories={availableCategories}
+            availableFormats={availableFormats}
+            defaultCategories={defaultCategories}
+            showGradeTypeFilter
+            showMatchFormatFilter
+            showGenderFilter={false}
+            showCaptainFilter={false}
           />
         </div>
 

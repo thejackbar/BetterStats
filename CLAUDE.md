@@ -1,5 +1,297 @@
 # BetterStats — Claude Session Notes
 
+## A grade is several things at once, and the dashboard filters on that (migration 259, v9.26.0, Aug 2026)
+
+Reported off the club dashboard: the GENDER filter should be a **Grade Type**
+filter (Men's / Juniors / Women's / Masters), T20 needs to exist, a grade should
+be able to hold several classifications at once, there should be a second
+**Match Type** filter (Two Day / One Day / T20), and the CAPTAIN filter should
+go.
+
+- **The Gender filter was reading a player attribute to answer a question about
+  the grade.** `p.gender` is free text, every writer stores it lowercase, and
+  the leaderboard SQL compared `p.gender = :gender` against the `'Male'` /
+  `'Female'` the pill sent — so it returned an empty board wherever it was
+  actually wired, and on the dashboard it was a **dead control** (no state, a
+  no-op setter). Same for CAPTAIN there, and on Players, Games and Ladders.
+  Those pills are off on all four screens now. **Gender is left in place on
+  Leaderboard and Records**, where it is wired; the casing bug is theirs and was
+  not chased here.
+- **`grades.categories` and `grades.match_formats` (TEXT[], migration 259)**,
+  and **`grades.category` stays and is kept in step with the first entry of
+  `categories`** in canonical order. That is what makes this additive: the
+  public grade grouping, `grade_labels.org_grade_categories`, the AFL silo's own
+  single-label readers and everything else that reads one value are untouched.
+  Send `category` alone to `PATCH /admin/grades/classify` and it still works.
+- **The two axes resolve into ONE `GradeScope` and one exclusion list**, so
+  adding a whole second filter changed no query — `resolve_scope` gained a
+  `formats=` argument and every one of the ~25 `scope.clause(...)` call sites is
+  as it was. A grade has to pass both tests to stay in.
+- **The axes fail differently on an unclassified grade, deliberately.** Every
+  grade has a category (the name suggestion bottoms out at men's senior), so
+  that test always has something to judge. A grade's FORMAT is often genuinely
+  unknowable, so a grade we cannot place is left OUT of an explicit format
+  filter rather than swept in — asking for T20 and being shown everything the
+  club has ever run is worse than being shown what we can vouch for.
+- **Format is derived, not asked for.** `org_grade_format_sets` falls: what the
+  club ticked → **the formats actually recorded on that grade's games
+  (`games.match_format`)** → the grade name. The middle step is the one that
+  matters: it is accurate for a single-format grade and needs no admin action,
+  which is why most clubs will find their grades already right. `fee_format` is
+  read too, but `'exclude'`/`'women'` are billing answers and map to nothing.
+- **`format_from_match_type` returns None for an unrecognised string, and must
+  keep doing so.** `fees.derive_fee_format` has to pick something ("everything
+  else is a single day") because a match day must be billed; a filter that
+  cannot tell has to say so instead.
+- **An explicit pick matches ANY of a grade's categories; the club DEFAULT
+  matches only the primary one.** Load-bearing, and the browser found it: with
+  ANY-matching everywhere, a "Girls Under 16" grade sneaks back into a default
+  that leaves junior out, on its women's half — junior seasons back inside
+  senior careers, which is the exact bug migration 228 exists to prevent. An
+  explicit "show me the women's grades" is an INCLUSION and should find it;
+  the default is an EXCLUSION and should not. `primary_category()` is the same
+  junior-first precedence `suggest_category` already used, so the default path
+  is byte-for-byte what it was.
+- **Grade-level, not per-fixture, and that is the granularity the club asked
+  for.** A mixed-format grade (see the `match_format` note below — Applecross
+  5th Grade is 32 one-day and 26 two-day) is tagged with both and appears under
+  either. Filtering per fixture would mean a `games.match_format` clause in
+  every one of those 25 call sites, several of which read `pss.grade_id` where
+  no format exists at all.
+- **Fixed while here, and it was a real one**: `_JUNIOR`/`_MASTERS` ended their
+  age patterns `\d+\b`, and a word boundary cannot match before a letter — so
+  **"Under 14s", "U14s", "Year 9s" and "Over 40s" all classified as SENIOR**.
+  The singular spellings always worked, which is why nobody noticed, and the
+  plural is how clubs actually write them. Junior seasons have been sitting
+  inside senior career averages for every club that spells it that way. Now
+  `\d+s?`.
+- **`get_club_summary` switches source under a scope**, the same trade the
+  leaderboards and career totals already make: CA's season aggregates carry no
+  grade (`v_effective_player_season_stats`'s `api` branch hardcodes NULL), so a
+  filtered figure is only answerable from the per-innings scorecards.
+- **The additive "Include" row and the pick-one "Grade Type" row are never
+  shown together** (`showCategoryFilter && !showGradeTypeFilter`). They answer
+  the same question two ways, and the dashboard briefly drew both. "All" on the
+  Grade Type row means the club's own default, and the note under the bar says
+  what that leaves out rather than dropping a club's juniors quietly.
+- **Auto-suggestion is untouched and now covers both axes.** An unclassified
+  grade still resolves on the fly, `POST /grades/apply-suggestions` still fills
+  the blanks (category from the name, format from the grade's own games, and it
+  refuses to guess a format it cannot tell), and the sync still persists a guess
+  for a brand-new grade. **Every site that writes `category=suggest_category(...)`
+  must ALSO write `categories=`** — sync ×2 and manual_entries ×2 — or a synced
+  "Girls Under 16" lands as junior alone and loses its women's half, which is
+  NARROWER than leaving both blank. Asserted structurally so a new write site
+  can't skip it. `match_formats` is deliberately left NULL on creation: a new
+  grade has no games yet, and leaving it unset keeps the derive-from-games step
+  live so it self-corrects as they arrive.
+- **`grades-with-stats` computes classification in its OWN query.** Unnesting
+  the two array columns into the existing aggregate multiplies every batting row
+  by the number of tags and silently inflates the RUNS column — written that way
+  first, caught before it shipped, and asserted against.
+- **Verified against a real Postgres** (93 checks: migration 259 applied three
+  times to a populated pre-259 table and matching the lifespan mirror, the
+  plural age-group spellings, both org resolvers' three-step fallbacks, every
+  branch of the two axes composing, a senior-only club coming out inactive and
+  emitting no clause, the scoped summary, and the route bodies incl. the
+  runs-inflation guard, the `category` column staying in step, an empty list
+  clearing back to the suggestion and apply-suggestions refusing to guess a
+  format, plus the every-write-site-pairs-both-columns guard) and
+  **driven in Chromium** (32: the pills that render and the ones
+  that no longer do, the exact params on the wire for all four dashboard
+  fetches, the two filters composing, clearing one without the other, the
+  Grades screen's chips and its PATCH, no page errors, no overflow at 390px).
+
+## `games.match_format` was never written, so every match was a one-dayer (v9.25.2, Aug 2026)
+
+Reported from Applecross Accounts: grades that play two-day cricket all showed a
+Fee Format of One Day, and it "used to be right". Every match day was being
+charged as one day.
+
+- **The column has no writer.** `derive_fee_format(grade.fee_format,
+  game.match_format)` is correct and always was; `games.match_format` was NULL
+  for every synced row, and its own fallback is "everything else (One Day,
+  blank, unknown) is treated as a single day". So the bug reads as a wrong
+  format rather than a missing one, which is why it looks like a settings
+  problem and isn't. **Migration 033's docstring claims the sync backfills this
+  ("also opportunistically backfilled during incremental syncs") — that code
+  does not exist in this tree.** The docstring is the only trace of it; treat a
+  migration's prose as intent, not proof, and grep for the writer.
+- **The format is per FIXTURE, and a grade cannot answer it.** Applecross 5th
+  Grade 2025/26 is **32 One Day and 26 Two Day** fixtures (verified live against
+  `/scores/grades/{id}/matches`); 1st Grade is 39/32. So the grade-level
+  `fee_format` override is NOT the fix — setting a mixed grade to `two_day`
+  would double-charge its one-day half. Leave that override for what it is for:
+  telling a women's grade from a men's one, and excluding a grade from fees.
+- **Read from the match LIST, not the scorecard.** `get_grade_matches` already
+  returns `matchType` ("One Day" / "Two Day" / "T20") and the discovery loop
+  already fetches it, so this costs no extra call and also covers a fixture
+  whose scorecard is never opened. `matchTypeId` (1 = Two Day, 2 = One Day) is
+  there too; the string is stored because every consumer substring-parses this
+  column (`fees.derive_fee_format`, `iq_team._fmt_of`) and the manual-entry form
+  writes free text into it.
+- **"BYE" is also a `matchType`** (48 of Colts T20's 87 entries) and is
+  deliberately NOT stored — it is not a format, and every consumer would parse
+  it as a one-dayer. A bye has no scorecard so it never becomes a `games` row
+  anyway; the guard just keeps the column honest.
+- **Setting it on `Game()` alone would have fixed almost nothing.** An
+  already-synced game never reaches the per-game block (the appearances-done
+  gate short-circuits it), so the write is ALSO a bulk pass beside the existing
+  `is_final` one — the same reason that one exists. That is what corrects a
+  club's existing season on an ordinary Sync Now.
+- **`python -m app.scripts.backfill_match_format <org-id-or-slug>`** (dry-run,
+  `--apply`, `--recompute`, `--season YYYY`, `--all-seasons`) is the retroactive
+  half, for the seasons an incremental run no longer scans. It restricts writes
+  to games under the club's OWN grades — a grade match list is competition-wide
+  and names plenty of fixtures that are not ours.
+- **It deliberately does NOT default to the whole history.** A club collects
+  fees for the season it is in and maybe the one before, so the default scope is
+  **the seasons carrying `fee_member_seasons` rows, plus the club's latest
+  season** — the latter because a club setting up this season's fees has no fee
+  rows in it yet. Reaching back to 2011 spends a CA call per grade correcting
+  money nobody is collecting. `--all-seasons` is there for the stats side
+  (StatLab / BetterIQ format filters, migration 033's original purpose), not for
+  fees. **A club onboarded after this shipped needs none of it** — its games get
+  the format at creation.
+- **Fee rows are not edited directly** — `recompute_fee_match_days` re-derives
+  them and already leaves an admin-overridden (`auto_derived=False`) or
+  already-paid row alone. Nothing new was needed for that; don't reimplement it.
+- **Verified against live Cricket Australia data** (7 checks over six real
+  Applecross 25/26 grades through the shipped `derive_fee_format`: the bug
+  reproduced from a NULL, all three formats mapping, the mixed grade proving the
+  per-fixture requirement, and the women's/exclude overrides still winning).
+
+## Accounts kept resetting to the newest season (v9.25.2, Aug 2026)
+
+Same report: work through 2025/26, open a member, come back, and you are in
+2026/27.
+
+- **`AdminFeeMemberDetail` already linked back with `?season=`; the Accounts
+  screen just ignored it** — `useState('')` then "set `sorted[0]`" on every
+  mount, unconditionally. Half the round trip had been built.
+- **The season is URL state now**, seeded from `?season=` and mirrored back on
+  change (`replace`, so the back button leaves the screen instead of walking the
+  season history). It survives a refresh and is shareable, which is what the
+  reported URL was.
+- **A season named in the URL that the club no longer holds falls back to the
+  newest** rather than leaving an empty screen with no way out.
+- **Driven in Chromium** against the real screens with the API stubbed (11
+  checks: the round trip holding 25/26, the back link, the no-param default, the
+  stale-id fallback, the dropdown writing the URL, no page errors). The one
+  failing check, horizontal overflow at 390px, was confirmed **pre-existing** by
+  re-running it with the change stashed — the members table is wide, and that is
+  not this fix's to solve.
+
+## The scheduled sync pulls the period's results, not the club's whole history (migration 258, v9.25.0, Aug 2026)
+
+`jobs/scheduler.py::sync_all_organisations` was `select(Organisation)` with no
+WHERE and a full historical `sync_organisation` per club, at 03:00 **UTC** —
+11:00 Sunday morning in WA, so a club's weekend results landed most of a day
+late. Four separate problems, and the fix for each lives in
+**`services/auto_sync.py`**, which is now the one place "who gets synced, and
+how far back" is decided.
+
+- **Perth, not UTC.** `PERTH` is module-level in scheduler.py and every
+  club-facing job uses it. Sunday AND Monday 01:00 — same job both days, since
+  each run asks the same question ("what has happened since this club's last
+  sync") and doesn't need to know which day it is.
+- **Eligibility reuses `auth.modules.org_core_live`** rather than inventing a
+  second idea of "lapsed". That function already knows about a cancelled or
+  paused Core row, an expired Core trial and the org-level master switch, and
+  **it fails OPEN** for a club whose subscription rows predate the per-module
+  scheme — so no long-established club is dropped by accident. Plus
+  `archived_at IS NULL` and `is_active`. Skips are counted and logged by
+  reason; a club quietly falling out of the sync with no trace is how you end
+  up debugging "why is this club three months old" from scratch.
+- **The watermark is the last run that actually PULLED MATCHES** — of
+  `org_recent`/`org_full`/`org_hard_refresh`, a manual Sync Now counts, and an
+  errored, cancelled or restart-interrupted run does NOT, so the next run
+  automatically re-covers the gap instead of leaving a hole. A club whose last
+  run failed therefore asks for fourteen days rather than seven, with no state
+  to keep. `OVERLAP_HOURS = 26` is subtracted, which catches a result typed in
+  hours after the last ball and makes Monday re-cover Sunday's fixtures.
+- **"Successful run" is NOT the same as "pulled matches", and that gap was a
+  real hole.** `sync.py` deliberately swallows a failure of the game-level
+  pass so the season aggregates it already wrote are kept — which meant the
+  run finished as a plain success, the watermark stepped over the period whose
+  scorecards had just failed, and the club was quietly short those results
+  forever. It now stamps **`match_pull_failed`** on the run's stats, and
+  `auto_sync.last_sync_at` ignores a run carrying it (`_pulled_matches_ok`).
+  **`ever_full` deliberately does NOT apply that filter** — "has this club's
+  history ever been pulled" is about whether seasons and grades were seeded,
+  and filtering it would hand a club whose game-level pass keeps failing a
+  fresh full historical sync twice a week forever. For the same reason
+  `plan_run` will not escalate to a full run twice: if a full run has already
+  completed since the watermark and the club is still behind, it returns
+  `full_sync_did_not_catch_up` and stays incremental at the `MAX_LOOKBACK_DAYS`
+  cap rather than looping.
+- **`kind = 'org_recent'` is deliberately NOT one of the existing kinds.**
+  `org_full`/`org_hard_refresh` mean "this club's whole history has been
+  pulled", which the Setup Wizard's own sync gate (`onboarding_wizard._sync_ready`),
+  `wizard_analytics` and All Clubs' `_FULL_SYNC_KINDS` all read as their
+  ready signal. An incremental run must not satisfy those. Same reason
+  `main.py`'s restart self-heal still only resumes the two full kinds — a
+  dropped incremental run needs no resume, because its watermark never moved.
+- **Incremental mode is the SAME code path with a smaller input set**, never a
+  different one: `since` filters the API season list through
+  `auto_sync.season_in_window` (400-day span, so a straddling season or a late
+  final can't be filtered out), and `sync_grassroots_game_level_data` takes
+  `since` + `season_ids` to restrict the grade fan-out and drop out-of-window
+  fixtures. **The grade fan-out is as much of the saving as the scorecards** —
+  an established club has hundreds of grades across its seasons, each costing a
+  `/scores/grades/{id}/matches` call on every run before a single scorecard.
+- **Three whole-club tail passes are skipped when an incremental run added no
+  games** (`_backfill_missing_season_stats`, `reconcile_imported_totals`, the
+  bare `ANALYZE` that walks the whole DB). They derive from per-game data that
+  by definition did not change. **Milestones are scoped, not skipped**:
+  `_compute_milestones` runs a query per player, so an incremental run passes
+  only the players whose season aggregates it just rewrote.
+- **Nothing played in the period, nothing pulled.**
+  `auto_sync.fixtures_in_window` asks the cheap question first — did this club
+  play anything since its last pull — and the grade match lists it fetches are
+  cached in-process, so when the answer is yes the sync that follows reuses
+  them. **This is deliberately NOT a notion of "is the season over".** A club
+  has an empty period for many ordinary reasons (the off-season, the Christmas
+  break, a bye, a washed-out round, a team between grades) and every one has
+  the same right answer. Modelling season boundaries per club and per
+  competition would be more code reaching the same outcome only some of the
+  time. **Every branch that returns "sync anyway" is load-bearing**: a CA
+  season we don't hold yet or hold with no grades (deciding "nothing played"
+  from grades we haven't created is how a club silently stops syncing the day
+  its new season opens), and every grade returning an empty list
+  (`get_grade_matches` returns `[]` for a transient failure and for a
+  genuinely empty grade alike, so "whole card empty" is "could not tell").
+  A fixture dated in the future doesn't count — it isn't a result to pull.
+- **An idle check still records a successful `org_recent` run, and that is not
+  bookkeeping for its own sake** — it moves the watermark. Without it a club
+  that plays nothing for a stretch has its window grow every run until it
+  crosses `MAX_LOOKBACK_DAYS` (90) and is handed a full historical rebuild,
+  quarterly, forever, for having done nothing.
+- **Historical drift is DETECTED, not blindly re-pulled** (per direct
+  instruction — no periodic full sync). `services/sync_drift.py` compares CA's
+  season aggregates against our stored `player_season_stats`, monthly, ~12
+  seasons per club per run rotating oldest-checked-first, three calls per
+  season and no scorecards. **The naive "sum the season and compare" reports
+  drift on healthy clubs**, so it compares per player and only for
+  participants CA itself reports: `_backfill_missing_season_stats` rows (for
+  players CA omits) are ignored, and any participant caught up in a live merge
+  is skipped, since the aggregate pass keeps one side's figures and drops the
+  other's. CA returning nothing is `unavailable`, never drift. Surfaced as a
+  banner on Data Sync with a Full Rebuild button; **acknowledging survives a
+  re-check that still finds drift** (no monthly nag) and is cleared by one
+  that finds the season clean.
+- **Verified against a real Postgres** (77 checks: migration 258 applied three
+  times and matching the lifespan mirror, every eligibility branch incl. the
+  fail-open legacy club, the watermark ignoring an errored run AND a
+  successful run whose match pull failed, the anti-escalation guard, the
+  season and fixture filtering asserted inside the real
+  `sync_grassroots_game_level_data` against stubbed CA responses, every
+  empty-period probe branch incl. a mid-season break and a bye, the drift
+  check's backfill/merge false-positive guards, the acknowledge semantics, and
+  the scheduler choosing the right run per club) and **driven in Chromium**
+  (13: the notice's copy and examples, dismiss posting to the endpoint, no
+  page errors, no overflow at 390px).
+
 ## A picker inside a `<label>` cancels its own selection (v9.23.1.1, Aug 2026)
 
 Reported from Accounts → Add member → Find in club: picking a player from the

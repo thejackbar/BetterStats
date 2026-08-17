@@ -183,6 +183,8 @@ export default function GamesPage() {
             setSelectedGrade={setSelectedGrade}
             finalsOnly={finalsOnly}
             setFinalsOnly={setFinalsOnly}
+            showGenderFilter={false}
+            showCaptainFilter={false}
           />
         </div>
 

@@ -327,6 +327,20 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS "
             "is_public BOOLEAN NOT NULL DEFAULT true"
         ))
+        # A grade is not one thing (migration 259). "Women's T20 Grade 2" is a
+        # women's grade AND a T20 grade, so the type and the format each get
+        # their own multi-valued column. `category` stays, kept in step with the
+        # first entry of `categories`, so every existing reader is untouched.
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS categories TEXT[]"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE grades ADD COLUMN IF NOT EXISTS match_formats TEXT[]"
+        ))
+        await conn.execute(text(
+            "UPDATE grades SET categories = ARRAY[category] "
+            "WHERE categories IS NULL AND category IS NOT NULL AND category <> ''"
+        ))
         # A club's own default for which of those categories count towards its
         # stats (migration 228). NULL = no preference, so the platform default
         # (everything except junior) applies. See services/grade_scope.py.
@@ -5298,6 +5312,33 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_sales_list_clubs_list ON sales_list_clubs(sales_list_id)"
+        ))
+
+        # Migration 258: historical-drift findings. The scheduled sync only
+        # pulls fixtures since a club's last run, so a Cricket Australia
+        # revision to an older season is never re-read; the monthly drift
+        # check records its verdict here instead (one row per club+season,
+        # updated in place). Byte-identical to
+        # alembic/versions/258_sync_drift_findings.py.
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS sync_drift_findings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                season_id UUID NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+                season_name TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'ok',
+                players_compared INTEGER NOT NULL DEFAULT 0,
+                players_differing INTEGER NOT NULL DEFAULT 0,
+                examples JSONB NOT NULL DEFAULT '[]'::jsonb,
+                checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                acknowledged_at TIMESTAMPTZ,
+                UNIQUE (organisation_id, season_id)
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_sync_drift_findings_open "
+            "ON sync_drift_findings(organisation_id) "
+            "WHERE status = 'drift' AND acknowledged_at IS NULL"
         ))
 
     # Ensure uploads directory exists

@@ -112,12 +112,20 @@ async def get_records(
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
     ),
+    formats: str | None = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Omitted applies no format filter. Ignored when an explicit "
+            "grade is picked."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
     # clause below sees an inactive scope and emits no SQL.
-    scope = await grade_scope.resolve_scope(db, org_id, categories)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     if grade_id or grade_name:
         scope = None
     scope_active = bool(scope is not None and scope.active)
@@ -1212,8 +1220,12 @@ async def get_records(
         # What these figures actually cover, plus the categories this club's
         # grades justify offering a toggle for.
         "grade_scope": {
-            **(scope.as_meta() if scope is not None else {"categories": [], "excluded_categories": [], "active": False}),
+            **(scope.as_meta() if scope is not None else {
+                "categories": [], "excluded_categories": [],
+                "formats": None, "excluded_formats": [], "active": False,
+            }),
             "available": await grade_scope.org_available_categories(db, org_id),
+            "available_formats": await grade_scope.org_available_formats(db, org_id),
         },
         "batting": {
             "top_career_runs":   top_career_runs,
