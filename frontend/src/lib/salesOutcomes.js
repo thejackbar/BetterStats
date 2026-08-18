@@ -34,12 +34,15 @@ export const CALL_OUTCOMES = {
   club_inactive: { label: 'Club inactive', category: 'administrative' },
   wrong_club: { label: 'Wrong club', category: 'administrative' },
   contact_details_updated: { label: 'Contact details updated', category: 'administrative' },
+  // General — not a call outcome as such, just something worth noting
+  // against the club without claiming a call was made or how it went.
+  general_note: { label: 'General Note', category: 'general' },
 }
 
-export const CATEGORY_ORDER = ['positive', 'neutral', 'unsuccessful', 'negative', 'administrative']
+export const CATEGORY_ORDER = ['positive', 'neutral', 'unsuccessful', 'negative', 'administrative', 'general']
 export const CATEGORY_LABELS = {
   positive: 'Positive', neutral: 'Neutral', unsuccessful: 'Unsuccessful contact',
-  negative: 'Negative', administrative: 'Administrative',
+  negative: 'Negative', administrative: 'Administrative', general: 'General',
 }
 
 export function groupedOutcomes() {

@@ -67,12 +67,15 @@ CALL_OUTCOMES: dict[str, dict] = {
     "club_inactive": {"label": "Club inactive", "category": "administrative"},
     "wrong_club": {"label": "Wrong club", "category": "administrative"},
     "contact_details_updated": {"label": "Contact details updated", "category": "administrative"},
+    # General — not a call outcome as such, just something worth noting
+    # against the club without claiming a call was made or how it went.
+    "general_note": {"label": "General Note", "category": "general"},
 }
 
-CATEGORY_ORDER = ("positive", "neutral", "unsuccessful", "negative", "administrative")
+CATEGORY_ORDER = ("positive", "neutral", "unsuccessful", "negative", "administrative", "general")
 CATEGORY_LABELS = {
     "positive": "Positive", "neutral": "Neutral", "unsuccessful": "Unsuccessful contact",
-    "negative": "Negative", "administrative": "Administrative",
+    "negative": "Negative", "administrative": "Administrative", "general": "General",
 }
 
 # Outcomes that lose a deal outright — stage moves to lost_dormant, status='lost'.

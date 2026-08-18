@@ -123,9 +123,9 @@ function StatePicker({ value, onChange }) {
 // the next), only dropping to its own line once the row genuinely runs out
 // of width. That's what keeps the whole bar to one or two lines instead of
 // one full-width row per group stacked all the way down the page.
-function FilterGroup({ label, children, first = false }) {
+function FilterGroup({ label, children, first = false, className = '' }) {
   return (
-    <div className={`flex flex-col gap-1.5 ${first ? '' : 'pl-4 border-l border-pb-hairline'}`}>
+    <div className={`flex flex-col gap-1.5 ${first ? '' : 'pl-4 border-l border-pb-hairline'} ${className}`}>
       <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">{label}</p>
       <div className="flex flex-wrap items-end gap-2">{children}</div>
     </div>
@@ -499,7 +499,7 @@ export default function SalesWorkspace() {
   }, [])
 
   const [filters, setFilters] = useState({
-    q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, list_id: '',
+    q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, voicemail: false, list_id: '',
     min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
     states: [], sort: '', sort_dir: '',
   })
@@ -988,22 +988,6 @@ export default function SalesWorkspace() {
             </FilterGroup>
           )}
 
-          <FilterGroup label="Call status">
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
-              title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
-              <input type="checkbox" checked={filters.called_clubs}
-                onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
-              <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
-              Called clubs
-            </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
-              <input type="checkbox" checked={filters.callback_due}
-                onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
-              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
-              Callback due
-            </label>
-          </FilterGroup>
-
           <FilterGroup label="Engagement score">
             <div className="flex items-center gap-1.5">
               <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
@@ -1052,6 +1036,29 @@ export default function SalesWorkspace() {
                 Searched
               </label>
             </div>
+          </FilterGroup>
+
+          <FilterGroup label="Call status" className="ml-auto">
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
+              title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
+              <input type="checkbox" checked={filters.called_clubs}
+                onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
+              Called
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+              <input type="checkbox" checked={filters.callback_due}
+                onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
+              Callback
+            </label>
+            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
+              title="Clubs whose most recent call went to voicemail">
+              <input type="checkbox" checked={filters.voicemail}
+                onChange={e => setFilters(f => ({ ...f, voicemail: e.target.checked }))} />
+              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500 inline-block" />
+              Voicemail
+            </label>
           </FilterGroup>
         </div>
       </div>
@@ -1142,6 +1149,7 @@ export default function SalesWorkspace() {
                     className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
                       selectedId === c.id ? 'border-pb-accent bg-pb-surface2'
                       : c.callback_due ? 'border-blue-500/60 hover:bg-pb-surface2'
+                      : c.last_call?.outcome === 'voicemail' ? 'border-purple-500/60 hover:bg-pb-surface2'
                       : c.ever_called ? 'border-orange-500/60 hover:bg-pb-surface2'
                       : 'border-transparent hover:bg-pb-surface2'
                     }`}

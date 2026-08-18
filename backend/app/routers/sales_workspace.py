@@ -135,6 +135,7 @@ async def list_clubs(
     owner_user_id: Optional[str] = None,
     called_clubs: bool = False,
     callback_due: bool = False,
+    voicemail: bool = False,
     list_id: Optional[str] = None,
     min_score: Optional[int] = None,
     max_score: Optional[int] = None,
@@ -184,14 +185,15 @@ async def list_clubs(
     field's own sensible default (recent/engagement_score default to desc,
     club_name/trial_days default to asc).
 
-    The called/callback filters are mutually exclusive, most-specific first:
-    ``callback_due`` (a due/overdue follow-up — inherently a called club,
-    since a follow-up can only exist once a call has been logged) takes
-    precedence when both are set; else ``called_clubs`` narrows to every
-    club that's ever been called; else — the default, with neither
-    ticked — the queue shows only clubs that have NEVER been called, which
-    is what a rep actually wants to see by default (a calling QUEUE, not a
-    call log)."""
+    The called/callback/voicemail filters are mutually exclusive,
+    most-specific first: ``callback_due`` (a due/overdue follow-up —
+    inherently a called club, since a follow-up can only exist once a call
+    has been logged) takes precedence over everything else; else
+    ``voicemail`` narrows to every club whose most recent call outcome was
+    'voicemail'; else ``called_clubs`` narrows to every club that's ever
+    been called; else — the default, with none ticked — the queue shows
+    only clubs that have NEVER been called, which is what a rep actually
+    wants to see by default (a calling QUEUE, not a call log)."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -328,6 +330,7 @@ async def list_clubs(
         last_call = last_calls.get(d.id)
         row["ever_called"] = last_call is not None
         row["last_call"] = crm_service._activity_dict(last_call) if last_call else None
+        row["last_call_outcome"] = last_call.outcome if last_call else None
         follow_up_at = follow_ups.get(d.id)
         row["next_follow_up_at"] = follow_up_at.isoformat() if follow_up_at else None
         # Precomputed for the queue row's own highlight colour (blue = a
@@ -347,6 +350,8 @@ async def list_clubs(
     # Most-specific-first, mutually exclusive — see the docstring above.
     if callback_due:
         out = [r for r in out if r["callback_due"]]
+    elif voicemail:
+        out = [r for r in out if r["last_call_outcome"] == "voicemail"]
     elif called_clubs:
         out = [r for r in out if r["ever_called"]]
     else:
