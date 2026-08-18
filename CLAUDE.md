@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## StatLab's list filters take several values at once (v9.29.0, Aug 2026)
+## StatLab's list filters take several values at once (v9.29.2, Aug 2026)
 
 Reported: StatLab could only ever be scoped to ONE grade, so "most runs across
 1st and 3rd Grade" was unanswerable. A range picker was the obvious shape and is

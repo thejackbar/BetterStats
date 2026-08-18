@@ -592,7 +592,7 @@ export default function SalesWorkspace() {
   // 'custom' opens the same way as the other three now — pre-filled from its
   // own editable template ("Custom sales rep email" in Comms -> Templates)
   // in the Design editor, not a blank plain-text form.
-  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'trial_extension', 'demo', 'subscribe', 'custom']
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'voicemail_followup', 'trial_information', 'trial_extension', 'demo', 'subscribe', 'custom']
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
@@ -1444,9 +1444,7 @@ export default function SalesWorkspace() {
                     }}>
                       <option value="">Pick a template…</option>
                       {emailTemplates.templates.map(t => (
-                        <option key={t.key} value={t.key}>
-                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
-                        </option>
+                        <option key={t.key} value={t.key}>{t.label}</option>
                       ))}
                     </Select>
                   </Field>

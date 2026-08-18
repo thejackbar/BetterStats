@@ -23,6 +23,7 @@ from app.services import email_service
 
 TEMPLATE_LABELS = {
     "information": "Send information",
+    "voicemail_followup": "Email following voicemail",
     "trial_information": "Trial information",
     "trial_extension": "Wants a trial extension",
     "demo": "Book a demo",
@@ -51,7 +52,9 @@ def _db_name(key: str) -> Optional[str]:
 # body typed by the rep from a blank form", but now opens the same way as
 # the rest: pre-filled from its own editable template, which the rep edits
 # in Design mode rather than starting from nothing.
-BUILT_IN_TEMPLATES = ("information", "trial_information", "trial_extension", "demo", "subscribe", "custom")
+BUILT_IN_TEMPLATES = (
+    "information", "voicemail_followup", "trial_information", "trial_extension", "demo", "subscribe", "custom",
+)
 
 
 def _greeting(name: Optional[str]) -> str:
@@ -107,6 +110,23 @@ def _render_template_hardcoded(
             f"{greeting} thanks for your interest in BetterCricket for {club_name}. "
             f"Have a look through what's on offer: {base} "
             "Happy to answer any questions — just reply to this email."
+        )
+    elif key == "voicemail_followup":
+        subject = f"BetterCricket for {club_name} — following up"
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
+            f"but couldn't get through, so I've left a voicemail. Wanted to follow up here too — "
+            f"BetterCricket is stats, team selection, availability, social posts and more, "
+            f"all in one place for {club_name}.</p>"
+            f'<p style="font-size:14px;line-height:1.5">Have a look through what’s on offer:</p>'
+            + _button("See BetterCricket", base)
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+        )
+        text = (
+            f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
+            f"voicemail. Wanted to follow up here too — BetterCricket for {club_name}. "
+            f"Have a look through what's on offer: {base} "
+            "Happy to answer any questions — just reply to this email, or give me a call back."
         )
     elif key == "trial_information":
         subject = f"Start your free BetterCricket trial — {club_name}"
@@ -205,6 +225,21 @@ _SEED_BODY = {
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">See BetterCricket</a></p>'
         "<p>Happy to answer any questions — just reply to this email.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+    # Seeded from information's own layout (intro line, then a button) per
+    # direct instruction, reworded for a rep following up in writing right
+    # after a call that went to voicemail.
+    "voicemail_followup": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
+        "Wanted to follow up here too — BetterCricket is stats, team selection, availability, "
+        "social posts and more, all in one place for {{club}}.</p>"
+        "<p>Have a look through what's on offer:</p>"
+        '<p><a href="{base}" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">See BetterCricket</a></p>'
+        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     "trial_information": (
@@ -392,6 +427,7 @@ _SEED_BODY = {
 }
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
+    "voicemail_followup": "BetterCricket for {{club}} — following up",
     "trial_information": "Start your free BetterCricket trial — {{club}}",
     "trial_extension": "Your BetterCricket trial extension for {{club}}",
     "demo": "Book a demo — BetterCricket for {{club}}",
