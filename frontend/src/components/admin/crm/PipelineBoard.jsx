@@ -9,8 +9,8 @@ const BETTERSTATS_LOGO = moduleBrand('stats').logo
 // Trial badge colours — bright amber for a club that self-registered its own
 // trial, a pale/greyed amber for a trial a BetterCricket admin set up for the
 // club. Same hourglass glyph either way; the colour carries the origin.
-const TRIAL_AMBER = '#F59E0B'
-const TRIAL_AMBER_MUTED = '#a6a39c'
+export const TRIAL_AMBER = '#F59E0B'
+export const TRIAL_AMBER_MUTED = '#a6a39c'
 
 export const TIER_TONE = { HOT: 'red', WARM: 'amber', COLD: 'faint', NOT_INTERESTED: 'faint' }
 
@@ -37,7 +37,7 @@ export function EngagementArrow({ dir }) {
 // this same card); a bright vs pale/greyed amber distinguishes a self-serve
 // trial from one a BetterCricket admin set up. Inline SVG so it stays crisp at
 // 16px.
-function TrialHourglassIcon({ className = '', color = TRIAL_AMBER }) {
+export function TrialHourglassIcon({ className = '', color = TRIAL_AMBER }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2"
       strokeLinecap="round" strokeLinejoin="round" className={className}
@@ -281,7 +281,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                           <Pill key={k} tone={expired ? 'red' : isSubscribed ? 'faint' : 'accent'}
                             title={expired ? `${moduleLabel(k)} trial expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago` : undefined}>
                             {moduleLabel(k)}
-                            {expired ? ' · EXPIRED' : (!isSubscribed && days != null ? ` (${days})` : '')}
+                            {expired ? ` · EXPIRED (${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago)` : (!isSubscribed && days != null ? ` (${days})` : '')}
                           </Pill>
                         )
                       })}

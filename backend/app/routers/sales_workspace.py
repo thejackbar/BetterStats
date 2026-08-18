@@ -425,6 +425,12 @@ async def get_club(
     # list use, just called with a single-club map since this is one deal.
     # Absent (None) for a bare prospect that's never been onboarded.
     deal_out["marketing_club_state"] = club.state if club else None
+    # Feeds ClubLocationMap.jsx in the drawer (same component/props the Club
+    # Directory's own map already uses) — Numeric columns need a float cast,
+    # since json can't serialise a Decimal.
+    deal_out["marketing_club_latitude"] = float(club.latitude) if club and club.latitude is not None else None
+    deal_out["marketing_club_longitude"] = float(club.longitude) if club and club.longitude is not None else None
+    deal_out["marketing_club_postcode"] = club.postcode if club else None
     club_stats = None
     trial_days = None
     min_trial_days = None
@@ -473,6 +479,7 @@ async def get_club(
 
     engagement = None
     website_visits = None
+    boundary = None
     if club is not None:
         club_id_for_reads = club.id  # captured now: club_engagement_breakdown
                                       # below commits, which expires every ORM
@@ -492,6 +499,16 @@ async def get_club(
         except Exception:  # noqa: BLE001 - the drawer must still render without it
             logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
             website_visits = None
+        # Feeds ClubLocationMap.jsx's suburb-boundary overlay — same
+        # super-admin-only reasoning as website_visits above, `/marketing/
+        # clubs/{id}/boundary` a 'sales' caller can't reach, so the drawer
+        # embeds it via the exact service function that route calls.
+        try:
+            from app.services import club_directory as cd
+            boundary = await cd.get_or_fetch_boundary(db, club_id_for_reads)
+        except Exception:  # noqa: BLE001 - the drawer must still render without it
+            logger.exception("sales_workspace: boundary lookup failed for club %s", club_id_for_reads)
+            boundary = None
         try:
             from app.routers.marketing import club_engagement_breakdown
             engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
@@ -507,6 +524,7 @@ async def get_club(
         "activities": activities_out,
         "engagement": engagement,
         "website_visits": website_visits,
+        "boundary": boundary,
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
     }
@@ -655,12 +673,28 @@ class EmailBody(BaseModel):
     directory_contact_id: Optional[str] = None
     crm_person_id: Optional[str] = None
     template: str  # 'information' | 'trial_information' | 'demo' | 'custom'
-    # Required for 'custom' (plain text, wrapped+escaped server-side). For a
-    # built-in template these carry the rep's EDITED copy of what
-    # /email-preview handed back (already-final HTML, sent as-is) — omitted,
-    # the server re-renders the template fresh from scratch.
+    # These carry the rep's EDITED copy of what /email-preview handed back
+    # (already-final HTML, sent as-is) for every one of the four built-in
+    # templates, 'custom' included — all four open pre-filled from their own
+    # editable template now. Omitted, the server re-renders the template
+    # fresh from scratch (a caller that skipped the preview step).
     subject: Optional[str] = None
     body: Optional[str] = None
+
+
+def _resolve_utm_code(club: Optional[MarketingClub]) -> Optional[str]:
+    """Auto-generate + persist a club's utm_code the same way club_directory.py
+    does for a crawled club, so a link sent before the club had one still gets
+    tracked attribution from here on — both to the club (utm_id) and, via
+    apply_sales_utm, to the sending rep (utm_content). Deterministic from the
+    club's name (see _default_utm), so calling this from a preview that never
+    commits is harmless — a later call recomputes the same value."""
+    if club is None:
+        return None
+    if not club.utm_code:
+        from app.services.club_directory import _default_utm
+        club.utm_code = _default_utm(club.name)
+    return club.utm_code or None
 
 
 class EmailPreviewBody(BaseModel):
@@ -679,8 +713,7 @@ async def email_preview(
     """Renders a built-in template's real, merged content (contact's name,
     club name, the picked calendly link) for the Send Email form's Design
     editor — the rep edits this before Send actually fires. Never sends
-    anything; 'custom' has no template body to preview (the form's own
-    Subject/Body fields ARE the content there)."""
+    anything."""
     from app.services import platform_settings as ps
     from app.services import sales_email as se
 
@@ -708,9 +741,11 @@ async def email_preview(
     if body.template == "demo":
         links = await ps.get_demo_booking_links(db)
         calendly_url = links.get(rep_name)
+    utm_code = _resolve_utm_code(club)
     subject, html_body = await se.render_template_preview(
         db, body.template, contact_name=person.full_name if person else None,
         club_name=club_name, rep_name=rep_name, calendly_url=calendly_url,
+        utm_code=utm_code or "",
     )
     return {"subject": subject, "body": html_body}
 
@@ -759,11 +794,9 @@ async def send_email(
     rep_name = actor.user.display_name or actor.user.username
     template = body.template
 
-    if template == "custom":
-        if not (body.subject or "").strip() or not (body.body or "").strip():
-            raise HTTPException(status_code=422, detail="Subject and body are required for a custom email")
-        subject, html_body, text_body = se.render_custom(body.subject.strip(), body.body.strip(), rep_name)
-    elif template in se.BUILT_IN_TEMPLATES:
+    utm_code = _resolve_utm_code(club)
+
+    if template in se.BUILT_IN_TEMPLATES:
         # The rep's own edited copy of what /email-preview handed back (the
         # normal path — the Design editor always sends its current content)
         # is trusted as final HTML, no re-wrapping/escaping: it's the same
@@ -781,21 +814,11 @@ async def send_email(
                 calendly_url = links.get(rep_name)
             subject, html_body, text_body = await se.render_template(
                 db, template, contact_name=person.full_name, club_name=club_name, rep_name=rep_name,
-                calendly_url=calendly_url,
+                calendly_url=calendly_url, utm_code=utm_code or "",
             )
     else:
         raise HTTPException(status_code=422, detail="Unknown email template")
 
-    # utm_code: auto-generate + persist the same way club_directory.py does
-    # for a crawled club, so a link sent before the club had one still gets
-    # tracked attribution from here on — both to the club (utm_id) and to
-    # this sending rep (utm_content), per direct instruction.
-    utm_code = None
-    if club is not None:
-        if not club.utm_code:
-            from app.services.club_directory import _default_utm
-            club.utm_code = _default_utm(club.name)
-        utm_code = club.utm_code or None
     html_body = se.apply_sales_utm(html_body, template_key=template, rep_username=actor.user.username, utm_code=utm_code)
 
     try:

@@ -16,7 +16,6 @@ instruction.
 """
 from __future__ import annotations
 
-import html as _html
 from typing import Optional
 
 from app.config.settings import settings
@@ -28,9 +27,28 @@ TEMPLATE_LABELS = {
     "demo": "Book a demo",
     "custom": "Custom email",
 }
-# Every key except 'custom' has a body built here; 'custom' is subject/body
-# typed by the rep and never reaches render_template.
-BUILT_IN_TEMPLATES = ("information", "trial_information", "demo")
+# The comms_templates row a key's content is seeded/read from — same as
+# TEMPLATE_LABELS (the rep-facing dropdown text) for every key EXCEPT
+# 'custom': the dropdown still reads "Custom email" (a rep picking it means
+# "I'm writing something of my own"), but the editable template behind it is
+# named "Custom sales rep email" in Comms -> Templates, a more descriptive
+# name for the super admin maintaining it there. Falls back to TEMPLATE_LABELS
+# for any key with no override.
+TEMPLATE_DB_NAMES = {
+    "custom": "Custom sales rep email",
+}
+
+
+def _db_name(key: str) -> Optional[str]:
+    return TEMPLATE_DB_NAMES.get(key, TEMPLATE_LABELS.get(key))
+
+
+# All four keys have a body built/loaded here now — 'custom' used to mean
+# "subject/body typed by the rep from a blank form", but now opens the same
+# way as the other three: pre-filled from its own editable template (a
+# proper branded shell with a placeholder message line), which the rep edits
+# in Design mode rather than starting from nothing.
+BUILT_IN_TEMPLATES = ("information", "trial_information", "demo", "custom")
 
 
 def _greeting(name: Optional[str]) -> str:
@@ -65,8 +83,7 @@ def _render_template_hardcoded(
     kept as the fallback ``render_template`` (below) uses when the outreach
     org isn't configured yet, or its seeded CommsTemplate row is missing
     (e.g. a fresh/local environment with no marketing org set up). Raises
-    ValueError for 'custom' or an unknown key — those have no template body,
-    the caller supplies subject/text/html directly."""
+    ValueError for an unknown key."""
     if key not in BUILT_IN_TEMPLATES:
         raise ValueError(f"'{key}' is not a built-in template")
 
@@ -108,7 +125,7 @@ def _render_template_hardcoded(
             "4) Create your admin account 5) Choose the modules you want "
             f"6) Start your 14-day trial — no card required. {base}/trial"
         )
-    else:  # demo
+    elif key == "demo":
         subject = f"Book a demo — BetterCricket for {club_name}"
         if calendly_url:
             body = (
@@ -127,6 +144,10 @@ def _render_template_hardcoded(
                 f"{greeting} happy to walk you through BetterCricket for {club_name} — reply to "
                 "this email with a couple of times that suit and I'll lock one in."
             )
+    else:  # custom — no fixed pitch, just a blank canvas to write into
+        subject = f"BetterCricket — {club_name}"
+        body = f'<p style="font-size:14px;line-height:1.5">{greeting}</p><p style="font-size:14px;line-height:1.5"></p>'
+        text = f"{greeting}\n\n"
 
     signoff_html = f'<p style="font-size:13px;color:#555;margin-top:24px">{rep_name}</p>'
     return subject, _wrap(subject, body + signoff_html), f"{text}\n\n{rep_name}"
@@ -173,11 +194,147 @@ _SEED_BODY = {
         "{{booking_block}}"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
+    # A full standalone document (dark theme, its own <head>/<body>), unlike
+    # the three light-shell fragments above — render_template's _is_full_doc
+    # check means this is used AS-IS, never re-wrapped in _wrap()'s own light
+    # shell. {{utm_code}} is placed directly in each link's own query string
+    # (not the automatic per-club utm_id apply_sales_utm adds afterwards) —
+    # per the template as given; routers/comms.py's _apply_utm only adds a
+    # key that ISN'T already on the link, so this hand-placed utm_source
+    # survives untouched and utm_id is appended alongside it.
+    "custom": '''<!DOCTYPE html>
+<html lang="en-AU">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark light">
+    <meta name="supported-color-schemes" content="dark light">
+    <title>BetterCricket</title>
+  </head>
+
+  <body style="margin:0; padding:0; background-color:#0b1220;">
+
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#0b1220;">
+      <tbody>
+        <tr>
+          <td align="center" style="padding:28px 12px;">
+
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" border="0" style="width:600px; max-width:600px; background-color:#0b1220; border:1px solid #1d2331; border-radius:12px;">
+              <tbody>
+
+                <!-- BetterCricket Header -->
+                <tr>
+                  <td align="center" style="padding:30px 36px 0 36px;">
+                    <a
+                      href="{base}?utm_source={{utm_code}}&amp;utm_medium=sales_email&amp;utm_campaign=rep_{{rep_name}}&amp;utm_content=header_logo"
+                      style="text-decoration:none;"
+                    >
+                      <img
+                        src="{base}/email/bettercricket-logo.png"
+                        width="64"
+                        alt="BetterCricket"
+                        style="display:block; border:0; margin:0 auto 8px auto;"
+                      >
+
+                      <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:21px; line-height:26px; font-weight:bold; letter-spacing:-0.3px; color:#e6e8ef;">
+                        Better<span style="color:#16C784;">Cricket</span>
+                      </span>
+                    </a>
+                  </td>
+                </tr>
+
+                <!-- Email Body -->
+                <tr>
+                  <td style="padding:30px 36px 0 36px;">
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tbody>
+
+                        <!-- Greeting -->
+                        <tr>
+                          <td style="padding-bottom:18px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
+                            Hi {{first_name}},
+                          </td>
+                        </tr>
+
+                        <!-- Message -->
+                        <tr>
+                          <td style="padding-bottom:28px; font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
+                            Enter your email message here
+                          </td>
+                        </tr>
+
+                      </tbody>
+                    </table>
+
+                  </td>
+                </tr>
+
+                <!-- Sales Rep Signature -->
+                <tr>
+                  <td style="padding:0 36px 30px 36px;">
+                    <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:15px; line-height:24px; color:#e6e8ef;">
+                      Regards,<br><br>
+
+                      {{rep_name}}<br>
+
+                      <a
+                        href="{base}?utm_source={{utm_code}}&amp;utm_medium=sales_email&amp;utm_campaign=rep_{{rep_name}}&amp;utm_content=signature"
+                        style="font-weight:bold; color:#16C784; text-decoration:none;"
+                      >
+                        BetterCricket
+                      </a>
+                    </span>
+                  </td>
+                </tr>
+
+                <!-- Divider -->
+                <tr>
+                  <td style="padding:0 36px;">
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                      <tbody>
+                        <tr>
+                          <td style="border-top:1px solid #1d2331; height:1px; line-height:1px; font-size:1px;">
+                            &nbsp;
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td align="center" style="padding:16px 36px 24px 36px;">
+                    <span style="font-family:'Helvetica Neue', Helvetica, Arial, sans-serif; font-size:12px; line-height:18px; color:#8a90a2;">
+                      The platform Australian cricket clubs run on<br>
+
+                      <a
+                        href="{base}?utm_source={{utm_code}}&amp;utm_medium=sales_email&amp;utm_campaign=rep_{{rep_name}}&amp;utm_content=footer"
+                        style="color:#16C784; text-decoration:none;"
+                      >
+                        betterat.cricket
+                      </a>
+                    </span>
+                  </td>
+                </tr>
+
+              </tbody>
+            </table>
+
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+  </body>
+</html>''',
 }
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
     "trial_information": "Start your free BetterCricket trial — {{club}}",
     "demo": "Book a demo — BetterCricket for {{club}}",
+    "custom": "",
 }
 
 
@@ -205,7 +362,7 @@ async def seed_sales_templates(session) -> int:
                 ON CONFLICT (organisation_id, name) DO NOTHING
             """),
             {
-                "org_id": org.id, "name": TEMPLATE_LABELS[key],
+                "org_id": org.id, "name": _db_name(key),
                 "subject": _SEED_SUBJECT[key],
                 # Plain substring replace, NOT str.format() — the body also
                 # holds {{merge_token}} placeholders for _merge() to resolve
@@ -232,7 +389,7 @@ async def _load_template_row(session, key: str):
     return await session.scalar(
         _select(CommsTemplate).where(
             CommsTemplate.organisation_id == org.id,
-            CommsTemplate.name == TEMPLATE_LABELS.get(key),
+            CommsTemplate.name == _db_name(key),
         )
     )
 
@@ -251,13 +408,16 @@ def _booking_block(club_name: str, calendly_url: Optional[str]) -> str:
 
 async def render_template(
     session, key: str, *, contact_name: Optional[str], club_name: str, rep_name: str,
-    calendly_url: Optional[str] = None,
+    calendly_url: Optional[str] = None, utm_code: str = "",
 ) -> tuple[str, str, str]:
     """Returns (subject, html, text) for a BUILT_IN_TEMPLATES key — from the
     editable outreach-org CommsTemplate row when one exists, else the
     original hardcoded builder (see _render_template_hardcoded's docstring
-    for when that fallback applies). Raises ValueError for 'custom' or an
-    unknown key, same as the hardcoded builder."""
+    for when that fallback applies). Raises ValueError for an unknown key,
+    same as the hardcoded builder. utm_code feeds the {{utm_code}} merge
+    token the 'custom' template hand-places into its own links — the other
+    three templates don't reference it, so it's a harmless unused variable
+    for them."""
     if key not in BUILT_IN_TEMPLATES:
         raise ValueError(f"'{key}' is not a built-in template")
     row = await _load_template_row(session, key)
@@ -277,6 +437,7 @@ async def render_template(
         "club": club_name,
         "rep_name": rep_name,
         "booking_block": _booking_block(club_name, calendly_url),
+        "utm_code": utm_code or "",
     }
     subject = _merge(row.subject or TEMPLATE_LABELS[key], ctx)
     merged_body = _merge(row.html or "", ctx)
@@ -287,7 +448,7 @@ async def render_template(
 
 async def render_template_preview(
     session, key: str, *, contact_name: Optional[str], club_name: str, rep_name: str,
-    calendly_url: Optional[str] = None,
+    calendly_url: Optional[str] = None, utm_code: str = "",
 ) -> tuple[str, str]:
     """Same rendering as render_template, without sending — the Sales
     Workspace's Send Email form uses this to pre-fill the Design editor with
@@ -295,24 +456,9 @@ async def render_template_preview(
     then edits before Send actually fires."""
     subject, html, _text = await render_template(
         session, key, contact_name=contact_name, club_name=club_name,
-        rep_name=rep_name, calendly_url=calendly_url,
+        rep_name=rep_name, calendly_url=calendly_url, utm_code=utm_code,
     )
     return subject, html
-
-
-def render_custom(subject: str, body_text: str, rep_name: str) -> tuple[str, str, str]:
-    """A rep-typed subject/body wrapped in the same light HTML shell as the
-    built-in templates — plain double-newline paragraphs, no rich editing
-    (this is a quick note, not a campaign). The rep's raw text is HTML-escaped
-    before embedding — free text typed into a form must never be trusted as
-    markup, unlike this module's own hardcoded template strings above."""
-    safe_subject = _html.escape(subject)
-    paras = "".join(
-        f'<p style="font-size:14px;line-height:1.5">{_html.escape(p).replace(chr(10), "<br>")}</p>'
-        for p in body_text.split("\n\n") if p.strip()
-    )
-    signoff_html = f'<p style="font-size:13px;color:#555;margin-top:24px">{_html.escape(rep_name)}</p>'
-    return safe_subject, _wrap(safe_subject, paras + signoff_html), f"{body_text}\n\n{rep_name}"
 
 
 def apply_sales_utm(html: str, *, template_key: str, rep_username: str, utm_code: Optional[str]) -> str:

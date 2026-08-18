@@ -1,10 +1,9 @@
 export default {
   version: 'v9.28.1',
-  date: '2026-08-18',
+  date: '2026-08-17',
   sortKey: '2026-08-24T04:00:00Z',
-  title: 'Match Type works inside a picked grade',
+  title: 'Start trial is hidden for now',
   items: [
-    'Fixed: choosing a grade switched the Grade Type and Match Type pills off. Picking 4th Grade and then Two Day gave you the whole grade, unfiltered, on the Leaderboard, Club Records, the club summary, the Games list and the results list.',
-    'A picked grade still overrides Grade Type, which is right — choosing "Under 14s" from the dropdown means you want the juniors. Match Type now survives it, which is the combination the filter exists for: a grade routinely plays one-day and two-day cricket in the same season.',
+    'Start trial (Sales Workspace) is off while it is reworked to pick the primary admin from the club\'s own contacts, rather than a rep typing a name and email by hand. The button is hidden until that\'s ready to switch back on.',
   ],
 }

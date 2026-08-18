@@ -6,7 +6,9 @@ import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
+import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
+import ClubLocationMap from '../../components/admin/ClubLocationMap'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
@@ -143,6 +145,29 @@ const SORT_OPTIONS = [
 const _SORT_DEFAULT_DIR_FE = { recent: 'desc', club_name: 'asc', engagement_score: 'desc', trial_days: 'asc' }
 const contactKey = (c) => c.directory_contact_id || c.crm_person_id
 const NEW_CONTACT_VALUE = '__new__'
+// Start trial now requires picking a real club contact with a valid email as
+// the primary admin (see the contact-picker in the Start trial modal below),
+// rather than a rep hand-typing a name and address. Hidden entirely while
+// that's under consideration — flip back to true to restore the button; the
+// rest of the flow is left fully wired so this is a one-line toggle.
+const START_TRIAL_ENABLED = false
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const splitFullName = (fullName) => {
+  const parts = (fullName || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return { first: '', last: '' }
+  if (parts.length === 1) return { first: parts[0], last: parts[0] }
+  return { first: parts[0], last: parts.slice(1).join(' ') }
+}
+// min_trial_days_remaining is SIGNED (see crm.trial_days_remaining_by_club) —
+// negative means the trial's own end date has already passed, which is what
+// tells "13 days left" apart from "expired 3 days ago" instead of both
+// reading as a plain countdown. Shared by the queue card and the drawer's
+// own ClubSummaryCard so the two never phrase this differently.
+const trialDaysLabel = (days) => {
+  const n = Math.abs(days)
+  const unit = `day${n === 1 ? '' : 's'}`
+  return days >= 0 ? `${n} ${unit} left` : `EXPIRED (${n} ${unit} ago)`
+}
 
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
@@ -249,9 +274,9 @@ function ClubSummaryCard({ deal }) {
     <div className="space-y-1.5 mt-2 pt-2 border-t border-pb-hairline">
       {line && <p className="text-[12px] text-pb-faint">{line}</p>}
       {days != null && (
-        days >= 0
-          ? <p className="text-[12.5px] text-pb-text">Trial: <span className="font-medium">{days} day{days === 1 ? '' : 's'} left</span></p>
-          : <p className="text-[12.5px] text-pb-red">Trial: <span className="font-medium">EXPIRED ({Math.abs(days)} day{Math.abs(days) === 1 ? '' : 's'} ago)</span></p>
+        <p className={`text-[12.5px] ${days >= 0 ? 'text-pb-text' : 'text-pb-red'}`}>
+          Trial: <span className="font-medium">{trialDaysLabel(days)}</span>
+        </p>
       )}
       {deal.registrant?.name && (
         <p className="text-[12px] text-pb-faint">
@@ -481,7 +506,21 @@ export default function SalesWorkspace() {
   // value, which is exactly the kind of stale-read that let the drawer keep
   // showing a club that had just dropped out of the filtered queue.
   const selectedIdRef = useRef(null)
+  // A plain click never needs the list to move — the card someone just
+  // clicked is by definition already on screen, so selecting it must leave
+  // the queue's scroll position exactly as it was. rowRefs backs the two
+  // cases that DO need a deliberate scroll (a ?club= deep link landing on a
+  // row that's off-screen, and auto-advancing to the next club below) —
+  // both call selectClub(id, { scroll: true }) explicitly rather than any
+  // selection whatsoever triggering a scroll.
+  const rowRefs = useRef({})
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  // Mirrors selectedIdRef's own reasoning: loadClubs' async .then() needs the
+  // queue as it stood just before THIS reload (to find what came after the
+  // club that just dropped out), and a plain closure over `clubs` would see
+  // whatever it was when loadClubs was last memoized, not the latest list.
+  const clubsRef = useRef([])
+  useEffect(() => { clubsRef.current = clubs }, [clubs])
 
   // Bulk assignment (super admin only) — checked deal ids from the CURRENT
   // filtered queue, and which reps are ticked in the bulk-assign panel: one
@@ -501,15 +540,30 @@ export default function SalesWorkspace() {
   }
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
+  const [mapOpen, setMapOpen] = useState(true)
   const [showAddContact, setShowAddContact] = useState(false)
   const [contactForm, setContactForm] = useState({ full_name: '', role: '', email: '', mobile: '' })
   const [savingContact, setSavingContact] = useState(false)
   const [showStartTrial, setShowStartTrial] = useState(false)
-  const [trialForm, setTrialForm] = useState({
-    admin_first_name: '', admin_last_name: '', admin_display_name: '',
+  const blankTrialForm = {
+    contactKey: '', admin_first_name: '', admin_last_name: '', admin_display_name: '',
     admin_username: '', admin_email: '', admin_mobile_number: '',
-  })
+  }
+  const [trialForm, setTrialForm] = useState(blankTrialForm)
   const [savingTrial, setSavingTrial] = useState(false)
+  // Only a club contact carrying a real email address can be handed the
+  // Primary Admin invite — a rep can no longer type an arbitrary name/email.
+  const trialEligibleContacts = (drawer?.contacts || []).filter(c => EMAIL_RE.test(c.email || ''))
+  const pickTrialContact = (key) => {
+    const picked = trialEligibleContacts.find(c => contactKey(c) === key)
+    if (!picked) { setTrialForm(f => ({ ...f, contactKey: key })); return }
+    const { first, last } = splitFullName(picked.full_name)
+    setTrialForm(f => ({
+      ...f, contactKey: key,
+      admin_first_name: first, admin_last_name: last, admin_display_name: picked.full_name,
+      admin_email: picked.email, admin_mobile_number: picked.mobile || '',
+    }))
+  }
 
   const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
   const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
@@ -524,7 +578,10 @@ export default function SalesWorkspace() {
   const emailEditorRef = useRef(null)
   const [emailEditorKey, setEmailEditorKey] = useState(0)
   const [loadingEmailPreview, setLoadingEmailPreview] = useState(false)
-  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo']
+  // 'custom' opens the same way as the other three now — pre-filled from its
+  // own editable template ("Custom sales rep email" in Comms -> Templates)
+  // in the Design editor, not a blank plain-text form.
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'trial_information', 'demo', 'custom']
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
@@ -537,14 +594,35 @@ export default function SalesWorkspace() {
       setClubs(rows)
       setStages(d.stages || [])
       // The currently-open drawer belongs to a club that just dropped out of
-      // the filtered queue (a filter changed, or the club itself was
-      // reassigned/updated out of the current filter) — clear it rather than
-      // leave a deal detail on screen for something no longer in the list.
+      // the filtered queue — most often a call outcome moving it to a stage
+      // (or "called"/callback state) the active filters no longer include,
+      // but the same thing happens if a filter itself changed underneath it.
+      // Rather than leave a blank "pick a club" pane, advance straight to
+      // whichever club now sits where the dropped one used to — i.e. the
+      // next one down in the list as the rep was last looking at it, walking
+      // upward instead if it was the last row, so the rep lands next to
+      // where they were rather than being bounced to an unrelated club.
       if (selectedIdRef.current && !rows.some(c => c.id === selectedIdRef.current)) {
-        selectedIdRef.current = null
-        setSelectedId(null)
-        setDrawer(null)
-        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+        const prevRows = clubsRef.current
+        const prevIdx = prevRows.findIndex(c => c.id === selectedIdRef.current)
+        let next = null
+        if (prevIdx !== -1) {
+          for (let i = prevIdx + 1; i < prevRows.length && !next; i++) {
+            next = rows.find(c => c.id === prevRows[i].id) || null
+          }
+          for (let i = prevIdx - 1; i >= 0 && !next; i--) {
+            next = rows.find(c => c.id === prevRows[i].id) || null
+          }
+        }
+        if (!next) next = rows[0] || null
+        if (next) {
+          selectClub(next.id, { scroll: true })
+        } else {
+          selectedIdRef.current = null
+          setSelectedId(null)
+          setDrawer(null)
+          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+        }
       }
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
@@ -570,11 +648,21 @@ export default function SalesWorkspace() {
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
-  const selectClub = (dealId) => {
+  // { scroll: true } is only for a programmatic jump the rep didn't click
+  // themselves (a ?club= deep link, or auto-advancing past a club that just
+  // dropped out of the filter below) — an ordinary click never passes it, so
+  // the queue's own scroll position is left exactly as the rep had it.
+  const selectClub = (dealId, { scroll = false } = {}) => {
     selectedIdRef.current = dealId
     setSelectedId(dealId)
     loadDrawer(dealId)
     setSearchParams((p) => { const n = new URLSearchParams(p); n.set('club', dealId); return n }, { replace: true })
+    if (scroll) {
+      // Deferred a tick so a row that only just entered the list (e.g. the
+      // new next-club after a reload) has actually mounted before we look
+      // for its ref — same pattern AreaEditor.jsx uses for the same reason.
+      setTimeout(() => rowRefs.current[dealId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 60)
+    }
   }
   // Awaits the queue reload FIRST — loadClubs itself clears the selection
   // when the club no longer matches the current filter, and reading the ref
@@ -588,7 +676,7 @@ export default function SalesWorkspace() {
   // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
   useEffect(() => {
     const clubParam = searchParams.get('club')
-    if (clubParam && clubParam !== selectedId) selectClub(clubParam)
+    if (clubParam && clubParam !== selectedId) selectClub(clubParam, { scroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -803,16 +891,12 @@ export default function SalesWorkspace() {
       const payload = { template: emailForm.template }
       if (chosen.directory_contact_id) payload.directory_contact_id = chosen.directory_contact_id
       else if (chosen.crm_person_id) payload.crm_person_id = chosen.crm_person_id
-      if (emailForm.template === 'custom') {
-        payload.subject = emailForm.subject
-        payload.body = emailForm.body
-      } else {
-        // The rep's (possibly edited) Design-mode content — flush() reads
-        // the iframe's current state synchronously, since onChange's state
-        // update may not have landed yet.
-        payload.subject = emailForm.subject
-        payload.body = emailEditorRef.current?.flush() ?? emailForm.body
-      }
+      // Every template (including Custom, which now also opens pre-filled in
+      // the Design editor) sends the rep's possibly-edited copy — flush()
+      // reads the iframe's current state synchronously, since onChange's
+      // state update may not have landed yet.
+      payload.subject = emailForm.subject
+      payload.body = emailEditorRef.current?.flush() ?? emailForm.body
       await api.salesWorkspaceSendEmail(drawer.deal.id, payload)
       toast?.success(`Email sent to ${chosen.full_name}`)
       setEmailForm({ contactKey: '', template: '', subject: '', body: '' })
@@ -912,10 +996,10 @@ export default function SalesWorkspace() {
           <FilterGroup label="Engagement score">
             <div className="flex items-center gap-1.5">
               <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 56 }} />
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 72 }} />
               <span className="text-pb-faintest">–</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 56 }} />
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 72 }} />
             </div>
           </FilterGroup>
 
@@ -1032,7 +1116,7 @@ export default function SalesWorkspace() {
                 </label>
               )}
               {clubs.map(c => (
-                <div key={c.id} className="flex items-start gap-1.5">
+                <div key={c.id} ref={el => { rowRefs.current[c.id] = el }} className="flex items-start gap-1.5">
                   {isSuper && (
                     <input
                       type="checkbox"
@@ -1066,6 +1150,14 @@ export default function SalesWorkspace() {
                       {c.next_follow_up_at && <span className="text-pb-amber"> · follow-up {timeAgo(c.next_follow_up_at) || 'due'}</span>}
                     </span>
                   </div>
+                  {c.min_trial_days_remaining != null && (
+                    <div className={`flex items-center gap-1 mt-1 text-[10.5px] ${
+                      c.min_trial_days_remaining >= 0 ? 'text-pb-text' : 'text-pb-red'}`}>
+                      <TrialHourglassIcon className="w-3 h-3 shrink-0"
+                        color={c.min_trial_days_remaining >= 0 ? TRIAL_AMBER : '#ef4444'} />
+                      <span>Trial: <span className="font-medium">{trialDaysLabel(c.min_trial_days_remaining)}</span></span>
+                    </div>
+                  )}
                   {(c.module_keys || []).length > 0 && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
                       {c.module_keys.map(k => (
@@ -1100,8 +1192,8 @@ export default function SalesWorkspace() {
                         {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
                       </Select>
                     )}
-                    {!drawer.deal.is_customer && drawer.deal.marketing_club_id && (
-                      <Btn variant="primary" sm onClick={() => setShowStartTrial(true)}>Start trial</Btn>
+                    {START_TRIAL_ENABLED && !drawer.deal.is_customer && drawer.deal.marketing_club_id && (
+                      <Btn variant="primary" sm onClick={() => { setTrialForm(blankTrialForm); setShowStartTrial(true) }}>Start trial</Btn>
                     )}
                   </div>
                 </div>
@@ -1127,6 +1219,28 @@ export default function SalesWorkspace() {
                 <div className={CARD}>
                   <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
                   <WebsiteAnalyticsCard data={drawer.website_visits} />
+                </div>
+              )}
+
+              {drawer.deal.marketing_club_id && (
+                <div className={CARD}>
+                  <button type="button" onClick={() => setMapOpen(o => !o)}
+                    className="flex items-center justify-between w-full text-left">
+                    <h3 className="font-display font-bold text-[13px]">Location</h3>
+                    <span className="text-pb-faintest text-[10px]">{mapOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {mapOpen && (
+                    <div className="mt-2">
+                      <ClubLocationMap
+                        clubId={drawer.deal.marketing_club_id}
+                        latitude={drawer.deal.marketing_club_latitude}
+                        longitude={drawer.deal.marketing_club_longitude}
+                        postcode={drawer.deal.marketing_club_postcode}
+                        state={drawer.deal.marketing_club_state}
+                        preloadedBoundary={drawer.boundary}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1313,12 +1427,6 @@ export default function SalesWorkspace() {
                       ))}
                     </Select>
                   </Field>
-                  {emailForm.template === 'custom' && (
-                    <>
-                      <Field label="Subject"><TextInput value={emailForm.subject} onChange={e => setEmailForm(f => ({ ...f, subject: e.target.value }))} /></Field>
-                      <Field label="Body"><TextArea value={emailForm.body} onChange={e => setEmailForm(f => ({ ...f, body: e.target.value }))} /></Field>
-                    </>
-                  )}
                   {BUILT_IN_EMAIL_TEMPLATES.includes(emailForm.template) && (
                     loadingEmailPreview ? (
                       <p className="text-[12px] text-pb-faintest py-2">Loading template…</p>
@@ -1350,19 +1458,40 @@ export default function SalesWorkspace() {
           <form onSubmit={submitStartTrial} className="space-y-2">
             <p className="text-[11.5px] text-pb-faint">
               Sets this club up exactly like Super Admin's New Club — a trial of every module starts immediately,
-              and the person below is emailed an invite link to set their own password.
+              and the contact picked below is emailed an invite link to set their own password as this club's
+              Primary Admin.
             </p>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="First name"><TextInput value={trialForm.admin_first_name} onChange={e => setTrialForm(f => ({ ...f, admin_first_name: e.target.value }))} required /></Field>
-              <Field label="Last name"><TextInput value={trialForm.admin_last_name} onChange={e => setTrialForm(f => ({ ...f, admin_last_name: e.target.value }))} required /></Field>
-            </div>
-            <Field label="Display name" hint="Defaults to first + last if left blank"><TextInput value={trialForm.admin_display_name} onChange={e => setTrialForm(f => ({ ...f, admin_display_name: e.target.value }))} /></Field>
-            <div className="grid grid-cols-2 gap-2">
-              <Field label="Username"><TextInput value={trialForm.admin_username} onChange={e => setTrialForm(f => ({ ...f, admin_username: e.target.value }))} required /></Field>
-              <Field label="Mobile (optional)"><TextInput value={trialForm.admin_mobile_number} onChange={e => setTrialForm(f => ({ ...f, admin_mobile_number: e.target.value }))} /></Field>
-            </div>
-            <Field label="Email"><TextInput type="email" value={trialForm.admin_email} onChange={e => setTrialForm(f => ({ ...f, admin_email: e.target.value }))} required /></Field>
-            <Btn type="submit" variant="primary" disabled={savingTrial}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
+            <Field label="Primary admin contact" hint="Only contacts with a valid email address on file are listed">
+              <Select value={trialForm.contactKey} onChange={e => pickTrialContact(e.target.value)} required>
+                <option value="" disabled>— select a contact —</option>
+                {trialEligibleContacts.map(c => (
+                  <option key={contactKey(c)} value={contactKey(c)}>
+                    {c.full_name}{c.role ? ` (${c.role})` : ''}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            {trialEligibleContacts.length === 0 && (
+              <p className="text-[11.5px] text-pb-red">
+                No contact with a valid email address is on file for this club yet — add one under Contacts above
+                before starting a trial.
+              </p>
+            )}
+            {trialForm.contactKey && (
+              <>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="First name"><TextInput value={trialForm.admin_first_name} onChange={e => setTrialForm(f => ({ ...f, admin_first_name: e.target.value }))} required /></Field>
+                  <Field label="Last name"><TextInput value={trialForm.admin_last_name} onChange={e => setTrialForm(f => ({ ...f, admin_last_name: e.target.value }))} required /></Field>
+                </div>
+                <Field label="Display name" hint="Defaults to first + last if left blank"><TextInput value={trialForm.admin_display_name} onChange={e => setTrialForm(f => ({ ...f, admin_display_name: e.target.value }))} /></Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Username"><TextInput value={trialForm.admin_username} onChange={e => setTrialForm(f => ({ ...f, admin_username: e.target.value }))} required /></Field>
+                  <Field label="Mobile (optional)"><TextInput value={trialForm.admin_mobile_number} onChange={e => setTrialForm(f => ({ ...f, admin_mobile_number: e.target.value }))} /></Field>
+                </div>
+                <Field label="Email" hint="From the contact picked above"><TextInput type="email" value={trialForm.admin_email} readOnly disabled /></Field>
+              </>
+            )}
+            <Btn type="submit" variant="primary" disabled={savingTrial || !trialForm.contactKey}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
           </form>
         </Modal>
       )}

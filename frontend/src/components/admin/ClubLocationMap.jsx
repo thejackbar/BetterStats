@@ -30,11 +30,20 @@ function FitToBoundary({ geojson }) {
   return null
 }
 
-export default function ClubLocationMap({ clubId, latitude, longitude, postcode, state }) {
-  const [boundary, setBoundary] = useState(null)
-  const [boundaryLoaded, setBoundaryLoaded] = useState(false)
+// `preloadedBoundary` lets a caller that already has the geojson (e.g. the
+// Sales Workspace drawer, which embeds it in the same payload as everything
+// else — a 'sales' rep can't call the Club Directory's own super-admin-only
+// /boundary endpoint this component otherwise self-fetches from) skip the
+// internal fetch entirely. `undefined` (the default) means "no preload was
+// given, fetch it yourself" — `null` is a real, already-resolved "no
+// boundary found" so it must be distinguished from "hasn't loaded yet".
+export default function ClubLocationMap({ clubId, latitude, longitude, postcode, state, preloadedBoundary }) {
+  const hasPreload = preloadedBoundary !== undefined
+  const [boundary, setBoundary] = useState(hasPreload ? preloadedBoundary : null)
+  const [boundaryLoaded, setBoundaryLoaded] = useState(hasPreload)
 
   useEffect(() => {
+    if (hasPreload) { setBoundary(preloadedBoundary); setBoundaryLoaded(true); return }
     setBoundary(null)
     setBoundaryLoaded(false)
     if (!clubId) return
@@ -44,7 +53,8 @@ export default function ClubLocationMap({ clubId, latitude, longitude, postcode,
       .catch(() => {})
       .finally(() => { if (!cancelled) setBoundaryLoaded(true) })
     return () => { cancelled = true }
-  }, [clubId])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubId, hasPreload, preloadedBoundary])
 
   const hasPoint = latitude != null && longitude != null
   // A boundary polygon can stand in for a centre point when the club has no
