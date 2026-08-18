@@ -426,6 +426,36 @@ async def _move_to_stage_key(session: AsyncSession, deal: CrmDeal, stage_key: st
     await session.flush()
 
 
+# The one-off Twenty pipeline cutover backfill (app/scripts/
+# import_twenty_pipeline.py) writes a "system" entry per club it touched
+# ("Imported from Twenty (...): stage=...") and a "note" entry per Twenty
+# Opportunity note it pulled in — both stamped with one of these meta keys.
+# The Sales Workspace's own History/Notes never show either: a rep's
+# timeline is what THEY did, not what a retired CRM's board once said.
+_TWENTY_IMPORT_META_KEYS = ("twenty_kind", "twenty_note_id")
+
+
+def _is_twenty_imported(activity: CrmActivity) -> bool:
+    meta = activity.meta or {}
+    return any(k in meta for k in _TWENTY_IMPORT_META_KEYS)
+
+
+async def list_activities_excluding_twenty(
+    session: AsyncSession, *, deal_id, limit: int = 200,
+) -> list[CrmActivity]:
+    """The same query crm_service.list_activities runs, minus anything the
+    Twenty pipeline backfill imported. Filtered in Python after an
+    over-fetch (rather than in the SQL WHERE clause) specifically to dodge
+    a JSONB NULL trap: an ordinary rep-logged call/note has meta=NULL, and
+    ``NOT (meta ? 'key')`` evaluates to NULL — not TRUE — for a NULL meta,
+    which would silently exclude every real, ordinary activity from the
+    result along with the Twenty-imported ones. Scoped to the Sales
+    Workspace only — the CRM Pipeline board (routers/crm.py) still calls
+    crm_service.list_activities directly and shows everything, by design."""
+    rows = await crm_service.list_activities(session, deal_id=deal_id, limit=max(limit * 3, limit))
+    return [a for a in rows if not _is_twenty_imported(a)][:limit]
+
+
 async def log_note(
     session: AsyncSession, *, deal: CrmDeal, body: str, pinned: bool, created_by_user_id,
 ) -> CrmActivity:

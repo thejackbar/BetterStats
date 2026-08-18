@@ -419,7 +419,7 @@ async def get_club(
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
 
     contacts = await sw.merged_contacts(db, deal.marketing_club_id)
-    activities = await crm_service.list_activities(db, deal_id=deal.id)
+    activities = await sw.list_activities_excluding_twenty(db, deal_id=deal.id)
     activities_out = [crm_service._activity_dict(a) for a in activities]
 
     # Every ORM attribute this response needs is read into plain dicts/lists
