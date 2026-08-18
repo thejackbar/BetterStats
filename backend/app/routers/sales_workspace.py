@@ -681,6 +681,32 @@ async def add_note(
     return {"status": "ok"}
 
 
+@router.patch("/clubs/{deal_id}/notes/{activity_id}")
+async def edit_note(
+    deal_id: str,
+    activity_id: str,
+    body: NoteBody,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    if not (body.body or "").strip():
+        raise HTTPException(status_code=422, detail="Note can't be empty")
+    aid = _uuid_or_none(activity_id)
+    activity = await db.get(CrmActivity, aid) if aid else None
+    # A note belongs to exactly one deal and is never anything else's edit
+    # target — same deal-scoping every other per-activity write in this
+    # router relies on, so an id from another club's timeline (or a call/
+    # email/system entry, which this form has no business rewriting) 404s
+    # rather than silently editing the wrong record.
+    if activity is None or activity.deal_id != deal.id or activity.type != "note":
+        raise HTTPException(status_code=404, detail="Note not found")
+    await sw.edit_note(db, activity=activity, body=body.body.strip(), pinned=body.pinned)
+    await db.commit()
+    return {"status": "ok"}
+
+
 # ─── Email actions ─────────────────────────────────────────────────────────────
 
 @router.get("/email-templates")
