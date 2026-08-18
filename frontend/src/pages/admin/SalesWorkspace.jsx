@@ -725,6 +725,14 @@ export default function SalesWorkspace() {
     api.salesWorkspaceClub(dealId).then((d) => {
       setDrawer(d)
       setCallForm(emptyCallForm())
+      // A club switch must not carry over the previous club's loaded email —
+      // template, subject, body and the "+ New contact…" inline forms all
+      // reset, and the editor remounts (key bump) so its iframe doesn't
+      // keep showing the old club's content under a blank state.
+      setEmailForm({ contactKey: '', template: '', subject: '', body: '' })
+      setShowNewCallContact(false)
+      setShowNewEmailContact(false)
+      setEmailEditorKey(k => k + 1)
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
