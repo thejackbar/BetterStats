@@ -505,6 +505,17 @@ export default function SalesWorkspace() {
   // value, which is exactly the kind of stale-read that let the drawer keep
   // showing a club that had just dropped out of the filtered queue.
   const selectedIdRef = useRef(null)
+  // Keeps the selected club's own card visible in the queue list — a click
+  // it should already be visible for, but a deep link (?club=) can land on a
+  // club far down an unscrolled list, and finishing a call/note can reorder
+  // the list (priority/recency-sorted) out from under an already-open card.
+  // block:'nearest' means this is a no-op whenever the card is already
+  // fully in view, so it never fights a rep's own manual scrolling.
+  const rowRefs = useRef({})
+  useEffect(() => {
+    if (!selectedId) return
+    rowRefs.current[selectedId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [selectedId, clubs])
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
 
   // Bulk assignment (super admin only) — checked deal ids from the CURRENT
@@ -1069,7 +1080,7 @@ export default function SalesWorkspace() {
                 </label>
               )}
               {clubs.map(c => (
-                <div key={c.id} className="flex items-start gap-1.5">
+                <div key={c.id} ref={el => { rowRefs.current[c.id] = el }} className="flex items-start gap-1.5">
                   {isSuper && (
                     <input
                       type="checkbox"
