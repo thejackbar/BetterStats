@@ -168,6 +168,12 @@ const trialDaysLabel = (days) => {
   const unit = `day${n === 1 ? '' : 's'}`
   return days >= 0 ? `${n} ${unit} left` : `EXPIRED (${n} ${unit} ago)`
 }
+// "Geelong, VIC" — state is already stored abbreviated (see the STATES
+// filter list above, same field). Either half can be missing on its own
+// (a club with no crawled address, or one outside AU with no state code),
+// so this degrades to whichever one is present rather than showing a bare
+// comma or nothing at all. Shared by the queue card and the drawer header.
+const townStateLabel = (suburb, state) => [suburb, state].filter(Boolean).join(', ') || null
 
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
@@ -1139,6 +1145,11 @@ export default function SalesWorkspace() {
                     <span className="text-pb-text text-[13px] font-medium truncate">{c.marketing_club_name || c.title}</span>
                     <PriorityBadge score={c.priority_score} />
                   </div>
+                  {townStateLabel(c.marketing_club_suburb, c.marketing_club_state) && (
+                    <div className="text-[10.5px] text-pb-faintest mt-0.5">
+                      {townStateLabel(c.marketing_club_suburb, c.marketing_club_state)}
+                    </div>
+                  )}
                   <div className="flex items-center justify-between gap-2 mt-1">
                     <span className="text-[10.5px] text-pb-faint">{c.stage_name}{isSuper && c.owner_name ? ` · ${c.owner_name}` : ''}</span>
                     <ScorePill score={c.engagement_score} tier={c.engagement_tier} />
@@ -1184,7 +1195,14 @@ export default function SalesWorkspace() {
             <>
               <div className={CARD}>
                 <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <h2 className="font-display font-bold text-lg">{drawer.deal.marketing_club_name || drawer.deal.title}</h2>
+                  <div className="min-w-0">
+                    <h2 className="font-display font-bold text-lg">{drawer.deal.marketing_club_name || drawer.deal.title}</h2>
+                    {townStateLabel(drawer.deal.marketing_club_suburb, drawer.deal.marketing_club_state) && (
+                      <p className="text-[12px] text-pb-faint mt-0.5">
+                        {townStateLabel(drawer.deal.marketing_club_suburb, drawer.deal.marketing_club_state)}
+                      </p>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2">
                     {drawer.can_assign && (
                       <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">

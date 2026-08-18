@@ -1,10 +1,9 @@
 export default {
   version: 'v9.28.6',
-  date: '2026-08-18',
+  date: '2026-08-17',
   sortKey: '2026-08-24T09:00:00Z',
-  title: 'Match Type works inside a picked grade',
+  title: 'Sales Workspace shows where a club is',
   items: [
-    'Fixed: choosing a grade switched the Grade Type and Match Type pills off. Picking 4th Grade and then Two Day gave you the whole grade, unfiltered, on the Leaderboard, Club Records, the club summary, the Games list and the results list.',
-    'A picked grade still overrides Grade Type, which is right — choosing "Under 14s" from the dropdown means you want the juniors. Match Type now survives it, which is the combination the filter exists for: a grade routinely plays one-day and two-day cricket in the same season.',
+    'A club\'s town and state (e.g. "Geelong, VIC") now shows on its queue card and under its name at the top of the detail pane.',
   ],
 }
