@@ -496,6 +496,17 @@ export default function SalesWorkspace() {
   const toast = useToast()
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
+  // react-router hands back a NEW setSearchParams identity on every URL
+  // change (it's memoized on the current searchParams object, which is
+  // itself rebuilt whenever location.search changes) — so a plain click on
+  // a club, which sets ?club=<id>, was recreating setSearchParams on every
+  // single select. loadClubs listed it as a dependency, which recreated
+  // loadClubs, which reran the effect below and reloaded the whole queue —
+  // the list flashing to "Loading…" and back on EVERY click, not just after
+  // a Save Call/Send Email. Routed through a ref so loadClubs never depends
+  // on this identity churn; the ref is always kept current.
+  const setSearchParamsRef = useRef(setSearchParams)
+  useEffect(() => { setSearchParamsRef.current = setSearchParams }, [setSearchParams])
 
   // Queue (the daily calling list + drawer) vs Events (List/Calendar of
   // every event a call outcome created plus anything added by hand).
@@ -701,7 +712,7 @@ export default function SalesWorkspace() {
           selectedIdRef.current = null
           setSelectedId(null)
           setDrawer(null)
-          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+          setSearchParamsRef.current((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
         }
       } else if (selectedIdRef.current) {
         // Still selected and still in the filtered list, but a resort (a
@@ -719,7 +730,7 @@ export default function SalesWorkspace() {
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
       .finally(() => setLoadingList(false))
-  }, [filters, toast, setSearchParams])
+  }, [filters, toast])
 
   useEffect(() => { loadClubs() }, [loadClubs])
   useEffect(() => {
