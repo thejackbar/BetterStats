@@ -5,6 +5,10 @@ see docs/afl-playhq-data-source.md):
 
   1. discoverCompetitions  → seasons (one row per competition-season pair)
   2. discoverTeams         → our teams + their grades, per season
+  2b. discoverTeamFixture  → per team, any grade it has since been re-graded
+                             OUT of. Step 2 only ever names a team's current
+                             grade, so without this the rounds played before a
+                             mid-season move are never discovered at all.
   3. discoverGradeFixture  → every game id in each of our grades (we keep only
                              the games one of OUR teams plays in)
   4. gameView              → result, quarter scores, BOTH teams' player lines,
@@ -180,11 +184,49 @@ async def _upsert_seasons(session: AsyncSession, org: Organisation,
     return out
 
 
+async def _former_grades_for_team(playhq_season_id: str, raw_team_id: str,
+                                  known_grade_ids: set[str]) -> dict[str, str]:
+    """Grades this team played in that ``discoverTeams`` no longer reports —
+    ``{playhq grade id: grade name}``, empty when there are none.
+
+    A community-footy side is routinely re-graded a few rounds into a season
+    (Hampton's Under 19s opened 2026 in Division 1 and moved to Division 2
+    from round 6). ``discoverTeams`` answers with the grade the team is in
+    NOW, so the rounds played before the move sit in a grade the ordinary
+    discovery has no way to reach, and they simply never arrive. The team's
+    own fixture is the one place PlayHQ carries the grade per round, so it is
+    what tells us the earlier division existed at all.
+
+    Filtered to the season being synced when the payload names it, so a team
+    id PlayHQ happens to reuse across years can't drag another season's grade
+    into this one.
+    """
+    found: dict[str, str] = {}
+    for rnd in await phq.get_team_fixture(raw_team_id):
+        for gm in rnd.get("games") or []:
+            # Every game in the round comes back, not only this team's, so the
+            # rounds our side had a bye in don't file another club's fixture
+            # under a grade we never played.
+            sides = (gm.get("home") or {}, gm.get("away") or {})
+            if not any(str(s.get("id") or "") == raw_team_id for s in sides):
+                continue
+            grade = ((gm.get("round") or {}).get("grade")) or {}
+            raw_gid = str(grade.get("id") or "")
+            if not raw_gid or raw_gid in known_grade_ids or raw_gid in found:
+                continue
+            season = grade.get("season") or {}
+            if season.get("id") and str(season["id"]) != str(playhq_season_id):
+                continue
+            found[raw_gid] = grade.get("name") or "Grade"
+    return found
+
+
 async def _upsert_teams_and_grades(session: AsyncSession, org: Organisation,
                                    season_row_id: uuid.UUID,
                                    playhq_season_id: str) -> list[dict]:
-    """discoverTeams for one season → grades + afl_teams. Returns
-    [{grade_row_id, playhq_grade_id, team_playhq_ids, team_names}]."""
+    """discoverTeams for one season → grades + afl_teams, plus any grade a
+    team has since been re-graded out of (see ``_former_grades_for_team``).
+    Returns [{grade_row_id, playhq_grade_id, team_playhq_ids, team_names}]."""
     teams = await phq.get_org_teams(playhq_season_id, org.playhq_id)
     by_grade: dict[str, dict] = {}
     for t in teams:
@@ -198,8 +240,24 @@ async def _upsert_teams_and_grades(session: AsyncSession, org: Organisation,
         })
         g["teams"].append(t)
 
+    # A former grade carries the same team, so it is added as its own entry
+    # here and the game-discovery walk below picks it up with no further
+    # special-casing. `current` is what keeps the team ROW pointed at the
+    # grade the side is in now: a team can only hold one grade_id, and the
+    # division it has moved on from is not it.
+    current_grade_ids = set(by_grade)
+    for t in teams:
+        raw_tid = str(t.get("id") or "")
+        if not raw_tid:
+            continue
+        for raw_gid, gname in (await _former_grades_for_team(
+                playhq_season_id, raw_tid, current_grade_ids)).items():
+            entry = by_grade.setdefault(str(raw_gid), {"name": gname, "teams": []})
+            entry["teams"].append(t)
+
     out = []
     for raw_gid, info in by_grade.items():
+        is_current = raw_gid in current_grade_ids
         gid = derive_id(org.id, f"grade:{raw_gid}")
         row = await session.get(Grade, gid)
         if row is None:
@@ -224,13 +282,13 @@ async def _upsert_teams_and_grades(session: AsyncSession, org: Organisation,
                     age_group=((t.get("ageGroup") or {}).get("value")),
                 )
                 session.add(trow)
-            else:
+            elif is_current:
                 trow.name = t.get("name") or trow.name
                 trow.season_id = season_row_id
                 trow.grade_id = gid
         out.append({
             "grade_row_id": gid, "playhq_grade_id": raw_gid,
-            "grade_name": info["name"],
+            "grade_name": info["name"], "former_grade": not is_current,
             "team_playhq_ids": team_ids, "team_names": team_names,
         })
     await session.commit()
@@ -623,9 +681,9 @@ async def sync_organisation(org_id: uuid.UUID,
     if owns_run:
         run_id = await start_sync_run(org_id, "afl_full" if full else "afl_sync",
                                       triggered_by_user_id=triggered_by_user_id)
-    stats = {"seasons": 0, "grades": 0, "teams": 0, "games_discovered": 0,
-             "games_stats_synced": 0, "games_failed": 0, "events_stored": 0,
-             "players": 0, "season_stat_rows": 0}
+    stats = {"seasons": 0, "grades": 0, "teams": 0, "former_grades": 0,
+             "games_discovered": 0, "games_stats_synced": 0, "games_failed": 0,
+             "events_stored": 0, "players": 0, "season_stat_rows": 0}
     try:
         async with async_session_maker() as session:
             org = await session.get(Organisation, org_id)
@@ -662,6 +720,10 @@ async def sync_organisation(org_id: uuid.UUID,
                 grade_infos.extend(infos)
             stats["grades"] = len(grade_infos)
             stats["teams"] = sum(len(g["team_playhq_ids"]) for g in grade_infos)
+            # Surfaced on the Data Sync page so a re-grade the club never told
+            # us about reads as a thing that was found, rather than a silent
+            # jump in the grade count.
+            stats["former_grades"] = sum(1 for g in grade_infos if g.get("former_grade"))
 
             our_team_ids = {tid for g in grade_infos for tid in g["team_playhq_ids"]}
 

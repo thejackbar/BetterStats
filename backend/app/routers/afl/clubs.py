@@ -11,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Organisation, get_db
 from app.services.afl.aggregations import _resolve_canonical_grade, grade_sort_key
-from app.services.club_history import previous_names_for_display
+from app.services.club_history import (
+    competitions_for_display, previous_names_for_display,
+)
 
 router = APIRouter(prefix="/clubs", tags=["afl-clubs"])
 
@@ -101,6 +103,7 @@ async def get_club(slug: str, db: AsyncSession = Depends(get_db)):
         # The club's own history, shown under its name on the dashboard.
         "established_year": org.established_year,
         "previous_names": previous_names_for_display(org.previous_names),
+        "competitions": competitions_for_display(org.competitions),
         "sport": "afl",
         "seasons": [dict(r._mapping) for r in seasons],
         "grades": grades,

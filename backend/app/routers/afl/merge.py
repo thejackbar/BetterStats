@@ -675,6 +675,33 @@ async def get_merge_history(
     ]
 
 
+async def _move_side_tables(db: AsyncSession, org_id: uuid.UUID,
+                            from_id: uuid.UUID, to_id: uuid.UUID) -> tuple[list, list]:
+    """Move one player's imported seasons and honour-board rows onto another,
+    returning the ids moved so an undo can hand exactly those rows back.
+
+    ``afl_imported_stats`` and ``player_achievements`` are both raw-SQL tables
+    holding a bare ``player_id`` with no foreign key, so nothing in the
+    database moves or clears them on its own — they have to be walked
+    explicitly, and a merge that forgets to leaves them pointing at a deleted
+    player where every read silently drops them.
+
+    Org-scoped on both, so an id arriving from a browser can never reach
+    another club's rows.
+    """
+    imported = (await db.execute(text("""
+        UPDATE afl_imported_stats SET player_id = :to
+        WHERE player_id = :from AND organisation_id = :org
+        RETURNING id
+    """), {"to": str(to_id), "from": str(from_id), "org": str(org_id)})).scalars().all()
+    achievements = (await db.execute(text("""
+        UPDATE player_achievements SET player_id = :to
+        WHERE player_id = :from AND org_id = :org
+        RETURNING id
+    """), {"to": str(to_id), "from": str(from_id), "org": str(org_id)})).scalars().all()
+    return [int(i) for i in imported], [int(i) for i in achievements]
+
+
 class MergePlayersRequest(BaseModel):
     keep_player_id: str
     remove_player_id: str
@@ -703,6 +730,16 @@ async def _merge_players_core(
                 "UPDATE afl_player_game_lines SET player_id = :kid WHERE player_id = :rid"
             ), {"kid": str(keep_id), "rid": str(remove_id)})
 
+        # Imported seasons and honour-board rows move too. Neither table has a
+        # foreign key back to players — they're both raw-SQL tables carrying a
+        # bare player_id — so a merge that only moved the game lines left them
+        # pointing at an id that no longer exists, and every read that joins
+        # players (career totals, the profile, the leaderboards) dropped them
+        # without a word. A club whose history came from Import Stats lost the
+        # removed player's whole career to a routine duplicate merge.
+        imported_ids, achievement_ids = await _move_side_tables(
+            db, org_id, remove_id, keep_id)
+
         removed_playhq_id = remove.playhq_id
         removed_display_name = remove.display_name
         keep_original_playhq_id = keep.playhq_id
@@ -717,13 +754,17 @@ async def _merge_players_core(
         await db.execute(text("""
             INSERT INTO afl_merge_logs
                 (org_id, keep_player_id, keep_player_name, removed_player_id, removed_player_name,
-                 removed_player_playhq_id, keep_original_playhq_id, line_ids)
-            VALUES (:org, :kid, :kname, :rid, :rname, :rphq, :kphq, CAST(:line_ids AS JSONB))
+                 removed_player_playhq_id, keep_original_playhq_id, line_ids,
+                 imported_stat_ids, achievement_ids)
+            VALUES (:org, :kid, :kname, :rid, :rname, :rphq, :kphq, CAST(:line_ids AS JSONB),
+                    CAST(:imported_ids AS JSONB), CAST(:achievement_ids AS JSONB))
         """), {
             "org": str(org_id), "kid": str(keep_id), "kname": keep.display_name,
             "rid": str(remove_id), "rname": removed_display_name,
             "rphq": removed_playhq_id, "kphq": keep_original_playhq_id,
             "line_ids": json.dumps(line_ids),
+            "imported_ids": json.dumps(imported_ids),
+            "achievement_ids": json.dumps(achievement_ids),
         })
 
         # afl_player_season_stats is fully derived from game lines (delete +
@@ -736,14 +777,19 @@ async def _merge_players_core(
             db, org_id=org_id, user_id=current_user.id,
             action="merge_players", target_type="player", target_id=str(keep_id),
             details={"removed_player_id": str(remove_id), "removed_player_name": removed_display_name,
-                    "game_lines_moved": len(line_ids)},
+                    "game_lines_moved": len(line_ids),
+                    "imported_seasons_moved": len(imported_ids),
+                    "achievements_moved": len(achievement_ids)},
         )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail=f"Merge failed: {exc}") from exc
 
-    return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id)}
+    return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id),
+            "game_lines_moved": len(line_ids),
+            "imported_seasons_moved": len(imported_ids),
+            "achievements_moved": len(achievement_ids)}
 
 
 @router.post("/merge-players")
@@ -796,13 +842,34 @@ async def undo_merge_players(
         "org": org_id, "phq": log_row["removed_player_playhq_id"],
     })
 
-    line_ids = log_row["line_ids"] or []
-    if isinstance(line_ids, str):
-        line_ids = json.loads(line_ids)
+    def _ids(key):
+        """A JSONB column reads back as a list from asyncpg and as a string
+        from a driver that hands JSON over raw — both shapes have been seen on
+        this table, so neither is assumed."""
+        val = log_row.get(key) or []
+        return json.loads(val) if isinstance(val, str) else val
+
+    line_ids = _ids("line_ids")
     if line_ids:
         await db.execute(text(
             "UPDATE afl_player_game_lines SET player_id = :rid WHERE id = ANY(:ids)"
         ), {"rid": str(remove_id), "ids": [uuid.UUID(i) for i in line_ids]})
+
+    # The imported seasons and honours the merge carried across go back too.
+    # A log written before those columns existed reads as [], which is the
+    # right answer for it: that merge never moved any.
+    imported_ids = _ids("imported_stat_ids")
+    if imported_ids:
+        await db.execute(text(
+            "UPDATE afl_imported_stats SET player_id = :rid "
+            "WHERE id = ANY(:ids) AND organisation_id = :org"
+        ), {"rid": str(remove_id), "ids": [int(i) for i in imported_ids], "org": org_id})
+    achievement_ids = _ids("achievement_ids")
+    if achievement_ids:
+        await db.execute(text(
+            "UPDATE player_achievements SET player_id = :rid "
+            "WHERE id = ANY(:ids) AND org_id = :org"
+        ), {"rid": str(remove_id), "ids": [int(i) for i in achievement_ids], "org": org_id})
 
     await _rollup_season_stats(db, club.id)
 
@@ -816,3 +883,198 @@ async def undo_merge_players(
     )
     await db.commit()
     return {"status": "undone", "restored_player_id": str(remove_id)}
+
+
+# ─── Split a player ───────────────────────────────────────────────────────────
+#
+# The inverse of a merge, and it is needed for the same reason merges are: an
+# Import Stats upload resolves a sheet row to a player BY NAME, so a club with
+# two Graeme Coles — a father who played 1961-64 and a son who played 1988-89 —
+# gets one record holding both careers, and no merge ever happened that could
+# be undone to separate them. The same thing happens to two brothers, and to a
+# name that comes back around a generation later.
+#
+# A SEASON is the unit that moves. Every stat AFL holds hangs off one (an
+# imported season row, or a game inside a season's grade), and a person's
+# playing years never overlap another person's under the same name — if they
+# did, no amount of data could tell the two apart anyway.
+#
+# There is deliberately no undo log: the split leaves two players with the
+# same name, which is exactly what Merge Players lists as an exact-name pair,
+# so merging them back IS the undo and it is already built and tested.
+
+
+@router.get("/split-player/{player_id}")
+async def get_split_preview(
+    player_id: uuid.UUID,
+    club: Organisation = Depends(get_current_club),
+    _: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """One player's seasons, each with what moving it would carry.
+
+    Both stat sources are reported per season — imported season rows and
+    synced per-game lines — because a long career often has both (a club's
+    spreadsheet history up to the year PlayHQ took over, synced games after
+    it), and an admin ticking a season needs to see the whole of what goes
+    with it.
+    """
+    player = await db.get(Player, player_id)
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    rows = (await db.execute(text("""
+        SELECT s.id AS season_id, s.name AS season_name, s.year,
+               COALESCE(SUM(x.games), 0)    AS games,
+               COALESCE(SUM(x.goals), 0)    AS goals,
+               COALESCE(SUM(x.behinds), 0)  AS behinds,
+               COUNT(*) FILTER (WHERE x.src = 'imported') AS imported_rows,
+               COUNT(*) FILTER (WHERE x.src = 'line')     AS game_lines
+        FROM (
+            SELECT i.season_id, i.games_played AS games, i.goals, i.behinds,
+                   'imported' AS src
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org AND i.player_id = :pid
+              AND i.season_id IS NOT NULL
+            UNION ALL
+            SELECT gr.season_id,
+                   CASE WHEN l.played THEN 1 ELSE 0 END AS games,
+                   COALESCE(l.goals, 0), COALESCE(l.behinds, 0),
+                   'line' AS src
+            FROM afl_player_game_lines l
+            JOIN games g   ON g.id = l.game_id
+            JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons s2 ON s2.id = gr.season_id
+            WHERE l.player_id = :pid AND s2.organisation_id = :org
+        ) x
+        JOIN seasons s ON s.id = x.season_id
+        GROUP BY s.id, s.name, s.year
+        ORDER BY s.year DESC NULLS LAST, s.name DESC
+    """), {"org": str(club.id), "pid": str(player_id)})).mappings().all()
+
+    # An imported row whose season never resolved has nothing to attribute it
+    # to, so it can't be split and stays with the original player. Reported
+    # rather than hidden — otherwise a split looks like it lost something.
+    unattributed = int((await db.execute(text("""
+        SELECT COUNT(*) FROM afl_imported_stats
+        WHERE organisation_id = :org AND player_id = :pid AND season_id IS NULL
+    """), {"org": str(club.id), "pid": str(player_id)})).scalar() or 0)
+
+    return {
+        "player": {"id": str(player_id), "name": player.display_name},
+        "seasons": [
+            {**dict(r), "season_id": str(r["season_id"])} for r in rows
+        ],
+        "unattributed_imported_rows": unattributed,
+    }
+
+
+class SplitPlayerRequest(BaseModel):
+    player_id: str
+    season_ids: list[str]
+    new_name: str
+
+
+@router.post("/split-player")
+async def split_player(
+    req: SplitPlayerRequest,
+    club: Organisation = Depends(get_current_club),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    db: AsyncSession = Depends(get_db),
+):
+    """Move the named seasons onto a brand-new player record.
+
+    The new player is deliberately given no ``playhq_id``: a PlayHQ profile
+    id belongs to whichever person the sync has been matching all along, and
+    handing it to the other half of a split would put the next sync's games
+    on the wrong man.
+    """
+    player = await db.get(Player, uuid.UUID(req.player_id))
+    if not player or player.organisation_id != club.id:
+        raise HTTPException(status_code=404, detail="Player not found")
+
+    name = (req.new_name or "").strip() or player.display_name
+    try:
+        season_ids = [str(uuid.UUID(s)) for s in req.season_ids]
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Bad season id")
+    if not season_ids:
+        raise HTTPException(status_code=422, detail="Pick at least one season to split off")
+
+    # Season ids come from a browser, so they are checked against this club's
+    # own seasons before anything is moved.
+    owned = set((await db.execute(text(
+        "SELECT id::text FROM seasons WHERE organisation_id = :org AND id = ANY(:ids)"
+    ), {"org": str(club.id), "ids": [uuid.UUID(s) for s in season_ids]})).scalars().all())
+    unknown = [s for s in season_ids if s not in owned]
+    if unknown:
+        raise HTTPException(status_code=400, detail="Those seasons don't belong to this club")
+
+    new_id = uuid.uuid4()
+    try:
+        db.add(Player(id=new_id, name=name, organisation_id=club.id))
+        await db.flush()
+
+        sid_params = {"org": str(club.id), "pid": str(player.id),
+                      "new": str(new_id), "sids": [uuid.UUID(s) for s in season_ids]}
+
+        imported = (await db.execute(text("""
+            UPDATE afl_imported_stats SET player_id = :new
+            WHERE organisation_id = :org AND player_id = :pid AND season_id = ANY(:sids)
+            RETURNING id
+        """), sid_params)).scalars().all()
+
+        lines = (await db.execute(text("""
+            UPDATE afl_player_game_lines SET player_id = :new
+            WHERE player_id = :pid AND game_id IN (
+                SELECT g.id FROM games g
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE s.organisation_id = :org AND s.id = ANY(:sids)
+            )
+            RETURNING id
+        """), sid_params)).scalars().all()
+
+        # An honour follows the career it was won in. `season` is free text
+        # holding either the season's id (what the Awards screen writes) or its
+        # name (what an import writes), so both are matched rather than one
+        # shape being assumed — see services/office_bearers' own note on the
+        # two spellings this column has always carried.
+        awards = (await db.execute(text("""
+            UPDATE player_achievements SET player_id = :new
+            WHERE org_id = :org AND player_id = :pid
+              AND season IN (
+                SELECT id::text FROM seasons WHERE id = ANY(:sids)
+                UNION ALL
+                SELECT name FROM seasons WHERE id = ANY(:sids)
+              )
+            RETURNING id
+        """), sid_params)).scalars().all()
+
+        # afl_player_season_stats is wholly derived from the game lines, so it
+        # is recomputed rather than moved — both players come out correct in
+        # one pass, same as a merge.
+        await _rollup_season_stats(db, club.id)
+
+        await log_activity(
+            db, org_id=club.id, user_id=current_user.id,
+            action="split_player", target_type="player", target_id=str(player.id),
+            details={"new_player_id": str(new_id), "new_player_name": name,
+                     "seasons": season_ids, "imported_rows_moved": len(imported),
+                     "game_lines_moved": len(lines), "achievements_moved": len(awards)},
+        )
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=f"Split failed: {exc}") from exc
+
+    return {
+        "status": "split",
+        "original_player_id": str(player.id),
+        "new_player_id": str(new_id),
+        "new_player_name": name,
+        "seasons_moved": len(season_ids),
+        "imported_rows_moved": len(imported),
+        "game_lines_moved": len(lines),
+        "achievements_moved": len(awards),
+    }

@@ -209,6 +209,35 @@ query gradeAllRounds($gradeID: ID!) {
 }
 """
 
+# One TEAM's whole season, round by round — and, unlike discoverTeams, each
+# round carries the grade the team played it IN. That is the only place
+# PlayHQ tells us a team was re-graded mid-season: discoverTeams only ever
+# answers with a team's CURRENT grade, so the division it started the year in
+# is otherwise invisible (see the sync's own note on why that loses rounds).
+#
+# Every game in the round comes back, not only ours, so the caller filters on
+# the team id the same way the grade-fixture walk filters on our team ids.
+_Q_TEAM_FIXTURE = """
+query teamFixture($teamID: ID!) {
+  discoverTeamFixture(teamID: $teamID) {
+    id
+    name
+    games {
+      id
+      home {
+        ... on ProvisionalTeam { name }
+        ... on DiscoverTeam { id name organisation { id name } }
+      }
+      away {
+        ... on ProvisionalTeam { name }
+        ... on DiscoverTeam { id name organisation { id name } }
+      }
+      round { id name grade { id name season { id name } } }
+    }
+  }
+}
+"""
+
 _Q_GAME_VIEW = """
 query gameView($gameId: ID!) {
   discoverGame(gameID: $gameId) {
@@ -352,6 +381,33 @@ async def get_grade_fixture(grade_id: str, force: bool = False) -> list[dict]:
         return hit
     data = await _discover("gradeAllRounds", _Q_GRADE_FIXTURE, {"gradeID": grade_id})
     out = data.get("discoverGradeFixture") or []
+    _cache_put(key, out, _FIXTURE_TTL)
+    return out
+
+
+async def get_team_fixture(team_id: str, force: bool = False) -> list[dict]:
+    """Every round one team appears in, each round's games carrying the grade
+    they were played in.
+
+    This is how a mid-season re-grade is discovered. ``discoverTeams`` reports
+    a team's current grade only, so a side that starts in Division 1 and moves
+    to Division 2 after round 5 has those first five rounds sitting in a grade
+    nothing else in the sync can see. Walking the team's own fixture finds
+    them.
+
+    Returns [] rather than raising when PlayHQ can't answer for a team: this
+    is a supplement to the ordinary discovery, and a season's whole sync must
+    not fail over it.
+    """
+    key = f"teamfixture:{team_id}"
+    if not force and (hit := _cache_get(key)) is not None:
+        return hit
+    try:
+        data = await _discover("teamFixture", _Q_TEAM_FIXTURE, {"teamID": team_id})
+    except PlayHQError as exc:
+        logger.warning("team fixture unavailable for %s: %s", team_id, exc)
+        return []
+    out = data.get("discoverTeamFixture") or []
     _cache_put(key, out, _FIXTURE_TTL)
     return out
 

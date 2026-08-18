@@ -8,14 +8,47 @@ import { SectionTitle, Select, GameRow, ClubCrest, displayName } from '../compon
 
 const MILESTONE_ICON = { games: thiings.calendar, goals: thiings.target }
 
-// "Hampton Football Club (1889–1975)" — the years are dropped when a club
-// recorded the name without them, which is common and shouldn't leave an empty
-// bracket hanging off the end.
+// "1889–1975", or a single year, or nothing at all — a club records the name
+// far more often than it records when it changed, and an empty bracket
+// hanging off the end reads as missing data rather than an unknown date.
+function yearSpan(p) {
+  if (p.from_year && p.to_year && p.from_year !== p.to_year) return `${p.from_year}–${p.to_year}`
+  return p.to_year || p.from_year || null
+}
+
+// "Hampton Football Club (1889–1975)"
 function previousNameLabel(p) {
-  const span = p.from_year && p.to_year && p.from_year !== p.to_year
-    ? `${p.from_year}–${p.to_year}`
-    : (p.to_year || p.from_year || null)
+  const span = yearSpan(p)
   return span ? `${p.name} (${span})` : p.name
+}
+
+/**
+ * The competitions the club has played in, beside the season picker.
+ *
+ * Club-entered, not synced: PlayHQ only knows the seasons it ran, so a league
+ * the club left before that has no other way onto the page. Renders nothing
+ * when the club hasn't filled any in, rather than an empty labelled box.
+ */
+function Competitions({ club }) {
+  const comps = club.competitions || []
+  if (!comps.length) return null
+  return (
+    <div className="pb-card px-4 py-3 sm:max-w-[320px] sm:text-right">
+      <span className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-2">
+        Competitions
+      </span>
+      <ul className="flex flex-col gap-1">
+        {comps.map((c, i) => (
+          <li key={i} className="text-[13px] leading-snug text-pb-text">
+            {c.name}
+            {yearSpan(c) && (
+              <span className="font-mono text-[11px] text-pb-faint ml-1.5">{yearSpan(c)}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }
 
 /**
@@ -217,12 +250,18 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
-        <Select
-          value={seasonId}
-          onChange={setSeasonId}
-          placeholder="All seasons"
-          options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))}
-        />
+        {/* Competitions sit above the season picker rather than under the club
+            name: the left column is already the club's own identity block, and
+            a league list is what the page is scoped BY, same as the season. */}
+        <div className="flex flex-col gap-3 sm:items-end shrink-0">
+          <Competitions club={club} />
+          <Select
+            value={seasonId}
+            onChange={setSeasonId}
+            placeholder="All seasons"
+            options={(club.seasons || []).map(x => ({ value: x.id, label: x.name }))}
+          />
+        </div>
       </div>
 
       {showResults && (

@@ -1,5 +1,121 @@
 # BetterStats — Claude Session Notes
 
+## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 261, v9.30.0, Aug 2026)
+
+Four things reported off Hampton Hammers' page. The first is the one worth
+remembering.
+
+### `discoverTeams` reports the grade a team is in NOW, and that loses rounds
+
+Reported: Hampton's Under 19s show from round 6 of 2026 and the first five
+rounds are simply absent. They opened the year in **Under 19s Division 1** and
+were re-graded to **Division 2** from round 6.
+
+- **Nothing was broken. The grade was unreachable.** `discoverTeams` answers
+  with each team's CURRENT grade and carries no history at all, so the division
+  the side started in never enters `grade_infos`, `_discover_grade_games` is
+  never pointed at its fixture, and those games are never discovered. Verified
+  live: `discoverTeams(season aea5195c, org f0727a8b)` returns exactly three
+  teams, the U19s under Division 2 alone.
+- **`discoverTeamFixture(teamID)` is the fix and it WORKS on the AFL tenant**
+  (it does not on cricket's Grassroots API, per the note further down about the
+  two APIs disagreeing). It returns the team's whole season round by round with
+  **the grade on each round**, which is the only place PlayHQ says a team
+  changed division. For the U19s it returns 19 rounds: 5 in Division 1
+  (a9823a21) and 14 in Division 2 (c1d73395).
+- **`_former_grades_for_team` filters two ways, and both are load-bearing.**
+  Every game in a round comes back, not just ours, so it keeps only rounds where
+  the team id is actually one of the two sides. And it drops a grade whose
+  `round.grade.season.id` is not the season being synced, so a team id PlayHQ
+  reuses across years can't drag another season's grade in.
+- **A former grade becomes an ordinary entry in `by_grade`**, so the existing
+  game-discovery walk picks it up with no special-casing, and a plain **Sync
+  Now** is what pulls the missing rounds in. What it must NOT do is move the
+  team ROW: `afl_teams.grade_id` holds one grade, and that is the division the
+  side is in now, so `is_current` guards the write. Current grades are inserted
+  into `by_grade` first, so a brand-new team row is always created under its
+  current grade.
+- **`link_grade_manually` (paste a PlayHQ match link) still exists** and is
+  still the way in for a grade even this can't see. It is no longer the only
+  way, which is the point: nobody knew to use it.
+- **`stats["former_grades"]` counts what was found**, so a re-grade the club
+  never mentioned reads as something the sync discovered rather than an
+  unexplained jump in the grade count.
+- **Verified against live PlayHQ** through the shipped functions: the reported
+  pair found (`{'a9823a21': 'Under 19s Division 1'}`), nothing found for the
+  Seniors or Reserves (no false positives), the current grade never re-reported
+  as a former one, the season guard, and the Division 1 fixture yielding exactly
+  the 5 missing Hampton games, rounds 1 to 5.
+
+### `organisations.competitions` (migration 261)
+
+- **The same `{name, from_year, to_year}` shape as `previous_names`, sharing
+  ONE validator** (`club_history._clean_year_spans`) rather than a second copy
+  of rules about what a year is. Its own column because a club changes
+  competition far more often than it changes its name.
+- Shown beside the season picker on the dashboard, not under the club name: the
+  left column is the club's identity, and a league list is what the page is
+  scoped by, like the season. Renders nothing when a club has filled none in.
+- **Only the seasons PlayHQ ran are synced**, so a league a club left before
+  that has no other way onto the page, and the settings copy says so.
+- Verified against a real Postgres (12 checks: migration 261 applied three times
+  to a populated table, an existing club reading NULL, the trim/coerce/backwards-
+  span rules through the real settings routes, competitions and former names not
+  disturbing each other, the public payload, and clearing storing NULL rather
+  than `[]`) and driven in Chromium (15, against the LIVE club payload with
+  competitions injected: the card in the reported empty space above the season
+  picker, a closed span, an open-ended one, no empty bracket on a yearless one).
+
+### Splitting a player, and the merge bug it uncovered
+
+Reported: "Graeme Cole" holds 1961-64 AND 1988-89 and was never merged. He never
+was: **Import Stats resolves a sheet row to a player by NAME**, so a father and
+son land on one record and there is no merge to undo.
+
+- **A SEASON is the unit that moves.** Every AFL stat hangs off one, and two
+  people's playing years under one name do not overlap. Moves
+  `afl_imported_stats`, `afl_player_game_lines` (via their games' season) and
+  `player_achievements`, then recomputes `afl_player_season_stats` with the
+  sync's own rollup, exactly as a merge does.
+- **No undo log, deliberately.** A split leaves two records with the same name,
+  which is precisely what Merge Players lists as an exact-name pair, so merging
+  them back IS the undo and it is already built.
+- **An honour's `season` is free text holding EITHER the season's id (the Awards
+  screen) or its name (an import)**, so the split matches both rather than
+  assuming one.
+- **The new record deliberately gets no `playhq_id`** — that belongs to whoever
+  the sync has been matching all along, and handing it over would put the next
+  sync's games on the wrong man.
+- **Splitting off EVERY season is refused.** That is a rename with extra steps,
+  and it would leave the original record empty.
+- **The bug this uncovered, and it was live: `_merge_players_core` only ever
+  moved the game lines.** `afl_imported_stats` and `player_achievements` are
+  raw-SQL tables carrying a bare `player_id` with NO foreign key, so nothing
+  moved or cleared them and they were left pointing at a deleted player — where
+  every read that joins `players` (career totals, the profile, the leaderboards)
+  drops them without a word. **A BetterImport club lost the removed player's
+  whole career to a routine duplicate merge.** Both now move with the rest, and
+  their ids are recorded on `afl_merge_logs` (two new JSONB columns, mirrored
+  idempotently) so the undo hands back exactly those rows. A log written before
+  those columns existed reads as `[]`, which is the right answer for it.
+- **Verified against a real Postgres** (28 checks through the shipped route
+  bodies: the reported career split at the right year, the preview's ordering
+  and counts, three guards, an unattributable seasonless imported row staying
+  put, another club's row never touched, each honour following its own career,
+  the two halves coming back as an exact-name merge pair, and the round trip
+  split → merge → undo landing byte-for-byte on the original) and driven in
+  Chromium (16).
+
+### Player search in the navbar
+
+`AflPlayerSearch` is BetterCricket's `NavbarPlayerSearch` pointed at the AFL
+roster and the club-scoped `/{slug}/players/{id}` route. The roster is fetched
+once and filtered locally, same as cricket. Each result carries games and goals,
+because a football club has several people with the same name and the numbers
+are what tells them apart. **The navbar's breakpoint moved from `md` to `lg`**:
+with a search box in the bar there is no room for six links at 768px, and
+splitting the two would have left that width with neither.
+
 ## StatLab gets the platform's Grade Type / Match Type filters (v9.29.4, Aug 2026)
 
 StatLab was the last stats surface with no `GradeScope` (migration 259). Two

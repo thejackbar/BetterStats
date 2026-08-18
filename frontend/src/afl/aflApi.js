@@ -190,6 +190,13 @@ export const aflApi = {
     method: 'POST', body: JSON.stringify({ merge_log_id: mergeLogId }),
   }),
 
+  // Admin — Split Player (the inverse: two people recorded as one)
+  splitPreview: (playerId) => request(`/club-admin/split-player/${playerId}`),
+  splitPlayer: (playerId, seasonIds, newName) => request('/club-admin/split-player', {
+    method: 'POST',
+    body: JSON.stringify({ player_id: playerId, season_ids: seasonIds, new_name: newName }),
+  }),
+
   // Admin — Seasons (list / rename / delete)
   adminListSeasons: () => request('/club-admin/seasons'),
   adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),

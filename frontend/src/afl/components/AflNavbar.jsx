@@ -4,6 +4,7 @@ import clsx from 'clsx'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { mediaUrl } from '../aflApi'
+import AflPlayerSearch from './AflPlayerSearch'
 
 const LINKS = [
   { to: '', label: 'Dashboard', end: true },
@@ -46,8 +47,12 @@ export default function AflNavbar({ club }) {
             : <span className="h-8 w-8 rounded pb-gradient" />}
           <span className="font-bold text-pb-text truncate">{club.short_name || club.name}</span>
         </Link>
-        <nav className="hidden md:flex items-center gap-1 ml-4">{links}</nav>
+        {/* One breakpoint for the whole bar: the search box needs room, so the
+            links collapse into the drawer at lg rather than md — otherwise the
+            bar between 768 and 1024px has neither the links nor the search. */}
+        <nav className="hidden lg:flex items-center gap-1 ml-4">{links}</nav>
         <div className="ml-auto flex items-center gap-2">
+          <AflPlayerSearch club={club} />
           <button
             onClick={toggle}
             className="text-pb-dim hover:text-pb-text text-sm px-2 py-1"
@@ -62,7 +67,7 @@ export default function AflNavbar({ club }) {
             {user ? 'Admin' : 'Admin login'}
           </Link>
           <button
-            className="md:hidden text-pb-text px-2 py-1"
+            className="lg:hidden text-pb-text px-2 py-1"
             onClick={() => setOpen(o => !o)}
             aria-label="Menu"
           >
@@ -71,8 +76,11 @@ export default function AflNavbar({ club }) {
         </div>
       </div>
       {open && (
-        <nav className="md:hidden flex flex-col px-4 pb-3 gap-1 bg-pb-surface pb-hairline-b">
-          {links}
+        <nav className="lg:hidden flex flex-col px-4 pb-3 gap-2 bg-pb-surface pb-hairline-b">
+          {/* Search is above the links on a phone, where the whole reason the
+              menu is open is usually to reach one person's profile. */}
+          <AflPlayerSearch club={club} variant="mobile" onSelect={() => setOpen(false)} />
+          <div className="flex flex-col gap-1">{links}</div>
         </nav>
       )}
     </header>

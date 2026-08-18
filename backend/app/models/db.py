@@ -271,6 +271,12 @@ class Organisation(Base):
     # else without knowing when that stopped.
     established_year = Column(Integer, nullable=True)
     previous_names = Column(JSONB, nullable=True)
+    # The competitions the club has played in (migration 261) — the same
+    # {"name", "from_year", "to_year"} shape as previous_names, and validated
+    # by the same rules. Kept as its own column rather than folded into the
+    # names list: a club changes competition without changing its name far
+    # more often than the other way round.
+    competitions = Column(JSONB, nullable=True)
     player_name_format = Column(Text, default="last_first", nullable=True)
     # BetterSelect: a player is "dormant" (hidden from default selection) if they
     # haven't appeared within this many months. Also bounds team squad

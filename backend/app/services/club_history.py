@@ -1,5 +1,6 @@
-"""A club's founding year and its former names — validation for the two
-``organisations`` columns migration 227 added.
+"""A club's founding year, its former names and the competitions it has
+played in — validation for the ``organisations`` columns migrations 227 and
+261 added.
 
 Kept out of the router so the public read and the admin write agree on what a
 stored value looks like, and so a second sport can adopt the same shape without
@@ -22,6 +23,7 @@ MIN_YEAR = 1800
 MAX_YEAR = 2200
 
 MAX_PREVIOUS_NAMES = 20
+MAX_COMPETITIONS = 30
 MAX_NAME_LEN = 120
 
 
@@ -41,13 +43,13 @@ def clean_year(value: Any) -> Optional[int]:
     return year if MIN_YEAR <= year <= MAX_YEAR else None
 
 
-def clean_previous_names(value: Any) -> Optional[list[dict]]:
-    """Normalise the stored former-names list.
+def _clean_year_spans(value: Any, limit: int) -> Optional[list[dict]]:
+    """Normalise a list of named year spans.
 
     Accepts either the full ``{"name", "from_year", "to_year"}`` shape or a
     bare string (which a simpler client, or a paste, can produce) and always
     stores the full shape. A row with no usable name is dropped — an entry
-    that names nothing is not a former name.
+    that names nothing is not a former name or a competition.
 
     Ordering is the caller's, preserved as given: a club lists its own history
     oldest-first and re-sorting that by year would scatter the entries whose
@@ -56,11 +58,15 @@ def clean_previous_names(value: Any) -> Optional[list[dict]]:
     Returns None rather than [] for an empty result, so "cleared" and "never
     set" are the same NULL in the column instead of two states meaning one
     thing.
+
+    Shared by both club-history lists deliberately: former names and
+    competitions are the same three facts recorded the same way, and a second
+    copy of these rules is how the two start disagreeing about what a year is.
     """
     if not isinstance(value, list):
         return None
     out: list[dict] = []
-    for raw in value[:MAX_PREVIOUS_NAMES]:
+    for raw in value[:limit]:
         if isinstance(raw, str):
             raw = {"name": raw}
         if not isinstance(raw, dict):
@@ -82,8 +88,28 @@ def clean_previous_names(value: Any) -> Optional[list[dict]]:
     return out or None
 
 
+def clean_previous_names(value: Any) -> Optional[list[dict]]:
+    """The club's former names, oldest first."""
+    return _clean_year_spans(value, MAX_PREVIOUS_NAMES)
+
+
+def clean_competitions(value: Any) -> Optional[list[dict]]:
+    """The competitions the club has played in, oldest first.
+
+    A higher cap than the former names: a club changes leagues, and fields
+    teams in several at once, far more often than it renames itself.
+    """
+    return _clean_year_spans(value, MAX_COMPETITIONS)
+
+
 def previous_names_for_display(value: Any) -> list[dict]:
     """What a public reader gets. Always a list, never None, and re-cleaned on
     the way out so a row written before these rules existed (or by hand) can't
     put an unexpected shape in front of the frontend."""
     return clean_previous_names(value) or []
+
+
+def competitions_for_display(value: Any) -> list[dict]:
+    """The public read of the competitions list — same guarantees as
+    ``previous_names_for_display``."""
+    return clean_competitions(value) or []

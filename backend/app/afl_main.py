@@ -254,6 +254,18 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_afl_merge_logs_org "
             "ON afl_merge_logs(org_id, merged_at DESC)"))
+        # A merge also carries the removed player's IMPORTED season rows and
+        # honour-board rows across. Neither table has a foreign key to
+        # players, so before this they were left pointing at a deleted id and
+        # silently vanished from every read (career_totals joins players).
+        # Their ids are recorded here for the same reason line_ids is: an undo
+        # has to know exactly which rows to hand back. CREATE TABLE IF NOT
+        # EXISTS never retrofits a column onto a deployed database, hence the
+        # idempotent ALTERs.
+        await conn.execute(text(
+            "ALTER TABLE afl_merge_logs ADD COLUMN IF NOT EXISTS imported_stat_ids JSONB DEFAULT '[]'"))
+        await conn.execute(text(
+            "ALTER TABLE afl_merge_logs ADD COLUMN IF NOT EXISTS achievement_ids JSONB DEFAULT '[]'"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS afl_merge_pair_ignores (
                 id SERIAL PRIMARY KEY,

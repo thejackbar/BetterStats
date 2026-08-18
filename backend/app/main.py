@@ -3225,6 +3225,10 @@ async def lifespan(app: FastAPI):
         # Both nullable: a club that has never filled them in shows neither.
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS established_year INTEGER"))
         await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS previous_names JSONB"))
+        # The competitions the club has played in (migration 261) — same shape
+        # and same validation as previous_names, its own column because a club
+        # changes competition far more often than it changes its name.
+        await conn.execute(text("ALTER TABLE organisations ADD COLUMN IF NOT EXISTS competitions JSONB"))
         # The order a club reads its own teams in (migration 227). NULL sorts
         # last, so an unordered grade keeps its previous alphabetical place.
         await conn.execute(text("ALTER TABLE grades ADD COLUMN IF NOT EXISTS display_order INTEGER"))

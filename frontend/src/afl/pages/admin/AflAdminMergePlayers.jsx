@@ -135,6 +135,148 @@ function ManualMerge({ players, onMerged }) {
   )
 }
 
+/**
+ * Split one record into two — the inverse of a merge, for two people an
+ * Import Stats upload resolved to a single player because they share a name.
+ *
+ * Seasons are the unit, and they're pre-sorted newest first, so the usual
+ * case (a father's career and a son's, decades apart) is a matter of ticking
+ * the run at one end of the list.
+ */
+function SplitPlayer({ players, onSplit }) {
+  const [open, setOpen] = useState(false)
+  const [player, setPlayer] = useState(null)
+  const [preview, setPreview] = useState(null)
+  const [picked, setPicked] = useState(new Set())
+  const [newName, setNewName] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+  const [result, setResult] = useState(null)
+
+  useEffect(() => {
+    setPicked(new Set())
+    // The result line is only cleared when a NEW player is picked. A finished
+    // split clears the picker itself, and clearing it here too would wipe the
+    // "split done" message in the same commit that set it.
+    if (!player) { setPreview(null); setNewName(''); return }
+    setResult(null)
+    setNewName(player.display_name || player.name || '')
+    aflApi.splitPreview(player.id).then(setPreview).catch(e => setError(e.message))
+  }, [player])
+
+  const seasons = preview?.seasons || []
+  const toggle = (id) => setPicked(s => {
+    const next = new Set(s)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+
+  // Splitting off every season would leave the original record empty and the
+  // new one holding the whole career — a rename with extra steps, not a split.
+  const canSplit = picked.size > 0 && picked.size < seasons.length && !!newName.trim()
+
+  const split = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await aflApi.splitPlayer(player.id, [...picked], newName.trim())
+      setResult(res)
+      setPlayer(null)
+      onSplit()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <button onClick={() => setOpen(o => !o)} className="text-sm font-semibold text-pb-text">
+        {open ? '▾' : '▸'} Split one player into two
+      </button>
+      {open && (
+        <div className="space-y-3">
+          <p className="text-sm text-pb-dim max-w-2xl">
+            Use this when one record is really two people with the same name: a father and
+            son, or two players a generation apart. Pick the seasons that belong to the
+            second person and they move onto a new record. To reverse it, merge the two
+            back together above.
+          </p>
+          {error && <p className="text-sm text-[var(--pb-negative)]">{error}</p>}
+          {result && (
+            <p className="text-sm text-[var(--pb-positive)]">
+              Split done — {result.seasons_moved} season{result.seasons_moved === 1 ? '' : 's'} moved
+              to a new record for {result.new_player_name}.
+            </p>
+          )}
+
+          <div className="max-w-sm">
+            <PlayerSearch players={players} value={player} onPick={setPlayer}
+                          placeholder="Search for the player to split…" />
+          </div>
+
+          {player && preview && (
+            <>
+              {seasons.length === 0 && (
+                <p className="text-sm text-pb-faint">
+                  This player has no seasons recorded, so there's nothing to split.
+                </p>
+              )}
+              {seasons.length > 0 && (
+                <>
+                  <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">
+                    Seasons to move to the new record
+                  </p>
+                  <div className="pb-card p-2 max-h-72 overflow-y-auto">
+                    {seasons.map(s => (
+                      <label key={s.season_id}
+                             className="flex items-center gap-3 px-2 py-1.5 rounded text-sm hover:bg-pb-surface2 cursor-pointer">
+                        <input type="checkbox" checked={picked.has(s.season_id)}
+                               onChange={() => toggle(s.season_id)}
+                               className="h-4 w-4 accent-[var(--pb-accent)]" />
+                        <span className="flex-1 truncate">{s.season_name}</span>
+                        <span className="font-mono text-[11px] text-pb-faint whitespace-nowrap">
+                          {s.games}g · {s.goals}gl
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                  {preview.unattributed_imported_rows > 0 && (
+                    <p className="text-[11px] text-pb-faintest">
+                      {preview.unattributed_imported_rows} imported row
+                      {preview.unattributed_imported_rows === 1 ? '' : 's'} never resolved to a
+                      season, so {preview.unattributed_imported_rows === 1 ? 'it stays' : 'they stay'} with
+                      the original record.
+                    </p>
+                  )}
+                  <div className="max-w-sm">
+                    <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-1">
+                      Name for the new record
+                    </label>
+                    <input value={newName} onChange={e => setNewName(e.target.value)}
+                           className="w-full bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm" />
+                    <p className="text-[11px] text-pb-faintest mt-1">
+                      Usually the same name. Tell them apart with Jnr/Snr if the club does.
+                    </p>
+                  </div>
+                  <button disabled={!canSplit || busy} onClick={split}
+                          className="px-4 py-2 rounded font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
+                    {busy ? 'Splitting…'
+                      : picked.size === 0 ? 'Pick the seasons to move'
+                      : picked.size === seasons.length ? 'Leave at least one season behind'
+                      : `Split off ${picked.size} season${picked.size === 1 ? '' : 's'}`}
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function MergePair({ pair, onMerged, onIgnored, onSkip, busyGlobal }) {
   const [keepId, setKeepId] = useState(pickKeep(pair.player_a, pair.player_b))
   const [busy, setBusy] = useState(false)
@@ -287,6 +429,13 @@ export default function AflAdminMergePlayers() {
     refreshCandidates()
   }
   const onIgnored = () => refreshCandidates()
+  // A split leaves two records with the same name, which is an exact-name
+  // merge candidate — so the pair list has to be re-read, or the screen would
+  // offer to merge back a split it can't see yet.
+  const onSplitDone = () => {
+    refreshCandidates()
+    aflApi.adminListPlayers().then(setPlayers).catch(() => {})
+  }
   const onSkip = (pair) => setSkipped(s => new Set(s).add(`${pair.player_a.id}:${pair.player_b.id}`))
 
   const bulkApprove = async () => {
@@ -335,8 +484,10 @@ export default function AflAdminMergePlayers() {
       <SectionTitle>Merge Players</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl">
         Combine duplicate player records into one — everything the removed
-        player was credited with (games, goals, behinds, best-on-grounds)
-        moves onto the kept player.
+        player was credited with (games, goals, behinds, best-on-grounds,
+        imported seasons and honours) moves onto the kept player. If the
+        opposite has happened and one record is really two people, split it
+        below.
       </p>
 
       {error && <p className="pb-card p-3 text-sm text-[var(--pb-negative)]">{error}</p>}
@@ -348,6 +499,7 @@ export default function AflAdminMergePlayers() {
       )}
 
       <ManualMerge players={players} onMerged={onMerged} />
+      <SplitPlayer players={players} onSplit={onSplitDone} />
 
       {bulkEligible.length > 0 && (
         <div className="pb-card p-4 flex items-center justify-between gap-3 flex-wrap">

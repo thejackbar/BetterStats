@@ -47,9 +47,75 @@ function Toggle({ label, hint, checked, onChange, disabled }) {
   )
 }
 
+const numField = (value, onChange, placeholder, width) => (
+  <input
+    type="number" inputMode="numeric" value={value ?? ''} placeholder={placeholder}
+    onChange={e => onChange(e.target.value)}
+    className={`bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm font-mono ${width}`}
+  />
+)
+
 /**
- * Founding year + former names, shown under the club name on the public
- * dashboard.
+ * A list of named year spans — a former club name, or a competition the club
+ * has played in. Both are the same three fields entered the same way, so they
+ * share one editor rather than two that drift apart.
+ */
+function YearSpanList({ label, rows, onChange, namePlaceholder, addLabel, emptyText }) {
+  const setRow = (i, field, value) =>
+    onChange(rows.map((n, j) => (j === i ? { ...n, [field]: value } : n)))
+
+  return (
+    <>
+      <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-2">
+        {label}
+      </label>
+      <div className="flex flex-col gap-2">
+        {rows.map((n, i) => (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <input
+              value={n.name || ''} placeholder={namePlaceholder}
+              onChange={e => setRow(i, 'name', e.target.value)}
+              className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm flex-1 min-w-[180px]"
+            />
+            {numField(n.from_year, v => setRow(i, 'from_year', v), 'From', 'w-20')}
+            {numField(n.to_year, v => setRow(i, 'to_year', v), 'To', 'w-20')}
+            <button
+              type="button"
+              onClick={() => onChange(rows.filter((_, j) => j !== i))}
+              className="text-pb-faint hover:text-pb-red px-2 py-1 text-sm"
+              aria-label="Remove this row"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+        {rows.length === 0 && <p className="text-sm text-pb-faintest">{emptyText}</p>}
+      </div>
+      <button
+        type="button"
+        onClick={() => onChange([...rows, { name: '', from_year: '', to_year: '' }])}
+        className="mt-2 font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-[var(--pb-accent)]"
+      >
+        {addLabel}
+      </button>
+    </>
+  )
+}
+
+// '' and a half-typed year both go up as null; the backend stores NULL for
+// anything it can't read as a plausible year, so a cleared field and a typo
+// agree rather than being two states meaning one thing.
+const spanPayload = (rows) => rows
+  .filter(n => (n.name || '').trim())
+  .map(n => ({
+    name: n.name.trim(),
+    from_year: n.from_year === '' || n.from_year == null ? null : Number(n.from_year),
+    to_year: n.to_year === '' || n.to_year == null ? null : Number(n.to_year),
+  }))
+
+/**
+ * Founding year, former names and the competitions the club has played in —
+ * all shown on the public dashboard.
  *
  * Edited as a draft and saved on a button rather than autosaved per keystroke,
  * the same call the branding panel above it makes: a half-typed year ("18")
@@ -60,27 +126,19 @@ function ClubHistoryPanel({ settings, onSaved }) {
   const toast = useToast()
   const [year, setYear] = useState(settings.established_year ?? '')
   const [names, setNames] = useState(() => settings.previous_names || [])
+  const [comps, setComps] = useState(() => settings.competitions || [])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
 
   const edit = (fn) => { fn(); setDirty(true) }
-  const setName = (i, field, value) => edit(() => setNames(list =>
-    list.map((n, j) => (j === i ? { ...n, [field]: value } : n))))
 
   async function save() {
     setSaving(true)
     try {
       await aflApi.patchAdminSettings({
-        // '' clears the year; the backend stores NULL for anything it can't
-        // read as a plausible year, so a cleared field and a typo agree.
         established_year: year === '' ? null : Number(year),
-        previous_names: names
-          .filter(n => (n.name || '').trim())
-          .map(n => ({
-            name: n.name.trim(),
-            from_year: n.from_year === '' || n.from_year == null ? null : Number(n.from_year),
-            to_year: n.to_year === '' || n.to_year == null ? null : Number(n.to_year),
-          })),
+        previous_names: spanPayload(names),
+        competitions: spanPayload(comps),
       })
       toast.success('Club history saved.')
       setDirty(false)
@@ -89,14 +147,6 @@ function ClubHistoryPanel({ settings, onSaved }) {
       toast.error(e.message)
     } finally { setSaving(false) }
   }
-
-  const numField = (value, onChange, placeholder, width) => (
-    <input
-      type="number" inputMode="numeric" value={value ?? ''} placeholder={placeholder}
-      onChange={e => onChange(e.target.value)}
-      className={`bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm font-mono ${width}`}
-    />
-  )
 
   return (
     <div className="pb-card p-5">
@@ -114,40 +164,30 @@ function ClubHistoryPanel({ settings, onSaved }) {
         <p className="text-[11px] text-pb-faintest mt-1">The year the club was founded.</p>
       </div>
 
-      <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase block mb-2">
-        Previous names
-      </label>
-      <div className="flex flex-col gap-2">
-        {names.map((n, i) => (
-          <div key={i} className="flex flex-wrap items-center gap-2">
-            <input
-              value={n.name || ''} placeholder="Former club name"
-              onChange={e => setName(i, 'name', e.target.value)}
-              className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm flex-1 min-w-[180px]"
-            />
-            {numField(n.from_year, v => setName(i, 'from_year', v), 'From', 'w-20')}
-            {numField(n.to_year, v => setName(i, 'to_year', v), 'To', 'w-20')}
-            <button
-              type="button"
-              onClick={() => edit(() => setNames(list => list.filter((_, j) => j !== i)))}
-              className="text-pb-faint hover:text-pb-red px-2 py-1 text-sm"
-              aria-label="Remove this name"
-            >
-              ✕
-            </button>
-          </div>
-        ))}
-        {names.length === 0 && (
-          <p className="text-sm text-pb-faintest">No former names recorded.</p>
-        )}
+      <YearSpanList
+        label="Previous names"
+        rows={names}
+        onChange={next => edit(() => setNames(next))}
+        namePlaceholder="Former club name"
+        addLabel="+ Add a former name"
+        emptyText="No former names recorded."
+      />
+
+      <div className="mt-6">
+        <YearSpanList
+          label="Competitions"
+          rows={comps}
+          onChange={next => edit(() => setComps(next))}
+          namePlaceholder="e.g. Southern Football Netball League"
+          addLabel="+ Add a competition"
+          emptyText="No competitions recorded."
+        />
+        <p className="text-[11px] text-pb-faintest mt-2 leading-snug">
+          Every league the club has played in, oldest first. Only the seasons PlayHQ
+          ran are synced, so a competition the club left before that is only here if
+          you add it.
+        </p>
       </div>
-      <button
-        type="button"
-        onClick={() => edit(() => setNames(list => [...list, { name: '', from_year: '', to_year: '' }]))}
-        className="mt-2 font-mono text-[10px] tracking-wide2 uppercase text-pb-faint hover:text-[var(--pb-accent)]"
-      >
-        + Add a former name
-      </button>
 
       <div className="mt-4">
         <button
@@ -324,7 +364,7 @@ export default function AflAdminSettings() {
       {/* Keyed on what's loaded, so the draft state inside re-seeds after a
           save (or a reload) instead of holding the values it mounted with. */}
       <ClubHistoryPanel
-        key={`${settings.established_year ?? ''}|${(settings.previous_names || []).length}`}
+        key={`${settings.established_year ?? ''}|${(settings.previous_names || []).length}|${(settings.competitions || []).length}`}
         settings={settings}
         onSaved={load}
       />

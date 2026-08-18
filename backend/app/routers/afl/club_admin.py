@@ -176,6 +176,7 @@ class SettingsPatch(BaseModel):
     # should read as "not recorded" rather than blocking the whole save.
     established_year: Optional[int] = None
     previous_names: Optional[list] = None
+    competitions: Optional[list] = None
     public_show_bog_leaderboard: Optional[bool] = None
     public_show_club_bf_leaderboard: Optional[bool] = None
     public_show_comp_bf_leaderboard: Optional[bool] = None
@@ -193,6 +194,7 @@ async def get_settings(club: Organisation = Depends(get_current_club)):
         "logo_url": club.logo_url,
         "established_year": club.established_year,
         "previous_names": club_history.previous_names_for_display(club.previous_names),
+        "competitions": club_history.competitions_for_display(club.competitions),
         "public_show_bog_leaderboard": club.public_show_bog_leaderboard,
         "public_show_club_bf_leaderboard": club.public_show_club_bf_leaderboard,
         "public_show_comp_bf_leaderboard": club.public_show_comp_bf_leaderboard,
@@ -217,6 +219,8 @@ async def patch_settings(patch: SettingsPatch,
         club.established_year = club_history.clean_year(data.pop("established_year"))
     if "previous_names" in data:
         club.previous_names = club_history.clean_previous_names(data.pop("previous_names"))
+    if "competitions" in data:
+        club.competitions = club_history.clean_competitions(data.pop("competitions"))
     for field, value in data.items():
         setattr(club, field, value)
     await db.commit()
