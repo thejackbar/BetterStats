@@ -461,9 +461,16 @@ function WebsiteAnalyticsCard({ data }) {
   )
 }
 
-function ActivityRow({ a }) {
-  const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call') : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
-  const tone = a.type === 'call' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
+// A row carries its own email content whenever it actually sent one —
+// email-type sends always do (meta.html); Extend Trial's own log stays
+// type='system' (the headline fact is the extension, not the email) but
+// still attaches meta.html when the confirmation email rendered, so the
+// SAME "View email" affordance below works off meta.html alone, whatever
+// `type` the row is.
+function ActivityRow({ a, onViewEmail }) {
+  const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call')
+    : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
+  const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
   return (
     <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
       <div className="flex items-center justify-between gap-2">
@@ -471,6 +478,12 @@ function ActivityRow({ a }) {
         <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
       </div>
       {a.body && <p className="mt-1 text-pb-text whitespace-pre-wrap">{a.body}</p>}
+      {a.meta?.html && (
+        <button type="button" onClick={() => onViewEmail?.(a)}
+          className="mt-1 text-[11px] text-pb-accent hover:underline">
+          View email →
+        </button>
+      )}
       {a.next_follow_up_at && (
         <p className="mt-1 text-[10.5px] text-pb-amber">Follow up {new Date(a.next_follow_up_at).toLocaleString('en-AU')}</p>
       )}
@@ -576,6 +589,9 @@ export default function SalesWorkspace() {
     }))
   }
 
+  // The activity currently open in the "View email" modal (holds meta.html/
+  // subject/to_email/to_name) — null when the modal is closed.
+  const [viewingEmail, setViewingEmail] = useState(null)
   const [showExtendTrial, setShowExtendTrial] = useState(false)
   const blankExtendTrialForm = {
     days: 14, contactKey: '', newFullName: '', newEmail: '', newMobile: '', nominate: false,
@@ -1473,7 +1489,7 @@ export default function SalesWorkspace() {
                 <h4 className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1.5">History</h4>
                 {timeline.length === 0 ? (
                   <p className="text-[12px] text-pb-faintest">No activity yet.</p>
-                ) : timeline.map(a => <ActivityRow key={a.id} a={a} />)}
+                ) : timeline.map(a => <ActivityRow key={a.id} a={a} onViewEmail={setViewingEmail} />)}
               </div>
 
               <div className={CARD}>
@@ -1633,6 +1649,17 @@ export default function SalesWorkspace() {
               <Btn type="submit" variant="primary" sm disabled={savingExtendTrial}>{savingExtendTrial ? 'Extending…' : 'Confirm'}</Btn>
             </div>
           </form>
+        </Modal>
+
+        <Modal open={!!viewingEmail} onClose={() => setViewingEmail(null)} title={viewingEmail?.meta?.subject || 'Email'}>
+          <div className="space-y-2">
+            <div className="text-[11.5px] text-pb-faint">
+              <div>To: {viewingEmail?.meta?.to_name}{viewingEmail?.meta?.to_email ? ` <${viewingEmail.meta.to_email}>` : ''}</div>
+              <div>Sent: {viewingEmail && new Date(viewingEmail.occurred_at).toLocaleString('en-AU')}</div>
+            </div>
+            <iframe title="email preview" srcDoc={viewingEmail?.meta?.html || ''}
+              className="w-full rounded border pb-hairline bg-white" style={{ height: 480 }} />
+          </div>
         </Modal>
         </>
       )}

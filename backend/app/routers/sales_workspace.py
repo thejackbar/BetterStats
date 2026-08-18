@@ -864,7 +864,10 @@ async def send_email(
         db, deal_id=deal.id, person_id=person.id, type="email",
         body=f"{se.TEMPLATE_LABELS.get(template, template)} sent to {to_email}",
         created_by_user_id=actor.user.id,
-        meta={"template": template, "subject": subject},
+        meta={
+            "template": template, "subject": subject, "html": html_body, "text": text_body,
+            "to_email": to_email, "to_name": person.full_name,
+        },
     )
     await db.commit()
     return {"status": "sent"}
@@ -1391,6 +1394,7 @@ async def extend_trial(
     rep_name = actor.user.display_name or actor.user.username
     utm_code = _resolve_utm_code(club)
     email_sent = False
+    subject = html_body = text_body = None
     try:
         subject, html_body, text_body = await se.render_template(
             db, "trial_extension", contact_name=person.full_name, club_name=club.name,
@@ -1412,10 +1416,20 @@ async def extend_trial(
         note += f" — invited {person.full_name} as Primary Admin"
     elif nominated_invited is False:
         note += f" — made {person.full_name} Primary Admin"
+    # meta carries the rendered email (when it got that far — a render
+    # failure leaves these None) alongside the trial facts, so the SAME
+    # "click to view the email" affordance the drawer's other email sends
+    # get can rely on meta.html being present, whatever the activity's own
+    # `type` is — this row's type stays 'system' since the headline fact is
+    # the trial extension, not the email.
     await crm_service.log_activity(
         db, deal_id=deal.id, person_id=person.id, type="system", body=note,
         created_by_user_id=actor.user.id,
-        meta={"days": body.days, "new_trial_end": new_trial_end.isoformat(), "email_sent": email_sent},
+        meta={
+            "days": body.days, "new_trial_end": new_trial_end.isoformat(), "email_sent": email_sent,
+            "subject": subject, "html": html_body, "text": text_body,
+            "to_email": to_email, "to_name": person.full_name,
+        },
     )
     await db.commit()
 

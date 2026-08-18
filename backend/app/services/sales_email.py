@@ -112,7 +112,7 @@ def _render_template_hardcoded(
             "Happy to answer any questions — just reply to this email."
         )
     elif key == "voicemail_followup":
-        subject = f"BetterCricket for {club_name} — following up"
+        subject = f"BetterCricket for {club_name} - following up"
         body = (
             f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
             f"but couldn't get through, so I've left a voicemail. Wanted to follow up here too — "
@@ -129,7 +129,7 @@ def _render_template_hardcoded(
             "Happy to answer any questions — just reply to this email, or give me a call back."
         )
     elif key == "trial_information":
-        subject = f"Start your free BetterCricket trial — {club_name}"
+        subject = f"Start your free BetterCricket trial - {club_name}"
         steps = (
             '<ol style="font-size:14px;line-height:1.8;padding-left:20px">'
             "<li>Go to BetterCricket</li><li>Search for your club</li>"
@@ -162,7 +162,7 @@ def _render_template_hardcoded(
             "Let me know if there's anything I can help with in the meantime."
         )
     elif key == "demo":
-        subject = f"Book a demo — BetterCricket for {club_name}"
+        subject = f"Book a demo - BetterCricket for {club_name}"
         if calendly_url:
             body = (
                 f'<p style="font-size:14px;line-height:1.5">{greeting} happy to walk you through '
@@ -197,7 +197,7 @@ def _render_template_hardcoded(
             "Happy to answer any questions — just reply to this email."
         )
     else:  # custom — no fixed pitch, just a blank canvas to write into
-        subject = f"BetterCricket — {club_name}"
+        subject = f"BetterCricket for {club_name}"
         body = f'<p style="font-size:14px;line-height:1.5">{greeting}</p><p style="font-size:14px;line-height:1.5"></p>'
         text = f"{greeting}\n\n"
 
@@ -427,12 +427,12 @@ _SEED_BODY = {
 }
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
-    "voicemail_followup": "BetterCricket for {{club}} — following up",
-    "trial_information": "Start your free BetterCricket trial — {{club}}",
+    "voicemail_followup": "BetterCricket for {{club}} - following up",
+    "trial_information": "Start your free BetterCricket trial - {{club}}",
     "trial_extension": "Your BetterCricket trial extension for {{club}}",
-    "demo": "Book a demo — BetterCricket for {{club}}",
+    "demo": "Book a demo - BetterCricket for {{club}}",
     "subscribe": "Get {{club}} set up on BetterCricket",
-    "custom": "",
+    "custom": "BetterCricket for {{club}}",
 }
 
 
