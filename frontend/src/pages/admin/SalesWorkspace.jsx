@@ -576,6 +576,59 @@ export default function SalesWorkspace() {
     }))
   }
 
+  const [showExtendTrial, setShowExtendTrial] = useState(false)
+  const blankExtendTrialForm = {
+    days: 14, contactKey: '', newFullName: '', newEmail: '', newMobile: '', nominate: false,
+  }
+  const [extendTrialForm, setExtendTrialForm] = useState(blankExtendTrialForm)
+  const [showExtendNewContact, setShowExtendNewContact] = useState(false)
+  const [savingExtendTrial, setSavingExtendTrial] = useState(false)
+  // Same rule as the Start trial contact picker — an email is the one thing
+  // this action can't do without (it's how the confirmation lands, and how
+  // a nominated Primary Admin is invited).
+  const extendTrialEligibleContacts = (drawer?.contacts || []).filter(c => EMAIL_RE.test(c.email || ''))
+
+  const submitExtendTrial = async (e) => {
+    e.preventDefault()
+    const body = { days: Number(extendTrialForm.days) || 14, nominate_primary_admin: extendTrialForm.nominate }
+    if (showExtendNewContact) {
+      if (!extendTrialForm.newFullName.trim()) { toast?.error('A name is required'); return }
+      if (!EMAIL_RE.test(extendTrialForm.newEmail.trim())) { toast?.error('A valid email address is required'); return }
+      body.new_contact = {
+        full_name: extendTrialForm.newFullName.trim(), email: extendTrialForm.newEmail.trim(),
+        mobile: extendTrialForm.newMobile.trim() || null,
+      }
+    } else {
+      const picked = extendTrialEligibleContacts.find(c => contactKey(c) === extendTrialForm.contactKey)
+      if (!picked) { toast?.error('Pick a contact, or add a new one'); return }
+      if (picked.directory_contact_id) body.directory_contact_id = picked.directory_contact_id
+      else if (picked.crm_person_id) body.crm_person_id = picked.crm_person_id
+    }
+    setSavingExtendTrial(true)
+    try {
+      const result = await api.salesWorkspaceExtendTrial(drawer.deal.id, body)
+      const newEnd = new Date(result.new_trial_end).toLocaleDateString('en-AU')
+      let msg = `Trial extended by ${result.days} day${result.days === 1 ? '' : 's'} to ${newEnd}. `
+      msg += result.email_sent
+        ? `A confirmation email was sent to ${result.contact_email}.`
+        : `The confirmation email could not be sent — let them know another way.`
+      if (result.nominated_primary_admin) {
+        msg += result.primary_admin_invited
+          ? ' An invite email was also sent so they can set up their Primary Admin account.'
+          : ' They are now this club’s Primary Admin.'
+      }
+      toast?.success(msg)
+      setShowExtendTrial(false)
+      setShowExtendNewContact(false)
+      setExtendTrialForm(blankExtendTrialForm)
+      refreshBoth()
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingExtendTrial(false)
+    }
+  }
+
   const [emailTemplates, setEmailTemplates] = useState({ templates: [], demo_link_configured: false })
   const [emailForm, setEmailForm] = useState({ contactKey: '', template: '', subject: '', body: '' })
   const [savingEmail, setSavingEmail] = useState(false)
@@ -1226,6 +1279,15 @@ export default function SalesWorkspace() {
                     {START_TRIAL_ENABLED && !drawer.deal.is_customer && drawer.deal.marketing_club_id && (
                       <Btn variant="primary" sm onClick={() => { setTrialForm(blankTrialForm); setShowStartTrial(true) }}>Start trial</Btn>
                     )}
+                    <Btn variant="subtle" sm disabled={drawer.deal.min_trial_days_remaining == null}
+                      title={drawer.deal.min_trial_days_remaining == null ? 'This club has no trial to extend' : undefined}
+                      onClick={() => {
+                        setExtendTrialForm(blankExtendTrialForm)
+                        setShowExtendNewContact(false)
+                        setShowExtendTrial(true)
+                      }}>
+                      Extend Trial
+                    </Btn>
                   </div>
                 </div>
                 <div className="mt-3">
@@ -1483,6 +1545,7 @@ export default function SalesWorkspace() {
       </div>
 
       {drawer && (
+        <>
         <Modal open={showStartTrial} onClose={() => setShowStartTrial(false)} title={`Start a trial for ${drawer.deal.marketing_club_name}`}>
           <form onSubmit={submitStartTrial} className="space-y-2">
             <p className="text-[11.5px] text-pb-faint">
@@ -1523,6 +1586,55 @@ export default function SalesWorkspace() {
             <Btn type="submit" variant="primary" disabled={savingTrial || !trialForm.contactKey}>{savingTrial ? 'Starting…' : 'Start trial'}</Btn>
           </form>
         </Modal>
+
+        <Modal open={showExtendTrial} onClose={() => setShowExtendTrial(false)} title={`Extend trial for ${drawer.deal.marketing_club_name}`}>
+          <form onSubmit={submitExtendTrial} className="space-y-2">
+            <p className="text-[11.5px] text-pb-faint">
+              {drawer.deal.min_trial_days_remaining != null && drawer.deal.min_trial_days_remaining < 0
+                ? `Are you sure you want to extend the trial for ${drawer.deal.marketing_club_name}?`
+                : `There ${drawer.deal.min_trial_days_remaining === 1 ? 'is' : 'are'} still ${drawer.deal.min_trial_days_remaining} day${drawer.deal.min_trial_days_remaining === 1 ? '' : 's'} remaining on the trial for ${drawer.deal.marketing_club_name}. Are you sure you want to extend the trial?`}
+            </p>
+            <Field label="Number of days extension">
+              <NumberInput min={1} max={14} value={extendTrialForm.days}
+                onChange={e => setExtendTrialForm(f => ({ ...f, days: e.target.value }))} style={{ width: 90 }} />
+            </Field>
+            <Field label="Send confirmation to" hint="Only contacts with a valid email address on file are listed">
+              <Select value={showExtendNewContact ? NEW_CONTACT_VALUE : extendTrialForm.contactKey}
+                onChange={e => {
+                  if (e.target.value === NEW_CONTACT_VALUE) { setShowExtendNewContact(true); return }
+                  setShowExtendNewContact(false)
+                  setExtendTrialForm(f => ({ ...f, contactKey: e.target.value }))
+                }}>
+                <option value="" disabled>— select a contact —</option>
+                {extendTrialEligibleContacts.map(c => (
+                  <option key={contactKey(c)} value={contactKey(c)}>
+                    {c.full_name}{c.role ? ` (${c.role})` : ''}
+                  </option>
+                ))}
+                <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
+              </Select>
+            </Field>
+            {showExtendNewContact && (
+              <div className="grid grid-cols-2 gap-2 p-2 rounded-lg border border-pb-hairline2 bg-pb-surface2">
+                <Field label="Name"><TextInput value={extendTrialForm.newFullName} onChange={e => setExtendTrialForm(f => ({ ...f, newFullName: e.target.value }))} required /></Field>
+                <Field label="Email"><TextInput type="email" value={extendTrialForm.newEmail} onChange={e => setExtendTrialForm(f => ({ ...f, newEmail: e.target.value }))} required /></Field>
+                <Field label="Mobile (optional)"><TextInput value={extendTrialForm.newMobile} onChange={e => setExtendTrialForm(f => ({ ...f, newMobile: e.target.value }))} /></Field>
+              </div>
+            )}
+            {!drawer.deal.primary_admin_name && (
+              <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-1">
+                <input type="checkbox" checked={extendTrialForm.nominate}
+                  onChange={e => setExtendTrialForm(f => ({ ...f, nominate: e.target.checked }))} />
+                Also make this contact the club's Primary Admin
+              </label>
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <Btn type="button" variant="ghost" sm onClick={() => setShowExtendTrial(false)}>Cancel</Btn>
+              <Btn type="submit" variant="primary" sm disabled={savingExtendTrial}>{savingExtendTrial ? 'Extending…' : 'Confirm'}</Btn>
+            </div>
+          </form>
+        </Modal>
+        </>
       )}
       </>
       )}

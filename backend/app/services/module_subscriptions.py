@@ -195,6 +195,38 @@ def remove_billing(org, billing_key: str, *, now=None) -> bool:
     return removed
 
 
+def extend_trial_for_org(org, *, days: int, reset_start: bool, now: datetime | None = None) -> list:
+    """A sales rep's "Extend Trial" action — extends every module CURRENTLY
+    on trial (status == STATUS_TRIAL) for this org, uniformly. An
+    active/paused/cancelled row is left alone; there's no trial there to
+    extend.
+
+    ``trial_ends_at`` is always set to ``now + days`` (not the existing end
+    date plus ``days``) — "extend by N days, from now" per the brief, so a
+    long-expired trial doesn't still read as expired after a rep just
+    extended it. ``trial_started_at`` is only reset to ``now`` when
+    ``reset_start`` is True (the club's trial had already expired — the
+    fresh look the reset gives it), never for an active trial, which keeps
+    its original start date and simply gets more runway on the end.
+
+    Requires ``org.module_subscriptions`` to already be loaded. Returns the
+    subscription rows that were touched (empty if the org has no module
+    currently on trial)."""
+    now = now or _now()
+    new_end = now + timedelta(days=days)
+    touched = []
+    for sub in (org.module_subscriptions or []):
+        if sub.status != STATUS_TRIAL:
+            continue
+        if reset_start:
+            sub.trial_started_at = now
+        sub.trial_ends_at = new_end
+        sub.updated_at = now
+        touched.append(sub)
+    recompute_overrides_cache(org, now)
+    return touched
+
+
 async def sweep_expired_trials(db: AsyncSession, *, now: datetime | None = None) -> list[str]:
     """Refresh the held cache for any club whose trial has passed its end, so
     unloaded synchronous reads drop the module too (the loaded gate already does).

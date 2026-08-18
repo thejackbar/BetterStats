@@ -2104,6 +2104,8 @@ export const api = {
     }),
   salesWorkspaceStartTrial: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceExtendTrial: (dealId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/extend-trial`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceSetDoNotContact: (dealId, contactId, doNotContact, reason) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/contacts/${contactId}/do-not-contact`, {
       method: 'PATCH', body: JSON.stringify({ do_not_contact: doNotContact, reason: reason || null }),

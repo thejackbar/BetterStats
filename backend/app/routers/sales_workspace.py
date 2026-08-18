@@ -10,18 +10,20 @@ Sales Pipeline board manages; there is no separate Sales Workspace schema.
 from __future__ import annotations
 
 import logging
+import secrets
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.db import (
     ClubMembership, CrmActivity, CrmDeal, CrmEvent, CrmPerson, MarketingClub, MarketingClubContact,
-    SalesListClub, User, get_db,
+    Organisation, SalesListClub, User, get_db,
 )
 from app.routers.auth import SalesActor, require_sales_or_super
 from app.services import crm as crm_service
@@ -1177,6 +1179,255 @@ async def start_trial(
     )
     await db.commit()
     return result
+
+
+# ─── Extend a live club's trial ────────────────────────────────────────────────
+# Unlike start_trial above (a brand-new club with no org yet), this is for a
+# club that's ALREADY registered and already holds at least one module in
+# trial status — a rep giving them more runway, not onboarding them.
+
+EXTEND_TRIAL_MIN_DAYS = 1
+EXTEND_TRIAL_MAX_DAYS = 14
+
+
+def _username_base(email: str) -> str:
+    """Mirrors self_serve_trial.py's _slugify, applied to an email's local
+    part — the Extend Trial modal never asks a rep for a username (it only
+    collects name/email/mobile), so one is derived here the same way a slug
+    is derived from a club name elsewhere in this codebase."""
+    import re
+    local = (email or "").split("@", 1)[0]
+    base = re.sub(r"[^a-z0-9]+", "", local.lower())
+    return base[:24] or "admin"
+
+
+async def _unique_username(db: AsyncSession, base: str) -> str:
+    username = base
+    n = 2
+    while True:
+        existing = await db.execute(select(User.id).where(User.username == username))
+        if not existing.scalar_one_or_none():
+            return username
+        username = f"{base}{n}"
+        n += 1
+
+
+class ExtendTrialContact(BaseModel):
+    full_name: str
+    email: str
+    mobile: Optional[str] = None
+
+
+class ExtendTrialBody(BaseModel):
+    days: int
+    directory_contact_id: Optional[str] = None
+    crm_person_id: Optional[str] = None
+    new_contact: Optional[ExtendTrialContact] = None
+    nominate_primary_admin: bool = False
+
+
+async def _nominate_primary_admin(
+    db: AsyncSession, *, org_id: uuid.UUID, club_name: str, full_name: str, email: str,
+    background_tasks: BackgroundTasks,
+) -> bool:
+    """Makes ``email`` the club's Primary Admin — flips the flag onto their
+    EXISTING membership on this same org if they already have an account
+    (e.g. a co-admin who was never made primary), else invites them as a
+    brand-new club_admin (password_hash NULL + invite_token, same "set your
+    own password" flow routers/club_admin.py::create_club_user uses). Only
+    ever called once the caller has confirmed the club has no primary admin
+    yet. Raises HTTPException on a genuine conflict — an email already tied
+    to an account outside this club, or to BetterCricket staff. Returns True
+    if a fresh invite email was sent (vs an existing member just promoted)."""
+    from app.services import memberships
+    from app.services.admin_identity import EMAIL_TAKEN_MESSAGE
+
+    email_norm = (email or "").strip().lower()
+    if not email_norm:
+        raise HTTPException(status_code=422, detail="An email address is required to nominate a Primary Admin")
+    if await memberships.has_primary_admin(db, org_id):
+        raise HTTPException(status_code=409, detail="This club already has a Primary Admin")
+
+    existing_user = await db.scalar(select(User).where(func.lower(User.email) == email_norm))
+    if existing_user is not None:
+        membership = await db.scalar(
+            select(ClubMembership).where(ClubMembership.user_id == existing_user.id)
+        )
+        if membership is None or str(membership.club_id) != str(org_id):
+            raise HTTPException(status_code=409, detail=EMAIL_TAKEN_MESSAGE)
+        if membership.role == "super_admin":
+            raise HTTPException(
+                status_code=409,
+                detail="This email belongs to a BetterCricket staff account, not a club admin",
+            )
+        if membership.role != "club_admin":
+            membership.role = "club_admin"
+        await memberships.set_primary_admin(db, org_id, existing_user.id)
+        return False
+
+    from app.config.settings import settings as _settings
+    from app.routers.club_admin import _INVITE_TOKEN_TTL_DAYS
+    from app.services.user_invite import send_invite_email
+
+    username = await _unique_username(db, _username_base(email_norm))
+    new_user = User(
+        id=uuid.uuid4(), username=username, display_name=full_name, email=email_norm,
+        password_hash=None, invite_token=secrets.token_urlsafe(32),
+        invite_token_expires_at=datetime.now(timezone.utc) + timedelta(days=_INVITE_TOKEN_TTL_DAYS),
+    )
+    db.add(new_user)
+    await db.flush()
+    db.add(ClubMembership(
+        id=uuid.uuid4(), club_id=org_id, user_id=new_user.id, role="club_admin",
+        is_primary_admin=True, capabilities=[],
+    ))
+    await db.flush()
+    invite_link = f"{_settings.public_base_url}/login?invite={new_user.invite_token}"
+    background_tasks.add_task(
+        send_invite_email, email=email_norm, display_name=full_name, club_name=club_name, link=invite_link,
+    )
+    return True
+
+
+@router.post("/clubs/{deal_id}/extend-trial")
+async def extend_trial(
+    deal_id: str,
+    body: ExtendTrialBody,
+    background_tasks: BackgroundTasks,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extends every module currently on trial by ``days`` (1-14), "from
+    now" per direct instruction — an already-expired trial also has its
+    start date reset to now, a still-live one keeps its original start and
+    just gets a later end. Sends the club's chosen contact the 'trial_
+    extension' BetterAdmin -> Comms -> Templates email (best-effort: a
+    delivery failure doesn't undo the extension, it's reported back so the
+    rep knows to follow up another way)."""
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+
+    if not deal.marketing_club_id:
+        raise HTTPException(status_code=422, detail="This club isn't linked to a Club Directory prospect yet")
+    club = await db.get(MarketingClub, deal.marketing_club_id)
+    if club is None:
+        raise HTTPException(status_code=404, detail="Club not found")
+    if not club.existing_org_id:
+        raise HTTPException(status_code=422, detail="This club isn't registered on BetterCricket yet")
+
+    from app.services import module_subscriptions
+    from app.services import sales_email as se
+
+    org = await db.get(
+        Organisation, club.existing_org_id, options=[selectinload(Organisation.module_subscriptions)],
+    )
+    if org is None:
+        raise HTTPException(status_code=404, detail="Club's account not found")
+
+    trial_map = await crm_service.trial_days_remaining_by_club(db, {club.id: club})
+    days_by_module = trial_map.get(club.id) or {}
+    if not days_by_module:
+        raise HTTPException(status_code=422, detail="This club has no active trial to extend")
+    min_days_remaining = min(days_by_module.values())
+
+    if not (EXTEND_TRIAL_MIN_DAYS <= body.days <= EXTEND_TRIAL_MAX_DAYS):
+        raise HTTPException(
+            status_code=422,
+            detail=f"Choose between {EXTEND_TRIAL_MIN_DAYS} and {EXTEND_TRIAL_MAX_DAYS} days",
+        )
+
+    # Resolve who gets the confirmation email — an existing pick, or a new
+    # contact written straight to the canonical Club Directory (same helper
+    # the drawer's own "+ Add contact" uses), then bridged into a CrmPerson
+    # the same way every other contact-touching action in this router does.
+    directory_contact_id = _uuid_or_none(body.directory_contact_id)
+    if body.new_contact is not None:
+        full_name = (body.new_contact.full_name or "").strip()
+        email = (body.new_contact.email or "").strip()
+        if not full_name:
+            raise HTTPException(status_code=422, detail="A name is required")
+        if not email:
+            raise HTTPException(status_code=422, detail="An email address is required")
+        contact = await sw.add_directory_contact(
+            db, marketing_club_id=deal.marketing_club_id, full_name=full_name,
+            role=None, email=email, mobile=body.new_contact.mobile,
+        )
+        directory_contact_id = contact.id if contact else None
+
+    if not directory_contact_id and not body.crm_person_id:
+        raise HTTPException(status_code=422, detail="Pick a contact, or add a new one, to email")
+
+    try:
+        person = await sw.resolve_or_materialize_person(
+            db, marketing_club_id=deal.marketing_club_id,
+            directory_contact_id=directory_contact_id, crm_person_id=_uuid_or_none(body.crm_person_id),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    to_email = (person.email or "").strip()
+    if not to_email:
+        raise HTTPException(status_code=422, detail="This contact has no email address on file")
+
+    # The extension itself, then the (optional) nomination — both real
+    # account/entitlement writes, so both land before the best-effort email.
+    # One `now` shared with extend_trial_for_org, so the reported
+    # new_trial_end is byte-identical to what actually landed in the row
+    # rather than two independent now() calls a few ms apart.
+    now = datetime.now(timezone.utc)
+    reset_start = min_days_remaining < 0
+    module_subscriptions.extend_trial_for_org(org, days=body.days, reset_start=reset_start, now=now)
+    new_trial_end = now + timedelta(days=body.days)
+
+    nominated_invited = None
+    if body.nominate_primary_admin:
+        nominated_invited = await _nominate_primary_admin(
+            db, org_id=club.existing_org_id, club_name=club.name, full_name=person.full_name,
+            email=to_email, background_tasks=background_tasks,
+        )
+
+    await db.commit()
+
+    rep_name = actor.user.display_name or actor.user.username
+    utm_code = _resolve_utm_code(club)
+    email_sent = False
+    try:
+        subject, html_body, text_body = await se.render_template(
+            db, "trial_extension", contact_name=person.full_name, club_name=club.name,
+            rep_name=rep_name, utm_code=utm_code or "",
+        )
+        html_body = se.apply_sales_utm(
+            html_body, template_key="trial_extension", rep_username=actor.user.username, utm_code=utm_code,
+        )
+        await se.send_sales_email(
+            to_email=to_email, to_name=person.full_name, subject=subject, html=html_body, text=text_body,
+            rep_name=rep_name, rep_email=actor.user.email,
+        )
+        email_sent = True
+    except Exception:  # noqa: BLE001 - best-effort: the extension already landed
+        logger.exception("extend_trial: could not send confirmation email for deal %s", deal.id)
+
+    note = f"Extended trial by {body.days} day(s) to {new_trial_end.date().isoformat()} for {to_email}"
+    if nominated_invited is True:
+        note += f" — invited {person.full_name} as Primary Admin"
+    elif nominated_invited is False:
+        note += f" — made {person.full_name} Primary Admin"
+    await crm_service.log_activity(
+        db, deal_id=deal.id, person_id=person.id, type="system", body=note,
+        created_by_user_id=actor.user.id,
+        meta={"days": body.days, "new_trial_end": new_trial_end.isoformat(), "email_sent": email_sent},
+    )
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "days": body.days,
+        "new_trial_end": new_trial_end.isoformat(),
+        "email_sent": email_sent,
+        "contact_email": to_email,
+        "nominated_primary_admin": nominated_invited is not None,
+        "primary_admin_invited": bool(nominated_invited),
+    }
 
 
 # ─── Sales Lists ──────────────────────────────────────────────────────────────
