@@ -328,9 +328,9 @@ const COLUMN_SETS = {
 }
 
 const CONTEXT_KEYS = [
-  'season_id','grade_id','grade_name','grade_names','opposition','date_from','date_to',
-  'min_year','max_year','finals_only','captain_only','keeper_only','result',
-  'dismissal','position_min','position_max',
+  'season_id','season_ids','grade_id','grade_name','grade_names','opposition','date_from','date_to',
+  'min_year','max_year','finals_only','captain_only','keeper_only','result','results',
+  'dismissal','dismissals','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
   'gender','overseas','player_role','award_category','award_subcategory','award_name','office_bearer',
   'family_id',
@@ -338,18 +338,41 @@ const CONTEXT_KEYS = [
 // Context keys whose value is a list. Carried through the URL as a repeated
 // param (?c_grade_names=1st+Grade&c_grade_names=3rd+Grade) rather than a
 // comma-joined string — a grade name can contain a comma.
-const CONTEXT_ARRAY_KEYS = new Set(['grade_names'])
+const CONTEXT_ARRAY_KEYS = new Set(['season_ids', 'grade_names', 'results', 'dismissals'])
 const CONTEXT_BOOL_KEYS = new Set(['finals_only', 'captain_only', 'keeper_only', 'on_this_day'])
 
-// The grades currently in scope, as a plain array. `grade_names` is what the
-// picker writes; `grade_name` is the single value it used to write, still
-// honoured so a saved report or a shared link from before the picker went
-// multi-select opens on the grade it names.
-function selectedGradeNames(ctx) {
-  const many = ctx?.grade_names
+// Every filter whose values come from a known list is multi-select: the list
+// key is what the picker writes, the single key is what it used to write and
+// is still honoured, so a saved report or a shared link from before opens on
+// exactly what it names. Pairs are (list key, single key).
+const MULTI_CONTEXT_PAIRS = [
+  ['season_ids', 'season_id'],
+  ['grade_names', 'grade_name'],
+  ['results', 'result'],
+  ['dismissals', 'dismissal'],
+]
+
+// The values currently in scope for one of those pairs, as a plain array.
+function selectedList(ctx, listKey, singleKey) {
+  const many = ctx?.[listKey]
   if (Array.isArray(many)) return many.filter(Boolean)
   if (many) return [many]
-  return ctx?.grade_name ? [ctx.grade_name] : []
+  const one = ctx?.[singleKey]
+  return one ? [one] : []
+}
+const selectedGradeNames = (ctx) => selectedList(ctx, 'grade_names', 'grade_name')
+
+// Picking writes the list key and clears the single one in the same update, so
+// the two can never disagree about what's in scope.
+function setMulti(ctx, listKey, singleKey, values) {
+  return { ...ctx, [listKey]: values, [singleKey]: '' }
+}
+
+// "Season: Summer 2025/26" for one, the names for a few, a count for a lot.
+function listChipLabel(one, many, labels) {
+  if (labels.length === 1) return `${one}: ${labels[0]}`
+  if (labels.length <= 3) return `${many}: ${labels.join(', ')}`
+  return `${many}: ${labels.length} selected`
 }
 
 // Category groupings for the field picker. Field membership is intersected
@@ -435,17 +458,23 @@ function summarizeContextChips(ctx, seasons, grades) {
   if (!ctx) return []
   const out = []
   // `keys` is what a chip clears when it's dismissed — usually just its own,
-  // but the grade chip has to clear the multi-select AND the single value a
+  // but a multi-select chip has to clear the list key AND the single value a
   // pre-multi-select saved report may still carry.
   const push = (key, label, keys) => out.push({ key, label, keys: keys || [key] })
-  if (ctx.season_id) {
-    const s = (seasons || []).find(x => x.id === ctx.season_id)
-    push('season_id', `Season: ${s?.name || ctx.season_id}`)
+  // One chip per multi-select filter, naming what's picked.
+  const pushMulti = (listKey, singleKey, one, many, labelOf) => {
+    const picked = selectedList(ctx, listKey, singleKey)
+    if (!picked.length) return
+    push(listKey, listChipLabel(one, many, picked.map(labelOf || (v => v))), [listKey, singleKey])
   }
-  const gradeSel = selectedGradeNames(ctx)
-  if (gradeSel.length === 1) push('grade_names', `Grade: ${gradeSel[0]}`, ['grade_names', 'grade_name'])
-  else if (gradeSel.length > 1 && gradeSel.length <= 3) push('grade_names', `Grades: ${gradeSel.join(', ')}`, ['grade_names', 'grade_name'])
-  else if (gradeSel.length > 3) push('grade_names', `Grades: ${gradeSel.length} selected`, ['grade_names', 'grade_name'])
+  // Labelled the way the picker labels it, so the chip reads back what was
+  // ticked rather than the season's raw stored name.
+  pushMulti('season_ids', 'season_id', 'Season', 'Seasons',
+    id => {
+      const s = (seasons || []).find(x => x.id === id)
+      return s ? formatSeason(s) : id
+    })
+  pushMulti('grade_names', 'grade_name', 'Grade', 'Grades')
   if (ctx.opposition) push('opposition', `Vs: ${ctx.opposition}`)
   if (ctx.date_from)  push('date_from', `From: ${ctx.date_from}`)
   if (ctx.date_to)    push('date_to', `To: ${ctx.date_to}`)
@@ -455,8 +484,10 @@ function summarizeContextChips(ctx, seasons, grades) {
   if (ctx.captain_only) push('captain_only', 'As captain')
   if (ctx.keeper_only)  push('keeper_only', 'As keeper')
   if (ctx.on_this_day)  push('on_this_day', 'On this day')
-  if (ctx.result)     push('result', `Result: ${ctx.result}`)
-  if (ctx.dismissal)  push('dismissal', `Dismissal: ${ctx.dismissal}`)
+  pushMulti('results', 'result', 'Result', 'Results',
+    v => RESULT_OPTIONS.find(o => o.value === v)?.label || v)
+  pushMulti('dismissals', 'dismissal', 'Dismissal', 'Dismissals',
+    v => DISMISSAL_OPTIONS.find(o => o.value === v)?.label || v)
   if (ctx.position_min) push('position_min', `Position ≥ ${ctx.position_min}`)
   if (ctx.position_max) push('position_max', `Position ≤ ${ctx.position_max}`)
   if (ctx.first_n_matches) push('first_n_matches', `First ${ctx.first_n_matches} matches`)
@@ -749,10 +780,15 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
     <div className="flex flex-col gap-2.5">
       <div>
         <Label>Season</Label>
-        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.season_id) ? activeFieldCls : ''}`} value={ctx.season_id || ''} onChange={e => set('season_id', e.target.value)}>
-          <option value="">All seasons</option>
-          {(seasons || []).map(s => <option key={s.id} value={s.id}>{formatSeason(s)}</option>)}
-        </select>
+        <div className="mt-1">
+          <MultiCheckSelect
+            options={(seasons || []).map(s => ({ value: s.id, label: formatSeason(s) }))}
+            values={selectedList(ctx, 'season_ids', 'season_id')}
+            onChange={next => onChange(setMulti(ctx, 'season_ids', 'season_id', next))}
+            allLabel="All seasons"
+            searchPlaceholder="Search seasons…"
+          />
+        </div>
       </div>
       <div>
         <Label>Grade</Label>
@@ -760,9 +796,7 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           <MultiCheckSelect
             options={(grades || []).map(g => ({ value: g.name, label: g.display_name || g.name }))}
             values={selectedGradeNames(ctx)}
-            // Writes the multi-select key and drops the old single one, so the
-            // two can never disagree about what's in scope.
-            onChange={next => onChange({ ...ctx, grade_names: next, grade_name: '' })}
+            onChange={next => onChange(setMulti(ctx, 'grade_names', 'grade_name', next))}
             allLabel="All grades"
             searchPlaceholder="Search grades…"
           />
@@ -794,9 +828,14 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
       </div>
       <div>
         <Label>Result</Label>
-        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.result) ? activeFieldCls : ''}`} value={ctx.result || ''} onChange={e => set('result', e.target.value)}>
-          {RESULT_OPTIONS.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-        </select>
+        <div className="mt-1">
+          <MultiCheckSelect
+            options={RESULT_OPTIONS.filter(r => r.value)}
+            values={selectedList(ctx, 'results', 'result')}
+            onChange={next => onChange(setMulti(ctx, 'results', 'result', next))}
+            allLabel="Any result"
+          />
+        </div>
       </div>
       <div className="flex flex-wrap gap-2 pt-1">
         {[
@@ -818,9 +857,14 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
         <>
           <div>
             <Label>Dismissal</Label>
-            <select className={`${selectCls} mt-1 ${isFieldActive(ctx.dismissal) ? activeFieldCls : ''}`} value={ctx.dismissal || ''} onChange={e => set('dismissal', e.target.value)}>
-              {DISMISSAL_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            <div className="mt-1">
+              <MultiCheckSelect
+                options={DISMISSAL_OPTIONS.filter(o => o.value)}
+                values={selectedList(ctx, 'dismissals', 'dismissal')}
+                onChange={next => onChange(setMulti(ctx, 'dismissals', 'dismissal', next))}
+                allLabel="Any dismissal"
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-1.5">
             <div>

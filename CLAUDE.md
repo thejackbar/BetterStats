@@ -1,10 +1,17 @@
 # BetterStats — Claude Session Notes
 
-## StatLab's Grade filter takes several grades at once (v9.29.0, Aug 2026)
+## StatLab's list filters take several values at once (v9.29.0, Aug 2026)
 
 Reported: StatLab could only ever be scoped to ONE grade, so "most runs across
 1st and 3rd Grade" was unanswerable. A range picker was the obvious shape and is
 the wrong one — the whole point is dropping a grade out of the middle of a run.
+
+**The rule that decided the scope: a filter whose values come from a KNOWN LIST
+gets the tick-box picker; everything else keeps the control it had.** So Grade,
+Season, Result and Dismissal are multi-select (`grade_names`, `season_ids`,
+`results`, `dismissals`); opposition, player role and the award fields stay free
+text (there is no list to tick), the year and position fields stay ranges, and
+Gender / Overseas stay single because ticking every option there IS "no filter".
 
 - **`grade_names` (a list) is the new filter; `grade_name` (single) stays.** The
   UI writes `grade_names` and clears `grade_name` in the same update, so the two
@@ -31,18 +38,45 @@ the wrong one — the whole point is dropping a grade out of the middle of a run
 - **A selected grade that is no longer in the club's list still draws a row** in
   the picker (renamed, merged away, arriving from a saved report), so it can be
   seen and un-ticked instead of silently scoping the query from nowhere.
-- **Verified against a real Postgres** (13 checks through the shipped builders'
+- **`results` and `dismissals` reuse ONE definition of their SQL, extracted.**
+  `_RESULT_CASE_SQL` and `_dismissal_match_sql(param)` are now shared by the
+  single-value spec entry and the multi-select builder, because two copies of a
+  CASE that size drift the first time one is edited. The dismissal CASE takes
+  its bind param BY NAME so each ticked value gets its own.
+- **`dismissals` lands in the INNINGS block, and that is what keeps residuals
+  honest.** `_residual_disqualified` treats any innings clause as unanswerable,
+  so putting the clause in `ic` costs nothing extra. `results` needed its own
+  entry (`_RESIDUAL_DISQUALIFYING_LIST_KEYS`) since it has no spec entry to read
+  a `value_kind` from — and it **coerces before disqualifying**, or a selection
+  that is entirely junk would filter nothing while still knocking residuals out.
+- **Season multi-select was supported server-side all along and one query had
+  never been told.** Three queries aggregate straight off `player_season_stats`
+  rather than through `game_universe` (player_season's aggregate path,
+  family_season, batting minutes), so they each carry their own season clause —
+  and `query_family_season` only ever honoured the single `season_id`. Shipping
+  the picker would have meant a multi-season pick working on four screens and
+  silently doing nothing on Family by season. All three go through
+  `_pss_season_filter(context, params, prefix)` now.
+- **The Season chip is labelled the way the picker labels it** (`formatSeason`,
+  so "2025/26"), not the season's stored `name` ("Summer 2025/26") as it was.
+  A chip should read back what was ticked.
+- **Verified against a real Postgres** (33 checks through the shipped builders'
   own SQL: two grades returning exactly those two, one grade matching the old
   single-value result byte for byte, a merged grade pulling in its alias' games
   and its alias-tagged residual rows, the comma-carrying name, an unknown grade
-  returning nothing rather than everything, and the residual halves ORing rather
-  than ANDing) and **driven in Chromium** (16: the exact params on the wire, the
-  chip's wording, dismissing it clearing both keys, un-ticking one of three, the
-  search box, an old single-value link still filtering and then handing over
-  cleanly once a second grade is added, no page errors, no overflow at 390px).
-- **Not done**: Season is still a single-select, though `season_ids` has been
-  supported server-side all along and the picker is now a component
-  (`MultiCheckSelect`) that would drop straight in.
+  returning nothing rather than everything, the residual halves ORing rather
+  than ANDing, both results and both seasons, caught counting the keeper's catch
+  as well, a junk value filtering nothing AND not disqualifying residuals, and
+  the shared pss season clause honouring a multi-season pick) and **driven in
+  Chromium** (26: the exact params on the wire for all four pickers, each chip's
+  wording, dismissing one clearing both keys, un-ticking one of three, the
+  search box, an old single-value link on each filter still opening pre-ticked
+  and handing over cleanly once a second value is added, no page errors, no
+  overflow at 390px).
+- **Noticed, deliberately NOT fixed**: the Result filter offers "Tied" and can
+  never match it. `games` carries a winning team or it doesn't, so the CASE only
+  ever emits won/lost/drawn and a tie is indistinguishable from a draw. Fixing
+  it is a data-model question, not a filter one.
 
 ## A duplicate whose first name is shortened is invisible to edit distance (v9.26.1, Aug 2026)
 

@@ -82,8 +82,10 @@ _CTX_KEYS_LIST = {
 # Multi-select TEXT filters — repeated query param only
 # (?grade_names=1st+Grade&grade_names=3rd+Grade). NOT comma-split: a grade
 # name is free text and may contain a comma, which the id lists never can.
+# `results` and `dismissals` come from a fixed vocabulary rather than free
+# text, but they're read the same way so there's one rule for text lists.
 _CTX_KEYS_LIST_TEXT = {
-    "grade_names",
+    "grade_names", "results", "dismissals",
 }
 
 

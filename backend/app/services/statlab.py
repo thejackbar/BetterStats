@@ -149,6 +149,40 @@ TARGETS: dict[str, dict] = {
 # match/game row of the underlying record. value_kind controls how the value is
 # coerced. operator is fixed because each filter has natural semantics.
 
+# The result of a game from OUR side, as SQL. Extracted so the single-value
+# `result` filter and the multi-select `results` one compare the same
+# expression — two copies of a CASE this size drift the first time one is
+# edited. Note it only ever emits won/lost/drawn: `games` has a winning team
+# or it doesn't, so a tie is indistinguishable from a draw here.
+_RESULT_CASE_SQL = (
+    "(CASE WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn'"
+    " WHEN ga.team_name IS NOT NULL AND g.winning_team = ga.team_name THEN 'won'"
+    " WHEN ga.team_name IS NOT NULL THEN 'lost' ELSE 'drawn' END)"
+)
+
+
+def _dismissal_match_sql(param: str) -> str:
+    """Match one friendly dismissal label against what sync actually stores
+    (bare short codes 'c'/'b'/'st', long forms for the rest), plus the
+    caught_behind flag for "caught behind". ELSE keeps the exact-match
+    fallback (e.g. 'not out').
+
+    Takes its bind param by name so the single-value `dismissal` filter and
+    each value of the multi-select `dismissals` one share this one definition.
+    """
+    return (
+        "(CASE "
+        f"WHEN LOWER(:{param}) = 'caught behind' THEN bi.caught_behind IS TRUE "
+        f"WHEN LOWER(:{param}) = 'caught'  THEN (bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' OR LOWER(bi.dismissal_type) LIKE 'ct%' OR LOWER(bi.dismissal_type) LIKE 'caught%') "
+        f"WHEN LOWER(:{param}) = 'bowled'  THEN (bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' OR LOWER(bi.dismissal_type) LIKE 'bowled%') "
+        f"WHEN LOWER(:{param}) = 'stumped' THEN (bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' OR LOWER(bi.dismissal_type) LIKE 'stumped%') "
+        f"WHEN LOWER(:{param}) = 'lbw'     THEN (LOWER(bi.dismissal_type) LIKE 'lbw%' OR LOWER(bi.dismissal_type) LIKE 'leg before%') "
+        f"WHEN LOWER(:{param}) = 'run out' THEN LOWER(bi.dismissal_type) LIKE 'run out%' "
+        f"WHEN LOWER(:{param}) = 'hit wicket' THEN LOWER(bi.dismissal_type) LIKE 'hit wicket%' "
+        f"ELSE LOWER(COALESCE(bi.dismissal_type, '')) = LOWER(:{param}) END)"
+    )
+
+
 # Match-level context filters — applied inside the game_universe CTE.
 # References inside SQL strings:
 #   g, gr, s, am  → table/CTE aliases visible in game_universe's WHERE clause.
@@ -166,25 +200,16 @@ MATCH_CONTEXT_FILTERS: dict[str, dict] = {
     "grade_name":   {"sql": "COALESCE(am.canonical_name, gr.name) = :ctx_grade_name", "value_kind": "text"},
     "opposition":   {"sql": "LOWER(COALESCE(CASE WHEN ga.team_name = g.home_team THEN g.away_team WHEN ga.team_name = g.away_team THEN g.home_team ELSE NULL END, '')) LIKE LOWER(:ctx_opposition)", "value_kind": "text_like"},
     "finals_only":  {"sql": "g.is_final = TRUE",                                       "value_kind": "flag"},
-    "result":       {"sql": "(CASE WHEN g.winning_team IS NULL OR g.winning_team = '' THEN 'drawn' WHEN ga.team_name IS NOT NULL AND g.winning_team = ga.team_name THEN 'won' WHEN ga.team_name IS NOT NULL THEN 'lost' ELSE 'drawn' END) = :ctx_result", "value_kind": "result"},
+    "result":       {"sql": f"{_RESULT_CASE_SQL} = :ctx_result",                       "value_kind": "result"},
     "on_this_day":  {"sql": "EXTRACT(MONTH FROM g.played_at) = EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(DAY FROM g.played_at) = EXTRACT(DAY FROM CURRENT_DATE)", "value_kind": "flag"},
 }
 
 # Per-innings filters — applied to batting_innings (bi) joins only; relevant
 # only for innings_list and the live-aggregate paths of player_*.
 INNINGS_CONTEXT_FILTERS: dict[str, dict] = {
-    # Value-aware so the friendly labels match what sync actually stores (bare
-    # short codes 'c'/'b'/'st', long forms for the rest), plus the caught_behind
-    # flag for "caught behind". ELSE keeps the exact-match fallback (e.g. 'not out').
-    "dismissal":    {"sql": "(CASE "
-                            "WHEN LOWER(:ctx_dismissal) = 'caught behind' THEN bi.caught_behind IS TRUE "
-                            "WHEN LOWER(:ctx_dismissal) = 'caught'  THEN (bi.dismissal_type = 'c' OR bi.dismissal_type LIKE 'c %' OR LOWER(bi.dismissal_type) LIKE 'ct%' OR LOWER(bi.dismissal_type) LIKE 'caught%') "
-                            "WHEN LOWER(:ctx_dismissal) = 'bowled'  THEN (bi.dismissal_type = 'b' OR bi.dismissal_type LIKE 'b %' OR LOWER(bi.dismissal_type) LIKE 'bowled%') "
-                            "WHEN LOWER(:ctx_dismissal) = 'stumped' THEN (bi.dismissal_type = 'st' OR bi.dismissal_type LIKE 'st %' OR LOWER(bi.dismissal_type) LIKE 'stumped%') "
-                            "WHEN LOWER(:ctx_dismissal) = 'lbw'     THEN (LOWER(bi.dismissal_type) LIKE 'lbw%' OR LOWER(bi.dismissal_type) LIKE 'leg before%') "
-                            "WHEN LOWER(:ctx_dismissal) = 'run out' THEN LOWER(bi.dismissal_type) LIKE 'run out%' "
-                            "WHEN LOWER(:ctx_dismissal) = 'hit wicket' THEN LOWER(bi.dismissal_type) LIKE 'hit wicket%' "
-                            "ELSE LOWER(COALESCE(bi.dismissal_type, '')) = LOWER(:ctx_dismissal) END)", "value_kind": "text"},
+    # See _dismissal_match_sql — the same CASE serves the multi-select
+    # `dismissals` filter, one bound value at a time.
+    "dismissal":    {"sql": _dismissal_match_sql("ctx_dismissal"), "value_kind": "text"},
     "position_min": {"sql": "bi.batting_position >= :ctx_position_min",                       "value_kind": "int"},
     "position_max": {"sql": "bi.batting_position <= :ctx_position_max",                       "value_kind": "int"},
 }
@@ -253,6 +278,14 @@ CONTEXT_FILTERS: dict[str, dict] = {**MATCH_CONTEXT_FILTERS, **INNINGS_CONTEXT_F
 _RESIDUAL_DISQUALIFYING_MATCH_KEYS = (
     "date_from", "date_to", "opposition", "finals_only", "result", "on_this_day",
 )
+# The multi-select forms of the same unanswerable questions, mapped to the
+# value_kind their single-value twin declares. Held separately because they
+# have no MATCH_CONTEXT_FILTERS spec entry of their own — the clause grows
+# with the selection, so it's built in _build_match_list_filters instead.
+# (`season_ids` and `grade_ids`/`grade_names` are deliberately absent: a
+# residual carries its own season and grade. `dismissals` is absent too — it
+# lands in the innings block, which disqualifies on its own.)
+_RESIDUAL_DISQUALIFYING_LIST_KEYS = {"results": "result"}
 _RESIDUAL_DISQUALIFYING_PLAYER_KEYS = ("captain_only", "keeper_only")
 
 # The player-level filters a residual row CAN be tested against — everything
@@ -278,6 +311,11 @@ def _residual_disqualified(context: dict, ic: list[str]) -> bool:
             coerced = _coerce_value(PLAYER_CONTEXT_FILTERS[key]["value_kind"], context[key])
             if coerced not in (None, False):
                 return True
+    for key, kind in _RESIDUAL_DISQUALIFYING_LIST_KEYS.items():
+        # Coerce first: a selection that's entirely junk filters nothing, so it
+        # must not knock residuals out either.
+        if any(_coerce_value(kind, v) for v in _text_list(context.get(key))):
+            return True
     return False
 
 
@@ -809,6 +847,15 @@ def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
         for i, v in enumerate(grade_ids):
             params[f"ctx_grade_ids_{i}"] = v
 
+    # Results ticked (won / lost / drawn). Same expression the single-value
+    # `result` filter compares, so the two can't disagree about what a draw is.
+    results = [v for v in (_coerce_value("result", x) for x in _text_list(ctx.get("results"))) if v]
+    if results:
+        ph = ", ".join(f":ctx_results_{i}" for i in range(len(results)))
+        clauses.append(f"{_RESULT_CASE_SQL} IN ({ph})")
+        for i, v in enumerate(results):
+            params[f"ctx_results_{i}"] = v
+
     # Grades ticked by name — what StatLab's own Grade picker sends. Compared
     # against the same COALESCE(am.canonical_name, gr.name) the single-value
     # grade_name filter uses, so a merged grade still resolves through its
@@ -821,6 +868,62 @@ def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
             params[f"ctx_grade_names_{i}"] = v
 
     return clauses, params
+
+
+def _pss_season_filter(context: dict, params: dict, prefix: str) -> str:
+    """`AND (…)` restricting a player_season_stats-based query to the chosen
+    season(s), alias-aware, or "" when no season is chosen.
+
+    Three queries aggregate straight off pss rather than through
+    game_universe (player_season's aggregate path, family_season, and the
+    batting-minutes derived query), so MATCH_CONTEXT_FILTERS never reaches
+    them and each needs this clause of its own. They had three near-copies of
+    it, one of which only ever honoured the single `season_id` — which is how
+    a multi-season pick would have been silently ignored on one screen and
+    obeyed on the others. `prefix` keeps the bind names distinct per query.
+
+    The multi-select `season_ids` wins outright over the legacy single
+    `season_id`, rather than ANDing: the picker writes one and clears the
+    other, and a saved report carrying both means the newer key.
+    """
+    season_ids = context.get("season_ids")
+    if isinstance(season_ids, str):
+        season_ids = [x.strip() for x in season_ids.split(",") if x.strip()]
+    season_ids = [v for v in (_coerce_value("uuid", x) for x in (season_ids or [])) if v]
+    if season_ids:
+        ph = ", ".join(f"CAST(:{prefix}season_ids_{i} AS UUID)" for i in range(len(season_ids)))
+        for i, v in enumerate(season_ids):
+            params[f"{prefix}season_ids_{i}"] = v
+        return (
+            f"AND (s.id IN ({ph}) "
+            f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
+        )
+    season_id = _coerce_value("uuid", context.get("season_id"))
+    if season_id:
+        params[f"{prefix}season_id"] = season_id
+        return (
+            f"AND (s.id = CAST(:{prefix}season_id AS UUID) "
+            f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
+            f"WHERE canonical_season_id = CAST(:{prefix}season_id AS UUID) "
+            f"AND undone_at IS NULL))"
+        )
+    return ""
+
+
+def _build_innings_list_filters(ctx: dict) -> tuple[list[str], dict]:
+    """Multi-select INNINGS-scope filters (dismissals). ORed inside one
+    bracket — "caught or caught behind" is one question about one innings,
+    whereas ANDing would ask for an innings that ended two ways at once."""
+    values = _text_list(ctx.get("dismissals"))
+    if not values:
+        return [], {}
+    ors, params = [], {}
+    for i, v in enumerate(values):
+        param = f"ctx_dismissals_{i}"
+        ors.append(_dismissal_match_sql(param))
+        params[param] = v
+    return ["(" + " OR ".join(ors) + ")"], params
 
 
 def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict, list[str], dict, bool]:
@@ -838,6 +941,13 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
         mp = {**mp, **list_params}
         mu = True
     ic, ip, _iu = _build_filter_block(ctx, INNINGS_CONTEXT_FILTERS)
+    # Merge in the multi-select INNINGS filter (dismissals). Landing in `ic` is
+    # what keeps residuals disqualified from a dismissal-scoped query — see
+    # _residual_disqualified, which treats any innings clause as unanswerable.
+    inn_clauses, inn_params = _build_innings_list_filters(ctx)
+    if inn_clauses:
+        ic = ic + inn_clauses
+        ip = {**ip, **inn_params}
     pc, pp, _pu = _build_filter_block(ctx, PLAYER_CONTEXT_FILTERS)
     return mc, mp, ic, ip, pc, pp, mu
 
@@ -1315,28 +1425,7 @@ async def query_player_season(
             LIMIT :limit OFFSET :offset
         """
     else:
-        season_filter = ""
-        # Multi-select season_ids takes precedence over the legacy single key.
-        season_ids = context.get("season_ids")
-        if isinstance(season_ids, str):
-            season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
-        if season_ids:
-            ph = ", ".join(f"CAST(:ctx_pss_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
-            season_filter = (
-                f"AND (s.id IN ({ph}) "
-                f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
-                f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
-            )
-            for i, v in enumerate(season_ids):
-                params[f"ctx_pss_season_ids_{i}"] = v
-        elif context.get("season_id"):
-            season_filter = (
-                "AND (s.id = CAST(:ctx_season_id AS UUID) "
-                "OR s.id IN (SELECT alias_season_id FROM season_aliases "
-                "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
-                "AND undone_at IS NULL))"
-            )
-            params["ctx_season_id"] = context["season_id"]
+        season_filter = _pss_season_filter(context, params, "ctx_pss_")
         sql = f"""
             WITH per_pss AS (
                 -- The effective view, not the base table: an imported season
@@ -1646,15 +1735,7 @@ async def query_family_season(
     metric_clause_sql, metric_params = _compile_metric_clause(metric_filters, filter_tree, FAMILY_AGG_METRICS)
     params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
 
-    season_filter = ""
-    if context.get("season_id"):
-        season_filter = (
-            "AND (s.id = CAST(:ctx_season_id AS UUID) "
-            "OR s.id IN (SELECT alias_season_id FROM season_aliases "
-            "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
-            "AND undone_at IS NULL))"
-        )
-        params["ctx_season_id"] = context["season_id"]
+    season_filter = _pss_season_filter(context, params, "ctx_fs_")
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
@@ -4268,27 +4349,7 @@ async def derived_most_minutes_in_season(
 ) -> list[dict]:
     """Most batting minutes accumulated in a single season."""
     params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
-    season_filter = ""
-    season_ids = context.get("season_ids")
-    if isinstance(season_ids, str):
-        season_ids = [s.strip() for s in season_ids.split(",") if s.strip()]
-    if season_ids:
-        ph = ", ".join(f"CAST(:ctx_mm_season_ids_{i} AS UUID)" for i in range(len(season_ids)))
-        season_filter = (
-            f"AND (s.id IN ({ph}) "
-            f"OR s.id IN (SELECT alias_season_id FROM season_aliases "
-            f"WHERE canonical_season_id IN ({ph}) AND undone_at IS NULL))"
-        )
-        for i, v in enumerate(season_ids):
-            params[f"ctx_mm_season_ids_{i}"] = v
-    elif context.get("season_id"):
-        season_filter = (
-            "AND (s.id = CAST(:ctx_season_id AS UUID) "
-            "OR s.id IN (SELECT alias_season_id FROM season_aliases "
-            "WHERE canonical_season_id = CAST(:ctx_season_id AS UUID) "
-            "AND undone_at IS NULL))"
-        )
-        params["ctx_season_id"] = context["season_id"]
+    season_filter = _pss_season_filter(context, params, "ctx_mm_")
     sql = f"""
         SELECT
             p.id::text                                   AS player_id,
