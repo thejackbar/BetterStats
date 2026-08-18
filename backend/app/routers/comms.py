@@ -3083,6 +3083,18 @@ async def list_templates(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
+    if org_is_outreach(club):
+        # The platform's own automated wording (trial lifecycle nudges) lives
+        # here as ordinary editable templates. Seeded on demand so a
+        # freshly-designated outreach org picks them up with no redeploy —
+        # same "call it cheaply and let it no-op" pattern seed_sales_templates
+        # already uses. Never overwrites an edited row.
+        from app.services import trial_lifecycle
+        try:
+            await trial_lifecycle.seed_nudge_templates(db)
+        except Exception:  # noqa: BLE001 - listing templates must not fail on a seed hiccup
+            await db.rollback()
+            logger.exception("comms: trial nudge template seed failed")
     rows = (await db.execute(
         select(CommsTemplate).where(CommsTemplate.organisation_id == club.id)
         .order_by(CommsTemplate.name)
