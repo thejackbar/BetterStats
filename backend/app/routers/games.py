@@ -146,11 +146,14 @@ async def list_games(
     # above and a manual game may have no grade at all, so they are deliberately
     # left alone — the scope clause's own `IS NULL OR` half makes the same call
     # for a grade-less row on this side.
-    if not grade_id:
-        scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
-        if scope.active:
-            clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
-            scope.bind(params)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    if grade_id:
+        # A picked grade beats the CATEGORY half only — a grade plays more than
+        # one format, so Match Type still has to bite inside it.
+        scope = scope.formats_only()
+    if scope.active:
+        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
+        scope.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first
     # (classify_match_result computes it against that syncing org's own

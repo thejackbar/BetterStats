@@ -113,6 +113,26 @@ go.
   the default is an EXCLUSION and should not. `primary_category()` is the same
   junior-first precedence `suggest_category` already used, so the default path
   is byte-for-byte what it was.
+- **A picked grade beats the CATEGORY half of the scope and NOT the format half
+  (`GradeScope.formats_only()`).** Reported from the Leaderboard with 4th Grade
+  selected: the Match Type pills did nothing. The rule above was written as
+  `if grade_id or grade_name: scope = None`, which threw the format away with
+  the category — and picking a grade AND a format is the single most useful
+  thing this filter does, because a grade routinely plays both in one season.
+  Six sites: the three extended leaderboards, `records.py`, `games.py`,
+  `get_org_results`, `_club_results` and `get_club_summary`'s grade branch.
+- **The grade branches never interpolated `scope_clause` at all**, which is the
+  other half of the same report. A picked grade takes its OWN query path in
+  every one of those functions (`WHERE g.grade_id = :grade_id`, or
+  `WHERE {_GRADE_MATCH}` for a grade picked by name), and those templates simply
+  had no `{scope_clause}` in them — so even once `formats_only()` kept the scope
+  alive it had nowhere to land. **When adding a filter to a leaderboard, check
+  the picked-grade branch as well as the default one**; they are separate SQL and
+  the default branch passing is not evidence about the other. `records.py` is
+  the worst of it — `game_grade_clause`, `pairs_grade_clause`, `_bat_where`,
+  `_bowl_where` and `_match_grade_filter` are five separate fragments, and the
+  first two used to REPLACE the scope clause with the grade condition rather
+  than append to it.
 - **FORMAT IS PER FIXTURE, CATEGORY IS PER GRADE, and the two are not
   symmetrical.** The first cut filtered format at grade level and was wrong:
   Applecross 1st Grade plays 32 one-day and 26 two-day games inside ONE season,
@@ -222,7 +242,7 @@ go.
   the two array columns into the existing aggregate multiplies every batting row
   by the number of tags and silently inflates the RUNS column — written that way
   first, caught before it shipped, and asserted against.
-- **Verified against a real Postgres** (182 checks: migration 259 applied three
+- **Verified against a real Postgres** (191 checks: migration 259 applied three
   times to a populated pre-259 table and matching the lifespan mirror, the
   plural age-group spellings, both org resolvers' three-step fallbacks, every
   branch of the two axes composing, a senior-only club coming out inactive and
@@ -234,7 +254,11 @@ go.
   double-counting, an unlabelled game in a mixed grade landing in NO column, the
   Python/SQL format mappings agreeing on 18 real strings, an import residual
   contributing nothing to a format column while still counting under a category
-  filter, and every figure on the new profile page) and
+  filter, every figure on the new profile page, and the picked-grade suite: a
+  grade plus Two Day, a grade plus One Day, the two splitting back to the
+  grade's own total, and the same across club records, the club summary and its
+  game count, the games list and the results list — with a control asserting an
+  explicitly picked junior grade still beats the CATEGORY filter) and
   **driven in Chromium** (50: the pills that render and the ones
   that no longer do, the exact params on the wire for all four dashboard
   fetches, the two filters composing, clearing one without the other, the

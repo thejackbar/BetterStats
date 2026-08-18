@@ -264,6 +264,22 @@ class GradeScope:
                 params[self._fmt_fallback_param] = self.format_fallback_ids
         return params
 
+    def formats_only(self) -> "GradeScope":
+        """This scope with the CATEGORY half dropped and the format half kept.
+
+        For the call sites where an explicitly picked grade beats the category
+        default: someone who chose "Under 14s" from the dropdown plainly wants
+        the juniors, so the category exclusion has to go. The FORMAT filter must
+        NOT go with it — picking 4th Grade and Two Day is the single most useful
+        combination this filter has, and a grade that plays both formats is
+        exactly the case it exists for. Dropping both is what left the Match Type
+        pills doing nothing whenever a grade was selected.
+        """
+        return GradeScope(
+            self.categories, [], (), self.param,
+            formats=self.formats, format_fallback_ids=self.format_fallback_ids,
+        )
+
     def as_meta(self) -> dict:
         """What the API reports back so a page can label a filtered figure."""
         return {

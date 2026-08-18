@@ -779,11 +779,12 @@ async def get_org_results(
         query += " AND g.is_final = TRUE"
     # Grade-type / match-type scope. An explicitly picked grade beats it, the
     # same rule the leaderboards follow.
-    if not grade_id:
-        scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
-        if scope.active:
-            query += scope.clause("g.grade_id")
-            scope.bind(params)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    if grade_id:
+        scope = scope.formats_only()
+    if scope.active:
+        query += scope.clause("g.grade_id")
+        scope.bind(params)
     query += " ORDER BY g.played_at DESC"
     rows = await db.execute(text(query), params)
     return [

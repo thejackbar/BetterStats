@@ -128,7 +128,7 @@ async def get_records(
     # clause below sees an inactive scope and emits no SQL.
     scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     if grade_id or grade_name:
-        scope = None
+        scope = scope.formats_only()
     scope_active = bool(scope is not None and scope.active)
     scope_clause = scope.clause("g.grade_id") if scope_active else ""
 
@@ -197,8 +197,10 @@ async def get_records(
             " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id"
         )
     else:
-        game_grade_clause  = " AND g.grade_id = :grade_id" if grade_id else scope_clause
-        pairs_grade_clause = " AND g.grade_id = :grade_id" if grade_id else scope_clause
+        # A picked grade narrows to that grade; the scope clause is APPENDED
+        # rather than replaced, so a Match Type filter still bites inside it.
+        game_grade_clause  = (" AND g.grade_id = :grade_id" if grade_id else "") + scope_clause
+        pairs_grade_clause = (" AND g.grade_id = :grade_id" if grade_id else "") + scope_clause
         pairs_game_join = (
             " JOIN v_effective_games g ON g.id = pt.game_id JOIN grades gr ON gr.id = g.grade_id AND gr.season_id = ANY(:season_ids)"
             if season_ids else
@@ -235,6 +237,7 @@ async def get_records(
         f" {_gw_season}"
         f" {finals_clause}"
         f"{gender_clause}"
+        f"{scope_clause}"
         " AND NOT COALESCE(bi.did_not_bat, FALSE)"
         " AND LOWER(COALESCE(bi.dismissal_type,'')) NOT IN ('absent','did not bat','dnb')"
     )
@@ -249,6 +252,7 @@ async def get_records(
         f" {_gw_season}"
         f" {finals_clause}"
         f"{gender_clause}"
+        f"{scope_clause}"
     )
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
@@ -263,7 +267,7 @@ async def get_records(
     # no per-innings rows for a best-innings or best-figures record anyway.
     use_game_level = bool(grade_name or finals_only or captain_only or scope_active)
     # Grade filter fragment for use-game-level queries that don't use _grade_match
-    _match_grade_filter = f"AND {_grade_match}" if grade_name else scope_clause
+    _match_grade_filter = (f"AND {_grade_match}{scope_clause}" if grade_name else scope_clause)
 
     # For the no-grade-name path (with or without finals_only/captain_only): same joins as
     # grade_name but without the grade filter. Also used (unconditionally, regardless of

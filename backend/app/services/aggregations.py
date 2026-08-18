@@ -793,9 +793,10 @@ async def get_fielding_leaderboard(
     ALLOWED_SORTS = {"total_catches", "total_catches_non_wk", "total_catches_wk", "total_run_outs", "total_stumpings", "total_dismissals", "games"}
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_dismissals"
-    # An explicitly picked grade beats the category default.
+    # An explicitly picked grade beats the CATEGORY default, but not the match
+    # type: 4th Grade AND Two Day is the combination this filter exists for.
     if grade_id or grade_name:
-        scope = None
+        scope = scope.formats_only() if scope is not None else None
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
@@ -856,7 +857,7 @@ async def get_fielding_leaderboard(
                 SELECT fs.player_id, fs.game_id, fs.catches, fs.catches_wk, fs.run_outs, fs.stumpings
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id{captain_join}
-                WHERE g.grade_id = :grade_id{finals_clause}
+                WHERE g.grade_id = :grade_id{finals_clause}{scope_clause}
             ){import_cte}
             SELECT * FROM (
                 SELECT
@@ -911,7 +912,7 @@ async def get_fielding_leaderboard(
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
-                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
+                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}{scope_clause}
             ){import_cte}
             SELECT * FROM (
                 SELECT
@@ -2446,11 +2447,13 @@ async def get_batting_leaderboard_extended(
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
-    # A grade the viewer picked by name beats the category default. Someone who
+    # A grade the viewer picked by name beats the CATEGORY default. Someone who
     # has chosen "Under 14s" from the grade dropdown plainly wants the juniors,
-    # and silently returning an empty board would read as broken.
+    # and silently returning an empty board would read as broken. The MATCH TYPE
+    # half survives: a grade routinely plays more than one format, so filtering
+    # within a picked grade is the whole point.
     if grade_id or grade_name:
-        scope = None
+        scope = scope.formats_only() if scope is not None else None
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
@@ -2515,7 +2518,7 @@ async def get_batting_leaderboard_extended(
                 SELECT bi.player_id, bi.game_id, bi.runs, bi.balls, bi.fours, bi.sixes, bi.not_out
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id{captain_join}
-                WHERE g.grade_id = :grade_id
+                WHERE g.grade_id = :grade_id{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
             ){import_cte}
@@ -2587,7 +2590,7 @@ async def get_batting_leaderboard_extended(
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
-                WHERE {_GRADE_MATCH}{season_clause}
+                WHERE {_GRADE_MATCH}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){finals_clause}
             ){import_cte}
@@ -2823,10 +2826,10 @@ async def get_bowling_leaderboard_extended(
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
 
-    # An explicitly picked grade beats the category default — see the note in
-    # get_batting_leaderboard_extended.
+    # An explicitly picked grade beats the category default, format half kept —
+    # see the note in get_batting_leaderboard_extended.
     if grade_id or grade_name:
-        scope = None
+        scope = scope.formats_only() if scope is not None else None
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
@@ -2905,7 +2908,7 @@ async def get_bowling_leaderboard_extended(
                 SELECT bs.player_id, bs.game_id, bs.wickets, bs.runs, bs.overs, bs.maidens
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id{captain_join}
-                WHERE g.grade_id = :grade_id{finals_clause}
+                WHERE g.grade_id = :grade_id{finals_clause}{scope_clause}
             ),
             best_spell AS (
                 SELECT DISTINCT ON (bq.player_id)
@@ -2979,7 +2982,7 @@ async def get_bowling_leaderboard_extended(
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id{captain_join}
-                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}
+                WHERE {_GRADE_MATCH}{season_clause}{finals_clause}{scope_clause}
             ),
             best_spell AS (
                 SELECT DISTINCT ON (bq.player_id)
@@ -3696,12 +3699,12 @@ async def _club_results(
         )""")
         params["sids"] = season_ids
 
-    # Grade-type / match-type scope. Dropped when a single grade is picked —
-    # an explicitly chosen grade beats the category default, the same rule the
-    # leaderboards follow.
-    if _scoped(scope) and not grade_id:
-        clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
-        scope.bind(params)
+    # Grade-type / match-type scope. A picked grade beats the CATEGORY half, the
+    # same rule the leaderboards follow, but keeps the match type.
+    eff = scope.formats_only() if (scope is not None and grade_id) else scope
+    if _scoped(eff):
+        clauses.append(eff.clause("g.grade_id").removeprefix(" AND ").strip())
+        eff.bind(params)
 
     # g.result is ALSO relative to whichever club's sync wrote it first
     # (classify_match_result computes it against that syncing org's own
@@ -3785,11 +3788,19 @@ async def get_club_summary(
     # headline matches the Top Batters / Top Bowlers lists shown beside it.
     # A grade is season-specific, so season_id is implied by the grade.
     if grade_id:
+        # A picked grade beats the CATEGORY half of the scope, but Match Type
+        # still applies inside it — that grade routinely plays more than one
+        # format, which is the whole reason the filter is per fixture.
+        fmt_scope = scope.formats_only() if scope is not None else None
+        fmt_clause = fmt_scope.format_clause("g") if _scoped(fmt_scope) else ""
+        fmt_params: dict = {"org_id": org_id, "grade_id": grade_id}
+        if _scoped(fmt_scope):
+            fmt_scope.bind(fmt_params)
         res = await session.execute(
-            text("""
+            text(f"""
                 WITH gg AS (
-                    SELECT id FROM v_effective_games
-                    WHERE grade_id = CAST(:grade_id AS UUID)
+                    SELECT g.id FROM v_effective_games g
+                    WHERE g.grade_id = CAST(:grade_id AS UUID){fmt_clause}
                 ),
                 bat AS (
                     SELECT bi.player_id, bi.runs
@@ -3824,7 +3835,7 @@ async def get_club_summary(
                         UNION SELECT player_id FROM fld
                      ) u)                                        AS total_players
             """),
-            {"org_id": org_id, "grade_id": grade_id},
+            fmt_params,
         )
         row = dict(res.mappings().first() or {})
         base.update({
@@ -3834,7 +3845,7 @@ async def get_club_summary(
             "total_players": int(row.get("total_players") or 0),
             "seasons": 1,
         })
-        base.update(await _club_results(session, org_id, grade_id=grade_id))
+        base.update(await _club_results(session, org_id, grade_id=grade_id, scope=fmt_scope))
         return base
 
     season_ids = await resolve_season_filter(session, org_id, season_id)
