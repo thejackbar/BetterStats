@@ -455,12 +455,12 @@ async def seed_sales_templates(session) -> int:
     for key in BUILT_IN_TEMPLATES:
         result = await session.execute(
             _text("""
-                INSERT INTO comms_templates (id, organisation_id, name, subject, html)
-                VALUES (gen_random_uuid(), :org_id, :name, :subject, :html)
-                ON CONFLICT (organisation_id, name) DO NOTHING
+                INSERT INTO comms_templates (id, organisation_id, name, subject, html, sales_template_key)
+                VALUES (gen_random_uuid(), :org_id, :name, :subject, :html, :key)
+                ON CONFLICT (organisation_id, sales_template_key) DO NOTHING
             """),
             {
-                "org_id": org.id, "name": _db_name(key),
+                "org_id": org.id, "name": _db_name(key), "key": key,
                 "subject": _SEED_SUBJECT[key],
                 # Plain substring replace, NOT str.format() — the body also
                 # holds {{merge_token}} placeholders for _merge() to resolve
@@ -478,6 +478,14 @@ async def seed_sales_templates(session) -> int:
 
 
 async def _load_template_row(session, key: str):
+    """Resolved by the stable ``sales_template_key`` (migration 261), NOT
+    by name — a super admin renaming this row in BetterAdmin -> Comms ->
+    Templates must never break which dropdown entry it backs. A row seeded
+    before 261 shipped gets its key backfilled by that migration; a row
+    that somehow still has no key (pre-261 AND already renamed away from
+    the old default before the backfill could match it) falls through to
+    ``render_template``'s hardcoded fallback, same as a genuinely missing
+    row always has."""
     from sqlalchemy import select as _select
     from app.services.marketing_org import get_outreach_org
     from app.models.db import CommsTemplate
@@ -487,7 +495,7 @@ async def _load_template_row(session, key: str):
     return await session.scalar(
         _select(CommsTemplate).where(
             CommsTemplate.organisation_id == org.id,
-            CommsTemplate.name == _db_name(key),
+            CommsTemplate.sales_template_key == key,
         )
     )
 

@@ -4127,6 +4127,7 @@ class CommsTemplate(Base):
     __tablename__ = "comms_templates"
     __table_args__ = (
         UniqueConstraint("organisation_id", "name", name="uq_comms_template_org_name"),
+        UniqueConstraint("organisation_id", "sales_template_key", name="uq_comms_template_org_sales_key"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -4138,6 +4139,15 @@ class CommsTemplate(Base):
     # Workspace's built-in one-to-one templates).
     subject = Column(Text, nullable=True)
     html = Column(Text, nullable=False, server_default="")
+    # Migration 261: the stable machine key (services/sales_email.py's
+    # BUILT_IN_TEMPLATES, e.g. 'trial_information') this row backs in the
+    # Sales Workspace's Send an Email dropdown, if any -- NULL for an
+    # ordinary club template. Lets ``name`` be renamed freely without
+    # breaking which dropdown entry resolves to this row; a plain unique
+    # constraint on (organisation_id, sales_template_key) permits any
+    # number of NULLs (SQL: NULL is never equal to NULL) so it only ever
+    # constrains the handful of sales-linked rows.
+    sales_template_key = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 

@@ -112,7 +112,7 @@ export default function CommsTemplates() {
     let live = true
     setLoadingDraft(true); setError(''); setNotice('')
     api.commsGetTemplate(selId)
-      .then(t => { if (!live) return; setDraft({ id: t.id, name: t.name || '', subject: t.subject || '', html: t.html ?? '' }); setEditorKey(k => k + 1) })
+      .then(t => { if (!live) return; setDraft({ id: t.id, name: t.name || '', subject: t.subject || '', html: t.html ?? '', salesTemplateLabel: t.sales_template_label || '' }); setEditorKey(k => k + 1) })
       .catch(e => { if (live) setError(e.message) })
       .finally(() => { if (live) setLoadingDraft(false) })
     return () => { live = false }
@@ -197,7 +197,8 @@ export default function CommsTemplates() {
   }
 
   const items = useMemo(() => (templates || []).map(t => ({
-    id: t.id, name: t.name, sub: 'Email layout',
+    id: t.id, name: t.name,
+    sub: t.sales_template_label ? `Email layout · Sales Workspace: ${t.sales_template_label}` : 'Email layout',
   })), [templates])
 
   if (intro.showing) {
@@ -250,6 +251,13 @@ export default function CommsTemplates() {
                   )}
                 </>}
               />
+
+              {draft.salesTemplateLabel && (
+                <Note toneKey="calm" className="mb-3">
+                  Linked to the Sales Workspace's <strong>{draft.salesTemplateLabel}</strong> dropdown entry.
+                  Renaming this template above is safe — the link is by id, not by name.
+                </Note>
+              )}
 
               <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
                 <TextInput value={draft.subject}
