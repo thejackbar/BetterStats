@@ -467,10 +467,42 @@ function WebsiteAnalyticsCard({ data }) {
 // still attaches meta.html when the confirmation email rendered, so the
 // SAME "View email" affordance below works off meta.html alone, whatever
 // `type` the row is.
-function ActivityRow({ a, onViewEmail }) {
+// Shared by the pinned-notes block and ActivityRow below — a note is a
+// rep's own free-text record and the only activity kind this drawer ever
+// lets anyone rewrite (a call/email/system entry is a log of something
+// that actually happened, not an editable draft).
+function NoteEditForm({ value, onChange, onSave, onCancel, saving }) {
+  return (
+    <div className="space-y-1.5">
+      <TextArea value={value.body} onChange={e => onChange(f => ({ ...f, body: e.target.value }))} autoFocus />
+      <div className="flex items-center justify-between gap-2">
+        <label className="flex items-center gap-1 text-[11px] text-pb-faint">
+          <input type="checkbox" checked={value.pinned} onChange={e => onChange(f => ({ ...f, pinned: e.target.checked }))} /> Pin
+        </label>
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={onCancel} className="text-[11px] text-pb-faint hover:underline">Cancel</button>
+          <Btn type="button" sm disabled={saving} onClick={onSave}>{saving ? 'Saving…' : 'Save'}</Btn>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStartEdit, onSaveEdit, onCancelEdit, savingEdit }) {
   const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call')
     : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
   const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
+  if (a.type === 'note' && editing) {
+    return (
+      <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <Pill tone={tone}>{kindLabel}</Pill>
+          <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
+        </div>
+        <NoteEditForm value={editValue} onChange={onChangeEdit} onSave={onSaveEdit} onCancel={onCancelEdit} saving={savingEdit} />
+      </div>
+    )
+  }
   return (
     <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
       <div className="flex items-center justify-between gap-2">
@@ -478,6 +510,12 @@ function ActivityRow({ a, onViewEmail }) {
         <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
       </div>
       {a.body && <p className="mt-1 text-pb-text whitespace-pre-wrap">{a.body}</p>}
+      {a.type === 'note' && (
+        <div className="mt-1 flex items-center gap-2">
+          <button type="button" onClick={() => onStartEdit?.(a)} className="text-[10.5px] text-pb-accent hover:underline">Edit</button>
+          {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
+        </div>
+      )}
       {a.meta?.html && (
         <button type="button" onClick={() => onViewEmail?.(a)}
           className="mt-1 text-[11px] text-pb-accent hover:underline">
@@ -496,6 +534,17 @@ export default function SalesWorkspace() {
   const toast = useToast()
   const isSuper = user?.role === 'super_admin'
   const [searchParams, setSearchParams] = useSearchParams()
+  // react-router hands back a NEW setSearchParams identity on every URL
+  // change (it's memoized on the current searchParams object, which is
+  // itself rebuilt whenever location.search changes) — so a plain click on
+  // a club, which sets ?club=<id>, was recreating setSearchParams on every
+  // single select. loadClubs listed it as a dependency, which recreated
+  // loadClubs, which reran the effect below and reloaded the whole queue —
+  // the list flashing to "Loading…" and back on EVERY click, not just after
+  // a Save Call/Send Email. Routed through a ref so loadClubs never depends
+  // on this identity churn; the ref is always kept current.
+  const setSearchParamsRef = useRef(setSearchParams)
+  useEffect(() => { setSearchParamsRef.current = setSearchParams }, [setSearchParams])
 
   // Queue (the daily calling list + drawer) vs Events (List/Calendar of
   // every event a call outcome created plus anything added by hand).
@@ -564,6 +613,9 @@ export default function SalesWorkspace() {
   }
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
+  const [editingNoteId, setEditingNoteId] = useState(null)
+  const [editNoteForm, setEditNoteForm] = useState({ body: '', pinned: false })
+  const [savingNoteEdit, setSavingNoteEdit] = useState(false)
   const [mapOpen, setMapOpen] = useState(true)
   const [showAddContact, setShowAddContact] = useState(false)
   const [contactForm, setContactForm] = useState({ full_name: '', role: '', email: '', mobile: '' })
@@ -701,13 +753,25 @@ export default function SalesWorkspace() {
           selectedIdRef.current = null
           setSelectedId(null)
           setDrawer(null)
-          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+          setSearchParamsRef.current((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
         }
+      } else if (selectedIdRef.current) {
+        // Still selected and still in the filtered list, but a resort (a
+        // call/email action moves priority_score, updated_at, etc.) can
+        // relocate its row well outside the current viewport with nothing
+        // else bringing it back — the open club's row must always stay on
+        // display, so re-anchor to it every time the queue reloads while
+        // it's still selected. A no-op via 'nearest' when it's already
+        // visible, so an ordinary filter tweak doesn't feel like a jump.
+        const id = selectedIdRef.current
+        setTimeout(() => {
+          rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }, 60)
       }
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
       .finally(() => setLoadingList(false))
-  }, [filters, toast, setSearchParams])
+  }, [filters, toast])
 
   useEffect(() => { loadClubs() }, [loadClubs])
   useEffect(() => {
@@ -733,6 +797,10 @@ export default function SalesWorkspace() {
       setShowNewCallContact(false)
       setShowNewEmailContact(false)
       setEmailEditorKey(k => k + 1)
+      // A club switch must not leave a stale edit form open against the
+      // PREVIOUS club's note — its activity id means nothing once the
+      // drawer has moved on.
+      setEditingNoteId(null)
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
@@ -867,6 +935,25 @@ export default function SalesWorkspace() {
       toast?.error(err.message)
     } finally {
       setSavingNote(false)
+    }
+  }
+
+  const startEditNote = (a) => {
+    setEditingNoteId(a.id)
+    setEditNoteForm({ body: a.body || '', pinned: !!a.meta?.pinned })
+  }
+  const cancelEditNote = () => setEditingNoteId(null)
+  const saveEditNote = async () => {
+    if (!editNoteForm.body.trim()) { toast?.error("Note can't be empty"); return }
+    setSavingNoteEdit(true)
+    try {
+      await api.salesWorkspaceEditNote(drawer.deal.id, editingNoteId, editNoteForm)
+      setEditingNoteId(null)
+      loadDrawer(drawer.deal.id)
+    } catch (err) {
+      toast?.error(err.message)
+    } finally {
+      setSavingNoteEdit(false)
     }
   }
 
@@ -1490,14 +1577,31 @@ export default function SalesWorkspace() {
                 {pinnedNotes.length > 0 && (
                   <div className="mb-3 space-y-1.5">
                     {pinnedNotes.map(a => (
-                      <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5">{a.body}</div>
+                      editingNoteId === a.id ? (
+                        <div key={a.id} className="bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5">
+                          <NoteEditForm value={editNoteForm} onChange={setEditNoteForm} onSave={saveEditNote} onCancel={cancelEditNote} saving={savingNoteEdit} />
+                        </div>
+                      ) : (
+                        <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2 py-1.5 flex items-start justify-between gap-2">
+                          <span className="whitespace-pre-wrap">{a.body}</span>
+                          <span className="flex items-center gap-1.5 shrink-0">
+                            {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
+                            <button type="button" onClick={() => startEditNote(a)}
+                              className="text-[10.5px] text-pb-accent hover:underline">Edit</button>
+                          </span>
+                        </div>
+                      )
                     ))}
                   </div>
                 )}
                 <h4 className="font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1.5">History</h4>
                 {timeline.length === 0 ? (
                   <p className="text-[12px] text-pb-faintest">No activity yet.</p>
-                ) : timeline.map(a => <ActivityRow key={a.id} a={a} onViewEmail={setViewingEmail} />)}
+                ) : timeline.map(a => (
+                  <ActivityRow key={a.id} a={a} onViewEmail={setViewingEmail}
+                    editing={editingNoteId === a.id} editValue={editNoteForm} onChangeEdit={setEditNoteForm}
+                    onStartEdit={startEditNote} onSaveEdit={saveEditNote} onCancelEdit={cancelEditNote} savingEdit={savingNoteEdit} />
+                ))}
               </div>
 
               <div className={CARD}>
@@ -1659,7 +1763,8 @@ export default function SalesWorkspace() {
           </form>
         </Modal>
 
-        <Modal open={!!viewingEmail} onClose={() => setViewingEmail(null)} title={viewingEmail?.meta?.subject || 'Email'}>
+        <Modal open={!!viewingEmail} onClose={() => setViewingEmail(null)} title={viewingEmail?.meta?.subject || 'Email'}
+          maxWidth="max-w-[40rem]">
           <div className="space-y-2">
             <div className="text-[11.5px] text-pb-faint">
               <div>To: {viewingEmail?.meta?.to_name}{viewingEmail?.meta?.to_email ? ` <${viewingEmail.meta.to_email}>` : ''}</div>

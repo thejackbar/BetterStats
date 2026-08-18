@@ -3080,6 +3080,13 @@ async def seed_starter_templates(conn) -> int:
 def _template_out(t: CommsTemplate, *, full: bool = False) -> dict:
     d = {"id": str(t.id), "name": t.name, "subject": t.subject,
          "updated_at": t.updated_at.isoformat() if t.updated_at else None}
+    if t.sales_template_key:
+        # Deferred import — sales_email.py itself does a late import of this
+        # module's own _merge/_is_full_doc/_html_to_text, so a module-level
+        # import here would risk a circular load order.
+        from app.services.sales_email import TEMPLATE_LABELS
+        d["sales_template_key"] = t.sales_template_key
+        d["sales_template_label"] = TEMPLATE_LABELS.get(t.sales_template_key, t.sales_template_key)
     if full:
         d["html"] = t.html or ""
     return d

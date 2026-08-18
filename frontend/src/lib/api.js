@@ -2088,6 +2088,8 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceAddNote: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/notes`, { method: 'POST', body: JSON.stringify(data) }),
+  salesWorkspaceEditNote: (dealId, activityId, data) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/notes/${activityId}`, { method: 'PATCH', body: JSON.stringify(data) }),
   salesWorkspaceAddContact: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/contacts`, { method: 'POST', body: JSON.stringify(data) }),
   salesWorkspaceSetInterest: (dealId, moduleKeys) =>

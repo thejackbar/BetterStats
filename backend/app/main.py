@@ -5347,6 +5347,40 @@ async def lifespan(app: FastAPI):
         # Byte-identical to alembic/versions/260_comms_template_subject.py.
         await conn.execute(text("ALTER TABLE comms_templates ADD COLUMN IF NOT EXISTS subject TEXT"))
 
+        # Migration 261: comms_templates gains a stable sales_template_key —
+        # the Sales Workspace's Send an Email dropdown used to resolve its
+        # editable template by matching the row's NAME, so renaming a
+        # template in Comms -> Templates silently broke the link (and the
+        # next reseed minted a duplicate row under the old name). This is
+        # the fix: a machine key that survives any rename. Byte-identical to
+        # alembic/versions/261_comms_template_sales_key.py, including the
+        # one-time backfill from the old name-matching rule.
+        await conn.execute(text("ALTER TABLE comms_templates ADD COLUMN IF NOT EXISTS sales_template_key TEXT"))
+        await conn.execute(text("""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = 'uq_comms_template_org_sales_key'
+                ) THEN
+                    ALTER TABLE comms_templates
+                        ADD CONSTRAINT uq_comms_template_org_sales_key UNIQUE (organisation_id, sales_template_key);
+                END IF;
+            END $$;
+        """))
+        for _key, _name in {
+            "information": "Send information",
+            "voicemail_followup": "Email following voicemail",
+            "trial_information": "Trial information",
+            "trial_extension": "Sales rep trial extension",
+            "demo": "Book a demo",
+            "subscribe": "Sales rep subscribe link",
+            "custom": "Custom sales rep email",
+        }.items():
+            await conn.execute(text(
+                "UPDATE comms_templates SET sales_template_key = :key "
+                "WHERE name = :name AND sales_template_key IS NULL "
+                "AND organisation_id IN (SELECT id FROM organisations WHERE is_marketing_outreach IS TRUE)"
+            ), {"key": _key, "name": _name})
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
