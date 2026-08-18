@@ -505,18 +505,21 @@ export default function SalesWorkspace() {
   // value, which is exactly the kind of stale-read that let the drawer keep
   // showing a club that had just dropped out of the filtered queue.
   const selectedIdRef = useRef(null)
-  // Keeps the selected club's own card visible in the queue list — a click
-  // it should already be visible for, but a deep link (?club=) can land on a
-  // club far down an unscrolled list, and finishing a call/note can reorder
-  // the list (priority/recency-sorted) out from under an already-open card.
-  // block:'nearest' means this is a no-op whenever the card is already
-  // fully in view, so it never fights a rep's own manual scrolling.
+  // A plain click never needs the list to move — the card someone just
+  // clicked is by definition already on screen, so selecting it must leave
+  // the queue's scroll position exactly as it was. rowRefs backs the two
+  // cases that DO need a deliberate scroll (a ?club= deep link landing on a
+  // row that's off-screen, and auto-advancing to the next club below) —
+  // both call selectClub(id, { scroll: true }) explicitly rather than any
+  // selection whatsoever triggering a scroll.
   const rowRefs = useRef({})
-  useEffect(() => {
-    if (!selectedId) return
-    rowRefs.current[selectedId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [selectedId, clubs])
   useEffect(() => { selectedIdRef.current = selectedId }, [selectedId])
+  // Mirrors selectedIdRef's own reasoning: loadClubs' async .then() needs the
+  // queue as it stood just before THIS reload (to find what came after the
+  // club that just dropped out), and a plain closure over `clubs` would see
+  // whatever it was when loadClubs was last memoized, not the latest list.
+  const clubsRef = useRef([])
+  useEffect(() => { clubsRef.current = clubs }, [clubs])
 
   // Bulk assignment (super admin only) — checked deal ids from the CURRENT
   // filtered queue, and which reps are ticked in the bulk-assign panel: one
@@ -589,14 +592,35 @@ export default function SalesWorkspace() {
       setClubs(rows)
       setStages(d.stages || [])
       // The currently-open drawer belongs to a club that just dropped out of
-      // the filtered queue (a filter changed, or the club itself was
-      // reassigned/updated out of the current filter) — clear it rather than
-      // leave a deal detail on screen for something no longer in the list.
+      // the filtered queue — most often a call outcome moving it to a stage
+      // (or "called"/callback state) the active filters no longer include,
+      // but the same thing happens if a filter itself changed underneath it.
+      // Rather than leave a blank "pick a club" pane, advance straight to
+      // whichever club now sits where the dropped one used to — i.e. the
+      // next one down in the list as the rep was last looking at it, walking
+      // upward instead if it was the last row, so the rep lands next to
+      // where they were rather than being bounced to an unrelated club.
       if (selectedIdRef.current && !rows.some(c => c.id === selectedIdRef.current)) {
-        selectedIdRef.current = null
-        setSelectedId(null)
-        setDrawer(null)
-        setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+        const prevRows = clubsRef.current
+        const prevIdx = prevRows.findIndex(c => c.id === selectedIdRef.current)
+        let next = null
+        if (prevIdx !== -1) {
+          for (let i = prevIdx + 1; i < prevRows.length && !next; i++) {
+            next = rows.find(c => c.id === prevRows[i].id) || null
+          }
+          for (let i = prevIdx - 1; i >= 0 && !next; i--) {
+            next = rows.find(c => c.id === prevRows[i].id) || null
+          }
+        }
+        if (!next) next = rows[0] || null
+        if (next) {
+          selectClub(next.id, { scroll: true })
+        } else {
+          selectedIdRef.current = null
+          setSelectedId(null)
+          setDrawer(null)
+          setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
+        }
       }
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
@@ -622,11 +646,21 @@ export default function SalesWorkspace() {
     }).catch(() => toast?.error('Could not load this club')).finally(() => setLoadingDrawer(false))
   }, [toast])
 
-  const selectClub = (dealId) => {
+  // { scroll: true } is only for a programmatic jump the rep didn't click
+  // themselves (a ?club= deep link, or auto-advancing past a club that just
+  // dropped out of the filter below) — an ordinary click never passes it, so
+  // the queue's own scroll position is left exactly as the rep had it.
+  const selectClub = (dealId, { scroll = false } = {}) => {
     selectedIdRef.current = dealId
     setSelectedId(dealId)
     loadDrawer(dealId)
     setSearchParams((p) => { const n = new URLSearchParams(p); n.set('club', dealId); return n }, { replace: true })
+    if (scroll) {
+      // Deferred a tick so a row that only just entered the list (e.g. the
+      // new next-club after a reload) has actually mounted before we look
+      // for its ref — same pattern AreaEditor.jsx uses for the same reason.
+      setTimeout(() => rowRefs.current[dealId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 60)
+    }
   }
   // Awaits the queue reload FIRST — loadClubs itself clears the selection
   // when the club no longer matches the current filter, and reading the ref
@@ -640,7 +674,7 @@ export default function SalesWorkspace() {
   // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
   useEffect(() => {
     const clubParam = searchParams.get('club')
-    if (clubParam && clubParam !== selectedId) selectClub(clubParam)
+    if (clubParam && clubParam !== selectedId) selectClub(clubParam, { scroll: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
