@@ -1444,9 +1444,7 @@ export default function SalesWorkspace() {
                     }}>
                       <option value="">Pick a template…</option>
                       {emailTemplates.templates.map(t => (
-                        <option key={t.key} value={t.key}>
-                          {t.label}{t.key === 'demo' && !emailTemplates.demo_link_configured ? ' (no booking link set — will ask them to reply)' : ''}
-                        </option>
+                        <option key={t.key} value={t.key}>{t.label}</option>
                       ))}
                     </Select>
                   </Field>
