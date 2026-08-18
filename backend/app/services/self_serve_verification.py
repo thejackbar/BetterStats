@@ -21,7 +21,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import SelfServeEmailVerification
-from app.services import email_service
+from app.services import email_pause, email_service
 from app.config.settings import settings
 
 CODE_TTL_HOURS = 24
@@ -121,8 +121,15 @@ async def _send_code_email(email: str, code: str) -> None:
         # stream, not the per-club tenant selection in services/ses_tenants.py
         # (which requires an Organisation and doesn't apply pre-registration).
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # One person's action produced exactly one email — held while
+        # transactional email is paused (services/email_pause).
+        category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     result = await email_service.get_email_provider().send(msg)
+    if result.suppressed:
+        # Not a provider problem: transactional email is paused platform-wide,
+        # so signup can't complete until it's switched back on.
+        raise RuntimeError("Verification email is paused platform-wide")
     if not result.ok:
         raise RuntimeError(f"Could not send verification email: {result.error}")
 

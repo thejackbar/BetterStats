@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
 from app.routers.organisations import _season_sort_key
 from app.auth.modules import org_core_live
-from app.services import club_lock, email_service, rate_limit
+from app.services import club_lock, email_pause, email_service, rate_limit
 from app.services import fonts as font_service
 from app.config.settings import settings
 
@@ -176,6 +176,10 @@ async def request_unpause(slug: str, body: RequestUnpauseBody, request: Request,
             text=f"{org.name} ({org.slug}) has a new unpause request.\nFrom: {email}\n{message or ''}",
             from_email=settings.email_from_address, from_name=settings.email_from_name,
             reply_to=email,
+            # A visitor submitted the request-access form — one action, one
+            # email. Held while transactional email is paused
+            # (services/email_pause); the queue row is the record either way.
+            category=email_pause.CATEGORY_TRANSACTIONAL,
         )
         await email_service.get_email_provider().send(msg)
     except Exception:

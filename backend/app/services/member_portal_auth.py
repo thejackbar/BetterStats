@@ -25,7 +25,7 @@ from fastapi import Request, Response
 from jose import JWTError, jwt
 
 from app.config.settings import settings
-from app.services import email_service
+from app.services import email_pause, email_service
 
 COOKIE_NAME = "bs_member_portal"
 SESSION_DAYS = 30
@@ -113,6 +113,9 @@ async def send_magic_link_email(*, to_email: str, member_name: str, club_name: s
         html=html, text=text,
         from_email=settings.email_from_address, from_name=club_name or settings.email_from_name,
         reply_to=settings.email_reply_to,
+        # One person's action produced exactly one email — held while
+        # transactional email is paused (services/email_pause).
+        category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     result = await email_service.get_email_provider().send(msg)
     if not result.ok:

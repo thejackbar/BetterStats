@@ -336,7 +336,7 @@ async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, lin
     fixture's ballot. Returns (sent, failure_reason); never raises — a
     provider hiccup on one player shouldn't fail the whole nudge batch."""
     from app.config.settings import settings
-    from app.services import email_service
+    from app.services import email_pause, email_service
 
     email = player.get("email")
     if not email:
@@ -359,11 +359,16 @@ async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, lin
             html=body_html, text=body_text,
             from_email=settings.email_from_address, from_name=club.name or settings.email_from_name,
             reply_to=settings.email_reply_to,
+            # An admin pressed Nudge — one action, one email. Held while
+            # transactional email is paused (services/email_pause).
+            category=email_pause.CATEGORY_TRANSACTIONAL,
         )
         result = await email_service.get_email_provider().send(msg)
     except Exception:
         logger.exception("vote nudge send failed for player %s / fixture %s", player.get("id"), fixture.id)
         return False, "send_failed"
+    if result.suppressed:
+        return False, "email_paused"
     if not result.ok:
         return False, "send_failed"
     db.add(VoteNudge(organisation_id=club.id, fixture_id=fixture.id, player_id=uuid.UUID(player["id"])))

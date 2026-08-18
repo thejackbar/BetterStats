@@ -376,10 +376,13 @@ async def send_trial_lifecycle_nudges():
     never opened), and email the club's own admin. Off by default —
     platform_settings.trial_nudges_enabled, checked here since it's a
     super-admin-managed flag, not an env var."""
-    from app.services import platform_settings as ps
+    from app.services import email_pause, platform_settings as ps
     from app.services import trial_lifecycle
     async with async_session_maker() as session:
         try:
+            if await email_pause.is_paused(email_pause.CATEGORY_AUTOMATED):
+                logger.info("Trial lifecycle nudge scan skipped: automated email is paused")
+                return
             if not await ps.get_trial_nudges_enabled(session):
                 return
             stats = await trial_lifecycle.scan_and_send(session)
@@ -395,8 +398,11 @@ async def send_member_reminders():
     platform_settings.member_portal_enabled_for_org inside
     member_reminders.send_all_reminders itself (a club with the flag off
     gets no reminders, same as the portal being invisible/unusable there)."""
-    from app.services import member_reminders
+    from app.services import email_pause, member_reminders
     try:
+        if await email_pause.is_paused(email_pause.CATEGORY_AUTOMATED):
+            logger.info("Member reminder scan skipped: automated email is paused")
+            return
         stats = await member_reminders.send_all_reminders()
         logger.info(f"Member reminder scan done: {stats}")
     except Exception as e:
@@ -407,8 +413,11 @@ async def send_diary_reminders():
     """Daily Club Diary reminder scan — opt-in per task definition (off by
     default), not gated by any platform flag since Club Diary is an
     always-on core feature."""
-    from app.services import club_diary_reminders
+    from app.services import club_diary_reminders, email_pause
     try:
+        if await email_pause.is_paused(email_pause.CATEGORY_AUTOMATED):
+            logger.info("Club Diary reminder scan skipped: automated email is paused")
+            return
         stats = await club_diary_reminders.send_all_diary_reminders()
         logger.info(f"Club Diary reminder scan done: {stats}")
     except Exception as e:

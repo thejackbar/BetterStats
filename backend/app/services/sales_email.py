@@ -19,7 +19,7 @@ from __future__ import annotations
 from typing import Optional
 
 from app.config.settings import settings
-from app.services import email_service
+from app.services import email_pause, email_service
 
 TEMPLATE_LABELS = {
     "information": "Send information",
@@ -588,6 +588,9 @@ async def send_sales_email(
         from_name=rep_name or settings.email_from_name,
         reply_to=rep_email or settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # A rep picked a template, edited it and pressed Send. Never held by
+        # the platform-wide pause (services/email_pause).
+        category=email_pause.CATEGORY_CAMPAIGN,
     )
     result = await email_service.get_email_provider().send(msg)
     if not result.ok:

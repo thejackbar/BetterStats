@@ -8,7 +8,7 @@ All three mirror self_serve_verification.py's email-construction pattern.
 from __future__ import annotations
 
 from app.config.settings import settings
-from app.services import email_service
+from app.services import email_pause, email_service
 
 
 def _greeting(display_name: str) -> str:
@@ -63,6 +63,9 @@ async def send_invite_email(*, email: str, display_name: str, club_name: str, li
         from_name=settings.email_from_name,
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # One person's action produced exactly one email — held while
+        # transactional email is paused (services/email_pause).
+        category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     try:
         result = await email_service.get_email_provider().send(msg)
@@ -117,6 +120,9 @@ async def send_password_reset_email(*, email: str, display_name: str, club_name:
         from_name=settings.email_from_name,
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # One person's action produced exactly one email — held while
+        # transactional email is paused (services/email_pause).
+        category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     try:
         result = await email_service.get_email_provider().send(msg)
@@ -168,6 +174,9 @@ async def send_self_password_reset_email(*, email: str, display_name: str, club_
         from_name=settings.email_from_name,
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # One person's action produced exactly one email — held while
+        # transactional email is paused (services/email_pause).
+        category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     try:
         result = await email_service.get_email_provider().send(msg)

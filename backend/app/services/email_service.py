@@ -84,6 +84,14 @@ class EmailMessage:
     # SES tenant to send on behalf of (multi-tenancy). Set by the caller only when
     # ses_tenant_sends_enabled. Ignored by non-SES providers. See services/ses_tenants.
     tenant: Optional[str] = None
+    # What KIND of send this is: 'automated' (a scheduled scan sent it),
+    # 'transactional' (one person's action produced exactly one email) or
+    # 'campaign' (a person composed it and clicked send). Read by the pause
+    # gate in get_email_provider — see services/email_pause. Defaults to
+    # 'transactional', which is pausable, so a send that never names a
+    # category is held rather than slipping out while the platform's
+    # background email is paused.
+    category: str = "transactional"
 
 
 @dataclass
@@ -91,6 +99,12 @@ class SendResult:
     ok: bool
     message_id: Optional[str] = None
     error: Optional[str] = None
+    # True when the pause gate held this send. Distinct from an ordinary
+    # failure: nothing was attempted and nothing is wrong with the message, so
+    # a caller that records "sent" state must not record it, and a caller
+    # showing an error should say the platform's email is paused rather than
+    # blaming the provider.
+    suppressed: bool = False
 
 
 class EmailProvider:
@@ -370,12 +384,57 @@ class SesEmailProvider(EmailProvider):
         return SendResult(ok=False, error=last_err)
 
 
+class PausedProvider(EmailProvider):
+    """Wraps the real provider and holds back a send whose category is paused.
+
+    The gate lives here, wrapping the single provider every caller reaches
+    through, rather than at the ten places that compose a message: a new
+    email added later is covered without anyone remembering to add a check.
+    See services/email_pause for what each category means and why both
+    pausable ones default to paused.
+
+    Proxies ``name``, so email_is_live() and the "preview / no-send" notice
+    keep reporting the underlying provider rather than the wrapper.
+    """
+
+    def __init__(self, inner: EmailProvider):
+        self.inner = inner
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return self.inner.name
+
+    async def send(self, msg: EmailMessage) -> SendResult:
+        from app.services import email_pause
+
+        category = getattr(msg, "category", email_pause.CATEGORY_TRANSACTIONAL)
+        if await email_pause.is_paused(category):
+            # Logged at WARNING with the recipient's domain only — enough to
+            # see what is being held and for whom, without writing a list of
+            # members' addresses into the container logs.
+            domain = (msg.to_email or "").rsplit("@", 1)[-1]
+            logger.warning(
+                "email paused (%s): held %r to @%s", category, msg.subject, domain
+            )
+            return SendResult(
+                ok=False,
+                error=f"{category} email is paused platform-wide",
+                suppressed=True,
+            )
+        return await self.inner.send(msg)
+
+
 def get_email_provider() -> EmailProvider:
-    """Resolve the active provider from settings, falling back to console.
+    """Resolve the active provider from settings, falling back to console,
+    wrapped in the pause gate.
 
     A provider that's selected but not fully configured falls back to console
     (fail-safe) so we never attempt an unauthenticated / misconfigured send.
     """
+    return PausedProvider(_resolve_provider())
+
+
+def _resolve_provider() -> EmailProvider:
     name = (settings.email_provider or "console").strip().lower()
     key = (settings.email_api_key or "").strip()
     if name == "brevo" and key:

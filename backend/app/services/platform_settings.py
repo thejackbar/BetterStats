@@ -45,6 +45,10 @@ _BOOL_KEYS = {
     # get_crm_show_past_events. It's listed here only so update_settings
     # validates/stores it as a real boolean.
     "crm_show_past_events",
+    # The outbound-email kill switch. Both default TRUE (paused) rather than
+    # false — see services/email_pause for why the safe state is the default
+    # one. Listed here so update_settings validates them as real booleans.
+    "automated_emails_paused", "transactional_emails_paused",
 }
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
@@ -437,6 +441,11 @@ async def update_settings(db: AsyncSession, patch: dict) -> dict:
         {"s": json.dumps(out)},
     )
     await db.commit()
+    # The send path caches the two email-pause flags for a few seconds, so
+    # drop that cache here: pausing or unpausing should take effect on the
+    # next send, not up to CACHE_TTL_SECONDS later.
+    from app.services import email_pause
+    email_pause.invalidate_cache()
     return out
 
 
@@ -445,6 +454,25 @@ async def get_feature_flag(db: AsyncSession, key: str) -> bool:
     keys in ``_BOOL_KEYS`` are meaningful here."""
     settings = await get_settings(db)
     return bool(settings.get(key) is True)
+
+
+async def get_automated_emails_paused(db: AsyncSession) -> bool:
+    """Whether the nine emails a scheduled scan sends are held. Defaults to
+    PAUSED — see services/email_pause. The send path reads this through
+    email_pause's cache, not directly; this getter is for the settings screen."""
+    v = (await get_settings(db)).get("automated_emails_paused")
+    return True if v is None else bool(v)
+
+
+async def get_transactional_emails_paused(db: AsyncSession) -> bool:
+    """Whether the seven one-action-one-email sends are held — invites, both
+    password resets, the signup verification code, the member-portal sign-in
+    link, vote nudges and unpause requests. Defaults to PAUSED.
+
+    Worth saying plainly: with this on, nobody can accept an invite, recover a
+    password, finish a self-serve signup or sign in to a member portal."""
+    v = (await get_settings(db)).get("transactional_emails_paused")
+    return True if v is None else bool(v)
 
 
 async def get_self_serve_registration_enabled(db: AsyncSession) -> bool:

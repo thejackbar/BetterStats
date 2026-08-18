@@ -20,7 +20,7 @@ from app.models.db import (
     async_session_maker, Organisation, FeeMember, FeeMemberSeason,
     MemberQualification, QualificationType,
 )
-from app.services import email_service
+from app.services import email_pause, email_service
 from app.services import fees as fee_service
 from app.services import platform_settings as ps
 
@@ -44,6 +44,8 @@ async def _send(to_email, to_name, club_name, subject, html, text):
         to_email=to_email, to_name=to_name, subject=subject, html=html, text=text,
         from_email=settings.email_from_address, from_name=club_name or settings.email_from_name,
         reply_to=settings.email_reply_to,
+        # A daily scan sent this, not a person (services/email_pause).
+        category=email_pause.CATEGORY_AUTOMATED,
     )
     return await email_service.get_email_provider().send(msg)
 

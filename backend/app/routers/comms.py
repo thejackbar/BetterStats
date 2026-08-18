@@ -48,6 +48,7 @@ from app.models.db import (
     async_session_maker, get_db,
 )
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
+from app.services import email_pause
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
@@ -672,6 +673,10 @@ def _render(org: Organisation, campaign: CommsCampaign, *, email: str, name: Opt
         # normal club on the transactional stream (both carry event destinations).
         configuration_set=(_ses_config_set(org) or None),
         tenant=_ses_tenant(org),
+        # A person composed this and pressed Send. Never held by the
+        # platform-wide pause (services/email_pause) — BetterComms has its own
+        # suspension, quota and unsubscribe controls.
+        category=email_pause.CATEGORY_CAMPAIGN,
     )
 
 
@@ -1989,7 +1994,10 @@ async def send_test_email(
         headers={"List-Unsubscribe": f"<{unsub}>",
                  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
         configuration_set=(_ses_config_set(club) or None),
-        tenant=_ses_tenant(club))
+        tenant=_ses_tenant(club),
+        # An admin checking their own sender setup — same class as a campaign,
+        # so the pause never blocks it (services/email_pause).
+        category=email_pause.CATEGORY_CAMPAIGN)
     res = await get_email_provider().send(msg)
     if not res.ok:
         raise HTTPException(status_code=502, detail=f"Test send failed: {res.error}")

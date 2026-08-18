@@ -54,7 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import BILLABLE_MODULE_NAMES, billing_key_for
 from app.config.settings import settings
-from app.services import email_service
+from app.services import email_pause, email_service
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +141,9 @@ async def _send(admin: dict, subject: str, html: str, text_body: str) -> bool:
         from_name=settings.email_from_name,
         reply_to=settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
+        # A daily scan sent this, not a person — held while automated email is
+        # paused (services/email_pause).
+        category=email_pause.CATEGORY_AUTOMATED,
     )
     result = await email_service.get_email_provider().send(msg)
     if not result.ok:
