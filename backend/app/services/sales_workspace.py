@@ -49,9 +49,11 @@ CALL_OUTCOMES: dict[str, dict] = {
     "referred_to_other": {"label": "Referred to another person", "category": "neutral"},
     "requested_information": {"label": "Requested information", "category": "neutral"},
     # Positive
+    "wants_to_subscribe": {"label": "Wants to buy/subscribe now", "category": "positive"},
     "interested": {"label": "Interested", "category": "positive"},
     "wants_more_info": {"label": "Wants more information", "category": "positive"},
     "wants_trial": {"label": "Wants trial", "category": "positive"},
+    "wants_trial_extension": {"label": "Wants a trial extension", "category": "positive"},
     "wants_demo": {"label": "Wants demo", "category": "positive"},
     "wants_pricing": {"label": "Wants to discuss pricing", "category": "positive"},
     "wants_committee_discussion": {"label": "Wants committee discussion", "category": "positive"},
@@ -93,8 +95,9 @@ _DO_NOT_CONTACT_OUTCOMES = ("dont_call_again", "remove_from_list")
 # 'spoke_no_decision' (the one neutral outcome with nothing concrete to
 # follow up ON) and everything unsuccessful/negative/administrative.
 _EVENT_WORTHY_OUTCOMES = (
-    "interested", "wants_more_info", "wants_trial", "wants_demo", "wants_pricing",
-    "wants_committee_discussion", "asked_callback", "referred_to_other", "requested_information",
+    "wants_to_subscribe", "interested", "wants_more_info", "wants_trial", "wants_trial_extension",
+    "wants_demo", "wants_pricing", "wants_committee_discussion", "asked_callback",
+    "referred_to_other", "requested_information",
 )
 
 # Outcomes worth handing to a named staff member instead of the caller
@@ -107,9 +110,11 @@ _ASSIGNABLE_EVENT_OUTCOMES = ("wants_pricing", "wants_more_info", "wants_demo")
 # Default event note per outcome when the call itself carried no free-text
 # notes — {name} is the followed-up contact's name, filled in at creation.
 _FOLLOW_UP_NOTE_TEMPLATES = {
+    "wants_to_subscribe": "Follow up with {name} — ready to buy/subscribe now.",
     "interested": "Follow up with {name} — interested in BetterCricket.",
     "wants_more_info": "Follow up with {name} — wants more information.",
     "wants_trial": "Follow up with {name} — wants to start a trial.",
+    "wants_trial_extension": "Follow up with {name} — wants a trial extension.",
     "wants_demo": "Follow up with {name} — wants a demo.",
     "wants_pricing": "Follow up with {name} — wants to discuss pricing.",
     "wants_committee_discussion": "Follow up with {name} following his committee meeting.",

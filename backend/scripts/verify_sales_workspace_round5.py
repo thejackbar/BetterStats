@@ -56,7 +56,7 @@ async def main():
         check("'custom' is a BUILT_IN_TEMPLATES key now", "custom" in se.BUILT_IN_TEMPLATES)
         seeded = await se.seed_sales_templates(db)
         await db.commit()
-        check("seed_sales_templates inserted 4 rows (incl. custom)", seeded == 4, str(seeded))
+        check("seed_sales_templates inserted 6 rows (incl. custom)", seeded == 6, str(seeded))
         reseeded = await se.seed_sales_templates(db)
         await db.commit()
         check("seed_sales_templates is idempotent (no dup insert)", reseeded == 0, str(reseeded))
@@ -64,7 +64,7 @@ async def main():
         rows = (await db.execute(
             select(CommsTemplate).where(CommsTemplate.organisation_id == outreach.id)
         )).scalars().all()
-        check("4 templates exist in the outreach org", len(rows) == 4, str(len(rows)))
+        check("6 templates exist in the outreach org", len(rows) == 6, str(len(rows)))
         names = {r.name for r in rows}
         check("dropdown label 'Custom email' is NOT the DB row name",
               "Custom email" not in names, str(names))

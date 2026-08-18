@@ -16,9 +16,11 @@ export const CALL_OUTCOMES = {
   referred_to_other: { label: 'Referred to another person', category: 'neutral' },
   requested_information: { label: 'Requested information', category: 'neutral' },
   // Positive
+  wants_to_subscribe: { label: 'Wants to buy/subscribe now', category: 'positive' },
   interested: { label: 'Interested', category: 'positive' },
   wants_more_info: { label: 'Wants more information', category: 'positive' },
   wants_trial: { label: 'Wants trial', category: 'positive' },
+  wants_trial_extension: { label: 'Wants a trial extension', category: 'positive' },
   wants_demo: { label: 'Wants demo', category: 'positive' },
   wants_pricing: { label: 'Wants to discuss pricing', category: 'positive' },
   wants_committee_discussion: { label: 'Wants committee discussion', category: 'positive' },

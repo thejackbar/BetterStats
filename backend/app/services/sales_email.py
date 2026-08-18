@@ -24,18 +24,22 @@ from app.services import email_service
 TEMPLATE_LABELS = {
     "information": "Send information",
     "trial_information": "Trial information",
+    "trial_extension": "Wants a trial extension",
     "demo": "Book a demo",
+    "subscribe": "Wants to buy/subscribe",
     "custom": "Custom email",
 }
 # The comms_templates row a key's content is seeded/read from — same as
 # TEMPLATE_LABELS (the rep-facing dropdown text) for every key EXCEPT
-# 'custom': the dropdown still reads "Custom email" (a rep picking it means
-# "I'm writing something of my own"), but the editable template behind it is
-# named "Custom sales rep email" in Comms -> Templates, a more descriptive
-# name for the super admin maintaining it there. Falls back to TEMPLATE_LABELS
-# for any key with no override.
+# 'custom'/'subscribe'/'trial_extension': the dropdown reads the outcome the
+# rep is acting on ("Custom email", "Wants to buy/subscribe", "Wants a trial
+# extension"), but the editable templates behind them carry more descriptive
+# names in Comms -> Templates for the super admin maintaining them there.
+# Falls back to TEMPLATE_LABELS for any key with no override.
 TEMPLATE_DB_NAMES = {
     "custom": "Custom sales rep email",
+    "subscribe": "Sales rep subscribe link",
+    "trial_extension": "Sales rep trial extension",
 }
 
 
@@ -43,12 +47,11 @@ def _db_name(key: str) -> Optional[str]:
     return TEMPLATE_DB_NAMES.get(key, TEMPLATE_LABELS.get(key))
 
 
-# All four keys have a body built/loaded here now — 'custom' used to mean
-# "subject/body typed by the rep from a blank form", but now opens the same
-# way as the other three: pre-filled from its own editable template (a
-# proper branded shell with a placeholder message line), which the rep edits
+# Every key has a body built/loaded here — 'custom' used to mean "subject/
+# body typed by the rep from a blank form", but now opens the same way as
+# the rest: pre-filled from its own editable template, which the rep edits
 # in Design mode rather than starting from nothing.
-BUILT_IN_TEMPLATES = ("information", "trial_information", "demo", "custom")
+BUILT_IN_TEMPLATES = ("information", "trial_information", "trial_extension", "demo", "subscribe", "custom")
 
 
 def _greeting(name: Optional[str]) -> str:
@@ -125,6 +128,19 @@ def _render_template_hardcoded(
             "4) Create your admin account 5) Choose the modules you want "
             f"6) Start your 14-day trial — no card required. {base}/trial"
         )
+    elif key == "trial_extension":
+        subject = f"Your BetterCricket trial extension for {club_name}"
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} no problem — I\'ve extended '
+            f"{club_name}'s BetterCricket trial so you've got more time to get everything set up.</p>"
+            + _button("Log in to BetterCricket", f"{base}/login")
+            + '<p style="font-size:14px;line-height:1.5">Let me know if there\'s anything I can help with in the meantime.</p>'
+        )
+        text = (
+            f"{greeting} no problem — I've extended {club_name}'s BetterCricket trial so you've "
+            f"got more time to get everything set up. {base}/login "
+            "Let me know if there's anything I can help with in the meantime."
+        )
     elif key == "demo":
         subject = f"Book a demo — BetterCricket for {club_name}"
         if calendly_url:
@@ -144,6 +160,22 @@ def _render_template_hardcoded(
                 f"{greeting} happy to walk you through BetterCricket for {club_name} — reply to "
                 "this email with a couple of times that suit and I'll lock one in."
             )
+    elif key == "subscribe":
+        subject = f"Get {club_name} set up on BetterCricket"
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} great news — let\'s get '
+            f"{club_name} set up on a paid BetterCricket subscription.</p>"
+            '<p style="font-size:14px;line-height:1.5">Log in to your account and head to Account '
+            "to choose your modules and subscribe:</p>"
+            + _button("Log in to subscribe", f"{base}/login")
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email.</p>'
+        )
+        text = (
+            f"{greeting} great news — let's get {club_name} set up on a paid BetterCricket "
+            f"subscription. Log in to your account and head to Account to choose your modules and "
+            f"subscribe: {base}/login "
+            "Happy to answer any questions — just reply to this email."
+        )
     else:  # custom — no fixed pitch, just a blank canvas to write into
         subject = f"BetterCricket — {club_name}"
         body = f'<p style="font-size:14px;line-height:1.5">{greeting}</p><p style="font-size:14px;line-height:1.5"></p>'
@@ -188,10 +220,38 @@ _SEED_BODY = {
         'font-size:14px">Start your trial</a></p>'
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
+    # Seeded from trial_information's own layout (intro line, then a button)
+    # per direct instruction, reworded for a club that's ready to move onto a
+    # paid subscription rather than start a trial. Subscribing itself happens
+    # from inside the app (Account -> Subscribe), so the button sends them to
+    # log in rather than inventing a public "/subscribe" page that doesn't
+    # exist.
+    "trial_extension": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>No problem — I've extended {{club}}'s BetterCricket trial so you've got more time "
+        "to get everything set up.</p>"
+        '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Log in to BetterCricket</a></p>'
+        "<p>Let me know if there's anything I can help with in the meantime.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
     "demo": (
         "<p>Hi {{first_name}},</p>"
         "<p>Happy to walk you through BetterCricket for {{club}}.</p>"
         "{{booking_block}}"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+    # Seeded from information's own layout (intro line, then a button) per
+    # direct instruction, reworded for a club ready to subscribe now.
+    "subscribe": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>Great news — let's get {{club}} set up on a paid BetterCricket subscription.</p>"
+        "<p>Log in to your account and head to Account to choose your modules and subscribe:</p>"
+        '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Log in to subscribe</a></p>'
+        "<p>Happy to answer any questions — just reply to this email.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     # A full standalone document (dark theme, its own <head>/<body>), unlike
@@ -333,20 +393,22 @@ _SEED_BODY = {
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
     "trial_information": "Start your free BetterCricket trial — {{club}}",
+    "trial_extension": "Your BetterCricket trial extension for {{club}}",
     "demo": "Book a demo — BetterCricket for {{club}}",
+    "subscribe": "Get {{club}} set up on BetterCricket",
     "custom": "",
 }
 
 
 async def seed_sales_templates(session) -> int:
-    """Insert the three built-in templates into the outreach org's
+    """Insert every BUILT_IN_TEMPLATES row into the outreach org's
     comms_templates library, once — called on demand (email_templates GET) so
     it self-heals for an environment that only just configured its outreach
     org, same "call it cheaply and let it no-op" pattern comms.py's own
     seed_starter_templates uses. A same-named row a super admin has since
     edited is left alone (ON CONFLICT DO NOTHING) — unlike the general
     starter-template seed, there's no "empty skeleton" self-heal here, since
-    these three are never auto-created empty. Returns the count inserted."""
+    none of these are ever auto-created empty. Returns the count inserted."""
     from app.services.marketing_org import get_outreach_org
     org = await get_outreach_org(session)
     if org is None:
