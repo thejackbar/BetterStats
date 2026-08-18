@@ -350,6 +350,11 @@ function DealSummaryStrip({ deal }) {
         <div className="text-[13px] text-pb-text font-medium">
           {ONBOARDING_METHOD_LABELS[deal.onboarding_method] || deal.onboarding_method || '—'}
         </div>
+        {/* Only while a trial is live or has expired — a subscriber or bare
+            prospect shows no primary admin line here. */}
+        {deal.min_trial_days_remaining != null && deal.primary_admin_name && (
+          <div className="text-[11px] text-pb-faint mt-0.5">{deal.primary_admin_name}</div>
+        )}
       </div>
       <div>
         <div className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest mb-0.5">Called</div>

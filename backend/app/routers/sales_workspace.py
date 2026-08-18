@@ -451,6 +451,23 @@ async def get_club(
     deal_out["trial_days_remaining"] = trial_days
     deal_out["min_trial_days_remaining"] = min_trial_days
 
+    # For the header's "primary admin" line under Onboarding — only shown
+    # while a trial is live or has expired, so only look it up then. A bare
+    # prospect (no existing_org_id yet) has no real ClubMembership to read.
+    primary_admin_name = None
+    if club is not None and club.existing_org_id and min_trial_days is not None:
+        admin_row = (await db.execute(
+            select(User.first_name, User.last_name, User.display_name)
+            .join(ClubMembership, ClubMembership.user_id == User.id)
+            .where(ClubMembership.club_id == club.existing_org_id, ClubMembership.is_primary_admin.is_(True))
+            .limit(1)
+        )).first()
+        if admin_row is not None:
+            first, last, display = admin_row
+            name = " ".join(p for p in (first, last) if p) or display
+            primary_admin_name = name or None
+    deal_out["primary_admin_name"] = primary_admin_name
+
     # Who registered for the trial (the deal's point of contact — set to the
     # registering admin at signup, see crm.sync_self_serve_trial_registration/
     # sync_super_admin_trial_registration), plus their committee role if a
