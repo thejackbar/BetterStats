@@ -338,17 +338,26 @@ export function Initials({ name, size = 30, className = '' }) {
 
 // A master-list row: avatar, name, sub-line, optional flag dot and figure. The
 // avatar is for people — pass `avatar={false}` for a list of things.
-export function ListRow({ name, sub, figure, flag = false, selected = false, avatar = true, onClick }) {
+// `subWrap` lets the sub line run onto a second line instead of being cut off
+// with an ellipsis. Off by default — a rail of one-line rows scans faster —
+// and worth turning on where the sub carries something a person has to read in
+// full rather than recognise at a glance (a Templates row naming the Sales
+// Workspace entry it feeds, say).
+export function ListRow({ name, sub, figure, flag = false, selected = false, avatar = true,
+                          subWrap = false, onClick }) {
   return (
     <button
       type="button" onClick={onClick}
-      className={`w-full flex items-center gap-2.5 px-[11px] py-[9px] rounded-lg text-left border transition-colors ${selected ? '' : 'border-transparent hover:bg-pb-surface2'}`}
+      className={`w-full flex ${subWrap ? 'items-start' : 'items-center'} gap-2.5 px-[11px] py-[9px] rounded-lg text-left border transition-colors ${selected ? '' : 'border-transparent hover:bg-pb-surface2'}`}
       style={selected ? { borderColor: TINT.border, background: TINT.panel } : undefined}
     >
       {avatar && <Initials name={name} />}
       <span className="min-w-0 flex-1">
         <span className="block text-[13.5px] font-semibold text-pb-text truncate">{name}</span>
-        {sub && <span className="block font-mono text-[9.5px] uppercase text-pb-faint truncate">{sub}</span>}
+        {sub && (
+          <span className={`block font-mono text-[9.5px] uppercase text-pb-faint ${
+            subWrap ? 'break-words leading-[1.45] mt-0.5' : 'truncate'}`}>{sub}</span>
+        )}
       </span>
       {flag && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: '#f5b542' }} />}
       {figure != null && (

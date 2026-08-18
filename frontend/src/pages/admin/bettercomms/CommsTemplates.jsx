@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { Button, Note, Empty, Toast, SectionHeading, Field, TextInput } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
@@ -69,6 +70,18 @@ function rtfToText(rtf) {
 }
 
 export default function CommsTemplates() {
+  const { user } = useAuth()
+  // The Subject hint draws a distinction only BetterCricket's own staff meet:
+  // a template the Sales Workspace sends as-is, versus a club's campaign,
+  // which always sets its own subject. A club admin has no Sales Workspace, so
+  // to them it names something that doesn't exist and reads as though their
+  // campaigns might inherit a subject from here.
+  //
+  // The row label and the "Linked to…" note below need no such gate: a
+  // sales_template_key is only ever written on the outreach org (see
+  // sales_email.seed_sales_templates), so a club's own templates never carry
+  // one and neither ever renders for them.
+  const isSuperAdmin = user?.role === 'super_admin'
   const intro = useScreenIntro('templates')
   const location = useLocation()
   const [templates, setTemplates] = useState(null)
@@ -198,7 +211,10 @@ export default function CommsTemplates() {
 
   const items = useMemo(() => (templates || []).map(t => ({
     id: t.id, name: t.name,
-    sub: t.sales_template_label ? `Email layout · Sales Workspace: ${t.sales_template_label}` : 'Email layout',
+    // A template linked to a Sales Workspace entry says WHICH entry and drops
+    // the "Email layout" prefix — every template is one, and the pane caption
+    // already says so, whereas the entry it feeds is the thing worth reading.
+    sub: t.sales_template_label ? `Sales Workspace: ${t.sales_template_label}` : 'Email layout',
   })), [templates])
 
   if (intro.showing) {
@@ -220,6 +236,7 @@ export default function CommsTemplates() {
       <CrudPanes>
         <RecordListPane
           items={items} loading={templates == null} selId={selId} onSelect={setSelId}
+          subWrap
           emptyText="No templates yet. Start from scratch, paste HTML, or import a .html file."
         >
           <Note toneKey="calm">
@@ -259,7 +276,9 @@ export default function CommsTemplates() {
                 </Note>
               )}
 
-              <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
+              <Field label="Subject" hint={isSuperAdmin
+                ? "Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject."
+                : undefined}>
                 <TextInput value={draft.subject}
                   onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
               </Field>

@@ -60,7 +60,8 @@ export function CrudPanes({ children }) {
 // group with no rows still renders its heading and its own empty line, so a
 // section that exists but is empty says so rather than vanishing.
 export function RecordListPane({
-  items, groups, selId, onSelect, emptyText, loading = false, avatar = false, children,
+  items, groups, selId, onSelect, emptyText, loading = false, avatar = false,
+  subWrap = false, children,
 }) {
   const sections = groups || [{ items: items || [] }]
   const nothing = sections.every(g => !(g.items || []).length)
@@ -74,7 +75,7 @@ export function RecordListPane({
           ) : g.items.map(it => (
             <ListRow
               key={it.id} name={it.name} sub={it.sub} figure={it.figure} flag={it.flag}
-              avatar={avatar} selected={it.id === selId} onClick={() => onSelect(it.id)}
+              avatar={avatar} subWrap={subWrap} selected={it.id === selId} onClick={() => onSelect(it.id)}
             />
           ))}
         </div>
