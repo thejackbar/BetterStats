@@ -126,10 +126,6 @@ async def _send_code_email(email: str, code: str) -> None:
         category=email_pause.CATEGORY_TRANSACTIONAL,
     )
     result = await email_service.get_email_provider().send(msg)
-    if result.suppressed:
-        # Not a provider problem: transactional email is paused platform-wide,
-        # so signup can't complete until it's switched back on.
-        raise RuntimeError("Verification email is paused platform-wide")
     if not result.ok:
         raise RuntimeError(f"Could not send verification email: {result.error}")
 

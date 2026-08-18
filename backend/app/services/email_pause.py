@@ -1,36 +1,52 @@
-"""Kill switch for the platform's own outbound email.
+"""Pause switch for BetterCricket's own reminder and nudge emails.
 
 Every email BetterCricket sends leaves through one door
-(``email_service.get_email_provider().send``), so the pause lives there rather
-than being sprinkled across the ten places that compose a message. What
-decides whether a given send is allowed is the message's own ``category``:
+(``email_service.get_email_provider().send``), so the switch lives there
+rather than being sprinkled across the places that compose a message. What
+decides whether a send is allowed is the message's own ``category``:
 
-  ``automated``      a scheduled scan sent it; nobody pressed send. The six
-                     trial-lifecycle nudges, the two member-portal reminders
-                     and the Club Diary task reminder.
-  ``transactional``  one person's action produced exactly one email —
-                     invites, both password resets, the signup verification
-                     code, the member-portal sign-in link, a vote nudge, an
-                     unpause request.
-  ``campaign``       a person composed it and clicked send: a BetterComms
+  ``automated``      a scheduled scan sent it, and nobody asked for it: the
+                     six trial-lifecycle nudges, the two member-portal
+                     reminders and the Club Diary task reminder. Marketing
+                     and housekeeping — a club not receiving one loses
+                     nothing it needs. **This is the only pausable
+                     category.**
+
+  ``transactional``  one person's action produced exactly one email, and
+                     that email is how the action completes: an invite, both
+                     password resets, the signup verification code, the
+                     member-portal sign-in link, a vote nudge, an unpause
+                     request. **Never pausable.** These carry system
+                     operations — without them nobody can accept an invite,
+                     recover a password, finish a self-serve signup or sign
+                     in to a member portal. There is deliberately no setting,
+                     no flag and no code path that holds one back.
+
+  ``campaign``       a person composed it and pressed Send: a BetterComms
                      campaign (and its test send) or a sales rep's outreach.
-                     NEVER pausable here — a club sending its own newsletter
-                     has nothing to do with the platform's background email,
-                     and BetterComms has its own suspension controls.
+                     **Never pausable.** A club sending its own newsletter
+                     has nothing to do with BetterCricket's reminders, and
+                     BetterComms has its own suspension, quota and
+                     unsubscribe controls.
 
-**Both pausable categories default to PAUSED.** That is the point: the pause
-takes effect the moment this deploys, with nobody needing to find a switch
-first, and staying paused is the state you fall back into if the settings row
-is missing or unreadable. Turning either group back on is the deliberate act,
-from All Clubs -> General Settings.
+The rule is enforced by construction, not by remembering to check: only
+``automated`` appears in ``PAUSABLE_CATEGORIES``, ``is_paused`` returns False
+for everything else before it so much as looks at a setting, and there is no
+platform setting for any other category. Adding one would mean editing this
+module deliberately.
 
-``category`` itself defaults to ``transactional`` on ``EmailMessage``, so a
-send that never names a category is paused rather than slipping out. Only the
-three person-sent paths opt into ``campaign``, and they do it explicitly.
+Two consequences of that shape worth knowing:
 
-Read this way round it is fail-safe in both directions: a new email added
-later is paused until somebody thinks about which category it belongs to, and
-a DB hiccup pauses rather than floods.
+  * ``EmailMessage.category`` defaults to ``transactional``, so a send that
+    somehow never names a category goes out rather than being held. That is
+    the safe direction here: the cost of a nudge escaping the pause is a club
+    getting one reminder it needn't have, while the cost of holding an
+    untagged transactional email is somebody locked out of their account.
+    The verification asserts that every EmailMessage in the tree names its
+    category explicitly, so the default is a backstop, not the norm.
+
+  * A settings row that can't be read leaves the nudges paused, because the
+    only thing that read can affect is whether nudges go out.
 """
 from __future__ import annotations
 
@@ -46,22 +62,30 @@ CATEGORY_CAMPAIGN = "campaign"
 
 CATEGORIES = (CATEGORY_AUTOMATED, CATEGORY_TRANSACTIONAL, CATEGORY_CAMPAIGN)
 
-# The two a super admin can pause. 'campaign' is deliberately absent.
-PAUSABLE_CATEGORIES = (CATEGORY_AUTOMATED, CATEGORY_TRANSACTIONAL)
+# The only category a super admin can hold back. Everything else is
+# unpausable BY CONSTRUCTION — see the module docstring. Do not add to this
+# tuple without a deliberate decision: transactional email carries system
+# operations (invites, password recovery, signup, portal sign-in) and must
+# never be disabled.
+PAUSABLE_CATEGORIES = (CATEGORY_AUTOMATED,)
+
+# Named so the guarantee is greppable and testable, not just prose.
+NEVER_PAUSABLE_CATEGORIES = (CATEGORY_TRANSACTIONAL, CATEGORY_CAMPAIGN)
 
 # platform_settings key per pausable category.
 SETTING_KEYS = {
     CATEGORY_AUTOMATED: "automated_emails_paused",
-    CATEGORY_TRANSACTIONAL: "transactional_emails_paused",
 }
 
-# Paused unless the settings row says otherwise — see the module docstring.
+# Nudges are paused unless the settings row says otherwise, so the pause
+# takes effect on deploy with no switch to find first.
 DEFAULT_PAUSED = True
 
-# The flags are read on the send path, which has no session of its own, so the
-# lookup opens one and the answer is cached. Short enough that unpausing takes
-# effect within half a minute without a restart; long enough that a campaign
-# blasting a few thousand recipients doesn't hit the DB per message.
+# The flag is read on the send path, which has no session of its own, so the
+# lookup opens one and the answer is cached. Short enough that unpausing
+# takes effect within half a minute without a restart; long enough that a
+# campaign blasting a few thousand recipients doesn't hit the DB per message
+# (though a campaign never reaches the lookup at all — see is_paused).
 CACHE_TTL_SECONDS = 30
 
 _cache: dict[str, bool] | None = None
@@ -70,8 +94,8 @@ _lock = asyncio.Lock()
 
 
 def invalidate_cache() -> None:
-    """Drop the cached flags so the next send re-reads them. Called right after
-    a super admin saves General Settings, so a pause or an unpause is visible
+    """Drop the cached flag so the next send re-reads it. Called right after a
+    super admin saves General Settings, so a pause or an unpause is visible
     immediately rather than up to CACHE_TTL_SECONDS later."""
     global _cache, _cache_at
     _cache = None
@@ -94,8 +118,8 @@ async def _load() -> dict[str, bool]:
 async def paused_state() -> dict[str, bool]:
     """{category: is_paused} for the pausable categories, cached.
 
-    A failure to read the flags returns the paused defaults rather than
-    raising — a database that can't answer must not become a licence to send.
+    A failure to read the flag leaves the nudges paused rather than raising.
+    Nothing that carries a system operation depends on this call.
     """
     global _cache, _cache_at
     now = time.monotonic()
@@ -108,7 +132,7 @@ async def paused_state() -> dict[str, bool]:
         try:
             loaded = await _load()
         except Exception:  # noqa: BLE001
-            logger.exception("email pause: could not read the flags, staying paused")
+            logger.exception("email pause: could not read the flag, nudges stay paused")
             loaded = {c: DEFAULT_PAUSED for c in PAUSABLE_CATEGORIES}
         _cache = loaded
         _cache_at = time.monotonic()
@@ -118,11 +142,10 @@ async def paused_state() -> dict[str, bool]:
 async def is_paused(category: str | None) -> bool:
     """Whether a send in this category is currently held.
 
-    An unrecognised category is treated as ``transactional`` — the same
-    fail-safe reason ``EmailMessage.category`` defaults to it.
+    Anything that is not ``automated`` returns False here immediately —
+    before any setting is read, so no configuration, no missing settings row
+    and no database failure can hold back a transactional or campaign send.
     """
-    if category == CATEGORY_CAMPAIGN:
-        return False
     if category not in PAUSABLE_CATEGORIES:
-        category = CATEGORY_TRANSACTIONAL
+        return False
     return (await paused_state()).get(category, DEFAULT_PAUSED)

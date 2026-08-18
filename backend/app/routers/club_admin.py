@@ -2334,7 +2334,6 @@ async def get_general_settings(
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
         "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "automated_emails_paused": await ps.get_automated_emails_paused(db),
-        "transactional_emails_paused": await ps.get_transactional_emails_paused(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),
@@ -2348,10 +2347,10 @@ class GeneralSettingsUpdate(BaseModel):
     onboarding_wizard_enabled: Optional[bool] = None
     trial_nudges_enabled: Optional[bool] = None
     billing_checkout_enabled: Optional[bool] = None
-    # The outbound-email kill switch (services/email_pause). Both default to
-    # PAUSED, so these two are how email is turned back ON, not off.
+    # Holds BetterCricket's own reminder/nudge emails (services/email_pause).
+    # Defaults to PAUSED, so this is how they are turned back ON, not off.
+    # There is no transactional equivalent by design — see the service.
     automated_emails_paused: Optional[bool] = None
-    transactional_emails_paused: Optional[bool] = None
     # Member self-service portal + Stripe Connect fee payments + reminder
     # automation (migration 178) — off by default; per direct instruction,
     # invisible to every club admin and unusable by any real member until a
@@ -2411,7 +2410,6 @@ async def patch_general_settings(
         "member_portal_enabled": await ps.get_member_portal_enabled(db),
         "merch_storefront_enabled": await ps.get_merch_storefront_enabled(db),
         "automated_emails_paused": await ps.get_automated_emails_paused(db),
-        "transactional_emails_paused": await ps.get_transactional_emails_paused(db),
         "bundle_discount_schedule": await ps.get_bundle_discount_schedule(db),
         "demo_booking_links": await ps.get_demo_booking_links(db),
         "backup_schedule": await ps.get_backup_schedule(db),

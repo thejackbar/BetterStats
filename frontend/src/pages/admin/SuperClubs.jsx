@@ -134,9 +134,9 @@ export default function SuperClubs() {
     self_serve_registration_enabled: false, onboarding_wizard_enabled: false,
     trial_nudges_enabled: false, billing_checkout_enabled: false, member_portal_enabled: false,
     merch_storefront_enabled: false,
-    // Both default to PAUSED — matches the server, and means a failed settings
-    // fetch shows the safe state rather than implying email is flowing.
-    automated_emails_paused: true, transactional_emails_paused: true,
+    // Defaults to PAUSED, matching the server. Only the reminder/nudge emails
+    // can be paused at all — transactional email has no switch by design.
+    automated_emails_paused: true,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
     demo_booking_links: [],
     backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
@@ -234,7 +234,6 @@ export default function SuperClubs() {
         member_portal_enabled: !!s?.member_portal_enabled,
         merch_storefront_enabled: !!s?.merch_storefront_enabled,
         automated_emails_paused: s?.automated_emails_paused !== false,
-        transactional_emails_paused: s?.transactional_emails_paused !== false,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
         demo_booking_links: Object.entries(s?.demo_booking_links || {}).map(([name, url]) => ({ name, url })),
         // Stored/returned by the API in UTC — shown to the admin in Perth time.
@@ -261,7 +260,6 @@ export default function SuperClubs() {
         member_portal_enabled: !!settingsForm.member_portal_enabled,
         merch_storefront_enabled: !!settingsForm.merch_storefront_enabled,
         automated_emails_paused: !!settingsForm.automated_emails_paused,
-        transactional_emails_paused: !!settingsForm.transactional_emails_paused,
         bundle_discount_schedule: Object.fromEntries(
           BUNDLE_DISCOUNT_ROWS.map((n) => [n, Math.max(0, Number(settingsForm.bundle_discount_schedule[n]) || 0)])
         ),
@@ -773,39 +771,28 @@ export default function SuperClubs() {
               </div>
               <div className="p-5 overflow-y-auto space-y-4">
 
-              <div className="space-y-2 rounded-md border border-pb-red/40 bg-pb-red/5 p-3">
-                <p className="font-mono text-[10px] tracking-wide3 uppercase text-pb-red">
-                  Outbound email
-                </p>
-                <p className="font-mono text-[10px] text-pb-faintest">
-                  Holds the emails BetterCricket sends on its own. Club newsletters sent from
-                  BetterComms and sales rep emails are never affected by these.
+              <div className="space-y-2 rounded-md border border-pb-amber/40 bg-pb-amber/5 p-3">
+                <p className="font-mono text-[10px] tracking-wide3 uppercase text-pb-amber">
+                  Reminder &amp; nudge emails
                 </p>
                 <label className="flex items-start gap-2 font-mono text-[10px] text-pb-faint">
                   <input type="checkbox" className="mt-0.5"
                     checked={!!settingsForm.automated_emails_paused}
                     onChange={e => setSettingsForm(f => ({ ...f, automated_emails_paused: e.target.checked }))} />
                   <span>
-                    Pause automated email
+                    Pause reminder and nudge emails
                     <span className="block text-pb-faintest normal-case">
-                      The 9 sent by a daily scan: 6 trial nudges, qualification expiry, fees
-                      owing, Club Diary task due.
+                      The 9 a daily scan sends with nobody asking for them: 6 trial nudges,
+                      qualification expiry, fees owing, Club Diary task due. Paused by default.
                     </span>
                   </span>
                 </label>
-                <label className="flex items-start gap-2 font-mono text-[10px] text-pb-faint">
-                  <input type="checkbox" className="mt-0.5"
-                    checked={!!settingsForm.transactional_emails_paused}
-                    onChange={e => setSettingsForm(f => ({ ...f, transactional_emails_paused: e.target.checked }))} />
-                  <span>
-                    Pause transactional email
-                    <span className="block text-pb-red normal-case">
-                      The 7 an action sends. While this is on, nobody can accept an invite,
-                      reset a password, finish a self-serve signup, or sign in to a member
-                      portal.
-                    </span>
-                  </span>
-                </label>
+                <p className="font-mono text-[10px] text-pb-faintest">
+                  Nothing else is affected. Emails that carry a system operation — invites,
+                  password resets, signup verification codes, member portal sign-in links — always
+                  send, and have no switch here on purpose. Club newsletters from BetterComms and
+                  sales rep emails always send too.
+                </p>
               </div>
 
               <div>

@@ -367,8 +367,6 @@ async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, lin
     except Exception:
         logger.exception("vote nudge send failed for player %s / fixture %s", player.get("id"), fixture.id)
         return False, "send_failed"
-    if result.suppressed:
-        return False, "email_paused"
     if not result.ok:
         return False, "send_failed"
     db.add(VoteNudge(organisation_id=club.id, fixture_id=fixture.id, player_id=uuid.UUID(player["id"])))

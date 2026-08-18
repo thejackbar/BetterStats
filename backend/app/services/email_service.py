@@ -84,13 +84,19 @@ class EmailMessage:
     # SES tenant to send on behalf of (multi-tenancy). Set by the caller only when
     # ses_tenant_sends_enabled. Ignored by non-SES providers. See services/ses_tenants.
     tenant: Optional[str] = None
-    # What KIND of send this is: 'automated' (a scheduled scan sent it),
-    # 'transactional' (one person's action produced exactly one email) or
-    # 'campaign' (a person composed it and clicked send). Read by the pause
-    # gate in get_email_provider — see services/email_pause. Defaults to
-    # 'transactional', which is pausable, so a send that never names a
-    # category is held rather than slipping out while the platform's
-    # background email is paused.
+    # What KIND of send this is: 'automated' (a scheduled scan sent it, and
+    # nobody asked for it), 'transactional' (one person's action produced
+    # exactly one email, and that email is how the action completes) or
+    # 'campaign' (a person composed it and pressed Send). Read by the pause
+    # gate in get_email_provider — see services/email_pause, which is also
+    # where the rule lives that ONLY 'automated' can ever be held.
+    #
+    # The default is 'transactional' — unpausable — so a send that somehow
+    # never names a category goes out rather than being held. Getting an
+    # extra nudge is a nuisance; being locked out of your account because an
+    # untagged invite was held is not. Every EmailMessage in the tree names
+    # its category explicitly, and the verification asserts that, so this
+    # default is a backstop rather than the normal path.
     category: str = "transactional"
 
 
@@ -388,10 +394,13 @@ class PausedProvider(EmailProvider):
     """Wraps the real provider and holds back a send whose category is paused.
 
     The gate lives here, wrapping the single provider every caller reaches
-    through, rather than at the ten places that compose a message: a new
-    email added later is covered without anyone remembering to add a check.
-    See services/email_pause for what each category means and why both
-    pausable ones default to paused.
+    through, rather than at the places that compose a message: a new email
+    added later is covered without anyone remembering to add a check.
+
+    Only 'automated' (reminders and nudges) is pausable. Transactional email
+    — invites, password resets, the signup verification code, the member
+    portal sign-in link — carries system operations and is never held, by
+    construction rather than by configuration. See services/email_pause.
 
     Proxies ``name``, so email_is_live() and the "preview / no-send" notice
     keep reporting the underlying provider rather than the wrapper.
@@ -407,6 +416,10 @@ class PausedProvider(EmailProvider):
     async def send(self, msg: EmailMessage) -> SendResult:
         from app.services import email_pause
 
+        # Only 'automated' can ever come back True here — is_paused returns
+        # False for every other category before it reads any setting, so no
+        # configuration and no database failure can hold back a transactional
+        # or campaign send.
         category = getattr(msg, "category", email_pause.CATEGORY_TRANSACTIONAL)
         if await email_pause.is_paused(category):
             # Logged at WARNING with the recipient's domain only — enough to

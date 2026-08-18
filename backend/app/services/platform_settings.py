@@ -45,10 +45,12 @@ _BOOL_KEYS = {
     # get_crm_show_past_events. It's listed here only so update_settings
     # validates/stores it as a real boolean.
     "crm_show_past_events",
-    # The outbound-email kill switch. Both default TRUE (paused) rather than
-    # false — see services/email_pause for why the safe state is the default
-    # one. Listed here so update_settings validates them as real booleans.
-    "automated_emails_paused", "transactional_emails_paused",
+    # Holds BetterCricket's own reminder and nudge emails. Defaults TRUE
+    # (paused) rather than false — see services/email_pause. There is
+    # deliberately NO equivalent key for transactional email: invites,
+    # password resets, signup codes and portal sign-in links carry system
+    # operations and must never be disabled.
+    "automated_emails_paused",
 }
 
 # How long a direct "onboard my club" website enquiry (Contact page or the quick
@@ -457,21 +459,15 @@ async def get_feature_flag(db: AsyncSession, key: str) -> bool:
 
 
 async def get_automated_emails_paused(db: AsyncSession) -> bool:
-    """Whether the nine emails a scheduled scan sends are held. Defaults to
-    PAUSED — see services/email_pause. The send path reads this through
-    email_pause's cache, not directly; this getter is for the settings screen."""
+    """Whether the nine reminder/nudge emails a scheduled scan sends are held.
+    Defaults to PAUSED — see services/email_pause. The send path reads this
+    through email_pause's cache, not directly; this getter is for the settings
+    screen.
+
+    This is the ONLY email pause setting, on purpose. Transactional email
+    (invites, password resets, the signup code, portal sign-in) has no
+    equivalent and cannot be switched off."""
     v = (await get_settings(db)).get("automated_emails_paused")
-    return True if v is None else bool(v)
-
-
-async def get_transactional_emails_paused(db: AsyncSession) -> bool:
-    """Whether the seven one-action-one-email sends are held — invites, both
-    password resets, the signup verification code, the member-portal sign-in
-    link, vote nudges and unpause requests. Defaults to PAUSED.
-
-    Worth saying plainly: with this on, nobody can accept an invite, recover a
-    password, finish a self-serve signup or sign in to a member portal."""
-    v = (await get_settings(db)).get("transactional_emails_paused")
     return True if v is None else bool(v)
 
 
