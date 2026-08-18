@@ -36,6 +36,55 @@ import uuid
 # what counts as a residual.
 from app.services.aggregations import _RESIDUAL_SOURCES
 
+
+# ─── Grade type / match type scope ─────────────────────────────────────────────
+# The two platform-wide grade filters (migration 259): Grade Type (men's /
+# juniors / women's / masters) and Match Type (two day / one day / T20). Every
+# other stats surface resolves them into one `GradeScope` and StatLab was the
+# last one that didn't, so a club whose default leaves juniors out saw them
+# counted here and nowhere else.
+#
+# The resolved scope rides in the context dict under `_scope`. That key can
+# never arrive from a URL — `_ctx_from_request` only ever writes keys from its
+# own whitelists, and none of them start with an underscore — so a browser
+# can't hand us a scope of its own choosing.
+_SCOPE_KEY = "_scope"
+
+
+def _ctx_scope(ctx: dict):
+    """The resolved GradeScope for this query, or None."""
+    scope = (ctx or {}).get(_SCOPE_KEY)
+    return scope if scope is not None and getattr(scope, "active", False) else None
+
+
+def _scope_clause_for_join(scope, column: str, params: dict) -> str:
+    """An aggregate-kind scope condition (leading AND), bound into `params`.
+
+    For the two family targets, which sum `player_season_stats` directly and so
+    have no game to read a format from. Returns "" when there is no scope.
+    """
+    if not scope:
+        return ""
+    clause = scope.clause(column, "aggregate")
+    if clause:
+        scope.bind(params)
+    return clause
+
+
+def _scope_fragment(clause: str) -> str:
+    """`GradeScope.clause()` output as a bare condition, ready to AND-join.
+
+    It hands back a fragment with a leading " AND " because most callers paste
+    it straight into a WHERE. StatLab keeps its conditions in a list and joins
+    them itself, so the leading AND has to come off. Each condition inside is
+    already bracketed, so what's left composes safely.
+    """
+    frag = (clause or "").strip()
+    if frag.startswith("AND "):
+        frag = frag[4:]
+    return frag.strip()
+
+
 # ─── Operators ─────────────────────────────────────────────────────────────────
 
 OPERATOR_MAP: dict[str, str] = {
@@ -465,6 +514,18 @@ def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
             ors.append(_residual_grade_match(prefix, suffix))
             params[f"{prefix}grade_name{suffix}"] = v
         clauses.append("(" + " OR ".join(ors) + ")")
+
+    # Grade type / match type against an aggregate row. `kind='aggregate'` is
+    # what makes this honest: a residual has a grade (sometimes) but never a
+    # game, so under a MATCH TYPE filter it emits AND FALSE rather than counting
+    # an imported season towards a T20 record it can say nothing about. A
+    # category-only scope still keeps residuals, per _RESIDUAL_SOURCES.
+    scope = _ctx_scope(context)
+    if scope:
+        frag = _scope_fragment(scope.clause("pss.grade_id", "aggregate"))
+        if frag:
+            clauses.append(frag)
+            scope.bind(params)
 
     return (" AND " + " AND ".join(clauses)) if clauses else ""
 
@@ -940,6 +1001,20 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
         mc = mc + list_clauses
         mp = {**mp, **list_params}
         mu = True
+    # Grade type / match type. `kind='game'` (the default) is right for
+    # game_universe: it reads the CATEGORY exclusion off the game's grade_id and
+    # the FORMAT off each fixture's own match_format, which is what stops a
+    # grade that plays both formats filing all of its games under one.
+    scope = _ctx_scope(ctx)
+    if scope:
+        frag = _scope_fragment(scope.clause("g.grade_id"))
+        if frag:
+            mc = mc + [frag]
+            scope.bind(mp)
+            # An active scope is only answerable from per-game rows, so it also
+            # switches the aggregate-path targets to live aggregation — the same
+            # trade records.py makes with its own `scope_active`.
+            mu = True
     ic, ip, _iu = _build_filter_block(ctx, INNINGS_CONTEXT_FILTERS)
     # Merge in the multi-select INNINGS filter (dismissals). Landing in `ic` is
     # what keeps residuals disqualified from a dismissal-scoped query — see
@@ -1687,6 +1762,14 @@ async def query_family_career(
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
+    # This target sums player_season_stats directly and has no per-game path, so
+    # the only scope it can answer is the aggregate one: a category exclusion
+    # lands on the rows that carry a grade, and a MATCH TYPE filter empties it
+    # (kind='aggregate' emits AND FALSE) rather than inventing a format for a
+    # season total. In the join condition, not the WHERE — a family whose every
+    # row is out of scope should still list, at zero, rather than disappear.
+    scope = _ctx_scope(context)
+    scope_clause = _scope_clause_for_join(scope, "pss.grade_id", params)
     sql = f"""
         WITH agg AS (
             SELECT {select_cols}
@@ -1702,7 +1785,7 @@ async def query_family_career(
                 AND (pss.season_id IS NULL OR EXISTS (
                     SELECT 1 FROM seasons s
                     WHERE s.id = pss.season_id AND s.organisation_id = :org_id
-                ))
+                )){scope_clause}
             WHERE f.organisation_id = :org_id
             GROUP BY f.id, f.name
         )
@@ -1736,6 +1819,8 @@ async def query_family_season(
     params = {"org_id": org_id, "limit": limit, "offset": offset, **metric_params}
 
     season_filter = _pss_season_filter(context, params, "ctx_fs_")
+    # Same aggregate-only scope as family_career above — see its note.
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
     where_sql = (f"WHERE {metric_clause_sql}" if metric_clause_sql else "")
 
     select_cols = _family_agg_select_cols()
@@ -1753,7 +1838,7 @@ async def query_family_season(
             -- excluded by the INNER JOIN to seasons below, same as before.
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             JOIN seasons s ON s.id = pss.season_id
-            WHERE f.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
+            WHERE f.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}{scope_clause}
             GROUP BY f.id, f.name, s.id, s.name, s.year
         )
         SELECT * FROM agg
@@ -4350,6 +4435,11 @@ async def derived_most_minutes_in_season(
     """Most batting minutes accumulated in a single season."""
     params = {"org_id": org_id, "limit": min(max(1, limit), 500)}
     season_filter = _pss_season_filter(context, params, "ctx_mm_")
+    # Batting minutes only exist as a season aggregate, so like the two family
+    # targets this one can only answer the aggregate-kind scope: a category
+    # exclusion lands on the rows carrying a grade, and a match type empties it
+    # rather than filing a season total under a format it can't know.
+    scope_clause = _scope_clause_for_join(_ctx_scope(context), "pss.grade_id", params)
     sql = f"""
         SELECT
             p.id::text                                   AS player_id,
@@ -4364,7 +4454,7 @@ async def derived_most_minutes_in_season(
         WHERE p.organisation_id = :org_id
           AND s.organisation_id = :org_id
           AND COALESCE(pss.batting_minutes, 0) > 0
-          {season_filter}
+          {season_filter}{scope_clause}
         ORDER BY pss.batting_minutes DESC NULLS LAST
         LIMIT :limit OFFSET :offset
     """

@@ -15,6 +15,7 @@ from app.auth.capabilities import (
 from app.models.db import get_db, SavedReport, User, ClubMembership, Organisation
 from app.routers.auth import get_current_user, get_current_club
 from app.services import statlab as svc
+from app.services import grade_scope
 
 
 async def _user_can_manage_reports(db: AsyncSession, user: User, club: Organisation) -> bool:
@@ -141,6 +142,23 @@ async def statlab_query(
     page: int = Query(1, ge=1),
     filters: list[str] = Query(default=[]),
     filter_tree: Optional[str] = Query(None, description="URL-encoded JSON filter tree (overrides `filters` when present)"),
+    categories: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated grade types to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, "
+            "which is what every other stats surface does."
+        ),
+    ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Matched per FIXTURE against each game's own match_format, "
+            "so a grade that plays several is split correctly. Omitted applies "
+            "no format filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Run a StatLab query against one of the registered targets.
@@ -154,6 +172,8 @@ async def statlab_query(
         except json.JSONDecodeError:
             raise HTTPException(status_code=400, detail="filter_tree must be valid JSON")
     ctx = _ctx_from_request(request)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_query(
             db,
@@ -169,7 +189,14 @@ async def statlab_query(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"rows": _serialise(result["rows"]), "has_more": result["has_more"], "page": result["page"]}
+    return {
+        "rows": _serialise(result["rows"]),
+        "has_more": result["has_more"],
+        "page": result["page"],
+        # So the page can say which grades its figures leave out, the same way
+        # every other stats screen does.
+        "scope": scope.as_meta(),
+    }
 
 
 @router.get("/derived/{name}")
@@ -179,16 +206,40 @@ async def statlab_derived(
     org_id: str,
     limit: int = Query(100, ge=1, le=500),
     page: int = Query(1, ge=1),
+    categories: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated grade types to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, "
+            "which is what every other stats surface does."
+        ),
+    ),
+    formats: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Matched per FIXTURE against each game's own match_format, "
+            "so a grade that plays several is split correctly. Omitted applies "
+            "no format filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     if name not in svc.DERIVED_QUERIES:
         raise HTTPException(status_code=400, detail=f"Unknown derived query: {name}")
     ctx = _ctx_from_request(request)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    ctx[svc._SCOPE_KEY] = scope
     try:
         result = await svc.run_derived(db, name=name, org_id=org_id, limit=limit, page=page, context=ctx)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Derived query error: {e}")
-    return {"rows": _serialise(result["rows"]), "has_more": result["has_more"], "page": result["page"]}
+    return {
+        "rows": _serialise(result["rows"]),
+        "has_more": result["has_more"],
+        "page": result["page"],
+        "scope": scope.as_meta(),
+    }
 
 
 @router.get("/picker-values")

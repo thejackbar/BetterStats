@@ -10,6 +10,9 @@ import ClubInactive from './ClubInactive'
 import ClubPinGate from './ClubPinGate'
 import { Label, Card, Btn, PageHeader, PbSpinner } from '../lib/presskit'
 import { fmt2, fmtCount, fmtOvers, formatSeason } from '../lib/cricketFormat'
+import {
+  GRADE_CATEGORIES, CATEGORY_LABELS, MATCH_FORMATS, FORMAT_LABELS, scopeNote,
+} from '../lib/gradeCategories'
 
 // ─── Static config ────────────────────────────────────────────────────────────
 
@@ -333,7 +336,7 @@ const CONTEXT_KEYS = [
   'dismissal','dismissals','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
   'gender','overseas','player_role','award_category','award_subcategory','award_name','office_bearer',
-  'family_id',
+  'family_id','categories','formats',
 ]
 // Context keys whose value is a list. Carried through the URL as a repeated
 // param (?c_grade_names=1st+Grade&c_grade_names=3rd+Grade) rather than a
@@ -367,6 +370,16 @@ const selectedGradeNames = (ctx) => selectedList(ctx, 'grade_names', 'grade_name
 function setMulti(ctx, listKey, singleKey, values) {
   return { ...ctx, [listKey]: values, [singleKey]: '' }
 }
+
+// Grade type and match type ride as ONE comma-separated string each, which is
+// the shape every other stats surface already sends (`?categories=senior,womens`)
+// and the shape resolve_scope reads. So they stay plain text keys rather than
+// joining CONTEXT_ARRAY_KEYS, and the picker splits and joins around them.
+const csvList = (v) => (v ? String(v).split(',').map(x => x.trim()).filter(Boolean) : [])
+const csvJoin = (list) => (list && list.length ? list.join(',') : '')
+
+const GRADE_TYPE_OPTIONS = GRADE_CATEGORIES.map(c => ({ value: c, label: CATEGORY_LABELS[c] || c }))
+const MATCH_TYPE_OPTIONS = MATCH_FORMATS.map(f => ({ value: f, label: FORMAT_LABELS[f] || f }))
 
 // "Season: Summer 2025/26" for one, the names for a few, a count for a lot.
 function listChipLabel(one, many, labels) {
@@ -484,6 +497,14 @@ function summarizeContextChips(ctx, seasons, grades) {
   if (ctx.captain_only) push('captain_only', 'As captain')
   if (ctx.keeper_only)  push('keeper_only', 'As keeper')
   if (ctx.on_this_day)  push('on_this_day', 'On this day')
+  {
+    const cats = csvList(ctx.categories)
+    if (cats.length) push('categories', listChipLabel('Grade type', 'Grade types',
+      cats.map(c => CATEGORY_LABELS[c] || c)))
+    const fmts = csvList(ctx.formats)
+    if (fmts.length) push('formats', listChipLabel('Match type', 'Match types',
+      fmts.map(f => FORMAT_LABELS[f] || f)))
+  }
   pushMulti('results', 'result', 'Result', 'Results',
     v => RESULT_OPTIONS.find(o => o.value === v)?.label || v)
   pushMulti('dismissals', 'dismissal', 'Dismissal', 'Dismissals',
@@ -765,8 +786,21 @@ function PickerInput({ orgId, kind, value, placeholder, onChange }) {
   )
 }
 
-function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId }) {
+function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, target, activeDerived, orgId, gradeMeta }) {
   const set = (k, v) => onChange({ ...ctx, [k]: v })
+  // Only the grade types and formats this club actually runs. A club with no
+  // junior programme is never offered a Juniors tick box, which is also exactly
+  // when the filter would do nothing — the same rule the pill rows follow.
+  const availableCats = gradeMeta?.available || []
+  const availableFormats = gradeMeta?.available_formats || []
+  const gradeTypeOptions = GRADE_TYPE_OPTIONS.filter(o => availableCats.includes(o.value))
+  const matchTypeOptions = MATCH_TYPE_OPTIONS.filter(o => availableFormats.includes(o.value))
+  // Nothing ticked on Grade type means the club's OWN default, not "everything"
+  // — which for most clubs leaves juniors out. Say so on the control rather
+  // than letting the figures quietly disagree with what it reads.
+  const defaultCats = gradeMeta?.default || []
+  const leftOut = availableCats.filter(c => !defaultCats.includes(c)).map(c => CATEGORY_LABELS[c] || c)
+  const defaultScopeLabel = leftOut.length ? `Club default (no ${leftOut.join(', ')})` : 'All grade types'
   const showInningsFilters = targetShape === 'list' || targetShape === 'aggregate'
   // Family targets are themselves family-aggregations, so a "filter to one
   // family" dropdown is redundant (you'd just see one row). Hide it there.
@@ -802,6 +836,32 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
           />
         </div>
       </div>
+      {gradeTypeOptions.length > 0 && (
+        <div>
+          <Label>Grade type</Label>
+          <div className="mt-1">
+            <MultiCheckSelect
+              options={gradeTypeOptions}
+              values={csvList(ctx.categories)}
+              onChange={next => set('categories', csvJoin(next))}
+              allLabel={defaultScopeLabel}
+            />
+          </div>
+        </div>
+      )}
+      {matchTypeOptions.length > 0 && (
+        <div>
+          <Label>Match type</Label>
+          <div className="mt-1">
+            <MultiCheckSelect
+              options={matchTypeOptions}
+              values={csvList(ctx.formats)}
+              onChange={next => set('formats', csvJoin(next))}
+              allLabel="Any match type"
+            />
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-2 gap-1.5">
         <div>
           <Label>From</Label>
@@ -1251,6 +1311,9 @@ export default function StatLab() {
   const [editingReport, setEditingReport] = useState(null)
 
   const [grades, setGrades] = useState([])
+  const [gradeMeta, setGradeMeta] = useState(null)
+  // What the last run actually counted, straight off the response.
+  const [scope, setScope] = useState(null)
   const [activeDerived, setActiveDerived] = useState(null)
   // activePreset tracks the label of the most recently applied preset (the
   // non-derived buttons in REPORTS panel). Presets are stateless once applied,
@@ -1279,6 +1342,18 @@ export default function StatLab() {
   useEffect(() => {
     if (!orgId) return
     api.getOrgGrades(orgId).then(setGrades).catch(() => setGrades([]))
+  }, [orgId])
+
+  // Which grade types and match types this club actually runs, and what it
+  // counts by default. Same public endpoint every other stats screen reads, so
+  // the Grade type control can say what "nothing ticked" means here.
+  useEffect(() => {
+    if (!orgId) return
+    let cancelled = false
+    api.orgGradeCategories(orgId)
+      .then(d => { if (!cancelled) setGradeMeta(d) })
+      .catch(() => { if (!cancelled) setGradeMeta(null) })
+    return () => { cancelled = true }
   }, [orgId])
 
   // Load reports whenever org changes
@@ -1363,6 +1438,7 @@ export default function StatLab() {
       setRows(data.rows)
       setHasMore(data.has_more)
       setCurrentPage(data.page)
+      setScope(data.scope || null)
     } catch (e) {
       setError(e.message); setRows([]); setHasMore(false); setCurrentPage(1)
     } finally { setLoading(false) }
@@ -1726,6 +1802,7 @@ export default function StatLab() {
                         target={query.target}
                         activeDerived={activeDerived}
                         orgId={orgId}
+                        gradeMeta={gradeMeta}
                       />
                     </div>
                   </div>
@@ -1868,6 +1945,22 @@ export default function StatLab() {
                           RESET ALL
                         </button>
                       </div>
+                    </div>
+                  )
+                })()}
+                {(() => {
+                  // What the figures leave out, and the one case a filter
+                  // genuinely can't be answered — better said out loud than
+                  // left as an unexplained empty table.
+                  const note = scopeNote(scope, 'Grade type')
+                  const aggregateOnly = query.target === 'family_career' || query.target === 'family_season'
+                  const formatUnanswerable = !!scope?.format_active && aggregateOnly
+                  if (!note && !formatUnanswerable) return null
+                  return (
+                    <div className="px-5 sm:px-6 py-2 pb-hairline-b text-[11px] text-pb-faint">
+                      {formatUnanswerable
+                        ? 'A match type is a property of each fixture, and this target sums season totals, which carry no format. Use Family by grade, or a player target, to read a format split.'
+                        : note}
                     </div>
                   )
                 })()}

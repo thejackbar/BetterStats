@@ -1,5 +1,80 @@
 # BetterStats — Claude Session Notes
 
+## StatLab gets the platform's Grade Type / Match Type filters (v9.29.4, Aug 2026)
+
+StatLab was the last stats surface with no `GradeScope` (migration 259). Two
+consequences, and the second is the one that mattered: there was no way to ask
+it for the T20s or the women's grades, AND it counted every grade whatever the
+club had set, so a club that leaves juniors out saw StatLab disagree with its
+own Leaderboard.
+
+- **StatLab now applies the club default like every other screen, and that is a
+  deliberate behaviour change.** `categories=None` means "the club's default"
+  everywhere else, so it means that here too. A club with junior grades will see
+  StatLab's unfiltered figures drop to match the Leaderboard's, including inside
+  a saved report written before this. The Grade type control says what the
+  default leaves out ("Club default (no Juniors)") rather than reading "All",
+  and the results carry `scopeNote`'s own line, the same one Records shows.
+- **The resolved scope rides in the context dict under `_scope`, and that key
+  can never arrive from a browser.** `_ctx_from_request` only ever writes keys
+  from its own whitelists and none of them start with an underscore, so a
+  crafted URL cannot hand the query builder a scope of its choosing. Doing it
+  this way meant two touch points instead of threading a new argument through
+  all ~30 `_build_context_filters` call sites.
+- **`_scope_fragment` exists because the two sides format differently.**
+  `GradeScope.clause()` hands back a fragment with a leading ` AND ` for callers
+  that paste it into a WHERE; StatLab keeps conditions in a list and joins them
+  itself, so the AND comes off. Every condition inside is already bracketed, so
+  what is left composes.
+- **`kind` per read, exactly as the platform rule says.** `game_universe` gets
+  `clause("g.grade_id")` (per-game: category off the grade, format off each
+  fixture's own `match_format`, which is what stops a grade that plays both
+  formats filing all its games under one). The residual CTEs and the three
+  aggregate-only queries get `clause("pss.grade_id", "aggregate")`, which emits
+  `AND FALSE` under a match-type filter rather than counting an imported season
+  towards a T20 record it can say nothing about.
+- **The three aggregate-only queries had to be found, not assumed**:
+  `query_family_career`, `query_family_season` and `derived_most_minutes_in_season`
+  sum `player_season_stats` directly and never touch `game_universe`, so the
+  clause `_build_context_filters` adds would have missed them entirely and the
+  filter would have read as working while doing nothing. Same class of gap as
+  the `_pss_season_filter` one the release before. On family_career it goes in
+  the JOIN condition, not the WHERE: a family whose every row is out of scope
+  should still list at zero rather than disappear.
+- **An active scope sets `any_match_used`,** so the aggregate-path targets
+  (player_career, player_season) switch to live per-innings aggregation. A scope
+  is only answerable from per-game rows, and this is the same trade
+  `records.py`'s `use_game_level` makes with its own `scope_active`.
+- **A match type genuinely cannot be answered by Family career / Family by
+  season, and the screen says so** instead of showing an unexplained empty
+  table. Those two have no per-game path at all.
+- **The picker offers only what the club runs.** `GET /organisations/{id}/grade-categories`
+  (public, cheap, already there) supplies `available` / `default` /
+  `available_formats`; a club with no junior programme is never shown a Juniors
+  tick box, which is also exactly when the filter would do nothing.
+- **On the wire they are ONE comma-separated string each** (`?categories=senior,womens`),
+  not a repeated param, because that is the shape every other stats endpoint
+  takes and what `resolve_scope` reads. So they stay plain text context keys and
+  the picker splits and joins around them — the opposite call to `grade_names`,
+  which is repeated precisely because a grade name can contain a comma and these
+  fixed keys cannot.
+- **Verified against a real Postgres** (19 checks through the real `resolve_scope`
+  and the shipped StatLab builders: the club default leaving juniors out, an
+  explicit junior pick finding them, one mixed grade splitting 1 two-day / 1
+  one-day / 1 unplaceable, an unlabelled game inheriting a single-format grade's
+  format but NOT a mixed grade's, every-format reading as no filter, the two
+  axes composing with each other and with a picked grade, residuals kept under a
+  category scope and emptied under a format one, and a senior-only club emitting
+  no clause and binding nothing) and **driven in Chromium** (35 checks, the 26
+  from the multi-select release plus the two new pickers: the club-default
+  label, only the offered types, the exact params on the wire, both chips,
+  dismissing one, the left-out note, and a shared link opening with both ticked;
+  no page errors, no overflow at 390px).
+- **Noticed, NOT fixed**: Family career and Family by season ignore every OTHER
+  context filter too (opposition, result, dismissal, a picked grade). They sum
+  season aggregates and predate the live per-innings path the player targets
+  use. That is a pre-existing gap, not one this release introduced.
+
 ## StatLab's list filters take several values at once (v9.29.2, Aug 2026)
 
 Reported: StatLab could only ever be scoped to ONE grade, so "most runs across
