@@ -8,6 +8,7 @@ import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
+import ClubLocationMap from '../../components/admin/ClubLocationMap'
 import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
@@ -539,6 +540,7 @@ export default function SalesWorkspace() {
   }
   const [noteForm, setNoteForm] = useState({ body: '', pinned: false })
   const [savingNote, setSavingNote] = useState(false)
+  const [mapOpen, setMapOpen] = useState(true)
   const [showAddContact, setShowAddContact] = useState(false)
   const [contactForm, setContactForm] = useState({ full_name: '', role: '', email: '', mobile: '' })
   const [savingContact, setSavingContact] = useState(false)
@@ -1217,6 +1219,28 @@ export default function SalesWorkspace() {
                 <div className={CARD}>
                   <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
                   <WebsiteAnalyticsCard data={drawer.website_visits} />
+                </div>
+              )}
+
+              {drawer.deal.marketing_club_id && (
+                <div className={CARD}>
+                  <button type="button" onClick={() => setMapOpen(o => !o)}
+                    className="flex items-center justify-between w-full text-left">
+                    <h3 className="font-display font-bold text-[13px]">Location</h3>
+                    <span className="text-pb-faintest text-[10px]">{mapOpen ? '▾' : '▸'}</span>
+                  </button>
+                  {mapOpen && (
+                    <div className="mt-2">
+                      <ClubLocationMap
+                        clubId={drawer.deal.marketing_club_id}
+                        latitude={drawer.deal.marketing_club_latitude}
+                        longitude={drawer.deal.marketing_club_longitude}
+                        postcode={drawer.deal.marketing_club_postcode}
+                        state={drawer.deal.marketing_club_state}
+                        preloadedBoundary={drawer.boundary}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -425,6 +425,12 @@ async def get_club(
     # list use, just called with a single-club map since this is one deal.
     # Absent (None) for a bare prospect that's never been onboarded.
     deal_out["marketing_club_state"] = club.state if club else None
+    # Feeds ClubLocationMap.jsx in the drawer (same component/props the Club
+    # Directory's own map already uses) — Numeric columns need a float cast,
+    # since json can't serialise a Decimal.
+    deal_out["marketing_club_latitude"] = float(club.latitude) if club and club.latitude is not None else None
+    deal_out["marketing_club_longitude"] = float(club.longitude) if club and club.longitude is not None else None
+    deal_out["marketing_club_postcode"] = club.postcode if club else None
     club_stats = None
     trial_days = None
     min_trial_days = None
@@ -473,6 +479,7 @@ async def get_club(
 
     engagement = None
     website_visits = None
+    boundary = None
     if club is not None:
         club_id_for_reads = club.id  # captured now: club_engagement_breakdown
                                       # below commits, which expires every ORM
@@ -492,6 +499,16 @@ async def get_club(
         except Exception:  # noqa: BLE001 - the drawer must still render without it
             logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
             website_visits = None
+        # Feeds ClubLocationMap.jsx's suburb-boundary overlay — same
+        # super-admin-only reasoning as website_visits above, `/marketing/
+        # clubs/{id}/boundary` a 'sales' caller can't reach, so the drawer
+        # embeds it via the exact service function that route calls.
+        try:
+            from app.services import club_directory as cd
+            boundary = await cd.get_or_fetch_boundary(db, club_id_for_reads)
+        except Exception:  # noqa: BLE001 - the drawer must still render without it
+            logger.exception("sales_workspace: boundary lookup failed for club %s", club_id_for_reads)
+            boundary = None
         try:
             from app.routers.marketing import club_engagement_breakdown
             engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
@@ -507,6 +524,7 @@ async def get_club(
         "activities": activities_out,
         "engagement": engagement,
         "website_visits": website_visits,
+        "boundary": boundary,
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
     }
