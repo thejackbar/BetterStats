@@ -703,6 +703,18 @@ export default function SalesWorkspace() {
           setDrawer(null)
           setSearchParams((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
         }
+      } else if (selectedIdRef.current) {
+        // Still selected and still in the filtered list, but a resort (a
+        // call/email action moves priority_score, updated_at, etc.) can
+        // relocate its row well outside the current viewport with nothing
+        // else bringing it back — the open club's row must always stay on
+        // display, so re-anchor to it every time the queue reloads while
+        // it's still selected. A no-op via 'nearest' when it's already
+        // visible, so an ordinary filter tweak doesn't feel like a jump.
+        const id = selectedIdRef.current
+        setTimeout(() => {
+          rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+        }, 60)
       }
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
@@ -1659,7 +1671,8 @@ export default function SalesWorkspace() {
           </form>
         </Modal>
 
-        <Modal open={!!viewingEmail} onClose={() => setViewingEmail(null)} title={viewingEmail?.meta?.subject || 'Email'}>
+        <Modal open={!!viewingEmail} onClose={() => setViewingEmail(null)} title={viewingEmail?.meta?.subject || 'Email'}
+          maxWidth="max-w-[40rem]">
           <div className="space-y-2">
             <div className="text-[11.5px] text-pb-faint">
               <div>To: {viewingEmail?.meta?.to_name}{viewingEmail?.meta?.to_email ? ` <${viewingEmail.meta.to_email}>` : ''}</div>
