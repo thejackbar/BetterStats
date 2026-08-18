@@ -328,13 +328,29 @@ const COLUMN_SETS = {
 }
 
 const CONTEXT_KEYS = [
-  'season_id','grade_id','grade_name','opposition','date_from','date_to',
+  'season_id','grade_id','grade_name','grade_names','opposition','date_from','date_to',
   'min_year','max_year','finals_only','captain_only','keeper_only','result',
   'dismissal','position_min','position_max',
   'first_n_matches','milestone_runs','on_this_day',
   'gender','overseas','player_role','award_category','award_subcategory','award_name','office_bearer',
   'family_id',
 ]
+// Context keys whose value is a list. Carried through the URL as a repeated
+// param (?c_grade_names=1st+Grade&c_grade_names=3rd+Grade) rather than a
+// comma-joined string — a grade name can contain a comma.
+const CONTEXT_ARRAY_KEYS = new Set(['grade_names'])
+const CONTEXT_BOOL_KEYS = new Set(['finals_only', 'captain_only', 'keeper_only', 'on_this_day'])
+
+// The grades currently in scope, as a plain array. `grade_names` is what the
+// picker writes; `grade_name` is the single value it used to write, still
+// honoured so a saved report or a shared link from before the picker went
+// multi-select opens on the grade it names.
+function selectedGradeNames(ctx) {
+  const many = ctx?.grade_names
+  if (Array.isArray(many)) return many.filter(Boolean)
+  if (many) return [many]
+  return ctx?.grade_name ? [ctx.grade_name] : []
+}
 
 // Category groupings for the field picker. Field membership is intersected
 // with each target's allowed metrics on render — categories with no eligible
@@ -418,12 +434,18 @@ function treeLeafCount(node) {
 function summarizeContextChips(ctx, seasons, grades) {
   if (!ctx) return []
   const out = []
-  const push = (key, label) => out.push({ key, label })
+  // `keys` is what a chip clears when it's dismissed — usually just its own,
+  // but the grade chip has to clear the multi-select AND the single value a
+  // pre-multi-select saved report may still carry.
+  const push = (key, label, keys) => out.push({ key, label, keys: keys || [key] })
   if (ctx.season_id) {
     const s = (seasons || []).find(x => x.id === ctx.season_id)
     push('season_id', `Season: ${s?.name || ctx.season_id}`)
   }
-  if (ctx.grade_name) push('grade_name', `Grade: ${ctx.grade_name}`)
+  const gradeSel = selectedGradeNames(ctx)
+  if (gradeSel.length === 1) push('grade_names', `Grade: ${gradeSel[0]}`, ['grade_names', 'grade_name'])
+  else if (gradeSel.length > 1 && gradeSel.length <= 3) push('grade_names', `Grades: ${gradeSel.join(', ')}`, ['grade_names', 'grade_name'])
+  else if (gradeSel.length > 3) push('grade_names', `Grades: ${gradeSel.length} selected`, ['grade_names', 'grade_name'])
   if (ctx.opposition) push('opposition', `Vs: ${ctx.opposition}`)
   if (ctx.date_from)  push('date_from', `From: ${ctx.date_from}`)
   if (ctx.date_to)    push('date_to', `To: ${ctx.date_to}`)
@@ -498,6 +520,10 @@ function encodeQueryToParams(q) {
   if (cleaned) p.set('ft', JSON.stringify(cleaned))
   Object.entries(q.context || {}).forEach(([k, v]) => {
     if (v === undefined || v === null || v === '' || v === false) return
+    if (Array.isArray(v)) {
+      v.filter(x => x !== undefined && x !== null && x !== '').forEach(x => p.append(`c_${k}`, String(x)))
+      return
+    }
     p.set(`c_${k}`, v === true ? '1' : String(v))
   })
   return p
@@ -523,9 +549,14 @@ function decodeParamsToQuery(params) {
   }
   const context = {}
   CONTEXT_KEYS.forEach(k => {
+    if (CONTEXT_ARRAY_KEYS.has(k)) {
+      const list = params.getAll(`c_${k}`).filter(Boolean)
+      if (list.length) context[k] = list
+      return
+    }
     const v = params.get(`c_${k}`)
     if (v == null) return
-    if (k === 'finals_only' || k === 'captain_only' || k === 'keeper_only' || k === 'on_this_day') {
+    if (CONTEXT_BOOL_KEYS.has(k)) {
       context[k] = v === '1' || v === 'true'
     } else {
       context[k] = v
@@ -549,6 +580,89 @@ const selectCls = inputCls + ' cursor-pointer'
 // — gives the user a visual cue of exactly which filters are scoping the query.
 const activeFieldCls = 'border-pb-accent ring-1 ring-pb-accent/40 bg-pb-accent/5'
 const isFieldActive = (v) => v !== undefined && v !== null && v !== '' && v !== false
+
+// Tick-box picker for a context filter that accepts several values at once
+// (the Grade filter). A plain <select multiple> is unusable on a phone and
+// needs ctrl-click on a desktop, so this is a button + panel of checkboxes:
+// every grade is one tap, and un-ticking one out of a run of them is the
+// thing a range picker can't do.
+function MultiCheckSelect({ options, values, onChange, allLabel = 'All', searchPlaceholder = 'Search…' }) {
+  const [open, setOpen] = useState(false)
+  const [term, setTerm] = useState('')
+  const wrapRef = useRef(null)
+  const picked = Array.isArray(values) ? values.filter(Boolean) : (values ? [values] : [])
+
+  // A value that's selected but no longer in the options (a grade that's since
+  // been renamed or merged away, arriving from a saved report) still gets a row
+  // so it can be seen and un-ticked, rather than silently scoping the query.
+  const known = new Set((options || []).map(o => o.value))
+  const rows = [...(options || []), ...picked.filter(v => !known.has(v)).map(v => ({ value: v, label: v }))]
+  const shown = term
+    ? rows.filter(o => String(o.label).toLowerCase().includes(term.toLowerCase()))
+    : rows
+
+  const toggle = (v) => onChange(picked.includes(v) ? picked.filter(x => x !== v) : [...picked, v])
+
+  const summary = picked.length === 0
+    ? allLabel
+    : picked.length <= 2
+      ? picked.map(v => rows.find(o => o.value === v)?.label || v).join(', ')
+      : `${picked.length} selected`
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className={`${selectCls} flex items-center justify-between gap-2 text-left ${picked.length ? activeFieldCls : ''}`}
+      >
+        <span className="truncate">{summary}</span>
+        <span className="text-pb-faintest shrink-0">▾</span>
+      </button>
+      <Dropdown
+        anchorRef={wrapRef}
+        open={open}
+        onClose={() => setOpen(false)}
+        maxHeight={280}
+        className="bg-pb-bg pb-card shadow-xl pb-scroll"
+      >
+        <div className="p-2 flex flex-col gap-1.5">
+          {rows.length > 8 && (
+            <input
+              className={inputCls}
+              placeholder={searchPlaceholder}
+              value={term}
+              onChange={e => setTerm(e.target.value)}
+              autoFocus
+            />
+          )}
+          <div className="flex items-center justify-between px-0.5">
+            <span className="font-mono text-[10px] tracking-wide3 text-pb-faintest">
+              {picked.length ? `${picked.length} SELECTED` : 'NONE SELECTED'}
+            </span>
+            {picked.length > 0 && (
+              <button type="button" onClick={() => onChange([])} className="text-[11px] text-pb-dim hover:text-pb-text">
+                Clear
+              </button>
+            )}
+          </div>
+          {shown.length === 0 && (
+            <div className="text-pb-faintest font-mono text-[10px] px-1 py-2">No matches.</div>
+          )}
+          {shown.map(o => (
+            <label
+              key={o.value}
+              className="flex items-center gap-2 px-1 py-1 rounded text-xs text-pb-dim hover:bg-pb-surface2 hover:text-pb-text cursor-pointer"
+            >
+              <input type="checkbox" checked={picked.includes(o.value)} onChange={() => toggle(o.value)} />
+              <span className="truncate">{o.label}</span>
+            </label>
+          ))}
+        </div>
+      </Dropdown>
+    </div>
+  )
+}
 
 // Searchable picker for Player Role / Award / Office Bearer attribute filters.
 // Hits /statlab/picker-values with the chosen kind and debounced search text.
@@ -642,10 +756,17 @@ function ContextFiltersPanel({ ctx, onChange, seasons, grades, targetShape, targ
       </div>
       <div>
         <Label>Grade</Label>
-        <select className={`${selectCls} mt-1 ${isFieldActive(ctx.grade_name) ? activeFieldCls : ''}`} value={ctx.grade_name || ''} onChange={e => set('grade_name', e.target.value)}>
-          <option value="">All grades</option>
-          {(grades || []).map(g => <option key={g.name} value={g.name}>{g.display_name || g.name}</option>)}
-        </select>
+        <div className="mt-1">
+          <MultiCheckSelect
+            options={(grades || []).map(g => ({ value: g.name, label: g.display_name || g.name }))}
+            values={selectedGradeNames(ctx)}
+            // Writes the multi-select key and drops the old single one, so the
+            // two can never disagree about what's in scope.
+            onChange={next => onChange({ ...ctx, grade_names: next, grade_name: '' })}
+            allLabel="All grades"
+            searchPlaceholder="Search grades…"
+          />
+        </div>
       </div>
       <div className="grid grid-cols-2 gap-1.5">
         <div>
@@ -1667,8 +1788,10 @@ export default function StatLab() {
                           <button
                             key={chip.key}
                             onClick={() => {
-                              const isBool = chip.key === 'finals_only' || chip.key === 'captain_only' || chip.key === 'keeper_only' || chip.key === 'on_this_day'
-                              const nextCtx = { ...(query.context || {}), [chip.key]: isBool ? false : '' }
+                              const nextCtx = { ...(query.context || {}) }
+                              ;(chip.keys || [chip.key]).forEach(k => {
+                                nextCtx[k] = CONTEXT_BOOL_KEYS.has(k) ? false : (CONTEXT_ARRAY_KEYS.has(k) ? [] : '')
+                              })
                               const nextQ = { ...query, context: nextCtx }
                               setQuery(nextQ)
                               runQuery(nextQ)

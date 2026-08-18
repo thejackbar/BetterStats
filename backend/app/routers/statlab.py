@@ -72,12 +72,18 @@ _CTX_KEYS_INT = {
 _CTX_KEYS_BOOL = {
     "finals_only", "captain_only", "keeper_only", "on_this_day",
 }
-# Multi-select filters — read as lists from either a repeated query param
+# Multi-select ID filters — read as lists from either a repeated query param
 # (?season_ids=a&season_ids=b) or a comma-separated single value
 # (?season_ids=a,b). Distinct from the single-value season_id / grade_id keys
 # above, which are kept for back-compat with old saved-report URLs.
 _CTX_KEYS_LIST = {
     "season_ids", "grade_ids",
+}
+# Multi-select TEXT filters — repeated query param only
+# (?grade_names=1st+Grade&grade_names=3rd+Grade). NOT comma-split: a grade
+# name is free text and may contain a comma, which the id lists never can.
+_CTX_KEYS_LIST_TEXT = {
+    "grade_names",
 }
 
 
@@ -102,6 +108,10 @@ def _ctx_from_request(request: Request) -> dict:
             if r in (None, ""):
                 continue
             values.extend(s.strip() for s in str(r).split(",") if s.strip())
+        if values:
+            ctx[k] = values
+    for k in _CTX_KEYS_LIST_TEXT:
+        values = [v for v in (str(r).strip() for r in qp.getlist(k)) if v]
         if values:
             ctx[k] = values
     for k in _CTX_KEYS_INT:

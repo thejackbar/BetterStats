@@ -281,8 +281,34 @@ def _residual_disqualified(context: dict, ic: list[str]) -> bool:
     return False
 
 
-def _residual_grade_match(prefix: str) -> str:
+def _text_list(value) -> list[str]:
+    """Normalise a multi-select TEXT context value into a list of strings.
+
+    Accepts the canonical list form, or a single string (a saved report or an
+    old URL that carried one value). Deliberately does NOT split on commas the
+    way the UUID list filters do — a grade name is free text and can contain
+    one ("1st Grade (Smith, Jones & Co)"), so splitting would quietly turn one
+    real grade into two that match nothing.
+    """
+    if value in (None, "", []):
+        return []
+    raw = value if isinstance(value, (list, tuple, set)) else [value]
+    out: list[str] = []
+    for v in raw:
+        if v in (None, ""):
+            continue
+        text = str(v).strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _residual_grade_match(prefix: str, suffix: str = "") -> str:
     """Merge-aware grade-name match for a residual row.
+
+    `suffix` distinguishes one bound value from the next when several grades
+    are selected at once (grade_names) — each gets its own
+    `:{prefix}grade_name{suffix}` param and the caller ORs the clauses.
 
     Mirrors aggregations.py's `_GRADE_MATCH` / `_IMPORT_GRADE_MATCH` — the
     identical fix (migration 154) applied there for grade-filtered
@@ -300,16 +326,16 @@ def _residual_grade_match(prefix: str) -> str:
     rows always carry NULL here, since they were never grade-scoped at
     upload time and self-exclude by never matching).
     """
-    p = prefix
+    p = f"{prefix}grade_name{suffix}"
     return (
-        f"(COALESCE(rg.name, pss.grade_label) = :{p}grade_name"
+        f"(COALESCE(rg.name, pss.grade_label) = :{p}"
         " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
         " WHERE gml.org_id = CAST(:org_id AS UUID)"
-        f" AND gml.alias_name = COALESCE(rg.name, pss.grade_label) AND gml.undone_at IS NULL"
-        f" AND (gml.canonical_name = :{p}grade_name"
+        " AND gml.alias_name = COALESCE(rg.name, pss.grade_label) AND gml.undone_at IS NULL"
+        f" AND (gml.canonical_name = :{p}"
         " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
         " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org_id AS UUID)"
-        f" AND gr2.display_name_override = :{p}grade_name))))"
+        f" AND gr2.display_name_override = :{p}))))"
     )
 
 
@@ -388,6 +414,19 @@ def _residual_scope_clause(context: dict, params: dict, prefix: str) -> str:
         if coerced:
             clauses.append(_residual_grade_match(prefix))
             params[f"{prefix}grade_name"] = coerced
+
+    # Several grades ticked at once (ctx.grade_names — what StatLab's Grade
+    # picker sends). ORed together, so "1st Grade or 3rd Grade" is one clause;
+    # the single-value grade_name above still ANDs, which is what a saved
+    # report written before the picker went multi-select expects.
+    grade_names = _text_list(context.get("grade_names"))
+    if grade_names:
+        ors = []
+        for i, v in enumerate(grade_names):
+            suffix = f"s_{i}"  # → :{prefix}grade_names_0, _1, …
+            ors.append(_residual_grade_match(prefix, suffix))
+            params[f"{prefix}grade_name{suffix}"] = v
+        clauses.append("(" + " OR ".join(ors) + ")")
 
     return (" AND " + " AND ".join(clauses)) if clauses else ""
 
@@ -723,13 +762,14 @@ def _build_filter_block(ctx: dict, spec_dict: dict) -> tuple[list[str], dict, bo
 
 
 def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
-    """Multi-select MATCH-scope filters (season_ids, grade_ids).
+    """Multi-select MATCH-scope filters (season_ids, grade_ids, grade_names).
     These don't fit the per-value spec dict because their SQL clause grows
-    with the number of selected IDs. Expanded inline as
-    ``IN (:p_0, :p_1, …)`` with one bound param per ID.
+    with the number of selected values. Expanded inline as
+    ``IN (:p_0, :p_1, …)`` with one bound param per value.
 
-    Accepts either a list (canonical) or a comma-separated string (back-compat
-    when the API receives a single repeated query param)."""
+    The two id filters accept either a list (canonical) or a comma-separated
+    string (back-compat when the API receives a single repeated query param).
+    `grade_names` is free text and so is never comma-split — see _text_list."""
 
     def _normalise(v):
         if v is None or v == "":
@@ -769,6 +809,17 @@ def _build_match_list_filters(ctx: dict) -> tuple[list[str], dict]:
         for i, v in enumerate(grade_ids):
             params[f"ctx_grade_ids_{i}"] = v
 
+    # Grades ticked by name — what StatLab's own Grade picker sends. Compared
+    # against the same COALESCE(am.canonical_name, gr.name) the single-value
+    # grade_name filter uses, so a merged grade still resolves through its
+    # canonical name and a season's worth of alias spellings all match.
+    grade_names = _text_list(ctx.get("grade_names"))
+    if grade_names:
+        ph = ", ".join(f":ctx_grade_names_{i}" for i in range(len(grade_names)))
+        clauses.append(f"COALESCE(am.canonical_name, gr.name) IN ({ph})")
+        for i, v in enumerate(grade_names):
+            params[f"ctx_grade_names_{i}"] = v
+
     return clauses, params
 
 
@@ -780,7 +831,7 @@ def _build_context_filters(ctx: dict) -> tuple[list[str], dict, list[str], dict,
     via a gap LEFT JOIN that callers must provide.
     """
     mc, mp, mu = _build_filter_block(ctx, MATCH_CONTEXT_FILTERS)
-    # Merge in multi-select MATCH filters (season_ids, grade_ids).
+    # Merge in multi-select MATCH filters (season_ids, grade_ids, grade_names).
     list_clauses, list_params = _build_match_list_filters(ctx)
     if list_clauses:
         mc = mc + list_clauses

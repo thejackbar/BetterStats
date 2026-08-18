@@ -1,5 +1,49 @@
 # BetterStats — Claude Session Notes
 
+## StatLab's Grade filter takes several grades at once (v9.29.0, Aug 2026)
+
+Reported: StatLab could only ever be scoped to ONE grade, so "most runs across
+1st and 3rd Grade" was unanswerable. A range picker was the obvious shape and is
+the wrong one — the whole point is dropping a grade out of the middle of a run.
+
+- **`grade_names` (a list) is the new filter; `grade_name` (single) stays.** The
+  UI writes `grade_names` and clears `grade_name` in the same update, so the two
+  can never disagree; the single key is kept because a saved report and a shared
+  link written before this shipped both carry it. If both arrive anyway they
+  AND, which is what a link the user then added to should do.
+- **It is NOT a new spec-dict entry.** `MATCH_CONTEXT_FILTERS` values are one
+  fixed SQL string with one bound param, and this clause grows with the
+  selection, so it lives in `_build_match_list_filters` beside the `season_ids` /
+  `grade_ids` id filters that already worked that way. Same expression the
+  single-value filter compares (`COALESCE(am.canonical_name, gr.name)`), so a
+  merged grade still resolves through its canonical name.
+- **`_text_list` deliberately does NOT comma-split, and the router gives text
+  lists their own reader.** The id lists accept `?grade_ids=a,b` because a UUID
+  can't contain a comma; a grade name can ("A Grade (Smith, Jones)" is real
+  enough — a sponsor suffix does this), and splitting it would quietly turn one
+  grade into two that match nothing. `_CTX_KEYS_LIST_TEXT` reads the repeated
+  param only. The URL is `?c_grade_names=…&c_grade_names=…` for the same reason.
+- **Residuals answer it, and their halves are ORed.** `_residual_grade_match`
+  took a `suffix` so each ticked grade binds its own param; the clauses are ORed
+  inside one bracket, since ANDing them asks for a row that is two grades at
+  once. `grade_names` is not in `_RESIDUAL_DISQUALIFYING_MATCH_KEYS` for the
+  same reason `grade_name` isn't — an imported or manual row carries its grade.
+- **A selected grade that is no longer in the club's list still draws a row** in
+  the picker (renamed, merged away, arriving from a saved report), so it can be
+  seen and un-ticked instead of silently scoping the query from nowhere.
+- **Verified against a real Postgres** (13 checks through the shipped builders'
+  own SQL: two grades returning exactly those two, one grade matching the old
+  single-value result byte for byte, a merged grade pulling in its alias' games
+  and its alias-tagged residual rows, the comma-carrying name, an unknown grade
+  returning nothing rather than everything, and the residual halves ORing rather
+  than ANDing) and **driven in Chromium** (16: the exact params on the wire, the
+  chip's wording, dismissing it clearing both keys, un-ticking one of three, the
+  search box, an old single-value link still filtering and then handing over
+  cleanly once a second grade is added, no page errors, no overflow at 390px).
+- **Not done**: Season is still a single-select, though `season_ids` has been
+  supported server-side all along and the picker is now a component
+  (`MultiCheckSelect`) that would drop straight in.
+
 ## A duplicate whose first name is shortened is invisible to edit distance (v9.26.1, Aug 2026)
 
 Reported from the Leaderboard: "Brad K Mant" (15,542 runs) and "Bradley Mant"
