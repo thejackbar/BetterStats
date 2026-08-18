@@ -66,9 +66,9 @@
   .masthead-right b { color: var(--accent); font-weight: 600; }
 
   /* ── Hero ─────────────────────────────────────────────── */
-  .hero { padding: 20px 0 16px 0; }
+  .hero { padding: 13px 0 12px 0; }
   h1 {
-    font-size: 39px;
+    font-size: 35px;
     line-height: 1.02;
     letter-spacing: -1.1px;
     font-weight: 700;
@@ -77,8 +77,8 @@
   h1 em { font-style: normal; color: var(--accent); }
   h1 .muted { color: var(--faint); }
   .lead {
-    font-size: 12.6px;
-    line-height: 1.66;
+    font-size: 11.9px;
+    line-height: 1.6;
     color: var(--dim);
     margin: 0;
     max-width: 168mm;
@@ -89,24 +89,24 @@
   .strip {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 9px;
-    margin: 16px 0 20px 0;
+    gap: 8px;
+    margin: 12px 0 13px 0;
   }
   .strip div {
     background: var(--panel);
     border: 1px solid var(--edge);
     border-radius: 8px;
-    padding: 11px 12px;
+    padding: 9px 11px;
   }
   .strip b {
     display: block;
-    font-size: 17.5px;
+    font-size: 16.5px;
     color: var(--accent);
     letter-spacing: -0.4px;
     margin-bottom: 1px;
   }
   .strip span {
-    font-size: 9.6px;
+    font-size: 9.2px;
     color: var(--faint);
     line-height: 1.35;
     display: block;
@@ -122,24 +122,24 @@
     margin: 0 0 3px 0;
   }
   .sub {
-    font-size: 11.2px;
+    font-size: 10.6px;
     color: var(--faint);
-    margin: 0 0 12px 0;
+    margin: 0 0 8px 0;
     line-height: 1.45;
   }
-  section { margin-bottom: 20px; }
+  section { margin-bottom: 13px; }
 
   /* ── Module grid ──────────────────────────────────────── */
   .modules {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 9px;
+    gap: 7px;
   }
   .mod {
     background: var(--panel);
     border: 1px solid var(--edge);
     border-radius: 8px;
-    padding: 11px 13px;
+    padding: 9px 12px;
   }
   .mod.core {
     grid-column: 1 / -1;
@@ -153,7 +153,7 @@
     gap: 8px;
     margin-bottom: 3px;
   }
-  .mod-name { font-size: 12.8px; font-weight: 700; letter-spacing: -0.2px; }
+  .mod-name { font-size: 12.1px; font-weight: 700; letter-spacing: -0.2px; }
   .mod-name .tag {
     font-size: 8.2px;
     letter-spacing: 0.9px;
@@ -174,13 +174,13 @@
   }
   .mod p {
     margin: 0;
-    font-size: 10.5px;
-    line-height: 1.55;
+    font-size: 9.9px;
+    line-height: 1.5;
     color: var(--dim);
   }
 
   /* ── Pain points ──────────────────────────────────────── */
-  .pains { display: grid; grid-template-columns: 1fr 1fr; gap: 13px 16px; }
+  .pains { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 16px; }
   .pain { display: flex; gap: 8px; }
   .pain .no {
     font-size: 9.8px;
@@ -191,14 +191,14 @@
   }
   .pain h3 {
     margin: 0 0 2px 0;
-    font-size: 11.4px;
+    font-size: 10.8px;
     font-weight: 700;
     letter-spacing: -0.1px;
   }
   .pain p {
     margin: 0;
-    font-size: 10.2px;
-    line-height: 1.53;
+    font-size: 9.7px;
+    line-height: 1.48;
     color: var(--dim);
   }
 
@@ -265,7 +265,7 @@
     margin-bottom: 3px;
   }
   .step h3 { margin: 0 0 3px 0; font-size: 11.2px; font-weight: 700; }
-  .step p { margin: 0; font-size: 10.1px; line-height: 1.53; color: var(--dim); }
+  .step p { margin: 0; font-size: 9.7px; line-height: 1.48; color: var(--dim); }
 
   /* ── Quote ────────────────────────────────────────────── */
   .quote {
@@ -275,8 +275,8 @@
   }
   .quote p {
     margin: 0 0 6px 0;
-    font-size: 11.4px;
-    line-height: 1.58;
+    font-size: 10.8px;
+    line-height: 1.52;
     color: var(--text);
     font-style: italic;
   }
@@ -289,14 +289,14 @@
   /* ── FAQ ──────────────────────────────────────────────── */
   .faq { display: grid; grid-template-columns: 1fr 1fr; gap: 11px 18px; }
   .faq dt {
-    font-size: 10.6px;
+    font-size: 10.1px;
     font-weight: 700;
     margin-bottom: 2.5px;
   }
   .faq dd {
     margin: 0;
-    font-size: 10.1px;
-    line-height: 1.53;
+    font-size: 9.6px;
+    line-height: 1.48;
     color: var(--dim);
   }
 
@@ -344,12 +344,29 @@
     letter-spacing: 0.6px;
   }
 
+  /* ── Automation band ──────────────────────────────────────── */
+  .band {
+    border: 1px solid rgba(22, 199, 132, 0.42);
+    background: rgba(22, 199, 132, 0.07);
+    border-radius: 8px;
+    padding: 9px 13px;
+    margin-bottom: 13px;
+  }
+  .band b {
+    font-size: 12.2px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: var(--accent);
+    margin-right: 7px;
+  }
+  .band span { font-size: 9.9px; line-height: 1.5; color: var(--dim); }
+
   /* Page 2 carries more sections, so it runs a slightly tighter rhythm. */
-  .p2 section { margin-bottom: 13px; }
+  .p2 section { margin-bottom: 7px; }
   .p2 .sub { margin-bottom: 9px; }
-  .p2 .card { padding: 12px 14px; }
+  .p2 .card { padding: 10px 13px; }
   .p2 .rows td { padding: 4px 0; }
-  .p2 .faq { gap: 8px 18px; }
+  .p2 .faq { gap: 4px 18px; }
 
   @media print {
     body { background: #fff; }
@@ -378,19 +395,27 @@
   <div class="hero">
     <h1>We do cricket<span class="muted">…</span> <em>Better.</em></h1>
     <p class="lead">
-      One platform for an Australian cricket club. It starts with your full match history, reconciled
-      and published as a club site worth showing off, then adds the parts that run the rest of the
-      season: availability and selection, match-day posts, fees and member emails, and the kind of
-      analytics most clubs never get near. <strong>Your match data arrives on its own and keeps itself
-      current</strong>, so nobody types a scorecard twice.
+      One platform for an Australian cricket club, built so the season takes less volunteer time to
+      run. <strong>Your match history arrives on its own and keeps itself current</strong>, so the
+      stats, records, ladders, milestones and the season yearbook all update without anyone typing a
+      scorecard. On top of that sit the parts that run the rest of the club: availability, selection
+      and best-player votes, match-day posts, fees and member emails, and analytics most clubs never
+      get near.
     </p>
   </div>
 
   <div class="strip">
     <div><b>Under 1 hr</b><span>From first sync to a live, branded club site</span></div>
+    <div><b>Overnight</b><span>Each round's results are in by Sunday morning</span></div>
     <div><b>Decades</b><span>Of history brought in, with no migration fee</span></div>
-    <div><b>$399/yr</b><span>To start, whatever size the club is</span></div>
     <div><b>14 days</b><span>Free trial of every module, no card needed</span></div>
+  </div>
+
+  <div class="band">
+    <b>The weekend scores itself.</b>
+    <span>BetterCricket pulls each round overnight, then updates every average, record, ladder,
+    leaderboard, milestone and player profile behind it. No re-keying a scorecard, and nothing
+    waiting on the one volunteer who knows how the spreadsheet works.</span>
   </div>
 
   <section>
@@ -405,10 +430,10 @@
         </div>
         <p>
           Every batting, bowling and fielding stat your club has, turned into a public, club-branded
-          website: a profile for every player with career timelines and dismissal breakdowns,
-          leaderboards and all-time records, partnership records, scorecards going back as far as the
-          records do, the honour board, a season yearbook that writes itself, and one-tap share cards
-          for social.
+          website: a profile for every player, leaderboards and all-time records, partnership records,
+          the honour board, and scorecards going back as far as the records do. Filter any of it by
+          grade type (men's, women's, juniors, masters) and match type (Two Day, One Day, T20). The
+          season yearbook writes itself, and Club Room Mode puts the lot on the TV at the clubhouse.
         </p>
       </div>
 
@@ -418,9 +443,10 @@
           <div class="price">$149 / yr</div>
         </div>
         <p>
-          Players set their own availability from a link, with no app and no account. Pick the XI on a
-          proper team sheet with form-aware suggestions, run the net manager, and collect 3-2-1 votes
-          that add themselves up, with a reveal mode for awards night.
+          Players set their own availability from a link, with no app and no account. Name the XI on a
+          numbered batting order with each player's form beside them, run Thursday nets off the
+          rotation timer, and collect 3-2-1 votes through that same link. The count keeps itself:
+          podium, race chart, and a presentation mode for awards night.
         </p>
       </div>
 
@@ -430,9 +456,10 @@
           <div class="price">$149 / yr</div>
         </div>
         <p>
-          Match-day graphics that fill themselves in from your own data: lineups, final scores, full
-          scorecards and player of the match, in your colours with your crest. Plus a real club
-          website with news, galleries, sponsors and honour boards.
+          A full-screen post designer of the kind your socials volunteer already knows: blocks dragged
+          around a canvas, layers, undo and redo, carousels and a club photo library. The difference is
+          the data. Drop in a match link, or a live block for fixtures, results or a player's career,
+          and the card fills itself in your colours. Plus a real club website.
         </p>
       </div>
 
@@ -442,9 +469,10 @@
           <div class="price">$149 / yr</div>
         </div>
         <p>
-          One directory for everyone at the club. Match fees and memberships that allocate themselves
-          as payments land, bulk email off the same list, stock and canteen, the volunteer roster with
-          hours logged for grants, and committee meetings with minutes and motions.
+          One directory for everyone at the club, fed from your player list rather than a CSV somebody
+          re-imports. Match fees and memberships settle themselves as payments land, bulk email goes to
+          that same list, and there's stock and canteen, the volunteer roster with hours logged for
+          grants, and committee meetings with minutes and motions.
         </p>
       </div>
 
@@ -454,9 +482,10 @@
           <div class="price">$249 / yr</div>
         </div>
         <p>
-          An opposition dossier for any upcoming opponent, danger players named before the toss, and a
-          printable captain's cheat sheet. A best-available XI, player trends and milestone forecasts,
-          and team analysis on partnerships, collapses and par scores.
+          An opposition dossier for any upcoming opponent, built from your own scorecards without
+          anyone requesting it: danger players named before the toss and a printable captain's cheat
+          sheet. Plus a best-available XI, player trends and milestone forecasts, and team analysis on
+          partnerships, collapses and par scores.
         </p>
       </div>
 
@@ -472,9 +501,9 @@
         <div class="no">01</div>
         <div>
           <h3>The same player, recorded three times</h3>
-          <p>Split careers across duplicate records are normal. One click merges them and keeps every
-             innings, spell, catch and partnership, and you can undo it. Most clubs find about 10% of
-             their history needs a tidy-up.</p>
+          <p>Split careers are normal, and BetterCricket goes looking for them rather than waiting to
+             be told. It flags the pairs, down to "Brad K Mant" against "Bradley Mant". One click
+             merges them, keeps every innings, spell, catch and partnership, and can be undone.</p>
         </div>
       </div>
 
@@ -482,9 +511,9 @@
         <div class="no">02</div>
         <div>
           <h3>Fifty years in a filing cabinet</h3>
-          <p>Bring whatever you have: spreadsheets, CSVs, PDFs, photographed scorebooks. We read it,
-             reconcile it against the live feed and land one career history per player. No separate
-             migration fee, no cap on seasons.</p>
+          <p>Spreadsheets, CSVs, PDFs and photographed scorebook pages all go in. The reader lifts the
+             figures off the page, reconciles them against the live feed and lands one career per
+             player. No separate migration fee, no cap on seasons.</p>
         </div>
       </div>
 
@@ -492,8 +521,9 @@
         <div class="no">03</div>
         <div>
           <h3>Under-14 seasons flattering senior averages</h3>
-          <p>Juniors, women's, masters and T20 are all their own thing. Every stats screen filters by
-             grade type and match type, so a career average means what the club thinks it means.</p>
+          <p>Juniors, women's and masters are each their own thing, and so are Two Day, One Day and
+             T20. Every stats screen filters on both, so a senior average isn't padded by Under-14s and
+             a T20 record only counts T20s.</p>
         </div>
       </div>
 
@@ -502,7 +532,8 @@
         <div>
           <h3>Five tools and five bills</h3>
           <p>A spreadsheet, a site builder, Canva, Mailchimp and a group chat, none of which talk to
-             each other. One subscription, one login, one match feed behind the lot.</p>
+             each other. One subscription and one match feed behind the lot, so the season only gets
+             entered once.</p>
         </div>
       </div>
 
@@ -510,17 +541,19 @@
         <div class="no">05</div>
         <div>
           <h3>Saturday's "who's in?" scramble</h3>
-          <p>Availability comes in from the players themselves, on a link they open on their phone.
-             The selection board already knows their form, grade and skills.</p>
+          <p>Availability comes in from the players themselves, on a link they open on their phone with
+             nothing to install. Selection already knows their form, grade and skills, and it warns you
+             about a side with no keeper or a short attack.</p>
         </div>
       </div>
 
       <div class="pain">
         <div class="no">06</div>
         <div>
-          <h3>Nobody has time to write the yearbook</h3>
-          <p>It writes itself from the season just played: results, honours, partnership records and
-             progression. Add a President's Report and photos, then publish it.</p>
+          <h3>The best-player count on an envelope</h3>
+          <p>3-2-1 votes arrive through the link players already use, and the ladder adds itself up
+             round by round. Chase the stragglers with one button, then reveal the season on the screen
+             at the awards night.</p>
         </div>
       </div>
 
@@ -547,7 +580,7 @@
 
   <section style="margin-top:14px">
     <h2>What it costs</h2>
-    <p class="sub">An annual licence, billed once a year. Flat per club: one team or fifty, juniors and seniors, men's and women's, the price is the same.</p>
+    <p class="sub">An annual licence, billed once a year and paid by card through Stripe. Flat per club: one team or fifty, juniors and seniors, men's and women's, the price is the same.</p>
     <div class="money">
 
       <div class="card">
@@ -601,7 +634,7 @@
       <div class="step">
         <span class="n">03 · LIVE</span>
         <h3>Your site goes public</h3>
-        <p>Fully branded and ready for members, parents and sponsors. Everything after this keeps itself up to date.</p>
+        <p>Fully branded and ready for members, parents and sponsors. From here it keeps itself current every round, with no ongoing data entry.</p>
       </div>
     </div>
   </section>
@@ -628,8 +661,13 @@
       </div>
 
       <div>
+        <dt>How much of it is actually automatic?</dt>
+        <dd>Results sync overnight after each round, and averages, records, ladders, milestones and profiles follow on their own. Posts, fee allocation and the yearbook build off the same data. What's left for a person is the judgement: merging a duplicate, approving an award.</dd>
+      </div>
+
+      <div>
         <dt>Where does the data come from?</dt>
-        <dd>Your club's match history is imported automatically and kept current after every game. Anything not already online comes in through our CSV templates and import tools.</dd>
+        <dd>Your match history imports automatically and stays current after every game. Anything not already online comes in through our CSV templates, or by photographing the scorebook page.</dd>
       </div>
 
       <div>
@@ -639,7 +677,12 @@
 
       <div>
         <dt>What if our scorers haven't been perfect?</dt>
-        <dd>There are tools for it: merge duplicate players, fix mis-attributed innings and tag aliases. It is a few minutes of work rather than a weekend.</dd>
+        <dd>Duplicate players are found for you and merged in a click, keeping every innings and spell. Mis-attributed innings and name changes are handled the same way. Minutes of work, not a weekend.</dd>
+      </div>
+
+      <div>
+        <dt>Can we keep junior seasons out of senior averages?</dt>
+        <dd>Yes. Every stats page filters by grade type (men's, women's, juniors, masters) and match type (Two Day, One Day, T20), and you set what your club's default view leaves out.</dd>
       </div>
 
       <div>
@@ -658,18 +701,8 @@
       </div>
 
       <div>
-        <dt>Do you need anything installed?</dt>
-        <dd>No software, plugins or app downloads. It is a website, so members and admins just open the URL on a phone, tablet or laptop.</dd>
-      </div>
-
-      <div>
         <dt>How do we pay?</dt>
-        <dd>Bank transfer or PayID for now. Most clubs don't have a card and we would rather not put that on a volunteer. Card payments are on the way.</dd>
-      </div>
-
-      <div>
-        <dt>Is there a discount for junior clubs?</dt>
-        <dd>Yes. A junior club linked to a senior club already subscribed to BetterCricket gets a discount. Ask us for the code.</dd>
+        <dd>An annual invoice, paid by card, Apple Pay or Google Pay through Stripe, with GST handled at checkout. Bank transfer or PayID still works if your treasurer would rather do it that way.</dd>
       </div>
 
     </dl>
