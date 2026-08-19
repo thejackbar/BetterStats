@@ -14,6 +14,8 @@ import Records from './pages/Records'
 import Leaderboard from './pages/Leaderboard'
 import Compare from './pages/Compare'
 import AflLogin from './pages/AflLogin'
+import AflPublicVoting from './pages/AflPublicVoting'
+import TeamLists from './pages/TeamLists'
 import AflAdminLayout from './AflAdminLayout'
 import AflAdminSync from './pages/admin/AflAdminSync'
 import AflAdminPlayers from './pages/admin/AflAdminPlayers'
@@ -29,6 +31,7 @@ import AflAdminAwards from './pages/admin/AflAdminAwards'
 import AflAdminSponsors from './pages/admin/AflAdminSponsors'
 import AflAdminUsers from './pages/admin/AflAdminUsers'
 import AflAdminSettings from './pages/admin/AflAdminSettings'
+import AflAdminVotes from './pages/admin/AflAdminVotes'
 import AflAdminSuperUsers from './pages/admin/AflAdminSuperUsers'
 import AflAdminSuperClubs from './pages/admin/AflAdminSuperClubs'
 
@@ -48,6 +51,9 @@ export default function AflApp() {
             <div className="min-h-screen bg-pb-bg">
               <Routes>
                 <Route path="/login" element={<AflLogin />} />
+                {/* Standalone, outside the club layout: a voter follows this
+                    link with no account and no club chrome. */}
+                <Route path="/vote/:token" element={<AflPublicVoting />} />
                 <Route path="/admin" element={<AflAdminLayout />}>
                   <Route index element={<AflAdminSync />} />
                   <Route path="players" element={<AflAdminPlayers />} />
@@ -62,6 +68,7 @@ export default function AflApp() {
                   <Route path="awards" element={<AflAdminAwards />} />
                   <Route path="sponsors" element={<AflAdminSponsors />} />
                   <Route path="users" element={<AflAdminUsers />} />
+                  <Route path="votes" element={<AflAdminVotes />} />
                   <Route path="settings" element={<AflAdminSettings />} />
                   <Route path="super/users" element={<AflAdminSuperUsers />} />
                   <Route path="super/clubs" element={<AflAdminSuperClubs />} />
@@ -72,6 +79,7 @@ export default function AflApp() {
                   <Route path="players/:playerId" element={<PlayerProfile />} />
                   <Route path="games" element={<Games />} />
                   <Route path="games/:gameId" element={<Match />} />
+                  <Route path="team-lists" element={<TeamLists />} />
                   <Route path="records" element={<Records />} />
                   <Route path="leaderboard" element={<Leaderboard />} />
                   <Route path="compare" element={<Compare />} />

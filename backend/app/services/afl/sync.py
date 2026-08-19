@@ -502,6 +502,11 @@ async def _sync_game_stats(session: AsyncSession, org_id: uuid.UUID,
                 player_id=player_id, name=name,
                 goals=0, behinds=0, bog_ranking=bp.get("ranking"),
             ))
+    # PlayHQ's own "did this club publish a team list" flag. Already in the
+    # gameView selection; stored so the team-list view can tell an unpublished
+    # side from an unsynced one.
+    if gv.get("publishLineup") is not None:
+        details.publish_lineup = bool(gv.get("publishLineup"))
     details.synced_at = datetime.now(timezone.utc)
     return True
 

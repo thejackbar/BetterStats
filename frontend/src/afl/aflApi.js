@@ -272,6 +272,70 @@ export const aflApi = {
   superSetPrimaryAdmin: (id, userId) => request(`/club-admin/super/clubs/${id}/primary-admin`, {
     method: 'PUT', body: JSON.stringify({ user_id: userId }),
   }),
+
+  // ─── Team lists (public) ──────────────────────────────────────────────────
+  // The side PlayHQ returned with each game, read from what the sync stored.
+  aflLineupGames: (orgId, { season_id, grade_id, limit, offset } = {}) => {
+    const q = new URLSearchParams()
+    if (season_id) q.set('season_id', season_id)
+    if (grade_id) q.set('grade_id', grade_id)
+    if (limit) q.set('limit', limit)
+    if (offset) q.set('offset', offset)
+    const qs = q.toString()
+    return request(`/afl-lineups/organisations/${orgId}/games${qs ? `?${qs}` : ''}`)
+  },
+  aflGameLineups: (gameId, orgId) => request(`/afl-lineups/games/${gameId}?org_id=${orgId}`),
+
+  // ─── Votes (admin) ────────────────────────────────────────────────────────
+  // Every call names the MEDAL it acts on; omitting it falls back server-side
+  // to the club's first medal.
+  votesMedals: () => request('/votes/medals'),
+  votesCreateMedal: (data) => request('/votes/medals', { method: 'POST', body: JSON.stringify(data) }),
+  votesUpdateMedal: (id, data) => request(`/votes/medals/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  votesDeleteMedal: (id, { confirm } = {}) =>
+    request(`/votes/medals/${id}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
+  votesRegenerateLink: (id) => request(`/votes/medals/${id}/regenerate`, { method: 'POST' }),
+  votesGames: ({ season_id, grade_id, round_key, q, medal_id } = {}) => {
+    const p = new URLSearchParams()
+    if (season_id) p.set('season_id', season_id)
+    if (grade_id) p.set('grade_id', grade_id)
+    if (round_key) p.set('round_key', round_key)
+    if (q) p.set('q', q)
+    if (medal_id) p.set('medal_id', medal_id)
+    const qs = p.toString()
+    return request(`/votes/games${qs ? `?${qs}` : ''}`)
+  },
+  votesGameDetail: (gameId, medalId) =>
+    request(`/votes/games/${gameId}${medalId ? `?medal_id=${medalId}` : ''}`),
+  votesAdminBallot: (gameId, medalId, data) =>
+    request(`/votes/games/${gameId}/ballots${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify(data) }),
+  votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
+  votesLockGame: (gameId, medalId) =>
+    request(`/votes/games/${gameId}/lock${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesReopenGame: (gameId, medalId) =>
+    request(`/votes/games/${gameId}/reopen${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesBulkState: (body) => request('/votes/bulk-state', { method: 'POST', body: JSON.stringify(body) }),
+  votesNudge: (body) => request('/votes/nudge', { method: 'POST', body: JSON.stringify(body) }),
+  votesLeaderboard: ({ season_id, grade_id, through_round, medal_id } = {}) => {
+    const p = new URLSearchParams()
+    if (season_id) p.set('season_id', season_id)
+    if (grade_id) p.set('grade_id', grade_id)
+    if (through_round) p.set('through_round', through_round)
+    if (medal_id) p.set('medal_id', medal_id)
+    const qs = p.toString()
+    return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
+  },
+
+  // ─── Votes (public link; no admin auth) ───────────────────────────────────
+  votePublicLanding: (token, { team } = {}) =>
+    request(`/public/votes/${token}${team ? `?team=${team}` : ''}`),
+  votePublicVerify: (token, player_id, pin) =>
+    request(`/public/votes/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  votePublicSwitch: (token) => request(`/public/votes/${token}/switch`, { method: 'POST' }),
+  votePublicGame: (token, gameId) => request(`/public/votes/${token}/games/${gameId}`),
+  votePublicSubmit: (token, gameId, data) =>
+    request(`/public/votes/${token}/games/${gameId}/ballot`, { method: 'POST', body: JSON.stringify(data) }),
 }
 
 /**
