@@ -5485,6 +5485,34 @@ async def lifespan(app: FastAPI):
                 "AND organisation_id IN (SELECT id FROM organisations WHERE is_marketing_outreach IS TRUE)"
             ), {"key": _key, "name": _name})
 
+    # Migration 266: games.status, and the two views that read it — the
+    # season-stats view nets abandoned/cancelled fixtures a player was named
+    # in but never played off CA's own `matches` counter.
+    #
+    # The SQL is IMPORTED from the migration rather than retyped. Every other
+    # mirror in this function is a hand-copied "byte-identical to
+    # alembic/versions/NNN.py", which works for a two-line ALTER and does not
+    # work for a 250-line six-branch view: the moment one copy is edited the
+    # two definitions disagree and which one a database ends up with depends
+    # on whether alembic or the lifespan ran last. alembic/ ships in the image
+    # (see the Dockerfile) and `alembic upgrade head` runs ahead of uvicorn
+    # anyway, so this path only really matters for a create_all-built local
+    # database.
+    async with engine.begin() as conn:
+        import importlib.util as _ilu
+
+        _mig_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "266_game_status_unplayed_matches.py"
+        _spec = _ilu.spec_from_file_location("_bs_migration_266", _mig_path)
+        _mig266 = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mig266)
+        for _stmt in (
+            _mig266.ADD_STATUS,
+            _mig266.ADD_INDEX,
+            _mig266.EFFECTIVE_GAMES_WITH_STATUS,
+            _mig266.SEASON_STATS_NET_OF_UNPLAYED,
+        ):
+            await conn.execute(text(_stmt))
+
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)

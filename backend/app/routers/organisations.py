@@ -755,6 +755,7 @@ async def get_org_results(
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                gr.id AS grade_id,
                g.match_format,
+               g.status,
                s.id AS season_id, s.name AS season_name
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
@@ -814,6 +815,10 @@ async def get_org_results(
             # The fixture's own format, so a results list can label a game
             # rather than making the reader guess from the grade name.
             "match_format": r.match_format,
+            # CA's own status for the fixture (migration 266). Carried so a
+            # results list can say ABANDONED instead of leaving the result
+            # column blank and reading as though the game is missing.
+            "status": r.status,
             "season_id": str(r.season_id) if r.season_id else None,
             "season_name": r.season_name,
         }

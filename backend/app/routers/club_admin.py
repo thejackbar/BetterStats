@@ -41,6 +41,7 @@ from app.services import stripe_client
 from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
 from app.services import playhq_client
+from app.services.game_status import NOT_PLAYED_SQL_LIST
 from app.services.name_format import name_sort_key
 from app.services import fonts as font_service
 from app.services import theme_config as theme_config_service
@@ -718,8 +719,19 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
+    # `status` is CA's own word for the fixture (migration 266) and
+    # `players_named` is how many of ours were in the side. Together they are
+    # what lets this screen show a club exactly which fixtures were called off
+    # and how many players' match counts that keeps clean — the club can see
+    # the correction rather than wondering why our figure disagrees with
+    # PlayHQ's. The count is only worth reading for a called-off fixture, so
+    # it is only computed for one.
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
+               g.status,
+               CASE WHEN g.status IN (""" + NOT_PLAYED_SQL_LIST + """) THEN (
+                   SELECT COUNT(*) FROM game_appearances ga WHERE ga.game_id = g.id
+               ) ELSE NULL END AS players_named,
                COALESCE(gr.display_name_override, gr.name) AS grade_name, s.name AS season_name
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
@@ -741,6 +753,8 @@ async def list_games(
             "away_team": r.away_team,
             "result": r.result,
             "winning_team": r.winning_team,
+            "status": r.status,
+            "players_named": r.players_named,
             "grade": r.grade_name,
             "season": r.season_name,
         }

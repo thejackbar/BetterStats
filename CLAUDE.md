@@ -1,5 +1,67 @@
 # BetterStats — Claude Session Notes
 
+## A washout is not a match played (migration 266, v9.32.1, Aug 2026)
+
+Reported off Hamilton Veterans: Geoff Barker's 25/26 reads 13 matches, the club
+counts 10, and three fixtures were washed out.
+
+- **Nothing was miscounting. `player_season_stats.matches` is CA's own
+  `statistics.matches`, copied verbatim** (`sync.py`'s season-stats upsert),
+  and CA's answer really is 13. **CA counts a player as having played the
+  moment they are on the team sheet**, ball bowled or not. Verified live rather
+  than reasoned about: the club's 25/26 card is 14 fixtures, three
+  `status: ABANDONED`, and a team-mate named in all of them reads 14.
+- **The comment in `aggregations.py`'s opposition breakdown claiming CA already
+  excludes abandoned games is wrong**, and was wrong before this. It is
+  corrected in place. Do not build on it.
+- **`games.status` (migration 266) exists because `result` cannot answer the
+  question.** A NULL result covers a washout, a fixture still to be played, one
+  in progress and one we could not classify, all four. The column takes CA's
+  own word verbatim.
+- **The correction lands in `v_effective_player_season_stats`, not in the
+  callers** — the same one-place discipline migration 060 used for the
+  cross-club leak, so career totals, the season table, the leaderboards and
+  records all move together and a club with no washouts joins an empty set and
+  is byte-for-byte unchanged.
+- **The rule is "named and recorded nothing at all", not "abandoned".** A game
+  called off at tea with a hundred on the board was played and the club counts
+  it, so the subtraction only fires where the player has no batting, bowling or
+  fielding row for that fixture. `NO RESULT` (statusId 5) is deliberately NOT
+  in `NOT_PLAYED_STATUSES` for the same reason — that is a game that started.
+- **`services/game_status.py` is the one vocabulary**, shared by the sync, the
+  view, the read paths, the backfill script and (as a mirrored constant) the
+  two screens. Two copies of "which statuses mean it never happened" is how
+  they start disagreeing.
+- **No Full Rebuild.** The grade match list already carries `status` per
+  fixture and the discovery loop already fetches it, so a plain Sync Now fixes
+  the current season through the same bulk pass `is_final` and `match_format`
+  use. `python -m app.scripts.backfill_game_status <org-id-or-slug|all>` covers
+  the seasons an incremental run no longer scans.
+- **A club whose season rows came from "Fix Missing Totals" needs it re-run.**
+  Those rows (`source = 'backfill'`) store a count computed from per-game rows
+  rather than reading CA's, so the view's correction cannot reach them. The
+  rollup's `appearances` CTE now excludes called-off fixtures; the script says
+  when a club has such rows.
+- **Scale, measured before building rather than assumed**: 316 of 4,165
+  fixtures across all 102 clubs' latest season carry no result; ~88% of a
+  sample are genuinely ABANDONED/CANCELLED and about half of those have a team
+  sheet. So ~140 fixtures a season platform-wide, across ~45 clubs. Invisible
+  at a club playing 380 fixtures, glaring at one playing 14 — which is why a
+  veterans club found it and nobody else had.
+- **Found while verifying: `CREATE OR REPLACE VIEW` cannot DROP a column.**
+  The first cut of 266's downgrade replaced the status-carrying
+  `v_effective_games` with the shorter prior definition and failed outright.
+  It drops and recreates now. **Migration 169's own downgrade has the same
+  latent defect** and would fail the same way; it has simply never been run.
+- **Verified against a real Postgres** (24 checks through the shipped view and
+  the real service functions: the reported 13 → 10 and a team-mate's 14 → 11, a
+  control club-mate unchanged, CA's stored row never rewritten, a mid-play
+  abandonment staying counted, a NULL status subtracting nothing, NO RESULT
+  still counting, CANCELLED behaving like ABANDONED, the rollup, the scoped
+  path, the season-by-season table and career games both reading 10, the
+  Matches screen's list, migration 266 applied three times to a populated
+  table, and the downgrade putting CA's figure back).
+
 ## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 262, v9.30.0, Aug 2026)
 
 Four things reported off Hampton Hammers' page. The first is the one worth

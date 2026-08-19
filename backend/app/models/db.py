@@ -1296,6 +1296,14 @@ class Game(Base):
     raw_payload = Column(JSON)
     venue = Column(Text)
     match_format = Column(Text, nullable=True)
+    # Cricket Australia's own match status, verbatim: COMPLETED, ABANDONED,
+    # CANCELLED, UPCOMING, LIVE (migration 266). NULL means we have not been
+    # told — every row predating that migration reads that way until a sync
+    # or `python -m app.scripts.backfill_game_status` fills it in. Read by
+    # v_effective_player_season_stats to keep a washed-out fixture out of a
+    # player's matches-played count; `result` cannot answer that question,
+    # since a NULL result also covers an upcoming or in-progress fixture.
+    status = Column(Text, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")

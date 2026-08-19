@@ -18,6 +18,7 @@ from app.models.db import (
     SyncRun, async_session_maker
 )
 from app.services import auto_sync, playhq_client
+from app.services.game_status import NOT_PLAYED_SQL_LIST, NOT_PLAYED_STATUSES
 from app.services.grade_labels import suggest_categories, suggest_category
 
 logger = logging.getLogger(__name__)
@@ -496,12 +497,20 @@ async def _backfill_missing_season_stats(org_id_str: str) -> int:
                     WHERE s.organisation_id = :org_id
                 ),
                 appearances AS (
+                    -- Being named in a side is what makes a match a match
+                    -- here, EXCEPT for a fixture that was called off. A club
+                    -- names a team for a game that is then washed out, and
+                    -- counting it would put a Saturday nobody played on a
+                    -- player's record. A game abandoned after play started
+                    -- still counts, because the batting/bowling/fielding rows
+                    -- it left behind reach games_count on their own.
                     SELECT ga.player_id, gr.season_id, ga.game_id
                     FROM game_appearances ga
                     JOIN games g   ON g.id = ga.game_id
                     JOIN grades gr ON gr.id = g.grade_id
                     JOIN seasons s ON s.id = gr.season_id
                     WHERE s.organisation_id = :org_id
+                      AND (g.status IS NULL OR g.status NOT IN (""" + NOT_PLAYED_SQL_LIST + """))
                 ),
                 pairs AS (
                     SELECT player_id, season_id FROM bat_innings
@@ -1837,6 +1846,7 @@ async def sync_grassroots_game_level_data(
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
+    match_to_status: dict[str, str] = {}  # match_id → CA's own status string
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
     for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
         stats["gr_teams_scanned"] += 1  # reuse existing stat key for continuity
@@ -1889,6 +1899,16 @@ async def sync_grassroots_game_level_data(
             _mt = (m.get("matchType") or "").strip()
             if _mt and _mt.upper() != "BYE":
                 match_to_format[mid] = _mt
+            # CA's own status for the fixture, straight off the same list
+            # entry — COMPLETED / ABANDONED / CANCELLED / UPCOMING / LIVE.
+            # Stored because a washout and an ordinary game are otherwise
+            # indistinguishable to us: `result` is NULL for a fixture that was
+            # called off, one still to be played and one in progress alike.
+            # What reads it is a player's matches-played count, which comes
+            # from CA's aggregate and counts a named-but-never-played fixture.
+            _status = (m.get("status") or "").strip().upper()
+            if _status:
+                match_to_status[mid] = _status
             opp_team_m = next((t for t in teams if t is not our_team_m), None)
             if opp_team_m:
                 opp_org = opp_team_m.get("owningOrganisation") or {}
@@ -1967,6 +1987,38 @@ async def sync_grassroots_game_level_data(
             logger.info(
                 "GR-sync: bulk-updated match_format (%s)",
                 ", ".join(f"{f}×{len(i)}" for f, i in by_format.items()),
+            )
+
+    # Bulk-update status the same way, and for the same reason: an
+    # already-synced game never reaches the per-game block below, so setting
+    # this only on the Game() constructor would leave every club's existing
+    # history reading as "status unknown" and a washed-out fixture would go on
+    # counting towards its named players' matches. CA is the only writer of
+    # this column for a synced game, so overwriting is right — a fixture's
+    # status genuinely changes as the day goes on (UPCOMING → LIVE →
+    # COMPLETED, or → ABANDONED).
+    if match_to_status:
+        by_status: dict[str, list[uuid.UUID]] = {}
+        for mid, st in match_to_status.items():
+            try:
+                by_status.setdefault(st, []).append(uuid.UUID(mid))
+            except ValueError:
+                pass
+        if by_status:
+            async with async_session_maker() as upd_session:
+                for st, ids in by_status.items():
+                    await upd_session.execute(
+                        text("UPDATE games SET status = :st "
+                             "WHERE id = ANY(:ids) AND status IS DISTINCT FROM :st"),
+                        {"st": st, "ids": ids},
+                    )
+                await upd_session.commit()
+            stats["gr_matches_not_played"] = sum(
+                len(i) for s, i in by_status.items() if s in NOT_PLAYED_STATUSES
+            )
+            logger.info(
+                "GR-sync: bulk-updated status (%s)",
+                ", ".join(f"{s}×{len(i)}" for s, i in by_status.items()),
             )
 
     if match_to_opp:
@@ -2244,6 +2296,7 @@ async def sync_grassroots_game_level_data(
                         winning_team=winner_name,
                         is_final=match_to_is_final.get(match_id_str, False),
                         match_format=match_to_format.get(match_id_str),
+                        status=match_to_status.get(match_id_str),
                         venue=venue_name,
                     ))
                     try:
