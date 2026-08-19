@@ -1836,6 +1836,7 @@ async def sync_grassroots_game_level_data(
     seen_match_ids: set[str] = set()
     match_to_season: dict[str, uuid.UUID] = {}
     match_to_is_final: dict[str, bool] = {}
+    match_to_round_name: dict[str, str] = {}
     match_to_format: dict[str, str] = {}  # match_id → CA's own matchType string
     match_to_opp: dict[str, tuple[str | None, str]] = {}  # match_id → (opp_org_id, opp_club_name)
     for grade_idx, (grade_guid, season_id, grade_name, _our_grade_id) in enumerate(grades, start=1):
@@ -1872,6 +1873,12 @@ async def sync_grassroots_game_level_data(
             match_to_season[mid] = season_id
             round_name = (m.get("round") or {}).get("name", "")
             match_to_is_final[mid] = "final" in round_name.lower()
+            # Keep the label itself, not just the one bit above. A Grand
+            # Final, a semi and a prelim all set is_final, so premiership
+            # detection has no way to tell them apart without it — and the
+            # string is already here, on a call we are making anyway.
+            if round_name:
+                match_to_round_name[mid] = round_name
             # The match list carries the format ("One Day" / "Two Day" / "T20")
             # per FIXTURE, and that granularity is the whole point: a WA turf
             # grade plays both across one season (Applecross 5th Grade 25/26 is
@@ -1940,6 +1947,27 @@ async def sync_grassroots_game_level_data(
                 )
             await upd_session.commit()
         logger.info(f"GR-sync: bulk-updated is_final ({len(finals_ids)} finals, {len(non_finals_ids)} non-finals)")
+
+    # Bulk-update round_name for the same reason is_final needs a bulk pass:
+    # an already-synced game short-circuits the per-game block below, so a
+    # club's existing seasons would never gain the label otherwise. Grouped
+    # by name because a season has a handful of distinct round labels across
+    # hundreds of matches.
+    if match_to_round_name:
+        by_name: dict[str, list[uuid.UUID]] = {}
+        for mid, rname in match_to_round_name.items():
+            by_name.setdefault(rname, []).append(uuid.UUID(mid))
+        async with async_session_maker() as upd_session:
+            for rname, ids in by_name.items():
+                await upd_session.execute(
+                    text("UPDATE games SET round_name = :rn WHERE id = ANY(:ids)"),
+                    {"rn": rname, "ids": ids},
+                )
+            await upd_session.commit()
+        logger.info(
+            f"GR-sync: bulk-updated round_name on {len(match_to_round_name)} games "
+            f"({len(by_name)} distinct rounds)"
+        )
 
     # Bulk-update match_format the same way, and for the same reason: an
     # already-synced game never reaches the per-game block below (the
@@ -2243,6 +2271,7 @@ async def sync_grassroots_game_level_data(
                         result=result_text,
                         winning_team=winner_name,
                         is_final=match_to_is_final.get(match_id_str, False),
+                        round_name=match_to_round_name.get(match_id_str),
                         match_format=match_to_format.get(match_id_str),
                         venue=venue_name,
                     ))

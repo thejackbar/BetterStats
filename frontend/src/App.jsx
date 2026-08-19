@@ -98,6 +98,7 @@ const AdminSeasons = lazy(() => import('./pages/admin/AdminSeasons'))
 const AdminSettings = lazy(() => import('./pages/admin/AdminSettings'))
 const AdminAccount = lazy(() => import('./pages/admin/AdminAccount'))
 const AdminAwards = lazy(() => import('./pages/admin/AdminAwards'))
+const AdminPremierships = lazy(() => import('./pages/admin/AdminPremierships'))
 const AdminAwardDefinitions = lazy(() => import('./pages/admin/AdminAwardDefinitions'))
 const AdminMerge = lazy(() => import('./pages/admin/AdminMerge'))
 const AdminFamilies = lazy(() => import('./pages/admin/AdminFamilies'))
@@ -423,6 +424,7 @@ export default function App() {
           <Route path="/admin/games" element={<ProtectedRoute requireCore><AdminGames /></ProtectedRoute>} />
           <Route path="/admin/seasons" element={<ProtectedRoute requireCore><AdminSeasons /></ProtectedRoute>} />
           <Route path="/admin/awards" element={<ProtectedRoute requireCore><AdminAwards /></ProtectedRoute>} />
+          <Route path="/admin/premierships" element={<ProtectedRoute requireCore><AdminPremierships /></ProtectedRoute>} />
           <Route path="/admin/award-definitions" element={<ProtectedRoute requireCore><AdminAwardDefinitions /></ProtectedRoute>} />
           <Route path="/admin/merge" element={<ProtectedRoute requireCore><AdminMerge /></ProtectedRoute>} />
           <Route path="/admin/families" element={<ProtectedRoute requireCore><AdminFamilies /></ProtectedRoute>} />

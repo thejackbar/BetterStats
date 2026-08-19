@@ -1,5 +1,74 @@
 # BetterStats — Claude Session Notes
 
+## A premiership is detected from the game that won it, and approved by a person (migration 264, v9.31.0, Aug 2026)
+
+Asked for: spot a Grand Final the club won and award every player a
+Premiership. Everything needed was already held except one thing.
+
+- **`is_final` is one bit, and one bit cannot tell a flag from a straight-sets
+  exit.** `sync.py` reads the association's `round.name` off the grade match
+  list and immediately reduces it to `"final" in round_name.lower()`, so a
+  Grand Final, a semi, a prelim and a qualifying final all store as `True`.
+  **`games.round_name` now keeps the string itself** — it was already in hand
+  on a call the sync makes anyway, so it costs no extra API traffic. The bulk
+  pass beside the `is_final` one is what backfills a club's existing seasons;
+  without it an already-synced game never reaches the per-game block.
+- **`services/finals.py` classifies the round, and the ORDER of its tests is
+  load-bearing.** Every finals name contains "final", so the specific kinds
+  must be claimed before the bare one: check "grand" first or "Grand Final"
+  reads as an ordinary final, check bare "final" first and every semi in the
+  competition becomes a premiership. A numbered round wins over everything
+  ("Round 12 (Final Round)" is the last ordinary round, not a decider). A name
+  it cannot place returns None and is never proposed.
+- **A bare "Final" IS a premiership candidate**, because a one-day or T20
+  competition routinely calls its decider that. It is the weaker claim, so it
+  carries `confidence: 'review'` and the screen says which round the
+  competition actually named.
+- **Candidates are derived on read; only the DECISION is stored**
+  (`premiership_detections`, absence of a row = pending). A club that corrects
+  a round name, re-syncs a result or merges two players gets a restated list
+  rather than a stale row describing a game that no longer looks that way.
+  Same posture as BetterFees' match-day allocation and the Votes leaderboard.
+- **"Did we win" never name-matches the club.** Three tiers, strongest first:
+  `home_org_id`/`away_org_id` against `winning_team` (definitive), else our own
+  players' `game_appearances.team_name` against `winning_team` (per-game
+  evidence from the scorecard), else `games.result` (org-relative to whoever
+  synced first, so reported as `weak` and the screen says to check). The
+  club-name shortcut is the bug `aggregations._club_results` documents, which
+  zeroed every game for "Bayswater-Postels".
+- **The `players.organisation_id` join on `game_appearances` is mandatory.** A
+  fixture between two both-synced clubs is ONE `games` row carrying BOTH
+  clubs' appearance rows, so reading appearances by game alone hands the
+  premiership to the opposition. Asserted against.
+- **`achievements._is_duplicate` is NOT reused, deliberately** — it does not
+  compare `subcategory`, so a player winning the 1st Grade and the T20 in one
+  season would have the second flag read as a duplicate of the first. The
+  grade is exactly what separates them, so `_already_awarded` puts it in the
+  test, and checks `season` as both the season id and its name (the column is
+  free text holding either, per the Awards screen vs an import).
+- **Undo hands back exactly the awards that approval wrote**, by the ids
+  recorded on the detection row. Re-deriving the XI instead would remove an
+  award somebody added by hand for the same game.
+- **Three things it cannot do, which is why approval exists rather than the
+  sync writing straight to the honour board**: a flag won on a washout or
+  higher position (no winner on the scorecard, nothing to detect), the squad
+  beyond the XI (the 12th and 13th man are in the award vocabulary and can
+  only be added by hand), and a genuinely ambiguous round label. A wrong label
+  would otherwise mint eleven wrong awards silently, and the honour board is
+  the club's record of record.
+- **Manual and uploaded games are not covered** — they carry `is_final` but no
+  round name, so there is nothing to tell a grand final from a semi.
+- **Verified against a real Postgres** (47 checks through the shipped service
+  functions: the semi/prelim never proposed, the opposition's grand final
+  never ours, a shared fixture awarding 11 of ours and no opposition player, a
+  drawn final producing nothing, two flags in one season both landing, approve
+  idempotent, and reset leaving a hand-added 12th Man untouched), the
+  migration applied three times to a populated pre-264 table with the lifespan
+  mirror landing on the same schema (12 checks), and **driven in Chromium**
+  (21: both badges, the review warning on the bare Final only, unticking a
+  player changing the payload on the wire, the empty state, undo, no page
+  errors, no overflow at 390px).
+
 ## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 262, v9.30.0, Aug 2026)
 
 Four things reported off Hampton Hammers' page. The first is the one worth

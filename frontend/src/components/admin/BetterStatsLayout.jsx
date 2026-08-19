@@ -51,6 +51,7 @@ export const GROUPS = [
     desc: 'Awards, yearbooks and the extras on your site.',
     items: [
       { to: '/admin/awards', label: 'Awards', icon: 'check', cap: CAP.MANAGE_AWARDS, desc: 'Record club awards and honours.' },
+      { to: '/admin/premierships', label: 'Premierships', icon: 'teams', cap: CAP.MANAGE_AWARDS, desc: 'Approve the flags we spotted in your results.' },
       { to: '/admin/award-definitions', label: 'Award Types', icon: 'settings', cap: CAP.MANAGE_AWARDS, desc: 'Set up the award categories your club uses.' },
       { to: '/admin/yearbook', label: 'Yearbooks', icon: 'sheet', cap: CAP.MANAGE_YEARBOOKS, desc: 'Write and publish season yearbooks.' },
       { to: '/admin/reports', label: 'Saved Reports', icon: 'ladders', cap: CAP.MANAGE_REPORTS, desc: 'Your saved stat reports.' },

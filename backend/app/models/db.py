@@ -1277,6 +1277,11 @@ class Game(Base):
     result = Column(Text)
     winning_team = Column(Text)
     is_final = Column(Boolean, default=False, nullable=False, server_default='false')
+    # The association's own round label ("Grand Final", "Semi Final",
+    # "Round 7"). is_final above is derived from it and keeps only one bit,
+    # which cannot tell a flag from a straight-sets exit — see
+    # services/finals.py and migration 264.
+    round_name = Column(Text, nullable=True)
     raw_payload = Column(JSON)
     venue = Column(Text)
     match_format = Column(Text, nullable=True)

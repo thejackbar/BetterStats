@@ -17,7 +17,7 @@ from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
-    public_club_room, sales_workspace
+    public_club_room, sales_workspace, premierships
 # BetterScout — a separate tenant type (Scout Org) with its own login,
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
@@ -1600,6 +1600,44 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_achievements_import_batch "
             "ON player_achievements(import_batch_id)"
         ))
+        # Premiership detection (migration 264). games.round_name is the
+        # association's own round label; the sync already read it and kept
+        # only the "is this a final" bit, which cannot tell a flag from a
+        # straight-sets exit. premiership_detections stores the admin's
+        # decision only — the candidates themselves are derived on read.
+        await conn.execute(text(
+            "ALTER TABLE games ADD COLUMN IF NOT EXISTS round_name TEXT"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS premiership_detections (
+                id                      UUID PRIMARY KEY,
+                organisation_id         UUID NOT NULL,
+                game_id                 UUID NOT NULL,
+                status                  TEXT NOT NULL,
+                decided_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                decided_by_user_id      UUID,
+                created_achievement_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+            )
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_premiership_detections_org_game "
+            "ON premiership_detections (organisation_id, game_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_premiership_detections_org "
+            "ON premiership_detections (organisation_id)"
+        ))
+        # Seed the round name from fixtures already synced — the one place a
+        # round label was previously persisted. Everything else fills in on
+        # the next sync.
+        await conn.execute(text("""
+            UPDATE games g
+               SET round_name = f.round
+              FROM fixtures f
+             WHERE f.playhq_id = g.id::text
+               AND f.round IS NOT NULL
+               AND g.round_name IS NULL
+        """))
         # Performance indexes on the per-game tables' join columns (migration
         # 103). Postgres doesn't index foreign keys automatically, so the records
         # board scanned the whole partnerships table four times per request.
@@ -5639,6 +5677,7 @@ app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(social_media.router)   # BetterSocials media library + brand kit
 app.include_router(achievements.router)
+app.include_router(premierships.router)
 app.include_router(award_definitions.router)
 app.include_router(statlab.router)
 app.include_router(yearbooks.router)

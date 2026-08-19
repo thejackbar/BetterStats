@@ -2143,6 +2143,20 @@ export const api = {
       body: JSON.stringify({ new_password: newPassword }),
     }),
 
+  // Premierships detected from finals results, pending an admin's approval
+  listDetectedPremierships: (status = 'pending') =>
+    request(`/club-admin/premierships?status=${encodeURIComponent(status)}`),
+  premiershipCounts: () => request('/club-admin/premierships/count'),
+  approvePremiership: (gameId, playerIds) =>
+    request(`/club-admin/premierships/${gameId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify(playerIds ? { player_ids: playerIds } : {}),
+    }),
+  ignorePremiership: (gameId) =>
+    request(`/club-admin/premierships/${gameId}/ignore`, { method: 'POST' }),
+  resetPremiership: (gameId) =>
+    request(`/club-admin/premierships/${gameId}/reset`, { method: 'POST' }),
+
   // Achievements
   listAchievements: (orgId, { playerId, season } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
