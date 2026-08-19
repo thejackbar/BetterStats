@@ -48,16 +48,62 @@ function fmtDismissal(text, caughtBehind) {
   return out
 }
 
-// True iff two team-name strings refer to the same club.
-// Splits on whitespace/hyphens, drops tokens shorter than 4 chars (e.g. "XI",
-// "CC", "6th"), then checks for any exact-word overlap.
-// Using String.includes() would give false positives: "ross" ⊂ "applecross".
-function teamsMatch(a, b) {
-  if (!a || !b) return false
-  const sig = s => s.toLowerCase().split(/[\s\-]+/).filter(w => w.length >= 4)
-  const aWords = sig(a)
-  const bSet = new Set(sig(b))
-  return aWords.some(w => bSet.has(w))
+// Words that turn up in half the team names in any competition, so sharing one
+// says nothing about WHICH club a name belongs to. Grading a name by word
+// overlap without stripping these marked both sides of
+// "Warwick Greenwood CC Senior Men F Grade" v "LCC Senior Men F" as the winner,
+// on the strength of the single word "senior".
+const GENERIC_TEAM_WORDS = new Set([
+  'the', 'and', 'of', 'cc', 'ccc', 'cca', 'jcc', 'xi', 'xis', 'ii', 'iii', 'iv',
+  'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h',
+  'cricket', 'club', 'clubs', 'team', 'teams', 'sport', 'sports', 'sporting',
+  'association', 'assoc', 'league', 'competition', 'comp', 'premier', 'premiers',
+  'senior', 'seniors', 'junior', 'juniors', 'man', 'men', 'mens', 'woman',
+  'women', 'womens', 'ladies', 'girls', 'boys', 'mixed',
+  'grade', 'grades', 'division', 'divisions', 'div', 'section', 'pool', 'group',
+  'under', 'over', 'colts', 'masters', 'veterans', 'vets', 'open', 'social',
+  'indoor', 'turf', 'synthetic', 'reserve', 'reserves',
+  'first', 'firsts', 'second', 'seconds', 'third', 'thirds', 'fourth', 'fourths',
+  'fifth', 'fifths', 'sixth', 'sixths', 'seventh', 'eighth', 'ninth', 'tenth',
+  '1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th',
+  '12th', 'day', 'twenty20', 't20', 'one',
+])
+
+function normaliseTeamName(s) {
+  return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+// The words that actually identify a club, i.e. everything a competition's
+// team names DON'T have in common. Empty when a name is nothing but generic
+// words, which reads as "no evidence" rather than "matches everything".
+function distinctiveTeamWords(s) {
+  return normaliseTeamName(s)
+    .split(' ')
+    .filter(w => w && !/^\d+$/.test(w) && !GENERIC_TEAM_WORDS.has(w))
+}
+
+// How strongly two team-name strings look like the same club. 0 = no evidence.
+// Word-level, never String.includes(), which would give false positives:
+// "ross" ⊂ "applecross".
+function teamMatchScore(a, b) {
+  if (!a || !b) return 0
+  const an = normaliseTeamName(a)
+  const bn = normaliseTeamName(b)
+  if (an && an === bn) return 100
+  const bSet = new Set(distinctiveTeamWords(b))
+  return distinctiveTeamWords(a).filter(w => bSet.has(w)).length
+}
+
+// A match has one winner, so the two sides are judged against each other
+// rather than each on its own — whichever name the winning side's name fits
+// better takes it, and a tie (including two zeroes) marks neither. Judging
+// them independently is what let both teams show a WON badge at once.
+function winnerSide(winner, teamA, teamB) {
+  if (!winner) return null
+  const a = teamMatchScore(winner, teamA)
+  const b = teamMatchScore(winner, teamB)
+  if (a === b) return null
+  return a > b ? 'a' : 'b'
 }
 
 // "Won by N wickets" (chasing side won) or "won by N runs" (defending side
@@ -67,8 +113,7 @@ function teamsMatch(a, b) {
 function marginText(game, innings1, innings2) {
   if (!game.winning_team || !innings1 || !innings2) return null
   const first = innings1, second = innings2
-  const secondBattingTeam = second.battingTeam
-  const wonBattingSecond = secondBattingTeam && teamsMatch(secondBattingTeam, game.winning_team)
+  const wonBattingSecond = winnerSide(game.winning_team, first.battingTeam, second.battingTeam) === 'b'
   if (wonBattingSecond && second.wickets != null) {
     const left = 10 - second.wickets
     if (left > 0) return `won by ${left} wicket${left === 1 ? '' : 's'}`
@@ -129,13 +174,15 @@ function MatchHeader({ game, innings }) {
   const homeTeam = game.home_team || ''
   const awayTeam = game.away_team || ''
   let homeInn = inningsData[0], awayInn = inningsData[1]
-  if (homeInn?.battingTeam && homeTeam && !teamsMatch(homeInn.battingTeam, homeTeam) && awayInn) {
+  if (awayInn && homeTeam &&
+      teamMatchScore(awayInn.battingTeam, homeTeam) > teamMatchScore(homeInn?.battingTeam, homeTeam)) {
     homeInn = inningsData[1]
     awayInn = inningsData[0]
   }
   const winner = (game.winning_team || '').trim()
-  const homeWon = !!winner && !!homeTeam && teamsMatch(winner, homeTeam)
-  const awayWon = !!winner && !homeWon
+  const side = winnerSide(winner, homeTeam, awayTeam)
+  const homeWon = side === 'a'
+  const awayWon = side === 'b'
 
   const Side = ({ label, teamName, inn, won, align }) => (
     <div
@@ -222,7 +269,7 @@ function ClaimButton({ row, onClaim }) {
 // BetterSocials' SC3 Dashboard share-image template lays it out — the
 // bowling figures of whichever team bowled at them, labelled by that
 // opponent's name. Two of these side by side is the whole scorecard.
-function TeamCard({ label, teamName, opponentName, winner, batting = [], bowling = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
+function TeamCard({ label, teamName, opponentName, won = false, batting = [], bowling = [], inningsTotal, fmtName = n => n, canManage = false, onClaim }) {
   const batted = batting
     .filter(r => !r.did_not_bat)
     .sort((a, b) => (a.batting_position ?? 999) - (b.batting_position ?? 999))
@@ -236,7 +283,6 @@ function TeamCard({ label, teamName, opponentName, winner, batting = [], bowling
     ? inningsTotal.wickets
     : batted.filter(r => !r.not_out && r.dismissal_type).length
   const score = fmtScore(total, wickets)
-  const won = !!winner && teamsMatch(winner, teamName)
   // Overs faced = overs bowled at this team, i.e. the opponent's bowling figures.
   const oversStr = ballsToOversStr(sumOversBalls(bowling))
 
@@ -709,6 +755,8 @@ export default function MatchScorecard() {
   // first as often as the home team does, so that guess is frequently backwards.
   const inn1Team = t1.batting_team || '1ST INNINGS'
   const inn2Team = t2.batting_team || '2ND INNINGS'
+  // Decided once for the pair, so the two cards can never both claim the win.
+  const wonSide = winnerSide(game.winning_team, inn1Team, inn2Team)
 
   return (
     <div className="min-h-screen bg-pb-bg text-pb-text">
@@ -734,7 +782,7 @@ export default function MatchScorecard() {
               label="INNINGS 1"
               teamName={inn1Team}
               opponentName={inn2Team}
-              winner={game.winning_team}
+              won={wonSide === 'a'}
               batting={inn1.batting}
               bowling={inn1.bowling}
               inningsTotal={t1}
@@ -747,7 +795,7 @@ export default function MatchScorecard() {
                 label="INNINGS 2"
                 teamName={inn2Team}
                 opponentName={inn1Team}
-                winner={game.winning_team}
+                won={wonSide === 'b'}
                 batting={inn2.batting}
                 bowling={inn2.bowling}
                 inningsTotal={t2}
