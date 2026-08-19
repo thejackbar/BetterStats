@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import {
   Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput,
   DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_OPTIONS, LEAD_SOURCE_OPTIONS,
-  WebsiteAnalyticsPanel, EngagementBreakdownPanel,
+  WebsiteAnalyticsPanel, EngagementBreakdownPanel, ownerEntryId, townStateLabel, associationNames,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
@@ -85,7 +85,18 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const patch = async (fields) => {
     setSaving(true)
     try {
-      const updated = await client.updateDeal(dealId, fields)
+      let updated
+      try {
+        updated = await client.updateDeal(dealId, fields)
+      } catch (e) {
+        // Changing the Owner of a club a sales rep has EARNED (logged a real
+        // call outcome on, or emailed a contact at) comes back as a 409 until
+        // a super admin says yes. Assignment is theirs to change; the prompt
+        // is there so it is never changed without seeing whose work it moves.
+        if (e?.detail?.code !== 'commission_attributed') throw e
+        if (!window.confirm(e.message)) { setDeal(d => ({ ...d })); return }
+        updated = await client.updateDeal(dealId, { ...fields, confirm_reassign: true })
+      }
       setDeal(updated)
       onChanged?.()
     } catch (e) { toast.error(e.message || 'Could not save') } finally { setSaving(false) }
@@ -281,6 +292,23 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             <Pill tone={deal.status === 'won' ? 'green' : 'red'}>{(deal.status === 'won' ? t.won : t.lost).toUpperCase()}</Pill>
           )}
 
+          {/* Club Directory context — town/state and every association the
+              club competes in, from marketing_clubs (Club Directory's own
+              PlayHQ crawl). Absent for a bare manually-created deal with no
+              linked club. */}
+          {(townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) || associationNames(deal.marketing_club_associations).length > 0) && (
+            <div className="space-y-1">
+              {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) && (
+                <p className="text-[12px] text-pb-faint">{townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state)}</p>
+              )}
+              {associationNames(deal.marketing_club_associations).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {associationNames(deal.marketing_club_associations).map(n => <Pill key={n}>{n}</Pill>)}
+                </div>
+              )}
+            </div>
+          )}
+
           {showPurgeBox && (
             <div className="pb-card px-3 py-3 border-pb-red/40 space-y-2">
               <p className="text-[12.5px] text-pb-text">
@@ -326,10 +354,25 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             </Field>
             {ownerOptions && ownerOptions.length > 0 && (
               <Field label="Owner" width={FIELD_W.owner}>
-                <Select value={deal.owner_user_id || ''} onChange={e => patch({ owner_user_id: e.target.value || null })}>
+                {/* Bound through ownerEntryId — see EventForm: an entry is a
+                    person, possibly covering several accounts, so a deal
+                    owned by one of the folded-away ones still shows its
+                    owner rather than reading Unassigned. */}
+                <Select value={ownerEntryId(ownerOptions, deal.owner_user_id)} onChange={e => patch({ owner_user_id: e.target.value || null })}>
                   <option value="">Unassigned</option>
-                  {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  {ownerOptions.filter(o => !o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  {ownerOptions.some(o => o.is_sales_rep) && (
+                    <optgroup label="Sales reps">
+                      {ownerOptions.filter(o => o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </optgroup>
+                  )}
                 </Select>
+                {deal.commission_rep_user_id && (
+                  <span className="block text-[10.5px] text-pb-faintest mt-1">
+                    Earned by {ownerOptions.find(o => (o.ids || [o.id]).includes(deal.commission_rep_user_id))?.name
+                      || 'a sales rep'}
+                  </span>
+                )}
               </Field>
             )}
             <Field label="Onboarding method" width={FIELD_W.onboarding}>

@@ -1219,7 +1219,7 @@ class Player(Base):
     phone = Column(Text, nullable=True)
     skill_positions = Column(JSONB, default=list, nullable=False, server_default="[]")  # e.g. ["BAT","WKT"]
     status = Column(Text, default="active", nullable=False, server_default="active")  # active | inactive
-    # Whether this player is shown on the club's PUBLIC site (migration 264).
+    # Whether this player is shown on the club's PUBLIC site (migration 265).
     # Defaults true, so nothing is hidden by an upgrade; a club opts a player
     # out (typically a junior who does not want to be findable) and they drop
     # off the public roster, search, profile page, leaderboards and records
@@ -1227,12 +1227,12 @@ class Player(Base):
     # grades.is_public, and read through the same user_can_view_org_private
     # escape so a signed-in club admin still sees their own club whole.
     is_public = Column(Boolean, default=True, nullable=False, server_default="true")
-    # BetterSelect "non-financial" filter (migration 264). NULL = no override,
+    # BetterSelect "non-financial" filter (migration 265). NULL = no override,
     # so the answer comes from BetterFees' own balance; True/False is a club
     # saying so by hand, which is also the only answer a club not running
     # BetterFees can give.
     is_financial_override = Column(Boolean, nullable=True)
-    # BetterSelect "attended training" filter (migration 264). NULL = no
+    # BetterSelect "attended training" filter (migration 265). NULL = no
     # override, so the answer comes from Net Manager attendance.
     trained_override = Column(Boolean, nullable=True)
 
@@ -4568,6 +4568,15 @@ class CrmDeal(Base):
     status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
     lost_reason = Column(Text, nullable=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Migration 264: commission attribution, which is NOT owner_user_id.
+    # owner_user_id says who is working the club now and a super admin may
+    # move it at will; this says which sales rep EARNED it, set once by the
+    # first qualifying action (a logged call outcome other than General Note,
+    # or an email sent to one of the club's contacts) and never moved by a
+    # later reassignment. See services/sales_workspace.attribute_commission.
+    commission_rep_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    commission_attributed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    commission_attributed_via = Column(Text, nullable=True)  # call | email
     source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |

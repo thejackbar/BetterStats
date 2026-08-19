@@ -507,6 +507,16 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         # scored (marketing_clubs.engagement_score_prev, migration 192).
         "engagement_delta_dir": _engagement_delta_dir(club),
         "marketing_club_name": club.name if club else None,
+        # State is already association-abbreviated at source (PlayHQ's own
+        # address payload, see club_directory.py) — no conversion needed.
+        # `associations` is the full competition list (Club Directory's own
+        # crawl, `[{"id","name","competition"}, …]`, None = not yet crawled,
+        # [] = crawled, none found); `association` stays as the single
+        # PRIMARY name for the existing filter bar/back-compat.
+        "marketing_club_state": club.state if club else None,
+        "marketing_club_suburb": club.suburb if club else None,
+        "marketing_club_association": club.association_name if club else None,
+        "marketing_club_associations": club.associations if club else None,
         "is_customer": bool(club.existing_org_id) if club else None,
         "pipeline_id": str(deal.pipeline_id),
         "stage_id": str(deal.stage_id),
@@ -527,6 +537,11 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "status": deal.status,
         "lost_reason": deal.lost_reason,
         "owner_user_id": str(deal.owner_user_id) if deal.owner_user_id else None,
+        # Commission attribution — who EARNED the club, as distinct from
+        # owner_user_id above. See models/db.py::CrmDeal.
+        "commission_rep_user_id": str(deal.commission_rep_user_id) if deal.commission_rep_user_id else None,
+        "commission_attributed_at": deal.commission_attributed_at.isoformat() if deal.commission_attributed_at else None,
+        "commission_attributed_via": deal.commission_attributed_via,
         "source": deal.source,
         "onboarding_method": deal.onboarding_method,
         "lead_source": deal.lead_source,
@@ -1680,15 +1695,82 @@ async def club_stats_by_club(session: AsyncSession, club_by_id: dict) -> dict:
     return out
 
 
+# The internal BetterCricket staff a platform deal or event can be owned by:
+# super admins AND sales reps. A rep is not a separate entity — they are a
+# User whose one ClubMembership carries role 'sales' (see routers/
+# sales_workspace.py) — and `crm_deals.owner_user_id` is exactly the column
+# the Sales Workspace assigns them with, so a rep-owned deal was always in
+# the pipeline while the owner picker listed super admins alone and could
+# never name, let alone filter to, whoever actually owns it.
+OWNER_ROLES = ("super_admin", "sales")
+
+
+def _owner_label_key(user: User) -> str:
+    """The name a reader actually sees, normalised. Grouping key for the
+    fold below."""
+    return " ".join(((user.display_name or user.username or "").strip().lower()).split())
+
+
+def _owner_primary_rank(user: User) -> tuple:
+    """Highest wins: an account that can log in beats one that never could,
+    then most-recently used, then oldest. This picks the id an assignment
+    writes, so ownership settles on the account the person actually uses."""
+    return (
+        1 if user.password_hash else 0,
+        user.last_login_at.timestamp() if user.last_login_at else 0.0,
+        -(user.created_at.timestamp() if user.created_at else 0.0),
+    )
+
+
 async def list_platform_owners(session: AsyncSession) -> list[dict]:
-    """Every super admin — the internal BetterCricket staff pool a platform
-    deal's owner_user_id is picked from (not a club's own users)."""
+    """The staff pool a platform deal's owner_user_id is picked from (not a
+    club's own users) — super admins and sales reps, ONE entry per person.
+
+    A person can hold more than one account: `users.email` is deliberately
+    not unique (migration 145) and nothing stops a second super-admin
+    account being created for someone who already has one. Every picker
+    renders the display name alone, so two accounts under one name read as a
+    duplicate AND make the filter a coin toss — picking one returns only the
+    deals that happened to land on that account. Accounts sharing a display
+    label are therefore folded into ONE entry carrying every id (`ids`),
+    which is what the filter matches on, so no deal can hide behind the
+    account that was not picked. Two genuinely different people under one
+    display name would fold together too: they are already indistinguishable
+    to a reader, and the fix for that is distinct display names, not a
+    second identical row in the list."""
     rows = (await session.execute(
-        select(User).join(ClubMembership, ClubMembership.user_id == User.id)
-        .where(ClubMembership.role == "super_admin")
-        .distinct().order_by(User.display_name, User.username)
-    )).scalars().all()
-    return [{"id": str(u.id), "name": u.display_name or u.username, "email": u.email} for u in rows]
+        select(User, ClubMembership.role)
+        .join(ClubMembership, ClubMembership.user_id == User.id)
+        .where(ClubMembership.role.in_(OWNER_ROLES))
+        .order_by(User.display_name, User.username)
+    )).all()
+
+    grouped: dict[str, dict] = {}
+    for user, role in rows:
+        # An account with no name at all falls back to its own id, so it can
+        # never be folded into someone else's entry.
+        key = _owner_label_key(user) or str(user.id)
+        g = grouped.setdefault(key, {"users": [], "roles": set()})
+        g["users"].append(user)
+        g["roles"].add(role)
+
+    out = []
+    for g in grouped.values():
+        primary = max(g["users"], key=_owner_primary_rank)
+        # Super admin wins the label if one person somehow holds both.
+        is_rep = "super_admin" not in g["roles"]
+        out.append({
+            "id": str(primary.id),
+            "ids": [str(u.id) for u in g["users"]],
+            "name": primary.display_name or primary.username,
+            "email": primary.email,
+            "role": "sales" if is_rep else "super_admin",
+            "is_sales_rep": is_rep,
+        })
+    # Super admins first, each half alphabetical — the two groups are drawn
+    # under their own headings in the picker.
+    out.sort(key=lambda o: (o["is_sales_rep"], (o["name"] or "").lower()))
+    return out
 
 
 async def get_person(session: AsyncSession, person_id) -> Optional[CrmPerson]:

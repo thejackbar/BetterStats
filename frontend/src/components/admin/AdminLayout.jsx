@@ -62,6 +62,24 @@ const NAV_SECTIONS = [
 export default function AdminLayout({ children }) {
   const { user, logout, switchClub, hasCapability, hasModule, coreLive, justLoggedIn, clearJustLoggedIn } = useAuth()
 
+  // index.css sets `scroll-behavior: smooth` on <html> for the marketing
+  // site's own in-page anchor links (href="#section") — but that property
+  // applies to EVERY scroll performed on the document, including ones the
+  // browser triggers on its own (reported live: clicking a module-interest
+  // pill in the Sales Workspace visibly scrolled the whole page over ~250ms,
+  // even with no scrollIntoView/scrollTo/focus call anywhere in the trigger
+  // path — traced to this one global rule, confirmed by disabling it
+  // directly). The admin app never has anchor-link navigation, so it has no
+  // use for the smooth variant and every admin screen is better off with the
+  // instant default. Scoped to exactly the admin session's lifetime (set on
+  // mount, restored on unmount) so the marketing site keeps its smooth
+  // anchor scrolling untouched.
+  useEffect(() => {
+    const prev = document.documentElement.style.scrollBehavior
+    document.documentElement.style.scrollBehavior = 'auto'
+    return () => { document.documentElement.style.scrollBehavior = prev }
+  }, [])
+
   // Super-admin module-request queue badge — refreshed on mount.
   useEffect(() => {
     if (user?.role !== 'super_admin') return

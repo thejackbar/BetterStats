@@ -20,13 +20,13 @@
     ordinary tick box; a club that runs them can still correct one player
     without the derivation being wrong for everyone.
 
-Revision ID: 264
-Revises: 263
+Revision ID: 265
+Revises: 264
 """
 from alembic import op
 
-revision = "264"
-down_revision = "263"
+revision = "265"
+down_revision = "264"
 branch_labels = None
 depends_on = None
 

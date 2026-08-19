@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
-import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS } from './ui'
+import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS, townStateLabel, associationNames } from './ui'
 import { CalendarIcon, eventSummaryText } from './EventForm'
 import { moduleBrand } from '../../../lib/moduleBrand'
 
@@ -243,6 +243,18 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                     </span>
                   )}
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
+                  {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) && (
+                    <div className="text-[10.5px] text-pb-faintest -mt-0.5 mb-1">
+                      {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state)}
+                    </div>
+                  )}
+                  {associationNames(deal.marketing_club_associations).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mb-1.5">
+                      {associationNames(deal.marketing_club_associations).map(n => (
+                        <Pill key={n}>{n}</Pill>
+                      ))}
+                    </div>
+                  )}
                   {deal.point_of_contact_name && (
                     <div className="text-[11px] text-pb-faint truncate">{deal.point_of_contact_name}</div>
                   )}

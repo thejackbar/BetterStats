@@ -15,7 +15,7 @@ import CrmEventsView from '../../components/admin/crm/CrmEventsView'
 import { CalendarIcon, eventSummaryText } from '../../components/admin/crm/EventForm'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
-  LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel,
+  LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel, MultiSelect, ownerFilterGroups, ownerMatches, OWNER_UNASSIGNED,
 } from '../../components/admin/crm/ui'
 
 const CHART_TOOLTIP_STYLE = { background: 'var(--pb-surface, #0b1220)', border: '1px solid var(--pb-hairline, #1a2540)', fontSize: 12 }
@@ -247,7 +247,10 @@ const STAGE_MODE_STYLE = {
 const STAGE_MODE_PREFIX = { '': '', exclude: '✕ ', include: '✓ ' }
 
 const EMPTY_FILTERS = {
-  q: '', ownerId: '', modules: [], minValue: '', maxValue: '',
+  // Owner is a LIST — several people at once, ORed. Entries are people, not
+  // accounts, and '__unassigned__' rides in the same list so "nobody, or
+  // Jack" is one selection rather than two mutually exclusive controls.
+  q: '', ownerIds: [], modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', leadSource: '',
   onboarding: '', minTrialDays: '', maxTrialDays: '',
   // Per-stage include/exclude filter: { stageKey: 'include' | 'exclude' }.
@@ -317,12 +320,12 @@ const fmtDollars = (v) => `$${Number(v).toLocaleString()}`
 function buildFilterSummary(filters, { owners, stages, status }) {
   const out = []
   const push = (label, value) => out.push({ label, value })
-  const ownerName = (id) => owners.find(o => o.id === id)?.name || id
+  const ownerName = (id) => (id === OWNER_UNASSIGNED ? 'Unassigned' : (owners.find(o => o.id === id)?.name || id))
   const stageName = (key) => stages.find(s => s.key === key)?.name || key
 
   if (status) push('Status', STATUS_LABELS[status] || status)
   if (filters.q.trim()) push('Search', filters.q.trim())
-  if (filters.ownerId) push('Owner', filters.ownerId === '__unassigned__' ? 'Unassigned' : ownerName(filters.ownerId))
+  if (filters.ownerIds.length) push('Owner', filters.ownerIds.map(ownerName).join(', '))
   if (filters.state) push('State', filters.state)
   if (filters.association.trim()) push('Association', filters.association.trim())
   if (filters.leadSource) {
@@ -646,7 +649,7 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
 // one control per line.
 // State pinned to the same width as Owner (was narrower); Association
 // doubled — both per direct instruction.
-const FBW = { search: '210px', owner: '120px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px', window: '116px' }
+const FBW = { search: '210px', owner: '150px', state: '120px', assoc: '240px', source: '130px', onboarding: '140px', num: '64px', window: '116px' }
 
 // Compact date input matching the shared inputCls (ui.jsx) but without its
 // `w-full` — the filter bar sizes these tightly, not full-width.
@@ -716,11 +719,8 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
               screens), each pinned to a compact width instead of stretching. */}
           <div className="flex flex-wrap gap-2">
             <TextInput placeholder="Club name or point of contact" value={filters.q} onChange={set('q')} style={{ width: FBW.search }} />
-            <Select value={filters.ownerId} onChange={set('ownerId')} style={{ width: FBW.owner }}>
-              <option value="">Any owner</option>
-              <option value="__unassigned__">Unassigned</option>
-              {owners.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
+            <MultiSelect value={filters.ownerIds} onChange={v => setFilters(f => ({ ...f, ownerIds: v }))}
+              groups={ownerFilterGroups(owners)} allLabel="Any owner" width={FBW.owner} />
             <Select value={filters.state} onChange={set('state')} style={{ width: FBW.state }}>
               <option value="">Any state</option>
               {stateOptions.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1334,7 +1334,7 @@ export default function SuperCrm() {
         .toLowerCase().includes(needle)) return false
       if (stageExc.includes(d.stage_key)) return false
       if (stageInc.length && !stageInc.includes(d.stage_key)) return false
-      if (filters.ownerId === '__unassigned__' ? d.owner_user_id : (filters.ownerId && d.owner_user_id !== filters.ownerId)) return false
+      if (!ownerMatches(filters.ownerIds, owners, d.owner_user_id)) return false
       if (filters.modules.length && !filters.modules.some(m => (d.module_keys || []).includes(m))) return false
       if (minValueCents != null && (d.effective_value_cents ?? d.value_cents) < minValueCents) return false
       if (maxValueCents != null && (d.effective_value_cents ?? d.value_cents) > maxValueCents) return false
@@ -1381,7 +1381,7 @@ export default function SuperCrm() {
       if (!inDateWindow(d.last_activity_at, filters.activityMode, filters.activityFrom, filters.activityTo)) return false
       return true
     })
-  }, [deals, filters])
+  }, [deals, filters, owners])
 
   const stageName = (id) => stages.find(s => s.id === id)?.name || '—'
 

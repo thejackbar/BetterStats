@@ -72,6 +72,14 @@ CALL_OUTCOMES: dict[str, dict] = {
     "general_note": {"label": "General Note", "category": "general"},
 }
 
+# The 'general' category is NOT a call, and that is the whole point of it:
+# it records something worth noting against the club without claiming anyone
+# was spoken to. So it must not mark the club as called — a rep jotting a
+# note down had the club vanish out of the default queue (which lists clubs
+# never called) and, on a Target deal, silently moved it to Contacted. Both
+# followed from the row being written as type='call'; see log_call.
+GENERAL_OUTCOMES = frozenset(k for k, v in CALL_OUTCOMES.items() if v["category"] == "general")
+
 CATEGORY_ORDER = ("positive", "neutral", "unsuccessful", "negative", "administrative", "general")
 CATEGORY_LABELS = {
     "positive": "Positive", "neutral": "Neutral", "unsuccessful": "Unsuccessful contact",
@@ -319,6 +327,72 @@ async def add_directory_contact(
     )
 
 
+# ─── Commission attribution ───────────────────────────────────────────────────
+#
+# ASSIGNMENT IS NOT ATTRIBUTION, and keeping the two apart is the whole point.
+# `crm_deals.owner_user_id` says who is working a club right now, and a super
+# admin can move it back to the unassigned pool or over to another rep at
+# will. Attribution says which rep EARNED the club, for commission. It is set
+# ONCE, by the first qualifying action, and a later reassignment never moves
+# it — that is what stops a rep's work being handed to whoever happens to
+# hold the club at payout time.
+#
+# Only two actions qualify, and both mean the rep actually went at the club:
+# logging a call outcome, or sending an email to one of its contacts. What
+# does NOT qualify: being assigned the club, adding a note, and logging the
+# General Note outcome. Those last two are someone writing something down.
+#
+# Only a SALES rep can be attributed. A super admin working a club is doing
+# sales ops, not earning commission on it.
+
+COMMISSION_VIA_CALL = "call"
+COMMISSION_VIA_EMAIL = "email"
+
+
+async def attribute_commission(session: AsyncSession, *, deal: CrmDeal, actor_user_id,
+                               actor_role: str, via: str) -> bool:
+    """Stamps `deal` as earned by this rep, if it is not already earned and
+    the actor is one. Returns whether it stamped. First action wins: an
+    already-attributed deal is left exactly as it is, including when the same
+    rep acts again, so `commission_attributed_at` stays the moment the club
+    was actually won rather than creeping forward."""
+    if actor_role != "sales" or actor_user_id is None:
+        return False
+    if deal.commission_rep_user_id is not None:
+        return False
+    deal.commission_rep_user_id = actor_user_id
+    deal.commission_attributed_at = datetime.now(timezone.utc)
+    deal.commission_attributed_via = via
+    await session.flush()
+    return True
+
+
+def commission_reassign_blocked(deal: CrmDeal, new_owner_id) -> bool:
+    """True when moving this deal to `new_owner_id` needs the super admin to
+    confirm first: the club is attributed, and this hands it somewhere other
+    than the rep who earned it (including back to the unassigned pool).
+    Re-assigning it TO its attributing rep is not a change worth querying."""
+    if deal.commission_rep_user_id is None:
+        return False
+    return str(new_owner_id or "") != str(deal.commission_rep_user_id)
+
+
+def commission_confirm_message(rep_name: Optional[str]) -> str:
+    return (f"This club has been attributed to {rep_name or 'a sales rep'} - "
+            "do you really want to change the club's assignment?")
+
+
+async def commission_rep_names(session: AsyncSession, deals) -> dict:
+    """user_id -> display name, for whichever deals in `deals` are attributed.
+    One query, so a bulk reassignment can name every rep it is about to move
+    a club away from."""
+    ids = {d.commission_rep_user_id for d in deals if d.commission_rep_user_id}
+    if not ids:
+        return {}
+    rows = (await session.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+    return {u.id: (u.display_name or u.username) for u in rows}
+
+
 # ─── Calls ────────────────────────────────────────────────────────────────────
 
 async def log_call(
@@ -331,17 +405,30 @@ async def log_call(
     if outcome not in CALL_OUTCOMES:
         raise ValueError(f"Unknown call outcome: {outcome}")
 
+    category = CALL_OUTCOMES[outcome]["category"]
+    # A general-category outcome is filed as a NOTE, not a call. Everything
+    # that asks "has this club been called" keys on type='call'
+    # (last_calls_by_deal, the funnel's attempted column, priority_score's
+    # uncalled boost), so writing the honest type here is what keeps all of
+    # them right at once rather than each needing to know about categories.
+    is_call = outcome not in GENERAL_OUTCOMES
+
     activity = await crm_service.log_activity(
         session, deal_id=deal.id, person_id=person.id if person else None,
-        type="call", body=notes, created_by_user_id=created_by_user_id,
+        type="call" if is_call else "note", body=notes,
+        created_by_user_id=created_by_user_id,
         outcome=outcome, next_follow_up_at=next_follow_up_at,
     )
 
     stage = await session.get(CrmStage, deal.stage_id)
     stage_key = stage.key if stage else None
-    category = CALL_OUTCOMES[outcome]["category"]
 
-    if category == "positive" and stage_key in _ADVANCEABLE_STAGE_KEYS:
+    if not is_call:
+        # Nothing was claimed about the club, so nothing about it moves. In
+        # particular NOT the Target -> Contacted nudge below, which exists
+        # for a first real contact and a note is not one.
+        pass
+    elif category == "positive" and stage_key in _ADVANCEABLE_STAGE_KEYS:
         await _move_to_stage_key(session, deal, "engaged")
     elif outcome in _LOST_OUTCOMES:
         # status/lost_reason aren't in update_deal's clearable-field whitelist
@@ -503,7 +590,21 @@ async def bulk_assign(
     paths leave an identical audit trail. Returns a per-rep count. There is
     no separate "duplicate assignment" guard to build here — a deal has
     exactly one owner_user_id by construction, so re-running this over the
-    same selection just overwrites it, same as the single-deal action."""
+    same selection just overwrites it, same as the single-deal action.
+
+    An empty `owner_ids` means "unassign" — every deal's owner_user_id is
+    cleared back to NULL (the shared pool), the same as picking "Unassigned"
+    on the single-deal PATCH. Counted under the "unassigned" key since there
+    is no real owner id to key it on."""
+    if not owner_ids:
+        counts: dict = {"unassigned": 0}
+        for deal in deals:
+            await crm_service.update_deal(session, deal, owner_user_id=None)
+            await log_reassignment(session, deal=deal, owner_name=None, created_by_user_id=created_by_user_id)
+            counts["unassigned"] += 1
+        await session.flush()
+        return counts
+
     counts: dict = {str(o): 0 for o in owner_ids}
     for i, deal in enumerate(deals):
         owner_id = owner_ids[i % len(owner_ids)]
@@ -538,6 +639,20 @@ def priority_score(*, engagement_score: Optional[int], ever_called: bool,
     return score
 
 
+# A row is a call for "has this club been called" purposes when it is
+# type='call' AND its outcome is not one of the general ones. The second half
+# is only for rows written before general outcomes were filed as notes: it
+# corrects them on read, so a club a rep left a general note against comes
+# back into the uncalled queue with no data fix or re-entry needed.
+# NOTE the explicit NULL arm: `NOT (NULL IN (...))` is NULL, not true, so a
+# bare ~in_() would silently drop every call row with no outcome recorded —
+# which the CRM's own generic activity endpoint can write. Same trap
+# services/grade_scope.py's clause() documents.
+_IS_CALL_ROW = (CrmActivity.type == "call") & (
+    CrmActivity.outcome.is_(None) | ~CrmActivity.outcome.in_(GENERAL_OUTCOMES)
+)
+
+
 async def last_calls_by_deal(session: AsyncSession, deal_ids) -> dict:
     """deal_id -> the most recent 'call' activity dict (or None), batched for
     the queue list — avoids an N+1 query per row."""
@@ -546,7 +661,7 @@ async def last_calls_by_deal(session: AsyncSession, deal_ids) -> dict:
         return {}
     rows = (await session.execute(
         select(CrmActivity)
-        .where(CrmActivity.deal_id.in_(ids), CrmActivity.type == "call")
+        .where(CrmActivity.deal_id.in_(ids), _IS_CALL_ROW)
         .order_by(CrmActivity.deal_id, CrmActivity.occurred_at.desc())
     )).scalars().all()
     out: dict = {}
@@ -692,7 +807,7 @@ async def funnel_by_rep(session: AsyncSession, *, owner_user_id=None) -> list[di
     if deals:
         rows = (await session.execute(
             select(CrmActivity.deal_id)
-            .where(CrmActivity.deal_id.in_([d.id for d in deals]), CrmActivity.type == "call")
+            .where(CrmActivity.deal_id.in_([d.id for d in deals]), _IS_CALL_ROW)
             .distinct()
         )).scalars().all()
         ever_called_deal_ids = set(rows)

@@ -2128,13 +2128,23 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/interest`, {
       method: 'PATCH', body: JSON.stringify({ module_keys: moduleKeys }),
     }),
-  salesWorkspaceAssign: (dealId, ownerUserId) =>
+  // confirmReassign answers the server's "this club has been attributed to X"
+  // 409 — the club is a sales rep's for commission and this hands it
+  // somewhere else. Never send it up front: the point is that a super admin
+  // sees the prompt first.
+  salesWorkspaceAssign: (dealId, ownerUserId, confirmReassign = false) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
-      method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
+      method: 'PATCH',
+      body: JSON.stringify({ owner_user_id: ownerUserId || null, confirm_reassign: confirmReassign }),
     }),
-  salesWorkspaceBulkAssign: (dealIds, ownerUserIds) =>
+  // unassign=true sends the selected clubs back into the shared pool
+  // (owner_user_id cleared to NULL) — ownerUserIds is ignored either way.
+  salesWorkspaceBulkAssign: (dealIds, ownerUserIds, unassign = false, confirmReassign = false) =>
     request('/club-admin/sales-workspace/bulk-assign', {
-      method: 'POST', body: JSON.stringify({ deal_ids: dealIds, owner_user_ids: ownerUserIds }),
+      method: 'POST',
+      body: JSON.stringify({
+        deal_ids: dealIds, owner_user_ids: ownerUserIds, unassign, confirm_reassign: confirmReassign,
+      }),
     }),
   salesWorkspaceStartTrial: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),

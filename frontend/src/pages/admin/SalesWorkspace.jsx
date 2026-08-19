@@ -9,7 +9,7 @@ import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, modu
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
-import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
+import { groupedOutcomes, outcomeLabel, isGeneralOutcome } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
 
@@ -174,6 +174,28 @@ const trialDaysLabel = (days) => {
 // so this degrades to whichever one is present rather than showing a bare
 // comma or nothing at all. Shared by the queue card and the drawer header.
 const townStateLabel = (suburb, state) => [suburb, state].filter(Boolean).join(', ') || null
+
+// Every association a club plays in — Club Directory's own PlayHQ crawl,
+// marketing_clubs.associations (`[{id, name, competition}, …]`). NULL = not
+// yet crawled, [] = crawled, none found — both render nothing, same as a
+// missing town/state above. Shared by the queue card and the drawer header.
+const associationNames = (associations) => (associations || []).map(a => a?.name).filter(Boolean)
+
+// Small wrapped chip row for the associations a club competes in — reused by
+// the queue card and the drawer header so the two never disagree on style.
+function AssociationChips({ associations, className = '' }) {
+  const names = associationNames(associations)
+  if (!names.length) return null
+  return (
+    <div className={`flex flex-wrap gap-1 ${className}`}>
+      {names.map(n => (
+        <span key={n} className="px-1.5 py-0.5 rounded-full text-[9.5px] bg-pb-surface2 text-pb-faint border border-pb-line">
+          {n}
+        </span>
+      ))}
+    </div>
+  )
+}
 
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
@@ -489,8 +511,13 @@ function NoteEditForm({ value, onChange, onSave, onCancel, saving }) {
 }
 
 function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStartEdit, onSaveEdit, onCancelEdit, savingEdit }) {
-  const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call')
-    : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
+  // The outcome names the row whenever there is one, whatever type it was
+  // filed under: a General Note is stored as a NOTE (it claims nothing about
+  // the club, so it must not read as a call anywhere) and would otherwise
+  // lose the label the person actually picked.
+  const kindLabel = a.outcome ? outcomeLabel(a.outcome)
+    : a.type === 'call' ? 'Call'
+      : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
   const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
   if (a.type === 'note' && editing) {
     return (
@@ -607,6 +634,9 @@ export default function SalesWorkspace() {
   // rep checked = assign everything to them, several = split evenly.
   const [checkedIds, setCheckedIds] = useState(() => new Set())
   const [bulkReps, setBulkReps] = useState(() => new Set())
+  // Unassign is mutually exclusive with picking reps — it sends the
+  // selection back into the shared pool instead of onto anyone's queue.
+  const [bulkUnassign, setBulkUnassign] = useState(false)
   const [bulkAssigning, setBulkAssigning] = useState(false)
 
   const [callForm, setCallForm] = useState(emptyCallForm)
@@ -934,8 +964,11 @@ export default function SalesWorkspace() {
       }
       const d = await api.salesWorkspaceLogCall(drawer.deal.id, payload)
       setDrawer(d)
+      const wasNote = isGeneralOutcome(callForm.outcome)
       setCallForm(emptyCallForm())
-      toast?.success('Call logged')
+      // A General Note is not a call and does not mark the club as called,
+      // so it must not report itself as one either.
+      toast?.success(wasNote ? 'Note saved' : 'Call logged')
       loadClubs()
     } catch (err) {
       toast?.error(err.message)
@@ -997,9 +1030,26 @@ export default function SalesWorkspace() {
     }
   }
 
+  // Assignment and commission attribution are different things: a super
+  // admin may move a club whenever they like, but if a rep has already
+  // EARNED it (logged a real call outcome or emailed a contact) the server
+  // refuses with a 409 until this asks. Confirm re-sends the same request
+  // with the flag; Cancel leaves the assignment exactly as it was.
+  const assignWithConfirm = async (send) => {
+    try {
+      return await send(false)
+    } catch (err) {
+      if (err?.detail?.code !== 'commission_attributed') throw err
+      if (!window.confirm(err.message)) return null
+      return await send(true)
+    }
+  }
+
   const submitAssign = async (ownerUserId) => {
     try {
-      await api.salesWorkspaceAssign(drawer.deal.id, ownerUserId)
+      const res = await assignWithConfirm(
+        (confirm) => api.salesWorkspaceAssign(drawer.deal.id, ownerUserId, confirm))
+      if (res === null) { refreshBoth(); return }   // cancelled — put the picker back
       toast?.success('Reassigned')
       refreshBoth()
     } catch (err) {
@@ -1015,22 +1065,33 @@ export default function SalesWorkspace() {
   const totalContacts = useMemo(() => clubs.reduce((n, c) => n + (c.contact_count || 0), 0), [clubs])
   const allChecked = clubs.length > 0 && clubs.every(c => checkedIds.has(c.id))
   const toggleSelectAllVisible = () => setCheckedIds(allChecked ? new Set() : new Set(clubs.map(c => c.id)))
-  const toggleBulkRep = (id) => setBulkReps(s => {
-    const next = new Set(s)
-    if (next.has(id)) next.delete(id); else next.add(id)
-    return next
-  })
+  const toggleBulkRep = (id) => {
+    setBulkUnassign(false)
+    setBulkReps(s => {
+      const next = new Set(s)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const toggleBulkUnassign = () => {
+    setBulkReps(new Set())
+    setBulkUnassign(u => !u)
+  }
 
   const submitBulkAssign = async () => {
     if (checkedIds.size === 0) { toast?.error('Select at least one club'); return }
-    if (bulkReps.size === 0) { toast?.error('Pick at least one salesperson'); return }
+    if (!bulkUnassign && bulkReps.size === 0) { toast?.error('Pick at least one salesperson, or Unassigned'); return }
     setBulkAssigning(true)
     try {
-      const result = await api.salesWorkspaceBulkAssign([...checkedIds], [...bulkReps])
+      const result = await assignWithConfirm((confirm) => api.salesWorkspaceBulkAssign(
+        [...checkedIds], bulkUnassign ? [] : [...bulkReps], bulkUnassign, confirm))
+      if (result === null) return   // cancelled — the selection stays as it was
       const summary = Object.entries(result.by_rep).map(([name, n]) => `${name}: ${n}`).join(', ')
-      toast?.success(`Assigned ${result.assigned} club${result.assigned === 1 ? '' : 's'} — ${summary}`)
+      const verb = bulkUnassign ? 'Unassigned' : 'Assigned'
+      toast?.success(`${verb} ${result.assigned} club${result.assigned === 1 ? '' : 's'}${summary ? ` — ${summary}` : ''}`)
       setCheckedIds(new Set())
       setBulkReps(new Set())
+      setBulkUnassign(false)
       loadClubs()
     } catch (err) {
       toast?.error(err.message)
@@ -1252,6 +1313,16 @@ export default function SalesWorkspace() {
         <div className={`${CARD} mb-3 flex flex-wrap items-center gap-3`}>
           <span className="text-[12px] text-pb-text font-medium">{checkedIds.size} selected</span>
           <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={toggleBulkUnassign}
+              title="Send the selected clubs back into the shared pool, unassigned"
+              className={`px-2 py-1 rounded font-mono text-[10px] border transition-colors ${
+                bulkUnassign ? 'border-pb-red text-pb-red' : 'border-pb-hairline text-pb-faint hover:text-pb-text'
+              }`}
+            >
+              Unassigned
+            </button>
             {team.map(u => (
               <button
                 key={u.id}
@@ -1266,12 +1337,14 @@ export default function SalesWorkspace() {
             ))}
           </div>
           <span className="text-[10.5px] text-pb-faintest">
-            {bulkReps.size > 1 ? 'Splits evenly, round-robin' : bulkReps.size === 1 ? 'Assigns everyone selected to them' : ''}
+            {bulkUnassign ? 'Sends every selected club back into the pool'
+              : bulkReps.size > 1 ? 'Splits evenly, round-robin'
+              : bulkReps.size === 1 ? 'Assigns everyone selected to them' : ''}
           </span>
           <Btn sm variant="primary" onClick={submitBulkAssign} disabled={bulkAssigning}>
-            {bulkAssigning ? 'Assigning…' : 'Assign selected'}
+            {bulkAssigning ? (bulkUnassign ? 'Unassigning…' : 'Assigning…') : (bulkUnassign ? 'Unassign selected' : 'Assign selected')}
           </Btn>
-          <Btn sm variant="subtle" onClick={() => { setCheckedIds(new Set()); setBulkReps(new Set()) }}>Clear</Btn>
+          <Btn sm variant="subtle" onClick={() => { setCheckedIds(new Set()); setBulkReps(new Set()); setBulkUnassign(false) }}>Clear</Btn>
         </div>
       )}
 
@@ -1296,7 +1369,7 @@ export default function SalesWorkspace() {
               </button>
             )}
           </div>
-          {!loadingList && (
+          {clubs.length > 0 && (
             <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
               <span>
                 <span className="text-pb-text font-medium">{clubs.length}</span> club{clubs.length === 1 ? '' : 's'}
@@ -1306,7 +1379,18 @@ export default function SalesWorkspace() {
               </span>
             </div>
           )}
-          {loadingList ? (
+          {/* A background reload (Save Call, Send Email, toggling module
+              interest — anything that calls loadClubs() while a club is
+              already open) should never collapse this list down to a bare
+              "Loading…" line and regrow it a moment later — that's needless
+              flicker for a refresh nobody asked to see. loadClubs() never
+              clears `clubs` before re-fetching, so simply not gating the
+              row list on `loadingList` keeps the STALE rows on screen the
+              whole time; React reconciles them against the fresh set once
+              it lands, keyed on id, with no interim empty state. The
+              "Loading…" placeholder is reserved for the one case with
+              nothing to show yet: a genuine first load. */}
+          {loadingList && clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
           ) : clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">No clubs match these filters.</p>
@@ -1348,6 +1432,7 @@ export default function SalesWorkspace() {
                       {townStateLabel(c.marketing_club_suburb, c.marketing_club_state)}
                     </div>
                   )}
+                  <AssociationChips associations={c.marketing_club_associations} className="mt-1" />
                   <div className="flex items-center justify-between gap-2 mt-1">
                     <span className="text-[10.5px] text-pb-faint">{c.stage_name}{isSuper && c.owner_name ? ` · ${c.owner_name}` : ''}</span>
                     <ScorePill score={c.engagement_score} tier={c.engagement_tier} />
@@ -1400,13 +1485,25 @@ export default function SalesWorkspace() {
                         {townStateLabel(drawer.deal.marketing_club_suburb, drawer.deal.marketing_club_state)}
                       </p>
                     )}
+                    <AssociationChips associations={drawer.deal.marketing_club_associations} className="mt-1.5" />
                   </div>
                   <div className="flex items-center gap-2">
                     {drawer.can_assign && (
-                      <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
-                        <option value="">Unassigned</option>
-                        {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
-                      </Select>
+                      <div>
+                        <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
+                          <option value="">Unassigned</option>
+                          {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+                        </Select>
+                        {/* Who EARNED the club, which is not the same as who
+                            holds it — shown here so a super admin sees whose
+                            work they are about to move before they touch the
+                            picker, not only in the confirm that follows. */}
+                        {drawer.deal.commission_rep_name && (
+                          <span className="block text-[10.5px] text-pb-faintest mt-1 text-right">
+                            Earned by {drawer.deal.commission_rep_name}
+                          </span>
+                        )}
+                      </div>
                     )}
                     {START_TRIAL_ENABLED && !drawer.deal.is_customer && drawer.deal.marketing_club_id && (
                       <Btn variant="primary" sm onClick={() => { setTrialForm(blankTrialForm); setShowStartTrial(true) }}>Start trial</Btn>
@@ -1518,7 +1615,7 @@ export default function SalesWorkspace() {
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Log a call</h3>
                 <form onSubmit={submitCall} className="space-y-2">
-                  <Field label="Contact">
+                  <Field label="Contact" composite>
                     <Select value={showNewCallContact ? NEW_CONTACT_VALUE : callForm.contactKey}
                       onChange={e => {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
@@ -1554,7 +1651,7 @@ export default function SalesWorkspace() {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Interested in">
+                  <Field label="Interested in" composite>
                     <div className="flex flex-wrap gap-1.5">
                       {MODULE_ORDER.map(key => {
                         const on = (drawer.deal.module_keys || []).includes(key)
@@ -1628,7 +1725,7 @@ export default function SalesWorkspace() {
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
                 <form onSubmit={submitEmail} className="space-y-2">
-                  <Field label="Contact">
+                  <Field label="Contact" composite>
                     <Select value={showNewEmailContact ? NEW_CONTACT_VALUE : emailForm.contactKey}
                       onChange={e => {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewEmailContact(true); return }

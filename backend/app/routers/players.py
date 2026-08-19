@@ -782,7 +782,7 @@ class PlayerProfileUpdate(BaseModel):
     squad_team_id: Optional[str] = None
     is_overseas: Optional[bool] = None
     overseas_country: Optional[str] = None
-    # Public visibility + the two BetterSelect flags (migration 264). All
+    # Public visibility + the two BetterSelect flags (migration 265). All
     # three are plain columns, so the generic setattr loop below applies
     # them; they are listed here because a field absent from this model
     # never reaches the service, however carefully the column was added.
