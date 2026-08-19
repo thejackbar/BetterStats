@@ -7,7 +7,7 @@ import { Avatar } from '../ui'
 // fixture.outstanding = [{ id, name, photo_url, channel }] where channel is
 // 'email' | 'none' (this codebase has no SMS/WhatsApp send integration, so a
 // nudge can only ever be an email reminder — see services/votes.py::send_nudge).
-export default function OutstandingVoters({ fixture, onNudged }) {
+export default function OutstandingVoters({ fixture, medalId, onNudged }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
   const list = fixture?.outstanding || []
@@ -15,7 +15,7 @@ export default function OutstandingVoters({ fixture, onNudged }) {
   const nudge = async (playerIds) => {
     setBusy(true)
     try {
-      const r = await api.votesNudge(fixture.id, { player_ids: playerIds })
+      const r = await api.votesNudge(fixture.id, { player_ids: playerIds, medal_id: medalId || undefined })
       const skipped = (r.failed || []).length
       toast.success(`Reminder sent to ${r.sent} player${r.sent === 1 ? '' : 's'}${skipped ? ` (${skipped} skipped)` : ''}`)
       onNudged?.()

@@ -1,8 +1,8 @@
-// Settings tab — the public-link block lives in ShareVotePanel (one sharing
-// surface); everything else (voter_mode, allow_non_participants,
-// allow_self_vote, ballot_values, counting_method, tie_policy,
-// eligibility_source, auto_close_days) hits the same api.votesSetSettings
-// patch endpoint it always did.
+// Settings tab — ONE medal's setup. The public-link block lives in
+// ShareVotePanel (one sharing surface); everything else (name, grades,
+// voter_mode, allow_non_participants, allow_self_vote, ballot_values,
+// counting_method, tie_policy, eligibility_source, auto_close_days) patches
+// the medal.
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useToast } from '../../../../contexts/ToastContext'
@@ -30,26 +30,62 @@ function Row({ label, hint, children }) {
   )
 }
 
-export default function VotesSettings({ canManage }) {
+export default function VotesSettings({
+  canManage, medalId, gradeOptions = [], medalCount = 1, onChanged, onDeleted,
+}) {
   const toast = useToast()
   const [cfg, setCfg] = useState(null)
   const [busy, setBusy] = useState(false)
   const [ballotDraft, setBallotDraft] = useState(null)
+  const [nameDraft, setNameDraft] = useState(null)
 
   const load = useCallback(() => {
-    api.votesGetSettings().then(setCfg).catch((e) => toast.error(e.message))
-  }, [toast])
+    setCfg(null)
+    api.votesGetSettings(medalId).then(setCfg).catch((e) => toast.error(e.message))
+  }, [toast, medalId])
   useEffect(() => { load() }, [load])
 
   const update = async (patch) => {
     if (!canManage) return
     setBusy(true)
-    try { setCfg(await api.votesSetSettings(patch)); setBallotDraft(null) }
-    catch (e) { toast.error(e.message || 'Update failed') }
+    try {
+      setCfg(await api.votesSetSettings(patch, medalId))
+      setBallotDraft(null)
+      setNameDraft(null)
+      // The medal bar above shows the name, its on/off state and its grades,
+      // so any of those changing has to refresh it too.
+      onChanged?.()
+    } catch (e) { toast.error(e.message || 'Update failed') }
     finally { setBusy(false) }
   }
 
+  const removeMedal = async () => {
+    const hasVotes = window.confirm(
+      `Delete "${cfg.medal_name}"? Every ballot cast towards it is deleted too, and that can't be undone.`,
+    )
+    if (!hasVotes) return
+    try {
+      await api.votesDeleteMedal(medalId, { confirm: true })
+      toast.success('Medal deleted')
+      onDeleted?.()
+    } catch (e) { toast.error(e.message || 'Could not delete the medal') }
+  }
+
+  // The picker works on grade NAMES, not the ids it sends: grades are per-season
+  // rows, so a medal's stored id often belongs to an older season than the one
+  // the picker offers. The server expands names back out when it counts.
+  const toggleGrade = (option) => {
+    const chosen = new Set(cfg.grade_names || [])
+    if (chosen.has(option.name)) chosen.delete(option.name)
+    else chosen.add(option.name)
+    update({
+      grade_ids: gradeOptions.filter((g) => chosen.has(g.name)).map((g) => g.id),
+    })
+  }
+
   if (!cfg) return <PbSpinner message="Loading settings…" />
+
+  const chosenGrades = new Set(cfg.grade_names || [])
 
   const ballot = ballotDraft || (cfg.ballot_values || []).map(String)
   const setPos = (i, v) => setBallotDraft(ballot.map((x, j) => (j === i ? v.replace(/\D/g, '').slice(0, 3) : x)))
@@ -61,9 +97,49 @@ export default function VotesSettings({ canManage }) {
 
   return (
     <div className="flex flex-col gap-4 max-w-3xl">
-      <ShareVotePanel settings={cfg} scope={{ label: 'Whole club' }} />
+      <ShareVotePanel settings={cfg} scope={{ label: cfg.medal_name }} />
 
       <div className="pb-card px-4 py-1">
+        <Row label="Medal name" hint="What the club calls this award. It's what players see on the voting page.">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={nameDraft ?? cfg.medal_name} disabled={!canManage}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && nameDraft?.trim()) update({ name: nameDraft.trim() }) }}
+              className="flex-1 min-w-[200px] bg-pb-surface2 border pb-hairline rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-pb-accent" />
+            {canManage && nameDraft !== null && nameDraft.trim() && nameDraft !== cfg.medal_name && (
+              <Btn sm variant="primary" onClick={() => update({ name: nameDraft.trim() })} disabled={busy}>Save name</Btn>
+            )}
+          </div>
+        </Row>
+        <Row label="Grades it counts" hint="Leave every grade unticked to count the whole club. Ticking a grade counts it in every season, so you don't have to redo this each year.">
+          {gradeOptions.length === 0 ? (
+            <div className="text-[12.5px] text-pb-faint">
+              No grades yet — this medal counts every game the club plays.
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-wrap gap-1.5">
+                {gradeOptions.map((g) => {
+                  const on = chosenGrades.has(g.name)
+                  return (
+                    <button key={g.id} onClick={() => toggleGrade(g)} disabled={!canManage || busy}
+                      className={`px-2.5 py-1 rounded-full text-[12.5px] border pb-hairline transition-colors ${
+                        on ? 'bg-pb-accent text-pb-on-accent border-transparent'
+                           : 'bg-pb-surface2 text-pb-faint hover:text-pb-text'}`}>
+                      {g.name}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="text-[11px] text-pb-faintest mt-1.5">
+                {chosenGrades.size === 0
+                  ? 'Counting every grade.'
+                  : `Counting ${[...chosenGrades].join(', ')}. Games in any other grade are left off this medal entirely.`}
+              </div>
+            </>
+          )}
+        </Row>
         <Row label="Who votes" hint="Every player in the game, or just the captain.">
           <Segmented sm value={cfg.voter_mode} onChange={(v) => update({ voter_mode: v })}
             options={[{ value: 'players', label: 'All players' }, { value: 'captain', label: 'Captain only' }]} />
@@ -145,6 +221,17 @@ export default function VotesSettings({ canManage }) {
           <b className="text-pb-text"> Manage votes</b> controls who runs the vote itself.
         </p>
       </div>
+
+      {canManage && medalCount > 1 && (
+        <div className="pb-card px-4 py-4">
+          <div className="font-display font-bold text-[15px] mb-1">Delete this medal</div>
+          <p className="text-[12.5px] text-pb-faint mb-3">
+            Every ballot cast towards <b className="text-pb-text">{cfg.medal_name}</b> goes with it, and
+            there's no undo. Your other medals and their counts are untouched.
+          </p>
+          <Btn sm variant="danger" onClick={removeMedal}>Delete {cfg.medal_name}</Btn>
+        </div>
+      )}
     </div>
   )
 }

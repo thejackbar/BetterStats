@@ -54,7 +54,7 @@ from app.models.db import (
     FantasyPoolPlayer, FantasySeason, FieldingStat, Fixture, FixtureLineup, Game,
     GameAppearance, Grade, Milestone, Organisation, Partnership, Player,
     PlayerSeasonGradeStats, PlayerSeasonStats, Season, Sponsor, Team, User,
-    VoteSettings, async_session_maker,
+    VoteMedal, async_session_maker,
 )
 from app.services.module_subscriptions import ensure_core_subscription, upsert_subscription
 
@@ -730,15 +730,17 @@ async def main():
         counts["fixture_lineups"] = lineup_count
         counts["result_games"] = result_game_count
 
-        # ── 14. Vote settings tuned for a frictionless live demo ──────────
+        # ── 14. A vote medal tuned for a frictionless live demo ───────────
         # eligibility_source='lineup' lets voting work off the BetterSelect XI
         # alone — no synced scorecard needed, since these fixtures are unplayed.
-        session.add(VoteSettings(
-            organisation_id=org.id, enabled=True, link_token=secrets.token_urlsafe(24),
+        # No grade_ids, so the demo medal counts every grade.
+        session.add(VoteMedal(
+            organisation_id=org.id, name="Club Champion", enabled=True,
+            link_token=secrets.token_urlsafe(24),
             require_pin=False, voter_mode="players", eligibility_source="lineup",
             allow_non_participants=True,
         ))
-        counts["vote_settings"] = 1
+        counts["vote_medals"] = 1
 
         # ── 15. BetterFantasy: a season + a priced pool from real career stats ─
         fantasy_season_id = uuid.uuid4()

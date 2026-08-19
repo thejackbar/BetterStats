@@ -2688,37 +2688,59 @@ export const api = {
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterSelect: vote collection (admin) ───
-  votesGetSettings: () => request('/votes/settings'),
-  votesSetSettings: (data) =>
-    request('/votes/settings', { method: 'POST', body: JSON.stringify(data) }),
-  votesRegenerateLink: () => request('/votes/settings/regenerate', { method: 'POST' }),
-  votesFixtures: ({ year, grade_id, round_key, q } = {}) => {
+  // Every admin vote call names the MEDAL it acts on. Omitting medalId falls
+  // back server-side to the club's first medal, which is what keeps a link
+  // saved before medals existed landing on the club's original count.
+  votesMedals: () => request('/votes/medals'),
+  votesCreateMedal: (data) =>
+    request('/votes/medals', { method: 'POST', body: JSON.stringify(data) }),
+  votesUpdateMedal: (medalId, data) =>
+    request(`/votes/medals/${medalId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  votesDeleteMedal: (medalId, { confirm } = {}) =>
+    request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
+  votesRegenerateLink: (medalId) =>
+    request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
+  votesSetSettings: (data, medalId) =>
+    request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify(data) }),
+  votesFixtures: ({ year, grade_id, round_key, q, medal_id } = {}) => {
     const params = new URLSearchParams()
     if (year) params.set('year', year)
     if (grade_id) params.set('grade_id', grade_id)
     if (round_key) params.set('round_key', round_key)
     if (q) params.set('q', q)
+    if (medal_id) params.set('medal_id', medal_id)
     const qs = params.toString()
     return request(`/votes/fixtures${qs ? `?${qs}` : ''}`)
   },
-  votesFixtureDetail: (fixtureId) => request(`/votes/fixtures/${fixtureId}`),
-  votesAdminBallot: (fixtureId, data) =>
-    request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),
+  votesFixtureDetail: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}${medalId ? `?medal_id=${medalId}` : ''}`),
+  votesAdminBallot: (fixtureId, medalId, data) =>
+    request(`/votes/fixtures/${fixtureId}/ballots${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify(data) }),
   votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
-  votesSetFixtureSource: (fixtureId, eligibility_source) =>
-    request(`/votes/fixtures/${fixtureId}/source`, { method: 'POST', body: JSON.stringify({ eligibility_source }) }),
-  votesLockFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/lock`, { method: 'POST' }),
-  votesReopenFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/reopen`, { method: 'POST' }),
-  votesLeaderboard: ({ year, grade_id, through_round } = {}) => {
+  votesSetFixtureSource: (fixtureId, eligibility_source, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/source${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify({ eligibility_source }) }),
+  votesLockFixture: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/lock${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesReopenFixture: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/reopen${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesLeaderboard: ({ year, grade_id, through_round, medal_id } = {}) => {
     const q = new URLSearchParams()
     if (year) q.set('year', year)
     if (grade_id) q.set('grade_id', grade_id)
     if (through_round) q.set('through_round', through_round)
+    if (medal_id) q.set('medal_id', medal_id)
     const qs = q.toString()
     return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
   },
-  votesBulkState: ({ fixture_ids, action }) =>
-    request('/votes/bulk-state', { method: 'POST', body: JSON.stringify({ fixture_ids, action }) }),
+  votesBulkState: ({ fixture_ids, action, medal_id }) =>
+    request('/votes/bulk-state', {
+      method: 'POST',
+      body: JSON.stringify({ fixture_ids, action, medal_id }),
+    }),
   votesNudge: (fixtureId, body) =>
     request('/votes/nudge', {
       method: 'POST',

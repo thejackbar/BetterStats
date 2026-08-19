@@ -1440,13 +1440,56 @@ class PlayerAvailabilityPeriod(Base):
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
-class VoteSettings(Base):
-    """BetterSelect — best-player vote collection config (one row per club).
+class VoteMedal(Base):
+    """One award a club counts votes towards — its name and its own settings.
 
     The whole feature is derived-on-read: ballots store ranked POSITIONS only,
     and every weekly result / season leaderboard is recomputed from this config
     at query time — so changing the ballot values, counting method or tie
     policy mid-season restates the season consistently with no backfill.
+
+    Every settings column here is named exactly as it was on ``VoteSettings``,
+    which is what lets ``services.votes.effective_config`` read either one.
+    ``VoteSettings`` is history after migration 265 and nothing reads it.
+    """
+    __tablename__ = "vote_medals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    name = Column(Text, nullable=False)
+    # Public voting link token — rotatable, same low-trust posture as the
+    # availability link (identifies the medal only; a player still needs a PIN).
+    # One per medal, so a club can share the Colts link with the Colts.
+    link_token = Column(Text, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    require_pin = Column(Boolean, nullable=False, default=True, server_default="true")
+    voter_mode = Column(Text, nullable=False, default="players", server_default="players")  # 'players' | 'captain'
+    ballot_values = Column(JSONB, nullable=False, default=[3, 2, 1])  # descending, position 1 first
+    counting_method = Column(Text, nullable=False, default="rank", server_default="rank")  # 'rank' | 'tally'
+    tie_policy = Column(Text, nullable=False, default="share", server_default="share")  # 'share' | 'countback'
+    allow_self_vote = Column(Boolean, nullable=False, default=False, server_default="false")
+    allow_non_participants = Column(Boolean, nullable=False, default=False, server_default="false")
+    auto_close_days = Column(Integer, nullable=False, default=7, server_default="7")
+    # Which team list decides who can be voted for (migration 194):
+    # 'scorecard' (who actually played) | 'lineup' (the BetterSelect XI) |
+    # 'playhq' (the side published on Play.Cricket). Overridable per fixture.
+    eligibility_source = Column(Text, nullable=False, default="scorecard", server_default="scorecard")
+    # The grades this medal counts, as a JSONB list of uuid strings. EMPTY
+    # MEANS EVERY GRADE — that is what a club's only medal means before anyone
+    # has thought about grades. No FK on purpose: a grade merged away or
+    # deleted just stops matching rather than blocking the delete.
+    grade_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
+    position = Column(Integer, nullable=False, default=0, server_default="0")
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
+class VoteSettings(Base):
+    """DEPRECATED (migration 265) — the pre-medals one-row-per-club config.
+
+    Kept as history: its row was copied onto the club's first ``VoteMedal``,
+    link token included, and nothing reads this table any more. Don't add a
+    column here; add it to ``VoteMedal``.
     """
     __tablename__ = "vote_settings"
 
@@ -1471,18 +1514,21 @@ class VoteSettings(Base):
 
 
 class VoteBallot(Base):
-    """One voter's ballot for one fixture.
+    """One voter's ballot for one fixture, towards ONE medal.
 
     Voter identity is exactly one of: voter_player_id (a club player — PIN
     verified on the public page, or admin-entered) or voter_name (a
     non-participant: coach / president / supporter, name typed on the public
-    page). Partial unique indexes (see migration 193) enforce one live ballot
-    per voter per fixture in each identity space.
+    page). Partial unique indexes (see migration 265) enforce one live ballot
+    per voter per fixture per medal in each identity space — a fixture counting
+    towards two medals collects a separate ballot for each, so the two counts
+    can genuinely disagree about who was best.
     """
     __tablename__ = "vote_ballots"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    medal_id = Column(UUID(as_uuid=True), ForeignKey("vote_medals.id", ondelete="CASCADE"), nullable=False)
     fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
     voter_player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
     voter_name = Column(Text, nullable=True)
@@ -1509,11 +1555,16 @@ class VoteBallotPick(Base):
 
 
 class VoteFixtureOverride(Base):
-    """Manual lock/reopen for a fixture's voting, layered over the auto-close
-    window (game end + auto_close_days). 'locked' closes voting immediately;
-    'reopened' holds it open past auto-close until locked again."""
+    """Manual lock/reopen for one medal's voting on one fixture, layered over
+    the auto-close window (game end + auto_close_days). 'locked' closes voting
+    immediately; 'reopened' holds it open past auto-close until locked again.
+
+    Keyed on (medal_id, fixture_id) since migration 265 — locking a count is a
+    decision about that medal, not about the fixture in the abstract, and two
+    medals over one fixture carry their own auto-close windows anyway."""
     __tablename__ = "vote_fixture_overrides"
 
+    medal_id = Column(UUID(as_uuid=True), ForeignKey("vote_medals.id", ondelete="CASCADE"), primary_key=True)
     fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), primary_key=True)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     # Nullable since migration 194: a row may exist to carry an eligibility
@@ -1528,13 +1579,14 @@ class VoteNudge(Base):
     """One reminder-email send, for the Games hub's "Nudge non-voters".
 
     The audit trail the nudge rate limit reads: at most one nudge per player
-    per fixture per 24h (migration 196), so a manager mashing the button
-    can't spam the same player with reminder emails.
+    per fixture per medal per 24h (migrations 196, 265), so a manager mashing
+    the button can't spam the same player with reminder emails.
     """
     __tablename__ = "vote_nudges"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    medal_id = Column(UUID(as_uuid=True), ForeignKey("vote_medals.id", ondelete="CASCADE"), nullable=False)
     fixture_id = Column(UUID(as_uuid=True), ForeignKey("fixtures.id", ondelete="CASCADE"), nullable=False)
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     sent_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

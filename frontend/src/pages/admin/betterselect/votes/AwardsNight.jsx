@@ -33,7 +33,7 @@ export default function AwardsNight({ board, onExit }) {
     let alive = true
     const round = counted[upto - 1]
     if (!round) return
-    api.votesLeaderboard({ year: board.year, grade_id: board.grade_id || undefined, through_round: round.key })
+    api.votesLeaderboard({ year: board.year, grade_id: board.grade_id || undefined, through_round: round.key, medal_id: board.medal_id || undefined })
       .then((d) => alive && setSnapshot(d)).catch(() => {})
     return () => { alive = false }
   }, [upto, counted, board.year, board.grade_id])

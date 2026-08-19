@@ -529,19 +529,24 @@ async def _merge_players_core(
         await db.execute(text("UPDATE player_season_grade_stats SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
         await db.execute(text("UPDATE game_appearances SET player_id = :kid WHERE player_id = :rid"), {"kid": str(keep_id), "rid": str(remove_id)})
 
-        # --- Vote collection rows (migration 193) ---
+        # --- Vote collection rows (migrations 193, 265) ---
         # Both FKs are ON DELETE CASCADE, so without this reassignment deleting
         # the removed player would silently destroy their ballots and every vote
-        # cast FOR them. De-dup first (one ballot per voter per fixture; one pick
-        # per player per ballot — both records are the same physical person, so
-        # keep's row wins), then move the rest. Not recorded in the undo log —
-        # an undone merge leaves votes attributed to the kept player, which is
-        # still the same human and never loses a vote.
+        # cast FOR them. De-dup first (one ballot per voter per fixture PER
+        # MEDAL; one pick per player per ballot — both records are the same
+        # physical person, so keep's row wins), then move the rest. Not recorded
+        # in the undo log — an undone merge leaves votes attributed to the kept
+        # player, which is still the same human and never loses a vote.
+        #
+        # The medal must be in the de-dup key or this drops a real ballot: the
+        # same person voting for the Club Champion AND the Colts Medal on one
+        # fixture holds two legitimate ballots, and matching on fixture alone
+        # would delete one of them.
         await db.execute(
             text(
                 "DELETE FROM vote_ballots r USING vote_ballots k "
                 "WHERE r.voter_player_id = :rid AND k.voter_player_id = :kid "
-                "AND k.fixture_id = r.fixture_id"
+                "AND k.fixture_id = r.fixture_id AND k.medal_id = r.medal_id"
             ),
             {"rid": str(remove_id), "kid": str(keep_id)},
         )

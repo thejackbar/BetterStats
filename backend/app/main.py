@@ -741,13 +741,11 @@ async def lifespan(app: FastAPI):
                 updated_at TIMESTAMPTZ DEFAULT now()
             )
         """))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_player "
-            "ON vote_ballots(fixture_id, voter_player_id) WHERE voter_player_id IS NOT NULL"))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_name "
-            "ON vote_ballots(fixture_id, lower(voter_name)) "
-            "WHERE voter_player_id IS NULL AND voter_name IS NOT NULL"))
+        # The two per-fixture ballot uniques migration 193 created are NOT
+        # mirrored here — migration 265 replaces them with medal-scoped ones a
+        # few statements below, and recreating them on every boot only to drop
+        # them again would rebuild a unique index over the whole table each
+        # time the API restarts.
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_vote_ballots_org_fixture "
             "ON vote_ballots(organisation_id, fixture_id)"))
@@ -813,6 +811,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_vote_nudges_fixture_player "
             "ON vote_nudges(fixture_id, player_id, sent_at)"))
+        # Vote medals (migration 265) — a club runs several awards, each with
+        # its own settings and public link. Runs the migration's own statement
+        # list so the two can't drift; every one is idempotent, backfill
+        # included (each is a no-op once a club already has a medal).
+        from app.services.vote_medal_ddl import VOTE_MEDAL_STATEMENTS
+        for _stmt in VOTE_MEDAL_STATEMENTS:
+            await conn.execute(text(_stmt))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
