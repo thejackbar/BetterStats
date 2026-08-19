@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
+import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
 import { Button, Note, Empty, Toast, SectionHeading, Field, TextInput } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
@@ -69,6 +70,8 @@ function rtfToText(rtf) {
 }
 
 export default function CommsTemplates() {
+  const { user } = useAuth()
+  const isSuper = user?.role === 'super_admin'
   const intro = useScreenIntro('templates')
   const location = useLocation()
   const [templates, setTemplates] = useState(null)
@@ -252,17 +255,19 @@ export default function CommsTemplates() {
                 </>}
               />
 
-              {draft.salesTemplateLabel && (
+              {isSuper && draft.salesTemplateLabel && (
                 <Note toneKey="calm" className="mb-3">
                   Linked to the Sales Workspace's <strong>{draft.salesTemplateLabel}</strong> dropdown entry.
                   Renaming this template above is safe — the link is by id, not by name.
                 </Note>
               )}
 
-              <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
-                <TextInput value={draft.subject}
-                  onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
-              </Field>
+              {isSuper && (
+                <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
+                  <TextInput value={draft.subject}
+                    onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
+                </Field>
+              )}
 
               <CountBar>
                 <span className="text-pb-dim">
