@@ -729,8 +729,8 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         poc = poc_by_deal.get(d.id) or {}
         row["point_of_contact_name"] = poc.get("name")
         row["point_of_contact_email"] = poc.get("email")
-        row["marketing_club_state"] = club.state if club else None
-        row["marketing_club_association"] = club.association_name if club else None
+        # marketing_club_state / _suburb / _association / _associations are
+        # now set by _deal_dict itself (club is already passed in above).
         row["acquisition_channel"] = (channel_by_club.get(d.marketing_club_id) if d.marketing_club_id else None) or d.source
         trial_days = trial_days_by_club.get(d.marketing_club_id) if d.marketing_club_id else None
         row["trial_days_remaining"] = trial_days

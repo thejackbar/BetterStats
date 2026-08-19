@@ -590,7 +590,21 @@ async def bulk_assign(
     paths leave an identical audit trail. Returns a per-rep count. There is
     no separate "duplicate assignment" guard to build here — a deal has
     exactly one owner_user_id by construction, so re-running this over the
-    same selection just overwrites it, same as the single-deal action."""
+    same selection just overwrites it, same as the single-deal action.
+
+    An empty `owner_ids` means "unassign" — every deal's owner_user_id is
+    cleared back to NULL (the shared pool), the same as picking "Unassigned"
+    on the single-deal PATCH. Counted under the "unassigned" key since there
+    is no real owner id to key it on."""
+    if not owner_ids:
+        counts: dict = {"unassigned": 0}
+        for deal in deals:
+            await crm_service.update_deal(session, deal, owner_user_id=None)
+            await log_reassignment(session, deal=deal, owner_name=None, created_by_user_id=created_by_user_id)
+            counts["unassigned"] += 1
+        await session.flush()
+        return counts
+
     counts: dict = {str(o): 0 for o in owner_ids}
     for i, deal in enumerate(deals):
         owner_id = owner_ids[i % len(owner_ids)]

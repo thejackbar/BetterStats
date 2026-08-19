@@ -323,11 +323,10 @@ async def list_clubs(
         row["commission_rep_name"] = (rep.display_name or rep.username) if rep else None
         row["contact_count"] = contact_counts.get(d.marketing_club_id, 0)
         row["not_interested"] = bool(club.not_interested) if club else False
-        # For the queue card's "Town, ST" line — same fields the drawer
-        # header carries (get_club below), read from the same club_by_id map
-        # this loop already has, so no extra query.
-        row["marketing_club_suburb"] = club.suburb if club else None
-        row["marketing_club_state"] = club.state if club else None
+        # marketing_club_suburb / _state / _association / _associations are
+        # already set by _deal_dict above (club is passed in) — the queue
+        # card's "Town, ST" line and its associations chips read straight
+        # off those, same fields the drawer header carries (get_club below).
         row["min_trial_days_remaining"] = min_trial_by_club.get(d.marketing_club_id)
         # Trial is the one stage that reads differently depending on whether
         # it's actually still live — split the display label the same way
@@ -442,9 +441,9 @@ async def get_club(
     # trial countdown) — same batched helpers the Sales Pipeline card and
     # list use, just called with a single-club map since this is one deal.
     # Absent (None) for a bare prospect that's never been onboarded.
-    deal_out["marketing_club_state"] = club.state if club else None
-    # For the header's "Town, ST" line, immediately below the club name.
-    deal_out["marketing_club_suburb"] = club.suburb if club else None
+    # marketing_club_state / _suburb / _association / _associations are
+    # already set by _deal_dict above (club is passed in) — the header's
+    # "Town, ST" line and associations chips read straight off those.
     # Feeds ClubLocationMap.jsx in the drawer (same component/props the Club
     # Directory's own map already uses) — Numeric columns need a float cast,
     # since json can't serialise a Decimal.
@@ -1125,7 +1124,10 @@ async def assign(
 
 class BulkAssignBody(BaseModel):
     deal_ids: list[str]
-    owner_user_ids: list[str]  # one id = assign all to them; several = split evenly, round-robin
+    owner_user_ids: list[str] = []  # one id = assign all to them; several = split evenly, round-robin
+    # True = send every selected club back into the shared pool
+    # (owner_user_id cleared to NULL) — owner_user_ids is ignored either way.
+    unassign: bool = False
     confirm_reassign: bool = False  # see AssignBody — same prompt, several clubs at once
 
 
@@ -1137,21 +1139,26 @@ async def bulk_assign(
 ):
     """Filter the queue down to a batch (never called, a state, a stage,
     unassigned…) then assign the whole selection in one action — "Assign
-    selected -> Sam" or "Split evenly among Sam / Jake / Sarah", per the
-    brief. Super-admin only, same as the single-deal PATCH .../assign."""
+    selected -> Sam", "Split evenly among Sam / Jake / Sarah", or (unassign)
+    "send them all back into the pool", per the brief. Super-admin only,
+    same as the single-deal PATCH .../assign."""
     _require_super(actor)
     if not body.deal_ids:
         raise HTTPException(status_code=422, detail="Select at least one club")
-    owner_ids = [_uuid_or_none(o) for o in body.owner_user_ids if o]
-    if not owner_ids:
-        raise HTTPException(status_code=422, detail="Pick at least one salesperson")
 
-    owners = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
-    found_ids = {u.id for u in owners}
-    missing = [str(o) for o in owner_ids if o not in found_ids]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Unknown salesperson id(s): {', '.join(missing)}")
-    owner_names = {u.id: (u.display_name or u.username) for u in owners}
+    owner_ids: list = []
+    owner_names: dict = {}
+    if not body.unassign:
+        owner_ids = [_uuid_or_none(o) for o in body.owner_user_ids if o]
+        if not owner_ids:
+            raise HTTPException(status_code=422, detail="Pick at least one salesperson, or choose Unassigned")
+
+        owners = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
+        found_ids = {u.id for u in owners}
+        missing = [str(o) for o in owner_ids if o not in found_ids]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Unknown salesperson id(s): {', '.join(missing)}")
+        owner_names = {u.id: (u.display_name or u.username) for u in owners}
 
     deal_uuids = [_uuid_or_none(d) for d in body.deal_ids]
     deals = (await db.execute(
@@ -1164,16 +1171,18 @@ async def bulk_assign(
         raise HTTPException(status_code=404, detail="None of the selected clubs could be found")
 
     # Same attribution guard as the single-deal PATCH, or bulk assignment
-    # would be the way around it. A round-robin split can send a club to any
-    # of the chosen reps, so a club already earned by someone else is
-    # reported whenever it is not going to exactly the rep who earned it —
-    # which, with several owners in play, is anything but a single-owner
-    # assignment straight back to them.
+    # would be the way around it. Three shapes to judge: sending the
+    # selection back to the pool always moves an earned club away from its
+    # rep; a round-robin split across several reps can send it to any of
+    # them, so it can never be relied on to land back where it was earned;
+    # and a single-owner assignment is only fine when that owner IS the rep
+    # who earned it.
     if not body.confirm_reassign:
         attributed = [
             d for d in deals
             if d.commission_rep_user_id is not None
-            and (len(owner_ids) > 1 or sw.commission_reassign_blocked(d, owner_ids[0]))
+            and (body.unassign or len(owner_ids) > 1
+                 or sw.commission_reassign_blocked(d, owner_ids[0]))
         ]
         if attributed:
             names = await sw.commission_rep_names(db, attributed)
@@ -1194,10 +1203,14 @@ async def bulk_assign(
         db, deals=deals, owner_ids=owner_ids, owner_names=owner_names, created_by_user_id=actor.user.id,
     )
     await db.commit()
+    by_rep = {
+        ("Unassigned" if k == "unassigned" else owner_names.get(uuid.UUID(k), k)): v
+        for k, v in counts.items()
+    }
     return {
         "assigned": len(deals),
         "skipped": len(body.deal_ids) - len(deals),
-        "by_rep": {owner_names.get(uuid.UUID(k), k): v for k, v in counts.items()},
+        "by_rep": by_rep,
     }
 
 

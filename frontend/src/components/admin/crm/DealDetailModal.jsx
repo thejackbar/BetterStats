@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import {
   Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput,
   DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_OPTIONS, LEAD_SOURCE_OPTIONS,
-  WebsiteAnalyticsPanel, EngagementBreakdownPanel, ownerEntryId,
+  WebsiteAnalyticsPanel, EngagementBreakdownPanel, ownerEntryId, townStateLabel, associationNames,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
@@ -290,6 +290,23 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
         <div className="space-y-5">
           {deal.status !== 'open' && (
             <Pill tone={deal.status === 'won' ? 'green' : 'red'}>{(deal.status === 'won' ? t.won : t.lost).toUpperCase()}</Pill>
+          )}
+
+          {/* Club Directory context — town/state and every association the
+              club competes in, from marketing_clubs (Club Directory's own
+              PlayHQ crawl). Absent for a bare manually-created deal with no
+              linked club. */}
+          {(townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) || associationNames(deal.marketing_club_associations).length > 0) && (
+            <div className="space-y-1">
+              {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) && (
+                <p className="text-[12px] text-pb-faint">{townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state)}</p>
+              )}
+              {associationNames(deal.marketing_club_associations).length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {associationNames(deal.marketing_club_associations).map(n => <Pill key={n}>{n}</Pill>)}
+                </div>
+              )}
+            </div>
           )}
 
           {showPurgeBox && (
