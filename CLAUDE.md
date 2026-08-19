@@ -1,5 +1,124 @@
 # BetterStats — Claude Session Notes
 
+## A club runs several medals, in both sports (migration 265, v9.32.0 / v9.33.0, Aug 2026)
+
+`vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly
+one ballot shape, one voter mode, one counting method and one public link. A
+club running a Club Champion on 3-2-1 alongside a Colts medal on 5-4-3-2-1 had
+no way to express it, and its two counts could only be told apart by filtering
+the one leaderboard down to a grade after the fact.
+
+### `vote_medals` is the record, and `vote_settings` is history
+
+- **Every settings column moves across UNCHANGED IN NAME**, which is what lets
+  `votes.effective_config` read a medal with no edit. Plus `name`, `grade_ids`
+  and `position`. `vote_settings` is left in place and **nothing reads it after
+  265** — the same call migration 230 made for `club_objectives.plan`.
+- **A ballot belongs to ONE medal** (per direct instruction). A fixture counting
+  towards two collects a separate ballot for each, so a 3-2-1 medal and a
+  5-4-3-2-1 medal can genuinely disagree about who was best. The two "one live
+  ballot per voter per fixture" partial uniques are rebuilt with `medal_id` in
+  front, and `vote_fixture_overrides` moves from a `fixture_id` primary key to
+  `(medal_id, fixture_id)` — locking a count is a decision about that medal, not
+  about the fixture in the abstract.
+- **GRADES ARE PER-SEASON ROWS, so a medal must not match on stored grade ids.**
+  Next season's "Colts" is a different id, and a medal keyed on ids alone would
+  silently stop counting the day the new season's grades are created —
+  mid-rollover, with nothing to see. `medal_grade_ids` expands the stored ids
+  through their NAMES to every grade of that name in the club, which is what
+  makes a medal a standing award. The picker therefore offers each grade NAME
+  once (`club_grade_options`), not once per season, and each medal reports its
+  `grade_names` so a screen can re-tick a selection whose stored id belongs to
+  an older season's row. **An EMPTY `grade_ids` means EVERY grade** — that is
+  what a club's only medal means before anyone has thought about grades, and it
+  is what the migrated row has to mean so an existing count doesn't narrow.
+- **A grade-restricted medal's screens drop the fixtures it doesn't count**
+  rather than showing them at zero ballots, which reads as "nobody voted"
+  instead of "not part of this count". Resolve grades BEFORE narrowing, or a
+  fixture carrying its grade only on its synced game falls out of every
+  restricted medal (`effective_grade_ids` is the fallback).
+- **An existing club keeps everything.** Its settings row becomes its first
+  medal, `link_token` included, so ballots already cast still count and the link
+  already in players' hands still works. A club with ballots or overrides but no
+  settings row (an admin typing paper votes never opened the settings screen)
+  gets a medal too, or the `NOT NULL` would have nothing to point those rows at.
+- **The DDL lives in ONE list both alembic and the lifespan run**
+  (`services/vote_medal_ddl.py`), in the same order, so the two copies cannot
+  drift. Every statement stays idempotent because the lifespan re-runs the whole
+  list on every boot; the backfills are no-ops once a club has a medal.
+- **`merge_players`' ballot de-dup needed the medal in its key.** It matched on
+  fixture alone, so merging two records of one person who had voted for both
+  medals on a fixture would have deleted one of their two legitimate ballots.
+- **`main.py`'s mirror deliberately no longer creates the two OLD per-fixture
+  ballot uniques.** 265 drops them a few statements later, and rebuilding a
+  unique index over the whole table on every API restart just to drop it again
+  is real cost for nothing.
+
+### asyncpg cannot type a bare `:param IS NULL`
+
+Found by the verification, and it would have 500'd in production: an optional
+filter written as `(:medal IS NULL OR medal_id = :medal)` raises
+`AmbiguousParameterError` at execute time — asyncpg infers a bound parameter's
+type from how it is used and that gives it nothing. **Any "param IS NULL OR col
+= param" needs an explicit `CAST(:param AS uuid)`.**
+
+### BetterFootball got the same engine, and a team-list service (v9.33.0)
+
+- **The counting rules are IMPORTED from `services/votes.py`, never re-typed.**
+  `tally_ballots`, `award_weekly_points`, `clean_ballot_values`,
+  `round_sort_key` and the vocabularies are pure functions with no cricket in
+  them. A second copy is how the two sports start disagreeing about what a
+  countback is. Change a rule there and both sports move.
+- **Football's ballots key on `games` directly** — cricket keys on `fixtures`,
+  BetterSelect's own scheduling table, which the AFL silo has no equivalent of.
+- **There is no eligibility SOURCE to choose.** Cricket picks among the
+  scorecard, a saved XI and the published side. Football has one team list, and
+  the sync already stores it: PlayHQ's
+  `gameView.statistics.{home,away}.players[]` becomes `afl_player_game_lines`,
+  both sides, with jumper number and captain flag. So
+  `services/afl/lineups.py` is a plain read of held data — no upstream call, no
+  cache, and it keeps working when PlayHQ is down. **Scope every team-list read
+  to `afl_game_details.our_side`**: the opposition's own named side sits on the
+  same game row, so a read that forgets is one that lists them as ours.
+- **A season is the `seasons` row the game's grade belongs to**, not cricket's
+  Jul→Jun window. Football runs inside one calendar year, so the summer-spanning
+  maths would file a whole season under the wrong label.
+- **`publish_lineup` was already selected by the gameView query and discarded.**
+  Stored now, because it is what separates "this club never named a side" from
+  "we haven't synced this game" — both render as an empty list, only one is
+  worth chasing.
+- **Post-game only, per direct instruction.** The sync only fetches games PlayHQ
+  marks FINAL, so a scheduled match reads as not played rather than as a side
+  nobody named. Pulling a pre-game side would mean a gameView call per upcoming
+  game per sync.
+- **No AFL lifespan change was needed**: `create_all` makes the new ORM tables
+  and `_sync_missing_columns` self-heals `afl_game_details.publish_lineup`.
+- **Capabilities are shared**, so `MANAGE_VOTES` / `VIEW_VOTE_RESULTS` gate the
+  football surface with no new vocabulary.
+
+### Verification
+
+Cricket: 59 checks against a real Postgres through the shipped statements and
+route bodies (265 applied three times to a populated pre-265 table, the link
+token and settings carried across, the old uniques gone and the new ones holding
+both ways, the two counts staying apart, per-medal overrides and nudge
+cooldowns, next season's grade of the same name still counted, the delete
+guards) and 17 driven in Chromium. Football: 47 and 27.
+
+**Both harnesses build their tables from the ORM models**, never by hand — the
+one exception being the five vote tables in the cricket suite, which have to
+start in their PRE-265 shape for the migration to have anything to do.
+
+Three real findings came from running them rather than reading the code: the
+asyncpg cast above, the self-vote rule refusing a fixture whose voter picked
+themselves, and rank conversion (the default) not being a raw tally — three
+voters all giving 3-2-1 to the same three players is still 3+2+1 for that game,
+not 18.
+
+**Noticed, NOT fixed**: the cricket Games hub's filter row overflows at 390px (a
+`ml-auto` select reaching 446px). Confirmed pre-existing by re-running the same
+check with the change stashed — identical element, identical width.
+
 ## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 262, v9.30.0, Aug 2026)
 
 Four things reported off Hampton Hammers' page. The first is the one worth
