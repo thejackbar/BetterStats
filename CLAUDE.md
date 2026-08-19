@@ -151,6 +151,19 @@ counts 10, and three fixtures were washed out.
   view, the read paths, the backfill script and (as a mirrored constant) the
   two screens. Two copies of "which statuses mean it never happened" is how
   they start disagreeing.
+- **The view was NOT enough, and this is the lesson.** Correcting
+  `v_effective_player_season_stats` fixes every reader that sums CA's season
+  aggregate, and misses every reader that counts matches from
+  `game_appearances` itself — which is what StatLab does. Reported live:
+  StatLab still read 13 after the platform-wide figure was already 10.
+  `appearance_counts_as_match(alias)` is the shared predicate, applied at
+  **five** sites found by auditing every `game_appearances` read rather than
+  assuming: StatLab's `appear` CTE (the only source of its `matches`), the
+  by-grade and by-season-grade breakdowns, by-venue, and the FORMATS page.
+  **When adding a screen that counts matches, ask which of the two sources it
+  reads.** By-opposition needed nothing — it already drops a result-NULL game.
+  The recent-games lists at `aggregations.py:511/553` are deliberately left
+  alone: a fixture list should show a washout a player was picked for.
 - **No Full Rebuild.** The grade match list already carries `status` per
   fixture and the discovery loop already fetches it, so a plain Sync Now fixes
   the current season through the same bulk pass `is_final` and `match_format`

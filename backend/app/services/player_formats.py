@@ -29,6 +29,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.grade_labels import FORMAT_LABELS, MATCH_FORMATS, format_sql_case
+from app.services.game_status import appearance_counts_as_match
+
+# Same rule as everywhere else: a fixture the player was named in but that
+# was called off is not a match played. See services/game_status.py.
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 
 # The bucket a game whose own match_format says nothing lands in. Deliberately
 # not one of MATCH_FORMATS — it is the absence of an answer, not an answer.
@@ -89,6 +94,7 @@ async def player_format_splits(
                 SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
             ){season_clause}
             GROUP BY 1
         """),
