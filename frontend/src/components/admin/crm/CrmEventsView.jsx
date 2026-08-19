@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
-import { Modal, Field, TextInput, Select, Btn, Pill } from './ui'
+import { Modal, Field, TextInput, Select, Btn, Pill, MultiSelect, ownerFilterGroups, ownerMatches } from './ui'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
 
 export const EVENT_COLOR = '#8b7cf6'  // the calendar/date accent, matching the board card
@@ -257,7 +257,9 @@ export function WeekDayView({ cursor, mode, events, onPick, onEdit, onDelete }) 
 // ─── the Events page (rendered as a view inside SuperCrm) ────────────────────
 export default function CrmEventsView({ owners }) {
   const toast = useToast()
-  const ownerOptions = owners || []
+  // Memoised: it feeds the filter useMemo's dependency list, and a fresh []
+  // on every render would recompute the whole filtered set each time.
+  const ownerOptions = useMemo(() => owners || [], [owners])
   const [allEvents, setAllEvents] = useState([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState('calendar')     // calendar (default) | list
@@ -266,8 +268,11 @@ export default function CrmEventsView({ owners }) {
 
   // Filters (all client-side — the platform pipeline's event set is small).
   const [q, setQ] = useState('')
-  const [ownerId, setOwnerId] = useState('')       // Assigned To
-  const [userId, setUserId] = useState('')         // Created by
+  // Both are LISTS of owner-entry ids — several people at once, ORed, the
+  // same control and the same staff pool (super admins + sales reps) the
+  // Board and List filter by.
+  const [ownerIds, setOwnerIds] = useState([])     // Assigned To
+  const [userIds, setUserIds] = useState([])       // Created by
   const [clubId, setClubId] = useState('')
   const [date, setDate] = useState('')             // single day (list view)
   const [dateFrom, setDateFrom] = useState('')
@@ -298,8 +303,8 @@ export default function CrmEventsView({ owners }) {
   const baseFiltered = useMemo(() => {
     const needle = q.trim().toLowerCase()
     return allEvents.filter(e => {
-      if (ownerId && e.owner_user_id !== ownerId) return false
-      if (userId && e.created_by_user_id !== userId) return false
+      if (!ownerMatches(ownerIds, ownerOptions, e.owner_user_id)) return false
+      if (!ownerMatches(userIds, ownerOptions, e.created_by_user_id)) return false
       if (clubId && e.marketing_club_id !== clubId) return false
       if (needle) {
         const hay = [e.title, e.marketing_club_name, e.deal_title, e.contact_name, e.body]
@@ -308,7 +313,7 @@ export default function CrmEventsView({ owners }) {
       }
       return true
     })
-  }, [allEvents, q, ownerId, userId, clubId])
+  }, [allEvents, q, ownerIds, userIds, clubId, ownerOptions])
 
   // List view honours the explicit Date / Date-range filters.
   const listEvents = useMemo(() => {
@@ -374,19 +379,15 @@ export default function CrmEventsView({ owners }) {
           <TextInput value={q} onChange={e => setQ(e.target.value)} placeholder="Search events…" />
         </Field>
         {ownerOptions.length > 0 && (
-          <Field label="Assigned to" width="170px">
-            <Select value={ownerId} onChange={e => setOwnerId(e.target.value)}>
-              <option value="">Anyone</option>
-              {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
+          <Field label="Assigned to" width="170px" composite>
+            <MultiSelect value={ownerIds} onChange={setOwnerIds} allLabel="Anyone"
+              groups={ownerFilterGroups(ownerOptions)} />
           </Field>
         )}
         {ownerOptions.length > 0 && (
-          <Field label="Created by" width="170px">
-            <Select value={userId} onChange={e => setUserId(e.target.value)}>
-              <option value="">Anyone</option>
-              {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
-            </Select>
+          <Field label="Created by" width="170px" composite>
+            <MultiSelect value={userIds} onChange={setUserIds} allLabel="Anyone"
+              groups={ownerFilterGroups(ownerOptions, { unassigned: false })} />
           </Field>
         )}
         <Field label="Club" width="190px">
@@ -408,8 +409,8 @@ export default function CrmEventsView({ owners }) {
             </Field>
           </>
         )}
-        {(q || ownerId || userId || clubId || date || dateFrom || dateTo) && (
-          <Btn variant="ghost" sm onClick={() => { setQ(''); setOwnerId(''); setUserId(''); setClubId(''); setDate(''); setDateFrom(''); setDateTo('') }}>
+        {(q || ownerIds.length || userIds.length || clubId || date || dateFrom || dateTo) && (
+          <Btn variant="ghost" sm onClick={() => { setQ(''); setOwnerIds([]); setUserIds([]); setClubId(''); setDate(''); setDateFrom(''); setDateTo('') }}>
             Clear filters
           </Btn>
         )}

@@ -4,7 +4,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import {
   Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput,
   DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_OPTIONS, LEAD_SOURCE_OPTIONS,
-  WebsiteAnalyticsPanel, EngagementBreakdownPanel,
+  WebsiteAnalyticsPanel, EngagementBreakdownPanel, ownerEntryId,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
@@ -326,9 +326,18 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             </Field>
             {ownerOptions && ownerOptions.length > 0 && (
               <Field label="Owner" width={FIELD_W.owner}>
-                <Select value={deal.owner_user_id || ''} onChange={e => patch({ owner_user_id: e.target.value || null })}>
+                {/* Bound through ownerEntryId — see EventForm: an entry is a
+                    person, possibly covering several accounts, so a deal
+                    owned by one of the folded-away ones still shows its
+                    owner rather than reading Unassigned. */}
+                <Select value={ownerEntryId(ownerOptions, deal.owner_user_id)} onChange={e => patch({ owner_user_id: e.target.value || null })}>
                   <option value="">Unassigned</option>
-                  {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  {ownerOptions.filter(o => !o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                  {ownerOptions.some(o => o.is_sales_rep) && (
+                    <optgroup label="Sales reps">
+                      {ownerOptions.filter(o => o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                    </optgroup>
+                  )}
                 </Select>
               </Field>
             )}
