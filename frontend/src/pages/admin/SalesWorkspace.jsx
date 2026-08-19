@@ -189,7 +189,13 @@ function AssociationChips({ associations, className = '' }) {
   return (
     <div className={`flex flex-wrap gap-1 ${className}`}>
       {names.map(n => (
-        <span key={n} className="px-1.5 py-0.5 rounded-full text-[9.5px] bg-pb-surface2 text-pb-faint border border-pb-line">
+        // 5px is half the radius a pill actually renders at here: the chip is
+        // 20.25px tall, so rounded-full caps at 10.125px however large the
+        // value. The border was `border-pb-line`, which is not a token this
+        // Tailwind config defines (see tailwind.config.js) — with no valid
+        // colour class the border fell back to preflight's own #e5e7eb and
+        // read far brighter than the name inside it. It matches the text now.
+        <span key={n} className="px-1.5 py-0.5 rounded-[5px] text-[9.5px] bg-pb-surface2 text-pb-faint border border-pb-faint">
           {n}
         </span>
       ))}
