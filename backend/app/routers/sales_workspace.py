@@ -250,7 +250,11 @@ async def list_clubs(
     'voicemail'; else ``called_clubs`` narrows to every club that's ever
     been called; else — the default, with none ticked — the queue shows
     only clubs that have NEVER been called, which is what a rep actually
-    wants to see by default (a calling QUEUE, not a call log)."""
+    wants to see by default (a calling QUEUE, not a call log). That last
+    default does NOT apply while ``attributed_user_ids`` is set: a club is
+    only ever earned by a call or an email, so "earned by Sam" and "never
+    called" are all but mutually exclusive and the pair would come back
+    empty however much work the rep has done."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -423,8 +427,14 @@ async def list_clubs(
         out = [r for r in out if r["last_call_outcome"] == "voicemail"]
     elif called_clubs:
         out = [r for r in out if r["ever_called"]]
-    else:
+    elif attributed_pick is None:
         out = [r for r in out if not r["ever_called"]]
+    # else: an Attributed pick asks which clubs a rep has EARNED, and a club
+    # is only ever earned by a logged call or a sent email — so the
+    # never-called default empties that answer by construction, which is
+    # exactly what it did when the filter first shipped. An explicit Called /
+    # Callback / Voicemail tick still narrows it; only the implicit default
+    # steps aside.
     if min_score is not None:
         out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] >= min_score]
     if max_score is not None:
