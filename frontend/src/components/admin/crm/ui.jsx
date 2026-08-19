@@ -175,6 +175,17 @@ export const ownerFilterGroups = (owners, { unassigned = true } = {}) => {
   ].filter(g => g.options.length > 0)
 }
 
+// The ATTRIBUTED filter's options: only a sales rep can ever earn a club
+// (see the commission note in services/sales_workspace.py), so a super admin
+// is never offered here even though they are a perfectly good OWNER.
+export const attributedFilterGroups = (owners) => {
+  const reps = (owners || []).filter(o => o.is_sales_rep)
+  return [
+    { label: '', options: [{ value: OWNER_UNASSIGNED, label: 'Unassigned' }] },
+    { label: reps.length ? 'Sales reps' : '', options: reps.map(o => ({ value: o.id, label: o.name })) },
+  ].filter(g => g.options.length > 0)
+}
+
 // Does `userId` belong to any of the picked people? Selecting one entry has
 // to match every account behind it, or a deal owned by the account that was
 // folded away would silently drop out of the results.

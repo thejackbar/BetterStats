@@ -15,7 +15,8 @@ import CrmEventsView from '../../components/admin/crm/CrmEventsView'
 import { CalendarIcon, eventSummaryText } from '../../components/admin/crm/EventForm'
 import {
   Modal, Field, TextInput, NumberInput, Select, Btn, Pill, money, MODULE_ORDER, moduleLabel, sortModuleKeys,
-  LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel, MultiSelect, ownerFilterGroups, ownerMatches, OWNER_UNASSIGNED,
+  LEAD_SOURCE_OPTIONS, WebsiteAnalyticsPanel, MultiSelect, ownerFilterGroups, attributedFilterGroups,
+  ownerMatches, OWNER_UNASSIGNED,
 } from '../../components/admin/crm/ui'
 
 const CHART_TOOLTIP_STYLE = { background: 'var(--pb-surface, #0b1220)', border: '1px solid var(--pb-hairline, #1a2540)', fontSize: 12 }
@@ -250,7 +251,10 @@ const EMPTY_FILTERS = {
   // Owner is a LIST — several people at once, ORed. Entries are people, not
   // accounts, and '__unassigned__' rides in the same list so "nobody, or
   // Jack" is one selection rather than two mutually exclusive controls.
-  q: '', ownerIds: [], modules: [], minValue: '', maxValue: '',
+  // ownerIds = who the deal is ASSIGNED to; attributedIds = which rep EARNED
+  // it. A reassignment never moves attribution, so the two answer different
+  // questions and compose (a deal worked by one rep, earned by another).
+  q: '', ownerIds: [], attributedIds: [], modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', leadSource: '',
   onboarding: '', minTrialDays: '', maxTrialDays: '',
   // Per-stage include/exclude filter: { stageKey: 'include' | 'exclude' }.
@@ -326,6 +330,7 @@ function buildFilterSummary(filters, { owners, stages, status }) {
   if (status) push('Status', STATUS_LABELS[status] || status)
   if (filters.q.trim()) push('Search', filters.q.trim())
   if (filters.ownerIds.length) push('Owner', filters.ownerIds.map(ownerName).join(', '))
+  if (filters.attributedIds.length) push('Attributed', filters.attributedIds.map(ownerName).join(', '))
   if (filters.state) push('State', filters.state)
   if (filters.association.trim()) push('Association', filters.association.trim())
   if (filters.leadSource) {
@@ -721,6 +726,8 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
             <TextInput placeholder="Club name or point of contact" value={filters.q} onChange={set('q')} style={{ width: FBW.search }} />
             <MultiSelect value={filters.ownerIds} onChange={v => setFilters(f => ({ ...f, ownerIds: v }))}
               groups={ownerFilterGroups(owners)} allLabel="Any owner" width={FBW.owner} />
+            <MultiSelect value={filters.attributedIds} onChange={v => setFilters(f => ({ ...f, attributedIds: v }))}
+              groups={attributedFilterGroups(owners)} allLabel="Any attributed" width={FBW.owner} />
             <Select value={filters.state} onChange={set('state')} style={{ width: FBW.state }}>
               <option value="">Any state</option>
               {stateOptions.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1335,6 +1342,7 @@ export default function SuperCrm() {
       if (stageExc.includes(d.stage_key)) return false
       if (stageInc.length && !stageInc.includes(d.stage_key)) return false
       if (!ownerMatches(filters.ownerIds, owners, d.owner_user_id)) return false
+      if (!ownerMatches(filters.attributedIds, owners, d.commission_rep_user_id)) return false
       if (filters.modules.length && !filters.modules.some(m => (d.module_keys || []).includes(m))) return false
       if (minValueCents != null && (d.effective_value_cents ?? d.value_cents) < minValueCents) return false
       if (maxValueCents != null && (d.effective_value_cents ?? d.value_cents) > maxValueCents) return false

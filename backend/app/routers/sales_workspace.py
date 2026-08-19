@@ -130,11 +130,54 @@ def _sort_rows(rows: list, sort_key: Optional[str], sort_dir: Optional[str]) -> 
 
 # ─── Queue ────────────────────────────────────────────────────────────────────
 
+# "Nobody" in an Assigned/Attributed pick. A UUID can never spell this, so it
+# rides in the same comma-list as the real ids rather than needing a second
+# parameter — which is what lets "unassigned, or Kate" be one selection.
+UNASSIGNED_PICK = "unassigned"
+
+
+def _people_filter(*raw_values) -> Optional[set]:
+    """The set a people-picker asked for, or None for "no filter at all".
+    Accepts several raw comma-lists and unions them, so the older single
+    ``owner_user_id`` and the newer ``owner_user_ids`` compose instead of
+    fighting. A value that is neither a UUID nor the sentinel raises 422 via
+    ``_uuid_or_none``, same as every other id this router reads off the query
+    string — these only ever come from the app's own picker, so junk means a
+    hand-edited URL and saying so beats quietly returning a different set of
+    clubs than the one asked for."""
+    picked = set()
+    seen_any = False
+    for raw in raw_values:
+        if not raw:
+            continue
+        for part in str(raw).split(","):
+            part = part.strip()
+            if not part:
+                continue
+            seen_any = True
+            picked.add(UNASSIGNED_PICK if part == UNASSIGNED_PICK else _uuid_or_none(part))
+    if not seen_any:
+        return None
+    return picked
+
+
+def _person_matches(picked: set, user_id) -> bool:
+    """Does this deal's owner (or attributing rep) satisfy the pick?"""
+    if not picked:
+        return True
+    if user_id is None:
+        return UNASSIGNED_PICK in picked
+    return user_id in picked
+
+
+
 @router.get("/clubs")
 async def list_clubs(
     q: Optional[str] = None,
     stage_key: Optional[str] = None,
     owner_user_id: Optional[str] = None,
+    owner_user_ids: Optional[str] = None,
+    attributed_user_ids: Optional[str] = None,
     called_clubs: bool = False,
     callback_due: bool = False,
     voicemail: bool = False,
@@ -175,6 +218,18 @@ async def list_clubs(
     ``MarketingClub.state`` (e.g. "WA,NSW") — an OR, same shape again; a deal
     with no linked club (and so no state) never matches a non-empty list.
 
+    ``owner_user_ids`` is the queue's ASSIGNED filter: a comma-list of user
+    ids, plus the sentinel ``unassigned`` for a club nobody holds, ORed
+    within the field (same shape as ``states``/``modules``). The older
+    single ``owner_user_id`` still works and simply joins the same set, so a
+    saved link written before the filter took several values keeps working.
+    ``attributed_user_ids`` is the separate ATTRIBUTED filter — which rep
+    EARNED the club (crm_deals.commission_rep_user_id, see the commission
+    note in services/sales_workspace.py), never who currently holds it —
+    same comma-list shape and the same ``unassigned`` sentinel for a club no
+    rep has earned. Both are super-admin-only: a 'sales' caller is already
+    pinned to their own assigned deals and neither param widens that.
+
     ``sort`` picks the ordering: ``recent`` (deal.updated_at, newest first),
     ``club_name`` (A-Z), ``engagement_score`` (highest first), ``trial_days``
     (soonest-concern first — an expired trial's negative "days ago" sorts
@@ -201,13 +256,20 @@ async def list_clubs(
     stage_by_key = {s.key: s for s in pipeline.stages}
     trial_stage_id = stage_by_key["trial"].id if "trial" in stage_by_key else None
 
-    effective_owner = None
-    if actor.role == "sales":
-        effective_owner = actor.user.id
-    elif owner_user_id:
-        effective_owner = _uuid_or_none(owner_user_id)
+    # A 'sales' caller is pinned to their own deals in SQL, which is the
+    # access rule and not a filter. The super admin's own Assigned/Attributed
+    # pickers take several values (and an "unassigned" sentinel), so they are
+    # applied in Python below alongside the other multi-value filters rather
+    # than through list_deals' single-owner argument.
+    effective_owner = actor.user.id if actor.role == "sales" else None
+    assigned_pick = _people_filter(owner_user_ids, owner_user_id) if actor.role != "sales" else None
+    attributed_pick = _people_filter(attributed_user_ids) if actor.role != "sales" else None
 
     deals = await crm_service.list_deals(db, pipeline.id, status="open", owner_user_id=effective_owner)
+    if assigned_pick is not None:
+        deals = [d for d in deals if _person_matches(assigned_pick, d.owner_user_id)]
+    if attributed_pick is not None:
+        deals = [d for d in deals if _person_matches(attributed_pick, d.commission_rep_user_id)]
     # Belt-and-braces on top of the status="open" filter above: a deal can be
     # sitting in a Won/Lost stage while its own `status` column still reads
     # "open" (e.g. one created directly into that stage — see create_deal,

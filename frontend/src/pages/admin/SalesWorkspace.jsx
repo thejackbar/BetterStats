@@ -594,13 +594,25 @@ export default function SalesWorkspace() {
   }, [])
 
   const [filters, setFilters] = useState({
-    q: '', stage_key: [], owner_user_id: '', called_clubs: false, callback_due: false, voicemail: false, list_id: '',
+    // ASSIGNED (who holds the club) and ATTRIBUTED (which rep earned it)
+    // are separate questions and separate filters — both take several
+    // people at once, ORed, and both are super-admin only.
+    q: '', stage_key: [], owner_user_ids: [], attributed_user_ids: [],
+    called_clubs: false, callback_due: false, voicemail: false, list_id: '',
     min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
     states: [], sort: '', sort_dir: '',
   })
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
   const [team, setTeam] = useState([])
+  // Unassigned plus every sales rep — the option list both people
+  // pickers draw from. 'unassigned' is the server's own sentinel
+  // (routers/sales_workspace.UNASSIGNED_PICK); a UUID can never spell
+  // it, so it rides in the same comma-list as the real ids.
+  const peopleOptions = useMemo(() => [
+    { key: 'unassigned', name: 'Unassigned' },
+    ...team.map(u => ({ key: u.id, name: u.display_name || u.username })),
+  ], [team])
   const [staff, setStaff] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
@@ -1230,13 +1242,27 @@ export default function SalesWorkspace() {
           </FilterGroup>
 
           {isSuper && (
-            <FilterGroup label="Owner">
-              <Select value={filters.owner_user_id} onChange={e => setFilters(f => ({ ...f, owner_user_id: e.target.value }))}
-                style={{ width: 150 }}>
-                <option value="">Everyone</option>
-                <option value="__unassigned__" disabled>— pick a rep —</option>
-                {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
-              </Select>
+            <FilterGroup label="Assigned">
+              <div style={{ width: 150 }}>
+                <MultiSelectPicker options={peopleOptions} value={filters.owner_user_ids}
+                  onChange={v => setFilters(f => ({ ...f, owner_user_ids: v }))}
+                  allLabel="Everyone" noun="people" />
+              </div>
+            </FilterGroup>
+          )}
+
+          {/* Who EARNED each club, which a reassignment never moves — so this
+              answers "what has Kate actually won" rather than "what is on
+              Kate's list today". Same control and same option list as
+              Assigned; the two compose, since a club can be worked by one rep
+              and earned by another. */}
+          {isSuper && (
+            <FilterGroup label="Attributed">
+              <div style={{ width: 150 }}>
+                <MultiSelectPicker options={peopleOptions} value={filters.attributed_user_ids}
+                  onChange={v => setFilters(f => ({ ...f, attributed_user_ids: v }))}
+                  allLabel="Everyone" noun="people" />
+              </div>
             </FilterGroup>
           )}
 
