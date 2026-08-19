@@ -1087,7 +1087,10 @@ async def assign(
 
 class BulkAssignBody(BaseModel):
     deal_ids: list[str]
-    owner_user_ids: list[str]  # one id = assign all to them; several = split evenly, round-robin
+    owner_user_ids: list[str] = []  # one id = assign all to them; several = split evenly, round-robin
+    # True = send every selected club back into the shared pool
+    # (owner_user_id cleared to NULL) — owner_user_ids is ignored either way.
+    unassign: bool = False
 
 
 @router.post("/bulk-assign")
@@ -1098,21 +1101,26 @@ async def bulk_assign(
 ):
     """Filter the queue down to a batch (never called, a state, a stage,
     unassigned…) then assign the whole selection in one action — "Assign
-    selected -> Sam" or "Split evenly among Sam / Jake / Sarah", per the
-    brief. Super-admin only, same as the single-deal PATCH .../assign."""
+    selected -> Sam", "Split evenly among Sam / Jake / Sarah", or (unassign)
+    "send them all back into the pool", per the brief. Super-admin only,
+    same as the single-deal PATCH .../assign."""
     _require_super(actor)
     if not body.deal_ids:
         raise HTTPException(status_code=422, detail="Select at least one club")
-    owner_ids = [_uuid_or_none(o) for o in body.owner_user_ids if o]
-    if not owner_ids:
-        raise HTTPException(status_code=422, detail="Pick at least one salesperson")
 
-    owners = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
-    found_ids = {u.id for u in owners}
-    missing = [str(o) for o in owner_ids if o not in found_ids]
-    if missing:
-        raise HTTPException(status_code=404, detail=f"Unknown salesperson id(s): {', '.join(missing)}")
-    owner_names = {u.id: (u.display_name or u.username) for u in owners}
+    owner_ids: list = []
+    owner_names: dict = {}
+    if not body.unassign:
+        owner_ids = [_uuid_or_none(o) for o in body.owner_user_ids if o]
+        if not owner_ids:
+            raise HTTPException(status_code=422, detail="Pick at least one salesperson, or choose Unassigned")
+
+        owners = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
+        found_ids = {u.id for u in owners}
+        missing = [str(o) for o in owner_ids if o not in found_ids]
+        if missing:
+            raise HTTPException(status_code=404, detail=f"Unknown salesperson id(s): {', '.join(missing)}")
+        owner_names = {u.id: (u.display_name or u.username) for u in owners}
 
     deal_uuids = [_uuid_or_none(d) for d in body.deal_ids]
     deals = (await db.execute(
@@ -1128,10 +1136,14 @@ async def bulk_assign(
         db, deals=deals, owner_ids=owner_ids, owner_names=owner_names, created_by_user_id=actor.user.id,
     )
     await db.commit()
+    by_rep = {
+        ("Unassigned" if k == "unassigned" else owner_names.get(uuid.UUID(k), k)): v
+        for k, v in counts.items()
+    }
     return {
         "assigned": len(deals),
         "skipped": len(body.deal_ids) - len(deals),
-        "by_rep": {owner_names.get(uuid.UUID(k), k): v for k, v in counts.items()},
+        "by_rep": by_rep,
     }
 
 

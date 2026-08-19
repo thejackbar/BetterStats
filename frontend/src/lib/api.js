@@ -2100,9 +2100,11 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/assign`, {
       method: 'PATCH', body: JSON.stringify({ owner_user_id: ownerUserId || null }),
     }),
-  salesWorkspaceBulkAssign: (dealIds, ownerUserIds) =>
+  // unassign=true sends the selected clubs back into the shared pool
+  // (owner_user_id cleared to NULL) — ownerUserIds is ignored either way.
+  salesWorkspaceBulkAssign: (dealIds, ownerUserIds, unassign = false) =>
     request('/club-admin/sales-workspace/bulk-assign', {
-      method: 'POST', body: JSON.stringify({ deal_ids: dealIds, owner_user_ids: ownerUserIds }),
+      method: 'POST', body: JSON.stringify({ deal_ids: dealIds, owner_user_ids: ownerUserIds, unassign }),
     }),
   salesWorkspaceStartTrial: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/start-trial`, { method: 'POST', body: JSON.stringify(data) }),
