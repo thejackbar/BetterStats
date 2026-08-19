@@ -163,7 +163,11 @@ async def run_one(db, org: dict, apply: bool, season_year: int | None) -> tuple[
         print("  Every game already matches CA. Nothing to change.")
         return 0, 0
 
-    total = sum(len(v) for v in changes)
+    # .values(), not the dict itself — iterating `changes` walks the STATUS
+    # STRINGS, so this summed their character lengths and reported "18" for a
+    # run that wrote 41 rows ("COMPLETED" + "ABANDONED"). The writes were
+    # always correct; only the tally printed was wrong.
+    total = sum(len(v) for v in changes.values())
     print(f"  {'Updating' if apply else 'Would update'} {total} game(s): "
           + ", ".join(f"{s}×{len(v)}" for s, v in
                       sorted(changes.items(), key=lambda kv: -len(kv[1]))))
