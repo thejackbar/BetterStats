@@ -6,11 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 import uuid
 
-from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord
+from app.models.db import get_db, Grade, Season, Organisation, ManualPartnershipRecord, User
+from app.routers.auth import get_optional_user, user_can_view_org_private
 from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
 from app.services.grade_labels import suggest_category
+from app.services import player_visibility
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -122,6 +124,7 @@ async def get_records(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
@@ -1221,7 +1224,15 @@ async def get_records(
             best.values(), key=lambda r: r.get("wicket_number") or 0
         )
 
-    return {
+    # Players the club has hidden from its public site come off every board
+    # here in one pass. Done on the payload rather than inside the ~40
+    # builders above so a board added later is covered without anyone
+    # remembering; see services/player_visibility.py.
+    hidden = (
+        set() if await user_can_view_org_private(db, viewer, org_id)
+        else await player_visibility.hidden_player_ids(db, org_id)
+    )
+    return player_visibility.prune_hidden({
         # What these figures actually cover, plus the categories this club's
         # grades justify offering a toggle for.
         "grade_scope": {
@@ -1257,7 +1268,7 @@ async def get_records(
         "allrounders": {
             "top_allrounders": top_allrounders,
         },
-    }
+    }, hidden)
 
 
 @router.get("/{org_id}/milestones")
@@ -1265,6 +1276,7 @@ async def get_records_milestones(
     org_id: str,
     grade_name: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     """Public milestones: career-wide by default, or scoped to one grade.
 
@@ -1515,4 +1527,12 @@ async def get_records_milestones(
                 })
 
     upcoming.sort(key=lambda m: m["needed"])
-    return {"upcoming": upcoming, "achieved": achieved, "scope": "grade" if grade_name else "career"}
+    hidden = (
+        set() if await user_can_view_org_private(db, viewer, org_id)
+        else await player_visibility.hidden_player_ids(db, org_id)
+    )
+    return {
+        "upcoming": player_visibility.drop_hidden(upcoming, hidden),
+        "achieved": player_visibility.drop_hidden(achieved, hidden),
+        "scope": "grade" if grade_name else "career",
+    }

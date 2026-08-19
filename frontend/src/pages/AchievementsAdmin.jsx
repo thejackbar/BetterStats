@@ -929,7 +929,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
 
   useEffect(() => {
     load()
-    api.listPlayers(orgId).then(data => setPlayers(data || [])).catch(() => {})
+    api.listPlayers(orgId, { includeHidden: true }).then(data => setPlayers(data || [])).catch(() => {})
     api.getOrgSeasons(orgId).then(data => setSeasons(data || [])).catch(() => {})
     api.listAwardDefinitions(orgId).then(data => setAwardDefs(data || [])).catch(() => {})
   }, [orgId])

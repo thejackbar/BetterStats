@@ -92,11 +92,28 @@ async def _public_player_attrs(db: AsyncSession, player: Player) -> dict:
 @router.get("")
 async def list_players(
     org_id: str,
+    include_hidden: bool = Query(
+        False,
+        description=(
+            "Include players the club has hidden from its public site. Only "
+            "honoured for a signed-in club admin (or Better staff); a visitor "
+            "asking for them still gets the public roster."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
-    result = await db.execute(
-        select(Player).where(Player.organisation_id == uuid.UUID(org_id))
+    # Hidden players (players.is_public false) drop off the public roster and
+    # the navbar search that reads it. An admin surface that genuinely needs
+    # the whole club — Merge Players, Awards, the Yearbook editor — asks for
+    # them, and only gets them if this viewer may see the club's private data.
+    public_only = not (
+        include_hidden and await user_can_view_org_private(db, viewer, org_id)
     )
+    conditions = [Player.organisation_id == uuid.UUID(org_id)]
+    if public_only:
+        conditions.append(Player.is_public.is_not(False))
+    result = await db.execute(select(Player).where(*conditions))
     # Sort by surname for everyone — a display_name_override is free text (often
     # "First Last", no comma) which an alphabetical DB sort would order by first
     # name, unlike the "Last, First" synced names. name_sort_key extracts the
@@ -116,9 +133,21 @@ async def list_players(
 
 
 @router.get("/{player_id}")
-async def get_player(player_id: str, db: AsyncSession = Depends(get_db)):
+async def get_player(
+    player_id: str,
+    db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
+):
     player = await db.get(Player, uuid.UUID(player_id))
     if not player:
+        raise HTTPException(status_code=404, detail="Player not found")
+    # A hidden player reads as absent rather than forbidden: a 403 would
+    # confirm the person exists, which is the thing they asked us not to say.
+    # This is the one gate the public profile page needs — every stats
+    # endpoint under it is keyed on the same id the page could not resolve.
+    if player.is_public is False and not await user_can_view_org_private(
+        db, viewer, str(player.organisation_id)
+    ):
         raise HTTPException(status_code=404, detail="Player not found")
     return {
         "id": str(player.id),
@@ -753,6 +782,13 @@ class PlayerProfileUpdate(BaseModel):
     squad_team_id: Optional[str] = None
     is_overseas: Optional[bool] = None
     overseas_country: Optional[str] = None
+    # Public visibility + the two BetterSelect flags (migration 264). All
+    # three are plain columns, so the generic setattr loop below applies
+    # them; they are listed here because a field absent from this model
+    # never reaches the service, however carefully the column was added.
+    is_public: Optional[bool] = None
+    is_financial_override: Optional[bool] = None
+    trained_override: Optional[bool] = None
 
 
 def _profile_fields(player: Player) -> dict:
@@ -778,6 +814,9 @@ def _profile_fields(player: Player) -> dict:
         "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
         "is_overseas": player.is_overseas,
         "overseas_country": player.overseas_country,
+        "is_public": player.is_public is not False,
+        "is_financial_override": player.is_financial_override,
+        "trained_override": player.trained_override,
     }
 
 

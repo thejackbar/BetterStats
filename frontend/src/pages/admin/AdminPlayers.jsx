@@ -183,6 +183,9 @@ function PlayerRow({ p, squadName, canEdit, fmt, onOpen }) {
             </span>
           )}
           {inactive && <span className="pl-badge mute">Inactive</span>}
+          {p.is_public === false && (
+            <span className="pl-badge mute" title="Kept off the club's public website">Hidden</span>
+          )}
         </div>
         {meta && <div className="pl-row-meta">{meta}</div>}
       </div>
@@ -203,7 +206,7 @@ export default function AdminPlayers() {
   const [players, setPlayers] = useState([])
   const [teams, setTeams] = useState([])
   const [filter, setFilter] = useState('')
-  const [scope, setScope] = useState('all') // all | local | overseas
+  const [scope, setScope] = useState('all') // all | local | overseas | hidden
   const [range, setRange] = useState('ALL')
   const [msg, setMsg] = useState('')
   const [nameFormat, setNameFormat] = useState('last_first')
@@ -232,6 +235,9 @@ export default function AdminPlayers() {
     const out = players.filter((p) => {
       if (scope === 'local' && p.is_overseas) return false
       if (scope === 'overseas' && !p.is_overseas) return false
+      // "Hidden" is the club's own list of who it keeps off the public site
+      // — the one place those players are easy to find and put back.
+      if (scope === 'hidden' && p.is_public !== false) return false
       const q = filter.trim()
       if (!q) return true
       return (
@@ -423,7 +429,7 @@ export default function AdminPlayers() {
         {/* Controls: scope + alphabet ranges */}
         <div className="pl-controls">
           <div className="inline-flex flex-wrap p-[3px] gap-0.5 bg-pb-surface2 rounded-lg border border-pb-hairline">
-            {[{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'overseas', label: 'Overseas' }].map((o) => {
+            {[{ value: 'all', label: 'All' }, { value: 'local', label: 'Local' }, { value: 'overseas', label: 'Overseas' }, { value: 'hidden', label: 'Hidden' }].map((o) => {
               const active = o.value === scope
               return (
                 <button key={o.value} type="button" onClick={() => setScope(o.value)}

@@ -139,7 +139,7 @@ function ManualMerge({ orgId, onMerged }) {
 
   useEffect(() => {
     if (expanded && players.length === 0) {
-      api.listPlayers(orgId).then(setPlayers).catch(() => {})
+      api.listPlayers(orgId, { includeHidden: true }).then(setPlayers).catch(() => {})
     }
   }, [expanded, orgId])
 

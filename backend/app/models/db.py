@@ -1219,6 +1219,22 @@ class Player(Base):
     phone = Column(Text, nullable=True)
     skill_positions = Column(JSONB, default=list, nullable=False, server_default="[]")  # e.g. ["BAT","WKT"]
     status = Column(Text, default="active", nullable=False, server_default="active")  # active | inactive
+    # Whether this player is shown on the club's PUBLIC site (migration 264).
+    # Defaults true, so nothing is hidden by an upgrade; a club opts a player
+    # out (typically a junior who does not want to be findable) and they drop
+    # off the public roster, search, profile page, leaderboards and records
+    # while staying fully present in every admin surface. Same shape as
+    # grades.is_public, and read through the same user_can_view_org_private
+    # escape so a signed-in club admin still sees their own club whole.
+    is_public = Column(Boolean, default=True, nullable=False, server_default="true")
+    # BetterSelect "non-financial" filter (migration 264). NULL = no override,
+    # so the answer comes from BetterFees' own balance; True/False is a club
+    # saying so by hand, which is also the only answer a club not running
+    # BetterFees can give.
+    is_financial_override = Column(Boolean, nullable=True)
+    # BetterSelect "attended training" filter (migration 264). NULL = no
+    # override, so the answer comes from Net Manager attendance.
+    trained_override = Column(Boolean, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")

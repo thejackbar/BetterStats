@@ -198,7 +198,13 @@ export const api = {
   getOrgLineup: (orgId, matchId) => request(`/organisations/${orgId}/lineups/${matchId}`),
 
   // Players
-  listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
+  // Public roster. Players the club has hidden (players.is_public false) are
+  // left out unless includeHidden is passed AND the caller is signed in as
+  // this club — admin screens that genuinely need the whole roster (Merge
+  // Players, Awards, the Yearbook editor) pass it; the public Players page
+  // and the navbar search deliberately don't.
+  listPlayers: (orgId, { includeHidden = false } = {}) =>
+    request(`/players?org_id=${orgId}${includeHidden ? '&include_hidden=true' : ''}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
   playerFormats: (playerId, { seasonId } = {}) => {
     const params = new URLSearchParams()

@@ -201,6 +201,9 @@ async def list_players(
             "is_opening_batsman": p.is_opening_batsman,
             "skill_positions": p.skill_positions or [],
             "status": p.status,
+            "is_public": p.is_public is not False,
+            "is_financial_override": p.is_financial_override,
+            "trained_override": p.trained_override,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "last_played": last_played.get(str(p.id)),
         }

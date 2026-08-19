@@ -3403,6 +3403,23 @@ async def lifespan(app: FastAPI):
         # every coupon created before this shipped, which reads as "not this
         # mode" and re-syncs the mirrored Coupon on first use.
         await conn.execute(text("ALTER TABLE discount_coupons ADD COLUMN IF NOT EXISTS stripe_mode TEXT"))
+        # Migration 264: hiding a player from the public site, plus the two
+        # BetterSelect flags a club can set by hand (both nullable — NULL
+        # means "no override, use what BetterFees / Net Manager say").
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS "
+            "is_public BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS is_financial_override BOOLEAN"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS trained_override BOOLEAN"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_players_org_hidden "
+            "ON players (organisation_id) WHERE is_public IS FALSE"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
