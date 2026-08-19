@@ -141,8 +141,16 @@ export function Stripes({ color = '#fff', angle = -45, gap = 14, opacity = 0.06,
 }
 
 export function ClubLogo({ monogram = 'NG', color = '#fff', bg = 'transparent', size = 120, shape = 'shield', src = null }) {
-  if (src) {
-    return <img src={src} alt={monogram + ' logo'} style={{ width: size, height: size, objectFit: 'contain', display: 'block' }} />
+  // A crest can be a hotlink to Grassroots' own CDN, which 404s often enough
+  // to matter — and a broken-image glyph on a match post is worse than the
+  // monogram it replaced. Failing back keys on `src` so swapping in a
+  // different crest gets its own chance rather than inheriting the failure.
+  const [failed, setFailed] = useState(null)
+  if (src && failed !== src) {
+    return (
+      <img src={src} alt={monogram + ' logo'} onError={() => setFailed(src)}
+        style={{ width: size, height: size, objectFit: 'contain', display: 'block' }} />
+    )
   }
   const stroke = Math.max(2, size * 0.04)
   const fontSize = size * 0.42
@@ -208,6 +216,10 @@ export function RoleChip({ kind, accent = '#ffc233', ink = '#0b1530' }) {
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      // Never squeezed by a long name beside it in a flex row — a chip
+      // narrower than its own label reads as a rendering fault, and the name
+      // it sits next to is auto-fitted precisely so it can give way instead.
+      flexShrink: 0,
       minWidth: 32, height: 24, padding: '0 8px',
       background: accent, color: ink,
       fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 16, fontWeight: 400,
@@ -395,6 +407,11 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         {(() => {
           const featured = featuredOf(players, featuredId)
           const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          // No hero, no headshot and no crest is an ordinary state (a
+          // club that hasn't uploaded a logo yet). Rendering an <img>
+          // with a null src puts a broken-image glyph and its alt text
+          // on the post, which is far worse than an empty panel.
+          if (!src) return null
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
@@ -437,18 +454,30 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
             }} />
         </div>
         <div style={{ width: 60, height: 4, background: palette.accent, marginTop: 10, marginBottom: 24 }} />
+        {/* The two club names sit either side of the crests in a column only
+            480px wide, and a full club name ("Applecross Cricket Club") does
+            not fit there at a fixed 34px. This used to wrap onto two lines and
+            shove the crests around; both names are fitted to their own box
+            now, and the row no longer wraps, so the lockup holds its shape
+            whatever the two clubs are called. */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          gap: 16, marginBottom: 26, flexWrap: 'wrap',
+          gap: 14, marginBottom: 26, flexWrap: 'nowrap',
         }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 34, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
+          <div style={{ flex: 1, minWidth: 0, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+            <AutoFitText text={team.name} max={34} min={13} lines={2} pad={4}
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'right', width: '100%' }} />
           </div>
-          <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={80} shape="shield" />
-          <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, opacity: 0.7 }}>V</div>
-          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={52} shape="shield" />
-          <div style={{ textAlign: 'left' }}>
-            <div style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 30, letterSpacing: 1.5, lineHeight: 1 }}>{opponent.name}</div>
+          <div style={{ flexShrink: 0 }}>
+            <ClubLogo src={team.logo} monogram={team.monogram} color={palette.accent} size={76} shape="shield" />
+          </div>
+          <div style={{ flexShrink: 0, fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 22, opacity: 0.7 }}>V</div>
+          <div style={{ flexShrink: 0 }}>
+            <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={palette.ink} size={52} shape="shield" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0, height: 40, display: 'flex', alignItems: 'center', justifyContent: 'flex-start' }}>
+            <AutoFitText text={opponent.name} max={30} min={13} lines={2} pad={4}
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 1.5, lineHeight: 1, textAlign: 'left', width: '100%' }} />
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 1, textAlign: 'right', flex: 1, minHeight: 0, overflow: 'hidden', justifyContent: P.length >= 9 ? 'space-between' : 'flex-start' }}>
@@ -632,6 +661,11 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
           const featured = featuredOf(players, featuredId)
           const hasHead = !!(heroImage || (featured && featured.headshot))
           const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          // No hero, no headshot and no crest is an ordinary state (a
+          // club that hasn't uploaded a logo yet). Rendering an <img>
+          // with a null src puts a broken-image glyph and its alt text
+          // on the post, which is far worse than an empty panel.
+          if (!src) return null
           return (
             <img src={src} alt={featured ? (featured.first + ' ' + featured.last) : team.short}
               style={{
@@ -887,6 +921,11 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
             const featured = featuredOf(players, featuredId)
             const hasHead = !!(heroImage || (featured && featured.headshot))
             const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+            // No hero, no headshot and no crest is an ordinary state (a club
+            // that hasn't uploaded a logo yet). Rendering an <img> with a
+            // null src puts a broken-image glyph and its alt text on the
+            // post, which is far worse than an empty panel.
+            if (!src) return null
             return (
               <img src={src} alt={featured?.last || team.short}
                 style={{
@@ -1507,8 +1546,9 @@ export function SC1_Broadcast({ match, palette = {}, square = false, only = 'hom
     <div style={{ background: panel, border: `1px solid ${rule}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, padding: '14px 22px', background: `linear-gradient(90deg, ${accentC}, ${accentC}aa 60%, transparent)`, color: headerInk, borderBottom: `1px solid ${rule}` }}>
         <ClubLogo monogram={team.short} color={headerInk} src={team.logo || null} size={76} shape='shield' />
-        <div>
-          <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 42, letterSpacing: 1.5, lineHeight: 1 }}>{team.name}</div>
+        <div style={{ minWidth: 0 }}>
+          <AutoFitText text={team.name} max={42} min={18} pad={4}
+            style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 1.5, lineHeight: 1 }} />
           <div style={{ fontFamily: SC_MONO, fontSize: 12, letterSpacing: 2, marginTop: 4, opacity: 0.75 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS · CHASE'} · {team.overs} OV</div>
         </div>
         <div style={{ textAlign: 'right', lineHeight: 0.9 }}>
@@ -1663,9 +1703,10 @@ export function SC2_Brutalist({ match, palette = {}, square = false, only = 'hom
     <div style={{ borderLeft: `2px solid ${ruleStrong}`, borderRight: `2px solid ${ruleStrong}`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <div style={{ background: ink, color: bg, padding: '16px 22px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 18, borderBottom: `2px solid ${ruleStrong}` }}>
         <ClubLogo monogram={team.short} color={bg} src={team.logo || null} size={70} shape='shield' />
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: SC_MONO, fontSize: 11, letterSpacing: 3, opacity: 0.65 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} OV</div>
-          <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 52, letterSpacing: 1, lineHeight: 0.95, marginTop: 2 }}>{team.name}</div>
+          <AutoFitText text={team.name} max={52} min={20} pad={4}
+            style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 1, lineHeight: 0.95, marginTop: 2 }} />
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 64, letterSpacing: -1, lineHeight: 0.9, color: accent }}>{team.total}{team.wickets < 10 ? `/${team.wickets}` : ''}</div>
@@ -1816,9 +1857,10 @@ export function SC3_Dashboard({ match, palette = {}, square = false, only = 'hom
           ? <img src={team.logo} alt={team.short} style={{ width: 68, height: 68, objectFit: 'contain', borderRadius: 8 }} />
           : <div style={{ width: 68, height: 68, borderRadius: 12, background: `${accentC}22`, color: accentC, display: 'grid', placeItems: 'center', fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 26, letterSpacing: 1 }}>{team.short}</div>
         }
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: SC_BODY, fontSize: 12, letterSpacing: 1.5, color: dim, fontWeight: 500 }}>{side === 'home' ? '1ST INNINGS' : '2ND INNINGS'} · {team.overs} ov</div>
-          <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 28, letterSpacing: 0.5, lineHeight: 1.1, color: ink }}>{team.name}</div>
+          <AutoFitText text={team.name} max={28} min={14} pad={4}
+            style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", letterSpacing: 0.5, lineHeight: 1.1, color: ink }} />
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontFamily: SC_FONT, fontWeight: "var(--social-display-font-weight, 800)", fontSize: 44, lineHeight: 0.9, color: ink, letterSpacing: -1 }}>{team.total}{team.wickets < 10 ? `/${team.wickets}` : ''}</div>

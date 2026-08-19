@@ -1471,25 +1471,95 @@ def _overs_str(overs_raw) -> str:
         return str(overs_raw)
 
 
-async def _org_logo_for_team(team_name: str, db: AsyncSession) -> str | None:
-    """Try to find a matching org in the DB and return its logo URL."""
-    from sqlalchemy import or_, func
-    words = [w for w in re.split(r"\W+", team_name.upper()) if len(w) > 3]
-    if not words:
-        return None
-    conditions = [func.upper(Organisation.name).contains(w) for w in words[:3]]
-    res = await db.execute(
-        select(Organisation)
-        .where(or_(*conditions))
-        .where(or_(Organisation.logo_url.isnot(None), Organisation.logo_data.isnot(None)))
-        .limit(1)
-    )
-    org = res.scalars().first()
-    if not org:
+def _org_logo_url(org) -> str | None:
+    """An org's crest, uploaded bytes or hosted URL — same precedence
+    ``social_rounds._club_dict`` uses."""
+    if org is None:
         return None
     if org.logo_url:
         return org.logo_url
-    return f"/api/images/organisations/{org.id}/logo"
+    if org.logo_data:
+        return f"/api/images/organisations/{org.id}/logo"
+    return None
+
+
+def _org_colour(org) -> str | None:
+    """An org's own brand colour for a post.
+
+    Same fallback chain the frontend's ``orgAccent`` walks — theme_config's
+    accent (what the branding page actually edits) before the mirrored
+    accent_color column and the legacy primary_color. Reading primary_color
+    first leaves most clubs on the platform's default green, since nothing
+    edits that column any more.
+    """
+    if org is None:
+        return None
+    theme = org.theme_config if isinstance(org.theme_config, dict) else {}
+    return theme.get("accent") or org.accent_color or org.primary_color or None
+
+
+async def _org_for_team(team_raw: dict, team_name: str, db: AsyncSession, club=None):
+    """Which club in our own data is this side of the match?
+
+    In priority order:
+
+    1. The viewing club, when the match names it. Our own crest and colours
+       are the ones we control and can vouch for, and a post a club builds
+       about its own game should plainly be in its own colours.
+    2. The Grassroots ``owningOrganisation.id``, which IS ``organisations.id``
+       for a club we hold — the strongest link there is, and free.
+    3. The team name against our org names, which is all a never-synced
+       opponent leaves us.
+
+    The name step is deliberately the last resort and deliberately strict.
+    The old version matched on ANY word over three characters, unscoped, so
+    "CVPCC Fifth XI" could pick up whichever club in the whole database
+    happened to have "Fifth" in its name — and a grade-level team name is
+    routinely a sponsor's name rather than a club's.
+    """
+    from sqlalchemy import or_, func
+
+    own = (team_raw.get("owningOrganisation") or {}) if isinstance(team_raw, dict) else {}
+    own_id = own.get("id") or own.get("organisationId")
+    club_id = str(club.id).lower() if club is not None and getattr(club, "id", None) else None
+
+    if club_id and own_id and str(own_id).lower() == club_id:
+        return club
+    if own_id:
+        try:
+            hit = await db.get(Organisation, uuid.UUID(str(own_id)))
+            if hit:
+                return hit
+        except (ValueError, TypeError):
+            pass
+
+    # An owning organisation with a name of its own beats the grade-level
+    # team name, which carries the sponsor ("A Grade (Gatorade)").
+    for candidate in (own.get("name"), team_name):
+        words = [w for w in re.split(r"\W+", (candidate or "").upper()) if len(w) > 3]
+        if not words:
+            continue
+        if club is not None and club.name:
+            club_words = {w for w in re.split(r"\W+", club.name.upper()) if len(w) > 3}
+            if club_words & set(words):
+                return club
+        # Every meaningful word has to appear, not just one of them — a
+        # single shared word is how an unrelated club gets picked.
+        conditions = [func.upper(Organisation.name).contains(w) for w in words[:3]]
+        res = await db.execute(
+            select(Organisation).where(*conditions).limit(2)
+        )
+        hits = res.scalars().all()
+        # Two clubs fitting is not an answer. Better a monogram than the
+        # wrong club's crest on a post about somebody else's game.
+        if len(hits) == 1:
+            return hits[0]
+    return None
+
+
+async def _org_logo_for_team(team_name: str, db: AsyncSession) -> str | None:
+    """Back-compat wrapper: an org's crest matched from a team name alone."""
+    return _org_logo_url(await _org_for_team({}, team_name, db))
 
 
 def _team_id_from_inn(inn: dict) -> str | None:
@@ -1505,13 +1575,14 @@ def _team_id_from_inn(inn: dict) -> str | None:
 
 
 @router.get("/social/scorecard/{match_id}", dependencies=[Depends(require_module("socials"))])
-async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db), _user=Depends(get_current_user)):
+async def get_social_scorecard(match_id: str, db: AsyncSession = Depends(get_db),
+                               _user=Depends(get_current_user), club=Depends(get_current_club)):
     """Fetch a Grassroots scorecard and return it in the social template format.
 
     Gated behind the BetterSocials module (require_module).
     """
     try:
-        return await _get_social_scorecard_inner(match_id, db)
+        return await _get_social_scorecard_inner(match_id, db, club)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1598,7 +1669,7 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
         raise HTTPException(500, f"Player of the match error: {exc}") from exc
 
 
-async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
+async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:
         raise HTTPException(404, "Scorecard not found — match may be PlayHQ-only or not yet completed")
@@ -1918,11 +1989,27 @@ async def _get_social_scorecard_inner(match_id: str, db: AsyncSession):
     home = build_team(home_team_raw, inn=home_inn, default_color="#1a4eb8")
     away = build_team(away_team_raw, inn=away_inn, default_color="#cc1f2c")
 
-    # Fallback logo lookup: if GR didn't provide a logo, match against orgs in our DB
-    if not home.get("logo"):
-        home["logo"] = await _org_logo_for_team(home["name"], db)
-    if not away.get("logo"):
-        away["logo"] = await _org_logo_for_team(away["name"], db)
+    # Each side's real club, so the post carries that club's own crest and
+    # colour instead of the generic blue/red the two cards used to get
+    # regardless of who was playing. Our own club wins where the match names
+    # it — a club posting about its own game should be in its own colours.
+    home_org = await _org_for_team(home_team_raw, home["name"], db, club)
+    away_org = await _org_for_team(away_team_raw, away["name"], db, club)
+    # Two sides can't both be us. If the name match claimed our club twice,
+    # keep it for whichever side the owning-organisation id actually named.
+    if club is not None and home_org is club and away_org is club:
+        home_own = ((home_team_raw.get("owningOrganisation") or {}).get("id") or "")
+        if str(home_own).lower() != str(club.id).lower():
+            home_org = None
+        else:
+            away_org = None
+    for side, org in ((home, home_org), (away, away_org)):
+        if org is not None:
+            side["color"] = _org_colour(org) or side["color"]
+            # A crest the club uploaded to us beats whatever Grassroots has:
+            # it's the one they chose, and it's served from our own domain
+            # rather than a hotlink that can 404 mid-render.
+            side["logo"] = _org_logo_url(org) or side.get("logo")
 
     # Result, venue, date and match type live at the TOP level of a /scores/*
     # match, not on matchSummary (which only carries `resultText` + `teams`) —
