@@ -979,6 +979,12 @@ class DiscountCoupon(Base):
     max_redemptions = Column(Integer, nullable=True)
     active = Column(Boolean, nullable=False, server_default="true", default=True)
     stripe_coupon_id = Column(Text, nullable=True)
+    # Which Stripe mode minted stripe_coupon_id — 'live' | 'test' (migration
+    # 263). A test-mode Coupon id is simply not there when a live key asks
+    # for it, so services/discount_coupons.ensure_stripe_coupon re-syncs
+    # whenever this doesn't match the key the app is running on. NULL for
+    # every coupon created before this shipped.
+    stripe_mode = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

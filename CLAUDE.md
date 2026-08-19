@@ -5340,6 +5340,54 @@ created at checkout.
   `once` behaviour above) is also not built — flagged as an open question,
   not assumed wanted.
 
+### A cached Stripe id belongs to ONE mode (migration 263, Aug 2026)
+
+Reported live off the first real checkouts: `No such coupon: 'IBBpUgf0'; a
+similar object exists in test mode, but a live mode key was used`, and a club
+entering the code LEEDY got nowhere.
+
+- **Nothing was wrong with the coupon. It was in the other Stripe mode.**
+  Every Stripe object id (Coupon, Product, Customer, Subscription) exists in
+  test OR live, never both, and the id itself carries no marker saying which.
+  BetterCricket had three places holding one: `stripe_products` (152),
+  `stripe_coupons` (153) and `discount_coupons.stripe_coupon_id` (156), all
+  written while the box still ran test keys, all handed straight to the live
+  API the day the keys changed. **The cache key has to include the mode**, or
+  every discount on the platform dies at the key switch.
+- **`stripe_client.stripe_mode()` reads it off the secret key** (`_live_` /
+  `_test_` in an `sk_` or `rk_` key, else `unknown`). The two caches are keyed
+  on `(key, mode)` — the old single-column PKs are gone, replaced by unique
+  indexes, which is what the `ON CONFLICT` targets.
+- **Existing rows are backfilled to `'unknown'`, deliberately not guessed.**
+  A cached id can't be interrogated for its mode without asking Stripe, so
+  `unknown` is a value no lookup matches and the object is simply re-created
+  in the mode being used. The stale rows stay as history; the orphaned
+  test-mode objects they point at cost nothing.
+- **A discount coupon RE-SYNCS rather than refusing.**
+  `discount_coupons.ensure_stripe_coupon` mints a fresh Stripe Coupon and
+  stamps `discount_coupons.stripe_mode` whenever the stored mode isn't the
+  one in use (NULL for every coupon predating this, so each re-syncs once, on
+  first use). A code already given to a club therefore survives the key
+  switch with no Super Admin re-creating the catalogue. Called from both
+  redeem paths, NOT from `/quote` — a price preview does no Stripe call at
+  all and shouldn't start creating objects.
+- **A stale `organisations.stripe_customer_id` used to kill the whole
+  checkout** ("No such customer" is a hard reject, not a fallback), so
+  `create_checkout_session` checks the Customer resolves first and starts a
+  new one if not; `handle_checkout_completed` re-stamps the org either way.
+  **A transient Stripe error reads as "exists"**, so a wobble can't orphan a
+  real club's Customer.
+- **Not covered, and it can't be**: a club whose `stripe_subscription_id` was
+  created in test mode has no live subscription to add modules to. That is a
+  club that never really subscribed, not an id to repair.
+- **Verified against a real Postgres** (migration 263 applied three times to
+  a populated pre-263 table carrying the reported ids, the lifespan mirror
+  landing on the same schema, both modes coexisting, the race-tolerant
+  upsert still no-oping) and through the shipped functions themselves with
+  Stripe stubbed: the stale rows ignored, live rows reused, one create per
+  new object, and `ensure_stripe_coupon` re-syncing a NULL/test coupon while
+  leaving an already-live one alone.
+
 ### Add-on pricing was still applying the bundle discount (Jul 2026)
 
 Caught in live testing: adding modules to an already-subscribed club's

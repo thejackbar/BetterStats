@@ -68,6 +68,7 @@ async def create_coupon(db: AsyncSession, *, created_by, **fields) -> DiscountCo
             raise CouponError(f"Unknown module(s): {', '.join(bad)}")
     coupon = DiscountCoupon(id=uuid.uuid4(), code=code, created_by=created_by, **fields)
     coupon.stripe_coupon_id = await stripe_client.sync_coupon_to_stripe(db, coupon)
+    coupon.stripe_mode = stripe_client.stripe_mode()
     db.add(coupon)
     await db.commit()
     await db.refresh(coupon)
@@ -229,10 +230,34 @@ async def validate_redemption(db: AsyncSession, code: str, org, *, is_new_signup
     return coupon
 
 
+async def ensure_stripe_coupon(db: AsyncSession, coupon) -> str:
+    """The coupon's Stripe Coupon id for the mode the app is actually running
+    in, minting it if what we hold belongs to the other one.
+
+    A Stripe Coupon lives in exactly one mode, so an id created while the box
+    ran test keys is dead the moment live keys are configured — Stripe answers
+    "No such coupon ...; a similar object exists in test mode", which is what
+    failed every live checkout carrying a code. Re-syncing rather than
+    refusing means a coupon a club has already been given keeps working
+    through a key switch, with no Super Admin re-creating the catalogue.
+
+    Every coupon created before migration 263 has a NULL stripe_mode, which
+    reads as "not this mode" and so re-syncs once, on first use."""
+    mode = stripe_client.stripe_mode()
+    if coupon.stripe_coupon_id and coupon.stripe_mode == mode:
+        return coupon.stripe_coupon_id
+    coupon.stripe_coupon_id = await stripe_client.sync_coupon_to_stripe(db, coupon)
+    coupon.stripe_mode = mode
+    await db.commit()
+    await db.refresh(coupon)
+    return coupon.stripe_coupon_id
+
+
 async def redeem_for_new_signup(db: AsyncSession, code: str, org, selected_module_keys: list[str], user) -> dict:
     coupon = await validate_redemption(
         db, code, org, is_new_signup=True, candidate_module_keys=selected_module_keys,
     )
+    stripe_coupon_id = await ensure_stripe_coupon(db, coupon)
     redemption = DiscountCouponRedemption(
         id=uuid.uuid4(), coupon_id=coupon.id, organisation_id=org.id,
         redeemed_by_user_id=user.id if user else None, applied_via="self_serve", status="pending",
@@ -242,7 +267,7 @@ async def redeem_for_new_signup(db: AsyncSession, code: str, org, selected_modul
     await db.refresh(redemption)
     return {
         "redemption_id": str(redemption.id),
-        "stripe_coupon_id": coupon.stripe_coupon_id,
+        "stripe_coupon_id": stripe_coupon_id,
         "stackable_with_bundle": coupon.stackable_with_bundle,
         "coupon": coupon,
     }
@@ -256,7 +281,8 @@ async def redeem_for_existing_subscription(db: AsyncSession, code: str, org, use
     coupon = await validate_redemption(
         db, code, org, is_new_signup=False, candidate_module_keys=held_keys, force=force,
     )
-    await stripe_client.attach_discount_to_subscription(org.stripe_subscription_id, coupon.stripe_coupon_id)
+    stripe_coupon_id = await ensure_stripe_coupon(db, coupon)
+    await stripe_client.attach_discount_to_subscription(org.stripe_subscription_id, stripe_coupon_id)
     redemption = DiscountCouponRedemption(
         id=uuid.uuid4(), coupon_id=coupon.id, organisation_id=org.id,
         redeemed_by_user_id=user.id if user else None, applied_via=applied_via, status="active",

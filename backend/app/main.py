@@ -3250,6 +3250,41 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
+        # A cached Stripe id belongs to ONE mode — a test-mode Coupon/Product
+        # is not there when a live key asks for it (migration 263). Existing
+        # rows keep 'unknown', which no lookup matches, so the object is
+        # re-created in the current mode the next time it's needed.
+        await conn.execute(text(
+            "ALTER TABLE stripe_products ADD COLUMN IF NOT EXISTS stripe_mode TEXT NOT NULL DEFAULT 'unknown'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE stripe_coupons ADD COLUMN IF NOT EXISTS stripe_mode TEXT NOT NULL DEFAULT 'unknown'"
+        ))
+        await conn.execute(text("""
+            DO $$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'stripe_products'::regclass AND contype = 'p'
+                ) THEN
+                    ALTER TABLE stripe_products DROP CONSTRAINT stripe_products_pkey;
+                END IF;
+                IF EXISTS (
+                    SELECT 1 FROM pg_constraint
+                    WHERE conrelid = 'stripe_coupons'::regclass AND contype = 'p'
+                ) THEN
+                    ALTER TABLE stripe_coupons DROP CONSTRAINT stripe_coupons_pkey;
+                END IF;
+            END $$;
+        """))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_stripe_products_key_mode "
+            "ON stripe_products (billing_key, stripe_mode)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_stripe_coupons_cents_mode "
+            "ON stripe_coupons (discount_cents, stripe_mode)"
+        ))
         # Pending pause/cancel signal for a running sync (migration 160) — see
         # services/sync.py's SyncControlSignal / _check_sync_control. NULL =
         # no request pending; 'pause' | 'cancel' while an operator's request
@@ -3364,6 +3399,10 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon "
             "ON discount_coupon_redemptions(coupon_id, redeemed_at DESC)"
         ))
+        # Which Stripe mode minted stripe_coupon_id (migration 263). NULL on
+        # every coupon created before this shipped, which reads as "not this
+        # mode" and re-syncs the mirrored Coupon on first use.
+        await conn.execute(text("ALTER TABLE discount_coupons ADD COLUMN IF NOT EXISTS stripe_mode TEXT"))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

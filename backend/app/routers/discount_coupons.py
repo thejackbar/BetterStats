@@ -44,6 +44,10 @@ def _serialize(c) -> dict:
         "max_redemptions": c.max_redemptions,
         "active": c.active,
         "stripe_coupon_id": c.stripe_coupon_id,
+        # Which Stripe mode that id belongs to — a coupon still showing 'test'
+        # (or nothing, for one created before migration 263) re-syncs itself
+        # into live the first time it's redeemed.
+        "stripe_mode": c.stripe_mode,
         "created_at": c.created_at,
     }
 

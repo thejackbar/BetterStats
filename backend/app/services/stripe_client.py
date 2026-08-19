@@ -57,6 +57,29 @@ def _combined_coupon_name(bundle_dollars: float, coupon_code: str, coupon_dollar
     return _clamp_coupon_name(f"{prefix}{coupon_code[:budget]}{suffix}")
 
 
+def stripe_mode() -> str:
+    """'live' or 'test' — which Stripe mode the configured secret key talks to.
+
+    Every Stripe object id (Coupon, Product, Customer, Subscription) belongs
+    to ONE mode: ask a live key for an id minted under a test key and Stripe
+    answers "No such coupon ...; a similar object exists in test mode, but a
+    live mode key was used". Our own caches (stripe_products, stripe_coupons,
+    discount_coupons.stripe_coupon_id) therefore have to record which mode
+    wrote an id, or switching the keys over hands live checkouts a pile of
+    ids that no longer resolve — which is exactly what took the first live
+    coupon checkouts down.
+
+    Both plain (`sk_`) and restricted (`rk_`) keys carry the mode in the
+    prefix. An unrecognised shape reads as 'unknown', which matches no cached
+    row, so the object is simply re-created rather than a stale id reused."""
+    key = settings.stripe_secret_key or ""
+    if "_live_" in key:
+        return "live"
+    if "_test_" in key:
+        return "test"
+    return "unknown"
+
+
 def _require_configured() -> None:
     if not settings.stripe_configured:
         raise StripeNotConfigured("Stripe is not configured (STRIPE_SECRET_KEY/STRIPE_PUBLISHABLE_KEY unset)")
@@ -101,6 +124,22 @@ async def _ensure_customer(*, org_id: str, club_name: str, email: str | None,
         kwargs["address"] = address
     customer = await stripe.Customer.create_async(**kwargs)
     return customer["id"]
+
+
+async def _customer_exists(customer_id: str) -> bool:
+    """Whether this Customer resolves for the key the app is configured with.
+    A deleted Customer, or one minted in the other Stripe mode, reads as
+    missing — either way the caller should start a new one rather than send
+    Stripe an id it will reject. A transient API error reads as True so a
+    Stripe wobble never orphans a real club's Customer."""
+    _require_configured()
+    try:
+        customer = await stripe.Customer.retrieve_async(customer_id)
+    except stripe.error.InvalidRequestError:
+        return False
+    except stripe.error.StripeError:
+        return True
+    return not customer.get("deleted")
 
 
 async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys: list[str],
@@ -253,6 +292,19 @@ async def create_checkout_session(db: AsyncSession, *, org_id: str, billing_keys
         # directly in the Stripe Dashboard (Product catalogue → Coupons),
         # no admin UI of our own needed for that.
         params["allow_promotion_codes"] = True
+
+    if customer_id and not await _customer_exists(customer_id):
+        # Same mode trap as the coupon/product caches (see stripe_mode) — a
+        # stripe_customer_id stamped onto the org while the box ran test keys
+        # doesn't resolve for a live key, and Stripe rejects the whole session
+        # with "No such customer" rather than falling back. Start a fresh
+        # Customer instead; handle_checkout_completed re-stamps the org with
+        # its id once this checkout completes.
+        logger.warning(
+            "Stripe customer %s not found in %s mode — creating a new one for org %s",
+            customer_id, stripe_mode(), org_id,
+        )
+        customer_id = None
 
     if customer_id:
         params["customer"] = customer_id
@@ -439,9 +491,13 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
     instead, which needs a descriptive per-redemption name and so isn't
     cached the same way."""
     cents = round(discount_dollars * 100)
+    # Keyed on (amount, mode) — a coupon minted under test keys doesn't exist
+    # for a live key, so the mode is part of the cache key, not an attribute
+    # of the row (migration 263).
+    mode = stripe_mode()
     row = (await db.execute(
-        text("SELECT stripe_coupon_id FROM stripe_coupons WHERE discount_cents = :c"),
-        {"c": cents},
+        text("SELECT stripe_coupon_id FROM stripe_coupons WHERE discount_cents = :c AND stripe_mode = :m"),
+        {"c": cents, "m": mode},
     )).first()
     if row:
         return row[0]
@@ -459,10 +515,10 @@ async def _ensure_bundle_coupon(db: AsyncSession, discount_dollars: float) -> st
     # is harmless Dashboard clutter, not worth locking for.
     await db.execute(
         text(
-            "INSERT INTO stripe_coupons (discount_cents, stripe_coupon_id) VALUES (:c, :p) "
-            "ON CONFLICT (discount_cents) DO NOTHING"
+            "INSERT INTO stripe_coupons (discount_cents, stripe_coupon_id, stripe_mode) "
+            "VALUES (:c, :p, :m) ON CONFLICT (discount_cents, stripe_mode) DO NOTHING"
         ),
-        {"c": cents, "p": coupon["id"]},
+        {"c": cents, "p": coupon["id"], "m": mode},
     )
     await db.commit()
     return coupon["id"]
@@ -546,9 +602,12 @@ def construct_webhook_event(payload: bytes, sig_header: str):
 # every add-on checkout.
 
 async def _ensure_product(db: AsyncSession, billing_key: str) -> str:
+    # Cached per (module, mode) — see stripe_mode()'s docstring for why a
+    # test-mode Product id is useless to a live key (migration 263).
+    mode = stripe_mode()
     row = (await db.execute(
-        text("SELECT stripe_product_id FROM stripe_products WHERE billing_key = :k"),
-        {"k": billing_key},
+        text("SELECT stripe_product_id FROM stripe_products WHERE billing_key = :k AND stripe_mode = :m"),
+        {"k": billing_key, "m": mode},
     )).first()
     if row:
         return row[0]
@@ -562,10 +621,10 @@ async def _ensure_product(db: AsyncSession, billing_key: str) -> str:
     # dashboard) and not worth locking for on a low-frequency admin action.
     await db.execute(
         text(
-            "INSERT INTO stripe_products (billing_key, stripe_product_id) VALUES (:k, :p) "
-            "ON CONFLICT (billing_key) DO NOTHING"
+            "INSERT INTO stripe_products (billing_key, stripe_product_id, stripe_mode) "
+            "VALUES (:k, :p, :m) ON CONFLICT (billing_key, stripe_mode) DO NOTHING"
         ),
-        {"k": billing_key, "p": product["id"]},
+        {"k": billing_key, "p": product["id"], "m": mode},
     )
     await db.commit()
     return product["id"]
