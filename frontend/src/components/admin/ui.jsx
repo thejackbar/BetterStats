@@ -341,7 +341,7 @@ export function Initials({ name, size = 30, className = '' }) {
 export function ListRow({ name, sub, figure, flag = false, selected = false, avatar = true, onClick }) {
   return (
     <button
-      type="button" onClick={onClick}
+      type="button" onClick={onClick} title={sub || undefined}
       className={`w-full flex items-center gap-2.5 px-[11px] py-[9px] rounded-lg text-left border transition-colors ${selected ? '' : 'border-transparent hover:bg-pb-surface2'}`}
       style={selected ? { borderColor: TINT.border, background: TINT.panel } : undefined}
     >

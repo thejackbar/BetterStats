@@ -201,7 +201,13 @@ export default function CommsTemplates() {
 
   const items = useMemo(() => (templates || []).map(t => ({
     id: t.id, name: t.name,
-    sub: t.sales_template_label ? `Email layout · Sales Workspace: ${t.sales_template_label}` : 'Email layout',
+    // Kept short on purpose — this mono caption line always truncates at
+    // this width (ListRow, shared with every other CRUD list in the app),
+    // so a longer sentence just runs off with no way to read the rest.
+    // The full "Linked to the Sales Workspace's X dropdown entry" wording
+    // lives in the detail pane's own Note once the record is open, and the
+    // row itself now also carries a hover title with the same short text.
+    sub: t.sales_template_label ? `Sales: ${t.sales_template_label}` : 'Email layout',
   })), [templates])
 
   if (intro.showing) {
