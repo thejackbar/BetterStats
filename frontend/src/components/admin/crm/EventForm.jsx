@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
-import { Field, TextInput, TextArea, Select, Btn } from './ui'
+import { Field, TextInput, TextArea, Select, Btn, ownerEntryId } from './ui'
 import DateTimePicker from './DateTimePicker'
 
 // Shared vocab — mirrors services/crm.py EVENT_TYPES / ALERT_CODES and
@@ -139,9 +139,19 @@ export default function EventForm({ initial, ownerOptions = [], contactOptions =
       <div className="flex flex-wrap gap-3">
         {ownerOptions.length > 0 && (
           <Field label="Owner (assigned to)" width="200px">
-            <Select value={form.owner_user_id} onChange={set('owner_user_id')}>
+            {/* Bound through ownerEntryId: an owner list entry is a PERSON
+                and may cover more than one account, so a stored id that is
+                one of the folded-away accounts still selects the right
+                person instead of reading blank. Saving writes the entry's
+                own id, which settles ownership on one account. */}
+            <Select value={ownerEntryId(ownerOptions, form.owner_user_id)} onChange={set('owner_user_id')}>
               <option value="">Unassigned</option>
-              {ownerOptions.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              {ownerOptions.filter(o => !o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+              {ownerOptions.some(o => o.is_sales_rep) && (
+                <optgroup label="Sales reps">
+                  {ownerOptions.filter(o => o.is_sales_rep).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </optgroup>
+              )}
             </Select>
           </Field>
         )}

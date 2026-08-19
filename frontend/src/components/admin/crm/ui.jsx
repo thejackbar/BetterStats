@@ -3,7 +3,7 @@
 // (pages/admin/SuperCrm.jsx), so a single Kanban/detail implementation serves
 // the internal sales pipeline and the club's own CRM. Mirrors the
 // self-contained bettermerch/ui.jsx pattern.
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { api } from '../../../lib/api'
 
@@ -45,8 +45,9 @@ export function Field({ label, children, hint, half, width, composite = false })
   // a picker that swaps "search box" for "chosen name + Clear button" mid-
   // interaction, is not one labelled control, and a <label> forwards a click
   // on any non-control descendant to whichever labelable element it holds AT
-  // THAT MOMENT. Use it for the Sales Workspace's Interested-in pills and
-  // any similar composite field.
+  // THAT MOMENT. Use it for the Sales Workspace's Interested-in pills, the
+  // MultiSelect below (whose every row is a button), and any similar
+  // composite field.
   const Tag = composite ? 'div' : 'label'
   const groupProps = composite ? { role: 'group', 'aria-label': label || undefined } : {}
   return (
@@ -69,6 +70,133 @@ export function NumberInput(props) {
 export function Select({ children, ...props }) {
   return <select {...props} className={`${inputCls} cursor-pointer ${props.className || ''}`}>{children}</select>
 }
+// A checkbox dropdown: several values at once, ORed by whoever reads it.
+// Reach for this over `Select` on any CRM filter whose values come from a
+// known list and where "these two, not just one" is a real question — the
+// owner filters on the Board, List, Event calendar and Event list are all
+// this one component.
+//
+// `groups` is `[{ label, options: [{ value, label, hint }] }]`; a group with
+// a blank label draws no heading, so a flat list is just one group. `value`
+// is always an array and an EMPTY array means no filter at all, which is
+// what `allLabel` reads out.
+//
+// Every row calls preventDefault() on mousedown as well as handling the
+// click: that suppresses a wrapping <label>'s click-forwarding even if this
+// is ever mounted inside a plain Field, which would otherwise hand the click
+// to whichever control the field holds and undo the tick. Field's own
+// `composite` is still the real fix; this is the net under it.
+export function MultiSelect({ value, onChange, groups, allLabel = 'Any', width, summary, disabled }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef(null)
+  const selected = value || []
+
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => { if (box.current && !box.current.contains(e.target)) setOpen(false) }
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', away)
+    document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
+  }, [open])
+
+  const all = (groups || []).flatMap(g => g.options || [])
+  const toggle = (v) => onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v])
+
+  // One pick reads as its own name; several read as a count, since the names
+  // would not fit the control's width and a truncated list is worse than a
+  // number the chip below the bar spells out in full.
+  const label = summary ? summary(selected, all)
+    : selected.length === 0 ? allLabel
+      : selected.length === 1 ? (all.find(o => o.value === selected[0])?.label || '1 selected')
+        : `${selected.length} selected`
+
+  const style = width ? { width } : undefined
+  return (
+    <div className="relative" ref={box} style={style}>
+      <button type="button" disabled={disabled} onClick={() => setOpen(v => !v)}
+        className={`${inputCls} cursor-pointer flex items-center justify-between gap-1.5 text-left disabled:opacity-40`}
+        aria-haspopup="listbox" aria-expanded={open}>
+        <span className={`truncate ${selected.length ? '' : 'text-pb-faint'}`}>{label}</span>
+        <span className="text-pb-faint shrink-0 text-[10px] leading-none">▾</span>
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 min-w-full w-max max-w-[280px] max-h-[300px] overflow-y-auto rounded-lg border border-pb-hairline2 bg-pb-surface shadow-xl py-1"
+          role="listbox">
+          <button type="button" onMouseDown={e => e.preventDefault()} onClick={() => onChange([])}
+            className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 ${selected.length ? 'text-pb-faint' : 'text-pb-accent'}`}>
+            {allLabel}
+          </button>
+          {(groups || []).map((g, gi) => (
+            <div key={g.label || gi}>
+              {g.label && (g.options || []).length > 0 && (
+                <div className="px-2.5 pt-2 pb-1 font-mono text-[9.5px] tracking-wide3 uppercase text-pb-faintest border-t border-pb-hairline mt-1">{g.label}</div>
+              )}
+              {(g.options || []).map(o => {
+                const on = selected.includes(o.value)
+                return (
+                  <button key={o.value} type="button" role="option" aria-selected={on}
+                    onMouseDown={e => e.preventDefault()} onClick={() => toggle(o.value)}
+                    className="w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface2 flex items-center gap-2">
+                    <span className={`w-[13px] h-[13px] rounded-[3px] border shrink-0 flex items-center justify-center text-[9px] leading-none ${on ? 'border-pb-accent text-black' : 'border-pb-hairline2'}`}
+                      style={on ? { background: 'var(--pb-accent)' } : undefined}>{on ? '✓' : ''}</span>
+                    <span className="truncate">{o.label}</span>
+                    {o.hint && <span className="ml-auto text-[10.5px] text-pb-faintest shrink-0">{o.hint}</span>}
+                  </button>
+                )
+              })}
+            </div>
+          ))}
+          {all.length === 0 && <div className="px-2.5 py-2 text-[12px] text-pb-faintest">Nothing to choose from.</div>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Owner pickers everywhere in the CRM read the SAME shape from
+// GET /super/crm/owners: super admins and sales reps in one list, each entry
+// one PERSON carrying every account id they hold (`ids`). Two helpers keep
+// the four surfaces honest about that.
+
+export const OWNER_UNASSIGNED = '__unassigned__'
+
+// Filter option groups — Unassigned, then the two staff groups under their
+// own headings, so "owned by a rep" is answerable at a glance. `unassigned`
+// is off for a field that always has a value (who CREATED an event), where
+// the row would only ever match nothing.
+export const ownerFilterGroups = (owners, { unassigned = true } = {}) => {
+  const supers = (owners || []).filter(o => !o.is_sales_rep)
+  const reps = (owners || []).filter(o => o.is_sales_rep)
+  return [
+    { label: '', options: unassigned ? [{ value: OWNER_UNASSIGNED, label: 'Unassigned' }] : [] },
+    { label: supers.length && reps.length ? 'Super admins' : '', options: supers.map(o => ({ value: o.id, label: o.name })) },
+    { label: 'Sales reps', options: reps.map(o => ({ value: o.id, label: o.name })) },
+  ].filter(g => g.options.length > 0)
+}
+
+// Does `userId` belong to any of the picked people? Selecting one entry has
+// to match every account behind it, or a deal owned by the account that was
+// folded away would silently drop out of the results.
+export const ownerMatches = (picked, owners, userId) => {
+  if (!picked || picked.length === 0) return true
+  if (!userId) return picked.includes(OWNER_UNASSIGNED)
+  return picked.some(p => {
+    if (p === OWNER_UNASSIGNED) return false
+    const o = (owners || []).find(x => x.id === p)
+    return o ? (o.ids || [o.id]).includes(String(userId)) : p === String(userId)
+  })
+}
+
+// The entry a stored owner_user_id belongs to — what an assignment Select
+// binds its value to, since the id on the record may be a folded-away
+// account rather than the entry's own primary id.
+export const ownerEntryId = (owners, userId) => {
+  if (!userId) return ''
+  const o = (owners || []).find(x => (x.ids || [x.id]).includes(String(userId)))
+  return o ? o.id : String(userId)
+}
+
 export function TextArea(props) {
   return <textarea {...props} className={`${inputCls} min-h-[64px] ${props.className || ''}`} />
 }
