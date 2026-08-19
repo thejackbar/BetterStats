@@ -3403,6 +3403,50 @@ async def lifespan(app: FastAPI):
         # every coupon created before this shipped, which reads as "not this
         # mode" and re-syncs the mirrored Coupon on first use.
         await conn.execute(text("ALTER TABLE discount_coupons ADD COLUMN IF NOT EXISTS stripe_mode TEXT"))
+        # Commission attribution on a CRM deal (migration 264) — who EARNED
+        # the club, as distinct from owner_user_id, who is merely working it
+        # now. Byte-identical to alembic/versions/264_crm_commission_
+        # attribution.py, including the one-time backfill from the activity
+        # rows already recorded.
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS commission_rep_user_id UUID "
+            "REFERENCES users(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS commission_attributed_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE crm_deals ADD COLUMN IF NOT EXISTS commission_attributed_via TEXT"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_crm_deals_commission_rep "
+            "ON crm_deals (commission_rep_user_id) WHERE commission_rep_user_id IS NOT NULL"
+        ))
+        await conn.execute(text("""
+            WITH qualifying AS (
+                SELECT DISTINCT ON (a.deal_id)
+                       a.deal_id,
+                       a.created_by_user_id,
+                       a.occurred_at,
+                       CASE WHEN a.type = 'email' THEN 'email' ELSE 'call' END AS via
+                FROM crm_activities a
+                JOIN club_memberships cm ON cm.user_id = a.created_by_user_id AND cm.role = 'sales'
+                WHERE a.deal_id IS NOT NULL
+                  AND a.created_by_user_id IS NOT NULL
+                  AND (
+                        a.type = 'email'
+                     OR (a.type = 'call' AND (a.outcome IS NULL OR a.outcome <> 'general_note'))
+                  )
+                ORDER BY a.deal_id, a.occurred_at ASC
+            )
+            UPDATE crm_deals d
+               SET commission_rep_user_id = q.created_by_user_id,
+                   commission_attributed_at = q.occurred_at,
+                   commission_attributed_via = q.via
+              FROM qualifying q
+             WHERE q.deal_id = d.id
+               AND d.commission_rep_user_id IS NULL
+        """))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(

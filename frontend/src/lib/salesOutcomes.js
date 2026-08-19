@@ -58,3 +58,12 @@ export function groupedOutcomes() {
 export function outcomeLabel(key) {
   return CALL_OUTCOMES[key]?.label || key
 }
+
+// A 'general' outcome is not a call: it records something worth noting
+// against the club without claiming anyone was spoken to. The server files it
+// as a note rather than a call, so it never marks the club as called and
+// never attributes the club to a rep for commission. Mirrors
+// services/sales_workspace.py's GENERAL_OUTCOMES.
+export function isGeneralOutcome(key) {
+  return CALL_OUTCOMES[key]?.category === 'general'
+}

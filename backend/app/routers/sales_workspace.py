@@ -298,7 +298,11 @@ async def list_clubs(
     follow_ups = await sw.next_follow_ups_by_deal(db, deal_ids)
     contact_counts = await sw.contact_counts_by_club(db, (d.marketing_club_id for d in deals))
 
+    # One lookup for both names on the row: who holds the club (owner) and
+    # who earned it (the attributing rep). They are usually the same person
+    # and often the same id, hence one query over the union rather than two.
     owner_ids = {d.owner_user_id for d in deals if d.owner_user_id}
+    owner_ids |= {d.commission_rep_user_id for d in deals if d.commission_rep_user_id}
     owners = {}
     if owner_ids:
         rows = (await db.execute(select(User).where(User.id.in_(owner_ids)))).scalars().all()
@@ -315,6 +319,8 @@ async def list_clubs(
         row = crm_service._deal_dict(d, stage_by_id.get(d.stage_id), club)
         owner = owners.get(d.owner_user_id)
         row["owner_name"] = (owner.display_name or owner.username) if owner else None
+        rep = owners.get(d.commission_rep_user_id)
+        row["commission_rep_name"] = (rep.display_name or rep.username) if rep else None
         row["contact_count"] = contact_counts.get(d.marketing_club_id, 0)
         row["not_interested"] = bool(club.not_interested) if club else False
         # For the queue card's "Town, ST" line — same fields the drawer
@@ -504,6 +510,8 @@ async def get_club(
 
     # Same shape the queue list already carries, so the drawer's own "Called
     # / Never called" reads off the identical field the queue row does.
+    deal_out["commission_rep_name"] = (
+        await sw.commission_rep_names(db, [deal])).get(deal.commission_rep_user_id)
     last_call = (await sw.last_calls_by_deal(db, [deal.id])).get(deal.id)
     deal_out["ever_called"] = last_call is not None
     deal_out["last_call"] = crm_service._activity_dict(last_call) if last_call else None
@@ -656,6 +664,15 @@ async def log_call(
         next_follow_up_at=body.next_follow_up_at, created_by_user_id=actor.user.id,
         event_owner_user_id=event_owner_id,
     )
+    # Real sales work on the club, so the rep who did it earns it — EXCEPT a
+    # General Note, which claims nothing about the club (see the commission
+    # note in services/sales_workspace.py). Assignment is untouched either
+    # way; this is only about who gets paid for it.
+    if body.outcome not in sw.GENERAL_OUTCOMES:
+        await sw.attribute_commission(
+            db, deal=deal, actor_user_id=actor.user.id, actor_role=actor.role,
+            via=sw.COMMISSION_VIA_CALL,
+        )
     await db.commit()
     return await get_club(deal_id, actor, db)
 
@@ -895,6 +912,13 @@ async def send_email(
             "to_email": to_email, "to_name": person.full_name,
         },
     )
+    # The other qualifying action: the rep put something in front of one of
+    # the club's contacts, so they earn the club. Stamped after the send
+    # actually succeeded — a failed send raises above and attributes nothing.
+    await sw.attribute_commission(
+        db, deal=deal, actor_user_id=actor.user.id, actor_role=actor.role,
+        via=sw.COMMISSION_VIA_EMAIL,
+    )
     await db.commit()
     return {"status": "sent"}
 
@@ -1054,6 +1078,11 @@ async def complete_follow_up(
 
 class AssignBody(BaseModel):
     owner_user_id: Optional[str] = None  # None/omitted = unassign
+    # Set once the super admin has answered the "this club has been
+    # attributed to X" prompt. Absent/false on an attributed club is a 409,
+    # never a silent move — the browser dialog is the prompt, but the rule
+    # lives here so no client can route around it.
+    confirm_reassign: bool = False
 
 
 @router.patch("/clubs/{deal_id}/assign")
@@ -1072,6 +1101,14 @@ async def assign(
         if owner is None:
             raise HTTPException(status_code=404, detail="User not found")
         owner_name = owner.display_name or owner.username
+    if not body.confirm_reassign and sw.commission_reassign_blocked(deal, owner_id):
+        rep_name = (await sw.commission_rep_names(db, [deal])).get(deal.commission_rep_user_id)
+        raise HTTPException(status_code=409, detail={
+            "code": "commission_attributed",
+            "message": sw.commission_confirm_message(rep_name),
+            "commission_rep_user_id": str(deal.commission_rep_user_id),
+            "commission_rep_name": rep_name,
+        })
     await crm_service.update_deal(db, deal, owner_user_id=owner_id)
     await sw.log_reassignment(db, deal=deal, owner_name=owner_name, created_by_user_id=actor.user.id)
     await db.commit()
@@ -1089,6 +1126,7 @@ async def assign(
 class BulkAssignBody(BaseModel):
     deal_ids: list[str]
     owner_user_ids: list[str]  # one id = assign all to them; several = split evenly, round-robin
+    confirm_reassign: bool = False  # see AssignBody — same prompt, several clubs at once
 
 
 @router.post("/bulk-assign")
@@ -1124,6 +1162,33 @@ async def bulk_assign(
     )).scalars().all()
     if not deals:
         raise HTTPException(status_code=404, detail="None of the selected clubs could be found")
+
+    # Same attribution guard as the single-deal PATCH, or bulk assignment
+    # would be the way around it. A round-robin split can send a club to any
+    # of the chosen reps, so a club already earned by someone else is
+    # reported whenever it is not going to exactly the rep who earned it —
+    # which, with several owners in play, is anything but a single-owner
+    # assignment straight back to them.
+    if not body.confirm_reassign:
+        attributed = [
+            d for d in deals
+            if d.commission_rep_user_id is not None
+            and (len(owner_ids) > 1 or sw.commission_reassign_blocked(d, owner_ids[0]))
+        ]
+        if attributed:
+            names = await sw.commission_rep_names(db, attributed)
+            raise HTTPException(status_code=409, detail={
+                "code": "commission_attributed",
+                "message": sw.commission_confirm_message(
+                    names.get(attributed[0].commission_rep_user_id)) if len(attributed) == 1 else
+                    f"{len(attributed)} of these clubs have been attributed to a sales rep - "
+                    "do you really want to change their assignment?",
+                "clubs": [
+                    {"deal_id": str(d.id), "title": d.title,
+                     "commission_rep_name": names.get(d.commission_rep_user_id)}
+                    for d in attributed
+                ],
+            })
 
     counts = await sw.bulk_assign(
         db, deals=deals, owner_ids=owner_ids, owner_names=owner_names, created_by_user_id=actor.user.id,

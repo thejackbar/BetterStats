@@ -73,6 +73,10 @@ class DealUpdate(BaseModel):
     discount_amount_cents: Optional[int] = None
     discount_percent: Optional[int] = None
     discount_reason: Optional[str] = None
+    # Answered the "this club has been attributed to X" prompt — see the
+    # commission note in services/sales_workspace.py. Only read when this
+    # PATCH changes owner_user_id on an attributed deal.
+    confirm_reassign: bool = False
 
 
 class StageMoveBody(BaseModel):
@@ -1012,8 +1016,25 @@ async def super_recalc_product_interest(deal_id: str, db: AsyncSession = Depends
 
 @super_router.patch("/deals/{deal_id}", dependencies=[_super])
 async def super_update_deal(deal_id: str, body: DealUpdate, db: AsyncSession = Depends(get_db)):
+    from app.services import sales_workspace as sw
+
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    await _update_deal_or_422(db, deal, **body.model_dump(exclude_unset=True))
+    fields = body.model_dump(exclude_unset=True)
+    confirm = bool(fields.pop("confirm_reassign", False))
+    # The Sales Pipeline's own Owner picker changes assignment too, so it
+    # needs the same commission guard the Sales Workspace's assign endpoints
+    # carry — otherwise the deal detail card is simply the way around it.
+    if "owner_user_id" in fields and not confirm:
+        new_owner = _uuid_or_404(fields["owner_user_id"]) if fields["owner_user_id"] else None
+        if sw.commission_reassign_blocked(deal, new_owner):
+            rep_name = (await sw.commission_rep_names(db, [deal])).get(deal.commission_rep_user_id)
+            raise HTTPException(status_code=409, detail={
+                "code": "commission_attributed",
+                "message": sw.commission_confirm_message(rep_name),
+                "commission_rep_user_id": str(deal.commission_rep_user_id),
+                "commission_rep_name": rep_name,
+            })
+    await _update_deal_or_422(db, deal, **fields)
     await db.commit()
     return await _serialize_deal(db, deal)
 

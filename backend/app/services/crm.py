@@ -527,6 +527,11 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         "status": deal.status,
         "lost_reason": deal.lost_reason,
         "owner_user_id": str(deal.owner_user_id) if deal.owner_user_id else None,
+        # Commission attribution — who EARNED the club, as distinct from
+        # owner_user_id above. See models/db.py::CrmDeal.
+        "commission_rep_user_id": str(deal.commission_rep_user_id) if deal.commission_rep_user_id else None,
+        "commission_attributed_at": deal.commission_attributed_at.isoformat() if deal.commission_attributed_at else None,
+        "commission_attributed_via": deal.commission_attributed_via,
         "source": deal.source,
         "onboarding_method": deal.onboarding_method,
         "lead_source": deal.lead_source,

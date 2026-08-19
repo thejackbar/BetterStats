@@ -9,7 +9,7 @@ import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, modu
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
-import { groupedOutcomes, outcomeLabel } from '../../lib/salesOutcomes'
+import { groupedOutcomes, outcomeLabel, isGeneralOutcome } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
 
@@ -489,8 +489,13 @@ function NoteEditForm({ value, onChange, onSave, onCancel, saving }) {
 }
 
 function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStartEdit, onSaveEdit, onCancelEdit, savingEdit }) {
-  const kindLabel = a.type === 'call' ? (a.outcome ? outcomeLabel(a.outcome) : 'Call')
-    : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
+  // The outcome names the row whenever there is one, whatever type it was
+  // filed under: a General Note is stored as a NOTE (it claims nothing about
+  // the club, so it must not read as a call anywhere) and would otherwise
+  // lose the label the person actually picked.
+  const kindLabel = a.outcome ? outcomeLabel(a.outcome)
+    : a.type === 'call' ? 'Call'
+      : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
   const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
   if (a.type === 'note' && editing) {
     return (
@@ -934,8 +939,11 @@ export default function SalesWorkspace() {
       }
       const d = await api.salesWorkspaceLogCall(drawer.deal.id, payload)
       setDrawer(d)
+      const wasNote = isGeneralOutcome(callForm.outcome)
       setCallForm(emptyCallForm())
-      toast?.success('Call logged')
+      // A General Note is not a call and does not mark the club as called,
+      // so it must not report itself as one either.
+      toast?.success(wasNote ? 'Note saved' : 'Call logged')
       loadClubs()
     } catch (err) {
       toast?.error(err.message)
@@ -997,9 +1005,26 @@ export default function SalesWorkspace() {
     }
   }
 
+  // Assignment and commission attribution are different things: a super
+  // admin may move a club whenever they like, but if a rep has already
+  // EARNED it (logged a real call outcome or emailed a contact) the server
+  // refuses with a 409 until this asks. Confirm re-sends the same request
+  // with the flag; Cancel leaves the assignment exactly as it was.
+  const assignWithConfirm = async (send) => {
+    try {
+      return await send(false)
+    } catch (err) {
+      if (err?.detail?.code !== 'commission_attributed') throw err
+      if (!window.confirm(err.message)) return null
+      return await send(true)
+    }
+  }
+
   const submitAssign = async (ownerUserId) => {
     try {
-      await api.salesWorkspaceAssign(drawer.deal.id, ownerUserId)
+      const res = await assignWithConfirm(
+        (confirm) => api.salesWorkspaceAssign(drawer.deal.id, ownerUserId, confirm))
+      if (res === null) { refreshBoth(); return }   // cancelled — put the picker back
       toast?.success('Reassigned')
       refreshBoth()
     } catch (err) {
@@ -1026,7 +1051,9 @@ export default function SalesWorkspace() {
     if (bulkReps.size === 0) { toast?.error('Pick at least one salesperson'); return }
     setBulkAssigning(true)
     try {
-      const result = await api.salesWorkspaceBulkAssign([...checkedIds], [...bulkReps])
+      const result = await assignWithConfirm(
+        (confirm) => api.salesWorkspaceBulkAssign([...checkedIds], [...bulkReps], confirm))
+      if (result === null) return   // cancelled — the selection stays as it was
       const summary = Object.entries(result.by_rep).map(([name, n]) => `${name}: ${n}`).join(', ')
       toast?.success(`Assigned ${result.assigned} club${result.assigned === 1 ? '' : 's'} — ${summary}`)
       setCheckedIds(new Set())
@@ -1414,10 +1441,21 @@ export default function SalesWorkspace() {
                   </div>
                   <div className="flex items-center gap-2">
                     {drawer.can_assign && (
-                      <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
-                        <option value="">Unassigned</option>
-                        {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
-                      </Select>
+                      <div>
+                        <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">
+                          <option value="">Unassigned</option>
+                          {team.map(u => <option key={u.id} value={u.id}>{u.display_name || u.username}</option>)}
+                        </Select>
+                        {/* Who EARNED the club, which is not the same as who
+                            holds it — shown here so a super admin sees whose
+                            work they are about to move before they touch the
+                            picker, not only in the confirm that follows. */}
+                        {drawer.deal.commission_rep_name && (
+                          <span className="block text-[10.5px] text-pb-faintest mt-1 text-right">
+                            Earned by {drawer.deal.commission_rep_name}
+                          </span>
+                        )}
+                      </div>
                     )}
                     {START_TRIAL_ENABLED && !drawer.deal.is_customer && drawer.deal.marketing_club_id && (
                       <Btn variant="primary" sm onClick={() => { setTrialForm(blankTrialForm); setShowStartTrial(true) }}>Start trial</Btn>

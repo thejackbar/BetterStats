@@ -4552,6 +4552,15 @@ class CrmDeal(Base):
     status = Column(Text, nullable=False, server_default="open", default="open")  # open | won | lost
     lost_reason = Column(Text, nullable=True)
     owner_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Migration 264: commission attribution, which is NOT owner_user_id.
+    # owner_user_id says who is working the club now and a super admin may
+    # move it at will; this says which sales rep EARNED it, set once by the
+    # first qualifying action (a logged call outcome other than General Note,
+    # or an email sent to one of the club's contacts) and never moved by a
+    # later reassignment. See services/sales_workspace.attribute_commission.
+    commission_rep_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    commission_attributed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    commission_attributed_via = Column(Text, nullable=True)  # call | email
     source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |

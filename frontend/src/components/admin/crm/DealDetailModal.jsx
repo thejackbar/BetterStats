@@ -85,7 +85,18 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const patch = async (fields) => {
     setSaving(true)
     try {
-      const updated = await client.updateDeal(dealId, fields)
+      let updated
+      try {
+        updated = await client.updateDeal(dealId, fields)
+      } catch (e) {
+        // Changing the Owner of a club a sales rep has EARNED (logged a real
+        // call outcome on, or emailed a contact at) comes back as a 409 until
+        // a super admin says yes. Assignment is theirs to change; the prompt
+        // is there so it is never changed without seeing whose work it moves.
+        if (e?.detail?.code !== 'commission_attributed') throw e
+        if (!window.confirm(e.message)) { setDeal(d => ({ ...d })); return }
+        updated = await client.updateDeal(dealId, { ...fields, confirm_reassign: true })
+      }
       setDeal(updated)
       onChanged?.()
     } catch (e) { toast.error(e.message || 'Could not save') } finally { setSaving(false) }
@@ -339,6 +350,12 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                     </optgroup>
                   )}
                 </Select>
+                {deal.commission_rep_user_id && (
+                  <span className="block text-[10.5px] text-pb-faintest mt-1">
+                    Earned by {ownerOptions.find(o => (o.ids || [o.id]).includes(deal.commission_rep_user_id))?.name
+                      || 'a sales rep'}
+                  </span>
+                )}
               </Field>
             )}
             <Field label="Onboarding method" width={FIELD_W.onboarding}>
