@@ -17,8 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_IQ, require_cap
 from app.models.db import Organisation, User, get_db
 from app.routers.auth import get_current_club, get_current_user
+from app.services import grade_scope
 from app.services import iq as iq_service
 from app.services import iq_ask
+from app.services import iq_filters
 from app.services import iq_opponent
 from app.services import iq_phases
 from app.services import iq_players
@@ -31,8 +33,68 @@ from app.services import iq_team
 from app.services import iq_teammates
 from app.services import iq_trends
 
-# Every BetterIQ route requires the MANAGE_IQ capability.
-router = APIRouter(prefix="/iq", tags=["iq"], dependencies=[Depends(require_cap(MANAGE_IQ))])
+async def apply_grade_scope(
+    categories: str | None = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, which "
+            "leaves junior out. An explicitly picked grade beats this."
+        ),
+    ),
+    formats: str | None = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Matched per FIXTURE against each game's own match_format, not "
+            "per grade, so a grade that plays both is split correctly. Omitted "
+            "applies no format filter."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Resolve the Grade Type / Match Type filter and put it in force for
+    this request.
+
+    Applied once at the router rather than on each of the ~38 endpoints:
+    every one of them ultimately reaches the same handful of query builders,
+    and adding two parameters to each by hand is how one endpoint quietly
+    ships without them. The scope itself travels in a ContextVar — see the
+    note at the top of services/iq_filters.py for why it is delivered
+    inlined rather than as bind parameters.
+    """
+    scope = await grade_scope.resolve_scope(db, str(club.id), categories, formats=formats)
+    token = iq_filters.set_scope(scope)
+    try:
+        yield scope
+    finally:
+        iq_filters.reset_scope(token)
+
+
+# Every BetterIQ route requires the MANAGE_IQ capability, and every one is
+# scoped by the club's Grade Type / Match Type filter.
+router = APIRouter(
+    prefix="/iq", tags=["iq"],
+    dependencies=[Depends(require_cap(MANAGE_IQ)), Depends(apply_grade_scope)],
+)
+
+
+@router.get("/grade-scope")
+async def grade_scope_options(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """What the two filters should offer this club, and what the default
+    leaves out. Only the categories and formats the club actually runs — a
+    club with no junior programme is never shown a Juniors tick box, which
+    is also exactly when the filter would do nothing."""
+    return {
+        **iq_filters.scope_meta(),
+        "available": await grade_scope.org_available_categories(db, str(club.id)),
+        "available_formats": await grade_scope.org_available_formats(db, str(club.id)),
+        "default": list(await grade_scope.club_default_categories(db, str(club.id))),
+    }
 
 
 @router.get("/opposition/opponents")

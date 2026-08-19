@@ -17,9 +17,30 @@ function statusMessage(res) {
   return res.statusText
 }
 
+// BetterIQ's Grade Type / Match Type filter. Held here and appended to every
+// /iq/ request rather than threaded through the ~37 iq* methods below, each of
+// which hand-builds its own query string — adding two params to all of them by
+// hand is how one quietly ships without them and the filter reads as working
+// while doing nothing on that screen. Mirrors the backend, where the same
+// filter is applied once at the router rather than on each endpoint.
+let _iqScope = null
+
+export function setIqScope(scope) {
+  _iqScope = scope && (scope.categories || scope.formats) ? { ...scope } : null
+}
+
+function iqScopeQuery(path) {
+  if (!_iqScope || !path.startsWith('/iq/')) return path
+  const parts = []
+  if (_iqScope.categories) parts.push(`categories=${encodeURIComponent(_iqScope.categories)}`)
+  if (_iqScope.formats) parts.push(`formats=${encodeURIComponent(_iqScope.formats)}`)
+  if (!parts.length) return path
+  return path + (path.includes('?') ? '&' : '?') + parts.join('&')
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' })
+  const res = await fetch(`${BASE}${iqScopeQuery(path)}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: statusMessage(res) }))
     let detail
@@ -110,6 +131,11 @@ function scopeQuery(scope) {
 }
 
 export const api = {
+  // Set BetterIQ's Grade Type / Match Type filter. Lives on `api` (not just as
+  // a bare export) because every caller already holds this object, and the
+  // filter is an api-layer concern: it decides what goes on the wire, not what
+  // any one screen renders.
+  setIqScope,
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
   unlockClub: (slug, pin) => request(`/clubs/${slug}/unlock`, {
@@ -2961,6 +2987,9 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`, { method: 'PUT', body: JSON.stringify(body) }),
 
   // ─── BetterIQ: Team self-analysis ───────────────────────
+  // What the two grade filters should offer this club, and what its own
+  // default leaves out. Cheap, and asked once when the filter bar loads.
+  iqGradeScope: () => request('/iq/grade-scope'),
   iqTeamSeasons: () => request('/iq/team/seasons'),
   iqTeamGrades: (seasonId) => request(`/iq/team/grades${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   iqTeamOverview: (seasonId, gradeId, seasonIds) => {

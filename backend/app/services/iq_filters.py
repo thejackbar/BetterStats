@@ -17,6 +17,146 @@ these today.
 """
 from __future__ import annotations
 
+import contextvars
+import re
+import uuid as _uuid
+from typing import Optional
+
+# ── The Grade Type / Match Type scope ────────────────────────────────────────
+# BetterIQ was the last stats surface with no ``GradeScope`` (migration 259):
+# no way to ask it for the T20s or the women's grades, and its figures counted
+# every grade whatever the club had set, so a club that leaves juniors out saw
+# BetterIQ disagree with its own Leaderboard.
+#
+# The scope rides in a ContextVar rather than being threaded through ~30 query
+# builders and every one of their ``execute`` calls. Two reasons, and the
+# second is the load-bearing one:
+#
+#  * IQ has no shared context dict to hang it on the way StatLab does, and
+#    ``iq_team`` already carries its cross-season filter exactly this way
+#    (``_RANGE_SEASONS``), so this is the file's own established pattern
+#    rather than a new one.
+#  * ``GradeScope.clause()`` emits ``:param`` references that every caller
+#    then has to bind. Threading a bind through thirty-odd execute sites is
+#    how one of them quietly ends up without it and the filter reads as
+#    working while doing nothing there. Rendering the clause with its values
+#    INLINED instead means every existing execute call keeps working
+#    untouched — the same trade ``_RANGE_SEASONS`` already makes when it
+#    inlines season ids as ``'…'::uuid`` literals.
+#
+# Inlining is safe here because none of the values come from a browser: the
+# excluded grade ids are UUIDs read out of our own ``grades`` table and the
+# formats are members of a fixed vocabulary. Both are re-validated below
+# anyway, and anything that doesn't parse is dropped rather than interpolated.
+_SCOPE: contextvars.ContextVar[object | None] = contextvars.ContextVar(
+    "iq_grade_scope", default=None
+)
+# Where the format half should read each fixture's own ``match_format`` from.
+# Per-query, because a query's games alias is its own business (``g``, ``gsf``,
+# ``ge`` …) and format is a per-FIXTURE fact — a grade that plays both a
+# one-day and a two-day season would otherwise file every game under one.
+_GAME_ALIAS: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "iq_scope_game_alias", default="g"
+)
+
+_FORMAT_TOKEN = re.compile(r"^[a-z0-9_]+$")
+
+
+def set_scope(scope):
+    """Make ``scope`` the active Grade Type / Match Type filter. Returns a
+    token for :func:`reset_scope`."""
+    return _SCOPE.set(scope)
+
+
+def reset_scope(token) -> None:
+    _SCOPE.reset(token)
+
+
+def active_scope():
+    """The scope in force, or None when no filter is applied."""
+    scope = _SCOPE.get()
+    return scope if scope is not None and getattr(scope, "active", False) else None
+
+
+def _sql_literal(value) -> Optional[str]:
+    """A bound value as an inlinable SQL literal, or None if it can't be.
+
+    Only two shapes ever reach here — a list of grade UUIDs and a list of
+    format tokens — and anything else returns None so the caller drops the
+    clause rather than interpolating something it doesn't understand.
+    """
+    if not isinstance(value, (list, tuple)):
+        return None
+    if not value:
+        # An empty ANY(...) is legal but pointless; the caller drops it.
+        return None
+    parts = []
+    for item in value:
+        try:
+            parts.append(f"'{_uuid.UUID(str(item))}'::uuid")
+            continue
+        except (ValueError, TypeError, AttributeError):
+            pass
+        token = str(item).strip().lower()
+        if not _FORMAT_TOKEN.match(token):
+            return None
+        parts.append(f"'{token}'")
+    return "ARRAY[" + ", ".join(parts) + "]"
+
+
+def _inline(sql: str, params: dict) -> Optional[str]:
+    """``sql`` with each ``:param`` replaced by its literal value.
+
+    ``GradeScope`` stays the single definition of what the filter MEANS —
+    this only changes how its clause is delivered. Longest parameter name
+    first, so ``:x_formats`` isn't half-eaten by a substitution for ``:x``.
+    """
+    for key in sorted(params, key=len, reverse=True):
+        literal = _sql_literal(params[key])
+        if literal is None:
+            return None
+        sql = sql.replace(f":{key}", literal)
+    # A leftover ``:name`` means a parameter we were never given a value for,
+    # and an unbound parameter in an inlined fragment fails at execute time.
+    if re.search(r"(?<![:\w]):[a-z_][a-z0-9_]*", sql):
+        return None
+    return sql
+
+
+def scope_clause(grade_column: str = "gr.id", kind: str = "game",
+                 game_alias: Optional[str] = None) -> str:
+    """The active scope as a self-contained ``AND …`` fragment, or ''.
+
+    ``kind`` carries ``GradeScope``'s own meaning:
+
+    - ``'game'``   the row is a fixture, so format is read per fixture off
+                   ``<game_alias>.match_format``.
+    - ``'aggregate'`` a ``player_season_stats`` row, which has no game behind
+                   it and so no format at all — under a Match Type filter it
+                   drops out rather than being counted as whichever format is
+                   being asked for.
+    - ``'grade'``  a grade listing with no game in the query.
+    """
+    scope = active_scope()
+    if scope is None:
+        return ""
+    params: dict = {}
+    scope.bind(params)
+    sql = scope.clause(grade_column, kind, game_alias=game_alias or _GAME_ALIAS.get())
+    return _inline(sql, params) or ""
+
+
+def scope_meta() -> dict:
+    """What the active scope covers, for a page that has to label a filtered
+    figure. Inactive reads as an empty scope rather than nothing at all, so a
+    caller can render the same shape either way."""
+    scope = _SCOPE.get()
+    if scope is None:
+        return {"categories": [], "excluded_categories": [], "formats": None,
+                "active": False, "category_active": False, "format_active": False}
+    return scope.as_meta()
+
+
 # Every sibling row of :season for the same org/year (or just :season when the
 # year is NULL). s0 is the picked row; s2 ranges over the org's season rows.
 _SEASON_YEAR_SET = (
@@ -139,15 +279,45 @@ def grade_canonical_label(alias: str = "gr", org_param: str = "org") -> str:
     )
 
 
-def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr", org_param: str = "org") -> str:
+def season_grade_clause(season_id, grade_id, *, grade_alias: str = "gr", org_param: str = "org",
+                        kind: str = "game", game_alias: Optional[str] = None) -> str:
     """Combined season (year-expanded) + grade (by merged, sponsor-stripped
     name) filter for the per-game IQ queries, where the grades table is
     aliased ``gr`` by default. ``org_param`` is the already-bound org-id
     parameter name the caller's query uses (``org`` everywhere except iq.py's
-    ``org_id`` — see ``grade_canonical_label``)."""
+    ``org_id`` — see ``grade_canonical_label``).
+
+    The Grade Type / Match Type scope is appended here too, so a caller that
+    already asks for the season + grade filter gets the new one for free. A
+    picked GRADE beats the category half but never the format half
+    (``formats_only``) — someone who chose "Under 14s" plainly wants the
+    juniors, whereas a grade plus a format is the single most useful thing
+    the pair does, since a grade routinely plays both inside one season.
+    """
     parts = []
     if season_id:
         parts.append(season_member_clause(f"{grade_alias}.season_id", season_id))
     if grade_id:
         parts.append(f"AND {grade_match_clause(grade_canonical_label(grade_alias, org_param))}")
+    parts.append(grade_scope_fragment(f"{grade_alias}.id", grade_id, kind=kind, game_alias=game_alias))
     return " ".join(p for p in parts if p)
+
+
+def grade_scope_fragment(grade_column: str, grade_id=None, *, kind: str = "game",
+                         game_alias: Optional[str] = None) -> str:
+    """:func:`scope_clause`, with the picked-grade rule applied.
+
+    Kept separate from ``scope_clause`` so a caller that has no grade filter
+    of its own doesn't have to pass ``None`` to say so, and so the rule lives
+    in exactly one place rather than at each of the call sites that has to
+    apply it."""
+    scope = active_scope()
+    if scope is None:
+        return ""
+    if grade_id:
+        token = _SCOPE.set(scope.formats_only())
+        try:
+            return scope_clause(grade_column, kind, game_alias)
+        finally:
+            _SCOPE.reset(token)
+    return scope_clause(grade_column, kind, game_alias)
