@@ -31,18 +31,30 @@ export function Btn({ children, onClick, variant = 'ghost', sm, disabled, icon, 
   )
 }
 
-export function Field({ label, children, hint, half, width }) {
+export function Field({ label, children, hint, half, width, composite = false }) {
   // `width` (e.g. "140px") pins an explicit flex-basis via inline style, which
   // reliably wins over the shared inputCls's `w-full` (same-specificity
   // Tailwind utilities are order-dependent, not override-safe) — use it for
   // any field that shouldn't stretch to the modal's full grid width.
   const style = width ? { flexBasis: width, maxWidth: width, minWidth: 0 } : undefined
+  // A field is a <label> wrapping its control by default, which is what
+  // gives an ordinary input its accessible name and click-the-caption
+  // behaviour. `composite` (mirrors components/admin/ui.jsx's own Field, and
+  // clubmanager/pickers.jsx's own note on the same trap) turns that off for
+  // anything holding SEVERAL of its own buttons — a set of toggle pills, or
+  // a picker that swaps "search box" for "chosen name + Clear button" mid-
+  // interaction, is not one labelled control, and a <label> forwards a click
+  // on any non-control descendant to whichever labelable element it holds AT
+  // THAT MOMENT. Use it for the Sales Workspace's Interested-in pills and
+  // any similar composite field.
+  const Tag = composite ? 'div' : 'label'
+  const groupProps = composite ? { role: 'group', 'aria-label': label || undefined } : {}
   return (
-    <label className={half && !width ? 'block flex-1 min-w-0 basis-[calc(50%-6px)]' : width ? 'block flex-none' : 'block'} style={style}>
+    <Tag className={half && !width ? 'block flex-1 min-w-0 basis-[calc(50%-6px)]' : width ? 'block flex-none' : 'block'} style={style} {...groupProps}>
       <span className="block text-[11.5px] text-pb-faint mb-[5px]">{label}</span>
       {children}
       {hint && <span className="block text-[10.5px] text-pb-faintest mt-1">{hint}</span>}
-    </label>
+    </Tag>
   )
 }
 

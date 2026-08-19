@@ -1296,7 +1296,7 @@ export default function SalesWorkspace() {
               </button>
             )}
           </div>
-          {!loadingList && (
+          {clubs.length > 0 && (
             <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
               <span>
                 <span className="text-pb-text font-medium">{clubs.length}</span> club{clubs.length === 1 ? '' : 's'}
@@ -1306,7 +1306,18 @@ export default function SalesWorkspace() {
               </span>
             </div>
           )}
-          {loadingList ? (
+          {/* A background reload (Save Call, Send Email, toggling module
+              interest — anything that calls loadClubs() while a club is
+              already open) should never collapse this list down to a bare
+              "Loading…" line and regrow it a moment later — that's needless
+              flicker for a refresh nobody asked to see. loadClubs() never
+              clears `clubs` before re-fetching, so simply not gating the
+              row list on `loadingList` keeps the STALE rows on screen the
+              whole time; React reconciles them against the fresh set once
+              it lands, keyed on id, with no interim empty state. The
+              "Loading…" placeholder is reserved for the one case with
+              nothing to show yet: a genuine first load. */}
+          {loadingList && clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
           ) : clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">No clubs match these filters.</p>
@@ -1518,7 +1529,7 @@ export default function SalesWorkspace() {
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Log a call</h3>
                 <form onSubmit={submitCall} className="space-y-2">
-                  <Field label="Contact">
+                  <Field label="Contact" composite>
                     <Select value={showNewCallContact ? NEW_CONTACT_VALUE : callForm.contactKey}
                       onChange={e => {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
@@ -1554,7 +1565,7 @@ export default function SalesWorkspace() {
                       ))}
                     </Select>
                   </Field>
-                  <Field label="Interested in">
+                  <Field label="Interested in" composite>
                     <div className="flex flex-wrap gap-1.5">
                       {MODULE_ORDER.map(key => {
                         const on = (drawer.deal.module_keys || []).includes(key)
@@ -1628,7 +1639,7 @@ export default function SalesWorkspace() {
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Send an email</h3>
                 <form onSubmit={submitEmail} className="space-y-2">
-                  <Field label="Contact">
+                  <Field label="Contact" composite>
                     <Select value={showNewEmailContact ? NEW_CONTACT_VALUE : emailForm.contactKey}
                       onChange={e => {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewEmailContact(true); return }
