@@ -324,13 +324,15 @@ const fmtDollars = (v) => `$${Number(v).toLocaleString()}`
 function buildFilterSummary(filters, { owners, stages, status }) {
   const out = []
   const push = (label, value) => out.push({ label, value })
-  const ownerName = (id) => (id === OWNER_UNASSIGNED ? 'Unassigned' : (owners.find(o => o.id === id)?.name || id))
+  // The sentinel reads differently per filter — nobody HOLDS it vs no rep
+  // has EARNED it — so the summary takes the wording from its caller.
+  const personName = (id, noneLabel) => (id === OWNER_UNASSIGNED ? noneLabel : (owners.find(o => o.id === id)?.name || id))
   const stageName = (key) => stages.find(s => s.key === key)?.name || key
 
   if (status) push('Status', STATUS_LABELS[status] || status)
   if (filters.q.trim()) push('Search', filters.q.trim())
-  if (filters.ownerIds.length) push('Owner', filters.ownerIds.map(ownerName).join(', '))
-  if (filters.attributedIds.length) push('Attributed', filters.attributedIds.map(ownerName).join(', '))
+  if (filters.ownerIds.length) push('Owner', filters.ownerIds.map(id => personName(id, 'Unassigned')).join(', '))
+  if (filters.attributedIds.length) push('Attributed', filters.attributedIds.map(id => personName(id, 'Unattributed')).join(', '))
   if (filters.state) push('State', filters.state)
   if (filters.association.trim()) push('Association', filters.association.trim())
   if (filters.leadSource) {

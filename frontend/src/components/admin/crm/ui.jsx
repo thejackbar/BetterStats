@@ -181,7 +181,10 @@ export const ownerFilterGroups = (owners, { unassigned = true } = {}) => {
 export const attributedFilterGroups = (owners) => {
   const reps = (owners || []).filter(o => o.is_sales_rep)
   return [
-    { label: '', options: [{ value: OWNER_UNASSIGNED, label: 'Unassigned' }] },
+    // Same sentinel VALUE as the Owner picker's own "nobody" row, different
+    // wording: there it means nobody holds the deal, here it means no rep
+    // has earned it.
+    { label: '', options: [{ value: OWNER_UNASSIGNED, label: 'Unattributed' }] },
     { label: reps.length ? 'Sales reps' : '', options: reps.map(o => ({ value: o.id, label: o.name })) },
   ].filter(g => g.options.length > 0)
 }

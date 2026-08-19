@@ -605,14 +605,19 @@ export default function SalesWorkspace() {
   const [clubs, setClubs] = useState([])
   const [stages, setStages] = useState([])
   const [team, setTeam] = useState([])
-  // Unassigned plus every sales rep — the option list both people
-  // pickers draw from. 'unassigned' is the server's own sentinel
-  // (routers/sales_workspace.UNASSIGNED_PICK); a UUID can never spell
-  // it, so it rides in the same comma-list as the real ids.
-  const peopleOptions = useMemo(() => [
-    { key: 'unassigned', name: 'Unassigned' },
-    ...team.map(u => ({ key: u.id, name: u.display_name || u.username })),
-  ], [team])
+  // Every sales rep, plus a "nobody" row. Both pickers offer the same
+  // people; only that first row's wording differs, since under Assigned it
+  // means nobody holds the club and under Attributed it means no rep has
+  // earned it. The VALUE is the same either way — 'unassigned' is the
+  // server's own sentinel (routers/sales_workspace.UNASSIGNED_PICK), and a
+  // UUID can never spell it, so it rides in the same comma-list as the real
+  // ids.
+  const repOptions = useMemo(
+    () => team.map(u => ({ key: u.id, name: u.display_name || u.username })), [team])
+  const assignedOptions = useMemo(
+    () => [{ key: 'unassigned', name: 'Unassigned' }, ...repOptions], [repOptions])
+  const attributedOptions = useMemo(
+    () => [{ key: 'unassigned', name: 'Unattributed' }, ...repOptions], [repOptions])
   const [staff, setStaff] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   const [selectedId, setSelectedId] = useState(null)
@@ -1244,7 +1249,7 @@ export default function SalesWorkspace() {
           {isSuper && (
             <FilterGroup label="Assigned">
               <div style={{ width: 150 }}>
-                <MultiSelectPicker options={peopleOptions} value={filters.owner_user_ids}
+                <MultiSelectPicker options={assignedOptions} value={filters.owner_user_ids}
                   onChange={v => setFilters(f => ({ ...f, owner_user_ids: v }))}
                   allLabel="Everyone" noun="people" />
               </div>
@@ -1259,7 +1264,7 @@ export default function SalesWorkspace() {
           {isSuper && (
             <FilterGroup label="Attributed">
               <div style={{ width: 150 }}>
-                <MultiSelectPicker options={peopleOptions} value={filters.attributed_user_ids}
+                <MultiSelectPicker options={attributedOptions} value={filters.attributed_user_ids}
                   onChange={v => setFilters(f => ({ ...f, attributed_user_ids: v }))}
                   allLabel="Everyone" noun="people" />
               </div>
