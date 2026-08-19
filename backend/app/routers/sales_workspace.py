@@ -317,11 +317,10 @@ async def list_clubs(
         row["owner_name"] = (owner.display_name or owner.username) if owner else None
         row["contact_count"] = contact_counts.get(d.marketing_club_id, 0)
         row["not_interested"] = bool(club.not_interested) if club else False
-        # For the queue card's "Town, ST" line — same fields the drawer
-        # header carries (get_club below), read from the same club_by_id map
-        # this loop already has, so no extra query.
-        row["marketing_club_suburb"] = club.suburb if club else None
-        row["marketing_club_state"] = club.state if club else None
+        # marketing_club_suburb / _state / _association / _associations are
+        # already set by _deal_dict above (club is passed in) — the queue
+        # card's "Town, ST" line and its associations chips read straight
+        # off those, same fields the drawer header carries (get_club below).
         row["min_trial_days_remaining"] = min_trial_by_club.get(d.marketing_club_id)
         # Trial is the one stage that reads differently depending on whether
         # it's actually still live — split the display label the same way
@@ -436,9 +435,9 @@ async def get_club(
     # trial countdown) — same batched helpers the Sales Pipeline card and
     # list use, just called with a single-club map since this is one deal.
     # Absent (None) for a bare prospect that's never been onboarded.
-    deal_out["marketing_club_state"] = club.state if club else None
-    # For the header's "Town, ST" line, immediately below the club name.
-    deal_out["marketing_club_suburb"] = club.suburb if club else None
+    # marketing_club_state / _suburb / _association / _associations are
+    # already set by _deal_dict above (club is passed in) — the header's
+    # "Town, ST" line and associations chips read straight off those.
     # Feeds ClubLocationMap.jsx in the drawer (same component/props the Club
     # Directory's own map already uses) — Numeric columns need a float cast,
     # since json can't serialise a Decimal.

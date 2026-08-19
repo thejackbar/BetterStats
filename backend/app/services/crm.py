@@ -507,6 +507,16 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         # scored (marketing_clubs.engagement_score_prev, migration 192).
         "engagement_delta_dir": _engagement_delta_dir(club),
         "marketing_club_name": club.name if club else None,
+        # State is already association-abbreviated at source (PlayHQ's own
+        # address payload, see club_directory.py) — no conversion needed.
+        # `associations` is the full competition list (Club Directory's own
+        # crawl, `[{"id","name","competition"}, …]`, None = not yet crawled,
+        # [] = crawled, none found); `association` stays as the single
+        # PRIMARY name for the existing filter bar/back-compat.
+        "marketing_club_state": club.state if club else None,
+        "marketing_club_suburb": club.suburb if club else None,
+        "marketing_club_association": club.association_name if club else None,
+        "marketing_club_associations": club.associations if club else None,
         "is_customer": bool(club.existing_org_id) if club else None,
         "pipeline_id": str(deal.pipeline_id),
         "stage_id": str(deal.stage_id),

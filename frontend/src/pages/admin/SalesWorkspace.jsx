@@ -175,6 +175,28 @@ const trialDaysLabel = (days) => {
 // comma or nothing at all. Shared by the queue card and the drawer header.
 const townStateLabel = (suburb, state) => [suburb, state].filter(Boolean).join(', ') || null
 
+// Every association a club plays in — Club Directory's own PlayHQ crawl,
+// marketing_clubs.associations (`[{id, name, competition}, …]`). NULL = not
+// yet crawled, [] = crawled, none found — both render nothing, same as a
+// missing town/state above. Shared by the queue card and the drawer header.
+const associationNames = (associations) => (associations || []).map(a => a?.name).filter(Boolean)
+
+// Small wrapped chip row for the associations a club competes in — reused by
+// the queue card and the drawer header so the two never disagree on style.
+function AssociationChips({ associations, className = '' }) {
+  const names = associationNames(associations)
+  if (!names.length) return null
+  return (
+    <div className={`flex flex-wrap gap-1 ${className}`}>
+      {names.map(n => (
+        <span key={n} className="px-1.5 py-0.5 rounded-full text-[9.5px] bg-pb-surface2 text-pb-faint border border-pb-line">
+          {n}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 // Inline "not in the list" contact entry, shared by both the Log a Call and
 // Send an Email contact pickers — a rep shouldn't have to leave the form
 // they're in to add someone first. Writes straight to the canonical Club
@@ -1359,6 +1381,7 @@ export default function SalesWorkspace() {
                       {townStateLabel(c.marketing_club_suburb, c.marketing_club_state)}
                     </div>
                   )}
+                  <AssociationChips associations={c.marketing_club_associations} className="mt-1" />
                   <div className="flex items-center justify-between gap-2 mt-1">
                     <span className="text-[10.5px] text-pb-faint">{c.stage_name}{isSuper && c.owner_name ? ` · ${c.owner_name}` : ''}</span>
                     <ScorePill score={c.engagement_score} tier={c.engagement_tier} />
@@ -1411,6 +1434,7 @@ export default function SalesWorkspace() {
                         {townStateLabel(drawer.deal.marketing_club_suburb, drawer.deal.marketing_club_state)}
                       </p>
                     )}
+                    <AssociationChips associations={drawer.deal.marketing_club_associations} className="mt-1.5" />
                   </div>
                   <div className="flex items-center gap-2">
                     {drawer.can_assign && (

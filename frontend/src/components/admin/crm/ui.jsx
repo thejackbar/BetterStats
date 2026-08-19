@@ -262,6 +262,20 @@ export const sortModuleKeys = (keys) => {
   return [...known, ...unknown]
 }
 
+// "Footscray, VIC" — state is already stored abbreviated at source (PlayHQ's
+// own address payload). Either half can be missing on its own (a club with no
+// crawled address, or one outside AU with no state code), so this degrades to
+// whichever one is present rather than a bare comma. Mirrors
+// SalesWorkspace.jsx's own copy — kept in sync by hand, same convention as
+// every other small vocab/label helper in this codebase.
+export const townStateLabel = (suburb, state) => [suburb, state].filter(Boolean).join(', ') || null
+
+// Every association a club plays in — Club Directory's own PlayHQ crawl,
+// marketing_clubs.associations (`[{id, name, competition}, …]`, set via
+// _deal_dict server-side). NULL = not yet crawled, [] = crawled, none found —
+// both render nothing.
+export const associationNames = (associations) => (associations || []).map(a => a?.name).filter(Boolean)
+
 export function Pill({ children, tone = 'faint' }) {
   const tones = {
     faint: 'bg-pb-surface2 text-pb-faint',
