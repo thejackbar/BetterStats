@@ -172,14 +172,87 @@ function OppClubSearch({ value, onPick }) {
 // `candidates` are the backend's close matches for this card name (same fuzzy
 // engine as historical imports and Merge Players) — shown first with their
 // confidence, so a near-miss spelling is one click instead of a search.
-function PlayerSelect({ value, roster, cardName, onChange, candidates = [] }) {
+// A select that can also make the thing it's selecting. Used for the season
+// and the grade: an old scorecard names both, and neither reliably exists in
+// a club whose sync only reaches back a few years, so the picker has to be
+// able to answer "it isn't in this list" without abandoning the import.
+export function PickOrAdd({ value, onChange, options, placeholder, addLabel, addPlaceholder, withYear, disabled, onAdd }) {
+  const [adding, setAdding] = useState(false)
+  const [name, setName] = useState('')
+  const [year, setYear] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const n = name.trim()
+    if (!n || busy) return
+    setBusy(true)
+    try {
+      const made = withYear
+        ? await onAdd({ name: n, year: year.trim() ? Number(year.trim()) : null })
+        : await onAdd(n)
+      // Stay open on failure so the message beneath is read against what was
+      // typed, rather than the field clearing and the error looking stray.
+      if (made) { setAdding(false); setName(''); setYear('') }
+    } finally { setBusy(false) }
+  }
+
+  if (adding) {
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex gap-1">
+          <input autoFocus className={SMALL_INPUT} value={name} placeholder={addPlaceholder}
+            onChange={e => setName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit() } if (e.key === 'Escape') setAdding(false) }} />
+          {withYear && (
+            <input className={`${SMALL_INPUT} w-20`} value={year} placeholder="year" inputMode="numeric"
+              onChange={e => setYear(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit() } if (e.key === 'Escape') setAdding(false) }} />
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="text-[11px] text-pb-accent disabled:opacity-50" disabled={busy || !name.trim()}
+            onClick={submit}>{busy ? 'Adding…' : 'Add'}</button>
+          <button type="button" className="text-[11px] text-pb-faint" onClick={() => setAdding(false)}>Cancel</button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      <select className={INPUT_CLS} value={value} disabled={disabled} onChange={e => onChange(e.target.value)}>
+        <option value="">{placeholder}</option>
+        {options.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+      </select>
+      <button type="button" className="text-[11px] text-pb-accent text-left disabled:opacity-40"
+        disabled={disabled} onClick={() => setAdding(true)}>+ {addLabel}</button>
+    </div>
+  )
+}
+
+export function PlayerSelect({ value, roster, cardName, onChange, candidates = [], onCreate }) {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const ref = useRef(null)
   const selected = roster.find(p => p.id === value)
   const t = q.trim().toLowerCase()
   const matches = (t ? roster.filter(p => (p.name || '').toLowerCase().includes(t)) : roster).slice(0, 40)
   const cands = t ? [] : candidates.filter(c => roster.some(p => p.id === c.player_id))
+  // What a "create" would be called: whatever has been typed, else the name
+  // as the card wrote it. A card name nobody on the roster answers to is the
+  // normal way a new player arrives at a club, and having to leave the review
+  // screen to add them is what leaves rows unmatched.
+  const newName = (q.trim() || cardName || '').trim()
+  const exactly = roster.some(p => (p.name || '').trim().toLowerCase() === newName.toLowerCase())
+  const canCreate = !!onCreate && !!newName && !exactly && !value
+  const create = async () => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const made = await onCreate(newName)
+      if (made?.id) { onChange(made.id); setOpen(false); setQ('') }
+    } finally { setCreating(false) }
+  }
   return (
     <div ref={ref} className="relative">
       <input
@@ -208,6 +281,16 @@ function PlayerSelect({ value, roster, cardName, onChange, candidates = [] }) {
                   {c.confidence != null && <span className="text-pb-faint text-xs"> · {Math.round(c.confidence * 100)}%</span>}
                 </button>
               ))}
+              <div className="border-t pb-hairline" />
+            </>
+          )}
+          {canCreate && (
+            <>
+              <button type="button" disabled={creating}
+                className="block w-full text-left px-3 py-1.5 text-sm text-pb-accent hover:bg-pb-surface2 disabled:opacity-50"
+                onMouseDown={e => { e.preventDefault(); create() }}>
+                {creating ? 'Adding…' : <>+ Add “{newName}” to the club</>}
+              </button>
               <div className="border-t pb-hairline" />
             </>
           )}
@@ -519,6 +602,49 @@ export default function AdminScorecardUpload() {
   // Close-match candidates for a card name (the historical-import fuzzy engine,
   // returned by the extract endpoint) — shown at the top of each player picker.
   const candsFor = useCallback(name => (extract?.match_info?.[name]?.candidates) || [], [extract])
+
+  // ── Adding what the card needs, without leaving the card ────────────────
+  // A scorecard routinely names a player, a season or a grade the club
+  // doesn't hold yet — an old card, a new junior, a grade that folded. Each
+  // used to be a dead end: save nothing, go and create it elsewhere, come
+  // back and read the photo again. All three are created in place now,
+  // through the same endpoints the Players and Manual Entries screens use,
+  // and land straight in the picker that asked for them.
+  const [addErr, setAddErr] = useState('')
+
+  const createPlayer = useCallback(async (name) => {
+    setAddErr('')
+    try {
+      // The server splits the written name ("G Evans", "Evans, G") so the
+      // one rule for what a name is lives in one place.
+      const made = await api.adminCreatePlayer({ name })
+      const row = { id: made.id, name: made.display_name || made.name || name }
+      setRoster(r => [...r, row])
+      setAllPlayers(p => [...p, row])
+      return row
+    } catch (e) { setAddErr(e.message || 'Could not add that player'); return null }
+  }, [])
+
+  const createSeason = useCallback(async ({ name, year }) => {
+    setAddErr('')
+    try {
+      const made = await api.adminCreateManualSeason({ name, year: year || null })
+      setSeasons(s => [...s, made])
+      setForm(f => ({ ...f, season_id: made.id, grade_id: '' }))
+      return made
+    } catch (e) { setAddErr(e.message || 'Could not add that season'); return null }
+  }, [])
+
+  const createGrade = useCallback(async (name) => {
+    setAddErr('')
+    if (!form.season_id) { setAddErr('Choose a season first'); return null }
+    try {
+      const made = await api.adminCreateManualGrade({ season_id: form.season_id, name })
+      setGrades(g => [...g, { ...made, season_id: form.season_id }])
+      setForm(f => ({ ...f, grade_id: made.id }))
+      return made
+    } catch (e) { setAddErr(e.message || 'Could not add that grade'); return null }
+  }, [form.season_id])
 
   // Normalise one extracted batting row into the split-dismissal shape: a canonical
   // `how_out` mode + fielder/bowler. For an opposition innings the fielder/bowler are
@@ -855,20 +981,33 @@ export default function AdminScorecardUpload() {
             {/* Match details */}
             <div className="bg-pb-surface border pb-hairline rounded-lg p-5">
               <h2 className="text-sm font-semibold text-pb-text mb-3">Match details</h2>
+              {addErr && <p className="text-xs text-red-400 mb-2">{addErr}</p>}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <label className={LABEL_CLS}>Season *</label>
-                  <select className={INPUT_CLS} value={form.season_id} onChange={e => setForm(f => ({ ...f, season_id: e.target.value, grade_id: '' }))}>
-                    <option value="">— choose —</option>
-                    {seasons.map(s => <option key={s.id} value={s.id}>{formatSeason(s.name, s.year)}</option>)}
-                  </select>
+                  <PickOrAdd
+                    value={form.season_id}
+                    onChange={v => setForm(f => ({ ...f, season_id: v, grade_id: '' }))}
+                    options={seasons.map(s => ({ id: s.id, label: formatSeason(s.name, s.year) }))}
+                    placeholder="— choose —"
+                    addLabel="New season"
+                    addPlaceholder="e.g. Summer 1996/97"
+                    withYear
+                    onAdd={createSeason}
+                  />
                 </div>
                 <div>
                   <label className={LABEL_CLS}>Grade</label>
-                  <select className={INPUT_CLS} value={form.grade_id} onChange={e => setForm(f => ({ ...f, grade_id: e.target.value }))} disabled={!form.season_id}>
-                    <option value="">— none —</option>
-                    {seasonGrades.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
-                  </select>
+                  <PickOrAdd
+                    value={form.grade_id}
+                    onChange={v => setForm(f => ({ ...f, grade_id: v }))}
+                    options={seasonGrades.map(g => ({ id: g.id, label: g.name }))}
+                    placeholder="— none —"
+                    addLabel="New grade"
+                    addPlaceholder="e.g. 3rd Grade"
+                    disabled={!form.season_id}
+                    onAdd={name => createGrade(name)}
+                  />
                 </div>
                 <div>
                   <label className={LABEL_CLS}>Date</label>
@@ -977,7 +1116,7 @@ export default function AdminScorecardUpload() {
                           </td>
                           {inn.is_our_team && (
                             <td className={`${TD} min-w-[150px]`}>
-                              <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onChange={v => editRow(ii, 'batting', ri, { player_id: v })} />
+                              <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onCreate={createPlayer} onChange={v => editRow(ii, 'batting', ri, { player_id: v })} />
                             </td>
                           )}
                           <td className={TD}><input className={`${SMALL_INPUT} w-12`} value={b.position ?? ''} onChange={e => editRow(ii, 'batting', ri, { position: e.target.value })} /></td>
@@ -991,14 +1130,14 @@ export default function AdminScorecardUpload() {
                               ? <span className="text-pb-faint/40 text-xs">—</span>
                               : inn.is_our_team
                                 ? <input className={SMALL_INPUT} placeholder="fielder (opp)" value={b.fielder || ''} onChange={e => editDismissal(ii, ri, { fielder: e.target.value })} />
-                                : <PlayerSelect value={b.fielder_id || ''} roster={roster} cardName={b.fielder} candidates={candsFor(b.fielder)} onChange={v => editDismissal(ii, ri, { fielder_id: v, fielder: rosterName(v) })} />}
+                                : <PlayerSelect value={b.fielder_id || ''} roster={roster} cardName={b.fielder} candidates={candsFor(b.fielder)} onCreate={createPlayer} onChange={v => editDismissal(ii, ri, { fielder_id: v, fielder: rosterName(v) })} />}
                           </td>
                           <td className={`${TD} min-w-[140px]`}>
                             {!modeHasBowler(b.how_out)
                               ? <span className="text-pb-faint/40 text-xs">—</span>
                               : inn.is_our_team
                                 ? <input className={SMALL_INPUT} placeholder="bowler (opp)" value={b.bowler || ''} onChange={e => editDismissal(ii, ri, { bowler: e.target.value })} />
-                                : <PlayerSelect value={b.bowler_id || ''} roster={roster} cardName={b.bowler} candidates={candsFor(b.bowler)} onChange={v => editDismissal(ii, ri, { bowler_id: v, bowler: rosterName(v) })} />}
+                                : <PlayerSelect value={b.bowler_id || ''} roster={roster} cardName={b.bowler} candidates={candsFor(b.bowler)} onCreate={createPlayer} onChange={v => editDismissal(ii, ri, { bowler_id: v, bowler: rosterName(v) })} />}
                           </td>
                         </tr>
                       ))}
@@ -1028,7 +1167,7 @@ export default function AdminScorecardUpload() {
                             <td className={TD}><input className={SMALL_INPUT} value={b.name || ''} onChange={e => editRow(ii, 'bowling', ri, { name: e.target.value })} /></td>
                             {!inn.is_our_team && (
                               <td className={`${TD} min-w-[150px]`}>
-                                <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onChange={v => editRow(ii, 'bowling', ri, { player_id: v })} />
+                                <PlayerSelect value={b.player_id} roster={roster} cardName={b.name} candidates={candsFor(b.name)} onCreate={createPlayer} onChange={v => editRow(ii, 'bowling', ri, { player_id: v })} />
                               </td>
                             )}
                             <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={b.overs ?? ''} onChange={e => editRow(ii, 'bowling', ri, { overs: e.target.value })} /></td>
@@ -1116,7 +1255,7 @@ export default function AdminScorecardUpload() {
                             <input className={SMALL_INPUT} value={f.name || ''} onChange={e => editFieldingExtra(fi, { name: e.target.value })} />
                           </td>
                           <td className={`${TD} min-w-[150px]`}>
-                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} candidates={candsFor(f.name)} onChange={v => editFieldingExtra(fi, { player_id: v })} />
+                            <PlayerSelect value={f.player_id} roster={roster} cardName={f.name} candidates={candsFor(f.name)} onCreate={createPlayer} onChange={v => editFieldingExtra(fi, { player_id: v })} />
                           </td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches ?? ''} onChange={e => editFieldingExtra(fi, { catches: e.target.value })} /></td>
                           <td className={TD}><input className={`${SMALL_INPUT} w-14`} value={f.catches_wk ?? ''} onChange={e => editFieldingExtra(fi, { catches_wk: e.target.value })} /></td>

@@ -290,10 +290,34 @@ async def patch_player(
 
 
 class PlayerCreate(BaseModel):
-    first_name: str
-    last_name: str
+    # Either first + last, or a single free-text `name` as it was written on
+    # whatever the admin is looking at — a scorecard photo names people
+    # "G Evans" or "Evans, G", and asking someone mid-import to split that by
+    # hand is exactly the step that makes them give up and leave the row
+    # unmatched.
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    name: Optional[str] = None
     playhq_id: Optional[str] = None
     display_name_override: Optional[str] = None
+
+
+def _split_written_name(written: str) -> tuple[str, str]:
+    """``(first, last)`` from a name as a human wrote it.
+
+    Handles the two shapes a card or a roster actually uses — "Evans, G"
+    (the stored convention) and "G Evans" — and returns an empty first name
+    for a mononym rather than guessing one, so "Wittingslow" stays
+    "Wittingslow" instead of becoming ", Wittingslow".
+    """
+    written = " ".join((written or "").split())
+    if "," in written:
+        last, _, first = written.partition(",")
+        return first.strip(), last.strip()
+    parts = written.split()
+    if len(parts) < 2:
+        return "", written
+    return " ".join(parts[:-1]), parts[-1]
 
 
 @router.post("/players")
@@ -303,12 +327,18 @@ async def create_player(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    first = data.first_name.strip()
-    last = data.last_name.strip()
-    if not first or not last:
-        raise HTTPException(status_code=422, detail="First name and last name are required")
+    if data.name and not (data.first_name or data.last_name):
+        first, last = _split_written_name(data.name)
+    else:
+        first = (data.first_name or "").strip()
+        last = (data.last_name or "").strip()
+    if not last:
+        raise HTTPException(status_code=422, detail="A player name is required")
 
-    name = f"{last}, {first}"
+    # A mononym is stored as-is; everyone else keeps the "Last, First"
+    # convention the sync writes, which is what keeps the roster in surname
+    # order (see name_sort_key).
+    name = f"{last}, {first}" if first else last
     phq_id = data.playhq_id.strip() if data.playhq_id else None
     override = data.display_name_override.strip() or None if data.display_name_override else None
 
