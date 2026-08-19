@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 261, v9.30.0, Aug 2026)
+## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 262, v9.30.0, Aug 2026)
 
 Four things reported off Hampton Hammers' page. The first is the one worth
 remembering.
@@ -47,7 +47,7 @@ were re-graded to **Division 2** from round 6.
   as a former one, the season guard, and the Division 1 fixture yielding exactly
   the 5 missing Hampton games, rounds 1 to 5.
 
-### `organisations.competitions` (migration 261)
+### `organisations.competitions` (migration 262)
 
 - **The same `{name, from_year, to_year}` shape as `previous_names`, sharing
   ONE validator** (`club_history._clean_year_spans`) rather than a second copy
@@ -58,7 +58,7 @@ were re-graded to **Division 2** from round 6.
   scoped by, like the season. Renders nothing when a club has filled none in.
 - **Only the seasons PlayHQ ran are synced**, so a league a club left before
   that has no other way onto the page, and the settings copy says so.
-- Verified against a real Postgres (12 checks: migration 261 applied three times
+- Verified against a real Postgres (12 checks: migration 262 applied three times
   to a populated table, an existing club reading NULL, the trim/coerce/backwards-
   span rules through the real settings routes, competitions and former names not
   disturbing each other, the public payload, and clearing storing NULL rather

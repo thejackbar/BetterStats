@@ -13,13 +13,13 @@
     a club knows which competitions it has been in far more often than it
     knows the year each one started.
 
-Revision ID: 261
-Revises: 260
+Revision ID: 262
+Revises: 261
 """
 from alembic import op
 
-revision = "261"
-down_revision = "260"
+revision = "262"
+down_revision = "261"
 branch_labels = None
 depends_on = None
 

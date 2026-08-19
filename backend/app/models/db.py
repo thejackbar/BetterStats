@@ -271,7 +271,7 @@ class Organisation(Base):
     # else without knowing when that stopped.
     established_year = Column(Integer, nullable=True)
     previous_names = Column(JSONB, nullable=True)
-    # The competitions the club has played in (migration 261) — the same
+    # The competitions the club has played in (migration 262) — the same
     # {"name", "from_year", "to_year"} shape as previous_names, and validated
     # by the same rules. Kept as its own column rather than folded into the
     # names list: a club changes competition without changing its name far
