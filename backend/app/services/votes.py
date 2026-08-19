@@ -55,7 +55,7 @@ SOURCE_LABELS = {
 # ─── Medals ──────────────────────────────────────────────────────────────────
 # A club counts votes towards one medal or several ("Club Champion", "Colts
 # Medal"), each with its own ballot shape, voter mode, counting method and
-# public link. Before migration 265 a club had exactly one implicit medal, held
+# public link. Before migration 267 a club had exactly one implicit medal, held
 # as the singleton `vote_settings` row; that row is now its first VoteMedal and
 # nothing reads vote_settings.
 
@@ -92,7 +92,7 @@ async def get_medal(db: AsyncSession, org_id, medal_id) -> Optional[VoteMedal]:
 
 async def medal_by_token(db: AsyncSession, token: str) -> Optional[VoteMedal]:
     """The medal a public voting link opens. The token is the medal's own, and
-    a club's pre-265 club-wide token was carried onto its first medal, so a
+    a club's pre-267 club-wide token was carried onto its first medal, so a
     link already shared with players still lands somewhere real."""
     if not token:
         return None
@@ -116,7 +116,7 @@ async def resolve_medal(db: AsyncSession, org_id, medal_id=None) -> Optional[Vot
 async def ensure_default_medal(db: AsyncSession, org_id) -> VoteMedal:
     """The club's first medal, created on demand.
 
-    A club that has never voted has no row at all — migration 265 only
+    A club that has never voted has no row at all — migration 267 only
     backfilled clubs that already had settings or ballots. Rather than make
     every screen cope with "no medal", the first write (turning voting on,
     entering a paper ballot) mints one. Does not commit; the caller's own
@@ -686,7 +686,7 @@ def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], rea
 async def get_override(db: AsyncSession, medal_id, fixture_id) -> Optional[VoteFixtureOverride]:
     """This medal's override row for the fixture (lock/reopen status and/or an
     eligibility source), or None. Callers read ``.status`` /
-    ``.eligibility_source``. Per medal since 265 — locking the Colts count on a
+    ``.eligibility_source``. Per medal since 267 — locking the Colts count on a
     match must not lock the Club Champion count on the same match."""
     res = await db.execute(
         select(VoteFixtureOverride).where(

@@ -40,14 +40,14 @@ A club with ballots or overrides but no settings row (an admin entering paper
 votes never had to open the settings screen) gets a medal too, or the NOT NULL
 below would have nothing to point those rows at.
 
-Revision ID: 265
-Revises: 264
+Revision ID: 267
+Revises: 266
 Create Date: 2026-08-19
 """
 from alembic import op
 
-revision = '265'
-down_revision = '264'
+revision = '267'
+down_revision = '266'
 branch_labels = None
 depends_on = None
 

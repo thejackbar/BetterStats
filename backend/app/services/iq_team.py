@@ -26,9 +26,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.grade_labels import suggest_category
+from app.services import iq_filters
 from app.services.iq_filters import (
     grade_canonical_label,
     grade_match_clause,
+    grade_scope_fragment,
     season_grade_clause,
     season_ids_cross_club,
     season_member_clause,
@@ -227,7 +229,12 @@ def _scope(season_id: str | None, grade_id: str | None) -> str:
         parts = [f"AND gr.season_id IN ({in_list})"]
         if grade_id:
             parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
-        return " ".join(parts)
+        # Compare mode returns early, so the Grade Type / Match Type scope has
+        # to be added here as well — a filter that works everywhere except
+        # across a season range is worse than one that doesn't work at all,
+        # because nobody notices it stopped.
+        parts.append(grade_scope_fragment("gr.id", grade_id))
+        return " ".join(p for p in parts if p)
     return season_grade_clause(season_id, grade_id)
 
 
@@ -247,13 +254,18 @@ def _scope_game(season_id: str | None, grade_id: str | None) -> str:
         parts = [season_ids_cross_club(in_list, "g.season_id")]
         if grade_id:
             parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
-        return " ".join(parts)
+        parts.append(grade_scope_fragment("gr.id", grade_id, game_alias="g"))
+        return " ".join(p for p in parts if p)
     parts = []
     if season_id:
         parts.append(season_member_clause_cross_club("g.season_id", season_id))
     if grade_id:
         parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
-    return " ".join(parts)
+    # The CATEGORY half reads off the joined grade row and the FORMAT half off
+    # each game's own match_format — the two are not symmetrical, and reading
+    # format per grade would file a whole mixed grade under one format.
+    parts.append(grade_scope_fragment("gr.id", grade_id, game_alias="g"))
+    return " ".join(p for p in parts if p)
 
 
 async def _per_game(session: AsyncSession, org_id: str, season_id: str | None, grade_id: str | None = None) -> list[dict]:
@@ -1390,6 +1402,9 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
     params = {"org": org_id, "year": year, "sid": sid, "grade": grade_id}
 
     psg_fallback = False
+    # Whether the board ended up on the whole-club season totals, which carry
+    # neither a grade nor a game and so can answer neither filter axis.
+    ungraded = False
 
     async def _ungraded_pls() -> list[dict]:
         res = await session.execute(
@@ -1443,6 +1458,7 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
                 FROM players p
                 JOIN player_season_grade_stats psg ON psg.player_id = p.id
                 JOIN grades gr ON gr.id = psg.grade_id AND {grade_match_clause(grade_canonical_label('gr', 'org'))}
+                     {grade_scope_fragment('gr.id', grade_id, kind='aggregate')}
                 JOIN seasons s ON s.id = psg.season_id AND s.organisation_id = CAST(:org AS UUID) {scope}
                 GROUP BY p.id, p.display_name_override, p.name
                 HAVING GREATEST(COALESCE(SUM(psg.matches), 0), COALESCE(SUM(psg.batting_innings), 0),
@@ -1466,11 +1482,14 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             # whole-club season totals and SAY so, rather than an empty board.
             pls = await _ungraded_pls()
             psg_fallback = bool(pls)
+            ungraded = True
     else:
         pls = await _ungraded_pls()
+        ungraded = True
     if not pls:
         return {"season": {"id": resolved["season_id"], "name": resolved["name"]},
-                "players": [], "psg_fallback": psg_fallback}
+                "players": [], "psg_fallback": psg_fallback,
+                "scope_unanswerable": bool(ungraded and iq_filters.active_scope())}
 
     def zmap(key, invert=False, only_present=False):
         vals = [p[key] for p in pls if p[key] is not None] if only_present else [p[key] for p in pls]
@@ -1512,7 +1531,12 @@ async def player_impact(session: AsyncSession, org_id: str, season_id: str | Non
             p.pop(k, None)
     pls.sort(key=lambda x: x["impact"], reverse=True)
     return {"season": {"id": resolved["season_id"], "name": resolved["name"]},
-            "players": pls[:12], "psg_fallback": psg_fallback}
+            "players": pls[:12], "psg_fallback": psg_fallback,
+            # The whole-club fallback sums player_season_stats, which carries
+            # no grade and no game — so under a Grade Type or Match Type
+            # filter it can answer neither, and the board says so rather than
+            # showing unfiltered figures under a filter someone just set.
+            "scope_unanswerable": bool(ungraded and iq_filters.active_scope())}
 
 
 def _dismissal_key(dt: str | None, caught_behind: bool | None = False) -> str | None:

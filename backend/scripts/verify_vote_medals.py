@@ -1,7 +1,7 @@
-"""Verification for vote medals (migration 265) against a real Postgres.
+"""Verification for vote medals (migration 267) against a real Postgres.
 
 Runs the SHIPPED statements and the SHIPPED service/route functions — not a
-replay of their logic — over a populated pre-265 schema, so the things that
+replay of their logic — over a populated pre-267 schema, so the things that
 actually go wrong here (a backfill that duplicates on re-run, a unique index
 that still keys on the fixture alone, a leaderboard that counts two medals'
 ballots into one total) fail loudly rather than reading as fine.
@@ -37,9 +37,9 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 # — a hand-written test schema that spells a column differently is how a whole
 # suite passes against a shared mistake (see the bowling_spells.runs note in
 # CLAUDE.md). The five vote tables are the exception, and have to be: they must
-# start in their PRE-265 shape for the migration to have anything to do.
+# start in their PRE-267 shape for the migration to have anything to do.
 
-PRE_265 = [
+PRE_267 = [
     """CREATE TABLE vote_settings (
         organisation_id UUID PRIMARY KEY REFERENCES organisations(id) ON DELETE CASCADE,
         enabled BOOLEAN NOT NULL DEFAULT false,
@@ -95,7 +95,7 @@ async def build_schema(conn) -> None:
     await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
     non_vote = [t for name, t in Base.metadata.tables.items() if not name.startswith("vote_")]
     await conn.run_sync(lambda sync_conn: Base.metadata.create_all(sync_conn, tables=non_vote))
-    for stmt in PRE_265:
+    for stmt in PRE_267:
         await conn.execute(text(stmt))
 
 
@@ -170,7 +170,7 @@ async def main() -> None:
 
     # A club already voting: settings + a link already shared + ballots already
     # cast, on both grades' fixtures. Raw SQL here on purpose — these rows have
-    # to be written in the PRE-265 shape the ORM no longer describes.
+    # to be written in the PRE-267 shape the ORM no longer describes.
     async with engine.begin() as conn:
         await conn.execute(
             text("INSERT INTO vote_settings (organisation_id, enabled, link_token, "

@@ -11,13 +11,14 @@ years-dormant name appearing as a "promote" suggestion for a men's 2nd XI).
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import FixtureLineup, Grade, Player, Team
+from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
+from app.auth.modules import org_has_module
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -28,6 +29,69 @@ SEASON_FORM_WEIGHT = 0.4
 WICKET_RUN_EQUIV = 25.0
 # Hard activity wall for autofill eligibility (12-month cutoff).
 AUTOFILL_RECENCY_MONTHS = 12
+# How far back "has been at training" looks. Three weeks covers a normal
+# Tuesday/Thursday nets programme plus one missed week, which is the question a
+# selector is actually asking — not "has this person ever attended".
+TRAINING_WINDOW_DAYS = 21
+
+
+async def _owing_player_ids(session: AsyncSession, club) -> set[str] | None:
+    """Players who still owe the club money, or None when we can't tell.
+
+    Reads BetterFees' own balance rather than a second idea of it: a balance
+    is derived, never stored, so anything asking "who owes" has to run the
+    same calculation the Accounts screen runs or the two start disagreeing.
+    None (not an empty set) when the club doesn't hold BetterFees or has no
+    season to price against — the difference matters, because "nobody owes"
+    and "we have no way of knowing" should not look the same on the board.
+    """
+    if not org_has_module(club, "fees"):
+        return None
+    from app.services import fees as fees_svc
+
+    season_id = (await session.execute(
+        select(Season.id).where(Season.organisation_id == club.id)
+        .order_by(Season.year.desc().nullslast(), Season.name.desc()).limit(1)
+    )).scalar_one_or_none()
+    if not season_id:
+        return None
+    try:
+        return {str(pid) for pid in await fees_svc.owing_player_ids(session, club.id, season_id)}
+    except Exception:
+        # A fees calculation that falls over must not take the whole
+        # selection board down with it — the filter degrades to "we can't
+        # tell", which is what the override is there for.
+        return None
+
+
+async def _trained_player_ids(session: AsyncSession, club, as_of: date) -> set[str] | None:
+    """Players who turned up to nets inside the window ending ``as_of``.
+
+    Net Manager records a check-in per session (``net_attendance``); a row's
+    existence IS the attendance. Guests carry no player_id and are skipped by
+    the join. None when the club has run no sessions in range at all, so a
+    club that doesn't use Net Manager gets "we can't tell" rather than a
+    board saying nobody has trained.
+    """
+    rows = (await session.execute(
+        text(
+            "SELECT DISTINCT na.player_id FROM net_attendance na "
+            "JOIN net_sessions ns ON ns.id = na.session_id "
+            "WHERE na.organisation_id = :org AND na.player_id IS NOT NULL "
+            "AND ns.session_date <= :as_of AND ns.session_date >= :since"
+        ),
+        {"org": club.id, "as_of": as_of, "since": as_of - timedelta(days=TRAINING_WINDOW_DAYS)},
+    )).fetchall()
+    any_session = (await session.execute(
+        text(
+            "SELECT 1 FROM net_sessions WHERE organisation_id = :org "
+            "AND session_date <= :as_of AND session_date >= :since LIMIT 1"
+        ),
+        {"org": club.id, "as_of": as_of, "since": as_of - timedelta(days=TRAINING_WINDOW_DAYS)},
+    )).first()
+    if not any_session:
+        return None
+    return {str(r[0]) for r in rows}
 
 
 def _compute_score(skill_positions: list[str] | None,
@@ -381,6 +445,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     for tid, seq, fee in sq_meta_res.fetchall():
         squad_meta[str(tid)] = (seq or 0, fee == "women")
 
+    # The two module-derived selection flags. Both can come back None — "we
+    # can't tell" — in which case only a per-player override answers, which is
+    # exactly the club that runs neither module ticking a box by hand.
+    owing_ids = await _owing_player_ids(db, club)
+    trained_ids = await _trained_player_ids(db, club, fx.played_on or date.today())
+
     recent_bat = await _recent_batting_form(db, club.id)
     recent_bowl = await _recent_bowling_form(db, club.id)
     season_stats = await _latest_season_stats(db, club.id)
@@ -416,6 +486,22 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         form_word = _form_word(rlevel, _season_level(skills_set, ss), has_recent)
         recent_series = _recent_series(skills_set, rb, rw)
 
+        # Financial + training, each resolved the same way: the player's own
+        # override wins outright, else what the module says, else None for
+        # "unknown" — which the board shows as no badge rather than guessing.
+        if p.is_financial_override is not None:
+            financial = bool(p.is_financial_override)
+        elif owing_ids is not None:
+            financial = pid not in owing_ids
+        else:
+            financial = None
+        if p.trained_override is not None:
+            trained = bool(p.trained_override)
+        elif trained_ids is not None:
+            trained = pid in trained_ids
+        else:
+            trained = None
+
         pool.append({
             "id": pid,
             "display_name": p.display_name,
@@ -446,6 +532,23 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "score": round(score, 2),
             "form": form_word,
             "recent": recent_series,
+            # True = paid up, False = owes the club money, None = unknown.
+            # Deliberately NOT folded into autofill_eligible: whether an
+            # unpaid player can be picked is a club's own call, and plenty
+            # would rather see the flag and decide than have autofill quietly
+            # leave someone out.
+            "is_financial": financial,
+            "financial_source": (
+                "override" if p.is_financial_override is not None
+                else "fees" if owing_ids is not None else None
+            ),
+            # True = at nets inside the last TRAINING_WINDOW_DAYS, False = not,
+            # None = the club records no sessions so we cannot say.
+            "trained_recently": trained,
+            "training_source": (
+                "override" if p.trained_override is not None
+                else "nets" if trained_ids is not None else None
+            ),
             "autofill_eligible": bool(tier in (1, 2, 3) and recent_ok and gender_ok and not manual_inactive),
         })
 
@@ -486,6 +589,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             for r in sorted(lineup_rows, key=lambda r: (r.batting_order or 999))
         ],
         "pool": pool,
+        # What the two flags above could actually be answered from, so the
+        # board can label the filter honestly ("from BetterFees" vs "set by
+        # hand") and hide a filter nothing can answer.
+        "flags": {
+            "financial": "fees" if owing_ids is not None else None,
+            "training": "nets" if trained_ids is not None else None,
+            "training_window_days": TRAINING_WINDOW_DAYS,
+        },
         "dormancy_months": months,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
     }

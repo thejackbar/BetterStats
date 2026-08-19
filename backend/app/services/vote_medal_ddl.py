@@ -1,4 +1,4 @@
-"""The DDL behind vote medals (migration 265), in ONE place.
+"""The DDL behind vote medals (migration 267), in ONE place.
 
 Every schema change in this codebase is applied twice: once by alembic, and
 once idempotently by ``main.py``'s lifespan so the API boots against a database

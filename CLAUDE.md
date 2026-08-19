@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## A club runs several medals, in both sports (migration 265, v9.32.0 / v9.33.0, Aug 2026)
+## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
 `vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly
 one ballot shape, one voter mode, one counting method and one public link. A
@@ -13,7 +13,7 @@ the one leaderboard down to a grade after the fact.
 - **Every settings column moves across UNCHANGED IN NAME**, which is what lets
   `votes.effective_config` read a medal with no edit. Plus `name`, `grade_ids`
   and `position`. `vote_settings` is left in place and **nothing reads it after
-  265** — the same call migration 230 made for `club_objectives.plan`.
+  267** — the same call migration 230 made for `club_objectives.plan`.
 - **A ballot belongs to ONE medal** (per direct instruction). A fixture counting
   towards two collects a separate ballot for each, so a 3-2-1 medal and a
   5-4-3-2-1 medal can genuinely disagree about who was best. The two "one live
@@ -50,7 +50,7 @@ the one leaderboard down to a grade after the fact.
   fixture alone, so merging two records of one person who had voted for both
   medals on a fixture would have deleted one of their two legitimate ballots.
 - **`main.py`'s mirror deliberately no longer creates the two OLD per-fixture
-  ballot uniques.** 265 drops them a few statements later, and rebuilding a
+  ballot uniques.** 267 drops them a few statements later, and rebuilding a
   unique index over the whole table on every API restart just to drop it again
   is real cost for nothing.
 
@@ -62,7 +62,7 @@ filter written as `(:medal IS NULL OR medal_id = :medal)` raises
 type from how it is used and that gives it nothing. **Any "param IS NULL OR col
 = param" needs an explicit `CAST(:param AS uuid)`.**
 
-### BetterFootball got the same engine, and a team-list service (v9.33.0)
+### BetterFootball got the same engine, and a team-list service (v9.34.0)
 
 - **The counting rules are IMPORTED from `services/votes.py`, never re-typed.**
   `tally_ballots`, `award_weekly_points`, `clean_ballot_values`,
@@ -99,7 +99,7 @@ type from how it is used and that gives it nothing. **Any "param IS NULL OR col
 ### Verification
 
 Cricket: 59 checks against a real Postgres through the shipped statements and
-route bodies (265 applied three times to a populated pre-265 table, the link
+route bodies (267 applied three times to a populated pre-267 table, the link
 token and settings carried across, the old uniques gone and the new ones holding
 both ways, the two counts staying apart, per-medal overrides and nudge
 cooldowns, next season's grade of the same name still counted, the delete
@@ -107,7 +107,7 @@ guards) and 17 driven in Chromium. Football: 47 and 27.
 
 **Both harnesses build their tables from the ORM models**, never by hand — the
 one exception being the five vote tables in the cricket suite, which have to
-start in their PRE-265 shape for the migration to have anything to do.
+start in their PRE-267 shape for the migration to have anything to do.
 
 Three real findings came from running them rather than reading the code: the
 asyncpg cast above, the self-vote rule refusing a fixture whose voter picked
@@ -118,6 +118,68 @@ not 18.
 **Noticed, NOT fixed**: the cricket Games hub's filter row overflows at 390px (a
 `ml-auto` select reaching 446px). Confirmed pre-existing by re-running the same
 check with the change stashed — identical element, identical width.
+
+## A washout is not a match played (migration 266, v9.32.1, Aug 2026)
+
+Reported off Hamilton Veterans: Geoff Barker's 25/26 reads 13 matches, the club
+counts 10, and three fixtures were washed out.
+
+- **Nothing was miscounting. `player_season_stats.matches` is CA's own
+  `statistics.matches`, copied verbatim** (`sync.py`'s season-stats upsert),
+  and CA's answer really is 13. **CA counts a player as having played the
+  moment they are on the team sheet**, ball bowled or not. Verified live rather
+  than reasoned about: the club's 25/26 card is 14 fixtures, three
+  `status: ABANDONED`, and a team-mate named in all of them reads 14.
+- **The comment in `aggregations.py`'s opposition breakdown claiming CA already
+  excludes abandoned games is wrong**, and was wrong before this. It is
+  corrected in place. Do not build on it.
+- **`games.status` (migration 266) exists because `result` cannot answer the
+  question.** A NULL result covers a washout, a fixture still to be played, one
+  in progress and one we could not classify, all four. The column takes CA's
+  own word verbatim.
+- **The correction lands in `v_effective_player_season_stats`, not in the
+  callers** — the same one-place discipline migration 060 used for the
+  cross-club leak, so career totals, the season table, the leaderboards and
+  records all move together and a club with no washouts joins an empty set and
+  is byte-for-byte unchanged.
+- **The rule is "named and recorded nothing at all", not "abandoned".** A game
+  called off at tea with a hundred on the board was played and the club counts
+  it, so the subtraction only fires where the player has no batting, bowling or
+  fielding row for that fixture. `NO RESULT` (statusId 5) is deliberately NOT
+  in `NOT_PLAYED_STATUSES` for the same reason — that is a game that started.
+- **`services/game_status.py` is the one vocabulary**, shared by the sync, the
+  view, the read paths, the backfill script and (as a mirrored constant) the
+  two screens. Two copies of "which statuses mean it never happened" is how
+  they start disagreeing.
+- **No Full Rebuild.** The grade match list already carries `status` per
+  fixture and the discovery loop already fetches it, so a plain Sync Now fixes
+  the current season through the same bulk pass `is_final` and `match_format`
+  use. `python -m app.scripts.backfill_game_status <org-id-or-slug|all>` covers
+  the seasons an incremental run no longer scans.
+- **A club whose season rows came from "Fix Missing Totals" needs it re-run.**
+  Those rows (`source = 'backfill'`) store a count computed from per-game rows
+  rather than reading CA's, so the view's correction cannot reach them. The
+  rollup's `appearances` CTE now excludes called-off fixtures; the script says
+  when a club has such rows.
+- **Scale, measured before building rather than assumed**: 316 of 4,165
+  fixtures across all 102 clubs' latest season carry no result; ~88% of a
+  sample are genuinely ABANDONED/CANCELLED and about half of those have a team
+  sheet. So ~140 fixtures a season platform-wide, across ~45 clubs. Invisible
+  at a club playing 380 fixtures, glaring at one playing 14 — which is why a
+  veterans club found it and nobody else had.
+- **Found while verifying: `CREATE OR REPLACE VIEW` cannot DROP a column.**
+  The first cut of 266's downgrade replaced the status-carrying
+  `v_effective_games` with the shorter prior definition and failed outright.
+  It drops and recreates now. **Migration 169's own downgrade has the same
+  latent defect** and would fail the same way; it has simply never been run.
+- **Verified against a real Postgres** (24 checks through the shipped view and
+  the real service functions: the reported 13 → 10 and a team-mate's 14 → 11, a
+  control club-mate unchanged, CA's stored row never rewritten, a mid-play
+  abandonment staying counted, a NULL status subtracting nothing, NO RESULT
+  still counting, CANCELLED behaving like ABANDONED, the rollup, the scoped
+  path, the season-by-season table and career games both reading 10, the
+  Matches screen's list, migration 266 applied three times to a populated
+  table, and the downgrade putting CA's figure back).
 
 ## BetterFootball: a re-graded team's first rounds, club competitions, navbar search, splitting a player (migration 262, v9.30.0, Aug 2026)
 

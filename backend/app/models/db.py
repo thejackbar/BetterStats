@@ -1219,6 +1219,22 @@ class Player(Base):
     phone = Column(Text, nullable=True)
     skill_positions = Column(JSONB, default=list, nullable=False, server_default="[]")  # e.g. ["BAT","WKT"]
     status = Column(Text, default="active", nullable=False, server_default="active")  # active | inactive
+    # Whether this player is shown on the club's PUBLIC site (migration 265).
+    # Defaults true, so nothing is hidden by an upgrade; a club opts a player
+    # out (typically a junior who does not want to be findable) and they drop
+    # off the public roster, search, profile page, leaderboards and records
+    # while staying fully present in every admin surface. Same shape as
+    # grades.is_public, and read through the same user_can_view_org_private
+    # escape so a signed-in club admin still sees their own club whole.
+    is_public = Column(Boolean, default=True, nullable=False, server_default="true")
+    # BetterSelect "non-financial" filter (migration 265). NULL = no override,
+    # so the answer comes from BetterFees' own balance; True/False is a club
+    # saying so by hand, which is also the only answer a club not running
+    # BetterFees can give.
+    is_financial_override = Column(Boolean, nullable=True)
+    # BetterSelect "attended training" filter (migration 265). NULL = no
+    # override, so the answer comes from Net Manager attendance.
+    trained_override = Column(Boolean, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
@@ -1280,6 +1296,14 @@ class Game(Base):
     raw_payload = Column(JSON)
     venue = Column(Text)
     match_format = Column(Text, nullable=True)
+    # Cricket Australia's own match status, verbatim: COMPLETED, ABANDONED,
+    # CANCELLED, UPCOMING, LIVE (migration 266). NULL means we have not been
+    # told — every row predating that migration reads that way until a sync
+    # or `python -m app.scripts.backfill_game_status` fills it in. Read by
+    # v_effective_player_season_stats to keep a washed-out fixture out of a
+    # player's matches-played count; `result` cannot answer that question,
+    # since a NULL result also covers an upcoming or in-progress fixture.
+    status = Column(Text, nullable=True)
 
     grade = relationship("Grade", back_populates="games")
     batting_innings = relationship("BattingInnings", back_populates="game")
@@ -1450,7 +1474,7 @@ class VoteMedal(Base):
 
     Every settings column here is named exactly as it was on ``VoteSettings``,
     which is what lets ``services.votes.effective_config`` read either one.
-    ``VoteSettings`` is history after migration 265 and nothing reads it.
+    ``VoteSettings`` is history after migration 267 and nothing reads it.
     """
     __tablename__ = "vote_medals"
 
@@ -1485,7 +1509,7 @@ class VoteMedal(Base):
 
 
 class VoteSettings(Base):
-    """DEPRECATED (migration 265) — the pre-medals one-row-per-club config.
+    """DEPRECATED (migration 267) — the pre-medals one-row-per-club config.
 
     Kept as history: its row was copied onto the club's first ``VoteMedal``,
     link token included, and nothing reads this table any more. Don't add a
@@ -1519,7 +1543,7 @@ class VoteBallot(Base):
     Voter identity is exactly one of: voter_player_id (a club player — PIN
     verified on the public page, or admin-entered) or voter_name (a
     non-participant: coach / president / supporter, name typed on the public
-    page). Partial unique indexes (see migration 265) enforce one live ballot
+    page). Partial unique indexes (see migration 267) enforce one live ballot
     per voter per fixture per medal in each identity space — a fixture counting
     towards two medals collects a separate ballot for each, so the two counts
     can genuinely disagree about who was best.
@@ -1559,7 +1583,7 @@ class VoteFixtureOverride(Base):
     the auto-close window (game end + auto_close_days). 'locked' closes voting
     immediately; 'reopened' holds it open past auto-close until locked again.
 
-    Keyed on (medal_id, fixture_id) since migration 265 — locking a count is a
+    Keyed on (medal_id, fixture_id) since migration 267 — locking a count is a
     decision about that medal, not about the fixture in the abstract, and two
     medals over one fixture carry their own auto-close windows anyway."""
     __tablename__ = "vote_fixture_overrides"
@@ -1579,7 +1603,7 @@ class VoteNudge(Base):
     """One reminder-email send, for the Games hub's "Nudge non-voters".
 
     The audit trail the nudge rate limit reads: at most one nudge per player
-    per fixture per medal per 24h (migrations 196, 265), so a manager mashing
+    per fixture per medal per 24h (migrations 196, 267), so a manager mashing
     the button can't spam the same player with reminder emails.
     """
     __tablename__ = "vote_nudges"

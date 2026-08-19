@@ -1,14 +1,14 @@
 export default {
   version: 'v9.33.0',
   date: '2026-08-19',
-  sortKey: '2026-08-30T14:00:00Z',
-  title: 'BetterFootball: best and fairest voting, and team lists',
+  sortKey: '2026-08-31T12:00:00Z',
+  title: 'A club can run several medals at once',
   items: [
-    'Votes comes to football. Set up as many medals as your club presents — a senior Best & Fairest on 3-2-1, a Reserves medal on 5-4-3-2-1, a coach\'s award — each with its own ballot, its own voting link and the grades it counts.',
-    'Players vote from a link you share. No account and no app: they find their name, confirm with the last four digits of their mobile, then tap out their votes on one screen. Nothing on the public site ever shows the count.',
-    'Who can be voted for comes from the team list PlayHQ already sends with each game, so there is nothing to set up and nothing to type in. A game opens for voting once it has synced.',
-    'A medal scoped to a grade counts that grade in every season, so you set it up once rather than redoing it each March.',
-    'You can enter a ballot yourself for anyone who hands you a paper vote or texts their three, and lock or reopen any game.',
-    'A new Team lists page on your club site shows the side named for each game, both teams, going back through the season. Where a club never published a side it says so, rather than leaving you wondering whether it is missing.',
+    'Votes in BetterSelect used to hold one set of voting settings per club, so a club could only ever run one count. You can now set up as many medals as you like \u2014 a Club Champion on 3-2-1 alongside a Colts Medal on 5-4-3-2-1, a coach\'s award, whatever your club presents.',
+    'Each medal has its own ballot shape, who votes, how weekly votes become season points, tie rules, which team list decides who can be voted for, when voting closes, and its own voting link to hand out.',
+    'A medal can be scoped to the grades it counts, or left across the whole club. Ticking a grade counts it in every season, so you set it up once rather than redoing it each year.',
+    'Games, the leaderboard and awards night all show one medal at a time, picked from the row above the tabs. The medal is in the page address, so you can send someone a link straight to one count.',
+    'Where a game counts towards two medals, a player casts a ballot for each. The two counts are kept apart the whole way through, so they can genuinely disagree about who was best.',
+    'Clubs already voting keep everything: your existing settings and every ballot cast this season become your first medal, and the voting link already in your players\' hands still works.',
   ],
 }

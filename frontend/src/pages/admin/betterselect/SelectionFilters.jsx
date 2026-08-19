@@ -18,6 +18,23 @@ import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS } from './selectionMeta'
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
 const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
 const STATUS_OPTS = [{ value: '', label: 'All' }, { value: 'unselected', label: 'Unselected' }, { value: 'clash', label: 'In another XI' }]
+// Fees and training. Each carries a third answer — "Not known" — because a
+// club that runs neither BetterFees nor Net Manager, and hasn't set the flag
+// by hand on a player, genuinely has no answer for them, and that list is
+// the useful one: it's who still has to be asked.
+const FEES_OPTS = [
+  { value: '', label: 'All' },
+  { value: 'owing', label: 'Non-financial' },
+  { value: 'financial', label: 'Paid up' },
+  { value: 'unknown', label: 'Not known' },
+]
+const TRAINING_OPTS = [
+  { value: '', label: 'All' },
+  { value: 'trained', label: 'At training' },
+  { value: 'missing', label: 'Not at training' },
+  { value: 'unknown', label: 'Not known' },
+]
+const optLabel = (opts, v) => (opts.find((o) => o.value === v) || {}).label || v
 
 function PanelGroup({ label, children }) {
   return (
@@ -25,6 +42,13 @@ function PanelGroup({ label, children }) {
       <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faintest pb-1 border-b border-pb-hairline">{label}</div>
       <div className="flex flex-col gap-0.5 mt-1.5">{children}</div>
     </div>
+  )
+}
+/* Says where a flag's answer comes from, so "Not known" reads as a state of
+ * the club's data rather than a broken filter. */
+function SourceNote({ source, from, manual }) {
+  return (
+    <div className="text-[10.5px] leading-snug text-pb-faintest mt-1.5">{source ? from : manual}</div>
   )
 }
 function Check({ label, checked, onChange, dot }) {
@@ -37,7 +61,7 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, flags }) {
   const [open, setOpen] = useState(false)
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
@@ -51,6 +75,8 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   ;(values.squad || []).forEach((s) => pills.push({ k: 's' + s, label: (squadOptions.find((o) => o.value === s) || {}).label || s, rm: () => toggle('squad', s) }))
   if (values.status) pills.push({ k: 'st', label: values.status === 'unselected' ? 'Unselected' : 'In another XI', rm: () => setValue('status', '') })
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
+  if (values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
+  if (values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
 
   const resetAll = () => { clearAll(); setYearsF(0) }
@@ -106,6 +132,20 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
           </PanelGroup>
           <PanelGroup label="Selection">
             <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
+          </PanelGroup>
+          <PanelGroup label="Fees">
+            <Segmented sm value={values.fees || ''} onChange={(v) => setValue('fees', v)} options={FEES_OPTS} />
+            <SourceNote
+              source={flags?.financial}
+              from="Read from BetterFees, or set on a player's profile."
+              manual="Set on a player's profile — turn on BetterFees to have it worked out." />
+          </PanelGroup>
+          <PanelGroup label="Training">
+            <Segmented sm value={values.training || ''} onChange={(v) => setValue('training', v)} options={TRAINING_OPTS} />
+            <SourceNote
+              source={flags?.training}
+              from={`At nets in the last ${flags?.training_window_days || 21} days, or set on a player's profile.`}
+              manual="Set on a player's profile — run a Net Manager session to have it worked out." />
           </PanelGroup>
         </div>
       )}

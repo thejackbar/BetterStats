@@ -389,6 +389,37 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         )}
         <PToggle on={draft.status === 'inactive'} onChange={(v) => set('status', v ? 'inactive' : 'active')}
           label="Inactive — hide from availability & selection" />
+        {/* Public visibility. Separate from Inactive on purpose: inactive is
+            about selection, this is about whether the person is findable at
+            all on the club's public site. Asked for by juniors who would
+            rather not be. Their stats still count towards the club's totals
+            and they stay in every admin screen. */}
+        <PToggle on={draft.is_public === false} onChange={(v) => set('is_public', !v)}
+          label="Hidden — keep off the public website" />
+        {draft.is_public === false && (
+          <div className="pl-[47px] pb-1.5 text-[11.5px] text-pb-faint leading-snug">
+            Off the public squad list, search, leaderboards and records, and
+            their profile page stops resolving. Still here for you: selection,
+            fees, reports and the club's own totals are unchanged.
+          </div>
+        )}
+      </div>
+
+      {/* BetterSelect selection flags. Both read from another module by
+          default — leave them on Automatic and the answer comes from
+          BetterFees' balance and Net Manager attendance. A club running
+          neither can still answer by hand, which is what these are for. */}
+      <div className="mt-1.5 border-t border-pb-hairline pt-2.5 flex flex-wrap gap-x-3.5 gap-y-2 items-end">
+        <Field label="Fees" half>
+          <PSelect value={boolToChoice(draft.is_financial_override)}
+            onChange={(v) => set('is_financial_override', choiceToBool(v))}
+            options={[['', 'Automatic (BetterFees)'], ['yes', 'Financial'], ['no', 'Not financial']]} />
+        </Field>
+        <Field label="Training" half>
+          <PSelect value={boolToChoice(draft.trained_override)}
+            onChange={(v) => set('trained_override', choiceToBool(v))}
+            options={[['', 'Automatic (Net Manager)'], ['yes', 'Attending'], ['no', 'Not attending']]} />
+        </Field>
       </div>
 
       {canEdit && playerId && (
@@ -433,6 +464,7 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
               {squad && <Tag tone="accent">{squad.name} squad</Tag>}
               {draft.is_overseas && <Tag tone="amber">Overseas{draft.overseas_country ? ` · ${draft.overseas_country}` : ''}</Tag>}
               {draft.status === 'inactive' && <Tag tone="faint">Inactive</Tag>}
+              {draft.is_public === false && <Tag tone="faint">Hidden</Tag>}
             </div>
             <div className="flex items-center gap-2.5 mt-1.5 text-pb-dim text-[13px] flex-wrap">
               {draft.player_role && <><span>{draft.player_role}</span><span className="text-pb-faintest">·</span></>}
@@ -474,6 +506,17 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
 }
 
 /* ── Build the editable draft from a profile payload ─────────────────────── */
+// The two BetterSelect override flags are a tri-state: null means "no
+// override, use what BetterFees / Net Manager say", true and false are the
+// club answering by hand. A <select> only speaks strings, so these two map
+// between the two.
+export function boolToChoice(v) {
+  return v === true ? 'yes' : v === false ? 'no' : ''
+}
+export function choiceToBool(v) {
+  return v === 'yes' ? true : v === 'no' ? false : null
+}
+
 export function draftFromProfile(p) {
   // Edit the override as separate first/last fields so it can be stored
   // canonically as "Last, First" (sorts by surname, respects the club name
@@ -497,6 +540,9 @@ export function draftFromProfile(p) {
     overseas_country: p.overseas_country || '',
     skill_positions: p.skill_positions || [],
     playhq_id: p.playhq_id || '',
+    is_public: p.is_public !== false,
+    is_financial_override: p.is_financial_override ?? null,
+    trained_override: p.trained_override ?? null,
   }
 }
 
@@ -523,5 +569,10 @@ export function patchFromDraft(d) {
     // Role is canonical — derive the skill codes the filters + chips read from
     // it (fall back to whatever was on the player when no role is set).
     skill_positions: ROLE_TO_SKILLS[d.player_role] || d.skill_positions || [],
+    is_public: d.is_public !== false,
+    // Sent as an explicit null to clear an override back to automatic —
+    // the PATCH reads exclude_unset, so a present null IS the intent.
+    is_financial_override: d.is_financial_override ?? null,
+    trained_override: d.trained_override ?? null,
   }
 }

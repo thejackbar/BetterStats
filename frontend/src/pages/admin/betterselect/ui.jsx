@@ -159,9 +159,12 @@ const TAG_TONE = {
   red: 'bg-pb-red/15 text-pb-red',
   faint: 'bg-pb-surface2 text-pb-faint',
 }
-export function Tag({ children, tone = 'accent', className = '' }) {
+// `title` is forwarded because a tag is often two letters doing a lot of work
+// ("NT", "$") and the hover text is the only place the full meaning fits.
+export function Tag({ children, tone = 'accent', className = '', title }) {
   return (
-    <span className={`inline-flex items-center font-mono text-[9.5px] font-bold tracking-wide2 px-1.5 py-0.5 rounded ${TAG_TONE[tone] || TAG_TONE.accent} ${className}`}>
+    <span title={title}
+      className={`inline-flex items-center font-mono text-[9.5px] font-bold tracking-wide2 px-1.5 py-0.5 rounded ${TAG_TONE[tone] || TAG_TONE.accent} ${className}`}>
       {children}
     </span>
   )

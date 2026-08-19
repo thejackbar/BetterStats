@@ -119,7 +119,7 @@ async def _club_for_token(db: AsyncSession, token: str) -> tuple[Organisation, V
 
     The token belongs to one medal, so a link decides which award the voter is
     voting for. A club's pre-medals club-wide token was carried onto its first
-    medal by migration 265, so a link already in players' hands this season
+    medal by migration 267, so a link already in players' hands this season
     keeps working and lands on the count it always did."""
     if not token:
         raise HTTPException(status_code=404, detail="Unknown link")
