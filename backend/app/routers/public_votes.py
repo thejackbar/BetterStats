@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.modules import MODULE_SELECT, org_has_module
 from app.config.settings import settings
-from app.models.db import Fixture, Organisation, Player, VoteBallot, VoteSettings, get_db
+from app.models.db import Fixture, Organisation, Player, VoteBallot, VoteMedal, get_db
 from app.routers.availability import active_self_service_players, phone_last4
 from app.services import rate_limit
 from app.services import votes as vote_svc
@@ -113,13 +113,17 @@ def _read_session(request: Request, club_id) -> Optional[uuid.UUID]:
         return None
 
 
-async def _club_for_token(db: AsyncSession, token: str) -> tuple[Organisation, VoteSettings]:
-    """Resolve the club + settings behind a vote-link token, or 404. Same
-    tell-nothing 404 posture as the availability link."""
+async def _club_for_token(db: AsyncSession, token: str) -> tuple[Organisation, VoteMedal]:
+    """Resolve the club + MEDAL behind a vote-link token, or 404. Same
+    tell-nothing 404 posture as the availability link.
+
+    The token belongs to one medal, so a link decides which award the voter is
+    voting for. A club's pre-medals club-wide token was carried onto its first
+    medal by migration 267, so a link already in players' hands this season
+    keeps working and lands on the count it always did."""
     if not token:
         raise HTTPException(status_code=404, detail="Unknown link")
-    res = await db.execute(select(VoteSettings).where(VoteSettings.link_token == token))
-    s = res.scalar_one_or_none()
+    s = await vote_svc.medal_by_token(db, token)
     club = await db.get(Organisation, s.organisation_id) if s else None
     if s is None or club is None or not s.enabled or not org_has_module(club, MODULE_SELECT):
         raise HTTPException(status_code=404, detail="This voting link isn't active")
@@ -148,11 +152,15 @@ async def _verified_player(db: AsyncSession, request: Request, club: Organisatio
 
 
 async def _open_fixtures(
-    db: AsyncSession, club: Organisation, cfg: dict,
+    db: AsyncSession, club: Organisation, cfg: dict, medal: VoteMedal,
     grade_id: Optional[str] = None, round_key: Optional[str] = None, q: Optional[str] = None,
 ) -> tuple[list[tuple[Fixture, str]], dict]:
-    """Recent played fixtures with their voting state, newest first, plus the
-    filter option lists (``grades``/``rounds``).
+    """Recent played fixtures THIS MEDAL counts, with their voting state,
+    newest first, plus the filter option lists (``grades``/``rounds``).
+
+    A medal restricted to a set of grades never lists a fixture outside them —
+    a Colts voter following the Colts link should not be offered the senior
+    game to vote on.
 
     ``grade_id``/``round_key``/``q`` narrow the list — the same filters the
     admin Fixtures tab has, so a club can share a link pre-scoped to one team
@@ -172,16 +180,25 @@ async def _open_fixtures(
         )
         .order_by(Fixture.played_on.desc())
     )
-    all_fixtures = res.scalars().all()
-    if not all_fixtures:
+    every_fixture = list(res.scalars().all())
+    if not every_fixture:
         return [], {"grades": [], "rounds": []}
 
     from sqlalchemy import text
-    from app.models.db import VoteFixtureOverride
 
-    grade_by_fixture = await vote_svc.effective_grade_ids(db, all_fixtures)
+    # Resolve grades BEFORE narrowing to the medal's own set — a fixture that
+    # carries its grade only on its synced game would otherwise drop out.
+    grade_by_fixture = await vote_svc.effective_grade_ids(db, every_fixture)
+    medal_grades = await vote_svc.medal_grade_ids(db, club.id, medal)
+    all_fixtures = [
+        f for f in every_fixture
+        if vote_svc.medal_covers(medal_grades, grade_by_fixture.get(str(f.id)))
+    ]
+    if not all_fixtures:
+        return [], {"grades": [], "rounds": []}
     grade_names: dict[str, str] = {}
-    gids = {gid for gid in grade_by_fixture.values() if gid}
+    gids = {grade_by_fixture.get(str(f.id)) for f in all_fixtures}
+    gids = {gid for gid in gids if gid}
     if gids:
         gn_res = await db.execute(text("SELECT id, name FROM grades WHERE id = ANY(:ids)"), {"ids": list(gids)})
         grade_names = {str(gid): name for gid, name in gn_res.fetchall()}
@@ -225,10 +242,7 @@ async def _open_fixtures(
         {"org": club.id, "ids": fids},
     )
     lineup_saved = {str(r[0]) for r in l_res.fetchall()}
-    o_res = await db.execute(
-        select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id.in_(fids))
-    )
-    overrides = {str(o.fixture_id): o for o in o_res.scalars().all()}
+    overrides = await vote_svc.overrides_by_fixture(db, medal.id, fids)
     out = []
     for f in fixtures:
         fid = str(f.id)
@@ -264,9 +278,12 @@ async def get_landing(
     cfg = vote_svc.effective_config(s)
     players = await active_self_service_players(db, club)
     me = await _verified_player(db, request, club)
-    fixtures, filter_opts = await _open_fixtures(db, club, cfg, grade_id=team, round_key=round_key, q=q)
+    fixtures, filter_opts = await _open_fixtures(db, club, cfg, s, grade_id=team, round_key=round_key, q=q)
     return {
         "club": _club_branding(club),
+        # Named so a player following one of several club links knows which
+        # award they're voting for — the ballot shape alone doesn't say.
+        "medal": {"id": str(s.id), "name": s.name},
         "require_pin": bool(s.require_pin),
         "voter_mode": cfg["voter_mode"],
         "allow_non_participants": cfg["allow_non_participants"],
@@ -388,7 +405,7 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
     if not fx or fx.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    ov = await vote_svc.get_override(db, fx.id)
+    ov = await vote_svc.get_override(db, s.id, fx.id)
     elig = await vote_svc.resolve_eligibility(
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
@@ -400,7 +417,9 @@ async def fixture_state(token: str, fixture_id: str, request: Request,
     my_ballot = None
     if me:
         res = await db.execute(select(VoteBallot).where(
-            VoteBallot.fixture_id == fx.id, VoteBallot.voter_player_id == me.id,
+            VoteBallot.medal_id == s.id,
+            VoteBallot.fixture_id == fx.id,
+            VoteBallot.voter_player_id == me.id,
         ))
         b = res.scalar_one_or_none()
         if b:
@@ -444,7 +463,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if not fx or fx.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Fixture not found")
 
-    ov = await vote_svc.get_override(db, fx.id)
+    ov = await vote_svc.get_override(db, s.id, fx.id)
     elig = await vote_svc.resolve_eligibility(
         db, club, fx, cfg, ov.eligibility_source if ov else None,
     )
@@ -489,10 +508,13 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
 
     if me:
         res = await db.execute(select(VoteBallot).where(
-            VoteBallot.fixture_id == fx.id, VoteBallot.voter_player_id == me.id,
+            VoteBallot.medal_id == s.id,
+            VoteBallot.fixture_id == fx.id,
+            VoteBallot.voter_player_id == me.id,
         ))
     else:
         res = await db.execute(select(VoteBallot).where(
+            VoteBallot.medal_id == s.id,
             VoteBallot.fixture_id == fx.id,
             VoteBallot.voter_player_id.is_(None),
             func.lower(VoteBallot.voter_name) == voter_name.lower(),
@@ -501,6 +523,7 @@ async def submit_ballot(token: str, fixture_id: str, body: BallotBody, request: 
     if not ballot:
         ballot = VoteBallot(
             organisation_id=club.id,
+            medal_id=s.id,
             fixture_id=fx.id,
             voter_player_id=me.id if me else None,
             voter_name=voter_name,

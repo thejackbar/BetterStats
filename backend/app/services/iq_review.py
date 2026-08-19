@@ -21,7 +21,7 @@ from collections import defaultdict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.iq_filters import grade_canonical_label, grade_match_clause, season_member_clause_cross_club
+from app.services.iq_filters import grade_scope_fragment, grade_canonical_label, grade_match_clause, season_member_clause_cross_club
 
 # Canonical "this game is ours" predicate — mirrors aggregations._club_results
 # (migrations 167/169). A shared fixture between two both-synced clubs is ONE
@@ -84,6 +84,11 @@ async def list_review_games(session: AsyncSession, org_id: str, limit: int = 40,
     params: dict = {"org": org_id, "limit": limit, "season": season_id, "grade": grade_id}
     if grade_id:
         clauses += f" AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
+    # The club-wide Grade Type / Match Type filter. Match Review lists OUR
+    # games, so the format half reads per fixture off `g` — a grade that plays
+    # both a one-day and a two-day season splits correctly rather than filing
+    # every game it ever played under one.
+    clauses += grade_scope_fragment("gr.id", grade_id, game_alias="g")
     if season_ids:
         clauses += (
             " AND (g.season_id = ANY(:season_ids) OR g.season_id IN ("

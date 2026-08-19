@@ -42,7 +42,9 @@ from app.models.db import Organisation
 from app.services import grassroots_scores_client
 from app.services import scouting_intel
 from app.services.club_match import club_match_keys
-from app.services.iq_filters import grade_canonical_label, grade_match_clause
+from app.services.iq_filters import (
+    grade_canonical_label, grade_match_clause, grade_scope_fragment,
+)
 
 
 # The opponent key + display name for a game, from our club's perspective.
@@ -75,7 +77,12 @@ def _opp_scope(grade: str | None, season_ids: list[str] | None, params: dict) ->
             params[k] = sid
             keys.append(f"CAST(:{k} AS UUID)")
         clauses.append(f"AND gr.season_id IN ({', '.join(keys)})")
-    return " ".join(clauses)
+    # The club-wide Grade Type / Match Type filter, on top of whatever this
+    # one report asked for. Every query routed through here joins the games
+    # view as `g` and its grade as `gr`, so the category half reads off the
+    # grade and the format half off each fixture's own match_format.
+    clauses.append(grade_scope_fragment("gr.id", grade, game_alias="g"))
+    return " ".join(c for c in clauses if c)
 
 
 async def _held_org_keys(session: AsyncSession) -> set[str]:

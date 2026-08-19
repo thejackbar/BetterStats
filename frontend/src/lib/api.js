@@ -17,9 +17,30 @@ function statusMessage(res) {
   return res.statusText
 }
 
+// BetterIQ's Grade Type / Match Type filter. Held here and appended to every
+// /iq/ request rather than threaded through the ~37 iq* methods below, each of
+// which hand-builds its own query string — adding two params to all of them by
+// hand is how one quietly ships without them and the filter reads as working
+// while doing nothing on that screen. Mirrors the backend, where the same
+// filter is applied once at the router rather than on each endpoint.
+let _iqScope = null
+
+export function setIqScope(scope) {
+  _iqScope = scope && (scope.categories || scope.formats) ? { ...scope } : null
+}
+
+function iqScopeQuery(path) {
+  if (!_iqScope || !path.startsWith('/iq/')) return path
+  const parts = []
+  if (_iqScope.categories) parts.push(`categories=${encodeURIComponent(_iqScope.categories)}`)
+  if (_iqScope.formats) parts.push(`formats=${encodeURIComponent(_iqScope.formats)}`)
+  if (!parts.length) return path
+  return path + (path.includes('?') ? '&' : '?') + parts.join('&')
+}
+
 async function request(path, options = {}) {
   const headers = { 'Content-Type': 'application/json', ...options.headers }
-  const res = await fetch(`${BASE}${path}`, { ...options, headers, credentials: 'include' })
+  const res = await fetch(`${BASE}${iqScopeQuery(path)}`, { ...options, headers, credentials: 'include' })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: statusMessage(res) }))
     let detail
@@ -110,6 +131,11 @@ function scopeQuery(scope) {
 }
 
 export const api = {
+  // Set BetterIQ's Grade Type / Match Type filter. Lives on `api` (not just as
+  // a bare export) because every caller already holds this object, and the
+  // filter is an api-layer concern: it decides what goes on the wire, not what
+  // any one screen renders.
+  setIqScope,
   // Clubs (slug-based)
   getClubBySlug: (slug) => request(`/clubs/${slug}`),
   unlockClub: (slug, pin) => request(`/clubs/${slug}/unlock`, {
@@ -198,7 +224,13 @@ export const api = {
   getOrgLineup: (orgId, matchId) => request(`/organisations/${orgId}/lineups/${matchId}`),
 
   // Players
-  listPlayers: (orgId) => request(`/players?org_id=${orgId}`),
+  // Public roster. Players the club has hidden (players.is_public false) are
+  // left out unless includeHidden is passed AND the caller is signed in as
+  // this club — admin screens that genuinely need the whole roster (Merge
+  // Players, Awards, the Yearbook editor) pass it; the public Players page
+  // and the navbar search deliberately don't.
+  listPlayers: (orgId, { includeHidden = false } = {}) =>
+    request(`/players?org_id=${orgId}${includeHidden ? '&include_hidden=true' : ''}`),
   getPlayer: (playerId) => request(`/players/${playerId}`),
   playerFormats: (playerId, { seasonId } = {}) => {
     const params = new URLSearchParams()
@@ -2688,37 +2720,59 @@ export const api = {
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
   // ─── BetterSelect: vote collection (admin) ───
-  votesGetSettings: () => request('/votes/settings'),
-  votesSetSettings: (data) =>
-    request('/votes/settings', { method: 'POST', body: JSON.stringify(data) }),
-  votesRegenerateLink: () => request('/votes/settings/regenerate', { method: 'POST' }),
-  votesFixtures: ({ year, grade_id, round_key, q } = {}) => {
+  // Every admin vote call names the MEDAL it acts on. Omitting medalId falls
+  // back server-side to the club's first medal, which is what keeps a link
+  // saved before medals existed landing on the club's original count.
+  votesMedals: () => request('/votes/medals'),
+  votesCreateMedal: (data) =>
+    request('/votes/medals', { method: 'POST', body: JSON.stringify(data) }),
+  votesUpdateMedal: (medalId, data) =>
+    request(`/votes/medals/${medalId}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  votesDeleteMedal: (medalId, { confirm } = {}) =>
+    request(`/votes/medals/${medalId}${confirm ? '?confirm=true' : ''}`, { method: 'DELETE' }),
+  votesRegenerateLink: (medalId) =>
+    request(`/votes/medals/${medalId}/regenerate`, { method: 'POST' }),
+  votesGetSettings: (medalId) => request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`),
+  votesSetSettings: (data, medalId) =>
+    request(`/votes/settings${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify(data) }),
+  votesFixtures: ({ year, grade_id, round_key, q, medal_id } = {}) => {
     const params = new URLSearchParams()
     if (year) params.set('year', year)
     if (grade_id) params.set('grade_id', grade_id)
     if (round_key) params.set('round_key', round_key)
     if (q) params.set('q', q)
+    if (medal_id) params.set('medal_id', medal_id)
     const qs = params.toString()
     return request(`/votes/fixtures${qs ? `?${qs}` : ''}`)
   },
-  votesFixtureDetail: (fixtureId) => request(`/votes/fixtures/${fixtureId}`),
-  votesAdminBallot: (fixtureId, data) =>
-    request(`/votes/fixtures/${fixtureId}/ballots`, { method: 'POST', body: JSON.stringify(data) }),
+  votesFixtureDetail: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}${medalId ? `?medal_id=${medalId}` : ''}`),
+  votesAdminBallot: (fixtureId, medalId, data) =>
+    request(`/votes/fixtures/${fixtureId}/ballots${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify(data) }),
   votesDeleteBallot: (ballotId) => request(`/votes/ballots/${ballotId}`, { method: 'DELETE' }),
-  votesSetFixtureSource: (fixtureId, eligibility_source) =>
-    request(`/votes/fixtures/${fixtureId}/source`, { method: 'POST', body: JSON.stringify({ eligibility_source }) }),
-  votesLockFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/lock`, { method: 'POST' }),
-  votesReopenFixture: (fixtureId) => request(`/votes/fixtures/${fixtureId}/reopen`, { method: 'POST' }),
-  votesLeaderboard: ({ year, grade_id, through_round } = {}) => {
+  votesSetFixtureSource: (fixtureId, eligibility_source, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/source${medalId ? `?medal_id=${medalId}` : ''}`,
+      { method: 'POST', body: JSON.stringify({ eligibility_source }) }),
+  votesLockFixture: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/lock${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesReopenFixture: (fixtureId, medalId) =>
+    request(`/votes/fixtures/${fixtureId}/reopen${medalId ? `?medal_id=${medalId}` : ''}`, { method: 'POST' }),
+  votesLeaderboard: ({ year, grade_id, through_round, medal_id } = {}) => {
     const q = new URLSearchParams()
     if (year) q.set('year', year)
     if (grade_id) q.set('grade_id', grade_id)
     if (through_round) q.set('through_round', through_round)
+    if (medal_id) q.set('medal_id', medal_id)
     const qs = q.toString()
     return request(`/votes/leaderboard${qs ? `?${qs}` : ''}`)
   },
-  votesBulkState: ({ fixture_ids, action }) =>
-    request('/votes/bulk-state', { method: 'POST', body: JSON.stringify({ fixture_ids, action }) }),
+  votesBulkState: ({ fixture_ids, action, medal_id }) =>
+    request('/votes/bulk-state', {
+      method: 'POST',
+      body: JSON.stringify({ fixture_ids, action, medal_id }),
+    }),
   votesNudge: (fixtureId, body) =>
     request('/votes/nudge', {
       method: 'POST',
@@ -2965,6 +3019,9 @@ export const api = {
     request(`/iq/trends/player/${encodeURIComponent(playerId)}/scouting`, { method: 'PUT', body: JSON.stringify(body) }),
 
   // ─── BetterIQ: Team self-analysis ───────────────────────
+  // What the two grade filters should offer this club, and what its own
+  // default leaves out. Cheap, and asked once when the filter bar loads.
+  iqGradeScope: () => request('/iq/grade-scope'),
   iqTeamSeasons: () => request('/iq/team/seasons'),
   iqTeamGrades: (seasonId) => request(`/iq/team/grades${seasonId ? `?season_id=${encodeURIComponent(seasonId)}` : ''}`),
   iqTeamOverview: (seasonId, gradeId, seasonIds) => {

@@ -50,6 +50,9 @@ from app.routers.afl import (
     result_imports as afl_result_imports,
     award_imports as afl_award_imports,
     seasons_admin as afl_seasons_admin,
+    votes as afl_votes,
+    public_votes as afl_public_votes,
+    lineups as afl_lineups,
 )
 
 logger = logging.getLogger(__name__)
@@ -413,6 +416,11 @@ app.include_router(afl_imports.router)
 app.include_router(afl_result_imports.router)
 app.include_router(afl_award_imports.router)
 app.include_router(afl_seasons_admin.router)
+app.include_router(afl_lineups.router)
+app.include_router(afl_votes.router)
+# Unauthenticated by necessity — trust comes from the medal's link token, the
+# player's PIN and a signed cookie, not from a session (see its docstring).
+app.include_router(afl_public_votes.router)
 
 
 @app.get("/health")

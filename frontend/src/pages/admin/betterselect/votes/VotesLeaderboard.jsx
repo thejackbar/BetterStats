@@ -27,7 +27,7 @@ function Form({ points = [], max = 3 }) {
   )
 }
 
-export default function VotesLeaderboard() {
+export default function VotesLeaderboard({ medalId }) {
   const toast = useToast()
   const [board, setBoard] = useState(null)
   const [year, setYear] = useState(null)
@@ -37,10 +37,10 @@ export default function VotesLeaderboard() {
 
   useEffect(() => {
     let alive = true
-    api.votesLeaderboard({ year, grade_id: gradeId || undefined, through_round: throughRound || undefined })
+    api.votesLeaderboard({ year, grade_id: gradeId || undefined, through_round: throughRound || undefined, medal_id: medalId || undefined })
       .then((d) => alive && setBoard(d)).catch((e) => toast.error(e.message))
     return () => { alive = false }
-  }, [year, gradeId, throughRound, toast])
+  }, [year, gradeId, throughRound, medalId, toast])
 
   const values = board?.ballot_values || [3, 2, 1]
 

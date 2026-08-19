@@ -252,7 +252,12 @@ export default function PublicVoting() {
                   style={{ background: 'var(--pb-accent)' }}>{initialsOf(club?.name || 'Club')}</span>}
             <div className="min-w-0">
               <div className="font-display font-bold text-[15px] leading-tight truncate">{club?.name || 'Vote'}</div>
-              <div className="font-mono text-[10px] tracking-wide2 text-pb-faint mt-0.5">BEST-PLAYER VOTES</div>
+              {/* A club can run several counts, each on its own link, so the
+                  medal is named here — the ballot shape alone doesn't say
+                  which award you're voting for. */}
+              <div className="font-mono text-[10px] tracking-wide2 text-pb-faint mt-0.5 truncate">
+                {(landing?.medal?.name || 'Best-player votes').toUpperCase()}
+              </div>
             </div>
             {me && (
               <button onClick={async () => {

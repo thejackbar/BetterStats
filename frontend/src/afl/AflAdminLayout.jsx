@@ -23,6 +23,8 @@ const NAV = [
   { heading: 'Clean Your Data' },
   { to: '/admin/merge', label: 'Merge Players' },
   { to: '/admin/merge-grades', label: 'Merge Grades' },
+  { heading: 'Votes' },
+  { to: '/admin/votes', label: 'Votes' },
   { heading: 'Records & Content' },
   { to: '/admin/award-definitions', label: 'Award Types' },
   { to: '/admin/awards', label: 'Awards' },

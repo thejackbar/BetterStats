@@ -18,6 +18,18 @@ const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
 
 /* ── Form indicator — quiet last-4 sparkline + word ──────────────────────── */
+/* Two quiet warnings on a pool card: money owed and nets missed. Only the
+ * negative case draws — a paid-up player who was at training is the normal
+ * state and does not need a badge, and "we can't tell" (null) says nothing
+ * rather than accusing anyone. */
+function FlagTags({ p }) {
+  return (
+    <>
+      {p.is_financial === false && <Tag tone="red" title="Owes the club money">$</Tag>}
+      {p.trained_recently === false && <Tag tone="faint" title="Not at training recently">NT</Tag>}
+    </>
+  )
+}
 function FormBars({ p, h = 14, w = 3, gap = 2 }) {
   const bars = spark(p.recent)
   const fm = formMeta(p)
@@ -171,6 +183,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
           <span className="text-[14px] font-semibold truncate">{p.display_name}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
+          <FlagTags p={p} />
         </div>
         <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
         {clash
@@ -335,6 +348,7 @@ function TrayCard({ p, vm, drag }) {
         <div className="flex items-center gap-1.5">
           <span className="text-[13.5px] font-semibold truncate">{p.display_name}</span>
           {p.squads?.[0] && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
+          <FlagTags p={p} />
         </div>
         <div className="text-[11.5px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
         {clash

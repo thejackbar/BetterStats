@@ -20,7 +20,7 @@ const SOURCES = [
 ]
 const sourceLabel = (v) => SOURCES.find((s) => s.value === v)?.label || v
 
-function BallotEntryForm({ detail, onSaved }) {
+function BallotEntryForm({ detail, medalId, onSaved }) {
   const toast = useToast()
   const eligible = detail.eligible || []
   const values = detail.settings?.ballot_values || [3, 2, 1]
@@ -40,7 +40,7 @@ function BallotEntryForm({ detail, onSaved }) {
     if (!chosen.length) { toast.error('Pick at least one player'); return }
     setSaving(true)
     try {
-      await api.votesAdminBallot(detail.fixture.id, {
+      await api.votesAdminBallot(detail.fixture.id, medalId, {
         voter_player_id: voterId === '__other__' ? null : voterId || null,
         voter_name: voterId === '__other__' ? voterName : null,
         picks: chosen,
@@ -100,7 +100,7 @@ function BallotEntryForm({ detail, onSaved }) {
   )
 }
 
-function EligibilityPanel({ detail, onChanged }) {
+function EligibilityPanel({ detail, medalId, onChanged }) {
   const toast = useToast()
   const e = detail.eligibility
   const [busy, setBusy] = useState(false)
@@ -109,7 +109,7 @@ function EligibilityPanel({ detail, onChanged }) {
   const setSource = async (value) => {
     setBusy(true)
     try {
-      await api.votesSetFixtureSource(detail.fixture.id, value)
+      await api.votesSetFixtureSource(detail.fixture.id, value, medalId)
       toast.success(value ? `Voting on the ${sourceLabel(value).toLowerCase()}` : 'Back to the club default')
       onChanged()
     } catch (err) { toast.error(err.message) }
@@ -155,13 +155,13 @@ function EligibilityPanel({ detail, onChanged }) {
   )
 }
 
-export default function FixtureDetail({ fixtureId, onBack }) {
+export default function FixtureDetail({ fixtureId, medalId, onBack }) {
   const toast = useToast()
   const [detail, setDetail] = useState(null)
 
   const load = useCallback(() => {
-    api.votesFixtureDetail(fixtureId).then(setDetail).catch((e) => toast.error(e.message))
-  }, [fixtureId, toast])
+    api.votesFixtureDetail(fixtureId, medalId).then(setDetail).catch((e) => toast.error(e.message))
+  }, [fixtureId, medalId, toast])
   useEffect(() => { load() }, [load])
 
   if (!detail) return <PbSpinner message="Loading ballots…" />
@@ -170,7 +170,7 @@ export default function FixtureDetail({ fixtureId, onBack }) {
 
   const setLock = async (lock) => {
     try {
-      await (lock ? api.votesLockFixture(fx.id) : api.votesReopenFixture(fx.id))
+      await (lock ? api.votesLockFixture(fx.id, medalId) : api.votesReopenFixture(fx.id, medalId))
       toast.success(lock ? 'Voting locked' : 'Voting reopened')
       load()
     } catch (e) { toast.error(e.message) }
@@ -216,7 +216,7 @@ export default function FixtureDetail({ fixtureId, onBack }) {
 
       <div className="flex flex-col lg:flex-row gap-4">
         <div className="flex-1 min-w-0 flex flex-col gap-4">
-          <EligibilityPanel detail={detail} onChanged={load} />
+          <EligibilityPanel detail={detail} medalId={medalId} onChanged={load} />
 
           <div className="pb-card px-4 py-4">
             <div className="font-display font-bold text-[15px] mb-2.5">This week's count</div>
@@ -246,7 +246,7 @@ export default function FixtureDetail({ fixtureId, onBack }) {
             )}
           </div>
 
-          {detail.eligible.length > 0 && <BallotEntryForm detail={detail} onSaved={load} />}
+          {detail.eligible.length > 0 && <BallotEntryForm detail={detail} medalId={medalId} onSaved={load} />}
 
           <div className="pb-card px-4 py-4">
             <div className="font-display font-bold text-[15px] mb-2.5">
@@ -283,7 +283,7 @@ export default function FixtureDetail({ fixtureId, onBack }) {
         <div className="w-full lg:w-[320px] shrink-0 flex flex-col gap-4">
           <ShareVotePanel settings={detail.settings} fixtures={[fx]}
             scope={{ fixtureId: fx.id, label: `${fx.round} v ${fx.opponent || 'TBC'}` }} />
-          <OutstandingVoters fixture={{ ...fx, outstanding: detail.outstanding }} onNudged={load} />
+          <OutstandingVoters fixture={{ ...fx, outstanding: detail.outstanding }} medalId={medalId} onNudged={load} />
         </div>
       </div>
     </div>

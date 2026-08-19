@@ -29,11 +29,30 @@ const SS_KEY = 'iq.ctx.v1'
 let _seasons = null          // oldest → newest
 let _grades = null
 let _ctx = null
+// What the club's grades justify offering: which categories exist, which
+// formats its games are actually recorded in, and what the club's own default
+// leaves out. A club with no junior programme is never shown a Juniors tick
+// box, which is also exactly when the filter would do nothing.
+let _scopeOpts = { available: [], available_formats: [], default: [], excluded_categories: [] }
 let _loadPromise = null
 const _listeners = new Set()
-let _snapshot = { seasons: [], grades: [], ctx: null, ready: false }
+let _snapshot = { seasons: [], grades: [], ctx: null, ready: false, scopeOpts: _scopeOpts }
 
-function _recompute() { _snapshot = { seasons: _seasons || [], grades: _grades || [], ctx: _ctx, ready: !!_seasons } }
+function _recompute() {
+  _snapshot = {
+    seasons: _seasons || [], grades: _grades || [], ctx: _ctx,
+    ready: !!_seasons, scopeOpts: _scopeOpts,
+  }
+  // Publish the scope to the api layer HERE rather than from a component
+  // effect: this runs before React re-renders the screens, so a fetch kicked
+  // off by that render already carries the new filter. From an effect it
+  // would land one render late and the first request after every change
+  // would go out unfiltered.
+  api.setIqScope(_ctx ? {
+    categories: (_ctx.categories && _ctx.categories.length) ? _ctx.categories.join(',') : null,
+    formats: (_ctx.formats && _ctx.formats.length) ? _ctx.formats.join(',') : null,
+  } : null)
+}
 function _emit() { _recompute(); _listeners.forEach(l => l()) }
 function _subscribe(l) { _listeners.add(l); return () => _listeners.delete(l) }
 function _saveCtx() { try { sessionStorage.setItem(SS_KEY, JSON.stringify(_ctx)) } catch { /* ignore */ } }
@@ -116,7 +135,15 @@ function _reconcile(saved) {
     team = teamFromNames(savedNames)
   }
   const mode = saved.season.mode === 'range' ? 'range' : saved.season.mode === 'all' ? 'all' : 'single'
-  return { team, season: { mode, from, to }, touched: !!saved.touched }
+  // Drop any saved category or format the club no longer runs, so a stale
+  // selection can't scope every screen to nothing with no visible reason.
+  const cats = (saved.categories || []).filter(c => _scopeOpts.available.includes(c))
+  const fmts = (saved.formats || []).filter(f => _scopeOpts.available_formats.includes(f))
+  return {
+    team, season: { mode, from, to }, touched: !!saved.touched,
+    categories: cats.length ? cats : null,
+    formats: fmts.length ? fmts : null,
+  }
 }
 
 async function _ensureLoaded() {
@@ -126,6 +153,15 @@ async function _ensureLoaded() {
       let seasons = [], grades = []
       try { seasons = (await api.iqTeamSeasons()) || [] } catch { /* ignore */ }
       try { grades = (await api.iqTeamGrades()) || [] } catch { /* ignore */ }
+      try {
+        const opts = await api.iqGradeScope()
+        _scopeOpts = {
+          available: opts.available || [],
+          available_formats: opts.available_formats || [],
+          default: opts.default || [],
+          excluded_categories: opts.excluded_categories || [],
+        }
+      } catch { /* a club we can't ask just gets no pickers */ }
       // Collapse the raw season ROWS into one entry per cricket YEAR. A club's
       // "2024/25" is often several rows (MyCricket vs PlayHQ ids, separate
       // comps), so every year entry keeps all its row ids in `ids` — a single
@@ -149,6 +185,11 @@ async function _ensureLoaded() {
         team: { id: null, name: 'All grades', names: [] },
         season: { mode: 'single', from: newest, to: newest },
         touched: false,
+        // null, not [] — "the club's own default", which is what every other
+        // stats surface means by an omitted categories param. An empty array
+        // would read as "nothing ticked" and scope to nothing.
+        categories: null,
+        formats: null,
       }
       _emit()
     })()
@@ -161,7 +202,7 @@ export function useIQFilter() {
   const snap = useSyncExternalStore(_subscribe, () => _snapshot, () => _snapshot)
   useEffect(() => { _ensureLoaded() }, [])
   const setCtx = (next) => { _ctx = typeof next === 'function' ? next(_ctx) : next; _saveCtx(); _emit() }
-  return { ctx: snap.ctx, setCtx, seasons: snap.seasons, grades: snap.grades, ready: snap.ready }
+  return { ctx: snap.ctx, setCtx, seasons: snap.seasons, grades: snap.grades, ready: snap.ready, scopeOpts: snap.scopeOpts }
 }
 
 /* ── derived helpers for screens ──────────────────────────────────────────── */
@@ -275,6 +316,67 @@ function PillTrigger({ icon, label, sub, open, accent }) {
    guess) — served per grade by /iq/team/grades. Single-pick still reads as a
    plain click; ticking more boxes builds the multi set. */
 const CATEGORY_TAGS = { junior: 'Jnr', womens: "Wom", masters: 'Mas', mixed: 'Mix' }
+
+/* ── Grade Type + Match Type — the platform's own two axes ────────────────────
+   The same pair every other stats surface carries (migration 259). Both are
+   tick-box multi-selects, because "One Day and T20 together" is the question
+   people actually ask and a pick-one control can't answer it.
+
+   The two behave differently on purpose, and that difference is the whole
+   design. Grade type is a property of the GRADE, and every grade has one, so
+   nothing ticked means the club's own default (which normally leaves juniors
+   out). Match type is a property of each FIXTURE and is often genuinely
+   unrecorded, so nothing ticked means no format filter at all — asking for
+   T20 and being shown everything the club has ever played is worse than being
+   shown only what we can vouch for. */
+const CATEGORY_LABELS = {
+  senior: "Men's", junior: 'Juniors', womens: "Women's",
+  masters: 'Masters', mixed: 'Mixed / social',
+}
+const FORMAT_LABELS = { two_day: 'Two day', one_day: 'One day', t20: 'T20' }
+
+function ScopePicker({ icon, sub, values, options, labels, onChange, emptyLabel, note }) {
+  if (!options || options.length < 2) return null
+  const picked = values || []
+  const toggle = (v) => {
+    const next = picked.includes(v) ? picked.filter(x => x !== v) : [...picked, v]
+    // Ticking everything is the same as ticking nothing, and saying so keeps
+    // the pill reading "Club default" / "All formats" rather than listing
+    // every option back at the person who just ticked them.
+    onChange(next.length && next.length < options.length ? next : null)
+  }
+  const label = !picked.length
+    ? emptyLabel
+    : picked.length === 1
+      ? (labels[picked[0]] || picked[0])
+      : `${picked.length} selected`
+  return (
+    <Popover width={230} trigger={open => (
+      <PillTrigger icon={icon} sub={sub} label={label} open={open} accent={!!picked.length} />
+    )}>
+      {() => (
+        <div>
+          <div className="flex flex-col gap-0.5">
+            {options.map(o => (
+              <label key={o} className="flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-[13px]"
+                style={{ color: 'var(--pb-dim)' }}>
+                <input type="checkbox" checked={picked.includes(o)} onChange={() => toggle(o)}
+                  style={{ accentColor: 'var(--pb-accent)' }} />
+                <span>{labels[o] || o}</span>
+              </label>
+            ))}
+          </div>
+          {note && <div className="iq-mono text-pb-faintest mt-2 pt-2 leading-snug"
+            style={{ fontSize: 9.5, borderTop: '1px solid var(--pb-hairline)' }}>{note}</div>}
+          {!!picked.length && (
+            <button className="iq-mono text-pb-faint hover:text-pb-accent mt-2" style={{ fontSize: 10 }}
+              onClick={() => onChange(null)}>Clear</button>
+          )}
+        </div>
+      )}
+    </Popover>
+  )
+}
 
 function TeamPicker({ value, grades, onChange, label = 'Team' }) {
   const picked = new Set(teamNames(value))
@@ -489,7 +591,7 @@ function SeasonControl({ season, seasons, allowRange, onChange }) {
 
 /* ── Context bar ──────────────────────────────────────────────────────────── */
 export function ContextBar({ route }) {
-  const { ctx, setCtx, seasons, grades, ready } = useIQFilter()
+  const { ctx, setCtx, seasons, grades, ready, scopeOpts } = useIQFilter()
   const filters = ROUTE_FILTERS[route]
   // Grades fielded in the currently-selected season(s), de-duped by name — so the
   // Team filter only offers grades the club actually played that season (picking
@@ -546,6 +648,20 @@ export function ContextBar({ route }) {
             <span className="iq-display font-semibold text-[13px]">{seasons[seasons.length - 1]?.label || 'Current'}</span>
             <span className="iq-mono text-pb-faint" style={{ fontSize: 10 }}>· current</span>
           </div>}
+      <ScopePicker
+        icon="teams" sub="Grade type"
+        values={ctx.categories} options={scopeOpts.available} labels={CATEGORY_LABELS}
+        emptyLabel={scopeOpts.excluded_categories?.length
+          ? `Club default (no ${scopeOpts.excluded_categories.map(c => CATEGORY_LABELS[c] || c).join(', ')})`
+          : 'All grade types'}
+        note="Nothing ticked uses the club's own default."
+        onChange={v => setCtx({ ...ctx, categories: v, touched: true })} />
+      <ScopePicker
+        icon="ladders" sub="Match type"
+        values={ctx.formats} options={scopeOpts.available_formats} labels={FORMAT_LABELS}
+        emptyLabel="All formats"
+        note="Read off each fixture, so a grade that plays two formats splits correctly. A match with no format recorded is left out of an explicit pick."
+        onChange={v => setCtx({ ...ctx, formats: v, touched: true })} />
       {isRange && <Tag tone="accent">Comparing {seasonSpanCount(ctx, seasons)} seasons</Tag>}
       <div className="ml-auto hidden md:flex items-center gap-1.5 text-pb-faintest text-[11px]">
         <Icon name="info" size={12} />

@@ -728,7 +728,7 @@ export default function AdminYearbookDetail() {
 
   useEffect(() => {
     if (!org?.id) return
-    api.listPlayers(org.id).then(setPlayers).catch(() => {})
+    api.listPlayers(org.id, { includeHidden: true }).then(setPlayers).catch(() => {})
   }, [org?.id])
 
   const generateNarrative = async () => {

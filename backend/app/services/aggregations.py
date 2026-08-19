@@ -6,6 +6,14 @@ import uuid
 
 from app.services.milestone_rules import next_threshold, reach_window
 from app.services.grade_scope import GradeScope
+from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
+
+# "Does this roster appearance count as a match played" — one definition,
+# interpolated into every query below that counts matches off
+# `game_appearances`. Module-level because these are f-string SQL literals in
+# several different functions and a per-function local would be four copies of
+# the same line. The alias is `ga` at every site that uses it.
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 from app.services.season_aliases import (
     resolve_season_filter,
     resolve_season_filter_no_org,
@@ -283,7 +291,15 @@ async def _scoped_games_played(
             UNION
             SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
             UNION
-            SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+            -- A bare roster appearance counts as a match played, unless the
+            -- fixture was called off (migration 266). A club names a side for
+            -- a game that is then washed out, and a Saturday nobody played is
+            -- not a match. A game abandoned after play started still counts,
+            -- via whichever of the three branches above holds its rows.
+            SELECT ga.game_id FROM game_appearances ga
+            JOIN games ag ON ag.id = ga.game_id
+            WHERE ga.player_id = CAST(:pid AS UUID)
+              AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
         )
         {season_clause}{scope_clause}
     """
@@ -1421,6 +1437,7 @@ async def get_player_team_breakdown(
                 UNION
                 SELECT ga.player_id, ga.game_id FROM game_appearances ga
                 WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
             )
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
@@ -1487,6 +1504,7 @@ async def get_player_team_breakdown(
                 SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
             )
             SELECT
                 gr.season_id AS season_id,
@@ -1746,14 +1764,19 @@ async def _season_by_season_scoped(
             ),
             -- Matches is every game the player turned out in, whether or not he
             -- batted, bowled or took a catch. UNION (not UNION ALL) across the
-            -- four sources so a game he did all four in still counts once.
+            -- four sources so a game he did all four in still counts once. The
+            -- roster branch drops a fixture CA says was called off, same rule
+            -- as _scoped_games_played — see the comment there.
             played AS (
                 SELECT sg.sid, COUNT(DISTINCT t.game_id) AS matches
                 FROM (
                     SELECT game_id FROM v_effective_batting_innings WHERE player_id = CAST(:pid AS UUID)
                     UNION SELECT game_id FROM v_effective_bowling_spells WHERE player_id = CAST(:pid AS UUID)
                     UNION SELECT game_id FROM v_effective_fielding_stats WHERE player_id = CAST(:pid AS UUID)
-                    UNION SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                    UNION SELECT ga.game_id FROM game_appearances ga
+                          JOIN games ag ON ag.id = ga.game_id
+                          WHERE ga.player_id = CAST(:pid AS UUID)
+                            AND (ag.status IS NULL OR ag.status NOT IN ({NOT_PLAYED_SQL_LIST}))
                 ) t
                 JOIN scoped_games sg ON sg.game_id = t.game_id
                 GROUP BY sg.sid
@@ -3455,10 +3478,17 @@ async def get_player_by_opposition(
             ),
             games_by_opposition AS (
                 -- Exclude result=NULL games (abandoned / washed-out / mid-day-one
-                -- forfeits where no winner was determined). CA's aggregate
-                -- player_season_stats.matches counter excludes these too, so
-                -- filtering here keeps the opposition sum aligned with the
-                -- career total shown on the profile.
+                -- forfeits where no winner was determined) — a W/L split can
+                -- say nothing about a game with no winner.
+                --
+                -- This comment used to claim CA's own
+                -- player_season_stats.matches counter excludes these too. It
+                -- does NOT: CA counts a player as having played the moment he
+                -- is on the team sheet, washout or not, which is the bug
+                -- migration 266 exists to correct. Do not lean on that claim.
+                -- The two figures still will not reconcile exactly, because a
+                -- game abandoned after play started is a match played (266
+                -- keeps it counted) and has no result to file it under here.
                 SELECT
                     opp_key,
                     COUNT(*) AS games,
@@ -3545,7 +3575,8 @@ async def get_player_by_venue(
         text(f"""
             WITH player_game_ids AS (
                 -- Same union as per-opposition: synced via appearances + manual via per-innings tables.
-                SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
                 UNION
                 SELECT manual_game_id AS game_id FROM manual_batting_innings WHERE player_id = CAST(:pid AS UUID)
                 UNION

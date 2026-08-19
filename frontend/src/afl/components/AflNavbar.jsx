@@ -10,6 +10,7 @@ const LINKS = [
   { to: '', label: 'Dashboard', end: true },
   { to: 'players', label: 'Players' },
   { to: 'games', label: 'Games' },
+  { to: 'team-lists', label: 'Team lists' },
   { to: 'records', label: 'Records' },
   { to: 'leaderboard', label: 'Leaderboard' },
   { to: 'compare', label: 'Compare' },

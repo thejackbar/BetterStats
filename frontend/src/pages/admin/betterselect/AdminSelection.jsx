@@ -273,6 +273,10 @@ export default function AdminSelection() {
     { key: 'squad', type: 'multi' }, { key: 'avail', type: 'multi' }, { key: 'role', type: 'multi' },
     { key: 'bowling', type: 'multi' }, { key: 'hand', type: 'multi' }, { key: 'form', type: 'multi' },
     { key: 'status', type: 'single' }, { key: 'hideUnavail', type: 'bool' },
+    // Fees + training. Single-choice rather than checkboxes because "shown
+    // both ways" is just no filter, and each has a third real answer —
+    // unknown — for a club whose modules can't say.
+    { key: 'fees', type: 'single' }, { key: 'training', type: 'single' },
   ], [])
   const filters = useFilters(facets)
   const { values, search } = filters
@@ -288,6 +292,16 @@ export default function AdminSelection() {
     if (values.form?.length) list = list.filter((p) => { const b = formBucket(p); return b && values.form.includes(b) })
     if (values.squad?.length) list = list.filter((p) => values.squad.some((s) => (p.squads || []).includes(s)))
     if (values.hideUnavail) list = list.filter((p) => p.availability !== 'UNAVAILABLE')
+    // is_financial / trained_recently are tri-state: true, false, or null when
+    // neither BetterFees nor Net Manager could answer and nobody has said by
+    // hand. "Unknown" is a filter in its own right — it's the list of people
+    // the club still has to chase.
+    if (values.fees === 'owing') list = list.filter((p) => p.is_financial === false)
+    else if (values.fees === 'financial') list = list.filter((p) => p.is_financial === true)
+    else if (values.fees === 'unknown') list = list.filter((p) => p.is_financial == null)
+    if (values.training === 'trained') list = list.filter((p) => p.trained_recently === true)
+    else if (values.training === 'missing') list = list.filter((p) => p.trained_recently === false)
+    else if (values.training === 'unknown') list = list.filter((p) => p.trained_recently == null)
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
     else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
@@ -524,7 +538,8 @@ export default function AdminSelection() {
 
   const filterBar = (
     <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
-      yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length} />
+      yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
+      flags={data?.flags} />
   )
 
   const vm = {

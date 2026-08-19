@@ -11,7 +11,21 @@ import SeasonSelector from '../components/SeasonSelector'
 import { useGradeFilters } from '../hooks/useGradeCategories'
 import { Card, PageHeader, PbSpinner } from '../lib/presskit'
 
-function ResultPill({ result }) {
+// PlayHQ's own words for a fixture that never happened. A called-off game has
+// no result, so without this the row reads as though the score is simply
+// missing. Kept in step with NOT_PLAYED_STATUSES in the backend's
+// services/game_status.py.
+const CALLED_OFF = ['ABANDONED', 'CANCELLED']
+
+function ResultPill({ result, status }) {
+  const called = CALLED_OFF.includes((status || '').toUpperCase())
+  if (called) {
+    return (
+      <span className="inline-block px-2 py-0.5 rounded text-[10px] font-mono font-semibold tracking-wide bg-pb-surface2 text-pb-dim">
+        {(status || '').toUpperCase()}
+      </span>
+    )
+  }
   if (!result) return null
   const styles = {
     WIN:  'bg-green-500/15 text-green-400',
@@ -53,7 +67,7 @@ function GameRow({ game }) {
             {game.winning_team} won
           </span>
         )}
-        <ResultPill result={game.result} />
+        <ResultPill result={game.result} status={game.status} />
         <span className="text-pb-faint text-[12px] group-hover:text-pb-accent transition">→</span>
       </div>
     </Link>

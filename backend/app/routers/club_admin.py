@@ -41,6 +41,7 @@ from app.services import stripe_client
 from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
 from app.services import playhq_client
+from app.services.game_status import NOT_PLAYED_SQL_LIST
 from app.services.name_format import name_sort_key
 from app.services import fonts as font_service
 from app.services import theme_config as theme_config_service
@@ -201,6 +202,9 @@ async def list_players(
             "is_opening_batsman": p.is_opening_batsman,
             "skill_positions": p.skill_positions or [],
             "status": p.status,
+            "is_public": p.is_public is not False,
+            "is_financial_override": p.is_financial_override,
+            "trained_override": p.trained_override,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "last_played": last_played.get(str(p.id)),
         }
@@ -287,10 +291,34 @@ async def patch_player(
 
 
 class PlayerCreate(BaseModel):
-    first_name: str
-    last_name: str
+    # Either first + last, or a single free-text `name` as it was written on
+    # whatever the admin is looking at — a scorecard photo names people
+    # "G Evans" or "Evans, G", and asking someone mid-import to split that by
+    # hand is exactly the step that makes them give up and leave the row
+    # unmatched.
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    name: Optional[str] = None
     playhq_id: Optional[str] = None
     display_name_override: Optional[str] = None
+
+
+def _split_written_name(written: str) -> tuple[str, str]:
+    """``(first, last)`` from a name as a human wrote it.
+
+    Handles the two shapes a card or a roster actually uses — "Evans, G"
+    (the stored convention) and "G Evans" — and returns an empty first name
+    for a mononym rather than guessing one, so "Wittingslow" stays
+    "Wittingslow" instead of becoming ", Wittingslow".
+    """
+    written = " ".join((written or "").split())
+    if "," in written:
+        last, _, first = written.partition(",")
+        return first.strip(), last.strip()
+    parts = written.split()
+    if len(parts) < 2:
+        return "", written
+    return " ".join(parts[:-1]), parts[-1]
 
 
 @router.post("/players")
@@ -300,12 +328,18 @@ async def create_player(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    first = data.first_name.strip()
-    last = data.last_name.strip()
-    if not first or not last:
-        raise HTTPException(status_code=422, detail="First name and last name are required")
+    if data.name and not (data.first_name or data.last_name):
+        first, last = _split_written_name(data.name)
+    else:
+        first = (data.first_name or "").strip()
+        last = (data.last_name or "").strip()
+    if not last:
+        raise HTTPException(status_code=422, detail="A player name is required")
 
-    name = f"{last}, {first}"
+    # A mononym is stored as-is; everyone else keeps the "Last, First"
+    # convention the sync writes, which is what keeps the roster in surname
+    # order (see name_sort_key).
+    name = f"{last}, {first}" if first else last
     phq_id = data.playhq_id.strip() if data.playhq_id else None
     override = data.display_name_override.strip() or None if data.display_name_override else None
 
@@ -685,8 +719,19 @@ async def list_games(
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import text
+    # `status` is CA's own word for the fixture (migration 266) and
+    # `players_named` is how many of ours were in the side. Together they are
+    # what lets this screen show a club exactly which fixtures were called off
+    # and how many players' match counts that keeps clean — the club can see
+    # the correction rather than wondering why our figure disagrees with
+    # PlayHQ's. The count is only worth reading for a called-off fixture, so
+    # it is only computed for one.
     query = """
         SELECT g.id, g.played_at, g.home_team, g.away_team, g.result, g.winning_team,
+               g.status,
+               CASE WHEN g.status IN (""" + NOT_PLAYED_SQL_LIST + """) THEN (
+                   SELECT COUNT(*) FROM game_appearances ga WHERE ga.game_id = g.id
+               ) ELSE NULL END AS players_named,
                COALESCE(gr.display_name_override, gr.name) AS grade_name, s.name AS season_name
         FROM games g
         JOIN grades gr ON gr.id = g.grade_id
@@ -708,6 +753,8 @@ async def list_games(
             "away_team": r.away_team,
             "result": r.result,
             "winning_team": r.winning_team,
+            "status": r.status,
+            "players_named": r.players_named,
             "grade": r.grade_name,
             "season": r.season_name,
         }

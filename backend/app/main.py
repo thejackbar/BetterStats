@@ -741,13 +741,11 @@ async def lifespan(app: FastAPI):
                 updated_at TIMESTAMPTZ DEFAULT now()
             )
         """))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_player "
-            "ON vote_ballots(fixture_id, voter_player_id) WHERE voter_player_id IS NOT NULL"))
-        await conn.execute(text(
-            "CREATE UNIQUE INDEX IF NOT EXISTS uq_vote_ballot_name "
-            "ON vote_ballots(fixture_id, lower(voter_name)) "
-            "WHERE voter_player_id IS NULL AND voter_name IS NOT NULL"))
+        # The two per-fixture ballot uniques migration 193 created are NOT
+        # mirrored here — migration 267 replaces them with medal-scoped ones a
+        # few statements below, and recreating them on every boot only to drop
+        # them again would rebuild a unique index over the whole table each
+        # time the API restarts.
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_vote_ballots_org_fixture "
             "ON vote_ballots(organisation_id, fixture_id)"))
@@ -813,6 +811,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_vote_nudges_fixture_player "
             "ON vote_nudges(fixture_id, player_id, sent_at)"))
+        # Vote medals (migration 267) — a club runs several awards, each with
+        # its own settings and public link. Runs the migration's own statement
+        # list so the two can't drift; every one is idempotent, backfill
+        # included (each is a no-op once a club already has a medal).
+        from app.services.vote_medal_ddl import VOTE_MEDAL_STATEMENTS
+        for _stmt in VOTE_MEDAL_STATEMENTS:
+            await conn.execute(text(_stmt))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "
@@ -3447,6 +3452,23 @@ async def lifespan(app: FastAPI):
              WHERE q.deal_id = d.id
                AND d.commission_rep_user_id IS NULL
         """))
+        # Migration 265: hiding a player from the public site, plus the two
+        # BetterSelect flags a club can set by hand (both nullable — NULL
+        # means "no override, use what BetterFees / Net Manager say").
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS "
+            "is_public BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS is_financial_override BOOLEAN"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS trained_override BOOLEAN"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_players_org_hidden "
+            "ON players (organisation_id) WHERE is_public IS FALSE"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
@@ -5467,6 +5489,34 @@ async def lifespan(app: FastAPI):
                 "WHERE name = :name AND sales_template_key IS NULL "
                 "AND organisation_id IN (SELECT id FROM organisations WHERE is_marketing_outreach IS TRUE)"
             ), {"key": _key, "name": _name})
+
+    # Migration 266: games.status, and the two views that read it — the
+    # season-stats view nets abandoned/cancelled fixtures a player was named
+    # in but never played off CA's own `matches` counter.
+    #
+    # The SQL is IMPORTED from the migration rather than retyped. Every other
+    # mirror in this function is a hand-copied "byte-identical to
+    # alembic/versions/NNN.py", which works for a two-line ALTER and does not
+    # work for a 250-line six-branch view: the moment one copy is edited the
+    # two definitions disagree and which one a database ends up with depends
+    # on whether alembic or the lifespan ran last. alembic/ ships in the image
+    # (see the Dockerfile) and `alembic upgrade head` runs ahead of uvicorn
+    # anyway, so this path only really matters for a create_all-built local
+    # database.
+    async with engine.begin() as conn:
+        import importlib.util as _ilu
+
+        _mig_path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "266_game_status_unplayed_matches.py"
+        _spec = _ilu.spec_from_file_location("_bs_migration_266", _mig_path)
+        _mig266 = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(_mig266)
+        for _stmt in (
+            _mig266.ADD_STATUS,
+            _mig266.ADD_INDEX,
+            _mig266.EFFECTIVE_GAMES_WITH_STATUS,
+            _mig266.SEASON_STATS_NET_OF_UNPLAYED,
+        ):
+            await conn.execute(text(_stmt))
 
     # Ensure uploads directory exists
     upload_dir = Path("/app/uploads")

@@ -34,9 +34,11 @@ from app.services.aggregations import (
 )
 from app.services import milestone_rules
 from app.services.grade_scope import resolve_scope_for_player
+from app.services import iq_filters
 from app.services.iq_filters import (
     grade_canonical_label,
     grade_match_clause,
+    grade_scope_fragment,
     season_member_clause,
 )
 
@@ -90,7 +92,13 @@ def _pull_filters(season_id: str | None, grade_id: str | None) -> str:
         parts.append(season_member_clause("g.season_id", season_id))
     if grade_id:
         parts.append(f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}")
-    return " ".join(parts)
+    # The club-wide Grade Type / Match Type filter. These are the per-GAME
+    # pulls behind every deep-dive card, so the format half reads each
+    # fixture's own match_format off `g`; the category half reads the
+    # LEFT-joined grade, and a grade-less manual game stays in, because a row
+    # we cannot categorise is not a row we know to exclude.
+    parts.append(grade_scope_fragment("gr.id", grade_id, game_alias="g"))
+    return " ".join(p for p in parts if p)
 
 
 def _scope_meta(season_id: str | None, grade_id: str | None) -> dict:
@@ -123,7 +131,9 @@ def _movers_src(grade_id: str | None) -> str:
     grade) table for that grade NAME. Both expose batting_innings / runs /
     not_outs / wickets / runs_conceded, so the rest of the query is identical."""
     if grade_id:
-        return f"player_season_grade_stats st JOIN grades gr ON gr.id = st.grade_id AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
+        return (f"player_season_grade_stats st JOIN grades gr ON gr.id = st.grade_id "
+                f"AND {grade_match_clause(grade_canonical_label('gr', 'org'))}"
+                f"{grade_scope_fragment('gr.id', grade_id, kind='aggregate')}")
     return "player_season_stats st"
 
 
@@ -440,6 +450,14 @@ async def trends_overview(session: AsyncSession, org_id: str, season_id: str | N
         "bowling": bowling,
         "emerging": emerging,
         "psg_fallback": psg_fallback,
+        # The movers and the emerging shelf are computed from SEASON
+        # aggregates. With a grade picked those come from the per-grade table,
+        # which the filter can narrow; without one they come from
+        # player_season_stats, which carries no grade and no game — so neither
+        # axis is answerable and these three shelves stay whole. Reported
+        # rather than silently unfiltered, so the screen can say which figures
+        # the filter reached and which it didn't.
+        "movers_unscoped": bool(not effective_grade and iq_filters.active_scope()),
     }
 
 

@@ -12,6 +12,7 @@ from app.models.db import Organisation, Season, Grade, User, ClubMembership, Mar
 from app.services import playhq_client
 from app.services import fonts as font_service
 from app.services import grade_scope
+from app.services import player_visibility
 from app.services.sync import sync_organisation, upsert_organisation
 from app.services.aggregations import get_upcoming_milestones_for_org, get_recently_achieved_milestones_for_org, get_club_summary
 from app.services.fixtures_source import org_grassroots_fixtures
@@ -363,23 +364,32 @@ async def get_season_grades(org_id: str, season_id: str, db: AsyncSession = Depe
     return []
 
 
+async def _hidden_for(db, org_id, viewer) -> set:
+    """Players this viewer must not be shown, or an empty set for a club admin."""
+    if await user_can_view_org_private(db, viewer, org_id):
+        return set()
+    return await player_visibility.hidden_player_ids(db, org_id)
+
+
 @router.get("/{org_id}/upcoming-milestones")
 async def get_upcoming_milestones(
     org_id: str,
     limit: int = 20,
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     rows = await get_upcoming_milestones_for_org(db, org_id, limit)
-    return rows
+    return player_visibility.drop_hidden(rows, await _hidden_for(db, org_id, viewer))
 
 
 @router.get("/{org_id}/recently-achieved-milestones")
 async def get_recently_achieved_milestones(
     org_id: str,
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     rows = await get_recently_achieved_milestones_for_org(db, org_id)
-    return rows
+    return player_visibility.drop_hidden(rows, await _hidden_for(db, org_id, viewer))
 
 
 @router.get("/{org_id}/summary")
@@ -403,13 +413,17 @@ async def get_org_summary(
         ),
     ),
     db: AsyncSession = Depends(get_db),
+    viewer: User | None = Depends(get_optional_user),
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
     scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
     summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
     summary["scope"] = scope.as_meta()
-    return summary
+    # The club-level totals stay whole (a hidden player's runs still happened
+    # and the club still scored them); only the named per-player shelves —
+    # leading run scorer, wicket taker and the like — lose a hidden name.
+    return player_visibility.prune_hidden(summary, await _hidden_for(db, org_id, viewer))
 
 
 @router.get("/{org_id}/fixtures")
@@ -741,6 +755,7 @@ async def get_org_results(
                COALESCE(gr.display_name_override, gr.name) AS grade_name,
                gr.id AS grade_id,
                g.match_format,
+               g.status,
                s.id AS season_id, s.name AS season_name
         FROM v_effective_games g
         LEFT JOIN grades gr ON gr.id = g.grade_id
@@ -800,6 +815,10 @@ async def get_org_results(
             # The fixture's own format, so a results list can label a game
             # rather than making the reader guess from the grade name.
             "match_format": r.match_format,
+            # CA's own status for the fixture (migration 266). Carried so a
+            # results list can say ABANDONED instead of leaving the result
+            # column blank and reading as though the game is missing.
+            "status": r.status,
             "season_id": str(r.season_id) if r.season_id else None,
             "season_name": r.season_name,
         }

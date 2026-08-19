@@ -11,7 +11,7 @@ import { STATUS_FILTERS, fmtDate, seasonLabel } from './votesTokens'
 // The Votes hub replaces the old Fixtures tab. One screen answers "what needs
 // me?": four counters, three filter axes that compose, per-fixture ballot
 // progress, multi-select bulk open/lock/nudge, and sharing.
-export default function VotesHub({ canManage, onOpenFixture }) {
+export default function VotesHub({ canManage, medalId, onOpenFixture }) {
   const toast = useToast()
   const [data, setData] = useState(null)
   const [year, setYear] = useState(null)
@@ -24,9 +24,9 @@ export default function VotesHub({ canManage, onOpenFixture }) {
   const [focusDetail, setFocusDetail] = useState(null)
 
   const load = useCallback(() => {
-    api.votesFixtures({ year, grade_id: gradeId || undefined, round_key: roundKey || undefined, q: q || undefined })
+    api.votesFixtures({ year, grade_id: gradeId || undefined, round_key: roundKey || undefined, q: q || undefined, medal_id: medalId || undefined })
       .then(setData).catch((e) => toast.error(e.message))
-  }, [year, gradeId, roundKey, q, toast])
+  }, [year, gradeId, roundKey, q, medalId, toast])
   useEffect(() => { load() }, [load])
 
   // Status is filtered client-side so the counts on the pills stay stable while
@@ -51,7 +51,7 @@ export default function VotesHub({ canManage, onOpenFixture }) {
   const bulk = async (action) => {
     setBusy(true)
     try {
-      const r = await api.votesBulkState({ fixture_ids: selected, action })
+      const r = await api.votesBulkState({ fixture_ids: selected, action, medal_id: medalId || undefined })
       const skipped = (r.skipped || []).length
       toast.success(`${r.updated} game${r.updated === 1 ? '' : 's'} ${action === 'open' ? 'opened' : 'locked'}${skipped ? ` (${skipped} skipped)` : ''}`)
       clear(); load()
@@ -62,7 +62,7 @@ export default function VotesHub({ canManage, onOpenFixture }) {
   const bulkNudge = async () => {
     setBusy(true)
     try {
-      const r = await api.votesNudge(null, { fixture_ids: selected })
+      const r = await api.votesNudge(null, { fixture_ids: selected, medal_id: medalId || undefined })
       toast.success(`Reminder sent to ${r.sent} player${r.sent === 1 ? '' : 's'}`)
       clear()
     } catch (e) { toast.error(e.message) }
@@ -77,9 +77,9 @@ export default function VotesHub({ canManage, onOpenFixture }) {
   useEffect(() => {
     if (!focus) { setFocusDetail(null); return }
     let alive = true
-    api.votesFixtureDetail(focus.id).then((d) => { if (alive) setFocusDetail(d) }).catch(() => {})
+    api.votesFixtureDetail(focus.id, medalId).then((d) => { if (alive) setFocusDetail(d) }).catch(() => {})
     return () => { alive = false }
-  }, [focus?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focus?.id, medalId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <div className="py-16 text-center text-pb-faint text-sm">Loading fixtures…</div>
 
@@ -222,8 +222,9 @@ export default function VotesHub({ canManage, onOpenFixture }) {
         {canManage && focus && (
           <div className="w-full lg:w-[300px] shrink-0">
             <OutstandingVoters
+              medalId={medalId}
               fixture={focusDetail ? { ...focus, outstanding: focusDetail.outstanding } : focus}
-              onNudged={() => { load(); api.votesFixtureDetail(focus.id).then(setFocusDetail).catch(() => {}) }}
+              onNudged={() => { load(); api.votesFixtureDetail(focus.id, medalId).then(setFocusDetail).catch(() => {}) }}
             />
           </div>
         )}

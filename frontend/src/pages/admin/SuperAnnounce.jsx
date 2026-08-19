@@ -196,7 +196,7 @@ export default function SuperAnnounce() {
       const [org, summary, players, batting, bowling, seasons, awardDefs] = await Promise.all([
         api.getOrg(id),
         api.getOrgSummary(id),
-        api.listPlayers(id),
+        api.listPlayers(id, { includeHidden: true }),
         api.battingLeaderboard(id, { limit: 500, minRuns: 0 }),
         api.bowlingLeaderboard(id, { limit: 500, minWickets: 0 }),
         api.getOrgSeasons(id).catch(() => []),

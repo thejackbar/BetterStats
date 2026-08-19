@@ -32,7 +32,7 @@ from typing import Optional
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Fixture, VoteBallot, VoteFixtureOverride, VoteNudge, VoteSettings
+from app.models.db import Fixture, VoteBallot, VoteFixtureOverride, VoteMedal, VoteNudge
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +52,209 @@ SOURCE_LABELS = {
 }
 
 
-# ─── Config ──────────────────────────────────────────────────────────────────
+# ─── Medals ──────────────────────────────────────────────────────────────────
+# A club counts votes towards one medal or several ("Club Champion", "Colts
+# Medal"), each with its own ballot shape, voter mode, counting method and
+# public link. Before migration 267 a club had exactly one implicit medal, held
+# as the singleton `vote_settings` row; that row is now its first VoteMedal and
+# nothing reads vote_settings.
 
-async def get_settings(db: AsyncSession, org_id) -> Optional[VoteSettings]:
-    res = await db.execute(select(VoteSettings).where(VoteSettings.organisation_id == org_id))
+DEFAULT_MEDAL_NAME = "Club Champion"
+MAX_MEDAL_NAME = 80
+
+
+async def list_medals(db: AsyncSession, org_id) -> list[VoteMedal]:
+    """The club's medals in its own order. The club's first medal is the one
+    every unscoped read (a bare leaderboard link, an old bookmark) falls back
+    to, so ordering is load-bearing, not just presentation."""
+    res = await db.execute(
+        select(VoteMedal)
+        .where(VoteMedal.organisation_id == org_id)
+        .order_by(VoteMedal.position, VoteMedal.created_at)
+    )
+    return list(res.scalars().all())
+
+
+async def get_medal(db: AsyncSession, org_id, medal_id) -> Optional[VoteMedal]:
+    """One medal, scoped to the club — a medal id arriving from a browser must
+    never resolve against another club's row."""
+    if not medal_id:
+        return None
+    try:
+        mid = uuid.UUID(str(medal_id))
+    except (TypeError, ValueError):
+        return None
+    res = await db.execute(
+        select(VoteMedal).where(VoteMedal.id == mid, VoteMedal.organisation_id == org_id)
+    )
     return res.scalar_one_or_none()
+
+
+async def medal_by_token(db: AsyncSession, token: str) -> Optional[VoteMedal]:
+    """The medal a public voting link opens. The token is the medal's own, and
+    a club's pre-267 club-wide token was carried onto its first medal, so a
+    link already shared with players still lands somewhere real."""
+    if not token:
+        return None
+    res = await db.execute(select(VoteMedal).where(VoteMedal.link_token == token))
+    return res.scalar_one_or_none()
+
+
+async def resolve_medal(db: AsyncSession, org_id, medal_id=None) -> Optional[VoteMedal]:
+    """The medal a request means: the one it named, else the club's first.
+
+    Falling back rather than 404-ing is what keeps every pre-medals caller —
+    a saved link to /admin/betterselect/votes, the awards-night URL — landing
+    on the club's original count instead of an error.
+    """
+    if medal_id:
+        return await get_medal(db, org_id, medal_id)
+    medals = await list_medals(db, org_id)
+    return medals[0] if medals else None
+
+
+async def ensure_default_medal(db: AsyncSession, org_id) -> VoteMedal:
+    """The club's first medal, created on demand.
+
+    A club that has never voted has no row at all — migration 267 only
+    backfilled clubs that already had settings or ballots. Rather than make
+    every screen cope with "no medal", the first write (turning voting on,
+    entering a paper ballot) mints one. Does not commit; the caller's own
+    transaction owns it.
+    """
+    medals = await list_medals(db, org_id)
+    if medals:
+        return medals[0]
+    medal = VoteMedal(organisation_id=org_id, name=DEFAULT_MEDAL_NAME, position=0)
+    db.add(medal)
+    await db.flush()
+    return medal
+
+
+def clean_medal_name(raw) -> str:
+    name = (raw or "").strip()
+    return name[:MAX_MEDAL_NAME] or DEFAULT_MEDAL_NAME
+
+
+def clean_grade_ids(raw) -> list[str]:
+    """The grades a medal counts, as a de-duplicated list of uuid strings.
+
+    An EMPTY list means every grade — that is what a club's only medal means
+    before anyone has thought about grades. Junk is dropped rather than stored,
+    since a value that is not a uuid can never match a fixture's grade and
+    would silently narrow the medal to nothing.
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for g in (raw or []):
+        try:
+            gid = str(uuid.UUID(str(g)))
+        except (TypeError, ValueError):
+            continue
+        if gid not in seen:
+            seen.add(gid)
+            out.append(gid)
+    return out
+
+
+async def medal_grade_ids(db: AsyncSession, org_id, medal: Optional[VoteMedal]) -> Optional[set[str]]:
+    """Every grade id this medal counts, or None meaning "all of them".
+
+    A medal is configured by ticking concrete grades, but ``grades`` rows are
+    PER SEASON — next season's "Colts" is a different id from this season's. A
+    medal that matched on the stored ids alone would therefore stop counting
+    the day the new season's grades are created, silently, mid-season-rollover.
+
+    So the stored ids are expanded through their NAMES to every grade of that
+    name in the club. That is what makes a medal a standing award rather than a
+    one-season one, and it is why the picker offers each grade name once rather
+    than once per season.
+
+    A stored id that no longer resolves (its grade was deleted) contributes
+    nothing, leaving the medal counting only its remaining grades — never
+    silently widening back to everything.
+    """
+    picked = clean_grade_ids(medal.grade_ids if medal else None)
+    if not medal or not picked:
+        return None
+    res = await db.execute(
+        text(
+            """
+            SELECT sibling.id
+            FROM grades picked
+            JOIN seasons ps ON ps.id = picked.season_id AND ps.organisation_id = :org
+            JOIN grades sibling ON sibling.name = picked.name
+            JOIN seasons ss ON ss.id = sibling.season_id AND ss.organisation_id = :org
+            WHERE picked.id = ANY(:ids)
+            """
+        ),
+        {"ids": [uuid.UUID(g) for g in picked], "org": org_id},
+    )
+    return {str(r[0]) for r in res.fetchall()}
+
+
+def medal_covers(allowed: Optional[set[str]], grade_id) -> bool:
+    """Does this medal count a fixture in this grade? ``allowed`` is what
+    ``medal_grade_ids`` returned — None means every grade.
+
+    A fixture whose grade can't be resolved at all (``effective_grade_ids``
+    found neither a fixture grade nor a synced game) is counted only by an
+    all-grades medal: a row we cannot place must not be swept into a
+    grade-restricted count.
+    """
+    if allowed is None:
+        return True
+    return bool(grade_id) and str(grade_id) in allowed
+
+
+async def club_grade_options(db: AsyncSession, org_id) -> list[dict]:
+    """The grades a medal can be scoped to: each distinct grade NAME once,
+    carrying its most recent season's id as the value to store. Offering the
+    same name once per season would make the picker unusable for a club with a
+    decade of history, and every one of those rows would mean the same thing."""
+    res = await db.execute(
+        text(
+            """
+            SELECT DISTINCT ON (gr.name) gr.name, gr.id
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            WHERE s.organisation_id = :org
+            ORDER BY gr.name, s.year DESC NULLS LAST
+            """
+        ),
+        {"org": org_id},
+    )
+    return [{"id": str(gid), "name": name} for name, gid in res.fetchall()]
+
+
+async def medal_grade_names(db: AsyncSession, org_id, medals: list[VoteMedal]) -> dict[str, list[str]]:
+    """medal id → the grade NAMES it counts, so a screen can show and re-tick a
+    medal's selection even when the stored id belongs to an older season's
+    grade row than the one the picker offers."""
+    ids: set[str] = set()
+    for m in medals:
+        ids.update(clean_grade_ids(m.grade_ids))
+    if not ids:
+        return {}
+    res = await db.execute(
+        text(
+            "SELECT gr.id, gr.name FROM grades gr "
+            "JOIN seasons s ON s.id = gr.season_id AND s.organisation_id = :org "
+            "WHERE gr.id = ANY(:ids)"
+        ),
+        {"org": org_id, "ids": [uuid.UUID(g) for g in ids]},
+    )
+    name_by_id = {str(gid): name for gid, name in res.fetchall()}
+    out: dict[str, list[str]] = {}
+    for m in medals:
+        seen, names = set(), []
+        for gid in clean_grade_ids(m.grade_ids):
+            nm = name_by_id.get(gid)
+            if nm and nm not in seen:
+                seen.add(nm)
+                names.append(nm)
+        out[str(m.id)] = names
+    return out
 
 
 def clean_ballot_values(raw) -> list[int]:
@@ -74,10 +272,13 @@ def clean_ballot_values(raw) -> list[int]:
     return vals or list(DEFAULT_BALLOT)
 
 
-def effective_config(s: Optional[VoteSettings]) -> dict:
-    """The club's voting config with defaults applied — usable whether or not a
-    vote_settings row exists yet."""
+def effective_config(s: Optional[VoteMedal]) -> dict:
+    """One medal's voting config with defaults applied — usable whether or not
+    the medal exists yet, so a club that has never voted still renders."""
     return {
+        "medal_id": str(s.id) if s else None,
+        "medal_name": (s.name if s and s.name else DEFAULT_MEDAL_NAME),
+        "grade_ids": clean_grade_ids(s.grade_ids if s else None),
         "enabled": bool(s.enabled) if s else False,
         "require_pin": bool(s.require_pin) if s else True,
         "voter_mode": (s.voter_mode if s and s.voter_mode in VOTER_MODES else "players"),
@@ -254,18 +455,28 @@ async def lineup_voter_counts(db: AsyncSession, org_id, fixture_ids: list) -> di
     return {str(fid): n for fid, n in res.fetchall()}
 
 
-async def player_ballot_counts(db: AsyncSession, org_id, fixture_ids: list) -> dict[str, int]:
+async def player_ballot_counts(db: AsyncSession, org_id, fixture_ids: list, medal_id=None) -> dict[str, int]:
     """Distinct PLAYER voters per fixture (excludes non-player/supporter
-    ballots) — the denominator side of "outstanding" is player voters only."""
+    ballots) — the denominator side of "outstanding" is player voters only.
+
+    Scoped to one medal: a player who voted for the Colts Medal has not voted
+    for the Club Champion, and counting them as done would hide them from the
+    chase list for a count they still owe a ballot to."""
     if not fixture_ids:
         return {}
     res = await db.execute(
         text(
+            # CAST is load-bearing: asyncpg infers a bound parameter's type
+            # from how it is used, and a bare `:medal IS NULL` gives it nothing
+            # to work from — it raises AmbiguousParameterError at execute time
+            # rather than returning a wrong answer. Same trap anywhere an
+            # optional filter is expressed as "param IS NULL OR col = param".
             "SELECT fixture_id, COUNT(DISTINCT voter_player_id) FROM vote_ballots "
             "WHERE organisation_id = :org AND fixture_id = ANY(:ids) AND voter_player_id IS NOT NULL "
+            "AND (CAST(:medal AS uuid) IS NULL OR medal_id = CAST(:medal AS uuid)) "
             "GROUP BY fixture_id"
         ),
-        {"org": org_id, "ids": fixture_ids},
+        {"org": org_id, "ids": fixture_ids, "medal": medal_id},
     )
     return {str(fid): n for fid, n in res.fetchall()}
 
@@ -316,22 +527,27 @@ async def outstanding_voters(db: AsyncSession, org_id, eligible: list[dict], bal
 NUDGE_COOLDOWN_HOURS = 24
 
 
-async def recently_nudged(db: AsyncSession, fixture_id, player_ids: list) -> set[str]:
-    """Player ids nudged for this fixture within the cooldown window."""
+async def recently_nudged(db: AsyncSession, medal_id, fixture_id, player_ids: list) -> set[str]:
+    """Player ids nudged for this fixture's medal within the cooldown window.
+
+    Per medal, not per fixture: two medals over one fixture are two ballots
+    the player genuinely owes, so a reminder about one must not suppress the
+    reminder about the other."""
     if not player_ids:
         return set()
     res = await db.execute(
         text(
             "SELECT DISTINCT player_id FROM vote_nudges "
-            "WHERE fixture_id = :fid AND player_id = ANY(:pids) "
+            "WHERE medal_id = :mid AND fixture_id = :fid AND player_id = ANY(:pids) "
             "AND sent_at > now() - make_interval(hours => :hrs)"
         ),
-        {"fid": fixture_id, "pids": player_ids, "hrs": NUDGE_COOLDOWN_HOURS},
+        {"mid": medal_id, "fid": fixture_id, "pids": player_ids, "hrs": NUDGE_COOLDOWN_HOURS},
     )
     return {str(r[0]) for r in res.fetchall()}
 
 
-async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, link_token: Optional[str]) -> tuple[bool, Optional[str]]:
+async def send_nudge(db: AsyncSession, club, medal: VoteMedal, fixture: Fixture, player: dict,
+                     link_token: Optional[str]) -> tuple[bool, Optional[str]]:
     """Email one outstanding voter a reminder, deep-linked straight to this
     fixture's ballot. Returns (sent, failure_reason); never raises — a
     provider hiccup on one player shouldn't fail the whole nudge batch."""
@@ -344,15 +560,23 @@ async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, lin
 
     link = f"{settings.public_base_url}/vote/{link_token}?fixture={fixture.id}" if link_token else None
     opponent = fixture.opponent_name or fixture.label or "TBC"
-    subject = f"{round_label_for(fixture)} v {opponent} — cast your vote"
+    # The medal is named in the reminder because a club running several counts
+    # will send several reminders about the same match, and "cast your vote"
+    # twice with nothing to tell them apart reads as a duplicate email.
+    award = medal.name if medal and medal.name else DEFAULT_MEDAL_NAME
+    subject = f"{round_label_for(fixture)} v {opponent} — {award} votes"
     first = (player.get("name") or "").split(" ")[0] or "there"
     body_html = (
         f"<p>Hi {first},</p>"
-        f"<p>Best-player votes are still open for <strong>{round_label_for(fixture)} v {opponent}</strong>. "
-        f"It takes about 30 seconds — no login needed.</p>"
+        f"<p><strong>{award}</strong> votes are still open for "
+        f"<strong>{round_label_for(fixture)} v {opponent}</strong>. "
+        f"It takes about 30 seconds, and you don't need to log in.</p>"
         + (f'<p><a href="{link}">Cast your vote</a></p>' if link else "")
     )
-    body_text = f"Hi {first},\n\nBest-player votes are still open for {round_label_for(fixture)} v {opponent}.\n" + (link or "")
+    body_text = (
+        f"Hi {first},\n\n{award} votes are still open for "
+        f"{round_label_for(fixture)} v {opponent}.\n"
+    ) + (link or "")
     try:
         msg = email_service.EmailMessage(
             to_email=email, to_name=player.get("name"), subject=subject,
@@ -366,7 +590,10 @@ async def send_nudge(db: AsyncSession, club, fixture: Fixture, player: dict, lin
         return False, "send_failed"
     if not result.ok:
         return False, "send_failed"
-    db.add(VoteNudge(organisation_id=club.id, fixture_id=fixture.id, player_id=uuid.UUID(player["id"])))
+    db.add(VoteNudge(
+        organisation_id=club.id, medal_id=medal.id, fixture_id=fixture.id,
+        player_id=uuid.UUID(player["id"]),
+    ))
     return True, None
 
 
@@ -456,13 +683,31 @@ def fixture_vote_state(fixture: Fixture, cfg: dict, override: Optional[str], rea
     return "open"
 
 
-async def get_override(db: AsyncSession, fixture_id) -> Optional[VoteFixtureOverride]:
-    """The fixture's override row (lock/reopen status and/or an eligibility
-    source), or None. Callers read ``.status`` / ``.eligibility_source``."""
+async def get_override(db: AsyncSession, medal_id, fixture_id) -> Optional[VoteFixtureOverride]:
+    """This medal's override row for the fixture (lock/reopen status and/or an
+    eligibility source), or None. Callers read ``.status`` /
+    ``.eligibility_source``. Per medal since 267 — locking the Colts count on a
+    match must not lock the Club Champion count on the same match."""
     res = await db.execute(
-        select(VoteFixtureOverride).where(VoteFixtureOverride.fixture_id == fixture_id)
+        select(VoteFixtureOverride).where(
+            VoteFixtureOverride.medal_id == medal_id,
+            VoteFixtureOverride.fixture_id == fixture_id,
+        )
     )
     return res.scalar_one_or_none()
+
+
+async def overrides_by_fixture(db: AsyncSession, medal_id, fixture_ids: list) -> dict[str, VoteFixtureOverride]:
+    """One medal's override rows for a page of fixtures, keyed on fixture id."""
+    if not fixture_ids:
+        return {}
+    res = await db.execute(
+        select(VoteFixtureOverride).where(
+            VoteFixtureOverride.medal_id == medal_id,
+            VoteFixtureOverride.fixture_id.in_(fixture_ids),
+        )
+    )
+    return {str(o.fixture_id): o for o in res.scalars().all()}
 
 
 # ─── Counting ────────────────────────────────────────────────────────────────
@@ -619,17 +864,20 @@ async def effective_grade_ids(db: AsyncSession, fixtures: list[Fixture]) -> dict
     return out
 
 
-async def load_ballots_by_fixture(db: AsyncSession, org_id, fixture_ids: list) -> dict:
-    """All ballots (picks eager-loaded) for a set of fixtures, grouped by
-    fixture id (string keys)."""
+async def load_ballots_by_fixture(db: AsyncSession, org_id, fixture_ids: list, medal_id=None) -> dict:
+    """One medal's ballots (picks eager-loaded) for a set of fixtures, grouped
+    by fixture id (string keys). ``medal_id=None`` reads every medal's, which
+    only the player-merge and cleanup paths want — a count must always name
+    its medal or it would add two awards' ballots into one total."""
     if not fixture_ids:
         return {}
-    res = await db.execute(
-        select(VoteBallot).where(
-            VoteBallot.organisation_id == org_id,
-            VoteBallot.fixture_id.in_(fixture_ids),
-        )
-    )
+    conds = [
+        VoteBallot.organisation_id == org_id,
+        VoteBallot.fixture_id.in_(fixture_ids),
+    ]
+    if medal_id is not None:
+        conds.append(VoteBallot.medal_id == medal_id)
+    res = await db.execute(select(VoteBallot).where(*conds))
     grouped: dict[str, list[VoteBallot]] = {}
     for b in res.scalars().all():
         grouped.setdefault(str(b.fixture_id), []).append(b)
@@ -657,14 +905,22 @@ async def build_leaderboard(
     year: int,
     grade_id: Optional[str] = None,
     through_round: Optional[str] = None,
+    medal: Optional[VoteMedal] = None,
 ) -> dict:
     """The Brownlow board: every round (a distinct fixture.round label, or the
     match date when no round is set) in chronological order, each fixture's
     weekly result, and cumulative standings THROUGH a chosen round — so in week
     8 you can replay what the count looked like after week 3.
 
-    grade_id filters both the rounds' fixtures and the standings to one grade;
-    without it the board is club-wide across every grade.
+    ONE medal's count. Two restrictions follow from that and both matter: only
+    that medal's ballots are loaded, and only fixtures in the grades the medal
+    counts are on the board. Without the second, a club whose Colts Medal is
+    restricted to the junior grades would still show every senior round on the
+    board with a nil result, which reads as "nobody voted" rather than "this
+    match isn't part of this count".
+
+    grade_id narrows further, to one grade within the medal's own set; without
+    it the board covers everything the medal counts.
     """
     start, end = season_window(year)
     q = (
@@ -682,11 +938,14 @@ async def build_leaderboard(
     # own docstring) — resolve every fixture's grade before filtering, or a
     # grade_id filter would silently match nothing.
     grade_by_fixture = await effective_grade_ids(db, all_fixtures)
-    fixtures = all_fixtures
+    allowed = await medal_grade_ids(db, org_id, medal)
+    fixtures = [f for f in all_fixtures if medal_covers(allowed, grade_by_fixture.get(str(f.id)))]
     if grade_id:
         fixtures = [f for f in fixtures if str(grade_by_fixture.get(str(f.id))) == grade_id]
 
-    ballots_by_fx = await load_ballots_by_fixture(db, org_id, [f.id for f in fixtures])
+    ballots_by_fx = await load_ballots_by_fixture(
+        db, org_id, [f.id for f in fixtures], medal.id if medal else None
+    )
     # Only fixtures that actually collected votes appear on the board.
     voted = [f for f in fixtures if ballots_by_fx.get(str(f.id))]
 
@@ -846,6 +1105,8 @@ async def build_leaderboard(
 
     return {
         "year": year,
+        "medal_id": str(medal.id) if medal else None,
+        "medal_name": medal.name if medal else cfg.get("medal_name"),
         "ballot_values": values,
         "counting_method": cfg["counting_method"],
         "tie_policy": cfg["tie_policy"],
