@@ -594,6 +594,13 @@ export default function SalesWorkspace() {
   // whatever it was when loadClubs was last memoized, not the latest list.
   const clubsRef = useRef([])
   useEffect(() => { clubsRef.current = clubs }, [clubs])
+  // Set true the first time loadClubs' reload handler runs to completion —
+  // whether it landed on a ?club= deep link, kept an existing selection, or
+  // fell through to the "land on the top of the queue" default below. Once
+  // true, that default never fires again for the rest of the session, so
+  // tweaking a filter mid-call can't rip the rep away from whoever they're
+  // looking at.
+  const initialPositionDoneRef = useRef(false)
 
   // Bulk assignment (super admin only) — checked deal ids from the CURRENT
   // filtered queue, and which reps are ticked in the bulk-assign panel: one
@@ -765,9 +772,17 @@ export default function SalesWorkspace() {
         // visible, so an ordinary filter tweak doesn't feel like a jump.
         const id = selectedIdRef.current
         setTimeout(() => {
-          rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+          rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
         }, 60)
+      } else if (!initialPositionDoneRef.current && rows[0]) {
+        // The very first load of this screen, nothing selected yet (no
+        // ?club= deep link either — that branch, above, would already have
+        // set selectedIdRef.current by the time this runs). Land on the top
+        // of the queue exactly as it stands under the current filters/sort
+        // — it's already row one, so no scroll is needed to get there.
+        selectClub(rows[0].id)
       }
+      initialPositionDoneRef.current = true
       return rows
     }).catch(() => { toast?.error('Could not load the club queue'); return [] })
       .finally(() => setLoadingList(false))
@@ -817,7 +832,13 @@ export default function SalesWorkspace() {
       // Deferred a tick so a row that only just entered the list (e.g. the
       // new next-club after a reload) has actually mounted before we look
       // for its ref — same pattern AreaEditor.jsx uses for the same reason.
-      setTimeout(() => rowRefs.current[dealId]?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 60)
+      // 'instant', not 'smooth' — a programmatic jump (a deep link, or
+      // auto-advancing past a dropped-out club) should land the rep exactly
+      // where the system decided to put them, not visibly travel there row
+      // by row. index.css sets `scroll-behavior: smooth` globally (on
+      // <html>, and that's an inherited CSS property), so 'auto' here would
+      // still animate — 'instant' is the one value that overrides it.
+      setTimeout(() => rowRefs.current[dealId]?.scrollIntoView({ block: 'nearest', behavior: 'instant' }), 60)
     }
   }
   // Awaits the queue reload FIRST — loadClubs itself clears the selection
