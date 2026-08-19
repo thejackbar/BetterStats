@@ -6,7 +6,14 @@ import uuid
 
 from app.services.milestone_rules import next_threshold, reach_window
 from app.services.grade_scope import GradeScope
-from app.services.game_status import NOT_PLAYED_SQL_LIST
+from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
+
+# "Does this roster appearance count as a match played" — one definition,
+# interpolated into every query below that counts matches off
+# `game_appearances`. Module-level because these are f-string SQL literals in
+# several different functions and a per-function local would be four copies of
+# the same line. The alias is `ga` at every site that uses it.
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 from app.services.season_aliases import (
     resolve_season_filter,
     resolve_season_filter_no_org,
@@ -1430,6 +1437,7 @@ async def get_player_team_breakdown(
                 UNION
                 SELECT ga.player_id, ga.game_id FROM game_appearances ga
                 WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
             )
             SELECT
                 COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
@@ -1496,6 +1504,7 @@ async def get_player_team_breakdown(
                 SELECT fs.game_id FROM v_effective_fielding_stats fs WHERE fs.player_id = CAST(:pid AS UUID)
                 UNION
                 SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
             )
             SELECT
                 gr.season_id AS season_id,
@@ -3566,7 +3575,8 @@ async def get_player_by_venue(
         text(f"""
             WITH player_game_ids AS (
                 -- Same union as per-opposition: synced via appearances + manual via per-innings tables.
-                SELECT game_id FROM game_appearances WHERE player_id = CAST(:pid AS UUID)
+                SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:pid AS UUID)
+                  AND {_APPEARANCE_PLAYED}
                 UNION
                 SELECT manual_game_id AS game_id FROM manual_batting_innings WHERE player_id = CAST(:pid AS UUID)
                 UNION

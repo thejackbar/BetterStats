@@ -35,6 +35,7 @@ import uuid
 # docstring in aggregations.py. Shared so the two modules can't drift on
 # what counts as a residual.
 from app.services.aggregations import _RESIDUAL_SOURCES
+from app.services.game_status import appearance_counts_as_match
 
 
 # ─── Grade type / match type scope ─────────────────────────────────────────────
@@ -1141,6 +1142,8 @@ def _player_agg_innings_cte(
     universe = _game_universe_sql(ctx_clauses)
     innings_extra = (" AND " + " AND ".join(innings_clauses)) if innings_clauses else ""
     player_extra = (" AND " + " AND ".join(player_clauses)) if player_clauses else ""
+    # The alias is `gap` in the appear CTE below, which is the row this tests.
+    played_clause = appearance_counts_as_match("gap")
     # gap LEFT JOIN exposes this player's per-game appearance row so the
     # captain_only / keeper_only filters can apply at the right scope.
     return f"""
@@ -1207,6 +1210,12 @@ def _player_agg_innings_cte(
             GROUP BY {group_cols}
         ),
         appear AS (
+            -- This CTE is the ONLY source of StatLab's `matches`, so the
+            -- called-off rule has to live here as well as in
+            -- v_effective_player_season_stats. Without it a washout a player
+            -- was named in counts here while the same player's season row on
+            -- every other screen has it netted off, and StatLab reads as
+            -- broken. See services/game_status.py.
             SELECT
                 {select_cols}
                 COUNT(DISTINCT gu.game_id) AS matches
@@ -1214,6 +1223,7 @@ def _player_agg_innings_cte(
             JOIN game_appearances gap ON gap.game_id = gu.game_id
             JOIN players p ON p.id = gap.player_id
             WHERE p.organisation_id = :org_id {player_extra}
+              AND {played_clause}
             GROUP BY {group_cols}
         )
     """
