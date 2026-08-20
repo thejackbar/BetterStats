@@ -1,5 +1,66 @@
 # BetterStats — Claude Session Notes
 
+## A player's date of birth, and who is told their age (migration 268, v9.36.0, Aug 2026)
+
+Asked for so a selector can see a young quick's age while deciding bowling
+workloads. `players.date_of_birth`, plus a club rule for whether BetterSelect
+shows the age it works out to.
+
+- **The AGE IS NEVER STORED.** `services/player_age.py` derives it on every
+  read, because a stored age is wrong from the day after it is written and a
+  volunteer who fills a birthday in once should not have to maintain it.
+  `age_on` returns None for no date, a future date and anything past 120 years
+  — all three mean "we cannot say", which a screen renders as nothing rather
+  than as a number. The month/day tuple comparison is what makes 29 February
+  turn a year older on 1 March in a non-leap year.
+- **Nothing syncs a birthday.** CA's feeds carry none and PlayHQ redacts its
+  juniors' names rather than dating them, so this is the club writing down
+  what its own registration form already holds. Entered on the profile only.
+- **The club's rule is applied SERVER-SIDE, in one place**
+  (`player_age.visible_age`). `organisations.select_show_age` is off by
+  default, and `select_show_age_under` is NULL for every player or an age to
+  show it only BELOW. A club restricted to under-16s never sends an adult's
+  age to a browser at all — the alternative, sending every age and telling the
+  browser not to draw some, is a leak dressed as a setting. Two copies of "can
+  this screen show an age" is how one screen ends up disagreeing with another.
+- **The profile is the exception, deliberately.** It returns the date of birth
+  itself and an ungated `age`: the club rule governs the SELECTION screens, not
+  the record a `MANAGE_PLAYERS` admin is editing. It also returns
+  `age_visible`, the gated answer, so a screen that has just saved a birthday
+  corrects its own roster row to what everyone else sees rather than to the
+  number the editor is looking at.
+- **`select_show_age_under` is a genuine tri-state on the wire**, so
+  `patch_settings` reads `model_fields_set`, not `is not None` — otherwise
+  "every player" (a null) would be unsettable the moment a club picked an age.
+  `clean_age_limit` turns 0, junk or an out-of-range number into that same
+  every-player null, so the setting can never mean "show nobody" while reading
+  as switched on.
+- **Never public.** No `public_show_age` was added and none should be without
+  asking: a date of birth is the personal data a junior's family is most
+  likely to object to, and the ask was about selection. `clone_demo_club` does
+  not copy it, alongside the contact details it already drops.
+- **A native date input clips its own year the moment anything shares its
+  row.** The first cut put the age beside the input in a half-width field and
+  it measured 82px at 1400 and 22px at 1024. The age sits on the CAPTION line
+  now and the field is full width: 274 / 129 / 316px at 1400 / 1024 / 390,
+  comfortably wider than the neighbouring fields everywhere.
+- **Verified against a real Postgres** (37 checks through the shipped route
+  bodies: migration 268 applied three times to a populated pre-268 table, an
+  existing club defaulting to off, both refusal guards leaving the stored date
+  intact, a null clearing the birthday and a null clearing the age limit
+  without switching ages off, an out-of-range limit storing as every-player,
+  and the roster and selection payloads withholding an adult's age under an
+  under-16 rule while carrying the junior's) plus 20 on the age maths itself
+  (the leap-day birthday both sides of 1 March, and "exactly 16 is not under
+  16"), and **driven in Chromium** (21: the picker hidden until ages are on,
+  the exact params on the wire including the explicit null, the roster row,
+  the profile field and its live age, the selection board's tag, no page
+  errors, no overflow at 390px).
+- **Not built**: an age filter on the selection board, and any bowling-workload
+  limit encoded in the app. What counts as too many overs for a fourteen
+  year old is a policy call the club's own association makes, and a number we
+  invented would be quoted back at us.
+
 ## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
 `vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly

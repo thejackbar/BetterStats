@@ -283,6 +283,16 @@ class Organisation(Base):
     # suggestions. Default 24 (migration 048).
     dormancy_months = Column(Integer, nullable=False, server_default="24", default=24)
     default_team_size = Column(Integer, nullable=False, server_default="11", default=11)  # 0 = no limit
+    # BetterSelect: show a player's age beside their name on the selection
+    # board and the roster (migration 268). Default off, so no club starts
+    # showing dates of birth to its selectors because of an upgrade.
+    # select_show_age_under is NULL for every player, or an age to show it
+    # only BELOW — the case this was built for, a coach wanting the juniors'
+    # ages in front of them when deciding bowling workloads. Applied
+    # server-side through services/player_age.visible_age, so a restricted
+    # club never sends an adult's age to a browser at all.
+    select_show_age = Column(Boolean, nullable=False, server_default="false", default=False)
+    select_show_age_under = Column(Integer, nullable=True)
     # Public player-profile attribute visibility (per-club). Overseas is always
     # shown; these gate the descriptive attributes on the public /players/:id
     # profile so each club chooses how much of a player's profile is public
@@ -1235,6 +1245,13 @@ class Player(Base):
     # BetterSelect "attended training" filter (migration 265). NULL = no
     # override, so the answer comes from Net Manager attendance.
     trained_override = Column(Boolean, nullable=True)
+    # Date of birth (migration 268), entered by hand on the player profile —
+    # no feed carries one. The AGE is never stored: services/player_age.py
+    # works it out on read, because a stored age is wrong the day after it
+    # was written. Only ever served on the MANAGE_PLAYERS-gated profile
+    # payload; every other surface gets the derived age instead, and only
+    # when the club's own BetterSelect setting allows it.
+    date_of_birth = Column(Date, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")

@@ -17,7 +17,7 @@ import ImageEditorModal from '../ImageEditorModal'
 import { Avatar, Tag, Btn, Dot, Icon } from '../../pages/admin/betterselect/ui'
 import {
   ROLE_OPTS, ROLE_TO_SKILLS, BAT_HANDS, GENDER_OPTS, BOWLING_OPTS,
-  bowlingLabel, bowlingFromLabel, bowls, normalizeGender,
+  bowlingLabel, bowlingFromLabel, bowls, normalizeGender, ageFromDob,
 } from '../../lib/playerAttributes'
 import { splitDisplayName, joinDisplayName } from '../../lib/nameFormat'
 
@@ -341,6 +341,7 @@ function AliasManager({ playerId }) {
 
 function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
+  const age = ageFromDob(draft.date_of_birth)
   return (
     <div className="px-5 py-[18px]">
       <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Details</div>
@@ -352,6 +353,24 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             <PInput value={draft.display_last} onChange={(v) => set('display_last', v)}
               placeholder="Last" />
           </div>
+        </Field>
+        {/* Date of birth, with the age it works out to on the caption line —
+            moving as the date is typed, and never stored (see
+            services/player_age.py). Full width, and the age sits beside the
+            LABEL rather than the input: a native date input clips its own
+            year segment the moment anything shares its row, and this column
+            is narrow at the lg breakpoint. Nothing syncs a birthday, so this
+            is the club writing down what its own registration form holds. */}
+        <Field label={
+          <span className="flex items-center justify-between gap-2">
+            <span>Date of birth</span>
+            <span className="font-mono text-[10px] tracking-wide2 shrink-0"
+              style={{ color: age == null ? 'var(--pb-faintest)' : 'var(--pb-dim)' }}>
+              {age == null ? 'AGE —' : `${age} YRS`}
+            </span>
+          </span>
+        }>
+          <PInput value={draft.date_of_birth} onChange={(v) => set('date_of_birth', v)} type="date" />
         </Field>
         <Field label="Squad (selection pool)" half>
           <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
@@ -450,6 +469,10 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
   const showBowlMeta = bowls(draft.bowling_action, draft.bowling_type)
   const playerName = profile.display_name || profile.name
+  // Current age, from the draft so it tracks an unsaved date of birth. Shown
+  // here whatever the club's BetterSelect setting says — that rule governs
+  // the selection screens, not the record an admin is editing.
+  const age = ageFromDob(draft.date_of_birth)
 
   return (
     <div className="overflow-auto h-full">
@@ -467,6 +490,10 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
               {draft.is_public === false && <Tag tone="faint">Hidden</Tag>}
             </div>
             <div className="flex items-center gap-2.5 mt-1.5 text-pb-dim text-[13px] flex-wrap">
+              {age != null && (
+                <><span>{age} years old</span>
+                  {(draft.player_role || handLabel || showBowlMeta) && <span className="text-pb-faintest">·</span>}</>
+              )}
               {draft.player_role && <><span>{draft.player_role}</span><span className="text-pb-faintest">·</span></>}
               {handLabel && <span>{handLabel}</span>}
               {showBowlMeta && <><span className="text-pb-faintest">·</span><span>{bowlingLabel(draft.bowling_action, draft.bowling_type)}</span></>}
@@ -543,6 +570,9 @@ export function draftFromProfile(p) {
     is_public: p.is_public !== false,
     is_financial_override: p.is_financial_override ?? null,
     trained_override: p.trained_override ?? null,
+    // "YYYY-MM-DD" or '' — the shape <input type="date"> speaks. The age is
+    // always derived from this, never carried in the draft.
+    date_of_birth: p.date_of_birth || '',
   }
 }
 
@@ -574,5 +604,7 @@ export function patchFromDraft(d) {
     // the PATCH reads exclude_unset, so a present null IS the intent.
     is_financial_override: d.is_financial_override ?? null,
     trained_override: d.trained_override ?? null,
+    // Cleared as an explicit null, same reason as the two overrides above.
+    date_of_birth: norm(d.date_of_birth),
   }
 }

@@ -305,7 +305,9 @@ async def main():
         await session.flush()
         counts["grades"] = len(grade_id_map)
 
-        # ── 5. Players (photos copied, contact details deliberately dropped) ─
+        # ── 5. Players (photos copied; contact details and dates of birth
+        #      deliberately dropped — a demo club has no business carrying
+        #      real people's personal details) ────────────────────────────────
         players_q = select(Player).where(Player.organisation_id == src.id)
         src_players = (await session.execute(players_q)).scalars().all()
         player_id_map = {}

@@ -4,6 +4,7 @@ from sqlalchemy import select, text, func
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import Optional
+from datetime import date
 import uuid
 
 from app.models.db import (
@@ -32,6 +33,7 @@ from app.services.milestone_rules import (
 from app.services import iq_teammates
 from app.services import grade_scope
 from app.services.player_aliases import normalise_name_key, seed_alias_on_rename
+from app.services.player_age import age_on, dob_error, visible_age
 from app.services.player_formats import player_format_splits
 
 router = APIRouter(prefix="/players", tags=["players"])
@@ -789,11 +791,23 @@ class PlayerProfileUpdate(BaseModel):
     is_public: Optional[bool] = None
     is_financial_override: Optional[bool] = None
     trained_override: Optional[bool] = None
+    # Date of birth (migration 268). Pydantic parses "YYYY-MM-DD" into a real
+    # date, so an unparseable value is a 422 rather than a string handed to a
+    # DATE column; an explicit null clears it (the PATCH reads exclude_unset,
+    # so a present null IS the intent).
+    date_of_birth: Optional[date] = None
 
 
 def _profile_fields(player: Player) -> dict:
     """The editable management fields, shared by GET and PATCH responses."""
     return {
+        # The date of birth itself only ever leaves the server here, on the
+        # MANAGE_PLAYERS-gated profile — this is the screen it is entered on.
+        # `age` rides along unconditionally for the same reason: the club's
+        # BetterSelect display rule governs the selection screens, not the
+        # record an admin is looking at while editing it.
+        "date_of_birth": player.date_of_birth.isoformat() if player.date_of_birth else None,
+        "age": age_on(player.date_of_birth),
         "id": str(player.id),
         "name": player.name,
         "display_name": player.display_name,
@@ -980,6 +994,15 @@ async def _full_profile(db: AsyncSession, player: Player) -> dict:
     data = _profile_fields(player)
     data["squad"] = await _squad_obj(db, player)
     data["snapshot"] = await _snapshot(db, player)
+    # The age the SELECTION screens would show for this player under the
+    # club's own rule — None when ages are off, or when this player is
+    # outside the age the club restricted the display to. Sent alongside the
+    # true `age` so a screen that has just saved a date of birth can correct
+    # its own roster row without re-reading the whole list, and correct it to
+    # what the rest of the club would actually see rather than to the number
+    # the person editing happens to be looking at.
+    org = await db.get(Organisation, player.organisation_id) if player.organisation_id else None
+    data["age_visible"] = visible_age(player.date_of_birth, org)
     return data
 
 
@@ -1010,6 +1033,10 @@ async def update_player_profile(
     data = body.model_dump(exclude_unset=True)
     if "status" in data and data["status"] not in (None, "active", "inactive"):
         raise HTTPException(status_code=400, detail="status must be 'active' or 'inactive'")
+    if "date_of_birth" in data:
+        err = dob_error(data["date_of_birth"])
+        if err:
+            raise HTTPException(status_code=422, detail=err)
     # Capture the effective display name before display_name_override changes,
     # so a rename via this route also gets remembered as an alias — same as
     # the plain-name rename_player endpoint above.

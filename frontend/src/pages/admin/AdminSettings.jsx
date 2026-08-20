@@ -225,6 +225,10 @@ export default function AdminSettings() {
         theme_mode: s.theme_mode || 'auto',
         player_name_format: s.player_name_format || 'last_first',
         dormancy_months: s.dormancy_months ?? 24,
+        select_show_age: !!s.select_show_age,
+        // null (not 0/'') is "every player" — the PATCH reads presence, so a
+        // null here genuinely clears any age limit the club had set.
+        select_show_age_under: s.select_show_age_under ?? null,
         public_show_role: !!s.public_show_role,
         public_show_batting: !!s.public_show_batting,
         public_show_bowling: !!s.public_show_bowling,
@@ -709,6 +713,42 @@ export default function AdminSettings() {
             <p className="font-mono text-[10px] text-pb-faintest mt-1">
               Players with no appearance in this window are hidden from the default selection roster and squad suggestions
             </p>
+          </div>
+
+          {/* --- BetterSelect: player age --- */}
+          <div className="pt-5 pb-hairline-t">
+            <label className={LABEL}>Player age (BetterSelect)</label>
+            <p className="font-mono text-[10px] text-pb-faintest mb-3">
+              Shows a player's age beside their name on the selection board and the BetterSelect
+              roster, so bowling workloads can be judged at a glance. Worked out from the date of
+              birth on each player's profile, which you fill in yourself. Never shown on your
+              public website.
+            </p>
+            <label className="flex items-start gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={!!form.select_show_age}
+                onChange={e => setForm(f => ({ ...f, select_show_age: e.target.checked }))}
+                className="accent-pb-accent mt-0.5 shrink-0" />
+              <span className="leading-tight">
+                <span className="text-pb-text text-sm">Show age in BetterSelect</span>
+                <span className="font-mono text-[10px] text-pb-faintest block">A player with no date of birth recorded shows nothing</span>
+              </span>
+            </label>
+            {form.select_show_age && (
+              <div className="mt-3 pl-7">
+                <label className="font-mono text-[10px] text-pb-faintest block mb-1.5">Show it for</label>
+                <select value={form.select_show_age_under ?? ''}
+                  onChange={e => setForm(f => ({ ...f, select_show_age_under: e.target.value ? Number(e.target.value) : null }))}
+                  className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
+                  <option value="">Every player</option>
+                  {[13, 14, 15, 16, 17, 18, 19, 21].map(n => (
+                    <option key={n} value={n}>Players under {n} only</option>
+                  ))}
+                </select>
+                <p className="font-mono text-[10px] text-pb-faintest mt-1">
+                  Anyone at or over that age shows no age at all — their birthday never leaves the profile
+                </p>
+              </div>
+            )}
           </div>
 
           {/* --- Public profile: visible player attributes --- */}

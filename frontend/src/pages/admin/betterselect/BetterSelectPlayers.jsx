@@ -53,7 +53,11 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
           )}
         </div>
         <div className="text-[11px] text-pb-faint mt-px truncate">
-          {[p.batting_hand === 'LEFT' ? 'LHB' : p.batting_hand === 'RIGHT' ? 'RHB' : null,
+          {/* `age` is only present when the club has turned ages on, and only
+              for the players its own under-X rule covers — the server decides,
+              so there is nothing to gate here. */}
+          {[p.age != null ? `${p.age}y` : null,
+            p.batting_hand === 'LEFT' ? 'LHB' : p.batting_hand === 'RIGHT' ? 'RHB' : null,
             bowls(p.bowling_action, p.bowling_type) ? bowlingLabel(p.bowling_action, p.bowling_type) : null]
             .filter(Boolean).join(' · ')}
         </div>
@@ -375,7 +379,12 @@ export default function BetterSelectPlayers() {
       setSavedTick(true)
       setTimeout(() => setSavedTick(false), 1800)
       // Reflect edits (squad/status/overseas/contact) back into the list row.
-      setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, ...patchFromDraft(draft), display_name: updated.display_name } : r))
+      // `age` comes from the saved profile's own age_visible, not from the
+      // draft: the list shows the age the club's setting allows, which is
+      // not necessarily the one the person editing can see on the profile.
+      setPlayers((rows) => (rows || []).map((r) => r.id === selId
+        ? { ...r, ...patchFromDraft(draft), display_name: updated.display_name, age: updated.age_visible ?? null }
+        : r))
     } catch (e) {
       toast.error('Save failed: ' + e.message)
     } finally {

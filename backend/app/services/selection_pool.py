@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
+from app.services import player_age
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -518,6 +519,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "bowling_type": p.bowling_type,
             "is_opening_batsman": p.is_opening_batsman,
             "gender": p.gender,
+            # Age, never the date of birth, and None unless the club has
+            # turned it on (and this player is inside whatever age it
+            # restricted the display to) — see services/player_age.py. The
+            # case it was built for is bowling workload: a selector needs to
+            # know the quick they are about to bowl into the ground is 14.
+            "age": player_age.visible_age(p.date_of_birth, club),
             "is_dormant": dormant and not manual_inactive,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,

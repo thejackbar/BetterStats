@@ -3469,6 +3469,19 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_players_org_hidden "
             "ON players (organisation_id) WHERE is_public IS FALSE"
         ))
+        # Migration 268: a player's date of birth, and the club's own rule
+        # for whether BetterSelect shows the age it works out to (and for
+        # whom). Age is never stored — see services/player_age.py.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS date_of_birth DATE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "select_show_age BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS select_show_age_under INTEGER"
+        ))
         # Seed Applecross with their specific trophy names (idempotent – skips if already seeded)
         from app.routers.award_definitions import seed_org_definitions, APPLECROSS_TEMPLATE
         acc_row = await conn.execute(
