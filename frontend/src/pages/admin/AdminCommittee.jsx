@@ -7,7 +7,8 @@ import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { PersonSearch } from '../../components/admin/clubmanager/pickers'
 import { ActionEditor, MotionGovernance, PlanTab, ActionTimeline, ObjectiveSelect, useObjectives, objectiveLabel,
-  ACTION_CATEGORIES as CATEGORIES, ACTION_STATUSES as STATUSES, ACTION_STATUS_LABELS as STATUS_LABELS } from '../../components/admin/clubmanager/governance'
+  ACTION_CATEGORIES as CATEGORIES, ACTION_STATUSES as STATUSES, ACTION_STATUS_LABELS as STATUS_LABELS,
+  MOTION_OUTCOMES } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
@@ -19,7 +20,6 @@ const EVENT_TYPES = ['committee_meeting', 'working_bee', 'registration_day', 'ag
 const MEETING_TYPES = ['committee', 'agm', 'special_general', 'sub_committee', 'other']
 const MEETING_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled']
 const AGENDA_ITEM_STATUSES = ['proposed', 'discussed', 'carried', 'deferred', 'withdrawn']
-const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
 const NOMINATION_STATUSES = ['nominated', 'elected', 'withdrawn', 'not_elected']
 const ATTENDANCE_STATUSES = ['present', 'apology', 'absent']
 const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')

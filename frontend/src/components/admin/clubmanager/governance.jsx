@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import { PersonSearch } from './pickers'
+import { objectiveTiers, objectiveLabel } from './planLabels'
 
 // The editing surface for what migration 217 added: an action's budget, spend,
 // progress, plan and dependencies; a carried motion recorded as a resolution
@@ -210,22 +211,18 @@ const catLabel = s => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).joi
 // most useful thing about an action serving the strategic plan — was readable
 // only by opening the dropdown and reading which row happened to be selected.
 // Here it is a breadcrumb, with what the club committed to underneath it.
-function ObjectiveLink({ objective }) {
+function ObjectiveLink({ objective, noun = 'ACTION' }) {
   if (!objective) {
     return (
       <div className="pb-card p-3">
         <div className={`${cap} mb-1`}>STRATEGIC PLAN</div>
         <div className="text-[12.5px] text-pb-faint">
-          Not linked yet. Point it at an objective below and this action starts counting towards the plan.
+          Not linked yet. Point it at an objective below and this {noun.toLowerCase()} starts counting towards the plan.
         </div>
       </div>
     )
   }
-  const tiers = [
-    ['PLAN', objective.plan_name || 'Not on a plan'],
-    objective.pillar_name ? ['THEME', objective.pillar_name] : null,
-    ['OBJECTIVE', objective.title],
-  ].filter(Boolean)
+  const tiers = objectiveTiers(objective)
   const meta = [
     objective.owner_position_name ? `Owned by the ${objective.owner_position_name}` : null,
     objective.due_date ? `Due ${objective.due_date}` : null,
@@ -233,9 +230,9 @@ function ObjectiveLink({ objective }) {
   ].filter(Boolean)
   return (
     <div className="pb-card p-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>
-      <div className={`${cap} mb-2`}>THIS ACTION SERVES</div>
+      <div className={`${cap} mb-2`}>THIS {noun} SERVES</div>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        {tiers.map(([k, v], i) => (
+        {tiers.map(({ key: k, value: v }, i) => (
           <span key={k} className="flex items-center gap-2">
             {i > 0 && <span className="text-pb-faintest text-[13px]">›</span>}
             <span className="flex flex-col">
@@ -466,6 +463,168 @@ export function ActionEditor({ task, allTasks, objectives, members, onClose, onS
             className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
             style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
             Delete action
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── One motion, opened for editing ─────────────────────────────────────── */
+
+// What a motion can end as. The meeting room, the manage screen and this editor
+// all read this list, so the vocabulary has one home.
+export const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
+const outcomeLabel = s => s.charAt(0).toUpperCase() + s.slice(1)
+
+// The motion register is a read of every motion the club has passed, and until
+// now that was all it was — a typo in a resolution could only be corrected by
+// finding the meeting it was moved at. A motion belongs to its meeting, so the
+// meeting's id rides along with the row and every write goes to that meeting's
+// own endpoint.
+export function MotionEditor({ meetingId, motion, members, objectives, onClose, onSaved, onDeleted }) {
+  const toast = useToast()
+  const [form, setForm] = useState({
+    description: motion.description || '',
+    outcome: motion.outcome || 'pending',
+    votes_for: motion.votes_for ?? '',
+    votes_against: motion.votes_against ?? '',
+    votes_abstain: motion.votes_abstain ?? '',
+    proposed_by_member_id: motion.proposed_by_member_id || '',
+    seconded_by_member_id: motion.seconded_by_member_id || '',
+    objective_id: motion.objective_id || '',
+    notes: motion.notes || '',
+  })
+  const [busy, setBusy] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const num = v => (v === '' || v === null ? null : Number(v))
+
+  async function save() {
+    if (!form.description.trim()) { toast.error('A motion needs its wording'); return }
+    setBusy(true)
+    try {
+      await api.committeeUpdateMotion(meetingId, motion.id, {
+        description: form.description.trim(),
+        outcome: form.outcome,
+        votes_for: num(form.votes_for),
+        votes_against: num(form.votes_against),
+        votes_abstain: num(form.votes_abstain),
+        proposed_by_member_id: form.proposed_by_member_id || null,
+        seconded_by_member_id: form.seconded_by_member_id || null,
+        objective_id: form.objective_id || null,
+        notes: form.notes || null,
+      })
+      toast.success('Motion updated')
+      onSaved?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
+  }
+
+  async function remove() {
+    // A motion is the record of a decision the committee took, so this names
+    // what it is rather than asking about an unnamed row.
+    if (!window.confirm(`Delete this motion?\n\n“${motion.description}”\n\nIts votes and notes go with it. This can't be undone.`)) return
+    setBusy(true)
+    try {
+      await api.committeeDeleteMotion(meetingId, motion.id)
+      toast.success('Motion deleted')
+      onDeleted?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
+  }
+
+  const objective = (objectives || []).find(o => o.id === form.objective_id) || null
+
+  return (
+    <div onClick={() => { if (!busy) onClose?.() }}
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div onClick={e => e.stopPropagation()} className="pb-card w-full max-w-3xl p-5 space-y-4">
+
+        <div className="flex items-start gap-3">
+          <label className="flex-1 min-w-0 block">
+            <span className={`${cap} block mb-1`}>MOTION</span>
+            <textarea rows={2} className={`${inp} !text-[14px]`} value={form.description}
+              onChange={e => set('description', e.target.value)}
+              placeholder="That the committee…" />
+          </label>
+          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+        </div>
+
+        <div>
+          <div className={`${cap} mb-1`}>OUTCOME</div>
+          <div className="flex flex-wrap gap-1">
+            {MOTION_OUTCOMES.map(s => (
+              <button key={s} onClick={() => set('outcome', s)}
+                className={`px-3 py-1.5 rounded text-[12.5px] border ${form.outcome === s ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                style={form.outcome === s
+                  ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' }
+                  : undefined}>
+                {outcomeLabel(s)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ObjectiveLink objective={objective} noun="MOTION" />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ObjectiveSelect objectives={objectives} value={form.objective_id}
+            onChange={v => set('objective_id', v || '')} />
+          <div />
+          <label className="block">
+            <span className={`${cap} block mb-1`}>MOVED BY</span>
+            <select className={inp} value={form.proposed_by_member_id}
+              onChange={e => set('proposed_by_member_id', e.target.value)}>
+              <option value="">— nobody recorded —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>SECONDED BY</span>
+            <select className={inp} value={form.seconded_by_member_id}
+              onChange={e => set('seconded_by_member_id', e.target.value)}>
+              <option value="">— nobody recorded —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          {[['votes_for', 'FOR'], ['votes_against', 'AGAINST'], ['votes_abstain', 'ABSTAIN']].map(([k, l]) => (
+            <label key={k} className="block">
+              <span className={`${cap} block mb-1`}>{l}</span>
+              <input type="number" min="0" className={inp} value={form[k]}
+                onChange={e => set(k, e.target.value)} placeholder="—" />
+            </label>
+          ))}
+        </div>
+
+        <label className="block">
+          <span className={`${cap} block mb-1`}>NOTE FOR THE MINUTES</span>
+          <textarea rows={2} className={inp} placeholder="Anything the minutes should carry alongside it."
+            value={form.notes} onChange={e => set('notes', e.target.value)} />
+        </label>
+
+        {/* The committee's own thread against this motion — a different thing
+            from the line above, which goes into the minutes. */}
+        <div className="pb-card p-3"><NoteThread entityType="motion" entityId={motion.id} /></div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={save} disabled={busy || !form.description.trim()}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            {busy ? 'SAVING…' : 'SAVE'}
+          </button>
+          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+          <button onClick={remove} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
+            style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
+            Delete motion
           </button>
         </div>
       </div>
@@ -715,7 +874,7 @@ export function useObjectives() {
   return objectives
 }
 
-export const objectiveLabel = o => (o.plan_name ? `${o.plan_name} › ${o.title}` : o.title)
+export { objectiveLabel, objectiveTiers }
 
 export function ObjectiveSelect({ objectives, value, onChange, className, label = 'OBJECTIVE' }) {
   const rows = objectives || []
@@ -1622,7 +1781,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
         const budget = Number(a.budget_estimate || 0)
         const spent = Number(a.actual_expenditure || 0)
         rows.push({
-          kind: 'action', id: a.id, title: a.title, plan: p.name, objective: o.title,
+          kind: 'action', id: a.id, title: a.title, plan: p.name, theme: o.pillar_name, objective: o.title,
           percent: a.percent_complete || 0, budget, spent,
           percentSpent: budget ? Math.round(spent / budget * 100) : null,
           over: budget > 0 && spent > budget,
@@ -1633,7 +1792,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
       }
       for (const m of (o.motion_list || [])) {
         rows.push({
-          kind: 'motion', id: m.id, title: m.description, plan: p.name, objective: o.title,
+          kind: 'motion', id: m.id, title: m.description, plan: p.name, theme: o.pillar_name, objective: o.title,
           percent: null, budget: 0, spent: 0, percentSpent: null, over: false,
           // A motion is a decision, not work with a deadline of its own. It
           // reads as late when the objective it serves is, which is the only
@@ -1694,7 +1853,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
                       </span>
                     )}
                   </div>
-                  <div className={`${cap} mt-1`}>{r.plan.toUpperCase()} › {r.objective.toUpperCase()}</div>
+                  <div className={`${cap} mt-1`}>{[r.plan, r.theme, r.objective].filter(Boolean).map(x => x.toUpperCase()).join(' › ')}</div>
                   <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
                     {r.owner && <span>{r.owner}</span>}
                     {r.due && <span>due {r.due}</span>}

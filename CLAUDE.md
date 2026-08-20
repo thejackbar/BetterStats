@@ -66,6 +66,20 @@ as sections with their own buttons rather than three tabs and a manage page.
   what the action was for. `ACTION_CATEGORIES` / `ACTION_STATUSES` /
   `ACTION_STATUS_LABELS` are exported from there and imported by
   AdminCommittee, so the vocabulary has one home.
+- **`MotionEditor` is the motion's counterpart**, opened from the register.
+  A motion belongs to a MEETING, so every row in the register carries the
+  `meeting_id` it was moved at and each write goes to that meeting's own
+  endpoint — the register is assembled from several meetings and has no id of
+  its own to write against.
+- **`planLabels.js` is the one place an objective is NAMED from elsewhere**,
+  and it names all three tiers: PLAN › THEME › OBJECTIVE. Skipping the theme
+  was the reported bug, and it matters because an objective's own title is
+  routinely a whole sentence ("Appoint accredited, high-quality coaches for
+  all senior and junior squads.") — the theme is what groups it. `objectiveLabel`
+  and `objectiveTiers` are the same data two ways, so the picker's one-line
+  label and `ObjectiveLink`'s written-out breadcrumb cannot disagree. It is its
+  OWN tiny module rather than a corner of governance.jsx, because the screens
+  that only name an objective must not pull that whole bundle into first paint.
 - **The Board's lanes are the drop targets, not the cards.** Dropping into the
   empty space under the last card has to work, or an empty lane could never
   receive anything. The move is applied locally first and rolled back on a

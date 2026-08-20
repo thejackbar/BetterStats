@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout , ManageLink } from '../ui'
 import { MeetingRoomPanel } from '../../../MeetingRoom'
+import { objectiveLabel } from '../../../../../components/admin/clubmanager/planLabels'
 // The Plans, Actions, Documents and Calendar sections are the manage screen's
 // own editors, mounted here rather than copied — two versions of "the club's
 // documents" is how the two start disagreeing about what the club holds.
@@ -12,6 +13,7 @@ import { MeetingRoomPanel } from '../../../MeetingRoom'
 const PlanTab = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.PlanTab })))
 const TasksTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.TasksTab })))
 const ActionEditor = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.ActionEditor })))
+const MotionEditor = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.MotionEditor })))
 const DocumentsTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.DocumentsTab })))
 const CalendarTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.CalendarTab })))
 
@@ -205,6 +207,7 @@ export default function Committee({ st, patch, narrow }) {
   // reaching the Actions list, since nothing else on this screen names one.
   const [objectives, setObjectives] = useState(null)
   const [editId, setEditId] = useState(null)
+  const [editMotionId, setEditMotionId] = useState(null)
   // Templates are only fetched when the modal is first opened — null means not
   // asked for yet, so glancing at the committee costs nothing extra.
   const [templates, setTemplates] = useState(null)
@@ -298,6 +301,15 @@ export default function Committee({ st, patch, narrow }) {
     } catch { /* the editor reports its own failures */ }
   }, [])
 
+  // A motion belongs to a meeting, so refreshing one means re-reading that
+  // meeting — the register is built from the meetings this screen holds.
+  const reloadMeeting = useCallback(async (id) => {
+    try {
+      const fresh = await api.committeeGetMeeting(id)
+      setData(d => (d ? { ...d, meetings: d.meetings.map(m => (m.id === id ? { ...m, ...fresh } : m)) } : d))
+    } catch { /* the editor reports its own failures */ }
+  }, [])
+
   const loadTemplates = useCallback(async () => {
     try {
       const res = await api.committeeListAgendaTemplates()
@@ -324,7 +336,7 @@ export default function Committee({ st, patch, narrow }) {
   // Objectives are what an action can be pointed at. Only the Actions list on
   // this screen names one, so it is fetched on reaching it.
   useEffect(() => {
-    if (tab === 'motions' && maView === 'actions' && actionsView === 'list' && objectives === null) {
+    if (tab === 'motions' && (maView === 'motions' || actionsView === 'list') && objectives === null) {
       api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => setObjectives([]))
     }
   }, [tab, maView, actionsView, objectives])
@@ -352,6 +364,22 @@ export default function Committee({ st, patch, narrow }) {
       setData(d => (d ? { ...d, tasks: d.tasks.filter(x => x.id !== t.id) } : d))
       if (editId === t.id) setEditId(null)
     } catch (e) { setMsg(`Could not delete that action — ${String(e?.message || e)}`) }
+  }
+
+  // A motion is the record of a decision the committee took, so this quotes it
+  // rather than asking about an unnamed row.
+  async function deleteMotion(mo) {
+    if (!window.confirm(`Delete this motion?\n\n“${mo.description}”\n\nIts votes and notes go with it. This cannot be undone.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteMotion(mo.meeting_id, mo.id)
+      setData(d => (d ? {
+        ...d,
+        meetings: d.meetings.map(m => (m.id === mo.meeting_id
+          ? { ...m, motions: (m.motions || []).filter(x => x.id !== mo.id) } : m)),
+      } : d))
+      if (editMotionId === mo.id) setEditMotionId(null)
+    } catch (e) { setMsg(`Could not delete that motion — ${String(e?.message || e)}`) }
   }
 
   const openNewTemplate = () => {
@@ -542,7 +570,14 @@ export default function Committee({ st, patch, narrow }) {
   // Read out of the live list, so a save that reloads shows the new values.
   const editTask = editId ? tasks.find(t => t.id === editId) : null
   const allMotions = []
-  meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({ ...mo, from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at) })))
+  meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({
+    ...mo,
+    // Every write goes to the meeting the motion was moved at, so the row
+    // carries that id rather than looking it up again later.
+    meeting_id: m.id,
+    from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at),
+  })))
+  const editMotion = editMotionId ? allMotions.find(mo => mo.id === editMotionId) : null
 
   // Seasons offered are the ones the club actually met in, newest first, plus
   // the season running now — so a club that has just rolled over can pick this
@@ -865,18 +900,38 @@ export default function Committee({ st, patch, narrow }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {allMotions.map((mo, i) => {
                   const oc = motionOutcome(mo.outcome)
+                  const obj = (objectives || []).find(o => o.id === mo.objective_id)
                   return (
-                    <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
+                    <div key={i} onClick={() => setEditMotionId(mo.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditMotionId(mo.id) } }}
+                      role="button" tabIndex={0} title="Open this motion"
+                      style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px', cursor: 'pointer' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
                         <span style={{ fontSize: 13, color: C.text, flex: 1, minWidth: 0, lineHeight: 1.45 }}>{mo.description}</span>
                         <span style={chip(oc.fg)}>{oc.label}</span>
+                        <button onClick={e => { e.stopPropagation(); deleteMotion(mo) }}
+                          title="Delete this motion" aria-label={`Delete motion ${mo.description}`}
+                          style={delBtn}>✕</button>
                       </div>
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 5 }}>{mo.from}{mo.proposed_by_member_id ? ' · moved ' + name(mo.proposed_by_member_id) : ''}</div>
+                      {/* The whole breadcrumb, theme included — an objective's
+                          own title is a sentence, and the theme is what groups
+                          it with the rest of the plan. */}
+                      {obj && (
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--pb-accent-ink)', marginTop: 3 }}>
+                          ▸ {objectiveLabel(obj)}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
                 {allMotions.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No motions recorded this season.</div>}
               </div>
+              {allMotions.length > 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
+                  CLICK A MOTION TO EDIT IT
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -905,7 +960,7 @@ export default function Committee({ st, patch, narrow }) {
                         {/* What it is for, when it serves the strategic plan. */}
                         {obj && (
                           <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--pb-accent-ink)', marginTop: 3 }}>
-                            ▸ {obj.plan_name ? `${obj.plan_name} › ${obj.title}` : obj.title}
+                            ▸ {objectiveLabel(obj)}
                           </div>
                         )}
                       </div>
@@ -963,6 +1018,16 @@ export default function Committee({ st, patch, narrow }) {
         <Suspense fallback={null}>
           <ActionEditor task={editTask} allTasks={tasks} objectives={objectives || []} members={members}
             onClose={() => setEditId(null)} onSaved={reloadTasks} onDeleted={reloadTasks} />
+        </Suspense>
+      )}
+
+      {editMotion && (
+        <Suspense fallback={null}>
+          <MotionEditor meetingId={editMotion.meeting_id} motion={editMotion}
+            members={members} objectives={objectives || []}
+            onClose={() => setEditMotionId(null)}
+            onSaved={() => reloadMeeting(editMotion.meeting_id)}
+            onDeleted={() => reloadMeeting(editMotion.meeting_id)} />
         </Suspense>
       )}
 
