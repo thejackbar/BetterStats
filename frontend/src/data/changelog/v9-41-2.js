@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.39.1',
-  date: '2026-08-20',
-  sortKey: '2026-08-20T16:00:00Z',
+  version: 'v9.41.2',
+  date: '2026-08-21',
+  sortKey: '2026-08-21T03:00:00Z',
   title: 'Selection rules: your grades, your wording, your dates',
   items: [
     'The grades a rule can be scoped to now come from Manage Grades — your own order, your own names, merged grades as one entry — and the picker offers the grades you actually run, with a link to show the older ones if you want them.',

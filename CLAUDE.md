@@ -212,7 +212,7 @@ from a WASTCA handbook but deliberately NOT as its rulebook.
   rule is a limit on the day and the umpires enforce it. Nothing here writes to
   PlayHQ or claims an association has approved anything.
 
-### What the first round of use changed (v9.39.1)
+### What the first round of use changed (v9.41.2)
 
 - **The rule scope picker reads Manage Grades, not `grades` directly.** The
   first cut listed every distinct grade name in the club, alphabetically — a
