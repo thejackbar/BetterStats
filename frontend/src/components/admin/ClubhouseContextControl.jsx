@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../../contexts/AuthContext'
 import { api } from '../../lib/api'
 
-// The club ⇄ BetterCricket-internal switch, in the BetterClubhouse sidebar
+// The club ⇄ BetterCricket-internal switch, in the BetterAdmin sidebar
 // footer. Restores what CommsContextBar used to do inside BetterComms, which
-// went dead in the BetterClubhouse merge — the mechanism (a dedicated outreach
+// went dead in the BetterAdmin merge — the mechanism (a dedicated outreach
 // organisation, reached through the act-as-club switch) never went anywhere,
 // only the way in did.
 //

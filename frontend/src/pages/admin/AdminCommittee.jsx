@@ -6,22 +6,20 @@ import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLay
 import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { PersonSearch } from '../../components/admin/clubmanager/pickers'
-import { ActionPlanPanel, MotionGovernance, NoteThread, AttachedDocuments, PlanTab, ActionTimeline, ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
+import { ActionEditor, MotionGovernance, PlanTab, ActionTimeline, ObjectiveSelect, useObjectives, objectiveLabel,
+  ACTION_CATEGORIES as CATEGORIES, ACTION_STATUSES as STATUSES, ACTION_STATUS_LABELS as STATUS_LABELS,
+  MOTION_OUTCOMES } from '../../components/admin/clubmanager/governance'
 
 const today = () => new Date().toISOString().slice(0, 10)
 
 // One input look for the whole module — the same class the shared kit's
 // TextInput/Select wear, so a hand-built control here matches a kit one.
 const inp = INPUT_CLS
-const CATEGORIES = ['operational', 'maintenance', 'compliance', 'finance', 'other']
-const STATUSES = ['todo', 'in_progress', 'done', 'blocked']
-const STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done', blocked: 'Blocked' }
 const DOC_CATEGORIES = ['governance', 'policies', 'constitution', 'insurance', 'grants', 'ground_leases', 'coach_accreditation', 'wwcc', 'risk_assessments', 'other']
 const EVENT_TYPES = ['committee_meeting', 'working_bee', 'registration_day', 'agm', 'awards_night', 'sponsor_function', 'fundraising', 'other']
 const MEETING_TYPES = ['committee', 'agm', 'special_general', 'sub_committee', 'other']
 const MEETING_STATUSES = ['scheduled', 'in_progress', 'completed', 'cancelled']
 const AGENDA_ITEM_STATUSES = ['proposed', 'discussed', 'carried', 'deferred', 'withdrawn']
-const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
 const NOMINATION_STATUSES = ['nominated', 'elected', 'withdrawn', 'not_elected']
 const ATTENDANCE_STATUSES = ['present', 'apology', 'absent']
 const label = (s) => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
@@ -328,12 +326,20 @@ function NewTaskForm({ onCreated }) {
   )
 }
 
-function TasksTab({ members }) {
+export function TasksTab({ members, view: viewProp, onView }) {
   const toast = useToast()
   const [tasks, setTasks] = useState(null)
   const [objectives, setObjectives] = useState([])
-  const [openId, setOpenId] = useState(null)   // the action whose plan is showing
-  const [view, setView] = useState('board')    // board | timeline
+  const [editId, setEditId] = useState(null)   // the action open in the editor
+  // Board drag-and-drop. `dragId` is the card in flight, `overLane` the status
+  // column under the cursor — both cleared on drop and on a cancelled drag.
+  const [dragId, setDragId] = useState(null)
+  const [overLane, setOverLane] = useState(null)
+  // board | timeline. A caller drawing its own buttons passes `view`, and then
+  // this stops drawing the toggle rather than showing two that disagree.
+  const [ownView, setOwnView] = useState('board')
+  const view = viewProp || ownView
+  const setView = onView || setOwnView
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
   const [objId, setObjId] = useState('')
@@ -346,8 +352,24 @@ function TasksTab({ members }) {
   useEffect(() => { load() }, [load])
   useEffect(() => { api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => {}) }, [])
 
-  async function setStatus(task, status) {
-    try { await api.committeeUpdateTask(task.id, { status }); load() } catch (e) { toast.error(e.message) }
+  // Dropping a card into a lane IS the status change. The board moves first and
+  // the write follows, so the card lands where it was dropped rather than
+  // snapping back for as long as the request takes; a failure puts it back and
+  // says why.
+  async function dropInto(status) {
+    const id = dragId
+    setDragId(null); setOverLane(null)
+    if (!id) return
+    const task = (tasks || []).find(t => t.id === id)
+    if (!task || task.status === status) return
+    setTasks(ts => ts.map(t => (t.id === id ? { ...t, status } : t)))
+    try {
+      await api.committeeUpdateTask(id, { status })
+      load()
+    } catch (e) {
+      setTasks(ts => ts.map(t => (t.id === id ? { ...t, status: task.status } : t)))
+      toast.error(e.message)
+    }
   }
   async function remove(task) {
     if (!confirm(`Delete "${task.title}"?`)) return
@@ -367,6 +389,11 @@ function TasksTab({ members }) {
     if (overdueOnly && !(t.due_date && t.due_date < today && t.status !== 'done')) return false
     return true
   })
+  // The action open in the editor, read out of the live list so a save that
+  // reloads shows the new values rather than the ones it was opened with.
+  const editing = editId ? tasks.find(t => t.id === editId) : null
+  const objName = Object.fromEntries((objectives || []).map(o => [o.id, objectiveLabel(o)]))
+
   // The filter row's own selects. Body font, not mono — mono is for labels and
   // figures, and these carry a club's real category and objective names.
   const selInp = `${INPUT_CLS} cursor-pointer !w-auto max-w-[190px]`
@@ -400,28 +427,61 @@ function TasksTab({ members }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-1 mb-3">
-        {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
-          <button key={k} onClick={() => setView(k)}
-            className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
-        ))}
-      </div>
+      {!viewProp && (
+        <div className="flex items-center gap-1 mb-3">
+          {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)}
+              className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+          ))}
+        </div>
+      )}
       {view === 'timeline' ? (
-        <ActionTimeline tasks={shown} objectives={objectives}
-          onOpen={t => { setView('board'); setOpenId(t.id) }} />
+        <ActionTimeline tasks={shown} objectives={objectives} onOpen={t => setEditId(t.id)} />
       ) : (
+      <>
+      <div className="font-mono text-[9.5px] tracking-wide2 text-pb-faintest mb-2">
+        DRAG A CARD TO ANOTHER LANE TO CHANGE ITS STATUS · CLICK IT TO EDIT
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {STATUSES.map(st => (
-          <div key={st}>
+          <div key={st}
+            // The lane is the drop target, not each card in it — dropping into
+            // the empty space under the last card has to work, or a lane with
+            // nothing in it could never receive anything.
+            onDragOver={e => { if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overLane !== st) setOverLane(st) } }}
+            onDragLeave={() => setOverLane(l => (l === st ? null : l))}
+            onDrop={e => { e.preventDefault(); dropInto(st) }}
+            className="rounded-lg p-1 -m-1 transition-colors"
+            style={overLane === st && dragId ? { background: 'color-mix(in srgb, var(--pb-accent) 9%, transparent)', outline: '1px dashed color-mix(in srgb, var(--pb-accent) 45%, transparent)' } : undefined}>
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">{STATUS_LABELS[st].toUpperCase()} ({shown.filter(t => t.status === st).length})</div>
-            <div className="space-y-2">
+            <div className="space-y-2 min-h-[3rem]">
               {shown.filter(t => t.status === st).map(t => (
-                <div key={t.id} className="pb-card px-3 py-2.5">
+                <div key={t.id} draggable
+                  onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(t.id) }}
+                  onDragEnd={() => { setDragId(null); setOverLane(null) }}
+                  onClick={() => setEditId(t.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditId(t.id) } }}
+                  role="button" tabIndex={0}
+                  title="Open this action — or drag it to another lane"
+                  className="pb-card px-3 py-2.5 cursor-pointer hover:border-pb-accent"
+                  style={{ opacity: dragId === t.id ? 0.45 : 1 }}>
                   <div className="text-pb-text text-[13px] mb-1">{t.title}</div>
                   <div className="flex items-center justify-between gap-1">
                     <span className="font-mono text-[9px] text-pb-faintest">{label(t.category)}{t.due_date ? ` · ${t.due_date}` : ''}{t.is_recurring ? ' · ↻' : ''}</span>
-                    <button onClick={() => remove(t)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">✕</button>
+                    <button onClick={e => { e.stopPropagation(); remove(t) }}
+                      title={`Delete "${t.title}"`} aria-label={`Delete ${t.title}`}
+                      className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">✕</button>
                   </div>
+                  {/* What the action is for, said on the card. The old "Plan"
+                      button unfolded a whole editor inside a 200px column;
+                      the linkage is worth reading at a glance, and editing it
+                      belongs in the dialog. */}
+                  {t.objective_id && objName[t.objective_id] && (
+                    <div className="font-mono text-[9px] mt-1 truncate" style={{ color: 'var(--pb-accent-ink)' }}
+                      title={objName[t.objective_id]}>
+                      ▸ {objName[t.objective_id]}
+                    </div>
+                  )}
                   {/* The planning line, only when there is something to say. */}
                   {(t.budget_estimate != null || t.percent_complete > 0 || (t.depends_on || []).length > 0) && (
                     <div className="flex items-center gap-2 mt-1 font-mono text-[9px]">
@@ -434,39 +494,25 @@ function TasksTab({ members }) {
                       {(t.depends_on || []).length > 0 && <span className="text-pb-faintest">waits on {t.depends_on.length}</span>}
                     </div>
                   )}
-                  <div className="flex gap-1 mt-1.5 flex-wrap">
-                    {STATUSES.filter(s => s !== st).map(s => (
-                      <button key={s} onClick={() => setStatus(t, s)}
-                        className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text">
-                        {STATUS_LABELS[s]}
-                      </button>
-                    ))}
-                    <button onClick={() => setOpenId(o => o === t.id ? null : t.id)}
-                      className="text-[10.5px] border border-pb-hairline2 rounded px-1.5 py-px text-pb-dim hover:text-pb-text ml-auto">
-                      {openId === t.id ? 'Close' : 'Plan'}
-                    </button>
-                  </div>
-                  {openId === t.id && (
-                    <div className="mt-2 space-y-2">
-                      <ActionPlanPanel task={t} allTasks={tasks} objectives={objectives} members={members}
-                        onChanged={load} />
-                      <div className="pb-card p-3"><NoteThread entityType="task" entityId={t.id} /></div>
-                      <div className="pb-card p-3"><AttachedDocuments entityType="task" entityId={t.id} /></div>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
           </div>
         ))}
       </div>
+      </>
+      )}
+
+      {editing && (
+        <ActionEditor task={editing} allTasks={tasks} objectives={objectives} members={members}
+          onClose={() => setEditId(null)} onSaved={load} onDeleted={load} />
       )}
     </div>
   )
 }
 
 // ── Documents tab ────────────────────────────────────────────────────────────
-function DocumentsTab() {
+export function DocumentsTab() {
   const toast = useToast()
   const [docs, setDocs] = useState(null)
   const [form, setForm] = useState({ title: '', category: 'governance', url: '' })
@@ -530,7 +576,7 @@ function DocumentsTab() {
 }
 
 // ── Calendar tab ─────────────────────────────────────────────────────────────
-function CalendarTab() {
+export function CalendarTab() {
   const toast = useToast()
   const [events, setEvents] = useState(null)
   const [form, setForm] = useState({ title: '', event_type: 'committee_meeting', starts_at: '', location: '' })

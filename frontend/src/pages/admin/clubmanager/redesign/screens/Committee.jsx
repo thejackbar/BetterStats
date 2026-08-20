@@ -1,7 +1,37 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout , ManageLink } from '../ui'
 import { MeetingRoomPanel } from '../../../MeetingRoom'
+import { objectiveLabel } from '../../../../../components/admin/clubmanager/planLabels'
+// The Plans, Actions, Documents and Calendar sections are the manage screen's
+// own editors, mounted here rather than copied — two versions of "the club's
+// documents" is how the two start disagreeing about what the club holds.
+//
+// Lazily, because they are a large slice of the bundle and most visits to this
+// screen only ever look at Meetings. Same call the Comms shell makes about its
+// HTML editor.
+const PlanTab = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.PlanTab })))
+const TasksTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.TasksTab })))
+const ActionEditor = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.ActionEditor })))
+const MotionEditor = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.MotionEditor })))
+const DocumentsTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.DocumentsTab })))
+const CalendarTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.CalendarTab })))
+
+// The buttons across the top, and the ones that appear on the line below when a
+// section holds more than one thing. Keys are what `st` stores, so renaming a
+// label never moves anyone's view.
+const TABS = [
+  { key: 'meetings', label: 'Meetings' },
+  { key: 'motions', label: 'Motions & Actions' },
+  { key: 'plans', label: 'Plans' },
+  { key: 'documents', label: 'Documents' },
+  { key: 'calendar', label: 'Calendar' },
+  { key: 'positions', label: 'Positions' },
+]
+const MEETING_VIEWS = [{ key: 'meetings', label: 'All Meetings' }, { key: 'templates', label: 'Meeting Templates' }]
+const MA_VIEWS = [{ key: 'actions', label: 'Actions' }, { key: 'motions', label: 'Motions' }]
+const ACTION_VIEWS = [{ key: 'list', label: 'List' }, { key: 'board', label: 'Board' }, { key: 'timeline', label: 'Timeline' }]
+const PLAN_VIEWS = [{ key: 'plans', label: 'Plans' }, { key: 'themes', label: 'Themes' }, { key: 'objectives', label: 'Objectives' }]
 
 // Committee — positions, meetings (agenda / attendance / motions) and the
 // club's committee tasks (the closest thing to action items), all on real data.
@@ -17,6 +47,19 @@ const isToday = (iso) => iso && new Date(iso).toDateString() === new Date().toDa
 // Newest meeting first — the list and anything inserted into it after a meeting
 // is created have to agree on the order, so both sort through here.
 const byNewest = (a, b) => new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0)
+
+// A committee season runs for twelve months from the club's own diary year
+// start (BetterAdmin → Settings → Club Diary Year Start, July by default), so a
+// meeting held in June 2027 belongs to the season that opened in July 2026.
+// The same rule the Club Diary lays its year out with.
+function seasonStartYear(iso, startMonth) {
+  const d = new Date(iso)
+  if (!iso || Number.isNaN(d.getTime())) return null
+  return d.getMonth() + 1 >= startMonth ? d.getFullYear() : d.getFullYear() - 1
+}
+// A club whose year starts in January has a season that IS a calendar year, so
+// it reads as one year rather than two.
+const seasonLabel = (y, startMonth) => (startMonth === 1 ? String(y) : `${y}/${y + 1}`)
 
 // `meeting_type` is free text on the server, so this is the vocabulary the club
 // actually writes. Same list the manage screen offers — keep the two in step.
@@ -36,6 +79,8 @@ function taskState(t) {
   if (t.due_date && new Date(t.due_date) < new Date()) return { label: 'OVERDUE', fg: '#ef5b5b' }
   return { label: (t.status || 'OPEN').toUpperCase().replace(/_/g, ' '), fg: 'var(--pb-accent)' }
 }
+const Loading = () => <div style={{ fontSize: 13, color: C.faint }}>Loading…</div>
+
 function motionOutcome(o) {
   const s = (o || '').toLowerCase()
   const lost = s.includes('lost') || s.includes('fail') || s.includes('reject')
@@ -139,6 +184,10 @@ function outcomeTone(v) {
 
 export default function Committee({ st, patch, narrow }) {
   const tab = st.cteTab || 'meetings'
+  const meetingsView = st.cteMeetingsView || 'meetings'
+  const maView = st.cteMaView || 'actions'
+  const actionsView = st.cteActionsView || 'list'
+  const plansView = st.ctePlansView || 'plans'
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [dragId, setDragId] = useState(null)
@@ -151,9 +200,23 @@ export default function Committee({ st, patch, narrow }) {
   // discovered halfway through creating the meeting, not before it.
   //   null | { step: 'meeting' | 'template', form, tpl, busy, error }
   const [mk, setMk] = useState(null)
+  // The club's diary year start, which is what decides where one committee
+  // season ends and the next begins. July until the settings call answers.
+  const [diaryStart, setDiaryStart] = useState(7)
+  // Objectives and the action open for editing. Objectives are only fetched on
+  // reaching the Actions list, since nothing else on this screen names one.
+  const [objectives, setObjectives] = useState(null)
+  const [editId, setEditId] = useState(null)
+  const [editMotionId, setEditMotionId] = useState(null)
   // Templates are only fetched when the modal is first opened — null means not
   // asked for yet, so glancing at the committee costs nothing extra.
   const [templates, setTemplates] = useState(null)
+  // The template open in the detail pane: { id | null, name, items, draft, busy }.
+  // `id` null means one being written for the first time.
+  const [tplEdit, setTplEdit] = useState(null)
+  // Anything that failed while writing, said where it happened rather than as a
+  // toast this screen has no room for.
+  const [msg, setMsg] = useState(null)
 
   // Reorder a position before another and persist the new sequence.
   const movePosition = (fromId, toId) => {
@@ -191,11 +254,18 @@ export default function Committee({ st, patch, narrow }) {
           positions: posRes?.positions || [],
           meetings: meetings.sort(byNewest),
           tasks: Array.isArray(tasksRes) ? tasksRes : (tasksRes?.tasks || []),
+          members: membersRes?.members || membersRes || [],
           nameById,
         })
       } catch (e) { if (alive) setErr(String(e?.message || e)) }
     })()
     return () => { alive = false }
+  }, [])
+
+  // The diary year start is a club setting any signed-in admin may read, so a
+  // committee manager without MANAGE_SETTINGS still gets the right seasons.
+  useEffect(() => {
+    api.adminGetSettings().then(sx => setDiaryStart(Number(sx?.diary_start_month) || 7)).catch(() => {})
   }, [])
 
   // Coming out of the meeting room, pull that one meeting's record again so the
@@ -221,12 +291,145 @@ export default function Committee({ st, patch, narrow }) {
     } : d))
   }, [])
 
+  // The actions list edits rows in place, so it re-reads them after a save or a
+  // delete rather than patching its own copy and hoping the two agree.
+  const reloadTasks = useCallback(async () => {
+    try {
+      const res = await api.committeeListTasks()
+      const tasks = Array.isArray(res) ? res : (res?.tasks || [])
+      setData(d => (d ? { ...d, tasks } : d))
+    } catch { /* the editor reports its own failures */ }
+  }, [])
+
+  // A motion belongs to a meeting, so refreshing one means re-reading that
+  // meeting — the register is built from the meetings this screen holds.
+  const reloadMeeting = useCallback(async (id) => {
+    try {
+      const fresh = await api.committeeGetMeeting(id)
+      setData(d => (d ? { ...d, meetings: d.meetings.map(m => (m.id === id ? { ...m, ...fresh } : m)) } : d))
+    } catch { /* the editor reports its own failures */ }
+  }, [])
+
   const loadTemplates = useCallback(async () => {
     try {
       const res = await api.committeeListAgendaTemplates()
       setTemplates(res?.templates || [])
     } catch { setTemplates([]) }
   }, [])
+
+  // Meeting Templates are fetched on entering their own view too, not only when
+  // the new-meeting dialog is opened.
+  useEffect(() => {
+    if (tab === 'meetings' && meetingsView === 'templates' && templates === null) loadTemplates()
+  }, [tab, meetingsView, templates, loadTemplates])
+
+  // Opening Meeting Templates opens the first one, so the pane beside the list
+  // shows a template rather than an instruction to pick one. Pressing + New
+  // sets `tplEdit` itself, so this can never overwrite a draft in progress.
+  useEffect(() => {
+    if (tab !== 'meetings' || meetingsView !== 'templates' || tplEdit) return
+    if (!templates || templates.length === 0) return
+    const keep = templates.find(t => t.id === st.cteTemplate)
+    openTemplate(keep || templates[0])
+  }, [tab, meetingsView, templates, tplEdit, st.cteTemplate])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Objectives are what an action can be pointed at. Only the Actions list on
+  // this screen names one, so it is fetched on reaching it.
+  useEffect(() => {
+    if (tab === 'motions' && (maView === 'motions' || actionsView === 'list') && objectives === null) {
+      api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => setObjectives([]))
+    }
+  }, [tab, maView, actionsView, objectives])
+
+  // Deleting a meeting takes its agenda, motions, attendance and minutes with
+  // it, so it asks first. A template the meeting was BUILT from is untouched —
+  // the items were copied onto the meeting when it was created.
+  async function deleteMeeting(m) {
+    if (!window.confirm(`Delete “${m.title}”?\n\nIts agenda, motions, attendance and minutes go with it. This cannot be undone.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteMeeting(m.id)
+      setData(d => (d ? { ...d, meetings: d.meetings.filter(x => x.id !== m.id) } : d))
+      if (st.cteMeeting === m.id) patch({ cteMeeting: null, cteRoom: null })
+    } catch (e) { setMsg(`Could not delete that meeting — ${String(e?.message || e)}`) }
+  }
+
+  // Deleting an action takes its notes and attachments with it, so it names
+  // what goes. Same wording as the editor's own Delete.
+  async function deleteTask(t) {
+    if (!window.confirm(`Delete “${t.title}”?\n\nIts notes and attached documents go with it. This cannot be undone.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteTask(t.id)
+      setData(d => (d ? { ...d, tasks: d.tasks.filter(x => x.id !== t.id) } : d))
+      if (editId === t.id) setEditId(null)
+    } catch (e) { setMsg(`Could not delete that action — ${String(e?.message || e)}`) }
+  }
+
+  // A motion is the record of a decision the committee took, so this quotes it
+  // rather than asking about an unnamed row.
+  async function deleteMotion(mo) {
+    if (!window.confirm(`Delete this motion?\n\n“${mo.description}”\n\nIts votes and notes go with it. This cannot be undone.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteMotion(mo.meeting_id, mo.id)
+      setData(d => (d ? {
+        ...d,
+        meetings: d.meetings.map(m => (m.id === mo.meeting_id
+          ? { ...m, motions: (m.motions || []).filter(x => x.id !== mo.id) } : m)),
+      } : d))
+      if (editMotionId === mo.id) setEditMotionId(null)
+    } catch (e) { setMsg(`Could not delete that motion — ${String(e?.message || e)}`) }
+  }
+
+  const openNewTemplate = () => {
+    patch({ cteTab: 'meetings', cteMeetingsView: 'templates', cteTemplate: null })
+    if (templates === null) loadTemplates()
+    setTplEdit({ id: null, name: '', items: [], draft: '', busy: false })
+  }
+  const openTemplate = (t) => {
+    patch({ cteTemplate: t.id })
+    setTplEdit({ id: t.id, name: t.name || '', items: [...(t.items || [])], draft: '', busy: false })
+  }
+  const setTpl = (k, v) => setTplEdit(t => ({ ...t, [k]: v }))
+  const addTplRow = () => setTplEdit(t => (t.draft.trim()
+    ? { ...t, items: [...t.items, { title: t.draft.trim() }], draft: '' }
+    : t))
+
+  async function saveTemplateEdit() {
+    const items = tplEdit.draft.trim() ? [...tplEdit.items, { title: tplEdit.draft.trim() }] : tplEdit.items
+    if (!tplEdit.name.trim() || items.length === 0) return
+    setTplEdit(t => ({ ...t, busy: true })); setMsg(null)
+    try {
+      const saved = tplEdit.id
+        ? await api.committeeUpdateAgendaTemplate(tplEdit.id, { name: tplEdit.name.trim(), items })
+        : await api.committeeCreateAgendaTemplate({ name: tplEdit.name.trim(), items })
+      setTemplates(ts => {
+        const rest = (ts || []).filter(x => x.id !== saved.id)
+        return [...rest, saved].sort((a, b) => (a.name || '').toLowerCase().localeCompare((b.name || '').toLowerCase()))
+      })
+      patch({ cteTemplate: saved.id })
+      setTplEdit({ id: saved.id, name: saved.name || '', items: [...(saved.items || [])], draft: '', busy: false })
+    } catch (e) {
+      setTplEdit(t => ({ ...t, busy: false }))
+      setMsg(String(e?.message || e))
+    }
+  }
+
+  // A template can be deleted whatever has been built from it. Creating a
+  // meeting COPIES the template's items onto that meeting's own agenda, and the
+  // meeting's back-reference is ON DELETE SET NULL — so every past meeting keeps
+  // its agenda word for word, it just stops naming the template it came from.
+  async function deleteTemplate(t) {
+    if (!window.confirm(`Delete the “${t.name}” template?\n\nMeetings already built from it keep their agendas — they simply stop naming it.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteAgendaTemplate(t.id)
+      setTemplates(ts => (ts || []).filter(x => x.id !== t.id))
+      if (tplEdit?.id === t.id) setTplEdit(null)
+      if (st.cteTemplate === t.id) patch({ cteTemplate: null })
+    } catch (e) { setMsg(`Could not delete that template — ${String(e?.message || e)}`) }
+  }
 
   const openNew = () => {
     setMk({
@@ -304,13 +507,16 @@ export default function Committee({ st, patch, narrow }) {
   })
 
   // Form furniture, matching the Directory's — these two screens sit beside each
-  // other in Clubhouse and their dialogs should read as the same dialog.
+  // other in BetterAdmin and their dialogs should read as the same dialog.
   const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 7, padding: '8px 11px', color: C.text, fontSize: 13, outline: 'none', width: '100%', fontFamily: 'inherit' }
   const lbl = { fontFamily: MONO, fontSize: 9.5, color: C.faint }
   // Amber is the module's brand, not the club's, so the ink on it is the fixed
   // ON_ACCENT constant rather than a token that follows a club's own accent.
   const btnP = { padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#0a0d14', cursor: 'pointer', fontFamily: 'inherit' }
   const btnS = { padding: '8px 13px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', fontFamily: 'inherit' }
+  // The small destructive control on a list row. Quiet by default — it sits
+  // beside OPEN, and a delete that shouts is a delete that gets pressed.
+  const delBtn = { background: 'transparent', border: `1px solid ${C.hair2}`, borderRadius: 4, padding: '2px 5px', lineHeight: 1, fontSize: 11, color: C.faint, cursor: 'pointer', fontFamily: MONO, flexShrink: 0 }
 
   const Header = ({ children }) => (
     <ScreenHeader>
@@ -319,27 +525,76 @@ export default function Committee({ st, patch, narrow }) {
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Committee</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>Positions, meetings, motions and actions</Caption>
       </div>
-      <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={[{ key: 'meetings', label: 'Meetings' }, { key: 'positions', label: 'Positions' }, { key: 'motions', label: 'Motions & actions' }]} />
+      <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={TABS} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
         <ManageLink to="/admin/clubhouse/committee/manage">Manage meetings &amp; positions</ManageLink>
-        {data && <button onClick={openNew} style={btnP}>+ New meeting</button>}
+        {/* The primary action belongs to whatever is on screen, so the button
+            names the record this view actually makes. */}
+        {data && tab === 'meetings' && meetingsView === 'meetings' && (
+          <button onClick={openNew} style={btnP}>+ New meeting</button>
+        )}
+        {data && tab === 'meetings' && meetingsView === 'templates' && (
+          <button onClick={openNewTemplate} style={btnP}>+ New Meeting Template</button>
+        )}
       </div>
       {children}
     </ScreenHeader>
   )
 
+  // The buttons on the line below the top row. Two rows where a section is
+  // three deep (Motions & Actions → Actions → List / Board / Timeline), and
+  // nothing at all where a section holds one thing.
+  const subRows = []
+  if (tab === 'meetings') {
+    subRows.push({ value: meetingsView, tabs: MEETING_VIEWS, onChange: v => { patch({ cteMeetingsView: v }); setTplEdit(null); setMsg(null) } })
+  } else if (tab === 'motions') {
+    subRows.push({ value: maView, tabs: MA_VIEWS, onChange: v => patch({ cteMaView: v }) })
+    if (maView === 'actions') subRows.push({ value: actionsView, tabs: ACTION_VIEWS, onChange: v => patch({ cteActionsView: v }) })
+  } else if (tab === 'plans') {
+    subRows.push({ value: plansView, tabs: PLAN_VIEWS, onChange: v => patch({ ctePlansView: v }) })
+  }
+  const SubBar = () => (subRows.length === 0 ? null : (
+    <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
+    </div>
+  ))
+
   if (!data) {
     return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load committee data.' : 'Loading committee…'}</div></div>
   }
 
-  const { positions, meetings, tasks, nameById } = data
+  const { positions, meetings, tasks, members, nameById } = data
   const name = (id) => (id && nameById[id]) || 'Unknown'
   const vacancies = positions.filter(p => !p.current_term)
   const openTasks = tasks.filter(t => taskState(t).label !== 'DONE')
+  // Read out of the live list, so a save that reloads shows the new values.
+  const editTask = editId ? tasks.find(t => t.id === editId) : null
   const allMotions = []
-  meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({ ...mo, from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at) })))
+  meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({
+    ...mo,
+    // Every write goes to the meeting the motion was moved at, so the row
+    // carries that id rather than looking it up again later.
+    meeting_id: m.id,
+    from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at),
+  })))
+  const editMotion = editMotionId ? allMotions.find(mo => mo.id === editMotionId) : null
 
-  const sel = meetings.find(m => m.id === st.cteMeeting) || meetings[0] || null
+  // Seasons offered are the ones the club actually met in, newest first, plus
+  // the season running now — so a club that has just rolled over can pick this
+  // season and see that nothing is booked yet, rather than not find it at all.
+  const seasonNow = seasonStartYear(new Date().toISOString(), diaryStart)
+  const seasonYears = [...new Set([
+    seasonNow,
+    ...meetings.map(m => seasonStartYear(m.scheduled_at, diaryStart)),
+  ].filter(y => y !== null))].sort((a, b) => b - a)
+  const season = st.cteMeetingsSeason ?? ''
+  const shownMeetings = season === ''
+    ? meetings
+    : meetings.filter(m => seasonStartYear(m.scheduled_at, diaryStart) === Number(season))
+
+  // The pane reads the meeting the LIST is showing, so filtering to a season
+  // can never leave a meeting open that the rail no longer holds.
+  const sel = shownMeetings.find(m => m.id === st.cteMeeting) || shownMeetings[0] || null
   // The room is only ever open on the meeting that is selected, so the card the
   // list highlights and the pane beside it can never disagree.
   const room = sel && st.cteRoom === sel.id ? sel.id : null
@@ -355,13 +610,27 @@ export default function Committee({ st, patch, narrow }) {
           <StatReadout value={String(allMotions.length)} label="MOTIONS THIS SEASON" />
         </div>
       </Header>
+      <SubBar />
 
-      {tab === 'meetings' && (
+      {msg && (
+        <div style={{ padding: '10px 20px', fontSize: 12.5, color: C.block, borderBottom: `1px solid ${C.hair}` }}>{msg}</div>
+      )}
+
+      {tab === 'meetings' && meetingsView === 'meetings' && (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
-            <div style={cap}>MEETINGS</div>
+            <div style={cap}>ALL MEETINGS</div>
+            {/* A committee's records run to years. The season is the club's own
+                diary year, so July-to-June at a club that starts in July. */}
+            <label style={{ ...lbl, display: 'block', marginBottom: 10 }}>SEASON
+              <select value={season} onChange={e => patch({ cteMeetingsSeason: e.target.value, cteMeeting: null, cteRoom: null })}
+                style={{ ...inp, marginTop: 4 }}>
+                <option value="">All</option>
+                {seasonYears.map(y => <option key={y} value={String(y)}>{seasonLabel(y, diaryStart)}</option>)}
+              </select>
+            </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {meetings.map(m => {
+              {shownMeetings.map(m => {
                 const s = meetingStatus(m)
                 return (
                   <div key={m.id} onClick={() => patch({ cteMeeting: m.id, cteRoom: null })}
@@ -383,11 +652,20 @@ export default function Committee({ st, patch, narrow }) {
                         OPEN
                       </button>
                       <span style={chip(s.fg)}>{s.label}</span>
+                      {/* Deleting takes the whole record with it, so it asks
+                          first — see deleteMeeting. */}
+                      <button onClick={e => { e.stopPropagation(); deleteMeeting(m) }}
+                        title={`Delete "${m.title}"`} aria-label={`Delete ${m.title}`}
+                        style={delBtn}>✕</button>
                     </div>
                   </div>
                 )
               })}
-              {meetings.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No meetings recorded yet.</div>}
+              {shownMeetings.length === 0 && (
+                <div style={{ fontSize: 13, color: C.faint }}>
+                  {meetings.length === 0 ? 'No meetings recorded yet.' : `No meetings in ${seasonLabel(Number(season), diaryStart)}.`}
+                </div>
+              )}
             </div>
           </div>
 
@@ -457,6 +735,124 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
+      {/* Meeting Templates — the same two panes as Meetings: the club's saved
+          agenda shapes down the left, the one being written or edited beside
+          them. A template is only ever COPIED onto a meeting at the moment that
+          meeting is created, so editing one here changes what the next meeting
+          starts from and never rewrites a meeting already held. */}
+      {tab === 'meetings' && meetingsView === 'templates' && (
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
+            <div style={cap}>MEETING TEMPLATES</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {(templates || []).map(t => {
+                const on = tplEdit?.id === t.id
+                return (
+                  <div key={t.id} onClick={() => openTemplate(t)}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 12px', borderRadius: 8, cursor: 'pointer', border: on ? '1px solid color-mix(in srgb, var(--pb-accent) 40%, transparent)' : `1px solid ${C.hair}`, background: on ? 'color-mix(in srgb, var(--pb-accent) 8%, transparent)' : C.surface }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: C.text }}>{t.name}</div>
+                      <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 3 }}>
+                        {(t.items || []).length} item{(t.items || []).length === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                    <button onClick={e => { e.stopPropagation(); deleteTemplate(t) }}
+                      title={`Delete "${t.name}"`} aria-label={`Delete ${t.name}`}
+                      style={delBtn}>✕</button>
+                  </div>
+                )
+              })}
+              {templates === null && <div style={{ fontSize: 13, color: C.faint }}>Loading templates…</div>}
+              {templates !== null && templates.length === 0 && (
+                <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5 }}>
+                  No templates saved yet. Make one and every meeting after this can start from it.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 24px' }}>
+            {!tplEdit ? (
+              <div style={{ fontSize: 13, color: C.faint }}>
+                Pick a template to edit it, or press <strong style={{ color: C.text }}>+ New Meeting Template</strong> to write one.
+              </div>
+            ) : (
+              <div style={{ maxWidth: '38rem' }}>
+                <h2 style={{ fontWeight: 700, fontSize: 21, margin: '0 0 4px', letterSpacing: '-0.01em' }}>
+                  {tplEdit.id ? 'Edit meeting template' : 'New meeting template'}
+                </h2>
+                <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 18, lineHeight: 1.55 }}>
+                  A saved agenda shape. Its items are copied onto a meeting’s agenda when that meeting
+                  is created, so changing it here sets what the next meeting starts from.
+                </div>
+
+                <div style={{ display: 'grid', gap: 13 }}>
+                  <label style={lbl}>TEMPLATE NAME *
+                    <input value={tplEdit.name} onChange={e => setTpl('name', e.target.value)}
+                      placeholder="e.g. Standard committee meeting" style={{ ...inp, marginTop: 4 }} />
+                  </label>
+                  <div>
+                    <div style={lbl}>AGENDA ITEMS *</div>
+                    {tplEdit.items.length > 0 && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, margin: '6px 0 8px' }}>
+                        {tplEdit.items.map((it, idx) => (
+                          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 9, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 7, padding: '7px 10px' }}>
+                            <span style={{ fontFamily: MONO, fontSize: 10, color: C.faintest, width: 12, flexShrink: 0 }}>{idx + 1}</span>
+                            <input value={it.title || ''}
+                              onChange={e => setTplEdit(t => ({ ...t, items: t.items.map((x, i) => (i === idx ? { ...x, title: e.target.value } : x)) }))}
+                              style={{ ...inp, flex: 1, padding: '2px 0', background: 'transparent', border: 'none', borderRadius: 0 }} />
+                            <button onClick={() => setTplEdit(t => ({ ...t, items: t.items.filter((_, i) => i !== idx) }))}
+                              title="Remove this item" style={delBtn}>✕</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 8, marginTop: tplEdit.items.length ? 0 : 4 }}>
+                      <input value={tplEdit.draft} onChange={e => setTpl('draft', e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTplRow() } }}
+                        placeholder="Agenda item title, press Enter" style={{ ...inp, flex: 1 }} />
+                      <button onClick={addTplRow} disabled={!tplEdit.draft.trim()}
+                        style={{ ...btnS, opacity: tplEdit.draft.trim() ? 1 : 0.6, flexShrink: 0 }}>Add item</button>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', gap: 8, marginTop: 20, flexWrap: 'wrap' }}>
+                  <button onClick={saveTemplateEdit}
+                    disabled={tplEdit.busy || !tplEdit.name.trim() || !(tplEdit.items.length || tplEdit.draft.trim())}
+                    style={{ ...btnP, opacity: (tplEdit.busy || !tplEdit.name.trim() || !(tplEdit.items.length || tplEdit.draft.trim())) ? 0.6 : 1 }}>
+                    {tplEdit.busy ? 'Saving…' : (tplEdit.id ? 'Save template' : 'Create template')}
+                  </button>
+                  {/* A saved template is always open (the list selects the
+                      first), so this discards unsaved edits rather than
+                      closing to a pane that would re-fill itself. */}
+                  <button
+                    onClick={() => {
+                      const t = tplEdit.id && (templates || []).find(x => x.id === tplEdit.id)
+                      if (t) openTemplate(t)
+                      else { setTplEdit(null); patch({ cteTemplate: null }) }
+                    }}
+                    disabled={tplEdit.busy} style={btnS}>
+                    {tplEdit.id ? 'Revert' : 'Cancel'}
+                  </button>
+                  {tplEdit.id && (
+                    <button
+                      onClick={() => {
+                        const t = (templates || []).find(x => x.id === tplEdit.id)
+                        if (t) deleteTemplate(t)
+                      }}
+                      disabled={tplEdit.busy}
+                      style={{ ...btnS, marginLeft: 'auto', color: C.block, borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
+                      Delete template
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {tab === 'positions' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '56rem' }}>
           {vacancies.length > 0 && (
@@ -496,47 +892,143 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'motions' && (
+      {tab === 'motions' && maView === 'motions' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28, maxWidth: '76rem' }}>
+          <div style={{ maxWidth: '48rem' }}>
             <div>
               <div style={cap}>MOTION REGISTER</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {allMotions.map((mo, i) => {
                   const oc = motionOutcome(mo.outcome)
+                  const obj = (objectives || []).find(o => o.id === mo.objective_id)
                   return (
-                    <div key={i} style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
+                    <div key={i} onClick={() => setEditMotionId(mo.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditMotionId(mo.id) } }}
+                      role="button" tabIndex={0} title="Open this motion"
+                      style={{ background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px', cursor: 'pointer' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
                         <span style={{ fontSize: 13, color: C.text, flex: 1, minWidth: 0, lineHeight: 1.45 }}>{mo.description}</span>
                         <span style={chip(oc.fg)}>{oc.label}</span>
+                        <button onClick={e => { e.stopPropagation(); deleteMotion(mo) }}
+                          title="Delete this motion" aria-label={`Delete motion ${mo.description}`}
+                          style={delBtn}>✕</button>
                       </div>
                       <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 5 }}>{mo.from}{mo.proposed_by_member_id ? ' · moved ' + name(mo.proposed_by_member_id) : ''}</div>
+                      {/* The whole breadcrumb, theme included — an objective's
+                          own title is a sentence, and the theme is what groups
+                          it with the rest of the plan. */}
+                      {obj && (
+                        <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--pb-accent-ink)', marginTop: 3 }}>
+                          ▸ {objectiveLabel(obj)}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
                 {allMotions.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No motions recorded this season.</div>}
               </div>
+              {allMotions.length > 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
+                  CLICK A MOTION TO EDIT IT
+                </div>
+              )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Actions → List: the open committee actions, read straight down. Board
+          and Timeline are the manage screen's own views of the same rows, with
+          their filter row, so all three answer the same question three ways. */}
+      {tab === 'motions' && maView === 'actions' && actionsView === 'list' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div style={{ maxWidth: '48rem' }}>
             <div>
               <div style={cap}>OPEN COMMITTEE ACTIONS</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {openTasks.map(t => {
                   const s = taskState(t)
+                  const obj = (objectives || []).find(o => o.id === t.objective_id)
                   return (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
+                    <div key={t.id} onClick={() => setEditId(t.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditId(t.id) } }}
+                      role="button" tabIndex={0} title={`Open “${t.title}”`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px', cursor: 'pointer' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.4 }}>{t.title}</div>
                         <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 3 }}>{t.assigned_to_member_id ? name(t.assigned_to_member_id) : 'Unassigned'}{t.due_date ? ' · due ' + fmtDate(t.due_date) : ''}</div>
+                        {/* What it is for, when it serves the strategic plan. */}
+                        {obj && (
+                          <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--pb-accent-ink)', marginTop: 3 }}>
+                            ▸ {objectiveLabel(obj)}
+                          </div>
+                        )}
                       </div>
                       <span style={chip(s.fg)}>{s.label}</span>
+                      <button onClick={e => { e.stopPropagation(); deleteTask(t) }}
+                        title={`Delete "${t.title}"`} aria-label={`Delete ${t.title}`}
+                        style={delBtn}>✕</button>
                     </div>
                   )
                 })}
                 {openTasks.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No open committee actions.</div>}
               </div>
+              {openTasks.length > 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
+                  CLICK AN ACTION TO EDIT IT
+                </div>
+              )}
             </div>
           </div>
         </div>
+      )}
+
+      {tab === 'motions' && maView === 'actions' && actionsView !== 'list' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div className="max-w-5xl">
+            <Suspense fallback={<Loading />}>
+              <TasksTab members={members} view={actionsView}
+                onView={v => patch({ cteActionsView: v })} />
+            </Suspense>
+          </div>
+        </div>
+      )}
+
+      {tab === 'plans' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div className="max-w-5xl"><Suspense fallback={<Loading />}><PlanTab members={members} section={plansView} /></Suspense></div>
+        </div>
+      )}
+
+      {tab === 'documents' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div className="max-w-5xl"><Suspense fallback={<Loading />}><DocumentsTab /></Suspense></div>
+        </div>
+      )}
+
+      {tab === 'calendar' && (
+        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+          <div className="max-w-5xl"><Suspense fallback={<Loading />}><CalendarTab /></Suspense></div>
+        </div>
+      )}
+
+      {/* One action editor for the screen — the list opens it, and Board and
+          Timeline open their own copy from inside TasksTab. */}
+      {editTask && (
+        <Suspense fallback={null}>
+          <ActionEditor task={editTask} allTasks={tasks} objectives={objectives || []} members={members}
+            onClose={() => setEditId(null)} onSaved={reloadTasks} onDeleted={reloadTasks} />
+        </Suspense>
+      )}
+
+      {editMotion && (
+        <Suspense fallback={null}>
+          <MotionEditor meetingId={editMotion.meeting_id} motion={editMotion}
+            members={members} objectives={objectives || []}
+            onClose={() => setEditMotionId(null)}
+            onSaved={() => reloadMeeting(editMotion.meeting_id)}
+            onDeleted={() => reloadMeeting(editMotion.meeting_id)} />
+        </Suspense>
       )}
 
       {mk && (

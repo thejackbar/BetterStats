@@ -5,7 +5,7 @@ import { Caption, StatCard, StatReadout, AttentionRow, Button, Empty } from '../
 import { PbSpinner } from '../../../lib/presskit'
 import { useClubhouseData, clubhouseModules, money } from './data'
 
-// Today — the front door of BetterClubhouse, replacing four separate module
+// Today — the front door of BetterAdmin, replacing four separate module
 // home pages (BetterFees had none, BetterComms opened on a list, BetterMerch
 // had an overview, BetterClubManager had its own Today).
 //

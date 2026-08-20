@@ -25,11 +25,11 @@ export const MODULE_BRAND = {
   stats:   { name: 'BetterStats',   accent: '#16C784', accentRgb: '22 199 132', logo: statsLogo },
   select:  { name: 'BetterSelect',  accent: '#3B82F6', accentRgb: '59 130 246', logo: selectLogo },
   socials: { name: 'BetterSocials', accent: '#EC4899', accentRgb: '236 72 153', logo: socialsLogo },
-  // BetterClubhouse — the merged back office (was BetterAdmin, and before the
-  // merge also BetterFees / BetterComms / BetterMerch / BetterClubManager). It
-  // keeps the BetterAdmin amber and the `admin` key, which is still what the
-  // billing and entitlement registries are keyed on.
-  admin:   { name: 'BetterClubhouse', accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
+  // BetterAdmin — the merged back office (BetterFees / BetterComms /
+  // BetterMerch / BetterClubManager before the merge, and briefly branded
+  // BetterClubhouse after it). It keeps the amber and the `admin` key, which is
+  // still what the billing and entitlement registries are keyed on.
+  admin:   { name: 'BetterAdmin', accent: '#F59E0B', accentRgb: '245 158 11', logo: adminLogo },
   iq:      { name: 'BetterIQ',      accent: '#A855F7', accentRgb: '168 85 247', logo: iqLogo },
   fantasy: { name: 'BetterFantasyCricket', accent: '#06B6D4', accentRgb: '6 182 212', logo: fantasyLogo },
   // BetterScout — a separate tenant type (a Scout Org, not a club), so its
@@ -42,7 +42,7 @@ export const MODULE_BRAND = {
 // dashboard-tile keys use the umbrella group names). Map them all onto one set.
 const ALIAS = {
   betterstats: 'stats', core: 'stats',
-  // BetterClubManager was folded into BetterClubhouse — its indigo is retired,
+  // BetterClubManager was folded into BetterAdmin — its indigo is retired,
   // so anything still asking for it gets the merged module's amber.
   betterclubmanager: 'admin', clubmanager: 'admin', club: 'admin',
   betterselect: 'select',

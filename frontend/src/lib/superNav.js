@@ -76,7 +76,7 @@ export const SUPER_SECTIONS = [
     items: [
       { to: '/admin/super/clubs', label: 'All Clubs', blurb: 'Onboard clubs, edit plans and subscriptions, sync or remove them.' },
       { to: '/admin/super/marketing', label: 'Club Directory', blurb: 'Prospect clubs, outreach lists and Twenty CRM sync.' },
-      { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterClubhouse; switch to BetterCricket internal to see the directory fields.' },
+      { to: '/admin/comms/segments', label: 'Directory Segments', blurb: 'Outreach segments built from prospect activity. Opens in BetterAdmin; switch to BetterCricket internal to see the directory fields.' },
       { to: '/admin/super/crm/engagement-params', label: 'Engagement Score Parameters', blurb: 'What the CRM treats as a warm club, and which clubs reach the pipeline at all.' },
       { to: '/admin/super/crm/sales-management', label: 'Sales Management', blurb: 'Workspace, lists, follow-ups, performance, targets and automation.' },
       { to: '/admin/super/crm', label: 'Sales Pipeline', blurb: 'Trials, demos and deal stages.', exact: true },

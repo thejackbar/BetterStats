@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import { PersonSearch } from './pickers'
+import { objectiveTiers, objectiveLabel } from './planLabels'
 
 // The editing surface for what migration 217 added: an action's budget, spend,
 // progress, plan and dependencies; a carried motion recorded as a resolution
@@ -193,11 +194,74 @@ export function AttachedDocuments({ entityType, entityId }) {
   )
 }
 
-/* ── The planning side of one action ────────────────────────────────────── */
+/* ── One action, opened for editing ─────────────────────────────────────── */
 
-export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged }) {
+// The vocabulary an action is filed under, in ONE place. The board, the list,
+// the timeline and this editor all read these, so a status added here shows up
+// everywhere rather than in whichever screen was edited last.
+export const ACTION_CATEGORIES = ['operational', 'maintenance', 'compliance', 'finance', 'other']
+export const ACTION_STATUSES = ['todo', 'in_progress', 'done', 'blocked']
+export const ACTION_STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done', blocked: 'Blocked' }
+const catLabel = s => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+
+// What an action is FOR, said in one line rather than left to a dropdown.
+//
+// An objective is three tiers deep (plan › theme › objective) and the old
+// inline panel showed only the picker, which meant the linkage — the single
+// most useful thing about an action serving the strategic plan — was readable
+// only by opening the dropdown and reading which row happened to be selected.
+// Here it is a breadcrumb, with what the club committed to underneath it.
+function ObjectiveLink({ objective, noun = 'ACTION' }) {
+  if (!objective) {
+    return (
+      <div className="pb-card p-3">
+        <div className={`${cap} mb-1`}>STRATEGIC PLAN</div>
+        <div className="text-[12.5px] text-pb-faint">
+          Not linked yet. Point it at an objective below and this {noun.toLowerCase()} starts counting towards the plan.
+        </div>
+      </div>
+    )
+  }
+  const tiers = objectiveTiers(objective)
+  const meta = [
+    objective.owner_position_name ? `Owned by the ${objective.owner_position_name}` : null,
+    objective.due_date ? `Due ${objective.due_date}` : null,
+    objective.budget != null ? `${money(objective.budget)} allocated` : null,
+  ].filter(Boolean)
+  return (
+    <div className="pb-card p-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>
+      <div className={`${cap} mb-2`}>THIS {noun} SERVES</div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {tiers.map(({ key: k, value: v }, i) => (
+          <span key={k} className="flex items-center gap-2">
+            {i > 0 && <span className="text-pb-faintest text-[13px]">›</span>}
+            <span className="flex flex-col">
+              <span className={cap}>{k}</span>
+              <span className={`text-[13px] ${i === tiers.length - 1 ? 'text-pb-text font-semibold' : 'text-pb-dim'}`}>{v}</span>
+            </span>
+          </span>
+        ))}
+      </div>
+      {meta.length > 0 && (
+        <div className="font-mono text-[10px] text-pb-faintest mt-2">{meta.join(' · ')}</div>
+      )}
+    </div>
+  )
+}
+
+// The whole of one action, in a dialog with room to lay it out.
+//
+// It replaces the panel that used to unfold inside a board card: a two-column
+// grid of dates and money in a 200px-wide column, which is why it read as a
+// jumble. Opened from the list, the board and the timeline alike, so there is
+// one place an action is edited however you reached it.
+export function ActionEditor({ task, allTasks, objectives, members, onClose, onSaved, onDeleted }) {
   const toast = useToast()
   const [form, setForm] = useState({
+    title: task.title || '',
+    description: task.description || '',
+    category: task.category || 'operational',
+    status: task.status || 'todo',
     objective_id: task.objective_id || '',
     budget_estimate: task.budget_estimate ?? '',
     actual_expenditure: task.actual_expenditure ?? '',
@@ -210,16 +274,24 @@ export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged
   const [deps, setDeps] = useState(task.depends_on || [])
   const [busy, setBusy] = useState(false)
 
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const num = v => (v === '' || v === null ? null : Number(v))
 
   async function save() {
+    if (!form.title.trim()) { toast.error('An action needs a title'); return }
     setBusy(true)
     try {
       await api.committeeUpdateTask(task.id, {
+        title: form.title.trim(),
+        description: form.description || null,
+        category: form.category,
+        status: form.status,
         objective_id: form.objective_id || null,
         budget_estimate: num(form.budget_estimate),
         actual_expenditure: num(form.actual_expenditure),
-        percent_complete: Number(form.percent_complete) || 0,
+        // Marking it done means done, so the progress bar stops disagreeing
+        // with the status pill above it.
+        percent_complete: form.status === 'done' ? 100 : (Number(form.percent_complete) || 0),
         start_date: form.start_date || null,
         due_date: form.due_date || null,
         assigned_to_member_id: form.assigned_to_member_id || null,
@@ -227,116 +299,334 @@ export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged
       })
       await api.committeeSetTaskDependencies(task.id, deps)
       toast.success('Action updated')
-      onChanged()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+      onSaved?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
   }
 
-  async function close() {
+  async function remove() {
+    // Deleting takes the action's notes and attachments with it, so it says so
+    // rather than asking "are you sure?" about something unnamed.
+    if (!window.confirm(`Delete "${task.title}"?\n\nIts notes and attached documents go with it. This can't be undone.`)) return
     setBusy(true)
     try {
-      // Closing sets percent_complete to 100 server-side — an action that is
-      // done is done, not 60% done.
-      await api.committeeUpdateTask(task.id, { status: 'done' })
-      toast.success('Action closed')
-      onChanged()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+      await api.committeeDeleteTask(task.id)
+      toast.success('Action deleted')
+      onDeleted?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
   }
 
+  const objective = (objectives || []).find(o => o.id === form.objective_id) || null
   const over = form.budget_estimate !== '' && Number(form.actual_expenditure || 0) > Number(form.budget_estimate)
   const candidates = (allTasks || []).filter(t => t.id !== task.id)
   const blockers = candidates.filter(t => deps.includes(t.id) && t.status !== 'done')
 
   return (
-    <div className="pb-card p-4 space-y-3">
-      <div className={cap}>PLAN</div>
+    <div onClick={() => { if (!busy) onClose?.() }}
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div onClick={e => e.stopPropagation()}
+        className="pb-card w-full max-w-3xl p-5 space-y-4">
 
-      <div className="grid grid-cols-2 gap-2">
-        <ObjectiveSelect objectives={objectives} value={form.objective_id}
-          onChange={v => setForm(f => ({ ...f, objective_id: v || '' }))} />
-        <label className="block">
-          <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
-          <select className={inp} value={form.assigned_to_member_id}
-            onChange={e => setForm(f => ({ ...f, assigned_to_member_id: e.target.value }))}>
-            <option value="">— unassigned —</option>
-            {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
-          </select>
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>STARTS</span>
-          <input type="date" className={inp} value={form.start_date}
-            onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>DUE</span>
-          <input type="date" className={inp} value={form.due_date}
-            onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>BUDGET</span>
-          <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
-            onChange={e => setForm(f => ({ ...f, budget_estimate: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>SPENT SO FAR</span>
-          <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.actual_expenditure}
-            onChange={e => setForm(f => ({ ...f, actual_expenditure: e.target.value }))} />
-        </label>
-      </div>
-
-      {over && (
-        <div className="font-mono text-[10px] text-pb-amber">
-          Over budget by {money(Number(form.actual_expenditure) - Number(form.budget_estimate))}.
+        <div className="flex items-start gap-3">
+          <label className="flex-1 min-w-0 block">
+            <span className={`${cap} block mb-1`}>ACTION</span>
+            <input className={`${inp} !text-[15px] !py-2`} value={form.title}
+              onChange={e => set('title', e.target.value)} placeholder="What has to happen" />
+          </label>
+          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
         </div>
-      )}
 
-      <label className="block">
-        <span className={`${cap} block mb-1`}>PROGRESS · {form.percent_complete}%</span>
-        <input type="range" min="0" max="100" step="5" className="w-full accent-pb-accent"
-          value={form.percent_complete}
-          onChange={e => setForm(f => ({ ...f, percent_complete: e.target.value }))} />
-      </label>
-
-      <div>
-        <div className={`${cap} mb-1`}>WAITS ON</div>
-        {candidates.length === 0 ? (
-          <div className="font-mono text-[10px] text-pb-faintest">No other actions to depend on yet.</div>
-        ) : (
-          <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
-            {candidates.map(t => (
-              <label key={t.id} className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer">
-                <input type="checkbox" className="accent-pb-accent" checked={deps.includes(t.id)}
-                  onChange={e => setDeps(d => e.target.checked ? [...d, t.id] : d.filter(x => x !== t.id))} />
-                <span className="truncate">{t.title}</span>
-                {t.status === 'done' && <span className="font-mono text-[8px] text-pb-positive">DONE</span>}
-              </label>
+        <div>
+          <div className={`${cap} mb-1`}>STATUS</div>
+          <div className="flex flex-wrap gap-1">
+            {ACTION_STATUSES.map(s => (
+              <button key={s} onClick={() => set('status', s)}
+                className={`px-3 py-1.5 rounded text-[12.5px] border ${form.status === s ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                style={form.status === s
+                  ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' }
+                  : undefined}>
+                {ACTION_STATUS_LABELS[s]}
+              </button>
             ))}
           </div>
-        )}
-        {blockers.length > 0 && (
-          <div className="font-mono text-[10px] text-pb-amber mt-1">
-            Blocked — {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
+        </div>
+
+        <ObjectiveLink objective={objective} />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ObjectiveSelect objectives={objectives} value={form.objective_id}
+            onChange={v => set('objective_id', v || '')} />
+          <label className="block">
+            <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
+            <select className={inp} value={form.assigned_to_member_id}
+              onChange={e => set('assigned_to_member_id', e.target.value)}>
+              <option value="">— unassigned —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>CATEGORY</span>
+            <select className={inp} value={form.category} onChange={e => set('category', e.target.value)}>
+              {ACTION_CATEGORIES.map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={`${cap} block mb-1`}>STARTS</span>
+              <input type="date" className={inp} value={form.start_date}
+                onChange={e => set('start_date', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className={`${cap} block mb-1`}>DUE</span>
+              <input type="date" className={inp} value={form.due_date}
+                onChange={e => set('due_date', e.target.value)} />
+            </label>
+          </div>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>BUDGET</span>
+            <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
+              onChange={e => set('budget_estimate', e.target.value)} />
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>SPENT SO FAR</span>
+            <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.actual_expenditure}
+              onChange={e => set('actual_expenditure', e.target.value)} />
+          </label>
+        </div>
+
+        {over && (
+          <div className="font-mono text-[10px] text-pb-amber">
+            Over budget by {money(Number(form.actual_expenditure) - Number(form.budget_estimate))}.
           </div>
         )}
-      </div>
 
-      <label className="block">
-        <span className={`${cap} block mb-1`}>OUTCOME</span>
-        <textarea rows={2} className={inp} placeholder="What actually happened, once it's done."
-          value={form.outcome_notes} onChange={e => setForm(f => ({ ...f, outcome_notes: e.target.value }))} />
-      </label>
+        <label className="block">
+          <span className={`${cap} block mb-1`}>PROGRESS · {form.status === 'done' ? 100 : form.percent_complete}%</span>
+          <input type="range" min="0" max="100" step="5" className="w-full accent-pb-accent"
+            disabled={form.status === 'done'}
+            value={form.status === 'done' ? 100 : form.percent_complete}
+            onChange={e => set('percent_complete', e.target.value)} />
+        </label>
 
-      <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
-          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
-          {busy ? 'SAVING…' : 'SAVE'}
-        </button>
-        {task.status !== 'done' && (
-          <button onClick={close} disabled={busy}
-            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
-            Close as complete
+        <label className="block">
+          <span className={`${cap} block mb-1`}>DETAIL</span>
+          <textarea rows={2} className={inp} placeholder="Anything the committee needs to know before it starts."
+            value={form.description} onChange={e => set('description', e.target.value)} />
+        </label>
+
+        <div>
+          <div className={`${cap} mb-1`}>WAITS ON</div>
+          {candidates.length === 0 ? (
+            <div className="font-mono text-[10px] text-pb-faintest">No other actions to depend on yet.</div>
+          ) : (
+            <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
+              {candidates.map(t => (
+                <label key={t.id} className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer">
+                  <input type="checkbox" className="accent-pb-accent" checked={deps.includes(t.id)}
+                    onChange={e => setDeps(d => e.target.checked ? [...d, t.id] : d.filter(x => x !== t.id))} />
+                  <span className="truncate">{t.title}</span>
+                  {t.status === 'done' && <span className="font-mono text-[8px] text-pb-positive">DONE</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          {blockers.length > 0 && (
+            <div className="font-mono text-[10px] text-pb-amber mt-1">
+              Blocked — {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
+            </div>
+          )}
+        </div>
+
+        <label className="block">
+          <span className={`${cap} block mb-1`}>OUTCOME</span>
+          <textarea rows={2} className={inp} placeholder="What actually happened, once it's done."
+            value={form.outcome_notes} onChange={e => set('outcome_notes', e.target.value)} />
+        </label>
+
+        <div className="pb-card p-3"><NoteThread entityType="task" entityId={task.id} /></div>
+        <div className="pb-card p-3"><AttachedDocuments entityType="task" entityId={task.id} /></div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={save} disabled={busy || !form.title.trim()}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            {busy ? 'SAVING…' : 'SAVE'}
           </button>
-        )}
+          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+          <button onClick={remove} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
+            style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
+            Delete action
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── One motion, opened for editing ─────────────────────────────────────── */
+
+// What a motion can end as. The meeting room, the manage screen and this editor
+// all read this list, so the vocabulary has one home.
+export const MOTION_OUTCOMES = ['pending', 'carried', 'lost', 'withdrawn']
+const outcomeLabel = s => s.charAt(0).toUpperCase() + s.slice(1)
+
+// The motion register is a read of every motion the club has passed, and until
+// now that was all it was — a typo in a resolution could only be corrected by
+// finding the meeting it was moved at. A motion belongs to its meeting, so the
+// meeting's id rides along with the row and every write goes to that meeting's
+// own endpoint.
+export function MotionEditor({ meetingId, motion, members, objectives, onClose, onSaved, onDeleted }) {
+  const toast = useToast()
+  const [form, setForm] = useState({
+    description: motion.description || '',
+    outcome: motion.outcome || 'pending',
+    votes_for: motion.votes_for ?? '',
+    votes_against: motion.votes_against ?? '',
+    votes_abstain: motion.votes_abstain ?? '',
+    proposed_by_member_id: motion.proposed_by_member_id || '',
+    seconded_by_member_id: motion.seconded_by_member_id || '',
+    objective_id: motion.objective_id || '',
+    notes: motion.notes || '',
+  })
+  const [busy, setBusy] = useState(false)
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const num = v => (v === '' || v === null ? null : Number(v))
+
+  async function save() {
+    if (!form.description.trim()) { toast.error('A motion needs its wording'); return }
+    setBusy(true)
+    try {
+      await api.committeeUpdateMotion(meetingId, motion.id, {
+        description: form.description.trim(),
+        outcome: form.outcome,
+        votes_for: num(form.votes_for),
+        votes_against: num(form.votes_against),
+        votes_abstain: num(form.votes_abstain),
+        proposed_by_member_id: form.proposed_by_member_id || null,
+        seconded_by_member_id: form.seconded_by_member_id || null,
+        objective_id: form.objective_id || null,
+        notes: form.notes || null,
+      })
+      toast.success('Motion updated')
+      onSaved?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
+  }
+
+  async function remove() {
+    // A motion is the record of a decision the committee took, so this names
+    // what it is rather than asking about an unnamed row.
+    if (!window.confirm(`Delete this motion?\n\n“${motion.description}”\n\nIts votes and notes go with it. This can't be undone.`)) return
+    setBusy(true)
+    try {
+      await api.committeeDeleteMotion(meetingId, motion.id)
+      toast.success('Motion deleted')
+      onDeleted?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
+  }
+
+  const objective = (objectives || []).find(o => o.id === form.objective_id) || null
+
+  return (
+    <div onClick={() => { if (!busy) onClose?.() }}
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div onClick={e => e.stopPropagation()} className="pb-card w-full max-w-3xl p-5 space-y-4">
+
+        <div className="flex items-start gap-3">
+          <label className="flex-1 min-w-0 block">
+            <span className={`${cap} block mb-1`}>MOTION</span>
+            <textarea rows={2} className={`${inp} !text-[14px]`} value={form.description}
+              onChange={e => set('description', e.target.value)}
+              placeholder="That the committee…" />
+          </label>
+          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+        </div>
+
+        <div>
+          <div className={`${cap} mb-1`}>OUTCOME</div>
+          <div className="flex flex-wrap gap-1">
+            {MOTION_OUTCOMES.map(s => (
+              <button key={s} onClick={() => set('outcome', s)}
+                className={`px-3 py-1.5 rounded text-[12.5px] border ${form.outcome === s ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                style={form.outcome === s
+                  ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' }
+                  : undefined}>
+                {outcomeLabel(s)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ObjectiveLink objective={objective} noun="MOTION" />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ObjectiveSelect objectives={objectives} value={form.objective_id}
+            onChange={v => set('objective_id', v || '')} />
+          <div />
+          <label className="block">
+            <span className={`${cap} block mb-1`}>MOVED BY</span>
+            <select className={inp} value={form.proposed_by_member_id}
+              onChange={e => set('proposed_by_member_id', e.target.value)}>
+              <option value="">— nobody recorded —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>SECONDED BY</span>
+            <select className={inp} value={form.seconded_by_member_id}
+              onChange={e => set('seconded_by_member_id', e.target.value)}>
+              <option value="">— nobody recorded —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          {[['votes_for', 'FOR'], ['votes_against', 'AGAINST'], ['votes_abstain', 'ABSTAIN']].map(([k, l]) => (
+            <label key={k} className="block">
+              <span className={`${cap} block mb-1`}>{l}</span>
+              <input type="number" min="0" className={inp} value={form[k]}
+                onChange={e => set(k, e.target.value)} placeholder="—" />
+            </label>
+          ))}
+        </div>
+
+        <label className="block">
+          <span className={`${cap} block mb-1`}>NOTE FOR THE MINUTES</span>
+          <textarea rows={2} className={inp} placeholder="Anything the minutes should carry alongside it."
+            value={form.notes} onChange={e => set('notes', e.target.value)} />
+        </label>
+
+        {/* The committee's own thread against this motion — a different thing
+            from the line above, which goes into the minutes. */}
+        <div className="pb-card p-3"><NoteThread entityType="motion" entityId={motion.id} /></div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={save} disabled={busy || !form.description.trim()}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            {busy ? 'SAVING…' : 'SAVE'}
+          </button>
+          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+          <button onClick={remove} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
+            style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
+            Delete motion
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -584,7 +874,7 @@ export function useObjectives() {
   return objectives
 }
 
-export const objectiveLabel = o => (o.plan_name ? `${o.plan_name} › ${o.title}` : o.title)
+export { objectiveLabel, objectiveTiers }
 
 export function ObjectiveSelect({ objectives, value, onChange, className, label = 'OBJECTIVE' }) {
   const rows = objectives || []
@@ -1084,7 +1374,91 @@ function PillarBar({ pillars, active, onPick, onChanged }) {
   )
 }
 
-export function PlanTab({ members }) {
+
+/* ── Themes, on their own screen ────────────────────────────────────────── */
+
+// The theme chips above the plans are a FILTER that happens to be editable.
+// This is the same rows read as a catalogue: what the club groups its work
+// under, how much work sits under each, and the rename/delete that goes with
+// owning a list. Deleting a theme never takes its objectives with it — they
+// stay, they just stop being grouped (the rule migration 232 set).
+function ThemesSection({ pillars, plans, unassigned, onChanged }) {
+  const toast = useToast()
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const all = [...plans.flatMap(p => p.objective_list || []), ...(unassigned.objective_list || [])]
+  const count = id => all.filter(o => o.pillar_id === id).length
+  const loose = all.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id)).length
+
+  async function add() {
+    if (!draft.trim()) return
+    setBusy(true)
+    try { await api.committeeCreatePillar({ name: draft.trim() }); setDraft(''); onChanged() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function rename(pl) {
+    const name = prompt('Rename this theme', pl.name)
+    if (!name || !name.trim() || name === pl.name) return
+    try { await api.committeeUpdatePillar(pl.id, { name: name.trim() }); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function remove(pl) {
+    const n = count(pl.id)
+    if (!confirm(`Delete "${pl.name}"?${n ? ` Its ${n} objective${n === 1 ? '' : 's'} stay, they just stop being grouped under it.` : ''}`)) return
+    try { await api.committeeDeletePillar(pl.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+
+  return (
+    <div>
+      <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
+        The headings the club groups its objectives under — participation, finances, volunteers,
+        facilities, or whatever your own plan is built around. A theme is a grouping, not another
+        level: plan, objective, action stays three deep.
+      </p>
+
+      <div className="flex gap-2 mb-4 max-w-md">
+        <input className={inp} placeholder="New theme, e.g. Facilities &amp; community"
+          value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }} />
+        <button onClick={add} disabled={busy || !draft.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40 whitespace-nowrap"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
+      </div>
+
+      {pillars.length === 0 ? (
+        <div className="pb-card p-6 text-center text-pb-dim text-[13px]">
+          No themes yet. Add one above and your objectives can be grouped under it.
+        </div>
+      ) : (
+        <div className="space-y-2 max-w-2xl">
+          {pillars.map(pl => (
+            <div key={pl.id} className="pb-card p-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-pb-text font-semibold text-[15px]">{pl.name}</div>
+                <div className={`${cap} mt-0.5`}>
+                  {count(pl.id)} {count(pl.id) === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => rename(pl)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Rename</button>
+                <button onClick={() => remove(pl)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+              </div>
+            </div>
+          ))}
+          {loose > 0 && (
+            <div className="font-mono text-[10px] text-pb-faintest pt-1">
+              {loose} objective{loose === 1 ? '' : 's'} under no theme.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+export function PlanTab({ members, section }) {
   const toast = useToast()
   const [report, setReport] = useState(null)
   const [positions, setPositions] = useState([])
@@ -1156,6 +1530,58 @@ export function PlanTab({ members }) {
     const loose = shown.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
     if (loose.length) groups.push({ id: '', name: pillars.length ? 'No theme' : null, rows: loose })
     return groups
+  }
+
+  // `section` splits this one screen into the three things it holds, for a
+  // caller that draws its own buttons (BetterAdmin → Committee → Plans).
+  // Passing nothing keeps the whole tab as it was, which is what the manage
+  // screen still renders.
+  if (section === 'themes') {
+    return <ThemesSection pillars={pillars} plans={plans} unassigned={unassigned} onChanged={load} />
+  }
+
+  if (section === 'objectives') {
+    // Every objective the club holds, in one list rather than one plan at a
+    // time — the way "what are we actually committed to" gets asked. Each still
+    // says which plan it belongs to, so flattening loses nothing.
+    const rows = [
+      ...plans.flatMap(pl => (pl.objective_list || []).map(o => ({ ...o, plan_name: o.plan_name || pl.name }))),
+      ...(unassigned.objective_list || []),
+    ]
+    return (
+      <div>
+        <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
+          Every objective across every plan. The actions and motions serving each one are folded
+          away underneath it, and the figures add up from the register the committee already keeps.
+        </p>
+        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} onChanged={load} />
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {!addingObjectiveTo && addingObjectiveTo !== '' && (
+            <button onClick={() => setAddingObjectiveTo('')}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold ml-auto"
+              style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
+          )}
+        </div>
+        <div className="space-y-2">
+          {addingObjectiveTo === '' && (
+            <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+              planId="" pillarId={pillarFilter} members={members}
+              onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
+          )}
+          {byTheme(rows).map(g => (
+            <div key={g.id || '__none'} className="space-y-2">
+              {g.name && <div className={`${cap} pt-1`}>{g.name.toUpperCase()}</div>}
+              {g.rows.map(o => <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />)}
+            </div>
+          ))}
+          {rows.filter(inTheme).length === 0 && addingObjectiveTo !== '' && (
+            <div className="pb-card p-6 text-center text-pb-dim text-[13px]">
+              {pillarFilter ? 'No objectives under that theme.' : 'No objectives written down yet.'}
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -1355,7 +1781,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
         const budget = Number(a.budget_estimate || 0)
         const spent = Number(a.actual_expenditure || 0)
         rows.push({
-          kind: 'action', id: a.id, title: a.title, plan: p.name, objective: o.title,
+          kind: 'action', id: a.id, title: a.title, plan: p.name, theme: o.pillar_name, objective: o.title,
           percent: a.percent_complete || 0, budget, spent,
           percentSpent: budget ? Math.round(spent / budget * 100) : null,
           over: budget > 0 && spent > budget,
@@ -1366,7 +1792,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
       }
       for (const m of (o.motion_list || [])) {
         rows.push({
-          kind: 'motion', id: m.id, title: m.description, plan: p.name, objective: o.title,
+          kind: 'motion', id: m.id, title: m.description, plan: p.name, theme: o.pillar_name, objective: o.title,
           percent: null, budget: 0, spent: 0, percentSpent: null, over: false,
           // A motion is a decision, not work with a deadline of its own. It
           // reads as late when the objective it serves is, which is the only
@@ -1427,7 +1853,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
                       </span>
                     )}
                   </div>
-                  <div className={`${cap} mt-1`}>{r.plan.toUpperCase()} › {r.objective.toUpperCase()}</div>
+                  <div className={`${cap} mt-1`}>{[r.plan, r.theme, r.objective].filter(Boolean).map(x => x.toUpperCase()).join(' › ')}</div>
                   <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
                     {r.owner && <span>{r.owner}</span>}
                     {r.due && <span>due {r.due}</span>}

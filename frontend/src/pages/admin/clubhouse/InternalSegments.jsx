@@ -17,7 +17,7 @@ import { useSegments, RuleBuilder, SegmentListPane, SegmentTitleRow, CountBar, r
 //
 // It used to be a separate page outside the module entirely
 // (/admin/super/directory-audiences, on the plain admin chrome), so choosing
-// Segments in internal mode threw you out of BetterClubhouse and into a screen
+// Segments in internal mode threw you out of BetterAdmin and into a screen
 // that looked nothing like the one beside it. It is a Clubhouse screen now, on
 // the same shell, the same builder and the same endpoints as the club mount —
 // the server already resolves a segment against whichever organisation you are

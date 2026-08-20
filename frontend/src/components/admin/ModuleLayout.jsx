@@ -10,13 +10,13 @@ import ModuleLockup from '../ModuleLockup'
 import ModuleSwitcher from './ModuleSwitcher'
 import BookmarkButton from './BookmarkButton'
 
-// Generic chrome for a Better module surface (BetterClubhouse, BetterSocials, …)
+// Generic chrome for a Better module surface (BetterAdmin, BetterSocials, …)
 // — a focused sidebar with just that module's tools, separate from the main
 // admin "noise". Parameterised by `moduleName` (the suffix after "Better") and a
 // `nav` array. BetterSelect predates this and keeps its own copy
 // (BetterSelectLayout) so it isn't disturbed.
 //
-// Shape follows the BetterClubhouse handoff: a 232px sidebar carrying the club
+// Shape follows the BetterAdmin handoff: a 232px sidebar carrying the club
 // identity, the module lockup, grouped nav and — in its footer — the platform
 // chrome (module switcher, account, bookmarks). Moving the chrome down there is
 // the load-bearing decision: it leaves the screen header free to carry the
@@ -89,7 +89,7 @@ export default function ModuleLayout({
   bare = false, hideHeader = false, sidebarFooterTop = null,
 }) {
   // Each module surface wears its own brand colour (BetterSocials magenta,
-  // BetterClubhouse amber). moduleName ("Socials" / "Clubhouse") resolves to the
+  // BetterAdmin amber). moduleName ("Socials" / "Admin") resolves to the
   // right brand via the shared registry.
   const brand = moduleBrand((moduleName || '').toLowerCase())
   const { user, logout, hasCapability } = useAuth()
@@ -192,7 +192,7 @@ export default function ModuleLayout({
   // The platform chrome the per-module sidebars used to leave to the header.
   const renderSidebarFooter = () => (
     <div className="border-t pb-hairline px-3 py-[11px] shrink-0">
-      {/* A module may put its own control above the switcher — BetterClubhouse
+      {/* A module may put its own control above the switcher — BetterAdmin
           uses it for the club ⇄ BetterCricket-internal switch. */}
       {sidebarFooterTop}
       <div className="font-mono text-[9px] tracking-[0.12em] uppercase text-pb-faintest mb-1.5">Switch module</div>

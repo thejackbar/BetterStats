@@ -1,5 +1,102 @@
 # BetterStats — Claude Session Notes
 
+## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
+
+Asked for directly: put the module's name back, and lay the Committee screen out
+as sections with their own buttons rather than three tabs and a manage page.
+
+- **The rename is DISPLAY ONLY, and that is the whole point.** `admin` is still
+  the module key, `/admin/clubhouse/*` is still the URL, and
+  `BetterClubhouseLayout.jsx` is still the component. Entitlement, billing,
+  `org_module_subscriptions` and every stored row are untouched — the same call
+  the v9.3.0 merge made in the other direction. Only strings a person reads
+  changed: `MODULE_BRAND.admin.name`, `MODULE_GROUPS.admin.name`,
+  `MODULE_TOGGLES`, `BILLABLE_MODULE_NAMES`, the Comms segment field vocabulary,
+  and `ModuleLayout`'s `moduleName` (now "Admin"; `clubhouse` stays in
+  `moduleBrand`'s ALIAS map so nothing that still asks for it breaks). The
+  marketing site and `billing_pricing.py` already said BetterAdmin, so the app
+  has stopped disagreeing with the invoice.
+- **Committee's buttons are Meetings (default), Motions & Actions, Plans,
+  Documents, Calendar, Positions**, with a second row where a section holds more
+  than one thing (Meetings → All Meetings | Meeting Templates) and a third under
+  Actions. Every key lives in `st`
+  (`cteMeetingsView` / `cteMaView` / `cteActionsView` / `ctePlansView`), so a
+  label can be renamed without moving anyone's view. **Positions is kept even
+  though the brief's list did not name it** — dropping a working screen is not
+  something a rename asks for.
+- **Documents, Calendar, Plans and the Actions board/timeline are the MANAGE
+  screen's own components, mounted here, not copied.** `TasksTab`,
+  `DocumentsTab` and `CalendarTab` are exported from `AdminCommittee.jsx` and
+  `PlanTab` from `governance.jsx`; two versions of "the club's documents" is how
+  the two start disagreeing about what the club holds. They are `lazy()` inside
+  this screen, because most visits only ever look at Meetings — glancing at the
+  committee should not pull the editors in.
+- **`TasksTab` takes an optional `view`/`onView` and hides its own toggle when
+  they are given.** Uncontrolled it is byte-for-byte the manage screen's; passing
+  `view` is what lets the Committee screen's own List / Board / Timeline row
+  drive it rather than drawing two toggles that disagree. `PlanTab` takes
+  `section` the same way — pass nothing and the whole tab renders as it did.
+- **A Meeting Template CAN be deleted while meetings are built from it, and that
+  is not a gap.** `_apply_agenda_template` COPIES a template's items into real
+  `meeting_agenda_items` rows at the moment the meeting is created, and
+  `committee_meetings.agenda_template_id` is `ON DELETE SET NULL`. So a past
+  meeting keeps its agenda word for word; it simply stops naming where it came
+  from. The confirm dialog says so rather than warning about a loss that cannot
+  happen. Editing a template is the same story — it sets what the NEXT meeting
+  starts from and never rewrites one already held.
+- **Deleting a meeting is the destructive one** and its confirm names what goes
+  with it (agenda, motions, attendance, minutes). A failed write is reported in
+  a line under the header; this screen has no toast.
+- **A committee season is the club's DIARY year, not a calendar one.** The
+  Season dropdown on All Meetings resolves each meeting through
+  `organisations.diary_start_month` (read off `adminGetSettings`, which any
+  signed-in admin may call — a committee manager does not hold
+  `MANAGE_SETTINGS`), so July 2026 to June 2027 is one season at a club
+  starting in July, and a club starting in January gets a one-year label
+  rather than "2026/2027". Options are the seasons the club actually met in
+  plus the one running now, so a club that has just rolled over can find this
+  season and see it is empty. `sel` reads the FILTERED list, or filtering
+  could leave a meeting open that the rail no longer holds.
+- **`ActionEditor` (governance.jsx) is the one place an action is edited**, and
+  it replaced `ActionPlanPanel`, which unfolded a full two-column editor inside
+  a 200px board column — reported as a meaningless block, and it was. It opens
+  from the List, the Board and the Timeline alike. The plan linkage is a
+  written-out breadcrumb (PLAN › THEME › OBJECTIVE plus the objective's owner,
+  due date and allocation) rather than a dropdown you had to open to find out
+  what the action was for. `ACTION_CATEGORIES` / `ACTION_STATUSES` /
+  `ACTION_STATUS_LABELS` are exported from there and imported by
+  AdminCommittee, so the vocabulary has one home.
+- **`MotionEditor` is the motion's counterpart**, opened from the register.
+  A motion belongs to a MEETING, so every row in the register carries the
+  `meeting_id` it was moved at and each write goes to that meeting's own
+  endpoint — the register is assembled from several meetings and has no id of
+  its own to write against.
+- **`planLabels.js` is the one place an objective is NAMED from elsewhere**,
+  and it names all three tiers: PLAN › THEME › OBJECTIVE. Skipping the theme
+  was the reported bug, and it matters because an objective's own title is
+  routinely a whole sentence ("Appoint accredited, high-quality coaches for
+  all senior and junior squads.") — the theme is what groups it. `objectiveLabel`
+  and `objectiveTiers` are the same data two ways, so the picker's one-line
+  label and `ObjectiveLink`'s written-out breadcrumb cannot disagree. It is its
+  OWN tiny module rather than a corner of governance.jsx, because the screens
+  that only name an objective must not pull that whole bundle into first paint.
+- **The Board's lanes are the drop targets, not the cards.** Dropping into the
+  empty space under the last card has to work, or an empty lane could never
+  receive anything. The move is applied locally first and rolled back on a
+  failed write, so a card lands where it was dropped instead of snapping back
+  for the length of the request. Testing it needs `DragEvent`s dispatched with
+  `dragstart` and `drop` in SEPARATE `evaluate` calls — the trap the roster
+  note above describes.
+- **Driven in Chromium** against the real screens with the API stubbed at the
+  network layer (39 checks: every button row and the ones that correctly do not
+  render, the meeting delete reaching the API and leaving the list, the template
+  PATCH and POST payloads on the wire, a template delete, all three Actions
+  views, Plans / Themes / Objectives, Documents, Calendar, no "BetterClubhouse"
+  anywhere on screen, no page errors, no overflow at 390px) plus a second pass
+  asserting the MANAGE screen's own Board/Timeline and By plan/All work toggles
+  are unchanged.
+
+
 ## A club writes its association's rules down once (migration 271, v9.39.0, Aug 2026)
 
 Asked for so a selector isn't holding the handbook in their head on a Friday

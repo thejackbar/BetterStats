@@ -13,7 +13,7 @@ const InternalSegments = lazy(() => import('./InternalSegments'))
 // has done. Same shell, same endpoints, same buttons; different vocabulary.
 //
 // This used to send internal mode to /admin/super/directory-audiences instead,
-// which took you out of BetterClubhouse mid-task and into the plain admin
+// which took you out of BetterAdmin mid-task and into the plain admin
 // chrome. The screen came into the module rather than the menu item leaving it.
 //
 // The pick is made HERE, once, and never inside either screen. That is the

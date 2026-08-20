@@ -1,4 +1,4 @@
-// The one admin UI language — the primitives every BetterClubhouse screen is
+// The one admin UI language — the primitives every BetterAdmin screen is
 // built from, and the replacement for the four local copies that used to live
 // in `bettermerch/ui.jsx`, `betterselect/ui.jsx`, `clubmanager/redesign/ui.jsx`
 // and inline in the Fees and Comms pages.
@@ -432,7 +432,7 @@ export function Cell({ children, num = false, head = false, first = false, last 
 
 /* ── Overlays ────────────────────────────────────────────────────────── */
 
-// The one dialog in BetterClubhouse, lifted from the Directory's "+ Add person"
+// The one dialog in BetterAdmin, lifted from the Directory's "+ Add person"
 // so every modal in the module reads the same: a 0.55 scrim, a surface card on
 // a 12px radius with the stronger hairline, a 17px title with an optional
 // sentence under it, and the actions right-aligned in a footer that ends in the

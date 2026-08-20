@@ -377,7 +377,7 @@ export default function App() {
           <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
           <Route path="/admin/betterstats" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
           <Route path="/admin/betterstats/:group" element={<ProtectedRoute requireCore><BetterStatsHome /></ProtectedRoute>} />
-          {/* BetterClubhouse — the merged back office. Today is its front door;
+          {/* BetterAdmin — the merged back office. Today is its front door;
               every other tool kept the URL it already had (see
               components/admin/BetterClubhouseLayout.jsx for the merged nav). */}
           <Route path="/admin/clubhouse" element={<ProtectedRoute><ClubhouseToday /></ProtectedRoute>} />
@@ -395,7 +395,7 @@ export default function App() {
               the real gate — the nav item only appears in internal mode, but a
               typed URL must be refused too. */}
           <Route path="/admin/clubhouse/internal/directory" element={<ProtectedRoute requireRole="super_admin"><ClubManagerApp initialScreen="internal_directory" /></ProtectedRoute>} />
-          {/* The full editors behind the read-only Clubhouse screens. They lost
+          {/* The full editors behind the read-only BetterAdmin screens. They lost
               their routes when the redesign screens took /admin/committee,
               /admin/events and friends, which left their CRUD unreachable.
               Each viewer links here until the two are folded together. */}
@@ -407,7 +407,7 @@ export default function App() {
           <Route path="/admin/clubhouse/facilities/manage" element={<ProtectedRoute><AdminAssets /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/diary/manage" element={<ProtectedRoute><AdminClubDiary /></ProtectedRoute>} />
           {/* Families moved back into BetterStats (/admin/families); the old
-              Clubhouse URL redirects so bookmarks and links still land. */}
+              BetterAdmin URL redirects so bookmarks and links still land. */}
           <Route path="/admin/clubhouse/directory/families" element={<Navigate to="/admin/families" replace />} />
           <Route path="/admin/clubhouse/directory/qualifications" element={<ProtectedRoute><AdminQualifications /></ProtectedRoute>} />
           <Route path="/admin/clubhouse/directory/volunteers" element={<ProtectedRoute><AdminVolunteers /></ProtectedRoute>} />
@@ -517,7 +517,7 @@ export default function App() {
           <Route path="/admin/super/module-requests" element={<ProtectedRoute requireRole="super_admin"><SuperModuleRequests /></ProtectedRoute>} />
           <Route path="/admin/super/comms-limits" element={<ProtectedRoute requireRole="super_admin"><SuperCommsLimits /></ProtectedRoute>} />
           <Route path="/admin/super/marketing" element={<ProtectedRoute requireRole="super_admin"><SuperMarketing /></ProtectedRoute>} />
-          {/* The directory segment builder is a BetterClubhouse screen now —
+          {/* The directory segment builder is a BetterAdmin screen now —
               /admin/comms/segments mounts it while acting as the outreach org.
               Kept live so an existing bookmark still lands. */}
           <Route path="/admin/super/directory-audiences" element={<Navigate to="/admin/comms/segments" replace />} />
@@ -559,7 +559,7 @@ export default function App() {
           {/* BetterSocials umbrella (Website + Post Designer) — Website is Core, so the hub is open to all */}
           <Route path="/admin/bettersocials" element={<ProtectedRoute requireCore><BetterSocialsHome /></ProtectedRoute>} />
 
-          {/* BetterComms (bulk email) — the Comms section of BetterClubhouse.
+          {/* BetterComms (bulk email) — the Comms section of BetterAdmin.
               Segments and Lists are both on the sidebar and are the two things
               an email's audience can be. Contacts stays reachable but is off
               the sidebar, since the person spine is the Directory. */}

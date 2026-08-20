@@ -10,7 +10,7 @@ import { useAuth } from '../../../../contexts/AuthContext'
 // area colours stay as their semantic values.
 
 // The indigo these screens used to carry is retired: they render inside the
-// BetterClubhouse shell now, which sets --pb-accent to the merged module's
+// BetterAdmin shell now, which sets --pb-accent to the merged module's
 // amber. Everything here just follows the surrounding surface's accent.
 export const ACCENT = 'var(--pb-accent)'
 
