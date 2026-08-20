@@ -45,16 +45,22 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import ClubMembership, OnboardingWizardState, Organisation
+from app.services.engagement_params import DEFAULTS as _D
 
-SUPER_ADMIN_ACTOR_FRACTION = 0.3
+# Every number here is a Super Admin parameter — see
+# services/engagement_params.py, which owns the catalogue, the defaults and the
+# stored overrides. These names are kept as the defaults re-exported, for a
+# caller with no session in hand; anything scoring a real club takes a resolved
+# ``params`` dict.
+SUPER_ADMIN_ACTOR_FRACTION = _D["SUPER_ADMIN_ACTOR_FRACTION"]
 
-REGISTRATION_CLUB_ADMIN = 70
-REGISTRATION_SUPER_ADMIN = 40
-MERGE_BONUS = 10
-IMPORT_STATS_BONUS = 15
-MODULE_GROUP_BONUS = 2
-MODULE_GROUP_CAP = 15
-ADMIN_POLISH_BONUS = 2
+REGISTRATION_CLUB_ADMIN = _D["REGISTRATION_CLUB_ADMIN"]
+REGISTRATION_SUPER_ADMIN = _D["REGISTRATION_SUPER_ADMIN"]
+MERGE_BONUS = _D["MERGE_BONUS"]
+IMPORT_STATS_BONUS = _D["IMPORT_STATS_BONUS"]
+MODULE_GROUP_BONUS = _D["MODULE_GROUP_BONUS"]
+MODULE_GROUP_CAP = _D["MODULE_GROUP_CAP"]
+ADMIN_POLISH_BONUS = _D["ADMIN_POLISH_BONUS"]
 
 # onboarding_wizard.py GROUPS step keys, grouped the same way the wizard
 # itself groups them, for the "actively used a paid module during trial"
@@ -113,7 +119,8 @@ async def _last_wizard_step_actor(session: AsyncSession, org_id, step_key: str) 
     return row.scalar_one_or_none()
 
 
-async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
+async def trial_depth_score(session: AsyncSession, org: Organisation,
+                            params: Optional[dict] = None) -> dict:
     """The trial-depth rollup for ONE prospect org (never called for a paying
     customer — see twenty_sync._engagement). Only meaningful for a club that
     actually exists in BetterCricket (has been onboarded/registered)."""
@@ -137,7 +144,8 @@ async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
         if getattr(org, "onboarding_method", None)
         else not has_primary
     )
-    registration = REGISTRATION_SUPER_ADMIN if staff_registered else REGISTRATION_CLUB_ADMIN
+    registration = (params["REGISTRATION_SUPER_ADMIN"] if staff_registered
+                    else params["REGISTRATION_CLUB_ADMIN"])
 
     state = await session.get(OnboardingWizardState, org.id)
     completed = set(state.completed_steps or []) if state else set()
@@ -149,20 +157,21 @@ async def trial_depth_score(session: AsyncSession, org: Organisation) -> dict:
     merge_pts = 0
     if has_merge:
         merge_actor = await _last_actor(session, org.id, ["merge_players", "merge_grades"])
-        merge_pts = round(MERGE_BONUS * await credit(merge_actor))
+        merge_pts = round(params["MERGE_BONUS"] * await credit(merge_actor))
 
     import_pts = 0
     if "import_stats" in completed:
         import_actor = await _last_wizard_step_actor(session, org.id, "import_stats")
-        import_pts = round(IMPORT_STATS_BONUS * await credit(import_actor))
+        import_pts = round(params["IMPORT_STATS_BONUS"] * await credit(import_actor))
 
     module_pts = 0
     for keys in _MODULE_GROUPS.values():
         if completed & keys:
-            module_pts += round(MODULE_GROUP_BONUS * await credit(None))
-    module_pts = min(module_pts, MODULE_GROUP_CAP)
+            module_pts += round(params["MODULE_GROUP_BONUS"] * await credit(None))
+    module_pts = min(module_pts, params["MODULE_GROUP_CAP"])
 
-    polish_pts = round(ADMIN_POLISH_BONUS * await credit(None)) if completed & _POLISH_STEPS else 0
+    polish_pts = (round(params["ADMIN_POLISH_BONUS"] * await credit(None))
+                  if completed & _POLISH_STEPS else 0)
 
     total = min(100, registration + merge_pts + import_pts + module_pts + polish_pts)
     return {

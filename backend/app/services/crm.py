@@ -1587,6 +1587,10 @@ async def recalc_pipeline_cards(lookback_seconds: int = 120) -> dict:
                 select(MarketingClub).where(MarketingClub.id.in_(club_ids))
             )).scalars().all()}
             changed = await _card_clubs_with_recent_activity(session, card_clubs, since)
+            # One parameter resolution for the whole sweep, so a save landing
+            # mid-run cannot score half the cards by one set of weights.
+            from app.services import engagement_params
+            sweep_params = await engagement_params.get_params(session)
             # Re-fetch each club FRESH inside the loop (never touch the pre-loaded
             # card_clubs objects here): a commit/rollback below expires every
             # attached ORM object, so reading a stale one's attribute would fire a
@@ -1601,7 +1605,9 @@ async def recalc_pipeline_cards(lookback_seconds: int = 120) -> dict:
                         Organisation, club.existing_org_id,
                         options=[selectinload(Organisation.module_subscriptions)])
                         if club.existing_org_id else None)
-                    deal = await sync_engagement_promotion(session, club, org, fast_web=True)
+                    deal = await sync_engagement_promotion(session, club, org,
+                                                          fast_web=True,
+                                                          params=sweep_params)
                     if deal is not None:
                         promoted += 1
                     processed += 1
@@ -2170,16 +2176,28 @@ _DEFAULT_DEAL_VALUE_CENTS = 39900
 _PROTECTED_DEAL_SOURCE = "manual"
 
 
-async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -> Optional[CrmDeal]:
+async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub,
+                                   params: Optional[dict] = None) -> Optional[CrmDeal]:
     """Keep a club's presence on the pipeline in step with its engagement score:
 
-      - score > 0 and NOT on the board  -> create a Target deal, valued at the
-        Stats/$399 default. (Never re-adds a club that already has any
-        non-archived deal, so a won/lost or already-worked club can't be
-        dragged back on.)
-      - score == 0 and it's an AUTO-added deal still sitting at Target -> archive
-        it (out of the pipeline). It re-enters automatically if it re-engages,
-        because an archived deal doesn't count as "already has a deal" above.
+      - score at or above PIPELINE_ADD_MIN and NOT on the board -> create a
+        Target deal, valued at the Stats/$399 default. (Never re-adds a club
+        that already has any non-archived deal, so a won/lost or already-worked
+        club can't be dragged back on.)
+      - score below PIPELINE_REMOVE_BELOW and it's an AUTO-added deal still
+        sitting at Target -> archive it (out of the pipeline). It re-enters
+        automatically if it re-engages, because an archived deal doesn't count
+        as "already has a deal" above.
+
+    Both thresholds are Super Admin parameters (services/engagement_params.py),
+    defaulting to 1 — which is byte-for-byte the "> 0 to add, == 0 to remove"
+    this used to hardcode. They are TWO numbers rather than one deliberately.
+    At zero the boundary is naturally sticky, because a zero score means no
+    attributed activity at all. Anywhere mid-range it is not, and a club
+    drifting across it does not merely flap a log line: re-entry creates a NEW
+    deal row, since the "already has a deal" guard excludes archived deals. The
+    gap between the two is the deadband that prevents that, so keep remove at or
+    below add.
 
     Deliberately NEVER touched (so manual work is safe): a deal whose
     ``source`` is ``manual`` (a super admin added it by hand — every other
@@ -2188,6 +2206,11 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
     that has advanced past Target (Contacted / Engaged / Trial / Won / Lost). A
     $0 auto Target deal is also topped up to the Stats/$399 default here. Caller
     commits."""
+    from app.services import engagement_params
+    if params is None:
+        params = await engagement_params.get_params(session)
+    add_min = params["PIPELINE_ADD_MIN"]
+    remove_below = min(params["PIPELINE_REMOVE_BELOW"], add_min)
     score = club.engagement_score or 0
     pipeline = await ensure_platform_pipeline(session)
     target = next((s for s in pipeline.stages if s.key == "target"), None)
@@ -2200,7 +2223,7 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
         ).order_by(CrmDeal.created_at.desc())
     )).scalars().first()
 
-    if score > 0:
+    if score >= add_min:
         any_deal = (await session.execute(
             select(CrmDeal.id).where(
                 CrmDeal.pipeline_id == pipeline.id,
@@ -2216,7 +2239,8 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
             await ensure_deal_contact(session, deal)
             await log_activity(
                 session, deal_id=deal.id, type="system",
-                body=f"Auto-added to pipeline (Target): engagement score {score}")
+                body=f"Auto-added to pipeline (Target): engagement score {score}"
+                     + (f" (threshold {add_min})" if add_min > 1 else ""))
             return deal
         # Existing auto Target deal with no value -> top up to the Stats default.
         if (open_deal is not None and open_deal.source != _PROTECTED_DEAL_SOURCE
@@ -2228,15 +2252,19 @@ async def sync_pipeline_membership(session: AsyncSession, club: MarketingClub) -
             open_deal.updated_at = func.now()
         return open_deal
 
-    # score == 0: remove an AUTO-added deal (any source but hand-added "manual",
-    # e.g. a legacy "twenty_import") that's still parked at Target.
+    # Below the remove threshold: archive an AUTO-added deal (any source but
+    # hand-added "manual", e.g. a legacy "twenty_import") still parked at Target.
+    # A club scoring between the two thresholds is left exactly as it is.
+    if score >= remove_below:
+        return None
     if (open_deal is not None and open_deal.source != _PROTECTED_DEAL_SOURCE
             and not open_deal.stage_auto_locked
             and target is not None and open_deal.stage_id == target.id):
         open_deal.archived_at = func.now()
         await log_activity(
             session, deal_id=open_deal.id, type="system",
-            body="Auto-removed from pipeline: engagement decayed to 0")
+            body=(f"Auto-removed from pipeline: engagement score {score} is below "
+                  f"the {remove_below} needed to stay on the board."))
         return None
     return None
 
@@ -2245,7 +2273,9 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
                                     org: Optional[Organisation] = None,
                                     web_stats: Optional[dict] = None,
                                     email_stats: Optional[dict] = None,
-                                    fast_web: bool = False) -> Optional[CrmDeal]:
+                                    fast_web: bool = False,
+                                    params: Optional[dict] = None,
+                                    keep_prev: bool = False) -> Optional[CrmDeal]:
     """Recompute one club's engagement score, ensure it's on the pipeline once
     the score is above zero, and immediately check the score-based
     Target/Contacted -> Engaged promotion, right now, in the caller's own
@@ -2256,10 +2286,14 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     queries, cheap enough to run inline wherever a real signal event already has
     a session+club in hand (an enquiry, a trial request/grant, a subscription
     change) rather than waiting for a scheduled sweep. Caller commits."""
+    from app.services import engagement_params
     from app.services.twenty_sync import _engagement
+    if params is None:
+        params = await engagement_params.get_params(session)
     await _engagement(session, club, org, web_stats=web_stats,
-                      email_stats=email_stats, fast_web=fast_web)
-    membership = await sync_pipeline_membership(session, club)
+                      email_stats=email_stats, fast_web=fast_web, params=params,
+                      keep_prev=keep_prev)
+    membership = await sync_pipeline_membership(session, club, params)
     promoted = await maybe_promote_by_engagement_score(session, club)
     return promoted or membership
 

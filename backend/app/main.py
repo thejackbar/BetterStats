@@ -818,6 +818,13 @@ async def lifespan(app: FastAPI):
         from app.services.vote_medal_ddl import VOTE_MEDAL_STATEMENTS
         for _stmt in VOTE_MEDAL_STATEMENTS:
             await conn.execute(text(_stmt))
+        # Engagement-score parameter history (migration 270). Runs the
+        # migration's own statement list so the two can't drift; both are
+        # idempotent. The parameter VALUES live in platform_settings, not here
+        # — see services/engagement_params.py.
+        from app.services.engagement_param_ddl import ENGAGEMENT_PARAM_STATEMENTS
+        for _stmt in ENGAGEMENT_PARAM_STATEMENTS:
+            await conn.execute(text(_stmt))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
             "ALTER TABLE onboarding_wizard_state "

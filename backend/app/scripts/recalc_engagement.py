@@ -52,6 +52,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services import crm as crm_service
+from app.services import engagement_params
 from app.services import twenty_sync
 
 logger = logging.getLogger("recalc_engagement")
@@ -106,7 +107,14 @@ def _print_histogram(scores: list) -> None:
           f"p90={_percentile(s,90):.0f}  max={s[-1]:.0f}  mean={sum(s)/n:.1f}")
 
 
-async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
+async def recalc(*, dry_run: bool = False, name: str | None = None,
+                 params: dict | None = None, keep_prev: bool = False) -> dict:
+    """``params`` overrides the stored engagement parameters for this run only,
+    which is what the parameters page's Preview uses: score every club under a
+    proposed set of weights inside a transaction that is then rolled back.
+    ``keep_prev`` suppresses the day-over-day baseline roll, for a sweep caused
+    by a parameter change rather than by real club activity — see
+    twenty_sync._apply_engagement_cache."""
     tiers: Counter = Counter()
     tiers_linked: Counter = Counter()   # clubs with a linked org (onboarded/customer)
     tiers_prospect: Counter = Counter()  # directory-only prospects
@@ -118,6 +126,11 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     linked_count = 0
 
     async with async_session_maker() as session:
+        # Resolve the scoring parameters ONCE for the whole sweep and inject
+        # them per club, so a save landing mid-run cannot score the first half
+        # of the table by one set of weights and the second half by another.
+        if params is None:
+            params = await engagement_params.get_params(session, use_cache=False)
         # Pre-load a lightweight list of (id, name) as PLAIN values, not ORM
         # instances. If a club's recompute errors, the failed transaction expires
         # every attached ORM object, so touching one afterwards (even to read its
@@ -142,8 +155,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
         # a pure in-memory calc for the common (prospect) case, so 6k clubs run
         # in minutes. The scoring is byte-for-byte identical (see --verify).
         print("  building batch web/email stats (one pass over usage_events + email_events) ...")
-        web_map = await twenty_sync.batch_web_stats(session)
-        email_map = await twenty_sync.batch_email_stats(session)
+        web_map = await twenty_sync.batch_web_stats(session, params)
+        email_map = await twenty_sync.batch_email_stats(session, params)
         print(f"  batch stats ready: {len(web_map)} clubs with web activity, "
               f"{len(email_map)} with email activity")
 
@@ -155,7 +168,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
                     continue
                 org = await _load_org(session, club.existing_org_id)
                 deal = await crm_service.sync_engagement_promotion(
-                    session, club, org, web_stats=web_map, email_stats=email_map)
+                    session, club, org, web_stats=web_map, email_stats=email_map,
+                    params=params, keep_prev=keep_prev)
                 tier = club.engagement_tier or "UNKNOWN"
                 tiers[tier] += 1
                 # "Linked" = has an Organisation row (an onboarded club: a trial
@@ -211,8 +225,19 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
     _print_histogram(scores)
     print("\n=== PROSPECTS ONLY (directory-only, the true lead-heat view) ===")
     _print_histogram(scores_prospect)
+    board = sum(1 for v in scores if v >= (params or {}).get("PIPELINE_ADD_MIN", 1))
+    opp_min = (params or {}).get("OPPORTUNITY_AUTO_THRESHOLD", 90)
     return {"processed": processed, "promoted": promoted, "errors": errors,
-            "linked": linked_count, "prospects": prospect_count, "tiers": dict(tiers)}
+            "linked": linked_count, "prospects": prospect_count,
+            "tiers": dict(tiers),
+            # Enough for the parameters page to describe a proposed change
+            # without re-deriving it: the whole score list (so a histogram and
+            # percentiles are a client-side calculation), how many clubs would
+            # be on the board under these thresholds, and how many would cross
+            # the Twenty Opportunity line.
+            "scores": scores, "scores_prospect": scores_prospect,
+            "on_board": board,
+            "at_opportunity": sum(1 for v in scores if v >= opp_min)}
 
 
 # Fields whose value must match between the fast (batch-injected) path and the

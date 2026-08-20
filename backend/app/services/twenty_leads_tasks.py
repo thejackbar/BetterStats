@@ -39,6 +39,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import MarketingClub, Organisation, async_session_maker
 from app.services.twenty_client import client
+from app.services import engagement_params
 from app.services.twenty_sync import (
     OPPORTUNITY_AUTO_THRESHOLD, TIER_HOT_MIN, _all_contacts_unsubscribed, _billing_modules,
     _engagement, _lifecycle, _link_get, _link_put, _module_split, _raise_task, _twenty_modules,
@@ -223,7 +224,13 @@ async def _seed_and_refresh_leads(session, http, stats) -> None:
         # self-serve trial club that keeps digging into the product (historical
         # import, merges, module trial usage — services/trial_engagement.py)
         # gets promoted the moment it earns it, not just at registration.
-        auto_opportunity = not is_paying and org is not None and (eng.get("engagementScore") or 0) >= OPPORTUNITY_AUTO_THRESHOLD
+        # Read the LIVE threshold, not the module default — a Super Admin
+        # lowering it from the parameters page must take effect on the next
+        # refresh rather than at the next deploy.
+        _ep = await engagement_params.get_params(session)
+        auto_opportunity = (not is_paying and org is not None
+                            and (eng.get("engagementScore") or 0)
+                            >= _ep["OPPORTUNITY_AUTO_THRESHOLD"])
         snaps.append((guid, tid_by_guid[guid], values, sig["status"], club, auto_opportunity))
     # Diagnostics so the caller/UI can see WHY the result is what it is — a cold list
     # with no interest signals reads 0 qualified, which is correct, not a failure.

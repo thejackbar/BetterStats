@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
-from app.services import platform_settings, trial_engagement
+from app.services import engagement_params, platform_settings, trial_engagement
 from app.services.club_directory import _PATH_CODE, _RESOLVED_CID, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
@@ -37,70 +37,59 @@ from app.services.twenty_client import (TwentyApiError, client, currency, emails
 # "start the deal" — twenty_leads_tasks._seed_and_refresh_leads uses this to
 # auto-create an Opportunity the moment a Lead's score reaches it, rather than
 # waiting on a human to flip Twenty's own createOpportunity cascade field.
-OPPORTUNITY_AUTO_THRESHOLD = 90
+OPPORTUNITY_AUTO_THRESHOLD = engagement_params.DEFAULTS["OPPORTUNITY_AUTO_THRESHOLD"]
 
 # --- Engagement scoring weights -------------------------------------------------
-# One place to tune every number in _engagement(). Mirrors the engagement-scoring
-# workbook shared with the team; see docs there for the rationale behind each.
+# EVERY NUMBER BELOW IS NOW A SUPER-ADMIN EDITABLE PARAMETER. The catalogue, the
+# defaults, validation and the stored overrides all live in
+# services/engagement_params.py; these module constants are just its defaults
+# re-exported under the names the rest of the codebase already greps for.
+#
+# Read them ONLY as a fallback for a code path with no session in hand. Anything
+# that actually scores a club takes a resolved ``params`` dict and reads from
+# that, or it will keep using the defaults after a Super Admin has changed them.
+# Resolve once per call chain (engagement_params.get_params) and pass it down —
+# never per club inside a sweep.
 #
 # Per-event decay: each web/email event is scored by ITS OWN age and the scores
-# are summed. Ages beyond the last tier here score 0 — the ``d90`` tier plus the
+# are summed. Ages beyond the last tier score 0 — the ``d90`` tier plus the
 # ``ELSE 0`` gives every sum an outer 90-day window, so a club's years of history
 # can't quietly peg the depth curve (the sum is otherwise unbounded in age).
-WEB_DECAY = {"d7": 2.0, "d14": 1.5, "d21": 1.0, "d28": 0.5, "d90": 0.25}
-# A Meta / paid ad-click landing is a higher-intent arrival than an organic page
-# view, so it gets its own richer curve instead of the flat WEB_DECAY rate.
-AD_DECAY = {"d7": 5.0, "d14": 3.5, "d21": 2.0, "d28": 1.0, "d90": 0.5}
-EMAIL_CLICK_DECAY = {"d7": 10.0, "d14": 7.5, "d21": 5.0, "d28": 2.0, "d90": 1.0}
-EMAIL_OPEN_DECAY = {"d7": 4.0, "d14": 3.0, "d21": 2.0, "d28": 1.0, "d90": 1.0}
+_D = engagement_params.DEFAULTS
 
-# Frequency = reach (distinct visitors) + depth (the summed per-event decay
-# points), each a LINEAR function of real activity. The old saturating caps
-# existed to stop a bot/crawler running the score away; outreach goes straight
-# to real clubs, so there's no bot traffic to defend against, and the caps were
-# the main thing compressing genuine clubs into a lump and creating the cliff.
-# The only ceiling now is the final min(100) clamp. These two scale factors are
-# the knobs to tune against the distribution (recalc_engagement prints a
-# histogram): points per distinct 30-day visitor, and a multiplier on the summed
-# per-event decay points.
-REACH_PER_VISITOR = 2.5
-DEPTH_SCALE = 0.6
 
-# Recency of the single most-recent touch of any kind (web / email / enquiry),
-# a SMOOTH exponential decay rather than hard day-buckets — so two clubs a day
-# either side of a boundary don't sit points apart for no real difference.
-# RECENCY_FULL at 0 days old, halving every RECENCY_HALFLIFE_DAYS; 0 if never.
-RECENCY_FULL = 10.0
-RECENCY_HALFLIFE_DAYS = 21.0
+def _curve(base: str, params: "Optional[dict]" = None) -> dict:
+    """The five age tiers of one decay curve, as the ``{"d7": ...}`` shape the
+    SQL builders read, pulled from a resolved params dict (or the defaults)."""
+    src = params or _D
+    return {tier.lower(): src[f"{base}_{tier}"]
+            for tier in ("D7", "D14", "D21", "D28", "D90")}
 
-# Prospect intent bonuses, added on top of recency + frequency.
-BONUS_REQUESTED_TRIAL = 12
-BONUS_IN_TRIAL = 10
-BONUS_ONBOARDING = 20
-# A visit to the BetterCricket contact page — a real "get in touch" intent
-# signal, worth more than plain browsing (a club that only browsed stays cooler).
-BONUS_CONTACT_PAGE = 10
-# A visit to the /trial signup page — the strongest pre-enquiry buying intent
-# (someone actively looking to start), so it's scored higher than a contact-page
-# visit. Both stack: a prospect who hit both pages earns both.
-BONUS_VISIT_TRIAL = 20
-# A club whose org was born from a Meta/paid ad (organisations.signup_source ==
-# 'self_serve_ad') converted a paid click all the way to a registration — score
-# that intent on top of the trial-depth registration credit it already earns.
-BONUS_AD_SIGNUP = 10
 
-# Customer account-health branch (floored, never Cold).
-CUSTOMER_BASE = 60
-CUSTOMER_UPSELL_BONUS = 15
-CUSTOMER_ONBOARDING_BONUS = 10
+WEB_DECAY = _curve("WEB_DECAY")
+AD_DECAY = _curve("AD_DECAY")
+EMAIL_CLICK_DECAY = _curve("EMAIL_CLICK_DECAY")
+EMAIL_OPEN_DECAY = _curve("EMAIL_OPEN_DECAY")
 
-# Tier bands: COLD < WARM_MIN, WARM up to < HOT_MIN, HOT at/above HOT_MIN.
-TIER_WARM_MIN = 30
-TIER_HOT_MIN = 60
+REACH_PER_VISITOR = _D["REACH_PER_VISITOR"]
+DEPTH_SCALE = _D["DEPTH_SCALE"]
+RECENCY_FULL = _D["RECENCY_FULL"]
+RECENCY_HALFLIFE_DAYS = _D["RECENCY_HALFLIFE_DAYS"]
 
-# A direct "onboard my club" enquiry pins a prospect to this flat score/HOT for
-# the super-admin-configured window (platform_settings.get_direct_enquiry_hot_days).
-DIRECT_ENQUIRY_SCORE = 80
+BONUS_REQUESTED_TRIAL = _D["BONUS_REQUESTED_TRIAL"]
+BONUS_IN_TRIAL = _D["BONUS_IN_TRIAL"]
+BONUS_ONBOARDING = _D["BONUS_ONBOARDING"]
+BONUS_CONTACT_PAGE = _D["BONUS_CONTACT_PAGE"]
+BONUS_VISIT_TRIAL = _D["BONUS_VISIT_TRIAL"]
+BONUS_AD_SIGNUP = _D["BONUS_AD_SIGNUP"]
+
+CUSTOMER_BASE = _D["CUSTOMER_BASE"]
+CUSTOMER_UPSELL_BONUS = _D["CUSTOMER_UPSELL_BONUS"]
+CUSTOMER_ONBOARDING_BONUS = _D["CUSTOMER_ONBOARDING_BONUS"]
+
+TIER_WARM_MIN = _D["TIER_WARM_MIN"]
+TIER_HOT_MIN = _D["TIER_HOT_MIN"]
+DIRECT_ENQUIRY_SCORE = _D["DIRECT_ENQUIRY_SCORE"]
 
 # Meta / paid-click detection for a usage_events row: a Meta ad click lands with
 # an fbclid (Facebook) or igshid (Instagram) in the URL, which record_event stores
@@ -115,9 +104,10 @@ _META_CLICK = "(ue.path ~* '(fbclid|igshid)=')"
 _PERTH_TZ = datetime.timezone(datetime.timedelta(hours=8))
 
 
-def _tier_for(score: float) -> str:
-    return ("COLD" if score < TIER_WARM_MIN
-            else "WARM" if score < TIER_HOT_MIN else "HOT")
+def _tier_for(score: float, params: "Optional[dict]" = None) -> str:
+    src = params or _D
+    return ("COLD" if score < src["TIER_WARM_MIN"]
+            else "WARM" if score < src["TIER_HOT_MIN"] else "HOT")
 
 
 logger = logging.getLogger(__name__)
@@ -267,7 +257,7 @@ def _arr(module_keys) -> float:
     return total - {0: 0, 1: 0, 2: 48, 3: 97, 4: 146}.get(priced, 146)
 
 
-def _recency_pts(last):
+def _recency_pts(last, params: "Optional[dict]" = None):
     """Recency points from a last-touch timestamp: a smooth exponential decay
     (RECENCY_FULL at 0 days, halving every RECENCY_HALFLIFE_DAYS), 0 if never.
     Continuous, so there are no step jumps at day boundaries. Deliberately modest
@@ -276,8 +266,10 @@ def _recency_pts(last):
     over the line."""
     if not last:
         return 0.0
+    src = params or _D
     days = max(0, (datetime.datetime.now(datetime.timezone.utc) - last).days)
-    return RECENCY_FULL * (0.5 ** (days / RECENCY_HALFLIFE_DAYS))
+    half_life = src["RECENCY_HALFLIFE_DAYS"] or 1
+    return src["RECENCY_FULL"] * (0.5 ** (days / half_life))
 
 
 async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
@@ -314,7 +306,8 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
     return (row[0] or 0, row[1]) if row else (0, None)
 
 
-def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
+def _apply_engagement_cache(club: MarketingClub, fields: dict,
+                            keep_prev: bool = False) -> None:
     """Every _engagement() call caches its result onto the club row itself —
     marketing_clubs.engagement_score/.engagement_tier/.engagement_scored_at —
     regardless of which of the four call sites triggered the computation
@@ -332,9 +325,16 @@ def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     # rather than being overwritten with today's own earlier reading. "Calendar
     # day" is Perth / Western Australia time (AWST, UTC+8, no DST) so the
     # boundary is Perth midnight, not UTC midnight (which is 8am in Perth).
+    #
+    # ``keep_prev`` suppresses that roll for a sweep triggered by a PARAMETER
+    # CHANGE rather than by real activity. Without it, the first recalc after a
+    # weight change is that first-write-of-the-day, so every club on the board
+    # sprouts a large up or down arrow describing the parameter edit and not any
+    # movement by the club — and the morning after a tuning session the board is
+    # unreadable.
     prev_at = club.engagement_scored_at
     prev_day = prev_at.astimezone(_PERTH_TZ).date() if prev_at is not None else None
-    if (club.engagement_score is not None and prev_day is not None
+    if (not keep_prev and club.engagement_score is not None and prev_day is not None
             and prev_day < now.astimezone(_PERTH_TZ).date()):
         club.engagement_score_prev = club.engagement_score
         club.engagement_score_prev_date = prev_day
@@ -343,7 +343,40 @@ def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     club.engagement_scored_at = now
 
 
-async def batch_web_stats(session) -> dict:
+# Age tiers, shared by every decay curve. Kept beside the SQL builder so the
+# tier boundaries and the curve values can never be edited apart.
+_DECAY_TIER_DAYS = (("d7", 7), ("d14", 14), ("d21", 21), ("d28", 28), ("d90", 90))
+
+
+def _decay_arms(curve: dict, ts: str, extra_pred: str = "") -> str:
+    """The CASE arms scoring one event by its own age, for one decay curve.
+
+    ONE builder for what used to be four hand-written copies of the same
+    ladder (the per-club web and email queries in ``_engagement``, and their
+    single-pass equivalents in ``batch_web_stats``/``batch_email_stats``). Two
+    copies of a curve is how a live single-club rescore and the nightly sweep
+    start disagreeing, which only ``recalc_engagement --verify`` would ever
+    catch.
+
+    Every value is coerced with ``float()`` before it is interpolated, so a
+    stored parameter cannot carry anything but a number into the query."""
+    pre = f"{extra_pred} AND " if extra_pred else ""
+    return "\n                   ".join(
+        f"WHEN {pre}{ts} > NOW() - INTERVAL '{days} days' THEN {float(curve[key])}"
+        for key, days in _DECAY_TIER_DAYS)
+
+
+def _non_page_view_arm(params: "Optional[dict]", alias: str = "") -> str:
+    """With "count page views only" on, anything that is not a page view scores
+    nothing. Off (the original behaviour) every recorded event counts, including
+    the dwell-time event fired when a page view ends, server-side API rows, and
+    the heartbeat the site sends every ~25 seconds while a page is open."""
+    if not (params or _D).get("COUNT_ONLY_PAGE_VIEWS"):
+        return ""
+    return f"WHEN {alias}event_type <> 'page_view' THEN 0.0\n                   "
+
+
+async def batch_web_stats(session, params: "Optional[dict]" = None) -> dict:
     """Single-pass equivalent of ``_engagement``'s per-club ``web`` query, for
     EVERY club at once.
 
@@ -364,9 +397,13 @@ async def batch_web_stats(session) -> dict:
     archived orgs, matching ``_engagement``'s own ``org_archived`` handling
     (which sets ``org_id = None`` so a wound-up test club stops scoring on its
     staff/test logins)."""
+    params = params or _D
+    web_curve, ad_curve = _curve("WEB_DECAY", params), _curve("AD_DECAY", params)
+    skip_non_pv = _non_page_view_arm(params)
     rows = (await session.execute(text(f"""
         WITH ev AS MATERIALIZED (
             SELECT ue.id AS eid, ue.created_at, ue.org_id, ue.user_id,
+                   ue.event_type,
                    COALESCE(ue.ip_hash, ue.visitor_id::text) AS ipk,
                    ({_META_CLICK}) AS is_meta,
                    (split_part(ue.path, '?', 1) ~* '^/contact(/|$)') AS is_contact,
@@ -386,13 +423,13 @@ async def batch_web_stats(session) -> dict:
         attributed AS (
             -- Prospect marketing traffic: anonymous, non-admin, resolves to a club
             -- (all three conditions are baked into a non-NULL rcid above).
-            SELECT rcid AS club_id, eid, created_at, ipk, is_meta, is_contact, is_trial
+            SELECT rcid AS club_id, eid, created_at, event_type, ipk, is_meta, is_contact, is_trial
             FROM ev
             WHERE rcid IS NOT NULL
           UNION
             -- Customer product use: the club's own (non-archived) org traffic,
             -- never a super admin's acting-as activity.
-            SELECT mc.id::text AS club_id, ev.eid, ev.created_at, ev.ipk,
+            SELECT mc.id::text AS club_id, ev.eid, ev.created_at, ev.event_type, ev.ipk,
                    ev.is_meta, ev.is_contact, ev.is_trial
             FROM ev
             JOIN marketing_clubs mc ON mc.existing_org_id = ev.org_id
@@ -406,21 +443,13 @@ async def batch_web_stats(session) -> dict:
                COUNT(DISTINCT ipk) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS sessions_30d,
                COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '30 days') AS events_30d,
                COALESCE(SUM(CASE
-                   WHEN is_meta THEN 0.0
-                   WHEN created_at > NOW() - INTERVAL '7 days' THEN {WEB_DECAY['d7']}
-                   WHEN created_at > NOW() - INTERVAL '14 days' THEN {WEB_DECAY['d14']}
-                   WHEN created_at > NOW() - INTERVAL '21 days' THEN {WEB_DECAY['d21']}
-                   WHEN created_at > NOW() - INTERVAL '28 days' THEN {WEB_DECAY['d28']}
-                   WHEN created_at > NOW() - INTERVAL '90 days' THEN {WEB_DECAY['d90']}
+                   {skip_non_pv}WHEN is_meta THEN 0.0
+                   {_decay_arms(web_curve, 'created_at')}
                    ELSE 0.0
                END), 0.0)::float AS web_decay_pts,
                COALESCE(SUM(CASE
-                   WHEN NOT is_meta THEN 0.0
-                   WHEN created_at > NOW() - INTERVAL '7 days' THEN {AD_DECAY['d7']}
-                   WHEN created_at > NOW() - INTERVAL '14 days' THEN {AD_DECAY['d14']}
-                   WHEN created_at > NOW() - INTERVAL '21 days' THEN {AD_DECAY['d21']}
-                   WHEN created_at > NOW() - INTERVAL '28 days' THEN {AD_DECAY['d28']}
-                   WHEN created_at > NOW() - INTERVAL '90 days' THEN {AD_DECAY['d90']}
+                   {skip_non_pv}WHEN NOT is_meta THEN 0.0
+                   {_decay_arms(ad_curve, 'created_at')}
                    ELSE 0.0
                END), 0.0)::float AS ad_decay_pts,
                COUNT(*) FILTER (WHERE is_meta) AS ad_clicks,
@@ -446,7 +475,7 @@ async def batch_web_stats(session) -> dict:
     return out
 
 
-async def batch_email_stats(session) -> dict:
+async def batch_email_stats(session, params: "Optional[dict]" = None) -> dict:
     """Single-pass equivalent of ``_engagement``'s per-club ``em`` (email
     engagement) query, for every club at once — the same idea as
     ``batch_web_stats``. Attributes each ``email_events`` row to a club by the
@@ -454,6 +483,9 @@ async def batch_email_stats(session) -> dict:
     deduped by event id so the two branches don't double-count, matching the
     per-club query's ``OR``. Returns ``{club_id_text: {...}}`` with the exact
     fields the per-club query yields."""
+    params = params or _D
+    click_curve = _curve("EMAIL_CLICK_DECAY", params)
+    open_curve = _curve("EMAIL_OPEN_DECAY", params)
     rows = (await session.execute(text(f"""
         WITH att AS (
             -- By the club's own contact email.
@@ -476,16 +508,8 @@ async def batch_email_stats(session) -> dict:
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
                COALESCE(SUM(CASE
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
+                   {_decay_arms(click_curve, 'created_at', "event_type = 'click'")}
+                   {_decay_arms(open_curve, 'created_at', "event_type = 'open'")}
                    ELSE 0.0
                END), 0.0)::float AS email_decay_pts
         FROM att
@@ -507,7 +531,9 @@ async def _engagement(session, club: MarketingClub,
                       org: "Optional[Organisation]" = None,
                       web_stats: "Optional[dict]" = None,
                       email_stats: "Optional[dict]" = None,
-                      fast_web: bool = False) -> dict:
+                      fast_web: bool = False,
+                      params: "Optional[dict]" = None,
+                      keep_prev: bool = False) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
     sort without holding raw events. Signal sources, all attributed to the club: web
     breadcrumbs (``usage_events`` by outreach UTM code or org id, both distinct-visitor
@@ -520,13 +546,26 @@ async def _engagement(session, club: MarketingClub,
     email + buying intent); a CUSTOMER (linked org) is scored on account health +
     expansion, never Cold, with the modules they want-but-don't-pay-for surfaced as an
     upsell opportunity so a customer mid-sales-cycle is tracked, not buried at zero."""
+    # Every weight in this function is a Super Admin parameter
+    # (services/engagement_params.py). A caller scoring MANY clubs must resolve
+    # once and pass ``params`` in, both to avoid a settings read per club and so
+    # that every club in one sweep is scored with the same values even if
+    # someone saves a change halfway through.
+    if params is None:
+        params = await engagement_params.get_params(session)
+    web_curve = _curve("WEB_DECAY", params)
+    ad_curve = _curve("AD_DECAY", params)
+    click_curve = _curve("EMAIL_CLICK_DECAY", params)
+    open_curve = _curve("EMAIL_OPEN_DECAY", params)
+    skip_non_pv = _non_page_view_arm(params, "ue.")
+
     # "Not interested" is a manual disposition that overrides the computed heat, so it
     # isn't recomputed away on the next refresh — set it in the Club Directory.
     if getattr(club, "not_interested", False):
         result = {"engagementScore": 0, "engagementTier": "NOT_INTERESTED",
                   "sessions30d": 0, "emailEngaged30d": 0,
                   "upsellModules": [], "inSalesCycle": False}
-        _apply_engagement_cache(club, result)
+        _apply_engagement_cache(club, result, keep_prev)
         return result
     # An ARCHIVED org (soft-deleted — gone from All Clubs, e.g. a wound-up test
     # trial) must stop scoring on its own product use. Its remaining activity is
@@ -602,22 +641,14 @@ async def _engagement(session, club: MarketingClub,
                -- Organic page views / API calls (everything that is NOT a paid
                -- ad-click landing), age-decayed and summed, bounded to 90 days.
                COALESCE(SUM(CASE
-                   WHEN {_META_CLICK} THEN 0.0
-                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN {WEB_DECAY['d7']}
-                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN {WEB_DECAY['d14']}
-                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN {WEB_DECAY['d21']}
-                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN {WEB_DECAY['d28']}
-                   WHEN ue.created_at > NOW() - INTERVAL '90 days' THEN {WEB_DECAY['d90']}
+                   {skip_non_pv}WHEN {_META_CLICK} THEN 0.0
+                   {_decay_arms(web_curve, 'ue.created_at')}
                    ELSE 0.0
                END), 0.0)::float AS web_decay_pts,
                -- Meta / paid ad-click landings, on the richer AD_DECAY curve.
                COALESCE(SUM(CASE
-                   WHEN NOT {_META_CLICK} THEN 0.0
-                   WHEN ue.created_at > NOW() - INTERVAL '7 days' THEN {AD_DECAY['d7']}
-                   WHEN ue.created_at > NOW() - INTERVAL '14 days' THEN {AD_DECAY['d14']}
-                   WHEN ue.created_at > NOW() - INTERVAL '21 days' THEN {AD_DECAY['d21']}
-                   WHEN ue.created_at > NOW() - INTERVAL '28 days' THEN {AD_DECAY['d28']}
-                   WHEN ue.created_at > NOW() - INTERVAL '90 days' THEN {AD_DECAY['d90']}
+                   {skip_non_pv}WHEN NOT {_META_CLICK} THEN 0.0
+                   {_decay_arms(ad_curve, 'ue.created_at')}
                    ELSE 0.0
                END), 0.0)::float AS ad_decay_pts,
                -- All-time count of matched Meta/paid ad-click landings (for the
@@ -701,16 +732,8 @@ async def _engagement(session, club: MarketingClub,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
                COALESCE(SUM(CASE
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
+                   {_decay_arms(click_curve, 'created_at', "event_type = 'click'")}
+                   {_decay_arms(open_curve, 'created_at', "event_type = 'open'")}
                    ELSE 0.0
                END), 0.0)::float AS email_decay_pts
         FROM email_events
@@ -752,10 +775,19 @@ async def _engagement(session, club: MarketingClub,
     # richer-weighted Meta/paid ad-click landings). The only ceiling is the final
     # min(100) clamp below, so genuinely busy clubs now climb the whole range
     # instead of bunching under an artificial wall.
-    reach_pts = REACH_PER_VISITOR * sessions
-    depth_pts = DEPTH_SCALE * (email_decay_pts + web_decay_pts + ad_decay_pts)
+    reach_pts = params["REACH_PER_VISITOR"] * sessions
+    depth_pts = params["DEPTH_SCALE"] * (email_decay_pts + web_decay_pts + ad_decay_pts)
+    # Depth is linear in raw event COUNT, which is what makes it vulnerable to
+    # any repeated-request source: an open tab sending a heartbeat every 25
+    # seconds, or a mail-security scanner prefetching every link in an outreach
+    # email. Capping it bounds that without having to identify the source, and
+    # leaves the club's total still linear in how many distinct visitors it had,
+    # which is the quantity worth measuring. 0 keeps the original behaviour.
+    depth_cap = params.get("DEPTH_PER_VISITOR_CAP") or 0
+    if depth_cap:
+        depth_pts = min(depth_pts, float(depth_cap))
     freq_pts = reach_pts + depth_pts
-    recency = _recency_pts(last_touch)
+    recency = _recency_pts(last_touch, params)
 
     # A prospect whose org was born from a paid ad (self_serve_ad). Only meaningful
     # for a linked org; a bare directory row has no signup_source.
@@ -767,35 +799,38 @@ async def _engagement(session, club: MarketingClub,
     if is_customer:
         # Account health + expansion. A paying account starts engaged, gains for
         # recent product use, and for an active expansion opportunity; floored at Warm.
-        score = CUSTOMER_BASE + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
+        score = (params["CUSTOMER_BASE"]
+                 + int(recency * params["CUSTOMER_RECENCY_SCALE"])
+                 + min(int(freq_pts * params["CUSTOMER_FREQ_SCALE"]),
+                       params["CUSTOMER_FREQ_CAP"]))
         if upsell:
-            score += CUSTOMER_UPSELL_BONUS
+            score += params["CUSTOMER_UPSELL_BONUS"]
         if onboarding_count:
-            score += CUSTOMER_ONBOARDING_BONUS   # e.g. asking to onboard a second team/ground
+            score += params["CUSTOMER_ONBOARDING_BONUS"]  # e.g. onboard a second team/ground
         score = min(score, 100)
-        tier = "HOT" if (score > TIER_HOT_MIN or upsell) else "WARM"
+        tier = "HOT" if (score > params["TIER_HOT_MIN"] or upsell) else "WARM"
     else:
         # Prospect lead heat: recency + frequency of any touch + buying intent.
         score = recency + freq_pts
         if club.requested_trial_modules:
-            score += BONUS_REQUESTED_TRIAL
+            score += params["BONUS_REQUESTED_TRIAL"]
         if (club.demo_status or "") == "in_trial":
-            score += BONUS_IN_TRIAL
+            score += params["BONUS_IN_TRIAL"]
         if visited_contact:
             # Hit the contact page — a real "get in touch" signal, not just browsing.
-            score += BONUS_CONTACT_PAGE
+            score += params["BONUS_CONTACT_PAGE"]
         if visited_trial:
             # Hit the /trial signup page — the strongest pre-enquiry buying intent.
-            score += BONUS_VISIT_TRIAL
+            score += params["BONUS_VISIT_TRIAL"]
         if ad_signup:
             # Converted a paid ad click all the way to a self-serve registration.
-            score += BONUS_AD_SIGNUP
+            score += params["BONUS_AD_SIGNUP"]
         if onboarding_count:
             # A direct "onboard my club" enquiry is the strongest signal a prospect
             # can give — heavier than the admin-set requested_trial_modules flag.
-            score += BONUS_ONBOARDING
+            score += params["BONUS_ONBOARDING"]
         score = min(score, 100)
-        tier = _tier_for(score)
+        tier = _tier_for(score, params)
 
         # Trial-depth floor: a self-serve/onboarded prospect's own product-setup
         # effort (registration, historical import, merges, module trial usage —
@@ -806,10 +841,10 @@ async def _engagement(session, club: MarketingClub,
         # only for a club that's actually been onboarded — a bare marketing-
         # directory row with no linked Organisation has nothing to be deep in.
         if org is not None:
-            trial_depth = await trial_engagement.trial_depth_score(session, org)
+            trial_depth = await trial_engagement.trial_depth_score(session, org, params)
             if trial_depth["score"] > score:
                 score = trial_depth["score"]
-                tier = _tier_for(score)
+                tier = _tier_for(score, params)
 
     # freq_pts sums fractional per-event decay points (the 21-28 day web-view tier
     # is worth 0.5), so score can come out fractional here — round once, at the
@@ -835,7 +870,19 @@ async def _engagement(session, club: MarketingClub,
         and (datetime.datetime.now(datetime.timezone.utc) - onboarding_last).days <= hot_days
     )
     if direct_enquiry_hot:
-        score, tier = DIRECT_ENQUIRY_SCORE, "HOT"
+        enquiry_score = params["DIRECT_ENQUIRY_SCORE"]
+        if params.get("ENQUIRY_OVERRIDE_IS_FLOOR"):
+            # A FLOOR: raise a club that would otherwise decay below it, never
+            # lower one that has independently earned more. The paragraph above
+            # describes only the first of those, but as an outright assignment
+            # this also did the second — a busy prospect on 100 dropped to 80 by
+            # filling in the contact form, so the most engaged prospects were the
+            # ones it penalised. Off by default so no club's score moves on
+            # deploy; turn it on from the parameters page with the preview open.
+            if enquiry_score > score:
+                score, tier = enquiry_score, _tier_for(enquiry_score, params)
+        else:
+            score, tier = enquiry_score, "HOT"
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
@@ -882,7 +929,7 @@ async def _engagement(session, club: MarketingClub,
         fields["lastWebVisitAt"] = last_web.isoformat()
     if last_email:
         fields["lastEmailAt"] = last_email.isoformat()
-    _apply_engagement_cache(club, fields)
+    _apply_engagement_cache(club, fields, keep_prev)
     return fields
 
 
@@ -2221,6 +2268,8 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
             # Snapshot the engagement fields per company before any IO. Load the
             # linked org (if any) so a customer is scored on health + expansion.
             updates = []
+            # Resolved once for the whole refresh, never per club.
+            sweep_params = await engagement_params.get_params(session)
             for guid in guids:
                 club = clubs.get(guid)
                 if club is None:
@@ -2229,7 +2278,7 @@ async def refresh_engagement(limit: Optional[int] = None) -> dict:
                             Organisation, club.existing_org_id,
                             options=[selectinload(Organisation.module_subscriptions)])
                        if club.existing_org_id else None)
-                fields = await _engagement(session, club, org)
+                fields = await _engagement(session, club, org, params=sweep_params)
                 # Local BetterCRM equivalent of the OPPORTUNITY_AUTO_THRESHOLD gate
                 # below — a club whose score has crossed 70 on this recompute gets
                 # its existing platform deal promoted to Engaged. See
