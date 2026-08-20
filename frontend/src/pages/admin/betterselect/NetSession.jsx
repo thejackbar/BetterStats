@@ -21,7 +21,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { Icon, Btn, Avatar, RoleChips, Search, Empty } from './ui'
+import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText } from './ui'
 
 const POLL_MS = 2500
 const TONE_COLOR = { info: 'var(--pb-accent)', amber: 'var(--pb-amber)', red: 'var(--pb-red)' }
@@ -311,11 +311,12 @@ export default function NetSession() {
           {canEdit && (
             <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-2 px-5 py-3 border-t pb-hairline text-[12.5px] text-pb-faint">
               <label className="inline-flex items-center gap-1.5">Nets
-                <input type="number" min="1" max="8" value={nets} onChange={(e) => patchSettings({ nets: Math.max(1, Math.min(8, Number(e.target.value) || 1)) })}
+                <NumText value={nets} min={1} max={8} ariaLabel="Nets" onCommit={(v) => patchSettings({ nets: v })}
                   className="w-12 bg-pb-surface2 border border-pb-hairline rounded px-1.5 h-7 text-center text-pb-text focus:outline-none focus:border-pb-accent" />
               </label>
               <label className="inline-flex items-center gap-1.5">Minutes
-                <input type="number" min="1" max="60" value={Math.round(settings.duration_seconds / 60)} onChange={(e) => patchSettings({ duration_seconds: Math.max(30, (Number(e.target.value) || 1) * 60) })}
+                <NumText value={Math.round(settings.duration_seconds / 60)} min={1} max={60} ariaLabel="Minutes"
+                  onCommit={(v) => patchSettings({ duration_seconds: v * 60 })}
                   className="w-12 bg-pb-surface2 border border-pb-hairline rounded px-1.5 h-7 text-center text-pb-text focus:outline-none focus:border-pb-accent" />
               </label>
               <button onClick={() => patchSettings({ auto_roll: !settings.auto_roll })} className={`inline-flex items-center gap-1.5 ${settings.auto_roll ? 'text-pb-accent' : ''}`}>

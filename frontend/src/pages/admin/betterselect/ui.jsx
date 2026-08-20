@@ -7,6 +7,7 @@
 // Colours come from `cssVar` on AVAILABILITY (inline styles), not dynamically
 // built Tailwind classes — Tailwind's JIT only sees literal class strings, so
 // anything status-coloured uses the CSS variable directly.
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
 
@@ -391,6 +392,39 @@ export function byAvailThenName(statusOf = (p) => p.availability ?? p.avail, nam
     const r = availRank(statusOf(a)) - availRank(statusOf(b))
     return r !== 0 ? r : nameOf(a).localeCompare(nameOf(b))
   }
+}
+
+/* ── NumText — a number field that behaves like a text field ──────────────
+ * A native `type="number"` bound straight to clamped state is unusable: every
+ * keystroke is clamped and written back, so a field holding 8 that you try to
+ * retype reads "85" for an instant and snaps back to 8, and clearing it snaps
+ * to the minimum before you can type the replacement. So this is a PLAIN TEXT
+ * input that holds whatever is typed (including empty) while the field has
+ * focus, and only parses, clamps and reports on blur or Enter. */
+export function NumText({ value, onCommit, min = 0, max = 999, pad = false, disabled = false, className = '', title, ariaLabel }) {
+  const fmt = (v) => (pad ? String(v).padStart(2, '0') : String(v))
+  const [draft, setDraft] = useState(fmt(value))
+  const focused = useRef(false)
+
+  useEffect(() => { if (!focused.current) setDraft(fmt(value)) }, [value, pad])
+
+  const commit = () => {
+    const n = parseInt(String(draft).replace(/[^0-9]/g, ''), 10)
+    const next = Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : value
+    setDraft(fmt(next))
+    if (next !== value) onCommit(next)
+  }
+
+  return (
+    <input
+      type="text" inputMode="numeric" pattern="[0-9]*" value={draft} disabled={disabled} title={title} aria-label={ariaLabel}
+      onFocus={(e) => { focused.current = true; e.target.select() }}
+      onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ''))}
+      onBlur={() => { focused.current = false; commit() }}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur() }}
+      className={className}
+    />
+  )
 }
 
 export { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER }

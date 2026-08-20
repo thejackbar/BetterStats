@@ -11,7 +11,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { Icon, Btn, Segmented, Avatar, Empty, RoleChips } from './ui'
+import { Icon, Btn, Segmented, Avatar, Empty, RoleChips, NumText } from './ui'
 
 const NET_URL = '/admin/betterselect/nets/'
 
@@ -272,20 +272,20 @@ function SettingsTab({ canEdit }) {
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest mb-1.5">Length</label>
             <div className="flex items-center gap-1.5">
-              <input type="number" min="0" max="120" value={mins} disabled={!canEdit}
-                onChange={(e) => patch('duration_seconds', Math.max(30, (Number(e.target.value) || 0) * 60 + secs))}
+              <NumText value={mins} min={0} max={120} disabled={!canEdit} ariaLabel="Minutes"
+                onCommit={(v) => patch('duration_seconds', Math.max(30, v * 60 + secs))}
                 className="w-16 bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 h-[38px] text-sm text-pb-text text-center focus:outline-none focus:border-pb-accent" />
               <span className="text-pb-faint text-sm">min</span>
-              <input type="number" min="0" max="59" value={secs} disabled={!canEdit}
-                onChange={(e) => patch('duration_seconds', Math.max(30, mins * 60 + (Number(e.target.value) || 0)))}
+              <NumText value={secs} min={0} max={59} disabled={!canEdit} ariaLabel="Seconds"
+                onCommit={(v) => patch('duration_seconds', Math.max(30, mins * 60 + v))}
                 className="w-16 bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 h-[38px] text-sm text-pb-text text-center focus:outline-none focus:border-pb-accent" />
               <span className="text-pb-faint text-sm">sec</span>
             </div>
           </div>
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest mb-1.5">Nets / batters at once</label>
-            <input type="number" min="1" max="8" value={s.nets} disabled={!canEdit}
-              onChange={(e) => patch('nets', Math.max(1, Math.min(8, Number(e.target.value) || 1)))}
+            <NumText value={s.nets} min={1} max={8} disabled={!canEdit} ariaLabel="Nets"
+              onCommit={(v) => patch('nets', v)}
               className="w-16 bg-pb-surface2 border border-pb-hairline rounded-lg px-2.5 h-[38px] text-sm text-pb-text text-center focus:outline-none focus:border-pb-accent" />
           </div>
         </div>
@@ -305,12 +305,12 @@ function SettingsTab({ canEdit }) {
           return (
             <div key={i} className="flex flex-wrap items-center gap-2 py-1.5 border-b pb-hairline last:border-0">
               <div className="flex items-center gap-1">
-                <input type="number" min="0" max="120" value={am} disabled={!canEdit}
-                  onChange={(e) => patchAlert(i, 'seconds_remaining', (Number(e.target.value) || 0) * 60 + as)}
+                <NumText value={am} min={0} max={120} disabled={!canEdit} ariaLabel="Alert minutes"
+                  onCommit={(v) => patchAlert(i, 'seconds_remaining', v * 60 + as)}
                   className="w-12 bg-pb-surface2 border border-pb-hairline rounded px-1.5 h-[34px] text-sm text-center focus:outline-none focus:border-pb-accent" />
                 <span className="text-pb-faint text-xs">:</span>
-                <input type="number" min="0" max="59" value={String(as).padStart(2, '0')} disabled={!canEdit}
-                  onChange={(e) => patchAlert(i, 'seconds_remaining', am * 60 + (Number(e.target.value) || 0))}
+                <NumText value={as} min={0} max={59} pad disabled={!canEdit} ariaLabel="Alert seconds"
+                  onCommit={(v) => patchAlert(i, 'seconds_remaining', am * 60 + v)}
                   className="w-12 bg-pb-surface2 border border-pb-hairline rounded px-1.5 h-[34px] text-sm text-center focus:outline-none focus:border-pb-accent" />
               </div>
               <input value={a.label} disabled={!canEdit} onChange={(e) => patchAlert(i, 'label', e.target.value)} placeholder="Alert message"
