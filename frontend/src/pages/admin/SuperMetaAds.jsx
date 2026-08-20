@@ -68,6 +68,97 @@ function isoToPerthInput(iso) {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
 }
 
+// The row's Last seen as a plain YYYY-MM-DD in Perth, the same wall clock
+// fmtTime prints it in, so a range typed off what is on screen matches what is
+// on screen. Comparing the two date strings keeps both ends of the range
+// inclusive with no hour maths, and a row either side of midnight cannot land
+// on the wrong day.
+function perthDay(iso) {
+  if (!iso) return ''
+  const parts = new Intl.DateTimeFormat('en-AU', {
+    timeZone: 'Australia/Perth', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(iso))
+  const get = (t) => parts.find((p) => p.type === t)?.value
+  return `${get('year')}-${get('month')}-${get('day')}`
+}
+
+// Club-name search + an inclusive Last seen date range, shared by the two
+// wizard club tables. Filtered in the browser rather than on the wire: both
+// tables already hold every row they list (they are a standing follow-up list,
+// not a windowed stat), so this is the same call the "Not selected only" and
+// "Show tests" toggles beside it already make.
+function useClubFilter() {
+  const [q, setQ] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
+  const active = Boolean(q.trim() || from || to)
+  const clear = useCallback(() => { setQ(''); setFrom(''); setTo('') }, [])
+  const apply = useCallback((rows) => {
+    const needle = q.trim().toLowerCase()
+    return (rows || []).filter((c) => {
+      if (needle && !(c.name || '').toLowerCase().includes(needle)) return false
+      if (from || to) {
+        // A row we hold no Last seen for cannot satisfy a date range, so it
+        // drops out rather than being swept in as a maybe.
+        const day = perthDay(c.last_at)
+        if (!day) return false
+        if (from && day < from) return false
+        if (to && day > to) return false
+      }
+      return true
+    })
+  }, [q, from, to])
+  return { q, setQ, from, setFrom, to, setTo, active, clear, apply }
+}
+
+const FILTER_INPUT = 'bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 font-mono text-[10px] text-pb-text'
+
+function ClubFilterBar({ filter, placeholder }) {
+  const { q, setQ, from, setFrom, to, setTo, active, clear } = filter
+  return (
+    <div className="flex flex-wrap items-center gap-2 mb-3">
+      <input
+        type="search"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder={placeholder}
+        className={`flex-1 min-w-[11rem] ${FILTER_INPUT} py-1.5 text-[11px]`}
+      />
+      <label className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-wide text-pb-faint">
+        Last seen
+        <input
+          type="date"
+          value={from}
+          max={to || undefined}
+          onChange={(e) => setFrom(e.target.value)}
+          aria-label="Last seen from"
+          className={FILTER_INPUT}
+        />
+      </label>
+      <label className="flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-wide text-pb-faint">
+        to
+        <input
+          type="date"
+          value={to}
+          min={from || undefined}
+          onChange={(e) => setTo(e.target.value)}
+          aria-label="Last seen to"
+          className={FILTER_INPUT}
+        />
+      </label>
+      {active && (
+        <button
+          type="button"
+          onClick={clear}
+          className="font-mono text-[9px] uppercase tracking-wide2 text-pb-faint hover:text-pb-text"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ChartTooltip({ active, payload, label, money }) {
   if (!active || !payload?.length) return null
   return (
@@ -410,6 +501,8 @@ export default function SuperMetaAds() {
   const [searchedClubs, setSearchedClubs] = useState(null)
   const [showHiddenSelections, setShowHiddenSelections] = useState(false)
   const [showSearchedOnly, setShowSearchedOnly] = useState(false)
+  const selectedFilter = useClubFilter()
+  const searchedFilter = useClubFilter()
   const [busySelectionKey, setBusySelectionKey] = useState('')
 
   const [trendDays, setTrendDays] = useState(14)
@@ -565,6 +658,19 @@ export default function SuperMetaAds() {
 
   const budget = summary?.campaign_budget ?? DEFAULT_BUDGET
   const lengthDays = summary?.campaign_length_days ?? DEFAULT_LENGTH_DAYS
+
+  // Club-name search and Last seen range, applied to the flagged-as-test rows
+  // as well: a filter that quietly left those unfiltered would report a match
+  // count the rows on screen disagree with.
+  const selectedRows = selectedFilter.apply(selectedClubs?.clubs)
+  const selectedHiddenRows = selectedFilter.apply(selectedClubs?.hidden_clubs)
+  // searchedMatched is the search/date filter alone; searchedRows adds the
+  // "Not selected only" toggle on top. The header counts read off the former,
+  // so ticking that toggle doesn't restate how many clubs the filter found.
+  const searchedMatched = searchedFilter.apply(searchedClubs?.clubs)
+  const searchedRows = searchedMatched.filter((c) => !showSearchedOnly || !c.selected)
+  const searchedNotSelected = searchedMatched.filter((c) => !c.selected).length
+  const searchedHiddenRows = searchedFilter.apply(searchedClubs?.hidden_clubs)
 
   const header = (
     <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
@@ -850,7 +956,9 @@ export default function SuperMetaAds() {
                   </div>
                   <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
                     <span>
-                      {selectedClubs.identified} identified
+                      {selectedFilter.active
+                        ? <>{selectedRows.length} of {selectedClubs.identified} identified</>
+                        : <>{selectedClubs.identified} identified</>}
                       {selectedClubs.anonymous > 0 && <> &middot; {selectedClubs.anonymous} not captured</>}
                     </span>
                     {(selectedClubs.hidden_count || 0) > 0 && (
@@ -865,7 +973,14 @@ export default function SuperMetaAds() {
                   </span>
                 </div>
 
-                {selectedClubs.clubs.length === 0
+                <ClubFilterBar filter={selectedFilter} placeholder="Search club name" />
+
+                {selectedFilter.active && selectedRows.length === 0
+                  && !(showHiddenSelections && selectedHiddenRows.length) ? (
+                  <p className="text-xs text-pb-faint">
+                    No club matches that search or date range.
+                  </p>
+                ) : selectedClubs.clubs.length === 0
                   && !(showHiddenSelections && (selectedClubs.hidden_clubs || []).length) ? (
                   <p className="text-xs text-pb-faint">
                     {selectedClubs.anonymous} club selection{selectedClubs.anonymous === 1 ? '' : 's'} in
@@ -887,7 +1002,7 @@ export default function SuperMetaAds() {
                         </tr>
                       </thead>
                       <tbody>
-                        {selectedClubs.clubs.map((c) => (
+                        {selectedRows.map((c) => (
                           <SelectionRow
                             key={c.name + (c.org_id || '')}
                             c={c}
@@ -895,7 +1010,7 @@ export default function SuperMetaAds() {
                             onFlag={() => hideSelection(c)}
                           />
                         ))}
-                        {showHiddenSelections && (selectedClubs.hidden_clubs || []).map((c) => (
+                        {showHiddenSelections && selectedHiddenRows.map((c) => (
                           <SelectionRow
                             key={'hidden-' + c.name + (c.org_id || '')}
                             c={c}
@@ -930,9 +1045,11 @@ export default function SuperMetaAds() {
                   </div>
                   <span className="font-mono text-[10px] text-pb-faintest flex items-center gap-2">
                     <span>
-                      {searchedClubs.identified} club{searchedClubs.identified === 1 ? '' : 's'}
-                      {searchedClubs.searched_only_count > 0
-                        && <> &middot; {searchedClubs.searched_only_count} not selected</>}
+                      {searchedFilter.active
+                        ? <>{searchedMatched.length} of {searchedClubs.identified} clubs</>
+                        : <>{searchedClubs.identified} club{searchedClubs.identified === 1 ? '' : 's'}</>}
+                      {(searchedFilter.active ? searchedNotSelected : searchedClubs.searched_only_count) > 0
+                        && <> &middot; {searchedFilter.active ? searchedNotSelected : searchedClubs.searched_only_count} not selected</>}
                     </span>
                     {searchedClubs.searched_only_count > 0 && searchedClubs.converted_count > 0 && (
                       <button
@@ -946,6 +1063,13 @@ export default function SuperMetaAds() {
                   </span>
                 </div>
 
+                <ClubFilterBar filter={searchedFilter} placeholder="Search club name" />
+
+                {searchedFilter.active && searchedRows.length === 0 && searchedHiddenRows.length === 0 ? (
+                  <p className="text-xs text-pb-faint">
+                    No club matches that search or date range.
+                  </p>
+                ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
                     <thead>
@@ -960,17 +1084,15 @@ export default function SuperMetaAds() {
                       </tr>
                     </thead>
                     <tbody>
-                      {searchedClubs.clubs
-                        .filter((c) => !showSearchedOnly || !c.selected)
-                        .map((c) => (
-                          <SearchRow
-                            key={c.name + (c.org_id || '')}
-                            c={c}
-                            busy={busySelectionKey === (c.key || c.name)}
-                            onFlag={() => hideSelection(c)}
-                          />
-                        ))}
-                      {(searchedClubs.hidden_clubs || []).map((c) => (
+                      {searchedRows.map((c) => (
+                        <SearchRow
+                          key={c.name + (c.org_id || '')}
+                          c={c}
+                          busy={busySelectionKey === (c.key || c.name)}
+                          onFlag={() => hideSelection(c)}
+                        />
+                      ))}
+                      {searchedHiddenRows.map((c) => (
                         <SearchRow
                           key={'hidden-' + c.name + (c.org_id || '')}
                           c={c}
@@ -982,6 +1104,7 @@ export default function SuperMetaAds() {
                     </tbody>
                   </table>
                 </div>
+                )}
                 <p className="font-mono text-[9px] text-pb-faintest mt-3">
                   A row is logged when a visitor&rsquo;s search returns a result, whether or not they then
                   click one &mdash; the top match is recorded along with the text they typed. &ldquo;Searched
