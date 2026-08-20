@@ -4442,6 +4442,17 @@ class MarketingClub(Base):
     # direction. _prev_date is the calendar day that _prev value belongs to.
     engagement_score_prev = Column(Integer, nullable=True)
     engagement_score_prev_date = Column(Date, nullable=True)
+    # Where that score came from: {source_key: points}, written by the same
+    # _apply_engagement_cache call that writes the score (migration 270). The
+    # keys are services/engagement_sources.SOURCES — visitors, page_views,
+    # meta_ads, email_clicks, contact_enquiry, self_serve_registration and the
+    # rest — and the points are what each contributed. A key at 0 points means
+    # the club really did that but the score is currently made of something
+    # else (a direct enquiry pins it, or the registration floor beat the
+    # activity tally), which is what lets the CRM's source filter answer "came
+    # to us through Meta ads" while the chart draws only what is paying.
+    # NULL = not scored since migration 270; recalc_engagement fills the table.
+    engagement_sources = Column(JSONB, nullable=True)
     # Suburb-level admin boundary polygon (from OpenStreetMap/Nominatim), fetched
     # lazily and cached forever — the closest free approximation to a real
     # postcode-area shape (no AU postcode boundary dataset is bundled here).

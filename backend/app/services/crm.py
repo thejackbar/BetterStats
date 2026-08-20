@@ -506,6 +506,16 @@ def _deal_dict(deal: CrmDeal, stage: Optional[CrmStage] = None,
         # calendar day, 'down' if lower, None if unchanged / no prior day / not
         # scored (marketing_clubs.engagement_score_prev, migration 192).
         "engagement_delta_dir": _engagement_delta_dir(club),
+        # Where that score came from: {source_key: points}, cached on the club
+        # by the same _engagement() call that produced the score (migration
+        # 270). Carried on the card so the board's "engagement source" filter
+        # is a plain read of what is already loaded rather than a per-club
+        # scan of usage_events for every deal on screen. A key at 0 points is
+        # a signal the club really gave us that the score is not currently
+        # made of — see services/engagement_sources.py. None (rather than {})
+        # means this club has not been scored since that column shipped, which
+        # the filter has to treat as "unknown", not "none of the above".
+        "engagement_sources": club.engagement_sources if club else None,
         "marketing_club_name": club.name if club else None,
         # State is already association-abbreviated at source (PlayHQ's own
         # address payload, see club_directory.py) — no conversion needed.
@@ -950,6 +960,10 @@ async def reset_marketing_club_engagement(session: AsyncSession, club: Marketing
     club.engagement_scored_at = None
     club.engagement_score_prev = None
     club.engagement_score_prev_date = None
+    # The cached per-source rollup goes with the score it explains — leaving it
+    # behind would keep a purged club listed under the very sources the reset
+    # is there to forget.
+    club.engagement_sources = None
     club.updated_at = func.now()
 
 

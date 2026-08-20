@@ -606,6 +606,14 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score_prev INTEGER"))
         await conn.execute(text(
             "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_score_prev_date DATE"))
+        # Migration 270: per-source engagement rollup ({source_key: points}) so the
+        # CRM can chart where a score came from and filter the board by it without
+        # re-running a per-club scan — see the column comment in models/db.py.
+        await conn.execute(text(
+            "ALTER TABLE marketing_clubs ADD COLUMN IF NOT EXISTS engagement_sources JSONB"))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_marketing_clubs_engagement_sources "
+            "ON marketing_clubs USING GIN (engagement_sources)"))
         # Migration 166: cached suburb boundary polygon for the directory's location
         # map, fetched on demand from OpenStreetMap/Nominatim and cached forever —
         # see services/nominatim_client.py.

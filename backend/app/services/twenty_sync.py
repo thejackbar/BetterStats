@@ -28,7 +28,7 @@ from sqlalchemy.orm import selectinload
 from app.config.settings import settings
 from app.models.db import (MarketingClub, MarketingClubContact, Organisation,
                            async_session_maker)
-from app.services import platform_settings, trial_engagement
+from app.services import engagement_sources, platform_settings, trial_engagement
 from app.services.club_directory import _PATH_CODE, _RESOLVED_CID, club_filters
 from app.services.twenty_client import (TwentyApiError, client, currency, emails_value,
                                         full_name, link, phone)
@@ -53,6 +53,20 @@ WEB_DECAY = {"d7": 2.0, "d14": 1.5, "d21": 1.0, "d28": 0.5, "d90": 0.25}
 AD_DECAY = {"d7": 5.0, "d14": 3.5, "d21": 2.0, "d28": 1.0, "d90": 0.5}
 EMAIL_CLICK_DECAY = {"d7": 10.0, "d14": 7.5, "d21": 5.0, "d28": 2.0, "d90": 1.0}
 EMAIL_OPEN_DECAY = {"d7": 4.0, "d14": 3.0, "d21": 2.0, "d28": 1.0, "d90": 1.0}
+
+
+def _decay_case_sql(kind: str, weights: dict) -> str:
+    """The per-event age-decay CASE for ONE email event type, built from the same
+    weight table the combined sum uses. Written once so the itemised open/click
+    columns the CRM's source breakdown reads can never carry different weights
+    from the ``email_decay_pts`` total they add up to."""
+    return ("COALESCE(SUM(CASE "
+            + " ".join(
+                f"WHEN event_type = '{kind}' AND created_at > NOW() - INTERVAL '{days} days' "
+                f"THEN {weights[tier]}"
+                for tier, days in (("d7", 7), ("d14", 14), ("d21", 21), ("d28", 28), ("d90", 90)))
+            + " ELSE 0.0 END), 0.0)::float")
+
 
 # Frequency = reach (distinct visitors) + depth (the summed per-event decay
 # points), each a LINEAR function of real activity. The old saturating caps
@@ -341,6 +355,16 @@ def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     club.engagement_score = fields.get("engagementScore")
     club.engagement_tier = fields.get("engagementTier")
     club.engagement_scored_at = now
+    # Cache the per-source rollup (migration 270) the same way and for the same
+    # reason as the score itself: so the CRM pipeline can be filtered by where a
+    # club's interest came from without re-running this per-club scan for every
+    # card on the board. NULL means "not scored since this shipped" — a full
+    # recalc (app/scripts/recalc_engagement.py) or opening the club's own detail
+    # card fills it in.
+    club.engagement_sources = {
+        c["key"]: c["points"]
+        for c in engagement_sources.build(fields)["contributions"]
+    }
 
 
 async def batch_web_stats(session) -> dict:
@@ -475,19 +499,17 @@ async def batch_email_stats(session) -> dict:
                MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
-               COALESCE(SUM(CASE
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
-                   ELSE 0.0
-               END), 0.0)::float AS email_decay_pts
+               -- The same open/click split the per-club query carries, so a
+               -- club scored by a full recalc gets the same itemised source
+               -- breakdown as one scored on its own.
+               COUNT(*) FILTER (WHERE event_type = 'open') AS opens_all,
+               COUNT(*) FILTER (WHERE event_type = 'click') AS clicks_all,
+               COUNT(*) FILTER (WHERE event_type = 'open'
+                                AND created_at > NOW() - INTERVAL '30 days') AS opens_30d,
+               COUNT(*) FILTER (WHERE event_type = 'click'
+                                AND created_at > NOW() - INTERVAL '30 days') AS clicks_30d,
+               {_decay_case_sql('open', EMAIL_OPEN_DECAY)}  AS open_pts,
+               {_decay_case_sql('click', EMAIL_CLICK_DECAY)} AS click_pts
         FROM att
         GROUP BY club_id
     """))).all()
@@ -498,7 +520,12 @@ async def batch_email_stats(session) -> dict:
         out[str(r[0])] = {
             "last_eng": r[1],
             "eng_30d": r[2] or 0,
-            "email_decay_pts": float(r[3] or 0.0),
+            "opens_all": r[3] or 0,
+            "clicks_all": r[4] or 0,
+            "opens_30d": r[5] or 0,
+            "clicks_30d": r[6] or 0,
+            "open_decay_pts": float(r[7] or 0.0),
+            "click_decay_pts": float(r[8] or 0.0),
         }
     return out
 
@@ -525,7 +552,12 @@ async def _engagement(session, club: MarketingClub,
     if getattr(club, "not_interested", False):
         result = {"engagementScore": 0, "engagementTier": "NOT_INTERESTED",
                   "sessions30d": 0, "emailEngaged30d": 0,
-                  "upsellModules": [], "inSalesCycle": False}
+                  "upsellModules": [], "inSalesCycle": False,
+                  # A manual "not interested" ends the question of where the
+                  # score came from — there is no score. Cleared rather than
+                  # left holding whatever the club last scored on, so the CRM's
+                  # source filter can't keep listing it under Meta ads.
+                  "_sourcePoints": {}, "_sourcePresent": [], "_driver": None}
         _apply_engagement_cache(club, result)
         return result
     # An ARCHIVED org (soft-deleted — gone from All Clubs, e.g. a wound-up test
@@ -700,19 +732,22 @@ async def _engagement(session, club: MarketingClub,
         SELECT MAX(created_at) FILTER (WHERE event_type IN ('open','click')) AS last_eng,
                COUNT(*) FILTER (WHERE event_type IN ('open','click')
                                 AND created_at > NOW() - INTERVAL '30 days') AS eng_30d,
-               COALESCE(SUM(CASE
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_CLICK_DECAY['d7']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_CLICK_DECAY['d14']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_CLICK_DECAY['d21']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_CLICK_DECAY['d28']}
-                   WHEN event_type = 'click' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_CLICK_DECAY['d90']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '7 days' THEN {EMAIL_OPEN_DECAY['d7']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '14 days' THEN {EMAIL_OPEN_DECAY['d14']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '21 days' THEN {EMAIL_OPEN_DECAY['d21']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '28 days' THEN {EMAIL_OPEN_DECAY['d28']}
-                   WHEN event_type = 'open' AND created_at > NOW() - INTERVAL '90 days' THEN {EMAIL_OPEN_DECAY['d90']}
-                   ELSE 0.0
-               END), 0.0)::float AS email_decay_pts
+               -- Opens and clicks are counted and decayed SEPARATELY as well as
+               -- together: the CRM's source breakdown itemises them, and a click
+               -- is worth more than an open, so lumping them would leave the
+               -- chart unable to say which of the two earned the points. Same
+               -- query, extra columns — no second scan of email_events.
+               COUNT(*) FILTER (WHERE event_type = 'open') AS opens_all,
+               COUNT(*) FILTER (WHERE event_type = 'click') AS clicks_all,
+               COUNT(*) FILTER (WHERE event_type = 'open'
+                                AND created_at > NOW() - INTERVAL '30 days') AS opens_30d,
+               COUNT(*) FILTER (WHERE event_type = 'click'
+                                AND created_at > NOW() - INTERVAL '30 days') AS clicks_30d,
+               -- The combined ``email_decay_pts`` the score uses IS these two
+               -- added together — same weights, same rows — so it is summed in
+               -- Python rather than carried as a third CASE that could drift.
+               {_decay_case_sql('open', EMAIL_OPEN_DECAY)}  AS open_pts,
+               {_decay_case_sql('click', EMAIL_CLICK_DECAY)} AS click_pts
         FROM email_events
         WHERE lower(email) IN (
                 SELECT lower(email) FROM marketing_club_contacts
@@ -721,13 +756,25 @@ async def _engagement(session, club: MarketingClub,
     """), {"cid": str(club.id), "org": org_id})).first()
       last_email = em[0] if em else None
       eng_30d = (em[1] or 0) if em else 0
-      email_decay_pts = float(em[2] or 0.0) if em else 0.0
+      opens_all = (em[2] or 0) if em else 0
+      clicks_all = (em[3] or 0) if em else 0
+      opens_30d = (em[4] or 0) if em else 0
+      clicks_30d = (em[5] or 0) if em else 0
+      open_decay_pts = float(em[6] or 0.0) if em else 0.0
+      click_decay_pts = float(em[7] or 0.0) if em else 0.0
+      email_decay_pts = open_decay_pts + click_decay_pts
     else:
       # Batch-precomputed by batch_email_stats() — the full-recalc fast path.
       es = email_stats.get(str(club.id)) or {}
       last_email = es.get("last_eng")
       eng_30d = es.get("eng_30d") or 0
-      email_decay_pts = float(es.get("email_decay_pts") or 0.0)
+      opens_all = es.get("opens_all") or 0
+      clicks_all = es.get("clicks_all") or 0
+      opens_30d = es.get("opens_30d") or 0
+      clicks_30d = es.get("clicks_30d") or 0
+      open_decay_pts = float(es.get("open_decay_pts") or 0.0)
+      click_decay_pts = float(es.get("click_decay_pts") or 0.0)
+      email_decay_pts = open_decay_pts + click_decay_pts
 
     onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm, org_slug)
 
@@ -757,6 +804,73 @@ async def _engagement(session, club: MarketingClub,
     freq_pts = reach_pts + depth_pts
     recency = _recency_pts(last_touch)
 
+    # Where the score comes from, recorded AS IT IS AWARDED rather than
+    # re-derived afterwards from the same inputs — services/engagement_sources.py
+    # only labels and groups these, so the CRM's chart and filter can never
+    # disagree with the number they are explaining. ``awarded`` holds the points
+    # a source actually contributes; ``present`` holds a signal the club really
+    # gave us that the winning driver does not pay for (a Meta ad click on a club
+    # whose score is pinned by a direct enquiry is still a Meta ad click — see
+    # that module's docstring).
+    awarded: dict = {}
+    present: list = []
+    # Which of the four mutually-exclusive things the score IS. Set by whichever
+    # branch below wins; ``raw_source_total`` is the pre-clamp sum behind it, so
+    # the card can say when a total was capped at 100 and what the activity tally
+    # came to when the registration floor beat it.
+    driver = engagement_sources.DRIVER_ACTIVITY
+    raw_source_total = 0.0
+    setup_floor = 0.0
+
+    def _award(key, pts):
+        pts = float(pts or 0.0)
+        if pts:
+            awarded[key] = round(awarded.get(key, 0.0) + pts, 2)
+
+    def _note(key, seen=True):
+        """Record a signal the club genuinely gave us that the winning driver
+        does not pay points for. Only ever called for something that really
+        happened — an absent signal must read as absent, or the source filter
+        would list every club under every source."""
+        if seen and key not in awarded and key not in present:
+            present.append(key)
+
+    # The activity signals, each at the point value it really contributes:
+    # reach at its per-visitor rate, and every decayed sum at DEPTH_SCALE.
+    activity_parts = {
+        "visitors": reach_pts,
+        "page_views": DEPTH_SCALE * web_decay_pts,
+        "meta_ads": DEPTH_SCALE * ad_decay_pts,
+        "email_clicks": DEPTH_SCALE * click_decay_pts,
+        "email_opens": DEPTH_SCALE * open_decay_pts,
+        "recency": recency,
+    }
+    # Did this signal happen at all, regardless of what it is worth today? An
+    # ad click outside the 90-day decay window scores nothing and is still how
+    # this club found us, which is what the CRM's source filter asks about.
+    activity_seen = {
+        "visitors": bool(sessions),
+        "page_views": bool(events_30d or web_decay_pts),
+        "meta_ads": bool(ad_clicks),
+        "email_clicks": bool(clicks_all),
+        "email_opens": bool(opens_all),
+        "recency": last_touch is not None,
+    }
+
+    def _note_unpaid():
+        """Every signal on file that the winning driver did not pay for. Reads
+        the intent flags at call time, since ``ad_signup`` is resolved below."""
+        intent_seen = {
+            "contact_enquiry": bool(onboarding_count),
+            "contact_page": visited_contact,
+            "trial_page": visited_trial,
+            "trial_requested": bool(club.requested_trial_modules),
+            "in_trial": (club.demo_status or "") == "in_trial",
+            "ad_signup": ad_signup,
+        }
+        for key, seen in {**activity_seen, **intent_seen}.items():
+            _note(key, seen)
+
     # A prospect whose org was born from a paid ad (self_serve_ad). Only meaningful
     # for a linked org; a bare directory row has no signup_source.
     ad_signup = (not is_customer and org is not None
@@ -767,35 +881,73 @@ async def _engagement(session, club: MarketingClub,
     if is_customer:
         # Account health + expansion. A paying account starts engaged, gains for
         # recent product use, and for an active expansion opportunity; floored at Warm.
-        score = CUSTOMER_BASE + int(recency * 0.5) + min(int(freq_pts * 0.5), 20)
+        product_use = min(int(freq_pts * 0.5), 20)
+        score = CUSTOMER_BASE + int(recency * 0.5) + product_use
         if upsell:
             score += CUSTOMER_UPSELL_BONUS
         if onboarding_count:
             score += CUSTOMER_ONBOARDING_BONUS   # e.g. asking to onboard a second team/ground
         score = min(score, 100)
         tier = "HOT" if (score > TIER_HOT_MIN or upsell) else "WARM"
+
+        driver = engagement_sources.DRIVER_CUSTOMER
+        _award("customer_base", CUSTOMER_BASE)
+        _award("recency", recency * 0.5)
+        # A customer's web and email activity is halved and then capped at 20,
+        # so no single signal has a point value of its own to report. Split that
+        # one term back across the signals that made it, in proportion to what
+        # each put in — exact below the cap, and the fairest reading of it at
+        # the cap. The alternative is one opaque "product use" bar that can't
+        # answer "did this customer come back through the ads or the emails".
+        activity_scale = (product_use / freq_pts) if freq_pts else 0.0
+        for key, pts in activity_parts.items():
+            if key == "recency":
+                continue
+            _award(key, pts * activity_scale)
+        if upsell:
+            _award("upsell", CUSTOMER_UPSELL_BONUS)
+        if onboarding_count:
+            _award("contact_enquiry", CUSTOMER_ONBOARDING_BONUS)
+        raw_source_total = float(CUSTOMER_BASE + recency * 0.5 + product_use
+                                 + (CUSTOMER_UPSELL_BONUS if upsell else 0)
+                                 + (CUSTOMER_ONBOARDING_BONUS if onboarding_count else 0))
+        _note_unpaid()
     else:
         # Prospect lead heat: recency + frequency of any touch + buying intent.
         score = recency + freq_pts
+        for key, pts in activity_parts.items():
+            _award(key, pts)
         if club.requested_trial_modules:
             score += BONUS_REQUESTED_TRIAL
+            _award("trial_requested", BONUS_REQUESTED_TRIAL)
         if (club.demo_status or "") == "in_trial":
             score += BONUS_IN_TRIAL
+            _award("in_trial", BONUS_IN_TRIAL)
         if visited_contact:
             # Hit the contact page — a real "get in touch" signal, not just browsing.
             score += BONUS_CONTACT_PAGE
+            _award("contact_page", BONUS_CONTACT_PAGE)
         if visited_trial:
             # Hit the /trial signup page — the strongest pre-enquiry buying intent.
             score += BONUS_VISIT_TRIAL
+            _award("trial_page", BONUS_VISIT_TRIAL)
         if ad_signup:
             # Converted a paid ad click all the way to a self-serve registration.
             score += BONUS_AD_SIGNUP
+            _award("ad_signup", BONUS_AD_SIGNUP)
         if onboarding_count:
             # A direct "onboard my club" enquiry is the strongest signal a prospect
             # can give — heavier than the admin-set requested_trial_modules flag.
             score += BONUS_ONBOARDING
+            _award("contact_enquiry", BONUS_ONBOARDING)
+        # Anything on file that earned nothing — an ad click older than the
+        # 90-day decay window, an email opened last winter. It is still how this
+        # club found us, so it is listed, at zero.
+        _note_unpaid()
+        raw_source_total = float(score)
         score = min(score, 100)
         tier = _tier_for(score)
+        driver = engagement_sources.DRIVER_ACTIVITY
 
         # Trial-depth floor: a self-serve/onboarded prospect's own product-setup
         # effort (registration, historical import, merges, module trial usage —
@@ -810,6 +962,24 @@ async def _engagement(session, club: MarketingClub,
             if trial_depth["score"] > score:
                 score = trial_depth["score"]
                 tier = _tier_for(score)
+                # The floor won, so the activity tally is not what the number is
+                # made of — the setup work is. Hand the activity signals back as
+                # present-but-unpaid rather than dropping them: a club that got
+                # here off a Meta ad still came to us through Meta ads.
+                awarded.clear()
+                _note_unpaid()
+                driver = engagement_sources.DRIVER_SETUP_FLOOR
+                _award("staff_registration" if trial_depth.get("_staffRegistered")
+                       else "self_serve_registration", trial_depth.get("_registrationPts"))
+                _award("import_stats", trial_depth.get("_importStatsPts"))
+                _award("merges", trial_depth.get("_mergePts"))
+                _award("module_setup", trial_depth.get("_modulePts"))
+                _award("admin_polish", trial_depth.get("_polishPts"))
+            else:
+                # The club's own activity is already above the floor, so the floor
+                # adds nothing — but say so on the card rather than leaving the
+                # reader to wonder why a registered club shows no setup points.
+                setup_floor = float(trial_depth["score"])
 
     # freq_pts sums fractional per-event decay points (the 21-28 day web-view tier
     # is worth 0.5), so score can come out fractional here — round once, at the
@@ -836,6 +1006,13 @@ async def _engagement(session, club: MarketingClub,
     )
     if direct_enquiry_hot:
         score, tier = DIRECT_ENQUIRY_SCORE, "HOT"
+        # The enquiry IS the score for this window, so it takes the whole of it
+        # and every other signal is reported as present-but-unpaid.
+        awarded.clear()
+        _note_unpaid()
+        driver = engagement_sources.DRIVER_DIRECT_ENQUIRY
+        _award("contact_enquiry", DIRECT_ENQUIRY_SCORE)
+        raw_source_total = float(DIRECT_ENQUIRY_SCORE)
 
     # In an active sales cycle: a customer expanding, or a prospect showing intent or
     # RECENT engagement (so it's a deal to work, not just a name on a list). Uses
@@ -875,6 +1052,26 @@ async def _engagement(session, club: MarketingClub,
         "_freqPts": round(freq_pts, 1),
         "_directEnquiryHot": direct_enquiry_hot,
         "_trialDepth": trial_depth,
+        # Per-source rollup for the CRM's "where is this score coming from"
+        # chart and its source filter. Recorded as the points were awarded
+        # above, never re-derived — services/engagement_sources.py turns these
+        # into labelled, grouped contributions and nothing else computes them.
+        "_sourcePoints": {k: round(v, 1) for k, v in awarded.items()},
+        "_sourcePresent": present,
+        "_driver": driver,
+        "_sourceTotal": round(raw_source_total, 1),
+        "_setupFloor": round(setup_floor, 1),
+        # Counts the breakdown phrases its detail lines from — carried here so
+        # the card needs no second pass over usage_events / email_events.
+        "_events30d": events_30d,
+        "_emailOpens": opens_all,
+        "_emailClicks": clicks_all,
+        "_emailOpens30d": opens_30d,
+        "_emailClicks30d": clicks_30d,
+        "_emailOpenPts": round(open_decay_pts, 1),
+        "_emailClickPts": round(click_decay_pts, 1),
+        "_onboardingCount": onboarding_count,
+        "_isCustomer": is_customer,
     }
     if last_touch:
         fields["lastSeenAt"] = last_touch.isoformat()

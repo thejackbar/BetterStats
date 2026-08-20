@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import get_db, async_session_maker, MarketingClub, MarketingClubContact
 from app.routers.auth import require_super_admin
 from app.services import club_directory as cd
+from app.services import engagement_sources
 from app.services import twenty_sync
 
 router = APIRouter(prefix="/club-admin/marketing", tags=["marketing"])
@@ -735,39 +736,39 @@ async def club_visits(club_id: str, db: AsyncSession = Depends(get_db),
 @router.get("/clubs/{club_id}/engagement-breakdown")
 async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get_db),
                                     _=Depends(require_super_admin)):
-    """Explain a club's engagement score: which signals produced it (recency,
-    web page views, email opens vs clicks, Meta ad clicks) and which flags fired
-    (a direct enquiry, a trial request/in-trial, an ad-sourced signup, product
-    setup depth). Recomputes _engagement live for the breakdown fields, AND
-    persists it — _apply_engagement_cache (called inside _engagement) stages
-    marketing_clubs.engagement_score/.engagement_tier/.engagement_scored_at on
-    the ORM object precisely so its caller's commit can write it through, the
-    same contract every other _engagement() call site (export, bulk export,
-    "Refresh Twenty scores"/"leads") already follows.
-    Without this, a club outside the Twenty-only nightly refresh_engagement
-    job (never exported, or Twenty unconfigured) could carry a score frozen
-    at whatever it was the one time it was first computed — e.g. a direct-
-    enquiry Hot-100 that outlives its own hot-days window — while every
-    detail view (this panel, and the Sales Workspace drawer that calls it)
-    shows the honest, currently-decayed number. Opening the panel is now
-    itself a self-heal: the kanban card/queue row picks up the correction on
-    its next load. Powers the deal-detail panel so a score like 70 with no
-    web activity is self-explaining (e.g. the trial-depth registration
-    floor) instead of a mystery number."""
+    """Explain a club's engagement score: which sources produced it, how many
+    points each one gave, and which of the four drivers the number actually is
+    (its own activity, the registration floor, a direct enquiry pinning it, or
+    a paying customer's account health). Powers the "where is this coming
+    from" chart on the CRM deal card and the Sales Workspace drawer, so a score
+    of 70 with no site visits reads as the trial-depth registration floor
+    instead of a mystery number.
+
+    Every figure here comes from ``twenty_sync._engagement()``'s own record of
+    what it awarded — see services/engagement_sources.py. Nothing is
+    re-derived, so the chart cannot disagree with the score it is explaining.
+
+    Recomputes live AND persists: ``_apply_engagement_cache`` (inside
+    ``_engagement``) stages marketing_clubs.engagement_score/.engagement_tier/
+    .engagement_sources on the ORM object precisely so its caller's commit can
+    write them through, the contract every other ``_engagement()`` call site
+    already follows. Without that, a club outside the Twenty-only nightly
+    refresh (never exported, or Twenty unconfigured) could carry a score frozen
+    at whatever it was first computed as — a direct-enquiry Hot 100 outliving
+    its own window, say — while this panel shows the honest, decayed number.
+    Opening the card is therefore itself a self-heal: the kanban card, the
+    queue row and the source filter all pick up the correction on their next
+    load."""
     from sqlalchemy.orm import selectinload
     from app.models.db import Organisation
 
     club = await db.get(MarketingClub, club_id)
     if club is None:
         raise HTTPException(status_code=404, detail="Club not found")
-    # Capture everything we need off the ORM object BEFORE the read-only rollback
-    # below: rollback expires attached instances, so any later club.<attr> access
+    # Capture everything we need off the ORM object BEFORE the commit below:
+    # committing expires attached instances, so any later club.<attr> access
     # would fire a lazy reload and raise MissingGreenlet in this async context.
     is_linked = bool(club.existing_org_id)
-    req_trial = bool(club.requested_trial_modules)
-    in_trial = (club.demo_status or "") == "in_trial"
-    cid = str(club.id)
-    org_id = str(club.existing_org_id) if club.existing_org_id else None
     org = None
     if club.existing_org_id:
         org = await db.get(Organisation, club.existing_org_id,
@@ -780,141 +781,56 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
     # already makes for its own live-signal recompute — see that function's
     # docstring for why the two paths are equivalent once backfilled.
     eng = await twenty_sync._engagement(db, club, org, fast_web=True)
+    breakdown = engagement_sources.build(eng)
 
-    # Split email engagement into opens vs clicks (with their own decay points),
-    # so the breakdown itemises them instead of lumping "email engagement". Uses
-    # the SAME per-event decay weights the score itself uses (twenty_sync), and
-    # the same attribution (this club's contact emails, or the linked org).
-    from app.services.twenty_sync import EMAIL_OPEN_DECAY as _OPEN, EMAIL_CLICK_DECAY as _CLICK
-
-    def _decay_case(kind, w):
-        return (f"COALESCE(SUM(CASE "
-                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '7 days' THEN {w['d7']} "
-                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '14 days' THEN {w['d14']} "
-                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '21 days' THEN {w['d21']} "
-                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '28 days' THEN {w['d28']} "
-                f"WHEN event_type='{kind}' AND created_at > NOW() - INTERVAL '90 days' THEN {w['d90']} "
-                f"ELSE 0.0 END), 0.0)::float")
-    em = (await db.execute(text(f"""
-        SELECT COUNT(*) FILTER (WHERE event_type='open')  AS opens_all,
-               COUNT(*) FILTER (WHERE event_type='click') AS clicks_all,
-               COUNT(*) FILTER (WHERE event_type='open'  AND created_at > NOW() - INTERVAL '30 days') AS opens_30d,
-               COUNT(*) FILTER (WHERE event_type='click' AND created_at > NOW() - INTERVAL '30 days') AS clicks_30d,
-               {_decay_case('open', _OPEN)}  AS open_pts,
-               {_decay_case('click', _CLICK)} AS click_pts
-        FROM email_events
-        WHERE lower(email) IN (SELECT lower(email) FROM marketing_club_contacts
-                               WHERE marketing_club_id = :cid AND email IS NOT NULL AND email <> '')
-           OR (CAST(:org AS text) IS NOT NULL AND organisation_id::text = CAST(:org AS text))
-    """), {"cid": cid, "org": org_id})).first()
-    opens_all, clicks_all, opens_30d, clicks_30d = (em[0] or 0, em[1] or 0, em[2] or 0, em[3] or 0)
-    open_pts, click_pts = (float(em[4] or 0), float(em[5] or 0))
-
-    # Persist the freshly-recomputed score/tier _engagement() already staged
-    # onto `club` (see the docstring above) — everything from here on reads
-    # off local variables/dicts, never a `club.<attr>` access, so the
-    # post-commit expiry this triggers is safe.
+    # Persist the freshly-recomputed score/tier/sources _engagement() already
+    # staged onto `club` (see the docstring above). Everything from here on
+    # reads local variables, never a `club.<attr>` access, so the post-commit
+    # expiry this triggers is safe.
     await db.commit()
-
-    # Itemised contributions that RECONCILE to the score. Frequency = reach +
-    # depth, both LINEAR, so each is shown at its real scaled point value:
-    #   reach = REACH_PER_VISITOR * distinct 30-day visitors   (usually the biggest term)
-    #   depth = DEPTH_SCALE * each per-event decay sum (web / email / ad)
-    # plus recency, plus the intent bonuses. The setup/registration score is a
-    # FLOOR (the score is the max of it and this activity tally), so it's only
-    # shown as the driver when it actually beats the tally.
-    from app.services.twenty_sync import REACH_PER_VISITOR as _RPV, DEPTH_SCALE as _DS
-
-    recency = eng.get("_recencyPts") or 0
-    web = eng.get("_webDecayPts") or 0
-    ad = eng.get("_adDecayPts") or 0
-    td = eng.get("_trialDepth") or None
-    sessions = eng.get("sessions30d", 0)
-    reach_pts = _RPV * sessions
-    web_c, opens_c, clicks_c, ad_c = _DS * web, _DS * open_pts, _DS * click_pts, _DS * ad
-
-    contributions = []
-    def add(label, points, category, detail=""):
-        if points and round(float(points), 1) != 0:
-            contributions.append({"label": label, "points": round(float(points), 1),
-                                  "category": category, "detail": detail})
-
-    # Engagement signals (the activity tally).
-    add("Distinct visitors (reach)", reach_pts, "engagement",
-        f"{sessions} distinct visitor(s) in 30 days (deduped by IP, matching 'unique IPs' "
-        f"below) x {_RPV} each. Resolves each visit to this one club, and counts its own "
-        f"pages (org/slug) as well as outreach-link clicks.")
-    add("Web page-view volume", web_c, "engagement",
-        "Recent page views to this club's pages, age-weighted (older counts less).")
-    add("Email clicks", clicks_c, "engagement",
-        f"{clicks_all} click(s) all-time, {clicks_30d} in 30 days.")
-    add("Email opens", opens_c, "engagement",
-        f"{opens_all} open(s) all-time, {opens_30d} in 30 days"
-        + ("; email tracking may be off (0 = no data, not no engagement)." if not opens_all and not clicks_all else "."))
-    add("Meta ad clicks", ad_c, "engagement", f"{eng.get('_adClicks', 0)} ad-click landing(s).")
-    add("Recency of last activity", recency, "engagement",
-        "Most recent web/email/enquiry touch, decaying over time.")
-
-    # Intent flags.
-    intent_bonus = 0.0
-    for flag, pts, label in (
-        (eng.get("_onboardingRequested"), twenty_sync.BONUS_ONBOARDING, "Onboarding enquiry"),
-        (eng.get("_visitedContact"), twenty_sync.BONUS_CONTACT_PAGE, "Visited the contact page"),
-        (req_trial, twenty_sync.BONUS_REQUESTED_TRIAL, "Requested a trial"),
-        (in_trial, twenty_sync.BONUS_IN_TRIAL, "Currently in a trial"),
-        (eng.get("_adSignup"), twenty_sync.BONUS_AD_SIGNUP, "Signed up from a paid ad"),
-    ):
-        if flag:
-            add(label, pts, "intent")
-            intent_bonus += pts
-
-    activity_total = reach_pts + web_c + opens_c + clicks_c + ad_c + recency + intent_bonus
-    floor = float((td or {}).get("score") or 0)
-
-    if eng.get("_directEnquiryHot"):
-        explanation = (f"A recent 'onboard my club' enquiry pins the score to "
-                       f"{eng.get('engagementScore')} for a set window — it overrides the tally.")
-    elif floor > activity_total + 0.5:
-        # The registration/setup floor beat the activity tally — it's the driver.
-        explanation = (f"This club is registered/onboarded, which sets a floor of {round(floor)}. "
-                       f"That's higher than its ~{round(activity_total)} activity tally, so the floor is the score.")
-        staff = "" if (td or {}).get("hasPrimaryAdmin") else " (staff-performed, discounted)"
-        add("Registered in BetterStats", td.get("_registrationPts"), "setup",
-            "Onboarded/set up as a club" + staff + ". A floor, not activity.")
-        add("Imported historical stats", td.get("_importStatsPts"), "setup")
-        add("Merged players/grades", td.get("_mergePts"), "setup")
-        add("Set up paid-module features", td.get("_modulePts"), "setup")
-        add("Admin polish (branding/sponsors)", td.get("_polishPts"), "setup")
-    else:
-        explanation = f"The activity signals above total about {round(activity_total)} — that's the score."
-        if floor:
-            explanation += (f" (A registration floor of {round(floor)} also applies, but the club's "
-                            f"activity is already at or above it.)")
 
     return {
         "score": eng.get("engagementScore"),
         "tier": eng.get("engagementTier"),
         "is_customer": is_linked,
         "in_sales_cycle": eng.get("inSalesCycle"),
+        "driver": breakdown["driver"],
+        "explanation": breakdown["explanation"],
+        # Ordered, categorised and carrying a `key` — the chart groups on
+        # `category`, sizes on `points`, and greys the `present_only` rows that
+        # happened but aren't what the score is made of today.
+        "contributions": breakdown["contributions"],
+        "sources": breakdown["sources"],
+        "scored_total": breakdown["scored_total"],
+        "raw_total": breakdown["raw_total"],
         "signals": {
             "sessions_30d": eng.get("sessions30d", 0),
-            "email_opens": opens_all,
-            "email_clicks": clicks_all,
-            "email_opens_30d": opens_30d,
-            "email_clicks_30d": clicks_30d,
+            "email_opens": eng.get("_emailOpens", 0),
+            "email_clicks": eng.get("_emailClicks", 0),
+            "email_opens_30d": eng.get("_emailOpens30d", 0),
+            "email_clicks_30d": eng.get("_emailClicks30d", 0),
             "ad_clicks": eng.get("_adClicks", 0),
-            "recency_pts": round(float(recency), 1),
-            "web_pts": round(float(web), 1),
-            "email_pts": round(float(open_pts + click_pts), 1),
-            "ad_pts": round(float(ad), 1),
+            "recency_pts": eng.get("_recencyPts", 0),
+            "web_pts": eng.get("_webDecayPts", 0),
+            "email_pts": round(float(eng.get("_emailDecayPts") or 0), 1),
+            "ad_pts": eng.get("_adDecayPts", 0),
             "freq_pts": eng.get("_freqPts", 0),
         },
-        "trial_depth": td,
-        "explanation": explanation,
-        "contributions": contributions,
+        "trial_depth": eng.get("_trialDepth"),
         "last_web_visit_at": eng.get("lastWebVisitAt"),
         "last_email_at": eng.get("lastEmailAt"),
     }
+
+
+@router.get("/engagement-sources")
+async def engagement_source_catalogue(_=Depends(require_super_admin)):
+    """The vocabulary of engagement sources — key, label, category, and one
+    line on what each means. The CRM's source filter offers exactly this, so
+    the pickable options and the scorer that writes the keys can't drift."""
+    return {"sources": engagement_sources.catalogue(),
+            "categories": [{"key": k, "label": lab}
+                           for k, lab in engagement_sources.CATEGORIES]}
+
 
 
 @router.get("/clubs/{club_id}/login-intent")
