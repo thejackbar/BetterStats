@@ -844,7 +844,7 @@ export default function AdminSettings() {
                 ))}
               </div>
               <p className="font-mono text-[10px] text-pb-faintest mt-2">
-                A grade's category is set on the Grades screen, under Merge Grades. A grade
+                A grade's category is set on the Grades screen, under Manage Grades. A grade
                 nobody has classified is worked out from its name, so Under 14s, Colts and
                 Year 7 are picked up without anyone labelling them. Untick everything here
                 to go back to the standard default.

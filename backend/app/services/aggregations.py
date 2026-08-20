@@ -15,6 +15,7 @@ from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_m
 # the same line. The alias is `ga` at every site that uses it.
 _APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 from app.services.season_aliases import (
+    load_reverse_alias_map,
     resolve_season_filter,
     resolve_season_filter_no_org,
 )
@@ -1395,6 +1396,67 @@ async def get_batting_by_grade(
     return [dict(r) for r in result.mappings()]
 
 
+async def _org_grade_display_orders(
+    session: AsyncSession, org_id: Optional[str]
+) -> dict[str, Optional[int]]:
+    """``{folded grade name -> display_order}`` for the club's own reading
+    order, set on Admin → Manage Grades.
+
+    Keyed on the SAME folded name the per-grade queries in this module group
+    by — the club's rename of a grade if it has one, else the canonical name of
+    whatever merge group it belongs to. A guid-keyed lookup (what
+    `social_rounds._grade_display_orders` does, where every row already carries
+    the raw CA guid) can't be used here: these rows are already folded, and two
+    guids can land on one name.
+
+    `MIN` because the reorder endpoint stamps the position onto the canonical
+    grade AND every alias merged into it, so a merge group's rows all carry the
+    same number; MIN ignores a NULL left on an alias the club never ordered.
+    """
+    if not org_id:
+        return {}
+    res = await session.execute(
+        text("""
+            SELECT
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                MIN(gr.display_order) AS display_order
+            FROM grades gr
+            JOIN seasons s ON s.id = gr.season_id
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            GROUP BY 1
+        """),
+        {"org_id": org_id},
+    )
+    return {r["grade_name"]: r["display_order"] for r in res.mappings()}
+
+
+async def _season_labels(session: AsyncSession, season_ids: list[str]) -> dict[str, dict]:
+    """``{season_id -> {name, year}}`` for the seasons named, so a caller
+    holding season ids can label them without a second round trip per row."""
+    if not season_ids:
+        return {}
+    res = await session.execute(
+        text("SELECT id, name, year FROM seasons WHERE id = ANY(CAST(:ids AS UUID[]))"),
+        {"ids": [str(s) for s in season_ids]},
+    )
+    return {str(r["id"]): {"name": r["name"], "year": r["year"]} for r in res.mappings()}
+
+
 async def get_player_team_breakdown(
     session: AsyncSession,
     player_id: str,
@@ -1403,9 +1465,18 @@ async def get_player_team_breakdown(
 ) -> dict:
     """Per-grade match breakdown for a single player.
 
-    Returns ``{rows, unattributed, total_aggregate_matches}``. Each row is a
-    canonical (merge-aware) grade with matches, seasons, won/lost/drawn,
-    win_pct, and a ``scorecard_matches`` count for the per-game source.
+    Returns ``{rows, season_rows, unattributed, total_aggregate_matches}``.
+    Each ``rows`` entry is a canonical (merge-aware) grade with matches,
+    seasons, won/lost/drawn, win_pct, a ``scorecard_matches`` count for the
+    per-game source, and the club's own ``display_order`` for it (Manage
+    Grades → Order; NULL for a grade the club has not placed).
+
+    ``season_rows`` is the same figures laid out season by season — one entry
+    per season with a ``grades`` map of {grade name: matches} — so a screen can
+    draw seasons down one axis and grades across the other. **Both come from
+    one per-(season, grade) attribution pass**, so the grid's column totals are
+    the ``rows`` matches by construction and the two can never disagree on
+    screen.
 
     ``player_season_stats.matches`` is the CA aggregate count and is the source
     of truth for "how many games did this player play". Per-game scorecard
@@ -1533,10 +1604,22 @@ async def get_player_team_breakdown(
         """),
         params,
     )
+    # Seasons are folded onto their canonical row before anything is counted:
+    # a club's real-world season can be split across several `seasons` rows
+    # (Merge Seasons, or one CA season guid per competition), and a grid drawn
+    # off the raw ids would show that one year as two lines.
+    alias_rev = await load_reverse_alias_map(session, org_id) if org_id else {}
+
+    def _canonical_season(raw) -> str:
+        sid = str(raw)
+        return alias_rev.get(sid, sid)
+
     season_grade_games: dict = {}  # season_id -> {grade_name: count}
     for r in per_season_grade.mappings():
-        sid = str(r["season_id"])
-        season_grade_games.setdefault(sid, {})[r["grade_name"]] = int(r["games"] or 0)
+        sid = _canonical_season(r["season_id"])
+        by_grade = season_grade_games.setdefault(sid, {})
+        gn = r["grade_name"]
+        by_grade[gn] = by_grade.get(gn, 0) + int(r["games"] or 0)
 
     # Per-season CA aggregate match counts (kept as a sanity reference and
     # for the heuristic fallback below).
@@ -1549,7 +1632,10 @@ async def get_player_team_breakdown(
         """),
         params,
     )
-    season_aggregate = {str(r["season_id"]): int(r["matches"] or 0) for r in season_totals.mappings()}
+    season_aggregate: dict = {}  # season_id -> CA's own match count
+    for r in season_totals.mappings():
+        sid = _canonical_season(r["season_id"])
+        season_aggregate[sid] = season_aggregate.get(sid, 0) + int(r["matches"] or 0)
 
     # Exact per-(season,grade) aggregate from CA (when synced). Source of truth.
     per_grade_agg = await session.execute(
@@ -1583,24 +1669,71 @@ async def get_player_team_breakdown(
     # Roll up per-(season, canonical-grade-name): sum because merged grades
     # could resolve to the same canonical name within a season.
     exact_per_season_grade: dict = {}  # season_id -> {grade_name: matches}
-    exact_per_grade: dict = {}         # grade_name -> total matches
     for r in per_grade_agg.mappings():
-        sid = str(r["season_id"])
+        sid = _canonical_season(r["season_id"])
         gn = r["grade_name"]
         m = int(r["matches"] or 0)
-        exact_per_season_grade.setdefault(sid, {})[gn] = exact_per_season_grade.get(sid, {}).get(gn, 0) + m
-        exact_per_grade[gn] = exact_per_grade.get(gn, 0) + m
+        by_grade = exact_per_season_grade.setdefault(sid, {})
+        by_grade[gn] = by_grade.get(gn, 0) + m
 
-    # Track which seasons have exact per-grade data so we don't double-count
-    # them with the legacy heuristic.
-    seasons_with_exact = set(exact_per_season_grade.keys())
+    # Attribution runs ONCE, per (season, grade), and everything else is read
+    # off the result. Doing it per season rather than per whole career is also
+    # what makes a mixed history add up: a player with CA's exact per-grade
+    # rows for one season and scorecards only for another used to have the two
+    # compared against each other career-wide, so the second season's matches
+    # were swallowed by the first season's aggregate rather than added to it.
+    cells: dict = {}              # season_id -> {grade_name: matches}
+    cell_unknown: dict = {}       # (season_id, grade_name) -> matches with no scorecard
+    season_unattributed: dict = {}  # season_id -> matches we can't place in a grade
 
-    unattributed = 0
+    for sid in set(season_grade_games) | set(exact_per_season_grade) | set(season_aggregate):
+        scorecards = season_grade_games.get(sid, {})
+        exact = exact_per_season_grade.get(sid)
+        row_cells: dict = {}
+        if exact:
+            # CA's own per-grade count is the source of truth, but never below
+            # the number of scorecards we actually hold for that grade.
+            for gn in set(scorecards) | set(exact):
+                held = scorecards.get(gn, 0)
+                claimed = exact.get(gn, 0)
+                if max(held, claimed) > 0:
+                    row_cells[gn] = max(held, claimed)
+                if claimed > held:
+                    cell_unknown[(sid, gn)] = claimed - held
+            # A season CA has broken down by grade is taken at its word: if its
+            # per-grade rows come to less than its own season total, the
+            # shortfall is left alone rather than guessed at, since the grade
+            # breakdown is the more specific of the two answers.
+        else:
+            # No per-grade aggregate for this season yet: count the scorecards
+            # and hand any shortfall against CA's season total to the one grade
+            # it can only have come from.
+            row_cells = {gn: ct for gn, ct in scorecards.items() if ct > 0}
+            gap = (season_aggregate.get(sid) or 0) - sum(scorecards.values())
+            if gap > 0:
+                if len(row_cells) == 1:
+                    gn = next(iter(row_cells))
+                    row_cells[gn] += gap
+                    cell_unknown[(sid, gn)] = cell_unknown.get((sid, gn), 0) + gap
+                else:
+                    season_unattributed[sid] = gap
+        if row_cells or season_unattributed.get(sid):
+            cells[sid] = row_cells
 
-    # 1) Apply exact per-grade matches where available.
-    for grade_name, agg_matches in exact_per_grade.items():
+    # Fold the cells up into the per-grade rows.
+    grade_totals: dict = {}
+    grade_unknown: dict = {}
+    grade_seasons: dict = {}
+    for sid, row_cells in cells.items():
+        for gn, val in row_cells.items():
+            grade_totals[gn] = grade_totals.get(gn, 0) + val
+            grade_seasons[gn] = grade_seasons.get(gn, 0) + 1
+            grade_unknown[gn] = grade_unknown.get(gn, 0) + cell_unknown.get((sid, gn), 0)
+
+    for grade_name, total in grade_totals.items():
         row = rows_by_name.get(grade_name)
         if row is None:
+            # A grade CA counts matches in but we hold no scorecard for at all.
             row = {
                 "grade_name": grade_name,
                 "scorecard_matches": 0,
@@ -1614,57 +1747,46 @@ async def get_player_team_breakdown(
             }
             rows.append(row)
             rows_by_name[grade_name] = row
-        extra = max(0, agg_matches - (row.get("scorecard_matches") or 0))
-        if extra > 0:
-            row["matches"] = (row.get("scorecard_matches") or 0) + extra
-            row["attributed_unknown"] = extra
-        # Update seasons count if exact data covers seasons the per-game data missed
-        seasons_seen = {sid for sid, gn_map in exact_per_season_grade.items() if grade_name in gn_map}
-        row["seasons"] = max(row.get("seasons") or 0, len(seasons_seen))
+        row["matches"] = total
+        row["attributed_unknown"] = grade_unknown.get(grade_name, 0)
+        row["seasons"] = grade_seasons.get(grade_name, 0)
 
-    # 2) Heuristic fallback for seasons WITHOUT per-grade aggregate yet.
-    grade_attributed_fallback: dict = {}
-    for sid, agg in season_aggregate.items():
-        if sid in seasons_with_exact:
-            continue
-        per_game = sum(season_grade_games.get(sid, {}).values())
-        gap = agg - per_game
-        if gap <= 0:
-            continue
-        grades_with_data = list(season_grade_games.get(sid, {}).keys())
-        if len(grades_with_data) == 1:
-            grade_attributed_fallback[grades_with_data[0]] = grade_attributed_fallback.get(grades_with_data[0], 0) + gap
-        else:
-            unattributed += gap
+    unattributed = sum(season_unattributed.values())
 
-    for grade_name, extra in grade_attributed_fallback.items():
-        row = rows_by_name.get(grade_name)
-        if row is None:
-            row = {
-                "grade_name": grade_name,
-                "scorecard_matches": 0,
-                "matches": extra,
-                "attributed_unknown": extra,
-                "seasons": 0,
-                "won": 0,
-                "lost": 0,
-                "drawn": 0,
-                "win_pct": None,
-            }
-            rows.append(row)
-            rows_by_name[grade_name] = row
-        else:
-            row["matches"] = (row.get("matches") or 0) + extra
-            row["attributed_unknown"] = (row.get("attributed_unknown") or 0) + extra
+    # The club's own reading order for its grades (Manage Grades → Order),
+    # keyed on the same folded name every query above groups by, so a merged
+    # grade carries one position rather than one per spelling.
+    order_by_grade = await _org_grade_display_orders(session, org_id)
+    for row in rows:
+        row["display_order"] = order_by_grade.get(row["grade_name"])
 
     rows.sort(key=lambda r: (-(r.get("matches") or 0), r.get("grade_name") or ""))
     for row in rows:
         decided = row["won"] + row["lost"] + row["drawn"]
         row["win_pct"] = round(row["won"] / decided * 100, 1) if decided > 0 else None
 
+    # Season rows, newest first. The total is the cells plus that season's own
+    # unplaceable matches, so a row reads across to its own figures rather than
+    # to a career number computed somewhere else.
+    season_meta = await _season_labels(session, list(cells.keys()))
+    season_rows = []
+    for sid, row_cells in cells.items():
+        meta = season_meta.get(sid) or {}
+        unplaced = season_unattributed.get(sid, 0)
+        season_rows.append({
+            "season_id": sid,
+            "season_name": meta.get("name"),
+            "year": meta.get("year"),
+            "grades": row_cells,
+            "unattributed": unplaced,
+            "matches": sum(row_cells.values()) + unplaced,
+        })
+    season_rows.sort(key=lambda r: ((r["year"] is None), -(r["year"] or 0), r["season_name"] or ""))
+
     total_aggregate = sum(season_aggregate.values())
     return {
         "rows": rows,
+        "season_rows": season_rows,
         "unattributed": unattributed,
         "total_aggregate_matches": total_aggregate,
     }
