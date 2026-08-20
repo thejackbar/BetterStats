@@ -19,21 +19,36 @@ const CARD = 'pb-card p-3'
 // instead of defaulting to whoever logged the call.
 const ASSIGNABLE_EVENT_OUTCOMES = ['wants_pricing', 'wants_more_info', 'wants_demo']
 
-// Call status — the four states the queue's own filter offers, mirroring
-// services/sales_workspace.py's CALL_STATUS_KEYS. Mutually exclusive and in
-// this precedence order, which is what lets each box own one of the queue
-// row's highlight colours (see the row's className below): a club that is
-// both callback-due and last went to voicemail is a callback, once, and
-// unticking Callback is the only box that hides it.
+// Call status — everything the queue's own filter can ask about a club,
+// mirroring services/sales_workspace.py's CALL_STATUS_KEYS.
+//
+// These OVERLAP. What has happened to a club accumulates: ring them, leave a
+// voicemail, set a follow-up, email a contact, and all four are still true
+// afterwards — so that club shows under Called and VM and Followup and Sent
+// Email, and unticking any one of them hides it. Only Not Called is exclusive
+// with the rest.
+//
+// The queue ROW still picks a single highlight colour by precedence (see its
+// className below), because a row can only be one colour. The swatches here
+// are that colour where there is one, so a filter and the rows it lets
+// through still read as related — but they are no longer the same thing, and
+// Sent Email has no row colour of its own at all.
 const CALL_STATUS = [
-  { key: 'not_called', label: 'Not Called', swatch: 'bg-pb-hairline2',
-    title: 'Clubs nobody has called yet' },
-  { key: 'called', label: 'Called', swatch: 'bg-orange-500',
-    title: 'Clubs that have been called, with no callback due and no voicemail last time' },
-  { key: 'callback', label: 'Callback', swatch: 'bg-blue-500',
+  // The keys stay `not_called`/`called` — they are what the server, a shared
+  // link and a saved preference are all written in, and only the wording on
+  // screen changed. Both read as a CALL, which is what the tooltips say: a
+  // club nobody has rung but somebody has emailed is Not Contacted with Sent
+  // Email ticked.
+  { key: 'not_called', label: 'Not Contacted', swatch: 'bg-pb-hairline2',
+    title: 'Clubs with no call logged against them yet' },
+  { key: 'called', label: 'Contacted', swatch: 'bg-orange-500',
+    title: 'Every club that has ever been called — voicemails and follow-ups included' },
+  { key: 'followup', label: 'Followup', swatch: 'bg-blue-500',
     title: 'Clubs with a follow-up now due or overdue' },
   { key: 'voicemail', label: 'VM', swatch: 'bg-purple-500',
-    title: 'Clubs whose most recent call went to voicemail' },
+    title: 'Clubs whose most recent call went to voicemail — i.e. nobody has picked up since' },
+  { key: 'sent_email', label: 'Sent Email', swatch: 'bg-teal-400',
+    title: 'Clubs a rep has sent an email to from this screen' },
 ]
 
 // First load for a user who has never touched these boxes shows everything —
@@ -45,13 +60,24 @@ const ALL_CALL_STATUS = Object.fromEntries(CALL_STATUS.map(s => [s.key, true]))
 // localStorage — a rep moving between machines keeps their queue.
 const CALL_STATUS_PREF = 'sales_call_status_filters'
 
-// Keeps only the four known keys, as real booleans, so a stored bag written
-// by an older (or newer) build can never feed the filter something it can't
-// read. An empty/unusable saved value falls back to everything ticked.
+// `followup` was saved as `callback` before the box was relabelled. Read the
+// old name through, so a rep who had it unticked doesn't have it silently
+// tick itself back on the first time they open the screen after the rename.
+const CALL_STATUS_ALIASES = { callback: 'followup' }
+
+// Keeps only the known keys, as real booleans, so a stored bag written by an
+// older (or newer) build can never feed the filter something it can't read. A
+// key the saved bag simply doesn't have — a box that did not exist when it
+// was written — defaults to TICKED, since a filter nobody has had the chance
+// to turn off should not start out hiding clubs.
 function cleanCallStatus(saved) {
   if (!saved || typeof saved !== 'object') return null
   const out = {}
-  for (const { key } of CALL_STATUS) out[key] = saved[key] === true
+  for (const { key } of CALL_STATUS) {
+    const alias = Object.keys(CALL_STATUS_ALIASES).find(a => CALL_STATUS_ALIASES[a] === key)
+    const stored = key in saved ? saved[key] : (alias && alias in saved ? saved[alias] : undefined)
+    out[key] = stored === undefined ? true : stored === true
+  }
   return out
 }
 
@@ -168,11 +194,21 @@ function StatePicker({ value, onChange }) {
 // the next), only dropping to its own line once the row genuinely runs out
 // of width. That's what keeps the whole bar to one or two lines instead of
 // one full-width row per group stacked all the way down the page.
-function FilterGroup({ label, children, first = false, className = '' }) {
+// `stack` puts the group's controls in a column instead of a wrapping row —
+// for Call status, where five checkboxes side by side read as a sentence and
+// have to be scanned left to right to see what is actually filtered. Stacked,
+// the ticks line up and the state of the queue is one glance down a column.
+//
+// The groups no longer carry a divider each. With eight of them wrapping onto
+// two or three lines, every wrapped line opened on a vertical rule with
+// nothing to its left, which read as a mistake; spacing separates them just
+// as well. The one rule left is the split between the filters and the Call
+// status column, which is a real boundary.
+function FilterGroup({ label, children, className = '', stack = false }) {
   return (
-    <div className={`flex flex-col gap-1.5 ${first ? '' : 'pl-4 border-l border-pb-hairline'} ${className}`}>
+    <div className={`flex flex-col gap-1.5 ${className}`}>
       <p className="font-mono text-[10px] tracking-wide2 text-pb-faintest uppercase">{label}</p>
-      <div className="flex flex-wrap items-end gap-2">{children}</div>
+      <div className={stack ? 'flex flex-col gap-0.5' : 'flex flex-wrap items-end gap-2'}>{children}</div>
     </div>
   )
 }
@@ -1460,14 +1496,29 @@ export default function SalesWorkspace() {
       )}
 
       <div className={`${CARD} mb-3`}>
-        <div className="flex flex-wrap items-start gap-x-4 gap-y-3">
-          <FilterGroup label="Search" first>
+        {/* Two columns, not one wrapping row. Call status is five stacked
+            checkboxes and so the tallest thing here by some way — left in the
+            wrap it pushed everything else around and sat on a line of its own
+            with a gap beside it. As its own column it reads as the panel it
+            is, and the filters wrap freely in what is left. */}
+        <div className="flex flex-col lg:flex-row gap-4">
+          {/* A grid rather than a wrap: with eight groups of different widths
+              the wrap left "Meta ad" alone on a line with half the card empty
+              beside it, and put two pickers that belong together on different
+              rows. Twelve columns rather than auto-fill, because the spans
+              have to ADD UP — an auto-fill track count moves with the width,
+              so the same spans made two square rows at one size and a ragged
+              three at another. Here each row is 3+4+2+3 and 2+2+3+5, always.
+              Below lg the whole thing drops to a plain two-up and every span
+              switches off, which is the only shape that fits a phone. */}
+          <div className="flex-1 min-w-0 grid grid-cols-2 lg:grid-cols-12 gap-x-5 gap-y-3 items-start">
+          <FilterGroup label="Search" className="col-span-2 lg:col-span-3">
             <TextInput value={filters.q} onChange={e => setFilters(f => ({ ...f, q: e.target.value }))}
-              placeholder="Club or contact name…" style={{ width: 200 }} />
+              placeholder="Club or contact name…" className="w-full" />
           </FilterGroup>
 
-          <FilterGroup label="Stage">
-            <div style={{ width: 150 }}>
+          <FilterGroup label="Stage" className="col-span-2 lg:col-span-5">
+            <div className="min-w-[130px] flex-1">
               <StagePicker stages={stages} value={filters.stage_key} onChange={v => setFilters(f => ({ ...f, stage_key: v }))} />
             </div>
             <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
@@ -1483,8 +1534,8 @@ export default function SalesWorkspace() {
           </FilterGroup>
 
           {isSuper && (
-            <FilterGroup label="Assigned">
-              <div style={{ width: 150 }}>
+            <FilterGroup label="Assigned" className="lg:col-span-2">
+              <div className="w-full">
                 <MultiSelectPicker options={assignedOptions} value={filters.owner_user_ids}
                   onChange={v => setFilters(f => ({ ...f, owner_user_ids: v }))}
                   allLabel="Everyone" noun="people" />
@@ -1498,8 +1549,8 @@ export default function SalesWorkspace() {
               Assigned; the two compose, since a club can be worked by one rep
               and earned by another. */}
           {isSuper && (
-            <FilterGroup label="Attributed">
-              <div style={{ width: 150 }}>
+            <FilterGroup label="Attributed" className="lg:col-span-2">
+              <div className="w-full">
                 <MultiSelectPicker options={attributedOptions} value={filters.attributed_user_ids}
                   onChange={v => setFilters(f => ({ ...f, attributed_user_ids: v }))}
                   allLabel="Everyone" noun="people" />
@@ -1507,23 +1558,23 @@ export default function SalesWorkspace() {
             </FilterGroup>
           )}
 
-          <FilterGroup label="Engagement score">
+          <FilterGroup label="Engagement score" className="lg:col-span-3">
             <div className="flex items-center gap-1.5">
               <NumberInput min={0} max={100} placeholder="min" value={filters.min_score}
-                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} style={{ width: 72 }} />
+                onChange={e => setFilters(f => ({ ...f, min_score: e.target.value }))} className="w-full min-w-0" />
               <span className="text-pb-faintest">–</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.max_score}
-                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} style={{ width: 72 }} />
+                onChange={e => setFilters(f => ({ ...f, max_score: e.target.value }))} className="w-full min-w-0" />
             </div>
           </FilterGroup>
 
-          <FilterGroup label="State">
-            <div style={{ width: 130 }}>
+          <FilterGroup label="State" className="lg:col-span-2">
+            <div className="w-full">
               <StatePicker value={filters.states} onChange={v => setFilters(f => ({ ...f, states: v }))} />
             </div>
           </FilterGroup>
 
-          <FilterGroup label="Interested in">
+          <FilterGroup label="Interested in" className="col-span-2 lg:col-span-5">
             <div className="flex flex-wrap gap-1.5">
               {MODULE_ORDER.map(key => {
                 const on = filters.modules.includes(key)
@@ -1532,7 +1583,7 @@ export default function SalesWorkspace() {
                     onClick={() => setFilters(f => ({
                       ...f, modules: f.modules.includes(key) ? f.modules.filter(k => k !== key) : [...f.modules, key],
                     }))}
-                    className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
+                    className={`px-2 py-1 rounded-full text-[11.5px] border transition ${
                       on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
                          : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
                     {moduleLabel(key)}
@@ -1542,8 +1593,8 @@ export default function SalesWorkspace() {
             </div>
           </FilterGroup>
 
-          <FilterGroup label="Meta ad">
-            <div className="flex items-center gap-3" title="From the trial signup wizard — tick both to match either">
+          <FilterGroup label="Meta ad" className="lg:col-span-2">
+            <div className="flex flex-wrap items-center gap-x-3" title="From the trial signup wizard — tick both to match either">
               <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
                 <input type="checkbox" checked={filters.meta_selected}
                   onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
@@ -1557,15 +1608,18 @@ export default function SalesWorkspace() {
             </div>
           </FilterGroup>
 
-          <FilterGroup label="Call status" className="ml-auto">
+          </div>
+
+          <FilterGroup label="Call status" stack
+            className="shrink-0 lg:pl-4 lg:border-l border-pb-hairline pt-3 border-t lg:pt-0 lg:border-t-0">
             {CALL_STATUS.map(s => (
               <label key={s.key} title={s.title}
-                className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-0.5">
                 <input type="checkbox" checked={!!filters.call_status?.[s.key]}
                   onChange={e => setFilters(f => ({
                     ...f, call_status: { ...f.call_status, [s.key]: e.target.checked },
                   }))} />
-                <span className={`w-2.5 h-2.5 rounded-sm inline-block ${s.swatch}`} />
+                <span className={`w-2.5 h-2.5 rounded-sm inline-block shrink-0 ${s.swatch}`} />
                 {s.label}
               </label>
             ))}
@@ -1615,7 +1669,11 @@ export default function SalesWorkspace() {
       <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 items-start">
         {/* Queue */}
         <div className={CARD}>
-          <div className="flex items-center gap-1.5 pb-2 mb-1.5">
+          {/* Sort and the counts share one line. They were two stacked rows
+              of chrome above the list plus the select-all row under them,
+              which pushed the first club a long way down a column whose whole
+              job is to be scanned. */}
+          <div className="flex items-center gap-1.5 pb-2 mb-1.5 border-b border-pb-hairline">
             <span className="text-[10.5px] text-pb-faintest">Sort</span>
             <Select value={filters.sort} onChange={e => setFilters(f => ({ ...f, sort: e.target.value, sort_dir: '' }))}
               className="!w-auto !py-1 !text-[12px]">
@@ -1632,17 +1690,14 @@ export default function SalesWorkspace() {
                 {(filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc' ? '▲' : '▼'}
               </button>
             )}
-          </div>
-          {clubs.length > 0 && (
-            <div className="flex items-center justify-between px-1 pb-2 mb-1.5 border-b border-pb-hairline text-[11px] text-pb-faint">
-              <span>
+            {clubs.length > 0 && (
+              <span className="ml-auto text-[11px] text-pb-faint whitespace-nowrap">
                 <span className="text-pb-text font-medium">{clubs.length}</span> club{clubs.length === 1 ? '' : 's'}
-              </span>
-              <span>
+                <span className="text-pb-faintest"> · </span>
                 <span className="text-pb-text font-medium">{totalContacts}</span> contact{totalContacts === 1 ? '' : 's'}
               </span>
-            </div>
-          )}
+            )}
+          </div>
           {/* A background reload (Save Call, Send Email, toggling module
               interest — anything that calls loadClubs() while a club is
               already open) should never collapse this list down to a bare
