@@ -370,7 +370,10 @@ export function SquareStep({ step, onOpenTool }) {
       {status && !status.connected && !status.configured && (
         <Notice tone="warn">Square isn't configured on the server yet — get in touch and we'll switch it on.</Notice>
       )}
-      {status && !status.connected && status.configured && (
+      {status && !status.connected && status.configured && status.config_error && (
+        <Notice tone="warn">{status.config_error} That's a server setting, not something your club can change. Get in touch and we'll sort it out.</Notice>
+      )}
+      {status && !status.connected && status.configured && !status.config_error && (
         canConnect ? (
           <WizardButton onClick={connect} disabled={busy}>
             {busy ? <Spinner /> : null} CONNECT SQUARE
@@ -390,6 +393,12 @@ export function SquareStep({ step, onOpenTool }) {
       )}
       {status && !status.connected && !canConnect && (
         <WizardButton variant="secondary" onClick={() => onOpenTool(step)}>OPEN THE SQUARE PAGE →</WizardButton>
+      )}
+      {status && !status.connected && status.configured && !status.config_error && canConnect && (
+        <p className="text-[11.5px] text-pb-faintest">
+          If Square answers with &ldquo;Application does not have a Redirect URL registered&rdquo; after you sign in,
+          that's on Square's side and nothing you entered was wrong. Tell us and we'll register it.
+        </p>
       )}
       {msg && <Notice tone={msg.tone}>{msg.text}</Notice>}
     </div>

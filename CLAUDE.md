@@ -3609,6 +3609,32 @@ OAuth code-flow, per club.
   `connect.squareup.com`. Tokens are stored per club as plain columns (same
   precedent as `playcricket_api_token`); encryption-at-rest is a hardening follow-up.
 
+### "Application does not have a Redirect URL registered in the Developer Console" (Aug 2026)
+
+Reported by a club admin: Setup → Integrations → Square → Connect Square, sign
+in to Square, and Square's OWN error page ends the handshake.
+
+- **Nothing in the handshake is wrong. The Redirect URL is missing on SQUARE's
+  side.** `authorize_url` sends `redirect_uri`, Square matches it against the
+  Authorized Redirect URL registered on the application, and with none
+  registered it refuses right after login. **Registration is PER ENVIRONMENT**,
+  so a URL registered under Sandbox does nothing for a Production app id, which
+  is the other way to see this exact wording. Fix it in the Developer Console
+  (OAuth tab, the matching environment); no deploy is involved.
+- **`SQUARE_REDIRECT_URL` overrides `settings.square_oauth_redirect`**, for a
+  deploy that isn't on `public_base_url` or a URL already registered in some
+  other shape. Square matches it exactly, so the two have to agree.
+- **`settings.square_config_error` is checked BEFORE the browser leaves.**
+  Square's sandbox credentials are prefixed `sandbox-`, so credentials pointed
+  at the wrong host are detectable from the app id alone, and that mismatch
+  reads as this same error. `/square/connect-url` 400s with the cause instead
+  of sending an admin to a page they can do nothing about.
+- **The redirect URL is SERVED, not hardcoded on the screen** (`redirect_url` /
+  `server_environment` on the Square status), so the setup instructions can't
+  drift from what we actually send. Both the Square page and the wizard step
+  name this error and the URL to register, because a club hitting it reads it
+  as a BetterMerch fault.
+
 ## BetterSelect — Self-service player availability (v8.1, Jun 2026)
 
 Players set their own availability with **no account, no app, no Facebook** — one

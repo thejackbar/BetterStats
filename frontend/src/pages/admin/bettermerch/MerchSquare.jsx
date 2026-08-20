@@ -18,6 +18,29 @@ function Toggle({ label, hint, checked, onChange }) {
   )
 }
 
+/* Square shows its own error page when the application has no Redirect URL
+   registered for the environment we send the club to, which reads as a
+   BetterMerch fault and leaves them with nowhere to go. Name it, and name the
+   exact URL that has to be registered. */
+function SquareRedirectHelp({ status }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="pb-card p-4">
+      <button onClick={() => setOpen(!open)} className="text-[12px] text-pb-faint hover:text-pb-accent">
+        {open ? '\u2212' : '+'} Square says &ldquo;Application does not have a Redirect URL registered&rdquo;?
+      </button>
+      {open && (
+        <div className="mt-3 text-[12.5px] text-pb-faint space-y-2">
+          <p>That error comes from Square, after you sign in, and it means BetterCricket's Square application is missing its Redirect URL on Square's side. Your club can't fix it, and nothing you entered was wrong.</p>
+          <p>Let us know you've seen it and we'll register this URL against the {status.server_environment === 'sandbox' ? 'Sandbox' : 'Production'} environment of the application:</p>
+          <code className="block text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">{status.redirect_url}</code>
+          <p className="text-pb-faintest">It's a one-off, server-wide job. Once it's done, Connect Square works for every club.</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function MerchSquare() {
   const toast = useToast()
   const [params, setParams] = useSearchParams()
@@ -108,8 +131,9 @@ export default function MerchSquare() {
                 <li>Click <b className="text-pb-text">+ Create App</b> (or open an existing one).</li>
                 <li>Open the <b className="text-pb-text">Credentials</b> tab and copy the <b className="text-pb-text">Production Application ID</b> and <b className="text-pb-text">Application Secret</b>.</li>
                 <li>
-                  Open the <b className="text-pb-text">OAuth</b> tab and add this as an Authorized Redirect URL:
-                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">https://betterat.cricket/api/public/square/callback</code></div>
+                  Open the <b className="text-pb-text">OAuth</b> tab, switch it to <b className="text-pb-text">{status.server_environment === 'sandbox' ? 'Sandbox' : 'Production'}</b>, and add this as the Redirect URL:
+                  <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">{status.redirect_url}</code></div>
+                  <span className="block mt-1 text-pb-faintest">Sandbox and Production keep their own Redirect URL, so registering it under one does nothing for the other.</span>
                 </li>
                 <li>
                   Add these to the server's <code className="text-pb-text">.env</code> and redeploy the backend:
@@ -123,12 +147,22 @@ export default function MerchSquare() {
               <p className="text-[11.5px] text-pb-faintest mt-3">Once that's live, this notice is replaced by a Connect Square button for each club to use.</p>
             </div>
           ) : !status.connected ? (
-            <div className="pb-card p-6 text-center">
-              <Icon name="share" size={28} className="text-pb-accent mx-auto mb-3" />
-              <h3 className="font-display font-bold text-base mb-1">Connect Square</h3>
-              <p className="text-[12.5px] text-pb-faint mb-4">You'll be sent to Square to approve read access to your items, inventory and sales.</p>
-              <Btn variant="primary" onClick={connect} disabled={busy} icon="share">Connect Square</Btn>
-            </div>
+            <>
+              {status.config_error && (
+                <div className="pb-card p-5 border-pb-amber/30">
+                  <div className="flex items-center gap-2 mb-1"><Icon name="info" size={16} className="text-pb-amber" /><b className="text-sm">Square can't be connected yet</b></div>
+                  <p className="text-[12.5px] text-pb-faint">{status.config_error}</p>
+                  <p className="text-[11.5px] text-pb-faintest mt-2">That's a server setting, not something your club can change. Get in touch and we'll sort it out.</p>
+                </div>
+              )}
+              <div className="pb-card p-6 text-center">
+                <Icon name="share" size={28} className="text-pb-accent mx-auto mb-3" />
+                <h3 className="font-display font-bold text-base mb-1">Connect Square</h3>
+                <p className="text-[12.5px] text-pb-faint mb-4">You'll be sent to Square to approve read access to your items, inventory and sales.</p>
+                <Btn variant="primary" onClick={connect} disabled={busy || !!status.config_error} icon="share">Connect Square</Btn>
+              </div>
+              <SquareRedirectHelp status={status} />
+            </>
           ) : (
             <>
               <div className="pb-card p-5 space-y-3">

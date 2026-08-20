@@ -2175,6 +2175,9 @@ async def create_bulk_payment(
 def _fee_square_status(conn: Optional[MerchSquareConnection]) -> dict:
     return {
         "configured": settings.square_configured,
+        # Named here too so a club without BetterMerch still gets told why the
+        # connection can't be made, rather than an unexplained dead end.
+        "config_error": settings.square_config_error if settings.square_configured else None,
         "connected": bool(conn and conn.access_token and conn.location_id),
         "location_name": conn.location_name if conn else None,
         "sync_fees": conn.sync_fees if conn else False,

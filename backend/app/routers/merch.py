@@ -1273,6 +1273,12 @@ async def export_stock(
 def _square_status(conn: MerchSquareConnection | None) -> dict:
     return {
         "configured": settings.square_configured,
+        # What has to be registered as an Authorized Redirect URL on the Square
+        # application, and under which environment. Served rather than hardcoded
+        # on the screen so the instructions can never drift from what we send.
+        "redirect_url": settings.square_oauth_redirect,
+        "server_environment": settings.square_environment,
+        "config_error": settings.square_config_error if settings.square_configured else None,
         "connected": bool(conn and conn.access_token),
         "merchant_id": conn.merchant_id if conn else None,
         "environment": conn.environment if conn else settings.square_environment,
@@ -1301,8 +1307,12 @@ async def square_connect_url(
     current_user: User = Depends(require_cap(MANAGE_MERCH)),
     club: Organisation = Depends(get_current_club),
 ):
-    if not settings.square_configured:
-        raise HTTPException(status_code=400, detail="Square is not configured on this server")
+    # Catch a server-side misconfiguration here rather than letting the admin
+    # sign in to Square and hit Square's own error page, which they can do
+    # nothing about and which names no cause.
+    problem = settings.square_config_error
+    if problem:
+        raise HTTPException(status_code=400, detail=problem)
     state = sign_square_state(club.id, current_user.id)
     return {"url": square_client.authorize_url(state)}
 

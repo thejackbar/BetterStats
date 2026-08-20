@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     square_app_secret: str = ""
     square_environment: str = "production"  # 'sandbox' | 'production'
     square_api_version: str = ""
+    # Overrides square_oauth_redirect. Only needed when the redirect URL already
+    # registered in the Developer Console isn't the one public_base_url builds
+    # (a deploy on another host, or a URL registered before this shipped) —
+    # Square matches it exactly, so the two have to agree.
+    square_redirect_url: str = ""
 
     # ─── Backup system — "Run backup now" via the backup-agent sidecar ─────────
     # The backend itself has no Docker socket / host filesystem access (by
@@ -322,12 +327,61 @@ class Settings(BaseSettings):
 
     @property
     def square_oauth_redirect(self) -> str:
-        # nginx strips the /api prefix, so this resolves at the public callback.
+        """The redirect URL Square sends the admin back to after they approve.
+
+        Square validates this against the Authorized Redirect URL registered on
+        the application in the Developer Console (OAuth tab), per environment —
+        a mismatch, or nothing registered at all, ends the handshake on Square's
+        own error page ("Application does not have a Redirect URL registered in
+        the Developer Console") before the browser ever comes back to us. So
+        this has to be byte-for-byte what is registered there, which is why
+        SQUARE_REDIRECT_URL can override it for a deploy that is not on
+        public_base_url. Default: nginx strips the /api prefix, so this resolves
+        at the public callback route.
+        """
+        override = (self.square_redirect_url or "").strip()
+        if override:
+            return override.rstrip("/")
         return f"{self.public_base_url}/api/public/square/callback"
 
     @property
     def square_configured(self) -> bool:
         return bool(self.square_app_id and self.square_app_secret)
+
+    @property
+    def square_config_error(self) -> str | None:
+        """A server-side misconfiguration that would fail on Square's page, or None.
+
+        Worth catching before we send an admin to Square, because every one of
+        these ends as an error page over there with nothing they can do about
+        it. Square's sandbox credentials are literally prefixed "sandbox-", so
+        credentials pointed at the wrong host are detectable from the app id
+        alone — and a sandbox app's redirect URL is registered separately from
+        the production one, so the wrong environment reads as "no Redirect URL
+        registered" too.
+        """
+        if not self.square_configured:
+            return "Square is not configured on this server"
+        sandbox_creds = self.square_app_id.startswith("sandbox-")
+        sandbox_env = self.square_environment == "sandbox"
+        if sandbox_creds and not sandbox_env:
+            return (
+                "Square is set to the production environment but SQUARE_APP_ID is a "
+                "sandbox application id. Set SQUARE_ENVIRONMENT=sandbox, or use the "
+                "production credentials."
+            )
+        if sandbox_env and not sandbox_creds:
+            return (
+                "Square is set to the sandbox environment but SQUARE_APP_ID is a "
+                "production application id. Set SQUARE_ENVIRONMENT=production, or use "
+                "the sandbox credentials."
+            )
+        if not self.square_oauth_redirect.startswith("https://"):
+            return (
+                "Square requires an https redirect URL. Fix PUBLIC_BASE_URL or set "
+                "SQUARE_REDIRECT_URL."
+            )
+        return None
 
     # ─── Billing — Stripe Checkout (recurring subscriptions) ───────────────────
     # Platform-owned Stripe account (not per-club OAuth, unlike Square) — one
