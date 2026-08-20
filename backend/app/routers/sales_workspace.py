@@ -244,19 +244,23 @@ async def list_clubs(
     club_name/trial_days default to asc).
 
     ``call_status`` is the queue's Call status filter: a comma-list of the
-    four buckets in services/sales_workspace.CALL_STATUS_KEYS
-    (``not_called``/``called``/``callback``/``voicemail``), ORed — a club is
-    kept when its own bucket is one of the listed ones. The buckets are
-    mutually exclusive and are exactly the queue row's four highlight
-    states, so a box and the rows it hides always agree (see
-    ``call_status_of``). An empty or unrecognised list ('none', which is
-    what the screen sends with every box unticked) matches nothing and
+    buckets in services/sales_workspace.CALL_STATUS_KEYS (``not_called``/
+    ``called``/``followup``/``voicemail``/``sent_email``), ORed — a club is
+    kept when it answers to ANY of the listed ones. The buckets OVERLAP (see
+    ``call_statuses_of``): a club that was rung, went to voicemail and was
+    then emailed is Called and VM and Sent Email at once, so unticking any
+    one of those hides it. ``callback`` is still accepted as the old name
+    for ``followup``, so a saved link or a stored preference written before
+    the rename keeps working. An empty or unrecognised list ('none', which
+    is what the screen sends with every box unticked) matches nothing and
     returns an empty queue — which is what unticking every box asks for.
 
     ``call_status`` REPLACES the older ``called_clubs``/``callback_due``/
     ``voicemail`` booleans, which are still honoured when it is omitted so a
-    link saved before this shipped keeps working. Those are mutually
-    exclusive, most-specific first: ``callback_due`` (a due/overdue
+    link saved before this shipped keeps working. Those ARE mutually
+    exclusive, most-specific first — the behaviour they had when they were
+    written, kept exactly as it was rather than quietly re-pointed at the
+    new overlapping rules: ``callback_due`` (a due/overdue
     follow-up — inherently a called club, since a follow-up can only exist
     once a call has been logged) takes precedence over everything else; else
     ``voicemail`` narrows to every club whose most recent call outcome was
@@ -374,6 +378,7 @@ async def list_clubs(
 
     deal_ids = [d.id for d in deals]
     last_calls = await sw.last_calls_by_deal(db, deal_ids)
+    emailed = await sw.emailed_deal_ids(db, deal_ids)
     follow_ups = await sw.next_follow_ups_by_deal(db, deal_ids)
     contact_counts = await sw.contact_counts_by_club(db, (d.marketing_club_id for d in deals))
 
@@ -423,6 +428,14 @@ async def list_clubs(
         # due/overdue follow-up, orange = called with nothing pending) so the
         # frontend doesn't re-derive the date comparison itself.
         row["callback_due"] = bool(row["next_follow_up_at"] and row["next_follow_up_at"] <= now_iso)
+        row["sent_email"] = d.id in emailed
+        # Every bucket this club answers to, computed once here so the filter
+        # below and anything else reading it can't drift apart. A set is not
+        # JSON, so it is popped back off before the response is built.
+        row["call_statuses"] = sw.call_statuses_of(
+            ever_called=row["ever_called"], followup_due=row["callback_due"],
+            last_call_outcome=row["last_call_outcome"], sent_email=row["sent_email"],
+        )
         # deal.updated_at is a cheap proxy for "recent signal" (it also moves
         # on engagement-driven auto-promotion elsewhere in the CRM engine) —
         # a full multi-source recency query per row isn't worth it for a v1
@@ -433,21 +446,18 @@ async def list_clubs(
         )
         out.append(row)
 
-    # The Call status filter. A ticked set is an OR over mutually-exclusive
-    # buckets, so it never needs the precedence dance the legacy booleans
-    # below do — and an explicit set always wins, Attributed pick or not,
-    # because it is the rep's own choice rather than an implicit default.
+    # The Call status filter: keep a club if it answers to ANY ticked box. The
+    # buckets overlap (a club that was rung, went to voicemail and was then
+    # emailed is all three at once — see sw.call_statuses_of), so this is a set
+    # intersection rather than the single-bucket test it started as. An
+    # explicit set always wins, Attributed pick or not, because it is the
+    # rep's own choice rather than an implicit default.
     if call_status is not None:
         picked_status = {
-            s.strip() for s in call_status.split(",") if s.strip()
+            sw.CALL_STATUS_ALIASES.get(s.strip(), s.strip())
+            for s in call_status.split(",") if s.strip()
         } & set(sw.CALL_STATUS_KEYS)
-        out = [
-            r for r in out
-            if sw.call_status_of(
-                ever_called=r["ever_called"], callback_due=r["callback_due"],
-                last_call_outcome=r["last_call_outcome"],
-            ) in picked_status
-        ]
+        out = [r for r in out if r["call_statuses"] & picked_status]
     # Legacy: most-specific-first, mutually exclusive — see the docstring above.
     elif callback_due:
         out = [r for r in out if r["callback_due"]]
@@ -469,6 +479,11 @@ async def list_clubs(
         out = [r for r in out if r["engagement_score"] is not None and r["engagement_score"] <= max_score]
 
     _sort_rows(out, sort, sort_dir)
+    # A set can't be serialised, and the browser has no use for it — the row
+    # already carries the flags it is built from (ever_called / callback_due /
+    # last_call_outcome / sent_email) for the row's own highlight.
+    for r in out:
+        r.pop("call_statuses", None)
     return {
         "clubs": out,
         "stages": [{"id": str(s.id), "key": s.key, "name": s.name} for s in pipeline.stages],

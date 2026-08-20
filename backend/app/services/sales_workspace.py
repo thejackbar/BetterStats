@@ -788,26 +788,78 @@ async def registration_journey(session: AsyncSession, club) -> Optional[dict]:
 
 
 # ─── Call status vocabulary ───────────────────────────────────────────────────
-# The four states the queue's Call status filter offers, and the ONE place the
-# rule for each is written. They are MUTUALLY EXCLUSIVE and in this precedence
-# order, which is deliberate: every one of them is a row highlight colour on
-# the queue (callback = blue, voicemail = purple, called = orange, not called =
-# no highlight), so a box and the rows it hides always mean the same thing. A
-# club that is both callback-due and last went to voicemail is a callback —
-# same precedence the queue row's own colour has always used.
-CALL_STATUS_KEYS = ("not_called", "called", "callback", "voicemail")
+# The five things the queue's Call status filter can ask about a club, and the
+# ONE place the rule for each is written.
+#
+# They OVERLAP, deliberately, because what has happened to a club accumulates:
+# a rep rings, leaves a voicemail, sets a follow-up and then emails a contact,
+# and every one of those is still true afterwards. So that club answers to
+# Called AND VM AND Followup AND Sent Email at once, and unticking any of them
+# hides it. Only ``not_called`` is exclusive with the rest, by construction —
+# a club with a call logged against it is not an uncalled one.
+#
+# This is NOT how they started out. The first cut treated them as one bucket
+# per club in a precedence order, which meant a voicemail was not a call and a
+# follow-up was neither — so a rep looking at Called could not see the clubs
+# they had most recently worked. The queue ROW still picks a single highlight
+# colour by precedence (see the frontend), because a row can only be one
+# colour; the filter no longer works that way and the two are allowed to
+# differ.
+CALL_STATUS_KEYS = ("not_called", "called", "followup", "voicemail", "sent_email")
+
+# ``callback`` was this bucket's name until it was relabelled Followup. Read
+# through so a shared link, or a preference saved against a user's account,
+# written before the rename still selects the right box rather than silently
+# selecting nothing.
+CALL_STATUS_ALIASES = {"callback": "followup"}
 
 
-def call_status_of(*, ever_called: bool, callback_due: bool,
-                   last_call_outcome: Optional[str]) -> str:
-    """Which single Call status bucket a queue row belongs to."""
+def call_statuses_of(*, ever_called: bool, followup_due: bool,
+                     last_call_outcome: Optional[str],
+                     sent_email: bool = False) -> set:
+    """Every Call status bucket a queue row answers to, not just one.
+
+    ``voicemail`` is about the club's MOST RECENT call, not any call it has
+    ever had: it means "I left a message and have not got through since",
+    which stops being true the moment someone picks up. Sending an email
+    afterwards does not change it — an email is not a call.
+    """
+    out = set()
     if not ever_called:
-        return "not_called"
-    if callback_due:
-        return "callback"
-    if last_call_outcome == "voicemail":
-        return "voicemail"
-    return "called"
+        out.add("not_called")
+    else:
+        out.add("called")
+        if last_call_outcome == "voicemail":
+            out.add("voicemail")
+    # A follow-up can only exist once a call has been logged, so this never
+    # applies to an uncalled club — but it is checked on its own rather than
+    # nested under `called`, so a follow-up recorded some other way in future
+    # still counts.
+    if followup_due:
+        out.add("followup")
+    if sent_email:
+        out.add("sent_email")
+    return out
+
+
+async def emailed_deal_ids(session: AsyncSession, deal_ids) -> set:
+    """The deals a rep has actually sent an email to, batched for the queue.
+
+    An email is a ``crm_activities`` row of type 'email' — what Send Email
+    writes on a successful send (see routers/sales_workspace.send_email), so a
+    send that failed logs nothing and this stays honest. Twenty-imported rows
+    are left out for the same reason the drawer's own timeline leaves them
+    out: they are a backfill of somebody else's pipeline, not a call this
+    workspace made.
+    """
+    ids = {d for d in deal_ids if d is not None}
+    if not ids:
+        return set()
+    rows = (await session.execute(
+        select(CrmActivity)
+        .where(CrmActivity.deal_id.in_(ids), CrmActivity.type == "email")
+    )).scalars().all()
+    return {a.deal_id for a in rows if not _is_twenty_imported(a)}
 
 
 # ─── Queue row shaping ────────────────────────────────────────────────────────
