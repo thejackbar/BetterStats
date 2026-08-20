@@ -10,7 +10,7 @@ import Events from './screens/Events'
 import AreasRoles from './screens/AreasRoles'
 import InternalDirectory from './screens/InternalDirectory'
 
-// The People and Club screens of BetterClubhouse.
+// The People and Club screens of BetterAdmin.
 //
 // These used to be BetterClubManager: a self-contained fork with its own 232px
 // sidebar, its own indigo accent and its own internal navigation. The merge
@@ -49,6 +49,9 @@ export default function ClubManagerApp({ initialScreen = 'overview' }) {
       dirType: '', dirPlaying: 'all',
       facTab: 'availability', bookings: null, requests: null, returned: {},
       cteTab: 'meetings', cteMeeting: 'm5',
+      // Committee's own button rows: the section, and the view within it.
+      cteMeetingsView: 'meetings', cteMaView: 'actions', cteActionsView: 'list',
+      ctePlansView: 'plans', cteTemplate: null,
       event: 'e3',
       setupTab: 'roles',
       // configurable rostering settings (would become real club settings)

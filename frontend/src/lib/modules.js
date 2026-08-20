@@ -47,7 +47,7 @@ export const MODULE_INFO = [
     to: '/admin/fees',
     built: true,
     caps: [CAP.MANAGE_FEES],
-    group: 'admin',  // shown under the BetterClubhouse umbrella tile
+    group: 'admin',  // shown under the BetterAdmin umbrella tile
   },
   {
     key: MODULE.COMMS,
@@ -95,7 +95,7 @@ export const MODULE_INFO = [
 ]
 
 // BetterFees + BetterComms + BetterMerch + BetterCRM are sold separately but
-// presented together as one **BetterClubhouse** umbrella tile on the dashboard
+// presented together as one **BetterAdmin** umbrella tile on the dashboard
 // / sidebar — the club's back office in one place, one sidebar, one accent.
 export const MODULE_GROUPS = {
   // BetterSocials is an umbrella too: the Post Designer (the socials module)
@@ -109,14 +109,14 @@ export const MODULE_GROUPS = {
     to: '/admin/bettersocials',
     alwaysOpen: true,
   },
-  // BetterClubhouse — the merged back office. Fees, comms, merch and the club
+  // BetterAdmin — the merged back office. Fees, comms, merch and the club
   // tools used to be four surfaces with four sidebars; they are six sections of
   // one now. The `admin` key and billing key are unchanged, so entitlement and
   // invoicing are untouched by the rename.
   admin: {
     key: 'admin',
     billingKey: 'admin',
-    name: 'BetterClubhouse',
+    name: 'BetterAdmin',
     blurb: 'Run the whole back office from one place — people, money, stock, comms and the club.',
     to: '/admin/clubhouse',
   },
@@ -129,7 +129,7 @@ export const MODULE_GROUPS = {
 // every admin, like the Core website under BetterSocials.
 //
 // BetterClubManager is NOT here either — it stopped being its own product when
-// it merged into BetterClubhouse. Its screens are the People and Club sections
+// it merged into BetterAdmin. Its screens are the People and Club sections
 // of that sidebar, still gated to super_admin while their CRUD is finished.
 export const CORE_TILES = [
   {
@@ -189,7 +189,7 @@ export function coreLiveFromPlan(plan) {
   return null
 }
 
-// The modular toggles a super admin grants per club. BetterClubhouse is the
+// The modular toggles a super admin grants per club. BetterAdmin is the
 // back-office umbrella, so its toggle covers all four backend module keys (fees
 // + comms + merch + crm). `modules` are the backend entitlement keys (app/auth/modules.py
 // ALL_MODULES); Core (BetterStats) is always on and isn't a toggle.
@@ -199,18 +199,18 @@ export const MODULE_TOGGLES = [
   { key: 'core',    label: 'BetterStats',   modules: ['core'] },
   { key: 'select',  label: 'BetterSelect',  modules: ['select'] },
   { key: 'socials', label: 'BetterSocials', modules: ['socials'] },
-  { key: 'admin',   label: 'BetterClubhouse', modules: ['fees', 'comms', 'merch', 'crm'] },
+  { key: 'admin',   label: 'BetterAdmin', modules: ['fees', 'comms', 'merch', 'crm'] },
   { key: 'iq',      label: 'BetterIQ',       modules: ['iq'] },
   { key: 'fantasy', label: 'BetterFantasyCricket', modules: ['fantasy'] },
 ]
 
-// Display name for a billable module key (BetterClubhouse = the
+// Display name for a billable module key (BetterAdmin = the
 // fees/comms/merch/crm umbrella). Mirrors the backend BILLABLE_MODULE_NAMES; covers the member keys too.
 export const BILLABLE_MODULE_NAME = {
   core: 'BetterStats',
   select: 'BetterSelect',
   socials: 'BetterSocials',
-  admin: 'BetterClubhouse',
+  admin: 'BetterAdmin',
   iq: 'BetterIQ',
   fantasy: 'BetterFantasyCricket',
   fees: 'BetterFees',

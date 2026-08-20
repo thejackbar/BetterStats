@@ -8,7 +8,7 @@ import { useState, useEffect, useRef } from 'react'
 // BetterComms serves two audiences from one engine and they stay strictly
 // separated:
 //   · Club scope — a club officer emailing their own people. CLUB_FIELD_DEFS,
-//     and nothing else. This is what BetterClubhouse's Segments screen imports.
+//     and nothing else. This is what BetterAdmin's Segments screen imports.
 //   · Super Admin scope — BetterCricket's own marketing against the Clubs
 //     Directory. DIRECTORY_FIELD_DEFS is that field set and it must never be
 //     reachable from a club build: not behind a dropdown, not greyed out, not
@@ -22,7 +22,7 @@ const YESNO = [['yes', 'yes'], ['no', 'no']]
 // The six modules a prospect can trial / request, by entitlement key.
 const MODULE_OPTS = [
   ['core', 'BetterStats'], ['select', 'BetterSelect'], ['socials', 'BetterSocials'],
-  ['admin', 'BetterClubhouse'], ['iq', 'BetterIQ'], ['fantasy', 'BetterFantasyCricket'],
+  ['admin', 'BetterAdmin'], ['iq', 'BetterIQ'], ['fantasy', 'BetterFantasyCricket'],
 ]
 
 // ── Club scope ───────────────────────────────────────────────────────────────
@@ -74,7 +74,7 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Visited a page', input: 'multi', ops: [['eq', 'is any of']],
     options: [
       ['stats', 'BetterStats page'], ['select', 'BetterSelect page'], ['socials', 'BetterSocials page'],
-      ['admin', 'BetterClubhouse page'], ['betteriq', 'BetterIQ page'], ['fantasy', 'BetterFantasyCricket page'],
+      ['admin', 'BetterAdmin page'], ['betteriq', 'BetterIQ page'], ['fantasy', 'BetterFantasyCricket page'],
       ['pricing', 'Pricing page'], ['compare', 'Compare page'], ['about', 'About page'],
       ['faq', 'FAQ page'], ['contact', 'Contact Us page'], ['any', 'Any page'],
     ],

@@ -328,12 +328,16 @@ function NewTaskForm({ onCreated }) {
   )
 }
 
-function TasksTab({ members }) {
+export function TasksTab({ members, view: viewProp, onView }) {
   const toast = useToast()
   const [tasks, setTasks] = useState(null)
   const [objectives, setObjectives] = useState([])
   const [openId, setOpenId] = useState(null)   // the action whose plan is showing
-  const [view, setView] = useState('board')    // board | timeline
+  // board | timeline. A caller drawing its own buttons passes `view`, and then
+  // this stops drawing the toggle rather than showing two that disagree.
+  const [ownView, setOwnView] = useState('board')
+  const view = viewProp || ownView
+  const setView = onView || setOwnView
   const [q, setQ] = useState('')
   const [cat, setCat] = useState('')
   const [objId, setObjId] = useState('')
@@ -400,12 +404,14 @@ function TasksTab({ members }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-1 mb-3">
-        {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
-          <button key={k} onClick={() => setView(k)}
-            className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
-        ))}
-      </div>
+      {!viewProp && (
+        <div className="flex items-center gap-1 mb-3">
+          {[['board', 'Board'], ['timeline', 'Timeline']].map(([k, l]) => (
+            <button key={k} onClick={() => setView(k)}
+              className={`px-3 py-1.5 rounded text-[12.5px] font-semibold ${view === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+          ))}
+        </div>
+      )}
       {view === 'timeline' ? (
         <ActionTimeline tasks={shown} objectives={objectives}
           onOpen={t => { setView('board'); setOpenId(t.id) }} />
@@ -466,7 +472,7 @@ function TasksTab({ members }) {
 }
 
 // ── Documents tab ────────────────────────────────────────────────────────────
-function DocumentsTab() {
+export function DocumentsTab() {
   const toast = useToast()
   const [docs, setDocs] = useState(null)
   const [form, setForm] = useState({ title: '', category: 'governance', url: '' })
@@ -530,7 +536,7 @@ function DocumentsTab() {
 }
 
 // ── Calendar tab ─────────────────────────────────────────────────────────────
-function CalendarTab() {
+export function CalendarTab() {
   const toast = useToast()
   const [events, setEvents] = useState(null)
   const [form, setForm] = useState({ title: '', event_type: 'committee_meeting', starts_at: '', location: '' })

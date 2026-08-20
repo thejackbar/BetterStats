@@ -286,7 +286,7 @@ export default function CommsContacts() {
         <div className="text-pb-faint text-sm">Loading…</div>
       ) : data.contacts.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
-          Nobody in your club has an email address on file yet. Add them in <strong className="text-pb-text">Clubhouse → Directory</strong>, or add and import addresses above.
+          Nobody in your club has an email address on file yet. Add them in <strong className="text-pb-text">BetterAdmin → Directory</strong>, or add and import addresses above.
         </div>
       ) : visible.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">No contacts match your search.</div>

@@ -1084,7 +1084,91 @@ function PillarBar({ pillars, active, onPick, onChanged }) {
   )
 }
 
-export function PlanTab({ members }) {
+
+/* ── Themes, on their own screen ────────────────────────────────────────── */
+
+// The theme chips above the plans are a FILTER that happens to be editable.
+// This is the same rows read as a catalogue: what the club groups its work
+// under, how much work sits under each, and the rename/delete that goes with
+// owning a list. Deleting a theme never takes its objectives with it — they
+// stay, they just stop being grouped (the rule migration 232 set).
+function ThemesSection({ pillars, plans, unassigned, onChanged }) {
+  const toast = useToast()
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  const all = [...plans.flatMap(p => p.objective_list || []), ...(unassigned.objective_list || [])]
+  const count = id => all.filter(o => o.pillar_id === id).length
+  const loose = all.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id)).length
+
+  async function add() {
+    if (!draft.trim()) return
+    setBusy(true)
+    try { await api.committeeCreatePillar({ name: draft.trim() }); setDraft(''); onChanged() }
+    catch (e) { toast.error(e.message) } finally { setBusy(false) }
+  }
+  async function rename(pl) {
+    const name = prompt('Rename this theme', pl.name)
+    if (!name || !name.trim() || name === pl.name) return
+    try { await api.committeeUpdatePillar(pl.id, { name: name.trim() }); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function remove(pl) {
+    const n = count(pl.id)
+    if (!confirm(`Delete "${pl.name}"?${n ? ` Its ${n} objective${n === 1 ? '' : 's'} stay, they just stop being grouped under it.` : ''}`)) return
+    try { await api.committeeDeletePillar(pl.id); onChanged() } catch (e) { toast.error(e.message) }
+  }
+
+  return (
+    <div>
+      <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
+        The headings the club groups its objectives under — participation, finances, volunteers,
+        facilities, or whatever your own plan is built around. A theme is a grouping, not another
+        level: plan, objective, action stays three deep.
+      </p>
+
+      <div className="flex gap-2 mb-4 max-w-md">
+        <input className={inp} placeholder="New theme, e.g. Facilities &amp; community"
+          value={draft} onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') add() }} />
+        <button onClick={add} disabled={busy || !draft.trim()}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40 whitespace-nowrap"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
+      </div>
+
+      {pillars.length === 0 ? (
+        <div className="pb-card p-6 text-center text-pb-dim text-[13px]">
+          No themes yet. Add one above and your objectives can be grouped under it.
+        </div>
+      ) : (
+        <div className="space-y-2 max-w-2xl">
+          {pillars.map(pl => (
+            <div key={pl.id} className="pb-card p-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-pb-text font-semibold text-[15px]">{pl.name}</div>
+                <div className={`${cap} mt-0.5`}>
+                  {count(pl.id)} {count(pl.id) === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => rename(pl)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Rename</button>
+                <button onClick={() => remove(pl)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+              </div>
+            </div>
+          ))}
+          {loose > 0 && (
+            <div className="font-mono text-[10px] text-pb-faintest pt-1">
+              {loose} objective{loose === 1 ? '' : 's'} under no theme.
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+export function PlanTab({ members, section }) {
   const toast = useToast()
   const [report, setReport] = useState(null)
   const [positions, setPositions] = useState([])
@@ -1156,6 +1240,58 @@ export function PlanTab({ members }) {
     const loose = shown.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
     if (loose.length) groups.push({ id: '', name: pillars.length ? 'No theme' : null, rows: loose })
     return groups
+  }
+
+  // `section` splits this one screen into the three things it holds, for a
+  // caller that draws its own buttons (BetterAdmin → Committee → Plans).
+  // Passing nothing keeps the whole tab as it was, which is what the manage
+  // screen still renders.
+  if (section === 'themes') {
+    return <ThemesSection pillars={pillars} plans={plans} unassigned={unassigned} onChanged={load} />
+  }
+
+  if (section === 'objectives') {
+    // Every objective the club holds, in one list rather than one plan at a
+    // time — the way "what are we actually committed to" gets asked. Each still
+    // says which plan it belongs to, so flattening loses nothing.
+    const rows = [
+      ...plans.flatMap(pl => (pl.objective_list || []).map(o => ({ ...o, plan_name: o.plan_name || pl.name }))),
+      ...(unassigned.objective_list || []),
+    ]
+    return (
+      <div>
+        <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
+          Every objective across every plan. The actions and motions serving each one are folded
+          away underneath it, and the figures add up from the register the committee already keeps.
+        </p>
+        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} onChanged={load} />
+        <div className="flex flex-wrap items-center gap-2 mb-4">
+          {!addingObjectiveTo && addingObjectiveTo !== '' && (
+            <button onClick={() => setAddingObjectiveTo('')}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold ml-auto"
+              style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
+          )}
+        </div>
+        <div className="space-y-2">
+          {addingObjectiveTo === '' && (
+            <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+              planId="" pillarId={pillarFilter} members={members}
+              onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
+          )}
+          {byTheme(rows).map(g => (
+            <div key={g.id || '__none'} className="space-y-2">
+              {g.name && <div className={`${cap} pt-1`}>{g.name.toUpperCase()}</div>}
+              {g.rows.map(o => <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />)}
+            </div>
+          ))}
+          {rows.filter(inTheme).length === 0 && addingObjectiveTo !== '' && (
+            <div className="pb-card p-6 text-center text-pb-dim text-[13px]">
+              {pillarFilter ? 'No objectives under that theme.' : 'No objectives written down yet.'}
+            </div>
+          )}
+        </div>
+      </div>
+    )
   }
 
   return (

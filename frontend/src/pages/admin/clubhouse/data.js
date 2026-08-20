@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import { MODULE } from '../../../lib/modules'
 
-// One roll-up for the whole BetterClubhouse surface.
+// One roll-up for the whole BetterAdmin surface.
 //
 // Every count in the module — the sidebar badge, the Today row, the Accounts
 // KPI, the "owes money" audience — is the same number computed once here. If

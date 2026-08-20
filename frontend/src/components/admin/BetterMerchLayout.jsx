@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '../../lib/api'
 import BetterClubhouseLayout from './BetterClubhouseLayout'
 
-// The Merch screens are the Stock section of BetterClubhouse now. The one thing
+// The Merch screens are the Stock section of BetterAdmin now. The one thing
 // this wrapper still owns is the storefront flag (migration 179) — "Online
 // store" stays invisible until a super admin switches
 // platform_settings.merch_storefront_enabled on (globally or for this club), so

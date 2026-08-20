@@ -1282,7 +1282,7 @@ export default function Directory({ st, patch, narrow }) {
               <>
                 <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 4 }}>Create a list</div>
                 <div style={{ fontSize: 12.5, color: C.faint, marginBottom: 16 }}>
-                  This makes a list in BetterClubhouse → Comms → Lists, under “Auto-generated lists”, so you can use it as an audience on an email.
+                  This makes a list in BetterAdmin → Comms → Lists, under “Auto-generated lists”, so you can use it as an audience on an email.
                 </div>
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>LIST NAME *
                   <input value={mkList.name} onChange={e => setMkList(m => ({ ...m, name: e.target.value }))} style={{ ...inp, marginTop: 4 }} />

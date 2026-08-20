@@ -4,7 +4,7 @@ import { useClubhouseData, clubhouseModules } from '../../pages/admin/clubhouse/
 import ModuleLayout from './ModuleLayout'
 import ClubhouseContextControl from './ClubhouseContextControl'
 
-// BetterClubhouse — the club's back office as ONE module.
+// BetterAdmin — the club's back office as ONE module.
 //
 // BetterFees, BetterComms, BetterMerch and BetterClubManager used to be four
 // surfaces with four sidebars, four accents and four ways of drawing a button.
@@ -123,7 +123,7 @@ export default function BetterClubhouseLayout({
 
   return (
     <ModuleLayout
-      moduleName="Clubhouse" nav={nav}
+      moduleName="Admin" nav={nav}
       title={title} caption={caption} onHelp={onHelp}
       filters={filters} stats={stats} actions={actions} bare={bare} hideHeader={hideHeader}
       sidebarFooterTop={<ClubhouseContextControl />}
