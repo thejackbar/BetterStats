@@ -603,6 +603,16 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "financial": "fees" if owing_ids is not None else None,
             "training": "nets" if trained_ids is not None else None,
             "training_window_days": TRAINING_WINDOW_DAYS,
+            # The club's own age rule, echoed so the filter can offer only
+            # what it can answer and say what it covers. Under a limit, an
+            # adult's `age` is null for the same reason a player with no
+            # birthday recorded is — so "no age shown" is NOT the same
+            # question as "no date of birth", and the board must not offer it
+            # as though it were.
+            "age": {
+                "shown": bool(club.select_show_age),
+                "under": player_age.clean_age_limit(club.select_show_age_under),
+            },
         },
         "dormancy_months": months,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,

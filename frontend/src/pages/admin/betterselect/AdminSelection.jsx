@@ -28,7 +28,7 @@ import { useFilters } from './filters'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
-import { classifyBowl, formBucket } from './selectionMeta'
+import { classifyBowl, formBucket, matchesAge } from './selectionMeta'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -277,6 +277,10 @@ export default function AdminSelection() {
     // both ways" is just no filter, and each has a third real answer —
     // unknown — for a club whose modules can't say.
     { key: 'fees', type: 'single' }, { key: 'training', type: 'single' },
+    // Age. Single-choice for the same reason: "under 16 and everyone else"
+    // is no filter at all, and the pool's age is already the club's own
+    // answer (see services/player_age.py) — this only reads it.
+    { key: 'age', type: 'single' },
   ], [])
   const filters = useFilters(facets)
   const { values, search } = filters
@@ -302,6 +306,7 @@ export default function AdminSelection() {
     if (values.training === 'trained') list = list.filter((p) => p.trained_recently === true)
     else if (values.training === 'missing') list = list.filter((p) => p.trained_recently === false)
     else if (values.training === 'unknown') list = list.filter((p) => p.trained_recently == null)
+    if (values.age) list = list.filter((p) => matchesAge(p, values.age))
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
     else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)

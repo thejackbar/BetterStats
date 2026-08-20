@@ -13,7 +13,7 @@ import { useState } from 'react'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
 import { SortMenu, SquadPicker } from './filters'
-import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS } from './selectionMeta'
+import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel } from './selectionMeta'
 
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
 const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
@@ -65,6 +65,10 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   const [open, setOpen] = useState(false)
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
+  // Empty for a club that hasn't switched ages on, and the whole group is
+  // dropped rather than shown dead — the same call the Fees and Training
+  // notes make about a filter their module can't answer.
+  const ageOptions = ageFilterOptions(flags)
 
   const pills = []
   ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
@@ -77,6 +81,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
   if (values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
   if (values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
+  if (values.age && ageFilterLabel(values.age, flags)) pills.push({ k: 'age', label: ageFilterLabel(values.age, flags), rm: () => setValue('age', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
 
   const resetAll = () => { clearAll(); setYearsF(0) }
@@ -126,6 +131,24 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
               <Check key={f.value} label={f.label} checked={(values.form || []).includes(f.value)} onChange={() => toggle('form', f.value)} />
             ))}
           </PanelGroup>
+          {ageOptions.length > 0 && (
+            <PanelGroup label="Age">
+              <select value={values.age || ''} onChange={(e) => setValue('age', e.target.value)}
+                className={`w-full bg-transparent text-[12.5px] rounded-md border px-2 py-1.5 focus:outline-none focus:border-pb-accent transition-colors ${
+                  values.age ? 'text-pb-accent border-pb-accent/40' : 'text-pb-dim border-pb-hairline hover:text-pb-text'
+                }`}>
+                <option value="" className="bg-pb-surface text-pb-text">Any age</option>
+                {ageOptions.map((o) => (
+                  <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>
+                ))}
+              </select>
+              <div className="text-[10.5px] leading-snug text-pb-faintest mt-1.5">
+                {flags?.age?.under
+                  ? `Ages are shown for players under ${flags.age.under}. Set a date of birth on a player's profile.`
+                  : "Worked out from the date of birth on a player's profile."}
+              </div>
+            </PanelGroup>
+          )}
           <PanelGroup label="Squad">
             <SquadPicker options={squadOptions} selected={values.squad || []}
               onToggle={(v) => toggle('squad', v)} onSetMany={(arr) => setMulti('squad', arr)} />

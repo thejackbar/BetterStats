@@ -84,6 +84,47 @@ export const FORM_BUCKETS = [
   { value: 'quiet', label: 'Out of nick' },
 ]
 
+/* ── Age ──────────────────────────────────────────────────────────────────
+ * The pool's `age` is already the club's own answer: the server applies both
+ * halves of the rule (ages on at all, and any "juniors only" limit), so a
+ * player carrying one is a player this selector is meant to see. That makes
+ * the filter a plain read of a value already on the card.
+ *
+ * Values are a fixed ladder rather than one option per age present, so the
+ * control reads the same from week to week and "Under 16" is where a coach
+ * expects to find it. The two ends are only OFFERED when the club shows
+ * every age — under a limit an adult has no age at all, so "18 and over"
+ * would always be empty and "no age shown" would mean "an adult, or someone
+ * with no birthday recorded", which is two questions wearing one label. */
+export const AGE_UNDER_LADDER = [13, 14, 15, 16, 17, 18, 19]
+
+export function ageFilterOptions(flags) {
+  const rule = flags?.age
+  if (!rule?.shown) return []
+  const limit = rule.under ?? null
+  // Only thresholds the club's own limit can actually answer: asking for
+  // under-18s when ages stop at 16 would quietly return the under-16s.
+  const unders = AGE_UNDER_LADDER.filter((n) => limit == null || n <= limit)
+  const opts = unders.map((n) => ({ value: `u${n}`, label: `Under ${n}` }))
+  if (limit == null) {
+    opts.push({ value: 'adult', label: '18 and over' })
+    opts.push({ value: 'none', label: 'No date of birth' })
+  }
+  return opts
+}
+
+export function matchesAge(p, value) {
+  if (!value) return true
+  if (value === 'none') return p?.age == null
+  if (value === 'adult') return p?.age != null && p.age >= 18
+  const n = Number(String(value).slice(1))
+  return p?.age != null && Number.isFinite(n) && p.age < n
+}
+
+export function ageFilterLabel(value, flags) {
+  return (ageFilterOptions(flags).find((o) => o.value === value) || {}).label || null
+}
+
 export const HAND_KINDS = [
   { value: 'RIGHT', label: 'Right-hand' },
   { value: 'LEFT', label: 'Left-hand' },

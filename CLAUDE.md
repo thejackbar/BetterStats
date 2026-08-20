@@ -56,10 +56,52 @@ shows the age it works out to.
   the exact params on the wire including the explicit null, the roster row,
   the profile field and its live age, the selection board's tag, no page
   errors, no overflow at 390px).
-- **Not built**: an age filter on the selection board, and any bowling-workload
-  limit encoded in the app. What counts as too many overs for a fourteen
-  year old is a policy call the club's own association makes, and a number we
-  invented would be quoted back at us.
+- **The Age filter offers only what the club's own rule can answer.**
+  `ageFilterOptions` (selectionMeta.js) reads the `flags.age` echo the
+  selection payload carries: no rule, no group at all — a dead control is
+  worse than none, the same call the Fees and Training source notes make. A
+  club limited to under-16s is offered thresholds up to 16 and NOT "18 and
+  over" (no adult carries an age, so it would always be empty) and NOT "no
+  date of birth" (under a limit a null means "an adult, OR nobody recorded
+  one", which is two questions wearing one label). A fixed ladder rather than
+  one option per age present, so "Under 16" is where a coach expects it week
+  to week.
+- **Not built**: any bowling-workload limit encoded in the app. What counts
+  as too many overs for a fourteen year old is a policy call the club's own
+  association makes, and a number we invented would be quoted back at us.
+
+### A `min-w-0` flex group whose children can't shrink OVERLAPS its siblings
+
+Reported off the same screen: the Selection board's Dual rail / Team sheet
+toggle was being painted over by the module pills and the Share button. Not a
+z-index problem and nothing to do with the age work — the header's first group
+carried `min-w-0`, so flex shrank the BOX below its content while the title
+and the toggle inside it could not shrink. The overflow slid under the later
+siblings, which paint on top. Measured, not eyeballed: the toggle's right edge
+sat at 591px while its own group ended at 315px, and from 1100px down an
+`elementFromPoint` at the centre of the last tab returned a module icon.
+
+- **`min-w-0` belongs on the ELEMENT that may shrink, not the group.** The
+  `<h1>` carries `truncate min-w-0` and the toggle carries `shrink-0`, so the
+  group's automatic minimum is now "hamburger + toggle" and flex will not
+  squeeze it past that. Putting `min-w-0` on the group instead is what removed
+  that floor.
+- **Shrinking alone was not enough and the fix is not one line.** With nowrap
+  the overlap went away and the page started overflowing horizontally at
+  ≤900px instead, and the module switcher was crushed to a 21px stub at 1024.
+  `flex-wrap xl:flex-nowrap` is the answer: one row at ≥1280 (byte-identical
+  to what it was, 65px), and below that the bar wraps rather than overlapping.
+  The signed-in user's name + Logout moved from `sm` to `xl` for the same
+  reason — ~110px of the least useful thing in the bar at exactly the widths
+  where the bar has too much in it.
+- **Every other BetterSelect screen is untouched** (53px, one row, no
+  overflow at 1440/1024/390): only Selection passes `headerLeft`, so only
+  Selection had the extra 214px to fit.
+- **Verified by measuring at eight widths with the change stashed and again
+  with it applied** — the baseline overlaps from 1100px down and never
+  overflows the page; the fix overlaps nowhere and overflows nowhere. When a
+  header looks crowded, measure `elementFromPoint` over the thing that is
+  meant to be clickable rather than judging it from a screenshot.
 
 ## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
