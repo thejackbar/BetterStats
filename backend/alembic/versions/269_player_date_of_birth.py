@@ -24,13 +24,13 @@
     the player's own profile payload, which is MANAGE_PLAYERS-gated, and
     never on any public endpoint.
 
-Revision ID: 268
-Revises: 267
+Revision ID: 269
+Revises: 268
 """
 from alembic import op
 
-revision = "268"
-down_revision = "267"
+revision = "269"
+down_revision = "268"
 branch_labels = None
 depends_on = None
 

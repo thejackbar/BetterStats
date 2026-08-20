@@ -1765,8 +1765,14 @@ _RESOLVED_VISITS = (
 # stamps this column at write time using the exact same logic, see above), just
 # applied here to the Website Analytics panel's per-club query instead of the
 # engagement score.
+# NOTE the UUID cid, deliberately NOT ::text like _RESOLVED_VISITS above.
+# Casting it defeats idx_usage_events_resolved_club_created (a plain btree on
+# the uuid column), so the caller's `WHERE v.cid = :cid` could not push down
+# as an index probe and every read seq-scanned the whole append-only
+# usage_events table — the exact cost this column was added to avoid. The
+# caller therefore binds :cid as uuid on this path; see club_visit_detail.
 _RESOLVED_VISITS_FAST = (
-    "SELECT ue.resolved_marketing_club_id::text AS cid, "
+    "SELECT ue.resolved_marketing_club_id AS cid, "
     "COALESCE(ue.visitor_id::text, ue.ip_hash) AS vk, ue.ip_hash AS ip_hash, "
     "ue.created_at, ue.path, ue.traffic_source, ue.country, ue.city "
     "FROM usage_events ue WHERE ue.event_type = 'page_view' "
@@ -1993,7 +1999,11 @@ async def club_visit_detail(session: AsyncSession, club_id, limit: int = 50, fas
     if not cid:
         return empty
     resolved = _RESOLVED_VISITS_FAST if fast_web else _RESOLVED_VISITS
-    base = f"FROM ({resolved}) v WHERE v.cid = :cid"
+    # The two paths carry different cid types — the fast one is the raw
+    # indexed uuid column, the live resolution is text — so the comparison
+    # has to match, or the index is unusable (see _RESOLVED_VISITS_FAST).
+    match = "v.cid = CAST(:cid AS uuid)" if fast_web else "v.cid = :cid"
+    base = f"FROM ({resolved}) v WHERE {match}"
     summary = (await session.execute(text(
         "SELECT COUNT(*) AS views, COUNT(DISTINCT v.vk) AS visitors, "
         "COUNT(DISTINCT v.ip_hash) AS unique_ips, COUNT(DISTINCT v.created_at::date) AS distinct_days, "

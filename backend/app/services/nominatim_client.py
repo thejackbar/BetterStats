@@ -10,13 +10,16 @@ suburb, so the suburb boundary is a reasonable free stand-in for "the
 postcode area".
 
 Nominatim's usage policy caps free use at ~1 request/second and requires a
-descriptive User-Agent — fine here since a lookup only happens once per
-club (the caller persists the result to `marketing_clubs.boundary_geojson`
-and never re-fetches).
+descriptive User-Agent. A lookup only happens once per club (the caller
+persists the result to `marketing_clubs.boundary_geojson` and never
+re-fetches), and MIN_INTERVAL below holds the rate even when several
+uncached clubs are opened in a row.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from typing import Optional
 
 import httpx
@@ -25,6 +28,15 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://nominatim.openstreetmap.org/search"
 TIMEOUT = 15.0
+# Nominatim's usage policy is one request a second, and going over it gets an
+# IP blocked rather than throttled. A rep clicking down the queue can now fire
+# these back to back (the Sales Workspace drawer fetches a boundary lazily, so
+# they are no longer paced by how fast a pane can load), so the gap is kept
+# here rather than left to whoever calls. This only ever delays a club whose
+# polygon has never been cached, and never anything a person is waiting on.
+MIN_INTERVAL = 1.1
+_lock = asyncio.Lock()
+_last_call = 0.0
 _HEADERS = {
     "User-Agent": "BetterCricket/1.0 (support@bettersports.com.au)",
     "Accept": "application/json",
@@ -49,8 +61,14 @@ async def find_suburb_boundary(suburb: str, state: Optional[str], country: str =
         "limit": 5,
     }
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-            r = await client.get(BASE_URL, params=params, headers=_HEADERS)
+        async with _lock:
+            global _last_call
+            wait = MIN_INTERVAL - (time.monotonic() - _last_call)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+                r = await client.get(BASE_URL, params=params, headers=_HEADERS)
+            _last_call = time.monotonic()
             if r.status_code != 200:
                 logger.debug(f"Nominatim: search {q!r} -> {r.status_code}")
                 return None

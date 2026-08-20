@@ -6,7 +6,7 @@ is how a club that restricted ages to juniors ends up with an adult's
 birthday on one screen and not another.
 
 Nothing here stores an age. ``players.date_of_birth`` is the record and the
-age is worked out on every read (migration 268) — a stored age is wrong from
+age is worked out on every read (migration 269) — a stored age is wrong from
 the day after it was written.
 """
 from __future__ import annotations

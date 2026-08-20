@@ -791,7 +791,7 @@ class PlayerProfileUpdate(BaseModel):
     is_public: Optional[bool] = None
     is_financial_override: Optional[bool] = None
     trained_override: Optional[bool] = None
-    # Date of birth (migration 268). Pydantic parses "YYYY-MM-DD" into a real
+    # Date of birth (migration 269). Pydantic parses "YYYY-MM-DD" into a real
     # date, so an unparseable value is a 422 rather than a string handed to a
     # DATE column; an explicit null clears it (the PATCH reads exclude_unset,
     # so a present null IS the intent).

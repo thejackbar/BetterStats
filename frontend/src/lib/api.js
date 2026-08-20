@@ -2115,6 +2115,16 @@ export const api = {
     return request(`/club-admin/sales-workspace/performance${qs}`)
   },
   salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
+  // Fetched separately from the drawer payload on purpose — a club whose
+  // suburb polygon has never been cached costs an upstream Nominatim
+  // lookup, which used to hold up the whole detail pane.
+  salesWorkspaceClubBoundary: (dealId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/boundary`),
+  // Where the club came from — the /trial pick, how far its registration got,
+  // and the Meta ad behind it. Its own request so the beacon reads behind it
+  // can't hold up the detail pane.
+  salesWorkspaceClubSignals: (dealId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/signals`),
   salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
   salesWorkspaceLogCall: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),
@@ -2877,11 +2887,42 @@ export const api = {
   nmUpdateSession: (id, data) =>
     request(`/nets/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   nmDeleteSession: (id) => request(`/nets/sessions/${id}`, { method: 'DELETE' }),
-  // Replace a session's attendance snapshot (checked-in players + guests, who batted).
-  nmSetAttendance: (id, attendees) =>
-    request(`/nets/sessions/${id}/attendance`, { method: 'PUT', body: JSON.stringify({ attendees }) }),
-  // Reports.
+  // The live session. Every device open on it polls nmLive with the version it
+  // last saw; a matching version comes back as {version, server_time,
+  // unchanged: true} and costs almost nothing. Every write below is a small,
+  // discrete change that bumps that version, so two devices on the one session
+  // build on each other's work instead of overwriting it — there is deliberately
+  // no "replace the whole attendance list" call any more.
+  nmLive: (id, since) =>
+    request(`/nets/sessions/${id}/live${since == null ? '' : `?since=${since}`}`),
+  nmAddAttendee: (id, body) =>
+    request(`/nets/sessions/${id}/attendees`, { method: 'POST', body: JSON.stringify(body) }),
+  nmRemoveAttendee: (id, attendeeId) =>
+    request(`/nets/sessions/${id}/attendees/${attendeeId}`, { method: 'DELETE' }),
+  nmPatchAttendee: (id, attendeeId, body) =>
+    request(`/nets/sessions/${id}/attendees/${attendeeId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  // Re-order the waiting queue. Send the waiting attendee ids in the order you
+  // want them; anyone checked in from another device meanwhile keeps their place.
+  nmReorderQueue: (id, ids) =>
+    request(`/nets/sessions/${id}/queue`, { method: 'POST', body: JSON.stringify({ ids }) }),
+  // Pass the turn number the screen is showing: a rotation is the one action
+  // that must not happen twice, so a second device tapping the same turn is
+  // quietly ignored rather than skipping a whole group of batters.
+  nmRotate: (id, autostart, turnSeq) =>
+    request(`/nets/sessions/${id}/rotate`, {
+      method: 'POST',
+      body: JSON.stringify({ autostart, turn_seq: turnSeq ?? null }),
+    }),
+  // action: 'start' | 'pause' | 'reset' | 'expire'
+  nmTimer: (id, action, durationSeconds) =>
+    request(`/nets/sessions/${id}/timer`, {
+      method: 'POST',
+      body: JSON.stringify({ action, duration_seconds: durationSeconds ?? null }),
+    }),
+  // Reports. days = 0 means all time.
   nmAttendanceReport: (days = 120) => request(`/nets/reports/attendance?days=${days}`),
+  nmAttendanceReportCsvUrl: (days = 120) => `${BASE}/nets/reports/attendance.csv?days=${days}`,
+  nmSessionCsvUrl: (id) => `${BASE}/nets/sessions/${id}/attendance.csv`,
   nmPlayerAttendance: (playerId) => request(`/nets/players/${playerId}/attendance`),
 
   // ─── BetterSelect: Player profile ───────────────────────

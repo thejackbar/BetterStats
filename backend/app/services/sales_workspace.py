@@ -21,7 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -613,6 +613,178 @@ async def bulk_assign(
         counts[str(owner_id)] += 1
     await session.flush()
     return counts
+
+
+# ─── Where this club came from: Meta, the trial page, the setup wizard ────────
+# Three questions a rep asks about a warm club that the queue row can't answer:
+# did an ad bring them, how far into signing up did they actually get, and (once
+# they're on) how much of the setup have they done. Every one of these reads a
+# beacon table, so they are served by their own endpoint rather than the drawer
+# payload — see routers/sales_workspace.get_club_signals.
+
+
+def _iso(dt):
+    return dt.isoformat() if dt else None
+
+
+async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
+    """What this club's Meta ad traffic actually was: how many ad landings, on
+    which campaign and creative, where they landed and when.
+
+    The engagement breakdown already says how many POINTS the ad clicks were
+    worth; it can't say which ad, and "they clicked the Club History ad twice
+    last Tuesday" is what a rep opens a call with. Returns None when the club
+    has no ad-attributed traffic at all, so the card simply doesn't draw.
+
+    A click is detected exactly as the score detects it — twenty_sync's
+    ``_META_CLICK``, an fbclid/igshid on the stored URL — rather than a second
+    rule that could disagree with the number beside it. Attribution mirrors
+    ``_engagement``'s own two branches: the pre-stamped resolved club for a
+    prospect's anonymous visit, plus the club's own org traffic once it is
+    onboarded.
+    """
+    if club is None:
+        return None
+    from app.services.twenty_sync import _META_CLICK
+
+    rows = (await session.execute(text(f"""
+        SELECT ue.created_at, ue.path, ue.landing_path,
+               COALESCE(NULLIF(ue.utm_campaign, ''),
+                        substring(ue.path from 'utm_campaign=([^&]+)')) AS campaign,
+               COALESCE(NULLIF(ue.utm_content, ''),
+                        substring(ue.path from 'utm_content=([^&]+)'))  AS content
+        FROM usage_events ue
+        WHERE {_META_CLICK}
+          AND (ue.resolved_marketing_club_id = CAST(:cid AS uuid)
+               -- CAST before the NULL test, not a bare `:org_id IS NOT NULL`:
+               -- asyncpg types a parameter from how it is used, and that gives
+               -- it nothing (AmbiguousParameterError at execute time). Same
+               -- trap the vote-medal note in CLAUDE.md documents.
+               OR (CAST(:org_id AS uuid) IS NOT NULL
+                   AND ue.org_id = CAST(:org_id AS uuid)))
+        ORDER BY ue.created_at DESC
+        LIMIT 500
+    """), {"cid": str(club.id),
+           "org_id": str(club.existing_org_id) if club.existing_org_id else None})).mappings().all()
+    if not rows:
+        return None
+
+    from app.services.meta_ads import AD_DESTINATIONS, CAMPAIGN_UTM_NAMES
+
+    # utm_content is the tag on an ad's own destination URL, so it names the
+    # creative; utm_campaign names the campaign. Both are read back through the
+    # SAME maps the Meta Ads dashboard labels its own rows with, so a creative
+    # reads as "Ad_ClubHistory_Trial_Hero_v3" in both places and an untagged or
+    # retired one falls back to whatever tag it actually carried.
+    ad_names = {a["utm_content"]: a["name"] for a in AD_DESTINATIONS.values() if a.get("utm_content")}
+    campaign_names = set(CAMPAIGN_UTM_NAMES.values())
+
+    def _tally(key):
+        counts: dict[str, int] = {}
+        for r in rows:
+            v = (r[key] or "").strip()
+            if v:
+                counts[v] = counts.get(v, 0) + 1
+        return counts
+
+    ads = [{"name": ad_names.get(k, k), "tag": k, "clicks": n}
+           for k, n in sorted(_tally("content").items(), key=lambda kv: -kv[1])]
+    campaigns = [{"name": k, "known": k in campaign_names, "clicks": n}
+                 for k, n in sorted(_tally("campaign").items(), key=lambda kv: -kv[1])]
+    landings: dict[str, int] = {}
+    for r in rows:
+        # landing_path is only stamped on the visitor's FIRST page of a visit,
+        # so fall back to this row's own path with its query string stripped —
+        # an ad click always carries one (the fbclid is what identified it).
+        path = (r["landing_path"] or (r["path"] or "").split("?")[0] or "").strip()
+        if path:
+            landings[path] = landings.get(path, 0) + 1
+
+    return {
+        "clicks": len(rows),
+        "first_at": rows[-1]["created_at"].isoformat() if rows[-1]["created_at"] else None,
+        "last_at": rows[0]["created_at"].isoformat() if rows[0]["created_at"] else None,
+        "campaigns": campaigns[:4],
+        "ads": ads[:4],
+        "landing_paths": [{"path": p, "views": n}
+                          for p, n in sorted(landings.items(), key=lambda kv: -kv[1])[:4]],
+    }
+
+
+async def registration_journey(session: AsyncSession, club) -> Optional[dict]:
+    """How far into the self-serve trial registration this club actually got,
+    on the real eight-step funnel — and whether they finished or walked away.
+
+    The wizard row a club carries already says "Club selected" / "Reached Terms
+    & privacy" / "Registration completed", which is only a three-level rank
+    over what happens to be identifiable platform-wide. This reads the beacon
+    trail of the visitors who picked THIS club, so "gave up right after the
+    verification code was sent" is sayable — which is the difference between a
+    call worth making and a guess.
+
+    Identity comes from the ``club_prepared`` beacon's OWN captured club (the
+    guid it recorded, else the name it recorded), never from a search term's
+    top match — the same guid-first, name-second priority
+    wizard_club_lists._directory_matches uses, and deliberately not the
+    searched-club resolver, whose whole point is that a half-typed query does
+    not identify anybody (see the Wizard Clubs note in CLAUDE.md).
+    """
+    if club is None:
+        return None
+    from app.services.meta_ads import REGISTRATION_STEP_ORDER
+
+    visitors = (await session.execute(text("""
+        SELECT DISTINCT visitor_id
+        FROM usage_events
+        WHERE event_type = 'self_serve_step'
+          AND route = 'club_prepared'
+          AND visitor_id IS NOT NULL
+          AND (
+            -- CAST before the NULL test — see meta_ad_summary above.
+            (CAST(:guid AS text) IS NOT NULL
+             AND NULLIF(TRIM(metadata->>'club_org_id'), '') = CAST(:guid AS text))
+            OR lower(TRIM(COALESCE(metadata->>'club_name', ''))) = CAST(:name AS text)
+          )
+    """), {"guid": (club.grassroots_guid or "").strip() or None,
+           "name": (club.name or "").strip().lower()})).scalars().all()
+    if not visitors:
+        return None
+
+    steps = (await session.execute(text("""
+        SELECT route, MIN(created_at) AS first_at, MAX(created_at) AS last_at
+        FROM usage_events
+        WHERE event_type = 'self_serve_step' AND visitor_id = ANY(:vids)
+        GROUP BY route
+    """), {"vids": visitors})).mappings().all()
+    by_route = {r["route"]: r for r in steps}
+
+    reached = []
+    furthest = None
+    for i, (key, label) in enumerate(REGISTRATION_STEP_ORDER):
+        row = by_route.get(key)
+        if row is None:
+            continue
+        entry = {"key": key, "label": label, "position": i + 1,
+                 "at": row["last_at"].isoformat() if row["last_at"] else None}
+        reached.append(entry)
+        furthest = entry
+
+    if furthest is None:
+        return None
+    total = len(REGISTRATION_STEP_ORDER)
+    completed = furthest["key"] == REGISTRATION_STEP_ORDER[-1][0]
+    return {
+        "visitors": len(visitors),
+        "completed": completed,
+        # An unfinished run is only worth calling "abandoned" once it has had
+        # time to be one — someone mid-signup right now is still signing up.
+        "abandoned": not completed,
+        "furthest": furthest,
+        "total_steps": total,
+        "reached": reached,
+        "first_at": _iso(min((r["first_at"] for r in steps if r["first_at"]), default=None)),
+        "last_at": _iso(max((r["last_at"] for r in steps if r["last_at"]), default=None)),
+    }
 
 
 # ─── Call status vocabulary ───────────────────────────────────────────────────

@@ -332,9 +332,40 @@ function clubStatsLine(state, stats) {
     stats && `${stats.seasons_count ?? 0} season${(stats.seasons_count ?? 0) === 1 ? '' : 's'}`,
     stats && `${stats.grades_count ?? 0} grade${(stats.grades_count ?? 0) === 1 ? '' : 's'}`,
     stats && `${stats.players_count ?? 0} player${(stats.players_count ?? 0) === 1 ? '' : 's'}`,
-    stats && stats.setup_total > 0 && `setup ${stats.setup_done}/${stats.setup_total}`,
     stats && stats.active_since && `active since ${new Date(stats.active_since).toLocaleDateString('en-AU')}`,
   ].filter(Boolean).join(' · ')
+}
+
+// How much of the Setup Wizard an onboarded club has actually worked through.
+// `setup_total` is the number of steps that apply to THIS club (the wizard
+// filters its groups by what the club is entitled to, so a Core-only club has
+// far fewer than one holding every module) — which is why it is shown as
+// "N of M" rather than against a fixed number that would be wrong for most
+// clubs. It used to be one item in the dense facts line above; a half-finished
+// setup is the most callable thing on the whole card, so it gets its own row.
+function SetupProgress({ stats }) {
+  const total = stats?.setup_total || 0
+  if (!total) return null
+  const done = stats.setup_done || 0
+  const pct = Math.round((done / total) * 100)
+  const complete = done >= total
+  return (
+    <div>
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">Setup wizard</span>
+        <span className={`text-[12px] font-medium ${complete ? 'text-pb-positive' : done ? 'text-pb-text' : 'text-pb-amber'}`}>
+          {done} of {total} step{total === 1 ? '' : 's'}
+          {complete ? ' — done' : done === 0 ? ' — not started' : ''}
+        </span>
+      </div>
+      <div className="h-1.5 rounded-sm mt-1 overflow-hidden" style={{ background: 'var(--pb-hairline2)' }}>
+        <div className="h-full rounded-sm" style={{
+          width: `${pct}%`,
+          background: complete ? 'var(--pb-positive)' : 'var(--pb-accent)',
+        }} />
+      </div>
+    </div>
+  )
 }
 
 // This club's trial and registration story — only rendered once a club is
@@ -352,6 +383,7 @@ function ClubSummaryCard({ deal }) {
   return (
     <div className="space-y-1.5 mt-2 pt-2 border-t border-pb-hairline">
       {line && <p className="text-[12px] text-pb-faint">{line}</p>}
+      <SetupProgress stats={stats} />
       {days != null && (
         <p className={`text-[12.5px] ${days >= 0 ? 'text-pb-text' : 'text-pb-red'}`}>
           Trial: <span className="font-medium">{trialDaysLabel(days)}</span>
@@ -368,24 +400,53 @@ function ClubSummaryCard({ deal }) {
 }
 
 const WIZARD_SOURCE_LABEL = {
-  both: 'Searched & selected in the trial wizard',
-  selected: 'Selected itself in the trial wizard',
-  searched: 'Searched for itself in the trial wizard',
+  both: 'Searched for and picked this club on /trial',
+  selected: 'Picked this club on /trial',
+  searched: 'Searched for this club on /trial',
 }
 
-// Someone from this club typed its name into the trial signup search, or
-// picked it — a real buying signal worth a rep seeing even before anything
-// else has happened. Same data (and the same guid-first, name-fallback
-// match) the Wizard Clubs page itself reads, narrowed to this one club.
-function WizardSignalCard({ signal }) {
-  if (!signal) return null
-  const queries = (signal.queries || []).filter(Boolean)
+const shortDate = (iso) => (iso ? new Date(iso).toLocaleDateString('en-AU') : null)
+
+// A small "step 4 of 8" rail. Filled to where they actually got, so how far
+// short they stopped is the thing you see rather than a number to read. An
+// unfinished run fills AMBER, matching its own headline — green would read as
+// "all good" about the exact case worth ringing them over.
+function StepRail({ position, total, done }) {
+  return (
+    <div className="flex items-center gap-0.5 mt-1.5" aria-hidden="true">
+      {Array.from({ length: total }, (_, i) => (
+        <span key={i} className="h-1.5 flex-1 rounded-sm"
+          style={{ background: i < position
+            ? (done ? 'var(--pb-positive)' : 'var(--pb-amber)')
+            : 'var(--pb-hairline2)' }} />
+      ))}
+    </div>
+  )
+}
+
+// Where this club came from: the /trial page pick, how far the registration
+// actually got, and the ad behind it. Fetched separately from the rest of the
+// drawer (see api.salesWorkspaceClubSignals) because every part reads a beacon
+// table — so this card fills in a moment after the pane rather than holding it
+// up. Renders nothing at all for a club none of it applies to.
+function OriginCard({ signals, loading }) {
+  const wizard = signals?.wizard
+  const reg = signals?.registration
+  if (loading && !signals) {
+    return <div className={CARD}><p className="text-[12px] text-pb-faintest">Looking up where this club came from…</p></div>
+  }
+  if (!wizard && !reg) return null
+  const queries = (wizard?.queries || []).filter(Boolean)
+  const viaMeta = wizard?.via_meta
   return (
     <div className={CARD}>
       <div className="flex items-center gap-2 flex-wrap mb-1">
-        <h3 className="font-display font-bold text-[13px]">{WIZARD_SOURCE_LABEL[signal.source] || 'Trial wizard activity'}</h3>
-        {signal.via_meta && <Pill tone="accent">META AD</Pill>}
+        <h3 className="font-display font-bold text-[13px]">
+          {WIZARD_SOURCE_LABEL[wizard?.source] || 'Trial signup activity'}
+        </h3>
+        {viaMeta && <Pill tone="accent">META AD</Pill>}
       </div>
+
       {queries.length > 0 && (
         <p className="text-[12px] text-pb-faint">
           Searched: {queries.map((q, i) => (
@@ -393,12 +454,77 @@ function WizardSignalCard({ signal }) {
           ))}
         </p>
       )}
-      {signal.furthest_step && (
-        <p className="text-[12px] text-pb-faint mt-0.5">Progress: <span className="text-pb-text">{signal.furthest_step}</span></p>
+
+      {reg ? (
+        <div className="mt-2">
+          <p className="text-[12.5px]">
+            {reg.completed ? (
+              <span className="text-pb-positive font-medium">Registration completed</span>
+            ) : (
+              <>
+                <span className="text-pb-amber font-medium">Gave up at {reg.furthest.label.toLowerCase()}</span>
+                <span className="text-pb-faint"> — step {reg.furthest.position} of {reg.total_steps}</span>
+              </>
+            )}
+          </p>
+          <StepRail position={reg.furthest.position} total={reg.total_steps} done={reg.completed} />
+          {reg.last_at && (
+            <p className="text-[11px] text-pb-faintest mt-1">
+              {reg.completed ? 'Finished' : 'Last step'} {shortDate(reg.last_at)}
+              {reg.visitors > 1 ? ` · ${reg.visitors} people tried` : ''}
+            </p>
+          )}
+        </div>
+      ) : (
+        // A club picked on /trial with no beacon trail behind it never started
+        // the form — worth saying, since "no registration" and "we can't tell"
+        // read the same on an empty card.
+        <p className="text-[12px] text-pb-faint mt-1">Never started the registration form.</p>
       )}
-      {signal.last_at && (
-        <p className="text-[11px] text-pb-faintest mt-0.5">Last seen {new Date(signal.last_at).toLocaleDateString('en-AU')}</p>
+
+      {!reg && wizard?.last_at && (
+        <p className="text-[11px] text-pb-faintest mt-1">Last seen {shortDate(wizard.last_at)}</p>
       )}
+    </div>
+  )
+}
+
+// The ad traffic behind whatever the engagement score credited to Meta. The
+// breakdown below already says how many POINTS those clicks were worth; this
+// says which ad, how many landings and when, which is what a rep opens with.
+function MetaAdsCard({ meta }) {
+  if (!meta) return null
+  return (
+    <div className={CARD}>
+      <div className="flex items-center gap-2 flex-wrap mb-1.5">
+        <h3 className="font-display font-bold text-[13px]">Came through a Meta ad</h3>
+        <Pill tone="accent">{meta.clicks} landing{meta.clicks === 1 ? '' : 's'}</Pill>
+      </div>
+      {meta.ads.length > 0 && (
+        <div className="space-y-0.5">
+          {meta.ads.map(a => (
+            <div key={a.tag} className="flex items-baseline justify-between gap-2 text-[12px]">
+              <span className="text-pb-text truncate">{a.name}</span>
+              <span className="text-pb-faint whitespace-nowrap">{a.clicks}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {meta.campaigns.length > 0 && (
+        <p className="text-[11.5px] text-pb-faint mt-1">
+          {meta.campaigns.map(c => c.name).join(' · ')}
+        </p>
+      )}
+      {meta.landing_paths.length > 0 && (
+        <p className="text-[11.5px] text-pb-faintest mt-0.5">
+          Landed on {meta.landing_paths.map(l => l.path).join(', ')}
+        </p>
+      )}
+      <p className="text-[11px] text-pb-faintest mt-1">
+        {meta.first_at === meta.last_at
+          ? shortDate(meta.last_at)
+          : `${shortDate(meta.first_at)} to ${shortDate(meta.last_at)}`}
+      </p>
     </div>
   )
 }
@@ -675,6 +801,11 @@ export default function SalesWorkspace() {
   const [selectedId, setSelectedId] = useState(null)
   const [drawer, setDrawer] = useState(null)
   const [loadingDrawer, setLoadingDrawer] = useState(false)
+  // The origin cards' own payload. signalsForRef guards against a slow lookup
+  // for one club landing after the rep has already clicked on to the next.
+  const [signals, setSignals] = useState(null)
+  const [signalsLoading, setSignalsLoading] = useState(false)
+  const signalsForRef = useRef(null)
   // Kept in sync with selectedId below, but read from inside loadClubs'/
   // refreshBoth's async callbacks — a plain closure over `selectedId` there
   // would see whatever it was when the callback was CREATED, not the latest
@@ -947,6 +1078,18 @@ export default function SalesWorkspace() {
 
   const loadDrawer = useCallback((dealId) => {
     setLoadingDrawer(true)
+    // Where this club came from (the /trial pick, how far registration got,
+    // the ad behind it) rides on its own request, fired alongside rather than
+    // inside the drawer's — every part of it reads a beacon table, and the
+    // wizard rollup in particular is a whole-platform rebuild whenever its
+    // own short cache has lapsed. The pane no longer waits on any of it.
+    setSignals(null)
+    setSignalsLoading(true)
+    signalsForRef.current = dealId
+    api.salesWorkspaceClubSignals(dealId)
+      .then((d) => { if (signalsForRef.current === dealId) setSignals(d) })
+      .catch(() => {})
+      .finally(() => { if (signalsForRef.current === dealId) setSignalsLoading(false) })
     api.salesWorkspaceClub(dealId).then((d) => {
       setDrawer(d)
       setCallForm(emptyCallForm())
@@ -1656,7 +1799,9 @@ export default function SalesWorkspace() {
                 <ClubSummaryCard deal={drawer.deal} />
               </div>
 
-              <WizardSignalCard signal={drawer.deal.wizard_signal} />
+              <MetaAdsCard meta={signals?.meta_ads} />
+
+              <OriginCard signals={signals} loading={signalsLoading} />
 
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
@@ -1685,7 +1830,7 @@ export default function SalesWorkspace() {
                         longitude={drawer.deal.marketing_club_longitude}
                         postcode={drawer.deal.marketing_club_postcode}
                         state={drawer.deal.marketing_club_state}
-                        preloadedBoundary={drawer.boundary}
+                        fetchBoundary={() => api.salesWorkspaceClubBoundary(drawer.deal.id)}
                       />
                     </div>
                   )}

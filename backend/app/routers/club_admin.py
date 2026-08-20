@@ -209,7 +209,7 @@ async def list_players(
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "last_played": last_played.get(str(p.id)),
             # Age, not date of birth, and only when the club's own
-            # BetterSelect setting says so (migration 268) — a club showing
+            # BetterSelect setting says so (migration 269) — a club showing
             # ages for its juniors alone should not be sending its adults'
             # ages to a browser that has merely been told not to draw them.
             # The BetterSelect roster renders it; Admin → Players doesn't.
@@ -788,7 +788,7 @@ class SettingsPatch(BaseModel):
     dormancy_months: Optional[int] = None
     default_team_size: Optional[int] = None
     # Show a player's age on BetterSelect's selection board and roster
-    # (migration 268), and for whom. select_show_age_under is a genuine
+    # (migration 269), and for whom. select_show_age_under is a genuine
     # tri-state on the wire: absent leaves it alone, null means every
     # player, a number means only players under that age. Read through
     # model_fields_set below for that reason.

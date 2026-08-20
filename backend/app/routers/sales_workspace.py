@@ -600,13 +600,6 @@ async def get_club(
         registrant = {"name": poc["name"], "email": poc.get("email"), "role": role}
     deal_out["registrant"] = registrant
 
-    # Did anyone from this club search for it or pick it in the trial signup
-    # wizard? A real buying signal worth a rep seeing, even before anything
-    # else has happened — same source the Wizard Clubs page reads, narrowed
-    # to this one club.
-    deal_out["wizard_signal"] = await sw.wizard_signal_for_club(db, deal.marketing_club_id) \
-        if deal.marketing_club_id else None
-
     # Same shape the queue list already carries, so the drawer's own "Called
     # / Never called" reads off the identical field the queue row does.
     deal_out["commission_rep_name"] = (
@@ -617,7 +610,6 @@ async def get_club(
 
     engagement = None
     website_visits = None
-    boundary = None
     if club is not None:
         club_id_for_reads = club.id  # captured now: club_engagement_breakdown
                                       # below commits, which expires every ORM
@@ -637,16 +629,6 @@ async def get_club(
         except Exception:  # noqa: BLE001 - the drawer must still render without it
             logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
             website_visits = None
-        # Feeds ClubLocationMap.jsx's suburb-boundary overlay — same
-        # super-admin-only reasoning as website_visits above, `/marketing/
-        # clubs/{id}/boundary` a 'sales' caller can't reach, so the drawer
-        # embeds it via the exact service function that route calls.
-        try:
-            from app.services import club_directory as cd
-            boundary = await cd.get_or_fetch_boundary(db, club_id_for_reads)
-        except Exception:  # noqa: BLE001 - the drawer must still render without it
-            logger.exception("sales_workspace: boundary lookup failed for club %s", club_id_for_reads)
-            boundary = None
         try:
             from app.routers.marketing import club_engagement_breakdown
             engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
@@ -662,9 +644,90 @@ async def get_club(
         "activities": activities_out,
         "engagement": engagement,
         "website_visits": website_visits,
-        "boundary": boundary,
+        # No boundary here on purpose. It is the ONLY thing in this handler
+        # that leaves the building — a Nominatim lookup for a club whose
+        # polygon has never been cached — so embedding it made a first open
+        # wait about a second (up to the client's 15s timeout on a bad day)
+        # while every later open was instant. That is the whole "some clubs
+        # are slower" report. The map fetches it itself now, after the pane
+        # has rendered; see GET /clubs/{deal_id}/boundary below.
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
+    }
+
+
+@router.get("/clubs/{deal_id}/boundary")
+async def get_club_boundary(
+    deal_id: str,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's suburb polygon for the drawer's map overlay, fetched on its
+    own so a cold lookup can't hold up the pane around it.
+
+    Exists because ClubLocationMap's usual source, `/marketing/clubs/{id}/
+    boundary`, is super-admin-only and a 'sales' caller can't reach it — the
+    same reason the drawer used to embed the polygon. Deal-scoped rather than
+    club-scoped so the rep's own access rule still decides it: _assert_can_touch
+    is the same gate every other action on this club goes through.
+
+    A club whose polygon is already cached answers from the row; only a club
+    that has never been looked up costs an upstream call, and the result is
+    cached on the row forever.
+    """
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    if not deal.marketing_club_id:
+        return {"geojson": None}
+    try:
+        from app.services import club_directory as cd
+        return {"geojson": await cd.get_or_fetch_boundary(db, deal.marketing_club_id)}
+    except Exception:  # noqa: BLE001 - the map must degrade, never 500 the drawer
+        logger.exception("sales_workspace: boundary lookup failed for deal %s", deal_id)
+        return {"geojson": None}
+
+
+@router.get("/clubs/{deal_id}/signals")
+async def get_club_signals(
+    deal_id: str,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """Where this club came from — the three beacon-backed stories the drawer
+    tells under the club's own details.
+
+    * ``wizard`` — did somebody search for this club, or pick it, on /trial.
+    * ``registration`` — how far into the self-serve registration they got,
+      on the real eight-step funnel, and whether they finished.
+    * ``meta_ads`` — the ad traffic behind whatever the engagement score
+      credited to Meta: which campaign and creative, how many landings, when.
+
+    Its own endpoint on purpose. Every one of these reads a beacon table, and
+    ``wizard`` in particular resolves through the whole-platform Wizard Clubs
+    rollup (cached for three minutes, several seconds to rebuild) — so
+    embedding it meant the pane hung for whoever's click happened to land on
+    an expired cache, seemingly at random. The pane renders first now and
+    these fill in behind it.
+
+    Each part fails independently: a card that can't be built is simply
+    absent, never a 500 on the drawer beside it.
+    """
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
+
+    async def _safe(what, coro):
+        try:
+            return await coro
+        except Exception:  # noqa: BLE001 - a missing card beats a broken drawer
+            logger.exception("sales_workspace: %s failed for deal %s", what, deal_id)
+            return None
+
+    return {
+        "wizard": await _safe("wizard signal", sw.wizard_signal_for_club(db, deal.marketing_club_id))
+        if deal.marketing_club_id else None,
+        "registration": await _safe("registration journey", sw.registration_journey(db, club)),
+        "meta_ads": await _safe("meta ad summary", sw.meta_ad_summary(db, club)),
     }
 
 
