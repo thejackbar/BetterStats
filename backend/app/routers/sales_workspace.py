@@ -181,6 +181,7 @@ async def list_clubs(
     called_clubs: bool = False,
     callback_due: bool = False,
     voicemail: bool = False,
+    call_status: Optional[str] = None,
     list_id: Optional[str] = None,
     min_score: Optional[int] = None,
     max_score: Optional[int] = None,
@@ -242,19 +243,31 @@ async def list_clubs(
     field's own sensible default (recent/engagement_score default to desc,
     club_name/trial_days default to asc).
 
-    The called/callback/voicemail filters are mutually exclusive,
-    most-specific first: ``callback_due`` (a due/overdue follow-up —
-    inherently a called club, since a follow-up can only exist once a call
-    has been logged) takes precedence over everything else; else
+    ``call_status`` is the queue's Call status filter: a comma-list of the
+    four buckets in services/sales_workspace.CALL_STATUS_KEYS
+    (``not_called``/``called``/``callback``/``voicemail``), ORed — a club is
+    kept when its own bucket is one of the listed ones. The buckets are
+    mutually exclusive and are exactly the queue row's four highlight
+    states, so a box and the rows it hides always agree (see
+    ``call_status_of``). An empty or unrecognised list ('none', which is
+    what the screen sends with every box unticked) matches nothing and
+    returns an empty queue — which is what unticking every box asks for.
+
+    ``call_status`` REPLACES the older ``called_clubs``/``callback_due``/
+    ``voicemail`` booleans, which are still honoured when it is omitted so a
+    link saved before this shipped keeps working. Those are mutually
+    exclusive, most-specific first: ``callback_due`` (a due/overdue
+    follow-up — inherently a called club, since a follow-up can only exist
+    once a call has been logged) takes precedence over everything else; else
     ``voicemail`` narrows to every club whose most recent call outcome was
     'voicemail'; else ``called_clubs`` narrows to every club that's ever
-    been called; else — the default, with none ticked — the queue shows
-    only clubs that have NEVER been called, which is what a rep actually
-    wants to see by default (a calling QUEUE, not a call log). That last
-    default does NOT apply while ``attributed_user_ids`` is set: a club is
-    only ever earned by a call or an email, so "earned by Sam" and "never
-    called" are all but mutually exclusive and the pair would come back
-    empty however much work the rep has done."""
+    been called; else — with none ticked — the queue shows only clubs that
+    have NEVER been called, which is what a rep actually wants to see by
+    default (a calling QUEUE, not a call log). That last default does NOT
+    apply while ``attributed_user_ids`` is set: a club is only ever earned
+    by a call or an email, so "earned by Sam" and "never called" are all
+    but mutually exclusive and the pair would come back empty however much
+    work the rep has done."""
     pipeline = await crm_service.ensure_platform_pipeline(db)
     stage_by_id = {s.id: s for s in pipeline.stages}
     stage_by_key = {s.key: s for s in pipeline.stages}
@@ -420,8 +433,23 @@ async def list_clubs(
         )
         out.append(row)
 
-    # Most-specific-first, mutually exclusive — see the docstring above.
-    if callback_due:
+    # The Call status filter. A ticked set is an OR over mutually-exclusive
+    # buckets, so it never needs the precedence dance the legacy booleans
+    # below do — and an explicit set always wins, Attributed pick or not,
+    # because it is the rep's own choice rather than an implicit default.
+    if call_status is not None:
+        picked_status = {
+            s.strip() for s in call_status.split(",") if s.strip()
+        } & set(sw.CALL_STATUS_KEYS)
+        out = [
+            r for r in out
+            if sw.call_status_of(
+                ever_called=r["ever_called"], callback_due=r["callback_due"],
+                last_call_outcome=r["last_call_outcome"],
+            ) in picked_status
+        ]
+    # Legacy: most-specific-first, mutually exclusive — see the docstring above.
+    elif callback_due:
         out = [r for r in out if r["callback_due"]]
     elif voicemail:
         out = [r for r in out if r["last_call_outcome"] == "voicemail"]

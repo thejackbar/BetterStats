@@ -19,6 +19,51 @@ const CARD = 'pb-card p-3'
 // instead of defaulting to whoever logged the call.
 const ASSIGNABLE_EVENT_OUTCOMES = ['wants_pricing', 'wants_more_info', 'wants_demo']
 
+// Call status — the four states the queue's own filter offers, mirroring
+// services/sales_workspace.py's CALL_STATUS_KEYS. Mutually exclusive and in
+// this precedence order, which is what lets each box own one of the queue
+// row's highlight colours (see the row's className below): a club that is
+// both callback-due and last went to voicemail is a callback, once, and
+// unticking Callback is the only box that hides it.
+const CALL_STATUS = [
+  { key: 'not_called', label: 'Not Called', swatch: 'bg-pb-hairline2',
+    title: 'Clubs nobody has called yet' },
+  { key: 'called', label: 'Called', swatch: 'bg-orange-500',
+    title: 'Clubs that have been called, with no callback due and no voicemail last time' },
+  { key: 'callback', label: 'Callback', swatch: 'bg-blue-500',
+    title: 'Clubs with a follow-up now due or overdue' },
+  { key: 'voicemail', label: 'VM', swatch: 'bg-purple-500',
+    title: 'Clubs whose most recent call went to voicemail' },
+]
+
+// First load for a user who has never touched these boxes shows everything —
+// nothing is hidden until they say so.
+const ALL_CALL_STATUS = Object.fromEntries(CALL_STATUS.map(s => [s.key, true]))
+
+// The namespace this user's last selection is saved under, on their own
+// account (GET/PATCH /club-admin/account/ui-prefs) rather than in
+// localStorage — a rep moving between machines keeps their queue.
+const CALL_STATUS_PREF = 'sales_call_status_filters'
+
+// Keeps only the four known keys, as real booleans, so a stored bag written
+// by an older (or newer) build can never feed the filter something it can't
+// read. An empty/unusable saved value falls back to everything ticked.
+function cleanCallStatus(saved) {
+  if (!saved || typeof saved !== 'object') return null
+  const out = {}
+  for (const { key } of CALL_STATUS) out[key] = saved[key] === true
+  return out
+}
+
+// The wire form: one comma-list, because the api helper drops false values
+// and the server must be able to tell "unticked" from "not sent" (an absent
+// param still means the legacy never-called default). 'none' is a value no
+// bucket answers to, so every box unticked genuinely returns nothing.
+function callStatusParam(bag) {
+  const on = CALL_STATUS.filter(s => bag?.[s.key]).map(s => s.key)
+  return on.length ? on.join(',') : 'none'
+}
+
 // The Follow up field's default value — "now", in the local-time string a
 // <input type="datetime-local"> needs (YYYY-MM-DDTHH:mm, no timezone) — so
 // the picker opens on today/now instead of blank, and a rep only has to
@@ -598,7 +643,9 @@ export default function SalesWorkspace() {
     // are separate questions and separate filters — both take several
     // people at once, ORed, and both are super-admin only.
     q: '', stage_key: [], owner_user_ids: [], attributed_user_ids: [],
-    called_clubs: false, callback_due: false, voicemail: false, list_id: '',
+    // Call status is one bag of four booleans, not four loose filter keys —
+    // it saves and restores as a unit (see CALL_STATUS_PREF below).
+    call_status: ALL_CALL_STATUS, list_id: '',
     min_score: '', max_score: '', meta_selected: false, meta_searched: false, modules: [],
     states: [], sort: '', sort_dir: '',
   })
@@ -620,6 +667,11 @@ export default function SalesWorkspace() {
     () => [{ key: 'unassigned', name: 'Unattributed' }, ...repOptions], [repOptions])
   const [staff, setStaff] = useState([])
   const [loadingList, setLoadingList] = useState(true)
+  // Call status is restored from the user's account before the queue is
+  // fetched at all; lastSavedCallStatusRef holds what the server already has,
+  // so hydration and a no-op re-tick don't write.
+  const [callStatusLoaded, setCallStatusLoaded] = useState(false)
+  const lastSavedCallStatusRef = useRef(JSON.stringify(ALL_CALL_STATUS))
   const [selectedId, setSelectedId] = useState(null)
   const [drawer, setDrawer] = useState(null)
   const [loadingDrawer, setLoadingDrawer] = useState(false)
@@ -779,9 +831,13 @@ export default function SalesWorkspace() {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
   }, [])
 
+  const noCallStatus = CALL_STATUS.every(s => !filters.call_status?.[s.key])
+
   const loadClubs = useCallback(() => {
     setLoadingList(true)
-    return api.salesWorkspaceClubs(filters).then((d) => {
+    // call_status rides as a comma-list, never as the four booleans the
+    // screen holds — see callStatusParam.
+    return api.salesWorkspaceClubs({ ...filters, call_status: callStatusParam(filters.call_status) }).then((d) => {
       const rows = d.clubs || []
       setClubs(rows)
       setStages(d.stages || [])
@@ -841,7 +897,44 @@ export default function SalesWorkspace() {
       .finally(() => setLoadingList(false))
   }, [filters, toast])
 
-  useEffect(() => { loadClubs() }, [loadClubs])
+  // Restore this user's own last Call status selection (per account, so it
+  // follows a rep or a super admin between browsers and machines). A user
+  // who has never touched the boxes — or whose saved value is unreadable —
+  // gets everything ticked, which hides nothing.
+  useEffect(() => {
+    let alive = true
+    api.getUiPrefs().then(r => {
+      if (!alive) return
+      const saved = cleanCallStatus(r?.prefs?.[CALL_STATUS_PREF])
+      if (saved) {
+        lastSavedCallStatusRef.current = JSON.stringify(saved)
+        setFilters(f => ({ ...f, call_status: saved }))
+      }
+    }).catch(() => {})
+      .finally(() => { if (alive) setCallStatusLoaded(true) })
+    return () => { alive = false }
+  }, [])
+
+  // Persist a change back to the account, debounced. Compares against the
+  // last-saved snapshot so hydration itself never writes, and the initial
+  // all-ticked default is only stored once the user actually changes it.
+  useEffect(() => {
+    if (!callStatusLoaded) return
+    const cur = JSON.stringify(filters.call_status || {})
+    if (cur === lastSavedCallStatusRef.current) return
+    lastSavedCallStatusRef.current = cur
+    const t = setTimeout(() => {
+      api.setUiPrefs({ [CALL_STATUS_PREF]: filters.call_status || {} }).catch(() => {})
+    }, 500)
+    return () => clearTimeout(t)
+  }, [filters.call_status, callStatusLoaded])
+
+  // Held back until this user's saved Call status selection has been read,
+  // so the queue is fetched ONCE, already scoped the way they left it —
+  // loading first and re-fetching on hydration would flash a queue they
+  // didn't ask for and, worse, land the drawer on a club that is about to
+  // drop out of it.
+  useEffect(() => { if (callStatusLoaded) loadClubs() }, [loadClubs, callStatusLoaded])
   useEffect(() => {
     if (isSuper) api.salesWorkspaceTeam().then((d) => setTeam(d.team || [])).catch(() => {})
   }, [isSuper])
@@ -1322,26 +1415,17 @@ export default function SalesWorkspace() {
           </FilterGroup>
 
           <FilterGroup label="Call status" className="ml-auto">
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
-              title="By default the queue only shows clubs that have never been called — tick this to see clubs that have">
-              <input type="checkbox" checked={filters.called_clubs}
-                onChange={e => setFilters(f => ({ ...f, called_clubs: e.target.checked }))} />
-              <span className="w-2.5 h-2.5 rounded-sm bg-orange-500 inline-block" />
-              Called
-            </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
-              <input type="checkbox" checked={filters.callback_due}
-                onChange={e => setFilters(f => ({ ...f, callback_due: e.target.checked }))} />
-              <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 inline-block" />
-              Callback
-            </label>
-            <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2"
-              title="Clubs whose most recent call went to voicemail">
-              <input type="checkbox" checked={filters.voicemail}
-                onChange={e => setFilters(f => ({ ...f, voicemail: e.target.checked }))} />
-              <span className="w-2.5 h-2.5 rounded-sm bg-purple-500 inline-block" />
-              Voicemail
-            </label>
+            {CALL_STATUS.map(s => (
+              <label key={s.key} title={s.title}
+                className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
+                <input type="checkbox" checked={!!filters.call_status?.[s.key]}
+                  onChange={e => setFilters(f => ({
+                    ...f, call_status: { ...f.call_status, [s.key]: e.target.checked },
+                  }))} />
+                <span className={`w-2.5 h-2.5 rounded-sm inline-block ${s.swatch}`} />
+                {s.label}
+              </label>
+            ))}
           </FilterGroup>
         </div>
       </div>
@@ -1430,7 +1514,12 @@ export default function SalesWorkspace() {
           {loadingList && clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
           ) : clubs.length === 0 ? (
-            <p className="text-[12px] text-pb-faintest px-1 py-2">No clubs match these filters.</p>
+            <p className="text-[12px] text-pb-faintest px-1 py-2">
+              {/* An empty queue with every Call status box unticked is
+                  self-inflicted, and reads as broken unless it says so. */}
+              {noCallStatus ? 'No Call status is ticked, so nothing can match. Tick at least one above.'
+                : 'No clubs match these filters.'}
+            </p>
           ) : (
             <div className="space-y-1.5 max-h-[75vh] overflow-y-auto">
               {isSuper && (

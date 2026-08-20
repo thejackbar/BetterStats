@@ -615,6 +615,29 @@ async def bulk_assign(
     return counts
 
 
+# ─── Call status vocabulary ───────────────────────────────────────────────────
+# The four states the queue's Call status filter offers, and the ONE place the
+# rule for each is written. They are MUTUALLY EXCLUSIVE and in this precedence
+# order, which is deliberate: every one of them is a row highlight colour on
+# the queue (callback = blue, voicemail = purple, called = orange, not called =
+# no highlight), so a box and the rows it hides always mean the same thing. A
+# club that is both callback-due and last went to voicemail is a callback —
+# same precedence the queue row's own colour has always used.
+CALL_STATUS_KEYS = ("not_called", "called", "callback", "voicemail")
+
+
+def call_status_of(*, ever_called: bool, callback_due: bool,
+                   last_call_outcome: Optional[str]) -> str:
+    """Which single Call status bucket a queue row belongs to."""
+    if not ever_called:
+        return "not_called"
+    if callback_due:
+        return "callback"
+    if last_call_outcome == "voicemail":
+        return "voicemail"
+    return "called"
+
+
 # ─── Queue row shaping ────────────────────────────────────────────────────────
 
 def priority_score(*, engagement_score: Optional[int], ever_called: bool,
