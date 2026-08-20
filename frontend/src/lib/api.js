@@ -425,7 +425,7 @@ export const api = {
     }),
   applyGradeSuggestions: () =>
     request('/admin/grades/apply-suggestions', { method: 'POST' }),
-  // The club's own reading order for its grades — drives Merge Grades' Order
+  // The club's own reading order for its grades — drives Manage Grades' Order
   // column AND, via each grade's stored display_order, the row order of
   // BetterPosts' Fixtures/Results roundup posts.
   reorderGrades: (gradeNames) =>

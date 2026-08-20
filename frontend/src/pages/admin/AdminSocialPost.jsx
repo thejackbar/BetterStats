@@ -511,10 +511,10 @@ function topBatters(t) {
 // Sensible grade ordering for roundup posts: senior numbered grades first
 // (1st, 2nd, 3rd…), then one-day/limited grades, then the rest — each by number.
 const _WORD_NUM = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
-// A row's grade may carry its own gradeOrder from the club's Merge Grades →
+// A row's grade may carry its own gradeOrder from the club's Manage Grades →
 // Order setting (backend-resolved, see social_rounds.py). That always wins —
 // it's a considered choice the club made, not a guess from the grade's name —
-// and sorts before every un-ordered grade, matching the Merge Grades screen's
+// and sorts before every un-ordered grade, matching the Manage Grades screen's
 // own "anything you haven't ordered sits below the ones you have" rule. Only
 // grades with no order set fall back to this name heuristic among themselves.
 function gradeSortKey(row) {

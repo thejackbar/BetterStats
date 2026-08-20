@@ -41,7 +41,7 @@ export const GROUPS = [
     desc: 'Merge duplicate players and grades.',
     items: [
       { to: '/admin/merge', label: 'Merge Players', icon: 'teams', cap: CAP.MANAGE_MERGES, desc: 'Combine duplicate player records into one.' },
-      { to: '/admin/grades', label: 'Merge Grades', icon: 'grip', cap: CAP.MANAGE_MERGES, desc: 'Combine grades that are really the same competition.' },
+      { to: '/admin/grades', label: 'Manage Grades', icon: 'grip', cap: CAP.MANAGE_MERGES, desc: 'Combine grades that are really the same competition, label them, and set the order they read in.' },
     ],
   },
   {

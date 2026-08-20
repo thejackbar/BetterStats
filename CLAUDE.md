@@ -115,6 +115,74 @@ from a WASTCA handbook but deliberately NOT as its rulebook.
   rule is a limit on the day and the umpires enforce it. Nothing here writes to
   PlayHQ or claims an association has approved anything.
 
+## Season × grade matches on a player profile, and the undercount it exposed (v9.37.3, Aug 2026)
+
+Asked for on Analysis → Team: seasons down one axis, a column per grade the
+player actually turned out in, a plain match count in each cell, columns in the
+club's own reading order. No migration, no new endpoint.
+
+- **The grid and the by-grade table above it come from ONE attribution pass.**
+  `get_player_team_breakdown` now builds a per-(season, grade) cell map and
+  derives `rows` from it, rather than the two being computed separately. That
+  is what makes the grid's column totals equal the table's `matches` **by
+  construction** — the same one-place discipline `_season_by_season_scoped`
+  exists for, and the reason a screen can't end up disagreeing with the card
+  sitting two inches above it.
+- **Doing it per season fixed a live undercount.** Step 1 used to compare CA's
+  exact per-grade aggregate against the scorecard count **across the whole
+  career** (`extra = max(0, agg_total - scorecard_total)`), which is only right
+  when every season is one or the other. A player with `player_season_grade_stats`
+  for 2024/25 (CA: 10, held: 3) and scorecards only for 2025/26 (5) read **10**,
+  not 15 — the scorecard season was swallowed by the aggregate one. Reproduced
+  against a real Postgres by running the pre-change function, then the new one.
+  It flows into the grade-matches milestones too (`players.py` ×2 read
+  `rows[].matches`).
+- **The two attribution rules are unchanged, just applied per season**: CA's
+  per-grade row wins but never below the scorecards we hold; with no per-grade
+  row, a season's shortfall goes to the one grade it can only have come from,
+  else to `unattributed`. A season CA HAS broken down is taken at its word, so
+  a shortfall against its own season total is left alone rather than guessed at
+  — the deliberate `seasons_with_exact` skip the old code made, kept.
+- **Seasons are folded onto their canonical row before anything is counted**
+  (`load_reverse_alias_map`), or a Merge Seasons pair, or one CA season guid per
+  competition, draws the one year as two lines.
+- **`_org_grade_display_orders` is keyed on the FOLDED grade name**, not the raw
+  CA guid `social_rounds._grade_display_orders` uses — these rows have already
+  been through the merge alias and the club's rename, and two guids can land on
+  one name. `MIN(display_order)`: the reorder endpoint stamps the position onto
+  the canonical grade and every alias merged into it, so MIN ignores a NULL left
+  on an alias nobody ordered. A grade the club has never placed reads NULL and
+  the column sorts after every placed one, the same rule everywhere else.
+- **The existing MATCHES BY GRADE table is deliberately still sorted by matches
+  descending.** The club's order was asked for on the new grid; re-sorting a
+  leaderboard-shaped summary was not, and quietly widening the change is how a
+  screen someone relies on moves under them.
+- **`unattributed` gets its own muted column, only when non-zero**, so the
+  columns plus that column equal the TOTAL on every row and on the career line.
+  The AFL grid's trade-off (season total ≠ sum of cells, documented in its own
+  comment) is avoided rather than copied.
+- **A historical bundle season is NOT special-cased.** `_HISTORICAL_BUNDLE_MATCH_CAP`
+  hides those from `get_season_by_season`, but the by-grade table has always
+  attributed their matches into grades, so excluding them here would make the
+  grid disagree with the table above it — the worse of the two outcomes. A club
+  with one will see a large early row.
+- **Merge Grades is renamed Manage Grades** (nav label + the copy that names it;
+  the URL `/admin/grades` and the in-page "Merge Grades" panel heading are
+  unchanged, and the AFL silo's own screen is untouched).
+- **Verified against a real Postgres** (41 checks through the shipped
+  `get_player_team_breakdown`: the plain grid, the club's order with an unplaced
+  grade last, a merged grade as one column under one position, a renamed grade,
+  the mixed-history undercount, an unplaceable mixed-grade season, a
+  single-grade gap, two merged seasons as one row, the season filter, a grade CA
+  counts but we hold no scorecard for, a club that has never ordered anything,
+  an empty player, and another club's order not reaching ours) and **driven in
+  Chromium** (9: the column headings in club order, every rendered row and its
+  dashes, the career line, the rendered rows and columns meeting at the same
+  total, the grid agreeing with the table above it, no page errors, no overflow
+  at 390px). The harness builds its tables from the ORM models and pulls the
+  five `v_effective_*` views straight out of migrations 038 / 075 / 147 / 266.
+
+
 ## A player's date of birth, and who is told their age (migration 269, v9.37.0, Aug 2026)
 
 Asked for so a selector can see a young quick's age while deciding bowling

@@ -1430,7 +1430,113 @@ function CaptainTab({ captainStats }) {
   )
 }
 
-function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
+// Seasons down the side, grades across the top, matches in the cells. The
+// grade columns are the club's own reading order (Admin → Manage Grades →
+// Order); a grade the club has not placed sorts after every one it has, which
+// is the same rule every other ordered grade list in the app follows.
+function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
+  const columns = useMemo(() => (
+    [...rows]
+      .filter(r => (r.matches || 0) > 0 && r.grade_name)
+      .sort((a, b) => (
+        (a.display_order == null) - (b.display_order == null)
+        || (a.display_order ?? 0) - (b.display_order ?? 0)
+        || String(a.grade_name).localeCompare(String(b.grade_name))
+      ))
+  ), [rows])
+
+  const anyUnplaced = seasonRows.some(s => (s.unattributed || 0) > 0)
+  const columnTotals = useMemo(() => {
+    const totals = {}
+    for (const s of seasonRows) {
+      for (const [grade, count] of Object.entries(s.grades || {})) {
+        totals[grade] = (totals[grade] || 0) + (count || 0)
+      }
+    }
+    return totals
+  }, [seasonRows])
+  const unplacedTotal = seasonRows.reduce((a, s) => a + (s.unattributed || 0), 0)
+  const grandTotal = seasonRows.reduce((a, s) => a + (s.matches || 0), 0)
+  const span = columns.length + (anyUnplaced ? 1 : 0) + 2
+
+  if (!columns.length || !seasonRows.length) return null
+
+  return (
+    <Card title="MATCHES BY SEASON &amp; GRADE" pad="p-0">
+      <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pt-4">
+        How many games this player turned out in for each grade, season by season. A dash means they
+        did not play in that grade that season.
+      </p>
+      <div className="overflow-x-auto pb-scroll mt-3">
+        <table className="w-full min-w-[560px] text-[13px]">
+          <thead>
+            <tr className="text-pb-faint font-mono text-[10px] tracking-wide3">
+              <th className="py-3 pl-5 pb-2 text-left">SEASON</th>
+              {columns.map(c => (
+                <th key={c.grade_name} className="py-3 px-3 pb-2 text-right whitespace-nowrap">
+                  {String(c.grade_name).toUpperCase()}
+                </th>
+              ))}
+              {anyUnplaced && (
+                <th className="py-3 px-3 pb-2 text-right whitespace-nowrap text-pb-faintest"
+                    title="Games CA's season aggregate counts but where we have no scorecard AND the player played in several grades that season, so they can't safely be attributed to one.">
+                  NO SCORECARD
+                </th>
+              )}
+              <th className="py-3 pr-5 pb-2 text-right text-pb-text whitespace-nowrap">TOTAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            {seasonRows.map((s, i) => (
+              <tr key={s.season_id || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px] whitespace-nowrap">
+                  {formatSeason(s.season_name) || '—'}
+                </td>
+                {columns.map(c => {
+                  const v = (s.grades || {})[c.grade_name]
+                  return (
+                    <td key={c.grade_name} className="py-2.5 px-3 font-mono text-pb-text text-right">
+                      {v ? v : <span className="text-pb-faintest">—</span>}
+                    </td>
+                  )
+                })}
+                {anyUnplaced && (
+                  <td className="py-2.5 px-3 font-mono text-pb-dim text-right">
+                    {s.unattributed ? s.unattributed : <span className="text-pb-faintest">—</span>}
+                  </td>
+                )}
+                <td className="py-2.5 pr-5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>
+                  {s.matches || 0}
+                </td>
+              </tr>
+            ))}
+            {seasonRows.length === 0 && (
+              <tr><td colSpan={span} className="py-4 pl-5 text-pb-faint">No seasons recorded.</td></tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr className="pb-hairline-t bg-pb-surface2">
+              <td className="py-2.5 pl-5 font-mono text-[11px] tracking-wide2 text-pb-faint">CAREER</td>
+              {columns.map(c => (
+                <td key={c.grade_name} className="py-2.5 px-3 font-mono text-pb-dim text-right">
+                  {columnTotals[c.grade_name] || 0}
+                </td>
+              ))}
+              {anyUnplaced && (
+                <td className="py-2.5 px-3 font-mono text-pb-dim text-right">{unplacedTotal}</td>
+              )}
+              <td className="py-2.5 pr-5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>
+                {grandTotal}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </Card>
+  )
+}
+
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -1888,6 +1994,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
 
       {subTab === 'team' && (() => {
         const rows = teamBreakdown.rows || []
+        const seasonRows = teamBreakdown.season_rows || []
         const unattributed = teamBreakdown.unattributed || 0
         return (
           <div className="space-y-6">
@@ -1981,6 +2088,8 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
             ) : (
               <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
             )}
+
+            <MatchesBySeasonGrade rows={rows} seasonRows={seasonRows} />
           </div>
         )
       })()}
@@ -2445,7 +2554,7 @@ export default function PlayerProfile() {
   const [bowlingByBatterPosition, setBowlingByBatterPosition] = useState([])
   const [byVenue, setByVenue] = useState([])
   const [byOpposition, setByOpposition] = useState([])
-  const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], unattributed: 0, total_aggregate_matches: 0 })
+  const [teamBreakdown, setTeamBreakdown] = useState({ rows: [], season_rows: [], unattributed: 0, total_aggregate_matches: 0 })
   const [captainStats, setCaptainStats] = useState(null)
   const [tab, setTab] = useState('batting')
   // Track which playerId we last fetched aux data for, so navigating between
