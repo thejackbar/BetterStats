@@ -393,6 +393,19 @@ async def commission_rep_names(session: AsyncSession, deals) -> dict:
     return {u.id: (u.display_name or u.username) for u in rows}
 
 
+async def user_names_by_ids(session: AsyncSession, ids) -> dict:
+    """user_id -> display name, batched. Every write on a deal — a call log,
+    a note, an email send, an assign, a bulk assign, an extend-trial — already
+    stamps `created_by_user_id` on its activity row; this is the one place
+    that id becomes a name for the History feed to show ("logged by …"),
+    without a per-row lookup."""
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    rows = (await session.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+    return {u.id: (u.display_name or u.username) for u in rows}
+
+
 # ─── Calls ────────────────────────────────────────────────────────────────────
 
 async def log_call(
@@ -691,23 +704,18 @@ async def meta_ad_summary(session: AsyncSession, club) -> Optional[dict]:
            for k, n in sorted(_tally("content").items(), key=lambda kv: -kv[1])]
     campaigns = [{"name": k, "known": k in campaign_names, "clicks": n}
                  for k, n in sorted(_tally("campaign").items(), key=lambda kv: -kv[1])]
-    landings: dict[str, int] = {}
-    for r in rows:
-        # landing_path is only stamped on the visitor's FIRST page of a visit,
-        # so fall back to this row's own path with its query string stripped —
-        # an ad click always carries one (the fbclid is what identified it).
-        path = (r["landing_path"] or (r["path"] or "").split("?")[0] or "").strip()
-        if path:
-            landings[path] = landings.get(path, 0) + 1
 
+    # The raw landing URLs are deliberately never surfaced to a rep — each ad
+    # click carries its own fbclid query string, so the same page reads as
+    # several distinct "URLs" and is noise, not signal (a landing count + date
+    # range already says everything useful). So this only ever needed to
+    # COUNT clicks, never to build a per-path breakdown.
     return {
         "clicks": len(rows),
         "first_at": rows[-1]["created_at"].isoformat() if rows[-1]["created_at"] else None,
         "last_at": rows[0]["created_at"].isoformat() if rows[0]["created_at"] else None,
         "campaigns": campaigns[:4],
         "ads": ads[:4],
-        "landing_paths": [{"path": p, "views": n}
-                          for p, n in sorted(landings.items(), key=lambda kv: -kv[1])[:4]],
     }
 
 

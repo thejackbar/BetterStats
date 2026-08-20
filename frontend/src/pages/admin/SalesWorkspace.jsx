@@ -551,11 +551,10 @@ function MetaAdsCard({ meta }) {
           {meta.campaigns.map(c => c.name).join(' · ')}
         </p>
       )}
-      {meta.landing_paths.length > 0 && (
-        <p className="text-[11.5px] text-pb-faintest mt-0.5">
-          Landed on {meta.landing_paths.map(l => l.path).join(', ')}
-        </p>
-      )}
+      {/* The raw landing paths (deliberately not shown — each click carries
+          its own fbclid query string, so the same page reads as several
+          different "URLs"; the landing count + date range above already say
+          everything a rep needs). */}
       <p className="text-[11px] text-pb-faintest mt-1">
         {meta.first_at === meta.last_at
           ? shortDate(meta.last_at)
@@ -732,12 +731,20 @@ function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStart
     : a.type === 'call' ? 'Call'
       : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
   const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
+  // Who logged this — a call, note, email, assign or extend-trial all stamp
+  // created_by_user_id, and the drawer resolves it to a name in one batched
+  // lookup (routers/sales_workspace.py::get_club). Absent only for an entry
+  // written before this shipped, or a system action with no attributable
+  // actor.
+  const byLine = a.occurred_at
+    ? `${new Date(a.occurred_at).toLocaleString('en-AU')}${a.created_by_name ? ` · ${a.created_by_name}` : ''}`
+    : (a.created_by_name || '')
   if (a.type === 'note' && editing) {
     return (
       <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
         <div className="flex items-center justify-between gap-2 mb-1">
           <Pill tone={tone}>{kindLabel}</Pill>
-          <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
+          <span className="text-pb-faintest text-[10.5px]">{byLine}</span>
         </div>
         <NoteEditForm value={editValue} onChange={onChangeEdit} onSave={onSaveEdit} onCancel={onCancelEdit} saving={savingEdit} />
       </div>
@@ -747,7 +754,7 @@ function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStart
     <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">
       <div className="flex items-center justify-between gap-2">
         <Pill tone={tone}>{kindLabel}</Pill>
-        <span className="text-pb-faintest text-[10.5px]">{new Date(a.occurred_at).toLocaleString('en-AU')}</span>
+        <span className="text-pb-faintest text-[10.5px]">{byLine}</span>
       </div>
       {a.body && <p className="mt-1 text-pb-text whitespace-pre-wrap">{a.body}</p>}
       {a.type === 'note' && (
@@ -1000,7 +1007,16 @@ export default function SalesWorkspace() {
 
   const noCallStatus = CALL_STATUS.every(s => !filters.call_status?.[s.key])
 
-  const loadClubs = useCallback(() => {
+  // `anchor` (default true) re-scrolls the open club's row back into view once
+  // the reload lands, for the cases that can genuinely move it: a call/email/
+  // assign/interest action re-sorts or re-scopes the queue. A reload fired by
+  // nothing more than a filter tweak (the effect below) passes `false` — the
+  // row the rep is looking at may now sit further down the SAME filtered
+  // list, and jumping the viewport to chase it there is not something a
+  // filter checkbox should ever do (reported live against the Call status
+  // boxes, but the same effect drives every filter, so the fix is general).
+  const loadClubs = useCallback((opts) => {
+    const anchor = opts?.anchor !== false
     setLoadingList(true)
     // call_status rides as a comma-list, never as the four booleans the
     // screen holds — see callStatusParam.
@@ -1038,14 +1054,16 @@ export default function SalesWorkspace() {
           setDrawer(null)
           setSearchParamsRef.current((p) => { const n = new URLSearchParams(p); n.delete('club'); return n }, { replace: true })
         }
-      } else if (selectedIdRef.current) {
+      } else if (selectedIdRef.current && anchor) {
         // Still selected and still in the filtered list, but a resort (a
         // call/email action moves priority_score, updated_at, etc.) can
         // relocate its row well outside the current viewport with nothing
         // else bringing it back — the open club's row must always stay on
-        // display, so re-anchor to it every time the queue reloads while
-        // it's still selected. A no-op via 'nearest' when it's already
-        // visible, so an ordinary filter tweak doesn't feel like a jump.
+        // display, so re-anchor to it every time an ACTION reloads the queue
+        // while it's still selected. Skipped entirely for a plain filter
+        // change (anchor === false, see loadClubs' own note above) — a
+        // filter tweak must never move the viewport, however far the row
+        // happens to sit within the newly-filtered list.
         const id = selectedIdRef.current
         setTimeout(() => {
           rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
@@ -1101,7 +1119,7 @@ export default function SalesWorkspace() {
   // loading first and re-fetching on hydration would flash a queue they
   // didn't ask for and, worse, land the drawer on a club that is about to
   // drop out of it.
-  useEffect(() => { if (callStatusLoaded) loadClubs() }, [loadClubs, callStatusLoaded])
+  useEffect(() => { if (callStatusLoaded) loadClubs({ anchor: false }) }, [loadClubs, callStatusLoaded])
   useEffect(() => {
     if (isSuper) api.salesWorkspaceTeam().then((d) => setTeam(d.team || [])).catch(() => {})
   }, [isSuper])
@@ -1811,7 +1829,16 @@ export default function SalesWorkspace() {
                     )}
                     <AssociationChips associations={drawer.deal.marketing_club_associations} className="mt-1.5" />
                   </div>
-                  <div className="flex items-center gap-2">
+                  {/* ml-auto pins this group to the right edge whether it fits
+                      beside the title or, on a narrow drawer, wraps onto its
+                      own line below it — without it, `justify-between` only
+                      right-aligns a SECOND item on the SAME row, so a wrapped
+                      single-item second row (this whole group, once the club
+                      name/town/associations push past the available width)
+                      fell back to flex-start and rendered on the left, which
+                      is the reported "wraps to the left" bug. shrink-0 stops
+                      the Select + buttons themselves being squeezed. */}
+                  <div className="flex items-center gap-2 ml-auto shrink-0">
                     {drawer.can_assign && (
                       <div>
                         <Select value={drawer.deal.owner_user_id || ''} onChange={e => submitAssign(e.target.value || null)} className="!w-auto">

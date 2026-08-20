@@ -541,6 +541,12 @@ async def get_club(
     contacts = await sw.merged_contacts(db, deal.marketing_club_id)
     activities = await sw.list_activities_excluding_twenty(db, deal_id=deal.id)
     activities_out = [crm_service._activity_dict(a) for a in activities]
+    # Who logged each call/note/email/assign/extend-trial — every one of
+    # those writers already stamps created_by_user_id, this just names it for
+    # the History feed. Batched, one query for the whole timeline.
+    creator_names = await sw.user_names_by_ids(db, (a.created_by_user_id for a in activities))
+    for row, a in zip(activities_out, activities):
+        row["created_by_name"] = creator_names.get(a.created_by_user_id)
 
     # Every ORM attribute this response needs is read into plain dicts/lists
     # BEFORE calling club_engagement_breakdown below — that function commits
