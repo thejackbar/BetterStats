@@ -4,8 +4,48 @@ A design note for making every number in the engagement-score calculation
 editable by a Super Admin, from a page linked off the CRM hub, instead of
 living as constants in `backend/app/services/twenty_sync.py`.
 
-Nothing here is built yet. This is the shape of the work, the traps found while
-reading the current code, and a straight answer to the recalculation question.
+**Status: BUILT (v9.38.0).** Sections 1 to 7 describe the design; what shipped
+follows it, with the deviations noted below. Sections 8 and 9 are findings about
+the scoring itself, most of which are NOT yet acted on and are the natural next
+piece of work.
+
+What shipped:
+
+- `backend/app/services/engagement_params.py` — the catalogue of 53 parameters,
+  validation, the sparse override store and the in-process cache.
+- `backend/app/services/engagement_param_ddl.py` + migration 270 —
+  `engagement_parameter_revisions`, the audit trail and rollback source, with
+  the DDL shared between alembic and the lifespan mirror.
+- Weights threaded through `_engagement`, `batch_web_stats`,
+  `batch_email_stats`, `_recency_pts`, `_tier_for`, `trial_depth_score`,
+  `sync_pipeline_membership` and both sweeps. The four hand-written decay
+  ladders collapsed into one `_decay_arms` builder.
+- `GET`/`PATCH /club-admin/super/crm/engagement-params` and
+  `POST .../preview`.
+- `frontend/src/pages/admin/SuperEngagementParams.jsx` at
+  `/admin/super/crm/engagement-params`, a CRM hub tile, and a Scoring button on
+  the Sales Pipeline toolbar.
+- `python -m app.scripts.verify_engagement_params` asserts the defaults score
+  exactly as the constants they replaced did, including the generated SQL
+  byte-for-byte.
+
+Deviations from the plan below, all deliberate:
+
+- Phase 2 and 3 landed together, because the preview is what makes the
+  membership floor safe to touch and shipping the floor without it would have
+  been the wrong order.
+- The two defects in section 8a and 9c are shipped as parameters defaulting to
+  the OLD behaviour (`ENQUIRY_OVERRIDE_IS_FLOOR`, `COUNT_ONLY_PAGE_VIEWS`)
+  rather than fixed outright. Both move real scores, so they are a decision to
+  take with the preview open, not a side effect of a deploy. **Neither is on.**
+- `DEPTH_PER_VISITOR_CAP` (section 9d) shipped as a parameter, also off by
+  default.
+- Revision history is recorded and displayed; one-click rollback to a previous
+  revision is not built yet.
+- "Club Selected" as a new scored signal (section 1) is not built.
+
+This is the shape of the work, the traps found while reading the current code,
+and a straight answer to the recalculation question.
 
 Section 8 is a separate question that came out of the same reading: whether the
 current scoring is sound. It is not entirely, and one of the findings is a

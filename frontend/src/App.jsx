@@ -147,6 +147,7 @@ const BetterCrmPeople = lazy(() => import('./pages/admin/bettercrm/BetterCrmPeop
 const SuperCrm = lazy(() => import('./pages/admin/SuperCrm'))
 const SuperCrmTargets = lazy(() => import('./pages/admin/SuperCrmTargets'))
 const SuperCrmAutomation = lazy(() => import('./pages/admin/SuperCrmAutomation'))
+const SuperEngagementParams = lazy(() => import('./pages/admin/SuperEngagementParams'))
 const SalesWorkspace = lazy(() => import('./pages/admin/SalesWorkspace'))
 const SalesFollowUps = lazy(() => import('./pages/admin/SalesFollowUps'))
 const SalesPerformance = lazy(() => import('./pages/admin/SalesPerformance'))
@@ -469,6 +470,7 @@ export default function App() {
           <Route path="/admin/super/crm" element={<ProtectedRoute requireRole="super_admin"><SuperCrm /></ProtectedRoute>} />
           <Route path="/admin/super/crm/targets" element={<ProtectedRoute requireRole="super_admin"><SuperCrmTargets /></ProtectedRoute>} />
           <Route path="/admin/super/crm/automation" element={<ProtectedRoute requireRole="super_admin"><SuperCrmAutomation /></ProtectedRoute>} />
+          <Route path="/admin/super/crm/engagement-params" element={<ProtectedRoute requireRole="super_admin"><SuperEngagementParams /></ProtectedRoute>} />
           <Route path="/admin/super/crm/wizard-clubs" element={<ProtectedRoute requireRole="super_admin"><SuperWizardClubs /></ProtectedRoute>} />
           {/* Sales Workspace is the ONLY page a 'sales' role account can reach
               (see ProtectedRoute.jsx's own note) — Follow-ups, Performance and

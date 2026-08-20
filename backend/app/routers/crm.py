@@ -22,6 +22,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -880,10 +881,10 @@ _engagement_recalc: dict = {
 _recalc_tasks: set = set()
 
 
-async def _run_engagement_recalc() -> None:
+async def _run_engagement_recalc(keep_prev: bool = False) -> None:
     from app.scripts.recalc_engagement import recalc
     try:
-        _engagement_recalc["result"] = await recalc()
+        _engagement_recalc["result"] = await recalc(keep_prev=keep_prev)
         _engagement_recalc["error"] = None
     except Exception as e:  # noqa: BLE001 - background task; surface via status, never crash
         logger.exception("manual engagement recalc failed")
@@ -912,6 +913,121 @@ async def super_recalc_engagement():
 @super_router.get("/recalc-engagement/status", dependencies=[_super])
 async def super_recalc_engagement_status():
     return {"status": "running" if _engagement_recalc["running"] else "idle", **_engagement_recalc}
+
+
+# ─── Engagement score parameters ─────────────────────────────────────────────
+# The Super Admin surface for every number that decides a club's engagement
+# score, and whether it appears on this pipeline at all. The catalogue (labels,
+# help text, defaults, ranges) is SERVED from the backend rather than mirrored
+# by hand in JS: there are ~53 entries carrying real explanatory copy, and a
+# hand-kept mirror of that would drift. See services/engagement_params.py.
+
+
+class EngagementParamsUpdate(BaseModel):
+    values: dict = {}
+    note: Optional[str] = None
+    # Save without immediately re-scoring every club. The change still takes
+    # effect on its own within one Tier 3 global sweep, so this is for someone
+    # staging several edits, not a way to avoid the recompute.
+    recalculate: bool = True
+
+
+@super_router.get("/engagement-params", dependencies=[_super])
+async def super_engagement_params(db: AsyncSession = Depends(get_db)):
+    from app.services import engagement_params as ep
+
+    values = await ep.get_params(db, use_cache=False)
+    overrides = await ep.stored_overrides(db)
+    board = (await db.execute(text(
+        "SELECT COUNT(*) FROM crm_deals d JOIN crm_pipelines p ON p.id = d.pipeline_id "
+        "WHERE d.status = 'open' AND d.archived_at IS NULL"))).scalar_one_or_none()
+    return {
+        "catalogue": ep.catalogue(),
+        "values": values,
+        "defaults": ep.defaults(),
+        # Which keys a Super Admin has actually changed, so the page can mark
+        # them as edited rather than making everything look bespoke.
+        "changed": sorted(overrides.keys()),
+        "revisions": await ep.list_revisions(db, limit=15),
+        "deals_on_board": board or 0,
+        "recalc": {"status": "running" if _engagement_recalc["running"] else "idle"},
+    }
+
+
+@super_router.patch("/engagement-params", dependencies=[_super])
+async def super_update_engagement_params(body: EngagementParamsUpdate,
+                                         db: AsyncSession = Depends(get_db),
+                                         user=Depends(get_current_user)):
+    """Save a partial change and (by default) kick the same full recompute the
+    board's Recalculate button runs, so the pipeline reflects the new rules
+    straight away. A key sent as its own default, or as null, goes back to
+    tracking the code default rather than being stored."""
+    from app.services import engagement_params as ep
+
+    try:
+        values = await ep.update_params(db, body.values or {},
+                                        actor_user_id=getattr(user, "id", None),
+                                        note=body.note)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    started = False
+    if body.recalculate and not _engagement_recalc["running"]:
+        # keep_prev: this sweep is a parameter edit, not club activity, so it
+        # must not roll every club's day-over-day baseline and fill the board
+        # with arrows describing the edit rather than the club.
+        _engagement_recalc.update(
+            running=True, started_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=None, result=None, error=None)
+        task = asyncio.create_task(_run_engagement_recalc(keep_prev=True))
+        _recalc_tasks.add(task)
+        task.add_done_callback(_recalc_tasks.discard)
+        started = True
+    return {"values": values, "recalculating": started,
+            "changed": sorted((await ep.stored_overrides(db)).keys())}
+
+
+@super_router.post("/engagement-params/preview", dependencies=[_super])
+async def super_preview_engagement_params(body: EngagementParamsUpdate,
+                                          db: AsyncSession = Depends(get_db)):
+    """Score every club under a PROPOSED set of parameters without saving
+    anything, and return the before-and-after distribution.
+
+    This is what turns "should this be 10 or 20" into a decision rather than a
+    guess. It reuses recalc's own dry-run path, which computes inside a
+    transaction and rolls back, so nothing is persisted. A full pass takes a
+    little while; the page runs it on demand, never on every keystroke."""
+    from app.scripts.recalc_engagement import recalc
+    from app.services import engagement_params as ep
+
+    current = await ep.get_params(db, use_cache=False)
+    proposed = dict(current)
+    try:
+        for key, value in (body.values or {}).items():
+            proposed[key] = ep.DEFAULTS[key] if value is None else ep._coerce(key, value)
+    except (ValueError, KeyError) as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    before = await recalc(dry_run=True, params=current)
+    after = await recalc(dry_run=True, params=proposed)
+    return {"before": _preview_shape(before, current),
+            "after": _preview_shape(after, proposed)}
+
+
+def _preview_shape(res: dict, params: dict) -> dict:
+    """Trim a dry-run result to what the page draws. The raw score lists go
+    across (a few thousand small integers) so the histogram and percentiles are
+    a client-side calculation rather than a second server round trip."""
+    return {
+        "processed": res.get("processed", 0),
+        "tiers": res.get("tiers", {}),
+        "scores": res.get("scores", []),
+        "scores_prospect": res.get("scores_prospect", []),
+        "on_board": res.get("on_board", 0),
+        "at_opportunity": res.get("at_opportunity", 0),
+        "add_min": params.get("PIPELINE_ADD_MIN"),
+        "opportunity_min": params.get("OPPORTUNITY_AUTO_THRESHOLD"),
+    }
 
 
 # ─── CRM auto-recompute cadence settings (Tier 2 / Tier 3) ────────────────────

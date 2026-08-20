@@ -1472,6 +1472,10 @@ export default function SuperCrm() {
               {recalcRunning ? 'Recalculating…' : 'Recalculate'}
             </Btn>
           </span>
+          <Link to="/admin/super/crm/engagement-params"
+                title="Tune what the score counts, and which clubs reach the board">
+            <Btn variant="ghost" sm>Scoring</Btn>
+          </Link>
           <Btn variant="ghost" sm onClick={() => setShowSettings(true)}>Settings</Btn>
           <Btn variant="primary" sm onClick={() => setShowNew(true)}>New deal</Btn>
         </div>

@@ -1213,6 +1213,9 @@ export const api = {
   superWizardClubsCreateList: (data) =>
     request('/club-admin/super/crm/wizard-clubs/create-list', { method: 'POST', body: JSON.stringify(data) }),
 
+  superEngagementParams: () => request('/club-admin/super/crm/engagement-params'),
+  superEngagementParamsSave: (data) => request('/club-admin/super/crm/engagement-params', { method: 'PATCH', body: JSON.stringify(data) }),
+  superEngagementParamsPreview: (data) => request('/club-admin/super/crm/engagement-params/preview', { method: 'POST', body: JSON.stringify(data) }),
   superCrmGetSettings: () => request('/club-admin/super/crm/settings'),
   superCrmUpdateSettings: (data) => request('/club-admin/super/crm/settings', { method: 'PATCH', body: JSON.stringify(data) }),
   superCrmCreateDeal: (data) => request('/club-admin/super/crm/deals', { method: 'POST', body: JSON.stringify(data) }),
