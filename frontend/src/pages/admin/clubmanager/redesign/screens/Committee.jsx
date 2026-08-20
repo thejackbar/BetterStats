@@ -11,6 +11,7 @@ import { MeetingRoomPanel } from '../../../MeetingRoom'
 // HTML editor.
 const PlanTab = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.PlanTab })))
 const TasksTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.TasksTab })))
+const ActionEditor = lazy(() => import('../../../../../components/admin/clubmanager/governance').then(m => ({ default: m.ActionEditor })))
 const DocumentsTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.DocumentsTab })))
 const CalendarTab = lazy(() => import('../../../AdminCommittee').then(m => ({ default: m.CalendarTab })))
 
@@ -44,6 +45,19 @@ const isToday = (iso) => iso && new Date(iso).toDateString() === new Date().toDa
 // Newest meeting first — the list and anything inserted into it after a meeting
 // is created have to agree on the order, so both sort through here.
 const byNewest = (a, b) => new Date(b.scheduled_at || 0) - new Date(a.scheduled_at || 0)
+
+// A committee season runs for twelve months from the club's own diary year
+// start (BetterAdmin → Settings → Club Diary Year Start, July by default), so a
+// meeting held in June 2027 belongs to the season that opened in July 2026.
+// The same rule the Club Diary lays its year out with.
+function seasonStartYear(iso, startMonth) {
+  const d = new Date(iso)
+  if (!iso || Number.isNaN(d.getTime())) return null
+  return d.getMonth() + 1 >= startMonth ? d.getFullYear() : d.getFullYear() - 1
+}
+// A club whose year starts in January has a season that IS a calendar year, so
+// it reads as one year rather than two.
+const seasonLabel = (y, startMonth) => (startMonth === 1 ? String(y) : `${y}/${y + 1}`)
 
 // `meeting_type` is free text on the server, so this is the vocabulary the club
 // actually writes. Same list the manage screen offers — keep the two in step.
@@ -184,6 +198,13 @@ export default function Committee({ st, patch, narrow }) {
   // discovered halfway through creating the meeting, not before it.
   //   null | { step: 'meeting' | 'template', form, tpl, busy, error }
   const [mk, setMk] = useState(null)
+  // The club's diary year start, which is what decides where one committee
+  // season ends and the next begins. July until the settings call answers.
+  const [diaryStart, setDiaryStart] = useState(7)
+  // Objectives and the action open for editing. Objectives are only fetched on
+  // reaching the Actions list, since nothing else on this screen names one.
+  const [objectives, setObjectives] = useState(null)
+  const [editId, setEditId] = useState(null)
   // Templates are only fetched when the modal is first opened — null means not
   // asked for yet, so glancing at the committee costs nothing extra.
   const [templates, setTemplates] = useState(null)
@@ -238,6 +259,12 @@ export default function Committee({ st, patch, narrow }) {
     return () => { alive = false }
   }, [])
 
+  // The diary year start is a club setting any signed-in admin may read, so a
+  // committee manager without MANAGE_SETTINGS still gets the right seasons.
+  useEffect(() => {
+    api.adminGetSettings().then(sx => setDiaryStart(Number(sx?.diary_start_month) || 7)).catch(() => {})
+  }, [])
+
   // Coming out of the meeting room, pull that one meeting's record again so the
   // summary beside the list shows what was just minuted. One fetch, on the way
   // out — the room reloads itself after every edit while it is open.
@@ -261,6 +288,16 @@ export default function Committee({ st, patch, narrow }) {
     } : d))
   }, [])
 
+  // The actions list edits rows in place, so it re-reads them after a save or a
+  // delete rather than patching its own copy and hoping the two agree.
+  const reloadTasks = useCallback(async () => {
+    try {
+      const res = await api.committeeListTasks()
+      const tasks = Array.isArray(res) ? res : (res?.tasks || [])
+      setData(d => (d ? { ...d, tasks } : d))
+    } catch { /* the editor reports its own failures */ }
+  }, [])
+
   const loadTemplates = useCallback(async () => {
     try {
       const res = await api.committeeListAgendaTemplates()
@@ -274,6 +311,24 @@ export default function Committee({ st, patch, narrow }) {
     if (tab === 'meetings' && meetingsView === 'templates' && templates === null) loadTemplates()
   }, [tab, meetingsView, templates, loadTemplates])
 
+  // Opening Meeting Templates opens the first one, so the pane beside the list
+  // shows a template rather than an instruction to pick one. Pressing + New
+  // sets `tplEdit` itself, so this can never overwrite a draft in progress.
+  useEffect(() => {
+    if (tab !== 'meetings' || meetingsView !== 'templates' || tplEdit) return
+    if (!templates || templates.length === 0) return
+    const keep = templates.find(t => t.id === st.cteTemplate)
+    openTemplate(keep || templates[0])
+  }, [tab, meetingsView, templates, tplEdit, st.cteTemplate])   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Objectives are what an action can be pointed at. Only the Actions list on
+  // this screen names one, so it is fetched on reaching it.
+  useEffect(() => {
+    if (tab === 'motions' && maView === 'actions' && actionsView === 'list' && objectives === null) {
+      api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => setObjectives([]))
+    }
+  }, [tab, maView, actionsView, objectives])
+
   // Deleting a meeting takes its agenda, motions, attendance and minutes with
   // it, so it asks first. A template the meeting was BUILT from is untouched —
   // the items were copied onto the meeting when it was created.
@@ -285,6 +340,18 @@ export default function Committee({ st, patch, narrow }) {
       setData(d => (d ? { ...d, meetings: d.meetings.filter(x => x.id !== m.id) } : d))
       if (st.cteMeeting === m.id) patch({ cteMeeting: null, cteRoom: null })
     } catch (e) { setMsg(`Could not delete that meeting — ${String(e?.message || e)}`) }
+  }
+
+  // Deleting an action takes its notes and attachments with it, so it names
+  // what goes. Same wording as the editor's own Delete.
+  async function deleteTask(t) {
+    if (!window.confirm(`Delete “${t.title}”?\n\nIts notes and attached documents go with it. This cannot be undone.`)) return
+    setMsg(null)
+    try {
+      await api.committeeDeleteTask(t.id)
+      setData(d => (d ? { ...d, tasks: d.tasks.filter(x => x.id !== t.id) } : d))
+      if (editId === t.id) setEditId(null)
+    } catch (e) { setMsg(`Could not delete that action — ${String(e?.message || e)}`) }
   }
 
   const openNewTemplate = () => {
@@ -472,10 +539,27 @@ export default function Committee({ st, patch, narrow }) {
   const name = (id) => (id && nameById[id]) || 'Unknown'
   const vacancies = positions.filter(p => !p.current_term)
   const openTasks = tasks.filter(t => taskState(t).label !== 'DONE')
+  // Read out of the live list, so a save that reloads shows the new values.
+  const editTask = editId ? tasks.find(t => t.id === editId) : null
   const allMotions = []
   meetings.forEach(m => (m.motions || []).forEach(mo => allMotions.push({ ...mo, from: (m.meeting_type || 'Meeting') + ' · ' + fmtDate(m.scheduled_at) })))
 
-  const sel = meetings.find(m => m.id === st.cteMeeting) || meetings[0] || null
+  // Seasons offered are the ones the club actually met in, newest first, plus
+  // the season running now — so a club that has just rolled over can pick this
+  // season and see that nothing is booked yet, rather than not find it at all.
+  const seasonNow = seasonStartYear(new Date().toISOString(), diaryStart)
+  const seasonYears = [...new Set([
+    seasonNow,
+    ...meetings.map(m => seasonStartYear(m.scheduled_at, diaryStart)),
+  ].filter(y => y !== null))].sort((a, b) => b - a)
+  const season = st.cteMeetingsSeason ?? ''
+  const shownMeetings = season === ''
+    ? meetings
+    : meetings.filter(m => seasonStartYear(m.scheduled_at, diaryStart) === Number(season))
+
+  // The pane reads the meeting the LIST is showing, so filtering to a season
+  // can never leave a meeting open that the rail no longer holds.
+  const sel = shownMeetings.find(m => m.id === st.cteMeeting) || shownMeetings[0] || null
   // The room is only ever open on the meeting that is selected, so the card the
   // list highlights and the pane beside it can never disagree.
   const room = sel && st.cteRoom === sel.id ? sel.id : null
@@ -501,8 +585,17 @@ export default function Committee({ st, patch, narrow }) {
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
             <div style={cap}>ALL MEETINGS</div>
+            {/* A committee's records run to years. The season is the club's own
+                diary year, so July-to-June at a club that starts in July. */}
+            <label style={{ ...lbl, display: 'block', marginBottom: 10 }}>SEASON
+              <select value={season} onChange={e => patch({ cteMeetingsSeason: e.target.value, cteMeeting: null, cteRoom: null })}
+                style={{ ...inp, marginTop: 4 }}>
+                <option value="">All</option>
+                {seasonYears.map(y => <option key={y} value={String(y)}>{seasonLabel(y, diaryStart)}</option>)}
+              </select>
+            </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {meetings.map(m => {
+              {shownMeetings.map(m => {
                 const s = meetingStatus(m)
                 return (
                   <div key={m.id} onClick={() => patch({ cteMeeting: m.id, cteRoom: null })}
@@ -533,7 +626,11 @@ export default function Committee({ st, patch, narrow }) {
                   </div>
                 )
               })}
-              {meetings.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No meetings recorded yet.</div>}
+              {shownMeetings.length === 0 && (
+                <div style={{ fontSize: 13, color: C.faint }}>
+                  {meetings.length === 0 ? 'No meetings recorded yet.' : `No meetings in ${seasonLabel(Number(season), diaryStart)}.`}
+                </div>
+              )}
             </div>
           </div>
 
@@ -691,8 +788,17 @@ export default function Committee({ st, patch, narrow }) {
                     style={{ ...btnP, opacity: (tplEdit.busy || !tplEdit.name.trim() || !(tplEdit.items.length || tplEdit.draft.trim())) ? 0.6 : 1 }}>
                     {tplEdit.busy ? 'Saving…' : (tplEdit.id ? 'Save template' : 'Create template')}
                   </button>
-                  <button onClick={() => { setTplEdit(null); patch({ cteTemplate: null }) }} disabled={tplEdit.busy} style={btnS}>
-                    {tplEdit.id ? 'Close' : 'Cancel'}
+                  {/* A saved template is always open (the list selects the
+                      first), so this discards unsaved edits rather than
+                      closing to a pane that would re-fill itself. */}
+                  <button
+                    onClick={() => {
+                      const t = tplEdit.id && (templates || []).find(x => x.id === tplEdit.id)
+                      if (t) openTemplate(t)
+                      else { setTplEdit(null); patch({ cteTemplate: null }) }
+                    }}
+                    disabled={tplEdit.busy} style={btnS}>
+                    {tplEdit.id ? 'Revert' : 'Cancel'}
                   </button>
                   {tplEdit.id && (
                     <button
@@ -787,18 +893,36 @@ export default function Committee({ st, patch, narrow }) {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {openTasks.map(t => {
                   const s = taskState(t)
+                  const obj = (objectives || []).find(o => o.id === t.objective_id)
                   return (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px' }}>
+                    <div key={t.id} onClick={() => setEditId(t.id)}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditId(t.id) } }}
+                      role="button" tabIndex={0} title={`Open “${t.title}”`}
+                      style={{ display: 'flex', alignItems: 'center', gap: 11, background: C.surface, border: `1px solid ${C.hair}`, borderRadius: 8, padding: '11px 13px', cursor: 'pointer' }}>
                       <div style={{ minWidth: 0, flex: 1 }}>
                         <div style={{ fontSize: 13, color: C.text, lineHeight: 1.4 }}>{t.title}</div>
                         <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginTop: 3 }}>{t.assigned_to_member_id ? name(t.assigned_to_member_id) : 'Unassigned'}{t.due_date ? ' · due ' + fmtDate(t.due_date) : ''}</div>
+                        {/* What it is for, when it serves the strategic plan. */}
+                        {obj && (
+                          <div style={{ fontFamily: MONO, fontSize: 9.5, color: 'var(--pb-accent-ink)', marginTop: 3 }}>
+                            ▸ {obj.plan_name ? `${obj.plan_name} › ${obj.title}` : obj.title}
+                          </div>
+                        )}
                       </div>
                       <span style={chip(s.fg)}>{s.label}</span>
+                      <button onClick={e => { e.stopPropagation(); deleteTask(t) }}
+                        title={`Delete "${t.title}"`} aria-label={`Delete ${t.title}`}
+                        style={delBtn}>✕</button>
                     </div>
                   )
                 })}
                 {openTasks.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No open committee actions.</div>}
               </div>
+              {openTasks.length > 0 && (
+                <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
+                  CLICK AN ACTION TO EDIT IT
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -831,6 +955,15 @@ export default function Committee({ st, patch, narrow }) {
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div className="max-w-5xl"><Suspense fallback={<Loading />}><CalendarTab /></Suspense></div>
         </div>
+      )}
+
+      {/* One action editor for the screen — the list opens it, and Board and
+          Timeline open their own copy from inside TasksTab. */}
+      {editTask && (
+        <Suspense fallback={null}>
+          <ActionEditor task={editTask} allTasks={tasks} objectives={objectives || []} members={members}
+            onClose={() => setEditId(null)} onSaved={reloadTasks} onDeleted={reloadTasks} />
+        </Suspense>
       )}
 
       {mk && (

@@ -193,11 +193,78 @@ export function AttachedDocuments({ entityType, entityId }) {
   )
 }
 
-/* ── The planning side of one action ────────────────────────────────────── */
+/* ── One action, opened for editing ─────────────────────────────────────── */
 
-export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged }) {
+// The vocabulary an action is filed under, in ONE place. The board, the list,
+// the timeline and this editor all read these, so a status added here shows up
+// everywhere rather than in whichever screen was edited last.
+export const ACTION_CATEGORIES = ['operational', 'maintenance', 'compliance', 'finance', 'other']
+export const ACTION_STATUSES = ['todo', 'in_progress', 'done', 'blocked']
+export const ACTION_STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', done: 'Done', blocked: 'Blocked' }
+const catLabel = s => s.split('_').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+
+// What an action is FOR, said in one line rather than left to a dropdown.
+//
+// An objective is three tiers deep (plan › theme › objective) and the old
+// inline panel showed only the picker, which meant the linkage — the single
+// most useful thing about an action serving the strategic plan — was readable
+// only by opening the dropdown and reading which row happened to be selected.
+// Here it is a breadcrumb, with what the club committed to underneath it.
+function ObjectiveLink({ objective }) {
+  if (!objective) {
+    return (
+      <div className="pb-card p-3">
+        <div className={`${cap} mb-1`}>STRATEGIC PLAN</div>
+        <div className="text-[12.5px] text-pb-faint">
+          Not linked yet. Point it at an objective below and this action starts counting towards the plan.
+        </div>
+      </div>
+    )
+  }
+  const tiers = [
+    ['PLAN', objective.plan_name || 'Not on a plan'],
+    objective.pillar_name ? ['THEME', objective.pillar_name] : null,
+    ['OBJECTIVE', objective.title],
+  ].filter(Boolean)
+  const meta = [
+    objective.owner_position_name ? `Owned by the ${objective.owner_position_name}` : null,
+    objective.due_date ? `Due ${objective.due_date}` : null,
+    objective.budget != null ? `${money(objective.budget)} allocated` : null,
+  ].filter(Boolean)
+  return (
+    <div className="pb-card p-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 35%, transparent)' }}>
+      <div className={`${cap} mb-2`}>THIS ACTION SERVES</div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {tiers.map(([k, v], i) => (
+          <span key={k} className="flex items-center gap-2">
+            {i > 0 && <span className="text-pb-faintest text-[13px]">›</span>}
+            <span className="flex flex-col">
+              <span className={cap}>{k}</span>
+              <span className={`text-[13px] ${i === tiers.length - 1 ? 'text-pb-text font-semibold' : 'text-pb-dim'}`}>{v}</span>
+            </span>
+          </span>
+        ))}
+      </div>
+      {meta.length > 0 && (
+        <div className="font-mono text-[10px] text-pb-faintest mt-2">{meta.join(' · ')}</div>
+      )}
+    </div>
+  )
+}
+
+// The whole of one action, in a dialog with room to lay it out.
+//
+// It replaces the panel that used to unfold inside a board card: a two-column
+// grid of dates and money in a 200px-wide column, which is why it read as a
+// jumble. Opened from the list, the board and the timeline alike, so there is
+// one place an action is edited however you reached it.
+export function ActionEditor({ task, allTasks, objectives, members, onClose, onSaved, onDeleted }) {
   const toast = useToast()
   const [form, setForm] = useState({
+    title: task.title || '',
+    description: task.description || '',
+    category: task.category || 'operational',
+    status: task.status || 'todo',
     objective_id: task.objective_id || '',
     budget_estimate: task.budget_estimate ?? '',
     actual_expenditure: task.actual_expenditure ?? '',
@@ -210,16 +277,24 @@ export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged
   const [deps, setDeps] = useState(task.depends_on || [])
   const [busy, setBusy] = useState(false)
 
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   const num = v => (v === '' || v === null ? null : Number(v))
 
   async function save() {
+    if (!form.title.trim()) { toast.error('An action needs a title'); return }
     setBusy(true)
     try {
       await api.committeeUpdateTask(task.id, {
+        title: form.title.trim(),
+        description: form.description || null,
+        category: form.category,
+        status: form.status,
         objective_id: form.objective_id || null,
         budget_estimate: num(form.budget_estimate),
         actual_expenditure: num(form.actual_expenditure),
-        percent_complete: Number(form.percent_complete) || 0,
+        // Marking it done means done, so the progress bar stops disagreeing
+        // with the status pill above it.
+        percent_complete: form.status === 'done' ? 100 : (Number(form.percent_complete) || 0),
         start_date: form.start_date || null,
         due_date: form.due_date || null,
         assigned_to_member_id: form.assigned_to_member_id || null,
@@ -227,116 +302,172 @@ export function ActionPlanPanel({ task, allTasks, objectives, members, onChanged
       })
       await api.committeeSetTaskDependencies(task.id, deps)
       toast.success('Action updated')
-      onChanged()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+      onSaved?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
   }
 
-  async function close() {
+  async function remove() {
+    // Deleting takes the action's notes and attachments with it, so it says so
+    // rather than asking "are you sure?" about something unnamed.
+    if (!window.confirm(`Delete "${task.title}"?\n\nIts notes and attached documents go with it. This can't be undone.`)) return
     setBusy(true)
     try {
-      // Closing sets percent_complete to 100 server-side — an action that is
-      // done is done, not 60% done.
-      await api.committeeUpdateTask(task.id, { status: 'done' })
-      toast.success('Action closed')
-      onChanged()
-    } catch (e) { toast.error(e.message) } finally { setBusy(false) }
+      await api.committeeDeleteTask(task.id)
+      toast.success('Action deleted')
+      onDeleted?.()
+      onClose?.()
+    } catch (e) { toast.error(e.message); setBusy(false) }
   }
 
+  const objective = (objectives || []).find(o => o.id === form.objective_id) || null
   const over = form.budget_estimate !== '' && Number(form.actual_expenditure || 0) > Number(form.budget_estimate)
   const candidates = (allTasks || []).filter(t => t.id !== task.id)
   const blockers = candidates.filter(t => deps.includes(t.id) && t.status !== 'done')
 
   return (
-    <div className="pb-card p-4 space-y-3">
-      <div className={cap}>PLAN</div>
+    <div onClick={() => { if (!busy) onClose?.() }}
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div onClick={e => e.stopPropagation()}
+        className="pb-card w-full max-w-3xl p-5 space-y-4">
 
-      <div className="grid grid-cols-2 gap-2">
-        <ObjectiveSelect objectives={objectives} value={form.objective_id}
-          onChange={v => setForm(f => ({ ...f, objective_id: v || '' }))} />
-        <label className="block">
-          <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
-          <select className={inp} value={form.assigned_to_member_id}
-            onChange={e => setForm(f => ({ ...f, assigned_to_member_id: e.target.value }))}>
-            <option value="">— unassigned —</option>
-            {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
-          </select>
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>STARTS</span>
-          <input type="date" className={inp} value={form.start_date}
-            onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>DUE</span>
-          <input type="date" className={inp} value={form.due_date}
-            onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>BUDGET</span>
-          <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
-            onChange={e => setForm(f => ({ ...f, budget_estimate: e.target.value }))} />
-        </label>
-        <label className="block">
-          <span className={`${cap} block mb-1`}>SPENT SO FAR</span>
-          <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.actual_expenditure}
-            onChange={e => setForm(f => ({ ...f, actual_expenditure: e.target.value }))} />
-        </label>
-      </div>
-
-      {over && (
-        <div className="font-mono text-[10px] text-pb-amber">
-          Over budget by {money(Number(form.actual_expenditure) - Number(form.budget_estimate))}.
+        <div className="flex items-start gap-3">
+          <label className="flex-1 min-w-0 block">
+            <span className={`${cap} block mb-1`}>ACTION</span>
+            <input className={`${inp} !text-[15px] !py-2`} value={form.title}
+              onChange={e => set('title', e.target.value)} placeholder="What has to happen" />
+          </label>
+          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
         </div>
-      )}
 
-      <label className="block">
-        <span className={`${cap} block mb-1`}>PROGRESS · {form.percent_complete}%</span>
-        <input type="range" min="0" max="100" step="5" className="w-full accent-pb-accent"
-          value={form.percent_complete}
-          onChange={e => setForm(f => ({ ...f, percent_complete: e.target.value }))} />
-      </label>
-
-      <div>
-        <div className={`${cap} mb-1`}>WAITS ON</div>
-        {candidates.length === 0 ? (
-          <div className="font-mono text-[10px] text-pb-faintest">No other actions to depend on yet.</div>
-        ) : (
-          <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
-            {candidates.map(t => (
-              <label key={t.id} className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer">
-                <input type="checkbox" className="accent-pb-accent" checked={deps.includes(t.id)}
-                  onChange={e => setDeps(d => e.target.checked ? [...d, t.id] : d.filter(x => x !== t.id))} />
-                <span className="truncate">{t.title}</span>
-                {t.status === 'done' && <span className="font-mono text-[8px] text-pb-positive">DONE</span>}
-              </label>
+        <div>
+          <div className={`${cap} mb-1`}>STATUS</div>
+          <div className="flex flex-wrap gap-1">
+            {ACTION_STATUSES.map(s => (
+              <button key={s} onClick={() => set('status', s)}
+                className={`px-3 py-1.5 rounded text-[12.5px] border ${form.status === s ? 'text-pb-text' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                style={form.status === s
+                  ? { borderColor: 'var(--pb-accent)', background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)' }
+                  : undefined}>
+                {ACTION_STATUS_LABELS[s]}
+              </button>
             ))}
           </div>
-        )}
-        {blockers.length > 0 && (
-          <div className="font-mono text-[10px] text-pb-amber mt-1">
-            Blocked — {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
+        </div>
+
+        <ObjectiveLink objective={objective} />
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <ObjectiveSelect objectives={objectives} value={form.objective_id}
+            onChange={v => set('objective_id', v || '')} />
+          <label className="block">
+            <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
+            <select className={inp} value={form.assigned_to_member_id}
+              onChange={e => set('assigned_to_member_id', e.target.value)}>
+              <option value="">— unassigned —</option>
+              {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
+            </select>
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>CATEGORY</span>
+            <select className={inp} value={form.category} onChange={e => set('category', e.target.value)}>
+              {ACTION_CATEGORIES.map(c => <option key={c} value={c}>{catLabel(c)}</option>)}
+            </select>
+          </label>
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className={`${cap} block mb-1`}>STARTS</span>
+              <input type="date" className={inp} value={form.start_date}
+                onChange={e => set('start_date', e.target.value)} />
+            </label>
+            <label className="block">
+              <span className={`${cap} block mb-1`}>DUE</span>
+              <input type="date" className={inp} value={form.due_date}
+                onChange={e => set('due_date', e.target.value)} />
+            </label>
+          </div>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>BUDGET</span>
+            <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.budget_estimate}
+              onChange={e => set('budget_estimate', e.target.value)} />
+          </label>
+          <label className="block">
+            <span className={`${cap} block mb-1`}>SPENT SO FAR</span>
+            <input type="number" step="0.01" className={inp} placeholder="0.00" value={form.actual_expenditure}
+              onChange={e => set('actual_expenditure', e.target.value)} />
+          </label>
+        </div>
+
+        {over && (
+          <div className="font-mono text-[10px] text-pb-amber">
+            Over budget by {money(Number(form.actual_expenditure) - Number(form.budget_estimate))}.
           </div>
         )}
-      </div>
 
-      <label className="block">
-        <span className={`${cap} block mb-1`}>OUTCOME</span>
-        <textarea rows={2} className={inp} placeholder="What actually happened, once it's done."
-          value={form.outcome_notes} onChange={e => setForm(f => ({ ...f, outcome_notes: e.target.value }))} />
-      </label>
+        <label className="block">
+          <span className={`${cap} block mb-1`}>PROGRESS · {form.status === 'done' ? 100 : form.percent_complete}%</span>
+          <input type="range" min="0" max="100" step="5" className="w-full accent-pb-accent"
+            disabled={form.status === 'done'}
+            value={form.status === 'done' ? 100 : form.percent_complete}
+            onChange={e => set('percent_complete', e.target.value)} />
+        </label>
 
-      <div className="flex items-center gap-2">
-        <button onClick={save} disabled={busy}
-          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
-          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
-          {busy ? 'SAVING…' : 'SAVE'}
-        </button>
-        {task.status !== 'done' && (
-          <button onClick={close} disabled={busy}
-            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
-            Close as complete
+        <label className="block">
+          <span className={`${cap} block mb-1`}>DETAIL</span>
+          <textarea rows={2} className={inp} placeholder="Anything the committee needs to know before it starts."
+            value={form.description} onChange={e => set('description', e.target.value)} />
+        </label>
+
+        <div>
+          <div className={`${cap} mb-1`}>WAITS ON</div>
+          {candidates.length === 0 ? (
+            <div className="font-mono text-[10px] text-pb-faintest">No other actions to depend on yet.</div>
+          ) : (
+            <div className="max-h-32 overflow-y-auto space-y-0.5 pr-1">
+              {candidates.map(t => (
+                <label key={t.id} className="flex items-center gap-2 text-[12.5px] text-pb-dim cursor-pointer">
+                  <input type="checkbox" className="accent-pb-accent" checked={deps.includes(t.id)}
+                    onChange={e => setDeps(d => e.target.checked ? [...d, t.id] : d.filter(x => x !== t.id))} />
+                  <span className="truncate">{t.title}</span>
+                  {t.status === 'done' && <span className="font-mono text-[8px] text-pb-positive">DONE</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          {blockers.length > 0 && (
+            <div className="font-mono text-[10px] text-pb-amber mt-1">
+              Blocked — {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
+            </div>
+          )}
+        </div>
+
+        <label className="block">
+          <span className={`${cap} block mb-1`}>OUTCOME</span>
+          <textarea rows={2} className={inp} placeholder="What actually happened, once it's done."
+            value={form.outcome_notes} onChange={e => set('outcome_notes', e.target.value)} />
+        </label>
+
+        <div className="pb-card p-3"><NoteThread entityType="task" entityId={task.id} /></div>
+        <div className="pb-card p-3"><AttachedDocuments entityType="task" entityId={task.id} /></div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={save} disabled={busy || !form.title.trim()}
+            className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            {busy ? 'SAVING…' : 'SAVE'}
           </button>
-        )}
+          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+            Cancel
+          </button>
+          <button onClick={remove} disabled={busy}
+            className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
+            style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
+            Delete action
+          </button>
+        </div>
       </div>
     </div>
   )

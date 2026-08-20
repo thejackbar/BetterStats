@@ -47,6 +47,32 @@ as sections with their own buttons rather than three tabs and a manage page.
 - **Deleting a meeting is the destructive one** and its confirm names what goes
   with it (agenda, motions, attendance, minutes). A failed write is reported in
   a line under the header; this screen has no toast.
+- **A committee season is the club's DIARY year, not a calendar one.** The
+  Season dropdown on All Meetings resolves each meeting through
+  `organisations.diary_start_month` (read off `adminGetSettings`, which any
+  signed-in admin may call — a committee manager does not hold
+  `MANAGE_SETTINGS`), so July 2026 to June 2027 is one season at a club
+  starting in July, and a club starting in January gets a one-year label
+  rather than "2026/2027". Options are the seasons the club actually met in
+  plus the one running now, so a club that has just rolled over can find this
+  season and see it is empty. `sel` reads the FILTERED list, or filtering
+  could leave a meeting open that the rail no longer holds.
+- **`ActionEditor` (governance.jsx) is the one place an action is edited**, and
+  it replaced `ActionPlanPanel`, which unfolded a full two-column editor inside
+  a 200px board column — reported as a meaningless block, and it was. It opens
+  from the List, the Board and the Timeline alike. The plan linkage is a
+  written-out breadcrumb (PLAN › THEME › OBJECTIVE plus the objective's owner,
+  due date and allocation) rather than a dropdown you had to open to find out
+  what the action was for. `ACTION_CATEGORIES` / `ACTION_STATUSES` /
+  `ACTION_STATUS_LABELS` are exported from there and imported by
+  AdminCommittee, so the vocabulary has one home.
+- **The Board's lanes are the drop targets, not the cards.** Dropping into the
+  empty space under the last card has to work, or an empty lane could never
+  receive anything. The move is applied locally first and rolled back on a
+  failed write, so a card lands where it was dropped instead of snapping back
+  for the length of the request. Testing it needs `DragEvent`s dispatched with
+  `dragstart` and `drop` in SEPARATE `evaluate` calls — the trap the roster
+  note above describes.
 - **Driven in Chromium** against the real screens with the API stubbed at the
   network layer (39 checks: every button row and the ones that correctly do not
   render, the meeting delete reaching the API and leaving the list, the template
