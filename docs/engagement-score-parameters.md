@@ -7,6 +7,11 @@ living as constants in `backend/app/services/twenty_sync.py`.
 Nothing here is built yet. This is the shape of the work, the traps found while
 reading the current code, and a straight answer to the recalculation question.
 
+Section 8 is a separate question that came out of the same reading: whether the
+current scoring is sound. It is not entirely, and one of the findings is a
+defect rather than a tuning choice, so read that before deciding what the page
+should default to.
+
 ## 1. Where the numbers live today
 
 Two files hold every weight:
@@ -455,3 +460,160 @@ same action rather than waiting on its own refresh. Then, separately, add "Club
 Selected" as a genuinely new scored signal off the `club_prepared` beacon, which
 by then is a catalogue entry and a query rather than a code change in four
 places.
+
+## 8. Is the current scoring sound?
+
+Short answer: the bottom end is worse than the top end, and neither is the
+biggest problem. There is a defect in the direct-enquiry override that no amount
+of re-weighting fixes.
+
+The numbers below come from modelling the formula's own arithmetic offline
+(constants copied from `twenty_sync.py`, archetype clubs pushed through it).
+They describe the shape of the curve, not the observed distribution. The real
+check is `python -m app.scripts.recalc_engagement --dry-run`, which already
+prints a histogram in bins of 5 plus percentiles, split between linked clubs and
+directory-only prospects. Run that before acting on any of this.
+
+### 8a. The defect: the enquiry override can LOWER a score
+
+`twenty_sync.py` line 833:
+
+    if direct_enquiry_hot:
+        score, tier = DIRECT_ENQUIRY_SCORE, "HOT"
+
+That is an assignment, not a floor. Its own comment says the purpose is so a
+score "doesn't quietly decay back to the ordinary recency/frequency score
+overnight", which is entirely about preventing a fall. Nothing in it justifies
+capping a club that has independently earned more.
+
+What it actually does:
+
+| Club | Score without enquiry | With a 2-day-old enquiry |
+|---|---|---|
+| Busy prospect, 20 visitors, hit /contact and /trial | 100 | **80** |
+| Onboarded club deep in setup (trial depth 95) | 95 | **80** |
+
+So a club that browses heavily, reaches the trial page and then fills in the
+contact form is scored **lower** than the same club that never got in touch.
+The most engaged prospects on the platform are the ones this penalises. Fix is
+one line, `score = max(score, DIRECT_ENQUIRY_SCORE)`, with the tier recomputed
+from the result rather than forced to HOT.
+
+Worth confirming with whoever wrote it, since "flat" is the word used, but the
+stated rationale only ever describes a floor.
+
+### 8b. The bottom end is noise, and it is what fills the pipeline
+
+One page view, from one anonymous visitor, is enough to put a club on the sales
+pipeline, and stays enough for about 90 days:
+
+| Signal | Score | On the board? |
+|---|---|---|
+| 1 page view, today | 14 | yes |
+| 1 page view, 29 days ago | 6 | yes |
+| 1 page view, 89 days ago | 1 | yes |
+| 1 page view, 100 days ago | 0 | no |
+| 1 email **open**, 30 days ago | 4 | yes |
+| 1 email open, 89 days ago | 1 | yes |
+
+Two things make this worse than it looks.
+
+**An email open is not a human.** Apple Mail Privacy Protection fires the
+tracking pixel without the recipient ever looking at the message. The code
+already knows this, which is why a click is weighted at more than double an
+open. But an auto-fired open still scores 4, which still clears `score > 0`, so
+it still creates a deal card. Send one outreach campaign across the directory
+and the pipeline fills with cards representing nobody.
+
+**Recency does most of the work down here.** A touch today is worth a flat 10
+whether it came from one page view or a hundred, so 10 of the first 14 points
+say only "somebody was here recently". That is the single largest distortion at
+the bottom of the range.
+
+This is the quantified case for the membership floor in 2a. A floor around 15
+would admit a club that has had a real visit and exclude a stale page view and
+an auto-fired open.
+
+### 8c. The top end saturates early
+
+The clamp binds sooner than the 100-point scale suggests:
+
+| Weekly traffic | Raw score | Reported |
+|---|---|---|
+| 5 visitors, 20 views | 46 | 46 |
+| 10 visitors, 40 views | 83 | 83 |
+| 20 visitors, 80 views | 156 | **100** |
+| 50 visitors, 200 views | 375 | **100** |
+| 100 visitors, 400 views | 740 | **100** |
+
+Saturation starts around 15 visitors a week. Above that every club is
+indistinguishable, and the marginal value of a new visitor is zero. A club
+pulling 100 visitors reads the same as one pulling 15.
+
+The intent bonuses compound it. Contact page 10, trial page 20, requested trial
+12, in trial 10, ad signup 10, enquiry 20 come to **82 points of a 100-point
+scale before a single page view is counted**. One visit today to `/trial` scores
+34, which is WARM off a single anonymous page view.
+
+Net effect: roughly scores 31 to 99 do the discriminating, and they cover about
+an 11x range of real traffic. Below 31 is mostly noise, above 99 is flat.
+
+### 8d. Three incommensurable things share one axis
+
+This matters more than the curve shape, and re-weighting cannot fix it.
+
+- A **customer** floors at `CUSTOMER_BASE` 60 and scores on account health.
+- A **self-registered prospect** floors at its trial depth, minimum 70 for
+  registering at all.
+- A **prospect** scores on lead heat, and needs roughly 8 real visitors in a
+  week to reach 60.
+
+So a paying customer who has done nothing outranks a prospect with 7 visitors,
+and a club that signed up and then abandoned setup (70, HOT) outranks a prospect
+actively browsing (say 55, WARM). They are all sorted together on the pipeline
+and all filterable together in Comms segments, where a "score >= 60" audience
+silently mixes customers, dormant registrations and hot leads.
+
+### 8e. The 60-day enquiry cliff
+
+The pin does not decay, it falls off:
+
+| Days since enquiry | Score |
+|---|---|
+| 59 | 80 HOT |
+| 60 | 80 HOT |
+| 61 | **1 COLD** |
+
+Overnight, from the top of the board to the bottom, with the club still on the
+pipeline (1 clears `score > 0`) but reading Cold. Everywhere else the scoring
+was deliberately made smooth, which is why `_recency_pts` is an exponential
+rather than day buckets. This is the one place that rule was not applied.
+
+### 8f. What to change, in order
+
+1. **Make the enquiry override a floor** (8a). One line, and it is a defect
+   rather than a preference.
+2. **Raise the membership floor** to something like 15 (2a and 8b). Biggest
+   single improvement to what the pipeline shows, and already planned.
+3. **Taper the enquiry pin** instead of cliffing it (8e). Simplest version is to
+   let it fall as an exponential from `DIRECT_ENQUIRY_SCORE` once the window
+   ends, rather than vanishing.
+4. **Reconsider `RECENCY_FULL` = 10**, or make recency scale with frequency
+   rather than add to it. It is what makes a single stale page view look like
+   engagement.
+5. **Shape the top instead of clamping it**, for example a soft saturation on
+   the final sum (`100 * (1 - exp(-raw / 60))`) so ordering is preserved above
+   15 visitors. Note the history here: the constants block records that the
+   earlier per-component saturating caps were removed precisely because they
+   compressed genuinely different clubs into a lump. A single monotonic
+   transform on the final sum is a different thing from per-component caps. It
+   never ties two clubs that differ, and it removes the hard ceiling rather than
+   adding more of them. Worth trying against the real histogram before
+   committing.
+6. **Decide whether customers belong on this axis at all** (8d). Options are a
+   separate account-health field, or keeping the number and stopping the
+   cross-lifecycle comparison in segments and sorting. Not a weights question.
+
+Items 1 to 3 are small and worth doing regardless of whether the parameters page
+gets built. Items 4 to 6 are exactly the kind of change the page plus its
+preview exists to make safely, so they should wait for it.
