@@ -49,8 +49,19 @@ rather than as part of it.
 
 ## 2. What there is to parameterise
 
-Around 45 numbers, in eight natural groups. Grouping matters, because a flat
-list of 45 inputs is unusable and hides which knobs interact.
+Around 45 numbers, in nine natural groups. Grouping matters, because a flat
+list of 45 inputs is unusable and hides which knobs interact, and because one
+group carries far more weight than the other eight put together.
+
+**Pipeline membership**, the two numbers that decide whether a club appears on
+the board at all. Neither exists yet. See 2a below, this is the highest-leverage
+control on the page.
+- `PIPELINE_ADD_MIN`, the score at or above which a club is auto-added to the
+  pipeline as a Target deal. Today this is hardcoded as `score > 0` in
+  `crm.sync_pipeline_membership`, so the effective value is 1.
+- `PIPELINE_REMOVE_BELOW`, the score under which an auto-added Target deal is
+  archived back off the board. Today hardcoded as `score == 0`, so the effective
+  value is also 1.
 
 **Recency** (`_recency_pts`, a smooth exponential decay of the single most
 recent touch of any kind)
@@ -115,6 +126,51 @@ changing the shape of the curve rather than its height, and the tier labels
 (`d7`, `d14`) are dictionary keys the whole codebase reads. Adding a sixth tier
 is a code change either way. Say so on the page rather than leaving people
 hunting for a control that is not there.
+
+### 2a. The membership floor needs two thresholds, not one
+
+`crm.sync_pipeline_membership` is what decides relevance in the most literal
+sense. Score above zero and a club with no existing deal gets one auto-created
+at Target, valued at the Stats default. Score at zero and an auto-added deal
+still parked at Target is archived off the board. With around 6,000 directory
+clubs, moving that boundary from 1 to, say, 15 is the difference between a
+pipeline and a phone book, and it is the one knob nobody would think to look
+for in a block of scoring weights.
+
+It cannot be exposed as a single number, though, and the reason is worth
+setting down.
+
+At zero the boundary is naturally sticky. A score of exactly zero means no
+attributed activity at all, so a club does not drift back and forth across it.
+Anywhere in the middle of the range it is not sticky: a club sitting near the
+threshold will cross it in both directions as its decay points tick down and a
+fresh page view ticks them back up. That matters more than a flapping log line,
+because **re-entry creates a NEW deal row**. The "already has a deal" guard
+excludes archived deals (`CrmDeal.archived_at.is_(None)`), which is exactly what
+lets a re-engaging club come back, but it also means a club oscillating around
+the floor accumulates a trail of archived deals and starts fresh each time.
+
+So model it as a deadband: add at or above `PIPELINE_ADD_MIN`, remove below
+`PIPELINE_REMOVE_BELOW`, with the remove threshold constrained to be less than
+or equal to the add threshold. Defaulting both to 1 reproduces today's behaviour
+exactly (add at `>= 1` is `> 0`; remove at `< 1` is `== 0`), so this ships as a
+no-op and a Super Admin opens the gap deliberately, for example add at 20 and
+remove below 10.
+
+Two things about the existing code make raising the floor safer than it sounds,
+and they are worth saying on the page so nobody hesitates over a control they
+should be using:
+
+- Archiving only ever touches an **auto-added deal still sitting at Target**. A
+  hand-added deal (`source = "manual"`), one that was hand-moved
+  (`stage_auto_locked`), and anything that has advanced to Contacted, Engaged,
+  Trial, Won or Lost are all left alone. Raising the floor cannot destroy worked
+  deals, only clear out cards nobody has touched.
+- It is reversible. Lower the floor again and the clubs return on the next
+  sweep, though as new cards rather than the originals.
+
+The archive activity line currently reads "Auto-removed from pipeline:
+engagement decayed to 0" and would need to quote the configured floor instead.
 
 ## 3. Storage
 
@@ -203,6 +259,24 @@ in `CLAUDE.md` for `:param IS NULL`.
 
 ## 5. The Super Admin surface
 
+**It is a relevance page, not a weights page.** That framing decides the
+layout. Three separate levers control what the pipeline treats as relevant, and
+the scoring weights are only one of them:
+
+1. The **membership floor** (2a above) decides whether a club is on the board.
+   Not editable today. Belongs at the top of this page.
+2. The **promotion rules** decide which stage a deal lands in and at what score.
+   Already editable, as `CrmAutomationRule` rows on the Sales Automation page
+   (`services/crm_rules.py`, migration 190). This page should link to that, not
+   restate it.
+3. The **weights** decide the number the other two are compared against. They
+   are the bulk of the controls and the least of the leverage.
+
+Built as 45 free-floating knobs it is a way to make the score worse, because
+there is no loop between changing `WEB_DECAY['d14']` from 1.5 to 1.2 and knowing
+whether the pipeline improved. Built floor-first, with the preview below, it is
+a genuine control surface.
+
 **Page**: `/admin/super/crm/engagement-parameters`, reached three ways.
 
 - A tile in the CRM hub (`SUPER_SECTIONS.crm.items` in
@@ -215,10 +289,18 @@ in `CLAUDE.md` for `:param IS NULL`.
 - Nothing on General Settings. That modal already carries the trial, billing,
   bundle-discount and marketing settings, and 45 more numbers would bury them.
 
-**Layout**: the eight groups above as collapsible sections, each parameter a
-number input with its label, its help text, its current value, its code default,
-and a reset-to-default control. Show the default next to the value at all times.
-With a sparse store, "this one has been changed" is real state worth seeing.
+**Layout**: membership floor and tier bands open at the top, since those are
+what most visits are actually about, then the eight weight groups as collapsed
+sections, then a link out to Sales Automation for the stage rules. Each
+parameter is a number input with its label, its help text, its current value,
+its code default and a reset-to-default control. Show the default next to the
+value at all times: with a sparse store, "this one has been changed" is real
+state worth seeing.
+
+Beside the membership floor, show what it currently means. The pipeline's own
+deal count and the club count at or above the proposed floor are both cheap
+queries, so the page can say "1,240 clubs on the board now, 310 at or above 20"
+while someone is typing the number.
 
 **Three things the page has to say out loud**, because they surprise people:
 
@@ -231,14 +313,19 @@ With a sparse store, "this one has been changed" is real state worth seeing.
    clubs.
 3. A customer scores on a completely different branch. Half the parameters on
    the page do not apply to a paying club at all.
+4. Raising the membership floor archives cards. It only ever touches auto-added
+   deals still parked at Target, never a hand-added, hand-moved or advanced
+   deal, and it is reversible. Say both halves, or nobody will touch the control
+   that matters most.
 
 **Preview before save is the feature that makes the page worth building.**
 `recalc_engagement` already has `--dry-run`, and it already prints a histogram
 in bins of 5 plus min / p25 / median / p75 / p90 / max / mean, split between
 linked clubs and directory-only prospects. Expose that: run the proposed weights
 against live data without persisting, and show the before and after
-distribution, the tier counts either side, how many clubs cross into HOT, and
-how many deals would auto-promote. That is what turns "should Club Selected be
+distribution, the tier counts either side, how many clubs cross into HOT, how
+many deals would auto-promote, and how many cards would join or leave the board
+under the proposed floor. That is what turns "should Club Selected be
 10 or 20" from a guess into a decision. It reuses machinery that exists rather
 than building a simulator.
 
@@ -289,9 +376,20 @@ button already shows. No new job, no new script, no new endpoint. Offer "save
 without recalculating" for someone staging several edits, with the page saying
 plainly that the change lands within the hour regardless.
 
-### Four side effects a recalculation has
+### Five side effects a recalculation has
 
 These are the reasons this needs a decision rather than just a button.
+
+**Cards join and leave the board.** The membership floor is applied by
+`sync_pipeline_membership`, which `sync_engagement_promotion` calls on every
+club in the sweep, so raising the floor mass-archives auto Target cards and
+lowering it mass-creates them, in one run. This is the intended effect rather
+than a hazard, and it is bounded (untouched auto Target cards only, never a
+manual, locked or advanced deal) and reversible. It is still the largest visible
+change a save can make, so the preview has to put a number on it and the save
+confirmation has to repeat it. Note that the clubs coming back come back as new
+cards, not the archived originals, which is the other reason for the deadband in
+2a rather than a single threshold.
 
 **The day-over-day arrow will lie.** `_apply_engagement_cache` rolls a club's
 previous score into `engagement_score_prev` on the first write of a new Perth
@@ -321,30 +419,39 @@ manufacture Opportunities in the external CRM on the next Twenty refresh. This
 is the strongest argument for the preview: show the count of clubs that would
 cross 90 before anything is saved.
 
-**Tier changes ripple into audiences.** A BetterComms segment built on
+**Tier and floor changes ripple into audiences.** A BetterComms segment built on
 `engagement_score >= 60` changes membership the moment scores move. Nothing
 sends on its own, so this is a surprise rather than a hazard, but a saved
 audience quietly meaning something different is worth a line on the page.
 
 ## 7. Suggested phasing
 
-Three steps, ordered so the risky one is provably a no-op.
+Three steps, ordered so the risky one is provably a no-op and nothing with a
+large blast radius ships without the preview that makes it safe.
 
 **Phase 1, no behaviour change.** Build the catalogue dict, the resolver, the
-in-process cache and the `weights=` argument threaded through `_engagement`,
+in-process cache, and the `weights=` argument threaded through `_engagement`,
 `batch_web_stats`, `batch_email_stats`, `_recency_pts`, `_tier_for` and
-`trial_depth_score`. Read only code defaults, store nothing. Verify with
-`recalc_engagement --verify` and by comparing a full `--dry-run` histogram
-before and after: it must be identical, club for club. This is the phase where a
-missed interpolation site shows up, and it shows up against a known answer.
+`trial_depth_score`. Replace the hardcoded `score > 0` and `score == 0` in
+`sync_pipeline_membership` with `PIPELINE_ADD_MIN` and `PIPELINE_REMOVE_BELOW`,
+both defaulting to 1, which is today's behaviour written differently. Read only
+code defaults, store nothing. Verify with `recalc_engagement --verify` and by
+comparing a full `--dry-run` histogram before and after: it must be identical,
+club for club, and the pipeline's deal count must not move. This is the phase
+where a missed interpolation site shows up, and it shows up against a known
+answer.
 
-**Phase 2, storage and the page.** The `platform_settings` key with its getter,
-setter and validator, the revisions table and its migration, the API endpoints,
-and the page with its groups, defaults and reset controls. Save persists and
-triggers the existing recalculation, with the `_prev` suppression above.
+**Phase 2, storage, the page and the preview together.** The
+`platform_settings` key with its getter, setter and validator, the revisions
+table and its migration, the API endpoints, and the page laid out floor-first
+per section 5. The preview belongs here rather than later: it is what stops a
+floor change being a leap, and most of it is `recalc --dry-run` plus the two
+counts. Save persists, then triggers the existing background recalculation with
+the `_prev` suppression above.
 
-**Phase 3, the judgement tools.** Preview with the before-and-after
-distribution, revision history with rollback, and the "would cross 90" and
-"would promote" counts. Then, separately, add "Club Selected" as a genuinely new
-scored signal off the `club_prepared` beacon, which by then is a catalogue entry
-and a query rather than a code change in four places.
+**Phase 3, the rest of the judgement tools.** Revision history with rollback,
+the "would cross 90" Opportunity warning, and an option to push to Twenty in the
+same action rather than waiting on its own refresh. Then, separately, add "Club
+Selected" as a genuinely new scored signal off the `club_prepared` beacon, which
+by then is a catalogue entry and a query rather than a code change in four
+places.
