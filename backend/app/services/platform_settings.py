@@ -367,7 +367,13 @@ def _selection_key(name: str) -> str:
 async def get_hidden_meta_selections(db: AsyncSession) -> set[str]:
     """The set of normalised club-name keys a super admin has flagged as test
     noise on the Meta Ads dashboard, so the wizard-selection table can filter
-    them out. Table-only tidy-up — never touches the Sales Pipeline."""
+    them out.
+
+    Also read by twenty_sync._wizard_selections: a wizard selection is worth
+    BONUS_CLUB_SELECTED points on the club's engagement score, so a flagged test
+    run has to stop scoring as well as stop showing — otherwise a super admin's
+    own stripetest pins a real club HOT with no lever to undo it. Flagging still
+    moves nothing else on the Sales Pipeline."""
     settings = await get_settings(db)
     raw = settings.get(_HIDDEN_META_SELECTIONS_KEY) or []
     if not isinstance(raw, list):

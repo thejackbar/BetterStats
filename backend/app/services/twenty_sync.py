@@ -88,6 +88,18 @@ BONUS_VISIT_TRIAL = 20
 # 'self_serve_ad') converted a paid click all the way to a registration — score
 # that intent on top of the trial-depth registration credit it already earns.
 BONUS_AD_SIGNUP = 10
+# Someone picked this club by name in the registration wizard (the
+# ``club_prepared`` beacon behind the Meta Ads page's "Clubs selected in the
+# wizard" table). Unlike every other bonus here this one is PER OCCURRENCE, not
+# a flat one-off: a club several different people have gone looking for is a
+# stronger signal than one person doing it once, so the points multiply.
+#
+# The occurrence counted is a DISTINCT VISITOR, not a raw beacon row. The
+# beacon fires on every click of a search result (Trial.jsx handleClubClick),
+# so one person browsing back and forth fires it repeatedly — counting rows
+# would let a single visitor's clicking run the score away. Distinct visitors
+# is also the unit the table itself reports next to each club.
+BONUS_CLUB_SELECTED = 15
 
 # Customer account-health branch (floored, never Cold).
 CUSTOMER_BASE = 60
@@ -314,6 +326,105 @@ async def _onboarding_signal(session, club: MarketingClub, utm: "Optional[str]",
     return (row[0] or 0, row[1]) if row else (0, None)
 
 
+# --- Wizard club selections --------------------------------------------------
+# A `club_prepared` beacon (routers/public_self_serve.py track_step) that names
+# the club it picked. The same rows behind the Meta Ads page's "Clubs selected
+# in the wizard" table (meta_ads.get_selected_clubs) — written once here so the
+# score and that table can never disagree about what counts as a selection.
+# ``route`` is an indexed equality (idx_usage_events_route_created), so this
+# starts from the small selection-beacon set rather than scanning usage_events.
+_WIZARD_SELECTION_ROWS = """
+        SELECT ue.visitor_id,
+               ue.created_at,
+               NULLIF(TRIM(ue.metadata->>'club_org_id'), '') AS guid,
+               lower(TRIM(ue.metadata->>'club_name'))        AS name_key
+        FROM usage_events ue
+        WHERE ue.event_type = 'self_serve_step'
+          AND ue.route = 'club_prepared'
+          AND NULLIF(TRIM(ue.metadata->>'club_name'), '') IS NOT NULL
+          -- A selection a super admin flagged as test noise on that table (their
+          -- own stripetest run) must not score either, or a stray test pins a
+          -- real club HOT with no lever to undo it. Keyed on the same normalised
+          -- club name the table hides on.
+          AND lower(TRIM(ue.metadata->>'club_name')) <> ALL (CAST(:hidden AS text[]))
+"""
+
+# Resolve a selection to ONE Club Directory row, by the wizard's own captured CA
+# organisation guid first and a case-insensitive name second — the same priority
+# (and for the same reason) as wizard_club_lists._directory_matches, so the CRM
+# page and the score agree about whose selection it is. LATERALs rather than
+# plain joins: marketing_clubs.name isn't unique, and a join would multiply the
+# beacon row and count one selection twice. ORDER BY id makes the pick among
+# same-named rows stable across runs rather than whatever the planner returns.
+#
+# The resolution runs over DISTINCT (guid, name) pairs, not over beacon rows —
+# thousands of beacons name only a few hundred different clubs, and resolving
+# per row instead cost ~8s a club at 6k clubs / 5k beacons (measured), on a path
+# that is meant to be a handful of indexed reads.
+#
+# MATERIALIZED is load-bearing, not decoration. Without it the planner inlines
+# the LATERALs into the join below and runs the name lookup once per BEACON —
+# the 8s plan above, which is what it costs when a bad row estimate off a CTE
+# turns into a nested loop. Materialising pins the resolution to the distinct
+# pairs it was written for.
+_WIZARD_SELECTION_CTE = f"""
+    WITH sel AS MATERIALIZED ({_WIZARD_SELECTION_ROWS}),
+    resolved AS MATERIALIZED (
+        SELECT p.guid, p.name_key, COALESCE(g.id, n.id)::text AS club_id
+        FROM (SELECT DISTINCT guid, name_key FROM sel) p
+        LEFT JOIN LATERAL (
+            SELECT mc.id FROM marketing_clubs mc
+            WHERE p.guid IS NOT NULL AND mc.grassroots_guid = p.guid
+            ORDER BY mc.id LIMIT 1
+        ) g ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT mc.id FROM marketing_clubs mc
+            WHERE lower(TRIM(mc.name)) = p.name_key
+            ORDER BY mc.id LIMIT 1
+        ) n ON TRUE
+    ),
+    attributed AS (
+        SELECT r.club_id, s.visitor_id, s.created_at
+        FROM sel s
+        JOIN resolved r ON r.name_key = s.name_key
+                       AND r.guid IS NOT DISTINCT FROM s.guid
+        WHERE r.club_id IS NOT NULL
+    )
+"""
+
+
+async def _wizard_selections(session, club: MarketingClub) -> tuple:
+    """Has anyone gone looking for this club in the registration wizard? Returns
+    (distinct visitors who picked it, when it was last picked) — all-time, like
+    ``_onboarding_signal``'s own count, and matching the all-time table it comes
+    from. Each visitor is worth BONUS_CLUB_SELECTED (see the constant for why the
+    unit is a visitor and not a raw beacon row)."""
+    hidden = sorted(await platform_settings.get_hidden_meta_selections(session))
+    row = (await session.execute(text(f"""
+        {_WIZARD_SELECTION_CTE}
+        SELECT COUNT(DISTINCT visitor_id), MAX(created_at)
+        FROM attributed WHERE club_id = CAST(:cid AS text)
+    """), {"cid": str(club.id), "hidden": hidden})).first()
+    return (row[0] or 0, row[1]) if row else (0, None)
+
+
+async def batch_wizard_selection_stats(session) -> dict:
+    """Single-pass equivalent of ``_wizard_selections`` for every club at once —
+    the same idea as ``batch_web_stats`` / ``batch_email_stats``, so a full
+    recalc resolves the beacons once instead of re-scanning them per club.
+    Returns ``{club_id_text: {"selections": int, "last_at": datetime}}`` with the
+    fields the per-club query yields."""
+    hidden = sorted(await platform_settings.get_hidden_meta_selections(session))
+    rows = (await session.execute(text(f"""
+        {_WIZARD_SELECTION_CTE}
+        SELECT club_id, COUNT(DISTINCT visitor_id) AS selections,
+               MAX(created_at) AS last_at
+        FROM attributed GROUP BY club_id
+    """), {"hidden": hidden})).all()
+    return {str(r[0]): {"selections": r[1] or 0, "last_at": r[2]}
+            for r in rows if r[0] is not None}
+
+
 def _apply_engagement_cache(club: MarketingClub, fields: dict) -> None:
     """Every _engagement() call caches its result onto the club row itself —
     marketing_clubs.engagement_score/.engagement_tier/.engagement_scored_at —
@@ -507,12 +618,14 @@ async def _engagement(session, club: MarketingClub,
                       org: "Optional[Organisation]" = None,
                       web_stats: "Optional[dict]" = None,
                       email_stats: "Optional[dict]" = None,
+                      wizard_stats: "Optional[dict]" = None,
                       fast_web: bool = False) -> dict:
     """A per-club engagement rollup pushed onto the Company so the CRM can score and
     sort without holding raw events. Signal sources, all attributed to the club: web
     breadcrumbs (``usage_events`` by outreach UTM code or org id, both distinct-visitor
     reach AND raw page-view/API volume), email engagement (``email_events`` opens/
-    clicks), a direct "onboard my club" website enquiry, and — for a customer — real
+    clicks), a direct "onboard my club" website enquiry, each distinct visitor who
+    picked the club by name in the registration wizard, and — for a customer — real
     per-module trial subscriptions (not just the marketing directory's aspirational
     trial-interest field).
 
@@ -731,7 +844,22 @@ async def _engagement(session, club: MarketingClub,
 
     onboarding_count, onboarding_last = await _onboarding_signal(session, club, utm, org_slug)
 
-    last_touch = max([d for d in (last_web, last_email, onboarding_last) if d], default=None)
+    # Wizard club selections. Attributed by the club the visitor PICKED (guid,
+    # then name), not by the utm/path resolution every other web signal uses — a
+    # visitor sits on /trial, which resolves to no club at all, so without this
+    # the strongest name-level intent signal we hold scored nothing.
+    if wizard_stats is None:
+        wizard_selections, wizard_last = await _wizard_selections(session, club)
+    else:
+        # Batch-precomputed by batch_wizard_selection_stats() — the full-recalc
+        # fast path.
+        ws = wizard_stats.get(str(club.id)) or {}
+        wizard_selections = ws.get("selections") or 0
+        wizard_last = ws.get("last_at")
+    selection_pts = BONUS_CLUB_SELECTED * wizard_selections
+
+    last_touch = max([d for d in (last_web, last_email, onboarding_last, wizard_last) if d],
+                     default=None)
 
     # Modules the club wants but isn't paying for = the open opportunity (a prospect's
     # interest, or a customer's expansion / trialing-extra). ``trial_mods`` is the
@@ -772,6 +900,12 @@ async def _engagement(session, club: MarketingClub,
             score += CUSTOMER_UPSELL_BONUS
         if onboarding_count:
             score += CUSTOMER_ONBOARDING_BONUS   # e.g. asking to onboard a second team/ground
+        # Someone typed this club into the wizard even though it is already a
+        # customer — usually a member finding their own club's page, occasionally
+        # a second side wanting setting up. Scored the same as a prospect's, per
+        # direct instruction that a selection is worth BONUS_CLUB_SELECTED
+        # wherever it happens.
+        score += selection_pts
         score = min(score, 100)
         tier = "HOT" if (score > TIER_HOT_MIN or upsell) else "WARM"
     else:
@@ -794,6 +928,11 @@ async def _engagement(session, club: MarketingClub,
             # A direct "onboard my club" enquiry is the strongest signal a prospect
             # can give — heavier than the admin-set requested_trial_modules flag.
             score += BONUS_ONBOARDING
+        # Every distinct visitor who picked this club in the registration wizard,
+        # BONUS_CLUB_SELECTED each. The one bonus here that multiplies, so a club
+        # several people went looking for outruns one who only browsed; the
+        # min(100) clamp below is its only ceiling.
+        score += selection_pts
         score = min(score, 100)
         tier = _tier_for(score)
 
@@ -845,7 +984,8 @@ async def _engagement(session, club: MarketingClub,
     in_cycle = bool(upsell or onboarding_count) if is_customer else bool(
         club.requested_trial_modules or (club.demo_status or "") == "in_trial"
         or onboarding_count or sessions or eng_30d or ad_signup or visited_contact
-        or visited_trial or (trial_depth and trial_depth["score"] >= 70))
+        or visited_trial or wizard_selections
+        or (trial_depth and trial_depth["score"] >= 70))
 
     fields = {
         "engagementScore": score,
@@ -873,6 +1013,8 @@ async def _engagement(session, club: MarketingClub,
         "_visitedContact": visited_contact,
         "_visitedTrial": visited_trial,
         "_freqPts": round(freq_pts, 1),
+        "_wizardSelections": wizard_selections,
+        "_wizardSelectionPts": selection_pts,
         "_directEnquiryHot": direct_enquiry_hot,
         "_trialDepth": trial_depth,
     }

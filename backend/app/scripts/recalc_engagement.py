@@ -141,11 +141,13 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
         # Resolving once here and injecting the results makes the loop's scoring
         # a pure in-memory calc for the common (prospect) case, so 6k clubs run
         # in minutes. The scoring is byte-for-byte identical (see --verify).
-        print("  building batch web/email stats (one pass over usage_events + email_events) ...")
+        print("  building batch web/email/wizard stats (one pass over usage_events + email_events) ...")
         web_map = await twenty_sync.batch_web_stats(session)
         email_map = await twenty_sync.batch_email_stats(session)
+        wizard_map = await twenty_sync.batch_wizard_selection_stats(session)
         print(f"  batch stats ready: {len(web_map)} clubs with web activity, "
-              f"{len(email_map)} with email activity")
+              f"{len(email_map)} with email activity, "
+              f"{len(wizard_map)} picked in the registration wizard")
 
         batch = 0
         for cid, cname in rows:
@@ -155,7 +157,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
                     continue
                 org = await _load_org(session, club.existing_org_id)
                 deal = await crm_service.sync_engagement_promotion(
-                    session, club, org, web_stats=web_map, email_stats=email_map)
+                    session, club, org, web_stats=web_map, email_stats=email_map,
+                    wizard_stats=wizard_map)
                 tier = club.engagement_tier or "UNKNOWN"
                 tiers[tier] += 1
                 # "Linked" = has an Organisation row (an onboarded club: a trial
@@ -222,7 +225,8 @@ async def recalc(*, dry_run: bool = False, name: str | None = None) -> dict:
 # rounded score.
 _VERIFY_FIELDS = ("engagementScore", "engagementTier", "sessions30d",
                   "emailEngaged30d", "_webDecayPts", "_emailDecayPts",
-                  "_adDecayPts", "_adClicks", "_visitedContact")
+                  "_adDecayPts", "_adClicks", "_visitedContact",
+                  "_wizardSelections")
 
 
 async def verify(sample: int, name: str | None = None) -> None:
@@ -240,9 +244,10 @@ async def verify(sample: int, name: str | None = None) -> None:
         idq = idq.limit(sample)
         rows = (await session.execute(idq)).all()
         print(f"Verifying batch vs per-club for {len(rows)} club(s) ...")
-        print("  building batch web/email stats ...")
+        print("  building batch web/email/wizard stats ...")
         web_map = await twenty_sync.batch_web_stats(session)
         email_map = await twenty_sync.batch_email_stats(session)
+        wizard_map = await twenty_sync.batch_wizard_selection_stats(session)
 
         checked = 0
         mismatches = 0
@@ -252,7 +257,8 @@ async def verify(sample: int, name: str | None = None) -> None:
                 continue
             org = await _load_org(session, club.existing_org_id)
             fast = await _engagement(session, club, org,
-                                     web_stats=web_map, email_stats=email_map)
+                                     web_stats=web_map, email_stats=email_map,
+                                     wizard_stats=wizard_map)
             slow = await _engagement(session, club, org)  # per-club queries
             checked += 1
             diffs = [(k, fast.get(k), slow.get(k))

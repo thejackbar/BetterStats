@@ -975,6 +975,14 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_utm_code "
             "ON marketing_clubs(utm_code)"))
+        # A registration-wizard selection is attributed to a directory club by
+        # its normalised name (twenty_sync._WIZARD_SELECTION_CTE), which is worth
+        # BONUS_CLUB_SELECTED on the club's engagement score. Same expression, so
+        # the planner can use it there — without it each lookup was a sequential
+        # scan of the whole directory (migration 268).
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_marketing_clubs_name_key "
+            "ON marketing_clubs (lower(TRIM(BOTH FROM name)))"))
         # Visit→club resolution also probes organisations by slug (the path-slug
         # branch); the only lookup key on that path that wasn't indexed (migration 121).
         await conn.execute(text(

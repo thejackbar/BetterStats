@@ -2245,6 +2245,7 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
                                     org: Optional[Organisation] = None,
                                     web_stats: Optional[dict] = None,
                                     email_stats: Optional[dict] = None,
+                                    wizard_stats: Optional[dict] = None,
                                     fast_web: bool = False) -> Optional[CrmDeal]:
     """Recompute one club's engagement score, ensure it's on the pipeline once
     the score is above zero, and immediately check the score-based
@@ -2258,7 +2259,8 @@ async def sync_engagement_promotion(session: AsyncSession, club: MarketingClub,
     change) rather than waiting for a scheduled sweep. Caller commits."""
     from app.services.twenty_sync import _engagement
     await _engagement(session, club, org, web_stats=web_stats,
-                      email_stats=email_stats, fast_web=fast_web)
+                      email_stats=email_stats, wizard_stats=wizard_stats,
+                      fast_web=fast_web)
     membership = await sync_pipeline_membership(session, club)
     promoted = await maybe_promote_by_engagement_score(session, club)
     return promoted or membership

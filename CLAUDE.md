@@ -1,5 +1,72 @@
 # BetterStats — Claude Session Notes
 
+## A wizard club selection is worth points (migration 268, v9.35.0, Aug 2026)
+
+Asked for directly: 15 engagement points per occurrence of a club being picked
+in the registration wizard, the rows behind the Meta Ads page's "Clubs selected
+in the wizard (all-time)" table. It was worth nothing before, and not by
+oversight — the signal was unreachable.
+
+- **The picked club is NOT the attributed club, and that is the whole problem.**
+  Every other web signal resolves through `_RESOLVED_CID` (alias, then `utm_code`
+  in `utm_id`/`utm_source`, then the first path segment, then an onboarded club's
+  slug). A wizard visitor sits on `/trial`, which matches no `utm_code`, so their
+  events attribute to nobody, and the club they TYPED lives only in the beacon's
+  `metadata` where nothing was looking. `_WIZARD_SELECTION_CTE` attributes by the
+  picked club instead: the wizard's own captured CA guid first, a case-insensitive
+  name second — **the same priority as `wizard_club_lists._directory_matches`**, so
+  the CRM page and the score can't disagree about whose selection it is.
+- **The occurrence counted is a DISTINCT VISITOR, not a beacon row.**
+  `Trial.jsx handleClubClick` fires `club_prepared` on EVERY click of a search
+  result, so one person going back and forth fires it repeatedly and counting rows
+  would let a single visitor's clicking run the score to 100. Distinct visitors is
+  also the figure the table itself prints beside each club.
+- **A test-flagged selection must stop SCORING, not just stop showing.**
+  `get_hidden_meta_selections` was documented as a table-only tidy-up; the score
+  reads it now, or a super admin's own stripetest run pins a real club HOT with no
+  lever to undo it. That docstring is updated rather than left to mislead.
+- **`BONUS_CLUB_SELECTED` is the only bonus that MULTIPLIES.** Every other one is a
+  flat one-off, so 7 selections alone reach the `min(100)` clamp and pin a club HOT
+  permanently — all-time, like `BONUS_ONBOARDING`, and with no decay. That is what
+  was asked for; the clamp is its only ceiling. A per-club cap is the knob to reach
+  for if it proves too loud.
+- **Applied in BOTH branches** (prospect lead heat and customer account health), and
+  a selection counts as a `last_touch`, so it feeds recency too — which is why
+  removing a club's selections costs more than 15 × N unless something else has
+  touched it since.
+- **MATERIALIZED is load-bearing, and only measuring found it.** The first cut
+  resolved the club per beacon row and took **7.9 SECONDS per club** at 6k clubs /
+  5k beacons — on the path `marketing.py`'s `fast_web` recompute runs inline on
+  every live signal. Resolving DISTINCT (guid, name) pairs instead changed nothing
+  on its own (the planner inlined the LATERALs straight back into the per-row join
+  off a bad CTE row estimate); `MATERIALIZED` pinned it, and **migration 268's
+  functional index on `lower(TRIM(name))`** — the expression the lookup actually
+  compares — took it the rest of the way. **11.7ms.** Benchmark before assuming a
+  correlated subquery over a small-looking table is cheap.
+- **`batch_wizard_selection_stats` follows `batch_web_stats`/`batch_email_stats`**,
+  threaded through `sync_engagement_promotion` and `recalc_engagement` so a full
+  sweep resolves the beacons once. `--verify` covers it (`_wizardSelections` is in
+  `_VERIFY_FIELDS`).
+- **`python -m app.scripts.backfill_wizard_selection_points`** back-calculates the
+  selections that already happened — dry-run by default, `--apply` to persist,
+  `--name` to spot-check one club. It only touches clubs that HAVE selections,
+  which is what separates it from `recalc_engagement`'s whole-directory sweep.
+  **Its dry run deliberately calls `_engagement` and NOT
+  `sync_engagement_promotion`**: the pipeline bootstrap inside the promotion path
+  commits when it has anything to reconcile, which swept the pending score of
+  whichever club was in flight into the database — a "dry run" that silently
+  persisted its first club, caught by checking the table afterwards rather than
+  trusting the rollback. **`recalc_engagement --dry-run` has the same latent
+  defect** and is left alone here.
+- **Verified against a real Postgres** (28 checks through the shipped functions:
+  guid and name attribution, guid beating name on a same-named decoy, 4 beacons
+  from 2 visitors counting 2, the batch path matching the per-club path
+  byte-for-byte on both count and timestamp, the score decomposing exactly as
+  recency + frequency + selection points, a beacon never double-counted as a page
+  view, removing the selections costing exactly 2 × 15 against a recency control,
+  test-flagged selections scoring nothing on both paths, the 100 clamp, the
+  customer branch, and "not interested" still overriding everything).
+
 ## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
 `vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly
