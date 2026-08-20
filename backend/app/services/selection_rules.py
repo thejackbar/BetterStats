@@ -68,7 +68,13 @@ QUALIFY_COUNTS = ("club", "this_or_higher", "same_grade")
 ABOVE_SCOPES = ("any", "immediate")
 FINALS_SCOPES = ("any", "only", "exclude")
 AGE_YEAR_ENDS = ("season_start", "season_end")
-AGE_BASES = ("cutoff", "match_date")
+AGE_BASES = ("cutoff", "match_date", "fixed_date")
+
+# How an age rule's two ends compare. A competition writes its limits either
+# way round — "15 and over" and "over 15" are different rules, and so are
+# "under 21" and "21 or under" — so the club picks rather than us assuming.
+MIN_OPS = ("gte", "gt")
+MAX_OPS = ("lt", "lte")
 
 # Bowling types that count as pace or medium pace, which is the group every
 # junior bowling-workload policy is written about. Mirrors the classifier
@@ -178,6 +184,12 @@ def club_config(org) -> dict:
         "age_basis": clean_age_basis(raw.get("age_basis")),
         "season_start_month": _int(raw.get("season_start_month"), 1, 12,
                                    DEFAULT_SEASON_START_MONTH),
+        # Which of the plain informational badges the board draws beside a
+        # player. A club that doesn't collect fees through BetterFees, or
+        # doesn't want its selectors seeing who owes, turns them off here.
+        # A RULE about the same thing still shows — that one was asked for.
+        "show_fees": raw.get("show_fees") is not False,
+        "show_training": raw.get("show_training") is not False,
     }
 
 
@@ -189,6 +201,16 @@ def clean_age_basis(raw) -> dict:
     basis = raw.get("basis")
     if basis == "match_date":
         return {"basis": "match_date"}
+    if basis == "fixed_date":
+        # One calendar date, the same every season — for a competition that
+        # publishes its cutoff as an actual date rather than as a rule about
+        # the season. Unreadable falls back to the platform default rather
+        # than storing a date nobody could satisfy.
+        try:
+            day = date.fromisoformat(str(raw.get("date"))[:10])
+        except (TypeError, ValueError):
+            return dict(DEFAULT_AGE_BASIS)
+        return {"basis": "fixed_date", "date": day.isoformat()}
     month = _int(raw.get("month"), 1, 12, DEFAULT_AGE_BASIS["month"])
     day = _int(raw.get("day"), 1, 31, DEFAULT_AGE_BASIS["day"])
     year = raw.get("year") if raw.get("year") in AGE_YEAR_ENDS else DEFAULT_AGE_BASIS["year"]
@@ -199,6 +221,12 @@ def age_basis_label(basis: dict) -> str:
     if (basis or {}).get("basis") == "match_date":
         return "on the day of the match"
     b = clean_age_basis(basis)
+    if b["basis"] == "fixed_date":
+        try:
+            d = date.fromisoformat(b["date"])
+            return f"as at {d.day} {_MONTHS[d.month - 1]} {d.year}"
+        except (TypeError, ValueError, KeyError):
+            return "as at a set date"
     end = "the year the season started" if b["year"] == "season_start" else "the year the season ends"
     return f"as at {b['day']} {_MONTHS[b['month'] - 1]} of {end}"
 
@@ -228,6 +256,11 @@ def age_as_at(basis: dict, match_date: date | None, season_year: int | None,
     b = clean_age_basis(basis)
     if b["basis"] == "match_date":
         return match_date
+    if b["basis"] == "fixed_date":
+        try:
+            return date.fromisoformat(b["date"])
+        except (TypeError, ValueError, KeyError):
+            return None
     if season_year is None:
         if not match_date:
             return None
@@ -288,12 +321,14 @@ def clean_config(kind: str, raw) -> dict:
         hi = _int(raw.get("under_age"), player_age.MIN_AGE_LIMIT, player_age.MAX_AGE_LIMIT)
         if lo is None and hi is None:
             raise ValueError("Set a minimum age, a maximum, or both.")
-        if lo is not None and hi is not None and hi <= lo:
-            raise ValueError("The maximum age has to be above the minimum.")
+        if lo is not None and hi is not None and hi < lo:
+            raise ValueError("The maximum age has to be at or above the minimum.")
         if lo is not None:
             cfg["min_age"] = lo
+            cfg["min_op"] = raw.get("min_op") if raw.get("min_op") in MIN_OPS else "gte"
         if hi is not None:
             cfg["under_age"] = hi
+            cfg["max_op"] = raw.get("max_op") if raw.get("max_op") in MAX_OPS else "lt"
         # A rule may measure age its own way; without one it follows the club's.
         if raw.get("as_at"):
             cfg["as_at"] = clean_age_basis(raw.get("as_at"))
@@ -364,6 +399,14 @@ def clean_config(kind: str, raw) -> dict:
     raise ValueError("Unknown rule type.")
 
 
+def _min_phrase(age: int, op: str | None) -> str:
+    return f"over {age}" if op == "gt" else f"{age} and over"
+
+
+def _max_phrase(age: int, op: str | None) -> str:
+    return f"{age} or under" if op == "lte" else f"under {age}"
+
+
 def rule_summary(kind: str, config: dict, basis: dict | None = None) -> str:
     """One plain line saying what the rule asks for. Read on the settings
     screen, on the board's rule list and in the warning itself, so it is
@@ -372,9 +415,9 @@ def rule_summary(kind: str, config: dict, basis: dict | None = None) -> str:
     if kind == "age":
         bits = []
         if c.get("min_age") is not None:
-            bits.append(f"{c['min_age']} and over")
+            bits.append(_min_phrase(c["min_age"], c.get("min_op")))
         if c.get("under_age") is not None:
-            bits.append(f"under {c['under_age']}")
+            bits.append(_max_phrase(c["under_age"], c.get("max_op")))
         return " · ".join(bits) + f" ({age_basis_label(c.get('as_at') or basis)})"
     if kind == "overseas":
         n = c.get("max_in_xi", 1)
@@ -434,6 +477,110 @@ def scope_summary(scope: dict, team_names: dict[str, str] | None = None) -> str:
     elif s["finals"] == "exclude":
         line += " · not in finals"
     return line
+
+
+# ── The grades a rule can name ───────────────────────────────────────────────
+
+async def club_grades(db: AsyncSession, org_id) -> list[dict]:
+    """Every grade the club runs, exactly as Manage Grades reads them.
+
+    That screen is where a club names, merges and ORDERS its grades, so the
+    rule scope picker has to agree with it: merged grades are one entry under
+    the name that was kept, a renamed grade reads under the club's own name for
+    it, and the list comes back in the club's reading order rather than
+    alphabetically. Anything else offers a selector a list they don't
+    recognise, in an order nobody chose.
+
+    ``recent`` marks the grades from the club's two most recent seasons — what
+    it actually runs now, as opposed to a decade of history the picker would
+    otherwise bury them in.
+    """
+    rows = (await db.execute(
+        text(
+            "SELECT gr.name, MAX(gr.display_name_override) AS display_name, "
+            "MIN(gr.display_order) AS display_order, MAX(s.year) AS latest_year "
+            "FROM grades gr JOIN seasons s ON s.id = gr.season_id "
+            "WHERE s.organisation_id = :org GROUP BY gr.name"
+        ),
+        {"org": org_id},
+    )).mappings().all()
+    if not rows:
+        return []
+
+    aliases = {
+        r["alias_name"]: r["canonical_name"]
+        for r in (await db.execute(
+            text("SELECT alias_name, canonical_name FROM grade_merge_logs "
+                 "WHERE org_id = :org AND undone_at IS NULL"),
+            {"org": org_id},
+        )).mappings().all()
+    }
+    display_by_raw = {r["name"]: (r["display_name"] or r["name"]) for r in rows}
+
+    # The two most recent seasons the club holds any grade in. Two rather than
+    # one because a club mid-rollover has next season's grades half-created,
+    # and a rule written now has to be able to name last season's.
+    years = sorted({r["latest_year"] for r in rows if r["latest_year"] is not None}, reverse=True)
+    recent_years = set(years[:2])
+
+    folded: dict[str, dict] = {}
+    for r in rows:
+        canonical = resolve_canonical_grade(aliases, r["name"])
+        label = display_by_raw.get(canonical) or canonical
+        slot = folded.setdefault(label, {
+            "name": label, "display_order": None, "recent": False, "aliases": set(),
+        })
+        slot["aliases"].add(r["name"])
+        if r["display_order"] is not None and (
+                slot["display_order"] is None or r["display_order"] < slot["display_order"]):
+            slot["display_order"] = r["display_order"]
+        if r["latest_year"] is not None and r["latest_year"] in recent_years:
+            slot["recent"] = True
+
+    out = [{k: v for k, v in g.items() if k != "aliases"} for g in folded.values()]
+    # The club's own reading order first; a grade nobody has placed sorts after
+    # every placed one. Same rule as Manage Grades and everywhere else.
+    out.sort(key=lambda g: (g["display_order"] is None, g["display_order"] or 0, g["name"].lower()))
+    return out
+
+
+def resolve_canonical_grade(aliases: dict[str, str], name: str) -> str:
+    """Follow a merge chain to the grade that was kept. Mirrors admin.py's own
+    resolver, cycle guard included."""
+    seen: set[str] = set()
+    current = name
+    while current in aliases and current not in seen:
+        seen.add(current)
+        current = aliases[current]
+    return current
+
+
+async def grade_alias_map(db: AsyncSession, org_id) -> dict[str, str]:
+    """Raw grade name → the canonical DISPLAY name a rule would have stored.
+
+    Keyed sponsor-suffix-stripped and case-folded, so a fixture arriving with
+    "A Grade (Gatorade)" resolves the same as our stored "A Grade".
+    """
+    rows = (await db.execute(
+        text("SELECT DISTINCT gr.name, gr.display_name_override FROM grades gr "
+             "JOIN seasons s ON s.id = gr.season_id WHERE s.organisation_id = :org"),
+        {"org": org_id},
+    )).fetchall()
+    aliases = {
+        a: c for a, c in (await db.execute(
+            text("SELECT alias_name, canonical_name FROM grade_merge_logs "
+                 "WHERE org_id = :org AND undone_at IS NULL"),
+            {"org": org_id},
+        )).fetchall()
+    }
+    display_by_raw = {name: (override or name) for name, override in rows}
+    out: dict[str, str] = {}
+    for name, override in rows:
+        canonical = resolve_canonical_grade(aliases, name)
+        label = display_by_raw.get(canonical) or canonical
+        for spelling in {name, override or name}:
+            out[grade_labels.strip_sponsor_suffix(spelling).lower()] = label
+    return out
 
 
 # ── Reading and writing rules ────────────────────────────────────────────────
@@ -611,6 +758,16 @@ async def evaluate(db: AsyncSession, club, fx, players, *,
     if season_year is None and fx.played_on:
         season_year = season_year_for(fx.played_on, cfg["season_start_month"])
 
+    # Fold the fixture's grade onto the name Manage Grades reads it under, so a
+    # rule naming the grade that was KEPT in a merge still covers a fixture
+    # arriving under one of the names merged into it. Only fetched when some
+    # rule actually names a grade.
+    if grade_name and any(clean_scope(r["scope"])["grade_names"] for r in rows):
+        folded = (await grade_alias_map(db, club.id)).get(
+            grade_labels.strip_sponsor_suffix(grade_name).lower())
+        if folded:
+            grade_name = folded
+
     categories: frozenset = frozenset()
     formats: frozenset = frozenset()
     if grade_name:
@@ -748,10 +905,14 @@ def _judge(kind, config, p, pid, *, age_at, played, sessions, session_count,
         if age is None:
             return None
         lo, hi = config.get("min_age"), config.get("under_age")
-        if lo is not None and age < lo:
-            return (f"{age} — the grade is {lo} and over", False)
-        if hi is not None and age >= hi:
-            return (f"{age} — the grade is under {hi}", False)
+        if lo is not None:
+            ok = age > lo if config.get("min_op") == "gt" else age >= lo
+            if not ok:
+                return (f"{age} — the grade is {_min_phrase(lo, config.get('min_op'))}", False)
+        if hi is not None:
+            ok = age <= hi if config.get("max_op") == "lte" else age < hi
+            if not ok:
+                return (f"{age} — the grade is {_max_phrase(hi, config.get('max_op'))}", False)
         return None
 
     if kind == "bowling_workload":

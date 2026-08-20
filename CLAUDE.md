@@ -115,6 +115,53 @@ from a WASTCA handbook but deliberately NOT as its rulebook.
   rule is a limit on the day and the umpires enforce it. Nothing here writes to
   PlayHQ or claims an association has approved anything.
 
+### What the first round of use changed (v9.39.1)
+
+- **The rule scope picker reads Manage Grades, not `grades` directly.** The
+  first cut listed every distinct grade name in the club, alphabetically — a
+  decade of history in an order nobody chose, with merged grades listed twice.
+  `selection_rules.club_grades` now mirrors that screen exactly: aliases folded
+  onto the grade that was kept, the club's `display_order` first and unplaced
+  grades after, and a `recent` flag for the two most recent seasons so the
+  picker offers what the club RUNS and hides the rest behind a link. **A picker
+  and the screen that owns the thing it is picking must agree**, or a selector
+  is choosing from a list they don't recognise.
+- **The fixture's grade is folded the same way before a rule is matched**
+  (`grade_alias_map`), so a rule naming the kept grade covers a fixture
+  arriving under a name merged into it. Scoping by name is only standing if
+  both sides resolve names the same way.
+- **A blocking rule now filters the pool for you.** The board opens on
+  eligible-only when any rule in play can bar someone — once per fixture, as an
+  ordinary filter pill, so clearing it sticks until you move to another
+  fixture. WARNINGS are deliberately still shown: a warning is the selector's
+  to weigh, and hiding those people would be deciding for them.
+- **An age rule carries a comparison at each end** (`min_op` gte/gt, `max_op`
+  lt/lte). "15 and over" is not "over 15" and "under 21" is not "21 or under",
+  and an association writes them either way round. `_min_phrase` / `_max_phrase`
+  are the one wording, shared by the summary, the breach text and the editor's
+  live preview. A stored config with no operator reads as gte/lt, which is what
+  every pre-existing rule meant.
+- **`fixed_date` is a third age basis**: one calendar date, typed in, for a
+  competition that publishes a date rather than a rule about the season. It
+  deliberately does NOT move with the season — the screen says so, because
+  somebody has to change it each year.
+- **The age ladder runs to 23**, on the rule, the display setting and the pool
+  filter. Colts and under-21 competitions are ordinary, and stopping at 19 made
+  them unexpressible.
+- **The fees and training notes can each be switched off**
+  (`selection_rules_config.show_fees` / `show_training`) and the value is then
+  WITHHELD rather than sent and hidden — the same call `visible_age` makes. The
+  filter goes with it, since there is nothing left to filter on. A fees or
+  training RULE still flags: that one the club asked for explicitly.
+- **"Has a problem" reads as "Flagged".** A player a rule has something to say
+  about is not a problem.
+- **Verified**: the Postgres suite is 102 checks now (the 79 above plus the age
+  comparisons both ways, an exactly-one-age rule, a fixed date not moving with
+  the season, junk falling back to the default, the Manage Grades order with an
+  unplaced and a merged grade, `recent` excluding a 2010 grade, a rule matching
+  through a merge, and a switched-off note withheld while its rule still
+  flags), and the Chromium run is 49.
+
 ## Season × grade matches on a player profile, and the undercount it exposed (v9.37.3, Aug 2026)
 
 Asked for on Analysis → Team: seasons down one axis, a column per grade the

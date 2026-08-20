@@ -13,7 +13,7 @@
 //
 // Wired to the real selection API + atom kit. Availability colours stay
 // semantic (green/amber/red); the club accent is reserved for chrome.
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
@@ -29,7 +29,7 @@ import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { classifyBowl, formBucket, matchesAge } from './selectionMeta'
-import { matchesRuleFilter, xiCompliance } from './selectionRules'
+import { matchesRuleFilter, xiCompliance, hasBlockingRule } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -191,6 +191,10 @@ export default function AdminSelection() {
   const [copied, setCopied] = useState(false)
   const [allFixtures, setAllFixtures] = useState([])
   const [prevXI, setPrevXI] = useState(null)
+  // Which fixture we've already offered the eligible-only pool for. A ref, not
+  // state: it must not re-trigger a render, and it has to survive the reload
+  // that follows a save.
+  const autoFiltered = useRef(null)
   // Pending cascades: displacedPlayerId → { fixture_id, batting_order, callupId }.
   // When a call-up bumps a regular out of this XI, that regular drops into the
   // team below (the called-up player's vacated slot) on save.
@@ -287,6 +291,19 @@ export default function AdminSelection() {
   ], [])
   const filters = useFilters(facets)
   const { values, search } = filters
+
+  // A rule the club made BLOCKING means the pool should be suggesting players
+  // who can actually be picked, so eligible-only is applied for you the first
+  // time each fixture is opened. From then on it is an ordinary filter pill:
+  // clear it to see everyone, and it stays cleared until you move to another
+  // fixture. Warnings are deliberately still shown — a warning is the
+  // selector's to weigh, not ours to hide.
+  useEffect(() => {
+    if (!data || autoFiltered.current === fixtureId) return
+    autoFiltered.current = fixtureId
+    if (!hasBlockingRule(data.rules) || values.rules) return
+    filters.setValue('rules', 'eligible')
+  }, [data, fixtureId])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const available = useMemo(() => (data?.pool || []).filter((p) => !usedIds.has(p.id)), [data, usedIds])
   const pool = useMemo(() => {

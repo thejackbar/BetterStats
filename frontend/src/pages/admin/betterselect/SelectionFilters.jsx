@@ -74,6 +74,11 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   // group at all. A control that can only ever answer "everybody is fine" is
   // worse than none.
   const showRules = !!rules?.active
+  // A club can switch the plain fees / training notes off entirely on the
+  // Selection rules screen. When it has, the server sends no answer for them,
+  // so there is nothing for these two groups to filter on and they go.
+  const showFees = flags?.show_fees !== false
+  const showTraining = flags?.show_training !== false
 
   const pills = []
   ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
@@ -84,8 +89,8 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   ;(values.squad || []).forEach((s) => pills.push({ k: 's' + s, label: (squadOptions.find((o) => o.value === s) || {}).label || s, rm: () => toggle('squad', s) }))
   if (values.status) pills.push({ k: 'st', label: values.status === 'unselected' ? 'Unselected' : 'In another XI', rm: () => setValue('status', '') })
   if (hideUnavail) pills.push({ k: 'hu', label: 'Hide unavailable', rm: () => setValue('hideUnavail', false) })
-  if (values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
-  if (values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
+  if (showFees && values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
+  if (showTraining && values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
   if (values.age && ageFilterLabel(values.age, flags)) pills.push({ k: 'age', label: ageFilterLabel(values.age, flags), rm: () => setValue('age', '') })
   if (showRules && values.rules) pills.push({ k: 'rul', label: optLabel(RULE_FILTERS, values.rules), rm: () => setValue('rules', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
@@ -170,20 +175,24 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
           <PanelGroup label="Selection">
             <Segmented sm value={values.status || ''} onChange={(v) => setValue('status', v)} options={STATUS_OPTS} />
           </PanelGroup>
-          <PanelGroup label="Fees">
-            <Segmented sm value={values.fees || ''} onChange={(v) => setValue('fees', v)} options={FEES_OPTS} />
-            <SourceNote
-              source={flags?.financial}
-              from="Read from BetterFees, or set on a player's profile."
-              manual="Set on a player's profile — turn on BetterFees to have it worked out." />
-          </PanelGroup>
-          <PanelGroup label="Training">
-            <Segmented sm value={values.training || ''} onChange={(v) => setValue('training', v)} options={TRAINING_OPTS} />
-            <SourceNote
-              source={flags?.training}
-              from={`At nets in the last ${flags?.training_window_days || 21} days, or set on a player's profile.`}
-              manual="Set on a player's profile — run a Net Manager session to have it worked out." />
-          </PanelGroup>
+          {showFees && (
+            <PanelGroup label="Fees">
+              <Segmented sm value={values.fees || ''} onChange={(v) => setValue('fees', v)} options={FEES_OPTS} />
+              <SourceNote
+                source={flags?.financial}
+                from="Read from BetterFees, or set on a player's profile."
+                manual="Set on a player's profile — turn on BetterFees to have it worked out." />
+            </PanelGroup>
+          )}
+          {showTraining && (
+            <PanelGroup label="Training">
+              <Segmented sm value={values.training || ''} onChange={(v) => setValue('training', v)} options={TRAINING_OPTS} />
+              <SourceNote
+                source={flags?.training}
+                from={`At nets in the last ${flags?.training_window_days || 21} days, or set on a player's profile.`}
+                manual="Set on a player's profile — run a Net Manager session to have it worked out." />
+            </PanelGroup>
+          )}
         </div>
       )}
 

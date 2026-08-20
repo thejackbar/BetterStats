@@ -110,15 +110,25 @@ export function xiCompliance(rules, poolById, playerIds) {
  * same call the Fees and Training filters already make. */
 export const RULE_FILTERS = [
   { value: '', label: 'All' },
-  { value: 'problem', label: 'Has a problem' },
+  { value: 'eligible', label: 'Eligible' },
+  { value: 'flagged', label: 'Flagged' },
   { value: 'block', label: 'Ineligible' },
-  { value: 'ok', label: 'Clear' },
 ]
 
 export function matchesRuleFilter(player, value) {
   if (!value) return true
   const state = player?.rule_state || 'ok'
-  if (value === 'problem') return state !== 'ok'
+  // "Eligible" keeps anyone the club's rules don't BAR, warnings included —
+  // a warning is the selector's to weigh, so hiding those people would be
+  // deciding for them.
+  if (value === 'eligible') return state !== 'block'
+  if (value === 'flagged') return state !== 'ok'
   if (value === 'block') return state === 'block'
   return state === 'ok'
+}
+
+/** Whether any rule in play can actually bar someone, which is what makes
+ *  defaulting the pool to eligible-only worth doing. */
+export function hasBlockingRule(rules) {
+  return (rules?.applied || []).some((r) => r.severity === 'block')
 }
