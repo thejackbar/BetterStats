@@ -70,6 +70,58 @@ shows the age it works out to.
   as too many overs for a fourteen year old is a policy call the club's own
   association makes, and a number we invented would be quoted back at us.
 
+### The profile importer only knew the fields it was born with (v9.37.1)
+
+Reported: Import player details was missing the date of birth. It was missing
+eight fields — every profile column added after it was built. A field added to
+`players` and to the profile editor does NOT reach this importer on its own,
+and nothing failed to tell anyone.
+
+- **`profile_import.VALUE_FIELDS` is the list, and `PLAYER_FIELDS` is what
+  gets written.** Adding a profile column means adding to both, plus a
+  `FIELD_LABELS` entry, a `SYNONYMS` block for auto-mapping, a branch in
+  `row_profile`, a line in the router's `_current_profile` (or a sheet
+  re-stating a value a player already has reads as a change), the two
+  templates and the wizard's own `FIELDS`/`SIMPLE` maps. The suite asserts
+  it structurally now: every field on `PlayerProfileUpdate` is either
+  importable or on a short named list of ones deliberately left out
+  (display name, PlayHQ id, skill positions, the non-player flag).
+- **A date of birth is read four ways** — ISO, `4 Mar 2012`, `04/03/2012`, and
+  an Excel serial — because `import_ingest` stringifies every cell, so an
+  Excel date cell arrives as `"2012-03-04 00:00:00"` and a date column nobody
+  formatted arrives as `"40972"`. **A slashed date is DAY FIRST**: this app
+  serves Australian and British clubs, the parser has to pick one, and the
+  column hint and template say which. The serial floor is deliberately above
+  any 4-digit year, so a bare `1998` typed into a date column reads as
+  unreadable rather than as 20 May 1905.
+- **It refuses what the profile editor refuses**, through the same
+  `player_age.dob_error` — a future date or one past 120 years is reported
+  and the player left alone, so a bulk upload can't write a birthday the
+  single-player form would reject.
+- **A country on its own marks a player overseas**, since that is the only
+  reading under which naming one means anything, but an explicit "No" in the
+  overseas column still wins.
+- **The two BetterSelect overrides can be SET from a sheet, never cleared.**
+  A blank cell already means "leave this player alone" everywhere in this
+  importer and it cannot also mean "back to automatic"; clearing stays a
+  profile-screen action, and the field hint says so.
+- **`FIELDS` had carried a hint per field since it was written and the wizard
+  never drew it** — `FIELDS.map(([f, label, required]) => …)` dropped the
+  fourth element. Harmless while the hints were "Male / Female", and not
+  harmless at all for a date whose day/month order has to be stated.
+- **The AFL silo's importer is a different, deliberately simpler one**
+  (`routers/afl/player_import.py` — name, email, phone, gender, no squads,
+  nothing auto-created) and is untouched.
+- **Verified against a real Postgres** (69 checks through the shipped
+  preview → resolve → commit bodies with a real uploaded sheet: every new
+  field auto-mapped from a club's own header wording, both date shapes
+  stored, an all-unreadable row changing nothing and reporting three notes,
+  a re-upload of the same sheet proposing no further changes, and both
+  templates round-tripping back through the importer's own parser) plus 24
+  on the date and boolean normalisers, and **driven in Chromium** (24: every
+  new field on the mapping screen with its hint, the before/after rows, the
+  age beside the date, no page errors, no overflow at 390px).
+
 ### A `min-w-0` flex group whose children can't shrink OVERLAPS its siblings
 
 Reported off the same screen: the Selection board's Dual rail / Team sheet

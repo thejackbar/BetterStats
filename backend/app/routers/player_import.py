@@ -108,6 +108,9 @@ def _apply_squad_overrides(matches: dict, overrides: dict) -> None:
 
 
 def _current_profile(p: Player) -> dict:
+    """What this player holds today, for the "from → to" preview. Every field
+    the importer can write has to be in here, or a sheet re-stating a value a
+    player already has reads as a change and inflates the count."""
     return {
         "email": p.email,
         "phone": p.phone,
@@ -116,6 +119,14 @@ def _current_profile(p: Player) -> dict:
         "batting_hand": p.batting_hand,
         "bowling_action": p.bowling_action,
         "bowling_type": p.bowling_type,
+        "date_of_birth": p.date_of_birth,
+        "is_opening_batsman": p.is_opening_batsman,
+        "is_overseas": p.is_overseas,
+        "overseas_country": p.overseas_country,
+        "status": p.status,
+        "is_public": p.is_public is not False,
+        "is_financial_override": p.is_financial_override,
+        "trained_override": p.trained_override,
         "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
     }
 
@@ -468,6 +479,32 @@ async def commit(
     }
 
 
+# One list of template columns, shared by the CSV and the Excel version so the
+# two can't drift. The date of birth example is written ISO (2012-03-04) on
+# purpose: 03/04 is a different month either side of the Pacific, and while
+# the parser does pick one (day-first, like the clubs this serves), a template
+# should not be teaching anyone to write the ambiguous form.
+_TEMPLATE_HEADERS = [
+    "Name", "Email", "Phone", "Squad", "Role", "Batting", "Bowling", "Gender",
+    "Date of birth", "Opening batter", "Overseas", "Overseas country",
+    "Status", "Show on website", "Fees", "Training",
+]
+
+
+def _template_examples(squad_names: list | None = None) -> list:
+    squad_names = squad_names or []
+    first = squad_names[0] if squad_names else "1st XI"
+    second = squad_names[1] if len(squad_names) > 1 else "Women's 1st XI"
+    return [
+        ["Smith, John", "john.smith@example.com", "0412 345 678", first,
+         "All Rounder", "Right handed", "Right-arm fast-medium", "Male",
+         "1998-09-14", "No", "No", "", "Active", "Show", "Financial", "At training"],
+        ["Patel, Anjali", "anjali.patel@example.com", "0423 456 789", second,
+         "Batter", "Left handed", "", "Female",
+         "2012-03-04", "Yes", "No", "", "Active", "Show", "", ""],
+    ]
+
+
 @router.get("/template.csv")
 async def template(
     current_user: User = Depends(get_current_user),
@@ -477,11 +514,9 @@ async def template(
     the columns it understands. Every column except Name is optional."""
     buf = io.StringIO()
     w = csv.writer(buf)
-    w.writerow(["Name", "Email", "Phone", "Squad", "Role", "Batting", "Bowling", "Gender"])
-    w.writerow(["Smith, John", "john.smith@example.com", "0412 345 678",
-                "1st XI", "All Rounder", "Right handed", "Right-arm fast-medium", "Male"])
-    w.writerow(["Patel, Anjali", "anjali.patel@example.com", "0423 456 789",
-                "Women's 1st XI", "Batter", "Left handed", "", "Female"])
+    w.writerow(_TEMPLATE_HEADERS)
+    for row in _template_examples():
+        w.writerow(row)
     return StreamingResponse(
         io.BytesIO(buf.getvalue().encode("utf-8-sig")),
         media_type="text/csv",
@@ -512,13 +547,8 @@ async def template_xlsx(
     )).scalars().all()
     squad_names = [t.name for t in sorted(teams, key=lambda t: (t.sequence or 0, (t.name or "").lower()))]
 
-    headers = ["Name", "Email", "Phone", "Squad", "Role", "Batting", "Bowling", "Gender"]
-    examples = [
-        ["Smith, John", "john.smith@example.com", "0412 345 678",
-         (squad_names[0] if squad_names else "1st XI"), "All Rounder", "Right handed", "Right-arm fast-medium", "Male"],
-        ["Patel, Anjali", "anjali.patel@example.com", "0423 456 789",
-         (squad_names[1] if len(squad_names) > 1 else "Women's 1st XI"), "Batter", "Left handed", "", "Female"],
-    ]
+    headers = list(_TEMPLATE_HEADERS)
+    examples = _template_examples(squad_names)
 
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -529,8 +559,17 @@ async def template_xlsx(
     for row in examples:
         ws.append(row)
     ws.freeze_panes = "A2"
-    for i, width in enumerate([22, 28, 16, 22, 20, 16, 22, 10], start=1):
+    for i, width in enumerate([22, 28, 16, 22, 20, 16, 22, 10,
+                               14, 14, 11, 18, 11, 16, 14, 15], start=1):
         ws.column_dimensions[get_column_letter(i)].width = width
+    # Written as text, not as Excel dates: the sheet parser reads every cell as
+    # a string, and a text cell survives the round trip exactly as typed
+    # instead of arriving as a locale-formatted date nobody chose.
+    for row in ws.iter_rows(min_row=2, max_row=ws.max_row,
+                            min_col=headers.index("Date of birth") + 1,
+                            max_col=headers.index("Date of birth") + 1):
+        for c in row:
+            c.number_format = "@"
 
     # A hidden "Lists" sheet holds the dropdown values; the main sheet references
     # them by range (sidesteps the 255-char inline-list limit and keeps it tidy).
@@ -542,6 +581,12 @@ async def template_xlsx(
         "Batting": prof.BATTING_VALUES,
         "Bowling": prof.BOWLING_VALUES,
         "Gender": prof.GENDER_VALUES,
+        "Opening batter": prof.YES_NO_VALUES,
+        "Overseas": prof.YES_NO_VALUES,
+        "Status": prof.STATUS_VALUES,
+        "Show on website": prof.WEBSITE_VALUES,
+        "Fees": prof.FEES_VALUES,
+        "Training": prof.TRAINING_VALUES,
     }
     MAX_ROW = 1000
     list_col = 1
