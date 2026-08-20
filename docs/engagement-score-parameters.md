@@ -617,3 +617,170 @@ rather than day buckets. This is the one place that rule was not applied.
 Items 1 to 3 are small and worth doing regardless of whether the parameters page
 gets built. Items 4 to 6 are exactly the kind of change the page plus its
 preview exists to make safely, so they should wait for it.
+
+## 9. Email link scanners, and event volume generally
+
+Reported: an outreach email containing several links to our site produces a
+cluster of page views that all land at once, one per linked page, from the
+recipient's mail infrastructure rather than a person. Microsoft Defender for
+Office 365 Safe Links, Proofpoint URL Defense, Mimecast and Barracuda all
+prefetch links this way. Technically page views; not humans.
+
+It is filterable, and the burst signature is reliable for the multi-link case.
+But reading the code around it turned up a larger distortion in the same place,
+so take these in order.
+
+### 9a. Confirm it is happening before filtering anything
+
+The page-view beacon is client-side JavaScript (`usePageView.js` POSTs to
+`/usage/event`). A scanner that only issues an HTTP GET never runs it and never
+appears in `usage_events` at all. Only a scanner that renders the page in a
+headless browser, which Safe Links detonation does in some configurations,
+shows up. So the volume may be smaller than it looks, or larger, and it is
+cheap to find out. This needs no code:
+
+    SELECT ip_hash,
+           to_timestamp(floor(extract(epoch FROM created_at) / 10) * 10) AS bucket,
+           COUNT(*)                                        AS events,
+           COUNT(DISTINCT split_part(path, '?', 1))        AS distinct_paths,
+           COUNT(DISTINCT visitor_id)                      AS visitor_ids,
+           MAX(created_at) - MIN(created_at)               AS span,
+           MIN(user_agent)                                 AS ua
+    FROM usage_events
+    WHERE event_type = 'page_view'
+      AND user_id IS NULL
+      AND ip_hash IS NOT NULL
+      AND created_at > NOW() - INTERVAL '90 days'
+    GROUP BY 1, 2
+    HAVING COUNT(DISTINCT split_part(path, '?', 1)) >= 3
+    ORDER BY distinct_paths DESC, bucket DESC
+    LIMIT 50;
+
+It rides the `(ip_hash, created_at DESC)` index added in migration 214. Read the
+`ua` column in the results: if the scanners are announcing themselves, the whole
+problem may be one user-agent test.
+
+### 9b. Why the burst signature is reliable, and where it is not
+
+The distinguishing feature is not "many requests from one IP". It is **many
+DIFFERENT paths from one IP in a few seconds**, and that is what makes it safe:
+
+- A **link scanner** fetches every link in the email, so it produces N
+  **distinct** paths from one IP, effectively simultaneously.
+- **Several real people at one club** reading the same email behind one office
+  IP produce N hits on the **same** path, spread over minutes or hours.
+
+Those two are cleanly separable. Keying on distinct paths inside a tight window
+gets the scanner and leaves the office NAT case alone, which is the false
+positive that would actually matter.
+
+Two corroborating signals, both already in the table:
+
+- **A fresh `visitor_id` per row from one `ip_hash`.** Each prefetch is a new
+  browser context. The engagement query's own comment already records observing
+  this ("18 'visitors' from 2 IPs"), which is why reach is deduped by
+  `COALESCE(ip_hash, visitor_id)` rather than raw `visitor_id`.
+- **No `page_exit` row.** A scanner never comes back to fire the dwell beacon
+  (`event_type = 'page_exit'`, matched to its page view by visitor and path).
+  Good as a corroborator, not as a sole test, since a real browser can drop it.
+
+**The honest limit**: this only catches multi-link scans. An email with one link
+produces one page view from the scanner, indistinguishable from a fast human on
+the data available. That case is lower harm (one view rather than ten) but it is
+not solved, and it should not be claimed to be.
+
+User-agent matching is worth adding as a second, independent rule, but not
+relied on alone: Safe Links often presents as an ordinary browser.
+`routers/usage.py::_parse_device` already has a bot word list, but it is
+**display only** on the Usage page. Nothing in `_engagement` filters on it.
+
+### 9c. The bigger distortion: every event type counts
+
+While checking where to apply the filter: `_engagement`'s web query has **no
+`event_type` filter at all**. It is a bare `COUNT(*)` and a decay sum over
+whatever rows match the club. Four event types are written to that table:
+
+| event_type | Written by | Counts toward depth today |
+|---|---|---|
+| `page_view` | the SPA beacon | yes |
+| `page_exit` | the dwell beacon, one per page view | yes |
+| `heartbeat` | **every ~25 seconds while a public page is open** | yes |
+| `api` | server-side, per interesting API call | yes |
+
+The heartbeat is the problem. At one every 25 seconds, a single visitor who
+leaves a tab open scores:
+
+| Tab left open | Heartbeats | Depth points | Score contribution |
+|---|---|---|---|
+| 5 minutes | ~12 | 14 | 14 |
+| 10 minutes | ~24 | 29 | 29 |
+| 60 minutes | ~144 | 173 | **clamped at 100** |
+
+So one person with a forgotten tab outscores ten different clubs' worth of
+genuine reading, and an hour of idle tab alone maxes the score. Every page view
+also double-counts through its own `page_exit` row, and a JS-heavy page adds
+`api` rows on top.
+
+This is worth fixing before, or at least alongside, the scanner work. It is a
+one-line `AND ue.event_type = 'page_view'` in the decay sum (in all four
+interpolation sites, per section 4), and it is a larger and more certain
+distortion than the prefetch traffic. It also shrinks the scanner problem on its
+own: a prefetch that currently contributes a page view plus several api rows
+would contribute one row.
+
+### 9d. The structural fix that beats any heuristic
+
+Depth is currently linear in **raw event count**, which is what makes it
+vulnerable to any repeated-request source, scanners and heartbeats alike. Bound
+it per visitor instead:
+
+    depth for a visitor-day = min(their decayed points, a per-visitor cap)
+
+Then a scanner hitting ten links from one IP contributes roughly what one visit
+contributes, whether or not it was ever detected as a scanner, and the same
+holds for the next source of repeated requests nobody has thought of yet. Reach
+(distinct visitors) already works this way, which is exactly why reach was not
+the half that broke.
+
+Note the history in section 8f item 5: earlier per-component saturating caps
+were removed because they compressed genuinely different clubs together. A
+per-visitor cap is a different thing from a per-club cap. It bounds one
+visitor's contribution while leaving the club's total linear in how many
+visitors it had, which is the quantity actually worth measuring.
+
+### 9e. Where to apply the filter
+
+Mark, do not delete. These are real requests and the Usage page may legitimately
+want to show them. Following the same discipline as the cross-club view fix
+(migration 060) and every other correction in this codebase: filter on read,
+never destroy the row.
+
+Sequence, matching the `resolved_marketing_club_id` precedent:
+
+1. **Query time first.** A gap-and-islands CTE over `usage_events` partitioned
+   by `ip_hash` (a new island whenever the gap exceeds ~5 seconds), keeping
+   islands with 3 or more distinct paths and a span under ~10 seconds. Works
+   retrospectively on existing data with no migration and no backfill, which
+   makes it cheap to evaluate and cheap to revert.
+2. **Then pre-stamp a column** once the rule has proven itself, exactly as
+   `usage_events.resolved_marketing_club_id` did with
+   `app/scripts/backfill_resolved_club.py`, so the `fast_web` per-club path stays
+   an indexed equality rather than a window function.
+3. **Apply it in one place, not four.** The same rows feed the Usage analytics,
+   the Club Directory visit panel and the Meta Ads funnel. If prefetch traffic is
+   distorting the engagement score it is distorting those too, and a filter that
+   lives only inside `_engagement` guarantees the three surfaces disagree.
+
+The burst thresholds (distinct paths, window seconds) belong in the parameter
+catalogue from section 3, so the rule can be tightened without a deploy once
+there is real data to tune against.
+
+### 9f. Order
+
+1. **Filter the decay sum to `page_view`** (9c). Largest, most certain gain,
+   smallest change.
+2. **Confirm the prefetch volume** with the query in 9a before building anything
+   for it.
+3. **Cap depth per visitor** (9d), which makes the remaining prefetch mostly
+   harmless whether or not it is ever identified.
+4. **Add burst marking** (9b, 9e) if 9a shows it is material after 1 and 3.
