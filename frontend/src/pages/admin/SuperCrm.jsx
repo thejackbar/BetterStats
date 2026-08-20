@@ -256,6 +256,12 @@ const EMPTY_FILTERS = {
   // questions and compose (a deal worked by one rep, earned by another).
   q: '', ownerIds: [], attributedIds: [], modules: [], minValue: '', maxValue: '',
   minScore: '', maxScore: '', state: '', association: '', leadSource: '',
+  // Which engagement sources a club's score came from — "show me the clubs
+  // that found us through Meta ads", or "through the ads AND self-serve".
+  // `engagementSourcesMode` is 'any' (found us at least one of these ways) or
+  // 'all' (every one of them). Both readings are wanted and neither is a
+  // sensible default for the other: 'any' widens as you tick, 'all' narrows.
+  engagementSources: [], engagementSourcesMode: 'any',
   onboarding: '', minTrialDays: '', maxTrialDays: '',
   // Per-stage include/exclude filter: { stageKey: 'include' | 'exclude' }.
   stageModes: {},
@@ -267,6 +273,62 @@ const EMPTY_FILTERS = {
   // Scheduled-event filter on a deal's next_event: 'all' (no filter) | 'today'
   // | 'future' | 'range'.
   eventsMode: 'all', eventsFrom: '', eventsTo: '',
+}
+
+// The engagement sources a deal can be filtered by. Mirrors
+// services/engagement_sources.py's own SOURCES — the keys are what the scorer
+// writes into marketing_clubs.engagement_sources, so a rename there has to be
+// made here too (the server also serves this list at
+// GET /club-admin/marketing/engagement-sources for anything that would rather
+// fetch it than hold a copy). Grouped the way the deal card groups them, so a
+// source is looked for in the same place on both screens.
+const ENGAGEMENT_SOURCE_GROUPS = [
+  { label: 'Engagement signals', options: [
+    { value: 'visitors', label: 'Distinct site visitors' },
+    { value: 'page_views', label: 'Website page views' },
+    { value: 'meta_ads', label: 'Meta / paid ad clicks' },
+    { value: 'email_clicks', label: 'Email clicks' },
+    { value: 'email_opens', label: 'Email opens' },
+    { value: 'recency', label: 'Recent activity' },
+  ] },
+  { label: 'Buying intent', options: [
+    { value: 'contact_enquiry', label: "'Contact us' enquiry" },
+    { value: 'contact_page', label: 'Visited the contact page' },
+    { value: 'trial_page', label: 'Visited the trial signup page' },
+    { value: 'trial_requested', label: 'Requested a trial' },
+    { value: 'in_trial', label: 'Currently in a trial' },
+    { value: 'ad_signup', label: 'Registered from a paid ad' },
+  ] },
+  { label: 'Setup & registration', options: [
+    { value: 'self_serve_registration', label: 'Registered themselves (self-serve)' },
+    { value: 'staff_registration', label: 'Registered by us (Super Admin)' },
+    { value: 'import_stats', label: 'Imported historical stats' },
+    { value: 'merges', label: 'Merged players or grades' },
+    { value: 'module_setup', label: 'Set up paid-module features' },
+    { value: 'admin_polish', label: 'Branding, sponsors and invites' },
+  ] },
+  { label: 'Customer account', options: [
+    { value: 'customer_base', label: 'Paying customer baseline' },
+    { value: 'upsell', label: 'Open upsell opportunity' },
+  ] },
+]
+const ENGAGEMENT_SOURCE_LABELS = Object.fromEntries(
+  ENGAGEMENT_SOURCE_GROUPS.flatMap(g => g.options).map(o => [o.value, o.label]))
+
+// Does this deal's club carry the picked sources? The map is
+// {source_key: points}, cached on the club by the scorer (migration 270): a
+// key at 0 points is a signal the club really gave us that its score is not
+// currently made of, and it still counts here — the question this filter asks
+// is "did this club come to us this way", not "is that what the number is".
+//
+// A club with NO map has not been scored since the column shipped, so we
+// genuinely do not know where its score came from. It is excluded rather than
+// treated as having no sources, which would read as a confident "no".
+const matchesEngagementSources = (d, picked, mode) => {
+  if (!picked.length) return true
+  const have = d.engagement_sources
+  if (!have) return false
+  return mode === 'all' ? picked.every(k => k in have) : picked.some(k => k in have)
 }
 
 // A deal has at least one ACTIVE (not-yet-expired) module trial. trial_days_
@@ -356,6 +418,10 @@ function buildFilterSummary(filters, { owners, stages, status }) {
     const lo = filters.minTrialDays !== '' ? filters.minTrialDays : null
     const hi = filters.maxTrialDays !== '' ? filters.maxTrialDays : null
     push('Trial expiring in', (lo != null && hi != null ? `${lo} – ${hi}` : lo != null ? `≥ ${lo}` : `≤ ${hi}`) + ' days')
+  }
+  if (filters.engagementSources.length) {
+    push(filters.engagementSourcesMode === 'all' ? 'Engagement from (all of)' : 'Engagement from',
+      filters.engagementSources.map(k => ENGAGEMENT_SOURCE_LABELS[k] || k).join(', '))
   }
   if (filters.activeTrials) push('Active trials', 'yes')
   if (filters.trialExpired) push('Expired trials', 'yes')
@@ -762,6 +828,24 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
               <NumberInput min={0} max={100} placeholder="min" value={filters.minScore} onChange={set('minScore')} style={{ width: FBW.num }} />
               <span className="text-[11px] text-pb-faint">to</span>
               <NumberInput min={0} max={100} placeholder="max" value={filters.maxScore} onChange={set('maxScore')} style={{ width: FBW.num }} />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-pb-faint"
+                title="Which signals a club's engagement score came from. A source counts even when it is not what the score is made of today — the question is how the club came to us.">
+                Engagement from
+              </span>
+              <MultiSelect value={filters.engagementSources}
+                onChange={v => setFilters(f => ({ ...f, engagementSources: v }))}
+                groups={ENGAGEMENT_SOURCE_GROUPS} allLabel="Any source" width={FBW.assoc} />
+              {filters.engagementSources.length > 1 && (
+                <Select value={filters.engagementSourcesMode}
+                  onChange={e => setFilters(f => ({ ...f, engagementSourcesMode: e.target.value }))}
+                  style={{ width: FBW.window }}
+                  title="Any: clubs matching at least one of the picked sources. All: only clubs matching every one.">
+                  <option value="any">any of these</option>
+                  <option value="all">all of these</option>
+                </Select>
+              )}
             </div>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-pb-faint" title="Only clubs with a tracked module trial (i.e. already onboarded)">Trial expiring in (days)</span>
@@ -1350,6 +1434,7 @@ export default function SuperCrm() {
       if (maxValueCents != null && (d.effective_value_cents ?? d.value_cents) > maxValueCents) return false
       if (minScore != null && (d.engagement_score == null || d.engagement_score < minScore)) return false
       if (maxScore != null && (d.engagement_score == null || d.engagement_score > maxScore)) return false
+      if (!matchesEngagementSources(d, filters.engagementSources, filters.engagementSourcesMode)) return false
       if (filters.state && d.marketing_club_state !== filters.state) return false
       if (assocNeedle && !(d.marketing_club_association || '').toLowerCase().includes(assocNeedle)) return false
       if (filters.leadSource && d.lead_source !== filters.leadSource) return false

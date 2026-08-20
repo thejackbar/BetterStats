@@ -7,6 +7,7 @@ import AdminLayout from '../../components/admin/AdminLayout'
 import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
 import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER, TOWN_STATE_COLOR } from '../../components/admin/crm/ui'
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
+import EngagementSources from '../../components/admin/crm/EngagementSources'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
 import { groupedOutcomes, outcomeLabel, isGeneralOutcome } from '../../lib/salesOutcomes'
@@ -577,29 +578,17 @@ function EngagementPanel({ engagement }) {
   if (!engagement) {
     return <p className="text-[12px] text-pb-faintest">No engagement data for this club yet.</p>
   }
-  const contribs = engagement.contributions || []
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       <div className="flex items-center gap-2">
         <ScorePill score={engagement.score} tier={engagement.tier} />
         {engagement.is_customer && <span className="text-[11px] text-pb-faint">already linked to a real club</span>}
       </div>
       {engagement.explanation && <p className="text-[11.5px] text-pb-faint italic">{engagement.explanation}</p>}
-      {contribs.length > 0 ? (
-        <div className="space-y-1">
-          {contribs.map((c, i) => (
-            <div key={i} className="flex items-baseline justify-between gap-2 text-[12px] border-b border-pb-hairline/50 pb-1">
-              <div>
-                <span className="text-pb-text">{c.label}</span>
-                {c.detail && <div className="text-pb-faintest text-[10.5px]">{c.detail}</div>}
-              </div>
-              <span className="font-display font-bold whitespace-nowrap" style={{ color: 'var(--pb-accent)' }}>+{c.points}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[12px] text-pb-faintest">No tracked signals yet.</p>
-      )}
+      {/* Exactly the chart the Sales Pipeline's deal card draws — one
+          component, so a rep and a super admin reading the same club are
+          never shown two different accounts of its score. */}
+      <EngagementSources data={engagement} />
       {engagement.signals && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
           {[

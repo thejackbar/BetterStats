@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { api } from '../../../lib/api'
+import EngagementSources from './EngagementSources'
 
 // Dollar values everywhere here are cents (matches the backend's value_cents).
 export const money = (cents) =>
@@ -394,17 +395,10 @@ export function WebsiteAnalyticsPanel({ marketingClubId }) {
 // email opens/clicks, Meta ad clicks, and the flags/floors (enquiry, trial,
 // setup depth). So a score like 70 with no site visits reads as "trial-depth
 // registration floor" instead of an unexplained number.
-const _CAT = {
-  engagement: { label: 'Engagement signals', tone: 'text-emerald-300' },
-  intent: { label: 'Buying intent', tone: 'text-sky-300' },
-  setup: { label: 'Setup & registration', tone: 'text-amber-300' },
-}
-const _CAT_ORDER = ['engagement', 'intent', 'setup']
 
 export function EngagementBreakdownPanel({ marketingClubId }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
-  const [engagementOnly, setEngagementOnly] = useState(false)
   useEffect(() => {
     if (!marketingClubId) return
     let alive = true
@@ -415,62 +409,20 @@ export function EngagementBreakdownPanel({ marketingClubId }) {
 
   if (!marketingClubId) return null
   const s = data?.signals
-  const contribs = data?.contributions || []
-  const grouped = _CAT_ORDER
-    .map(cat => ({ cat, items: contribs.filter(c => (c.category || 'engagement') === cat) }))
-    .filter(g => g.items.length && (!engagementOnly || g.cat === 'engagement'))
-  const hasNonEngagement = contribs.some(c => (c.category || 'engagement') !== 'engagement')
   return (
     <div>
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="font-display font-bold text-[13px]">What's driving this score</h3>
-        {hasNonEngagement && (
-          <label className="flex items-center gap-1.5 text-[11px] text-pb-faint cursor-pointer select-none">
-            <input type="checkbox" checked={engagementOnly} onChange={e => setEngagementOnly(e.target.checked)} />
-            Engagement only (hide setup/registration)
-          </label>
-        )}
-      </div>
+      <h3 className="font-display font-bold text-[13px] mb-2">Where this score is coming from</h3>
       {loading ? <p className="text-[12px] text-pb-faintest">Loading…</p> : data == null ? (
         <p className="text-[12px] text-pb-faintest">No score yet for this club.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div className="flex items-center gap-2 text-[12px]">
             <span className="font-display font-bold text-[16px]">{data.score}</span>
             <Pill tone={{ HOT: 'red', WARM: 'amber' }[data.tier] || 'faint'}>{(data.tier || '').replace(/_/g, ' ')}</Pill>
             {data.is_customer && <span className="text-pb-faint">linked club (onboarded/customer)</span>}
           </div>
           {data.explanation && <p className="text-[11.5px] text-pb-faint italic">{data.explanation}</p>}
-          {grouped.length ? (
-            <div className="space-y-2">
-              {grouped.map(({ cat, items }) => (
-                <div key={cat}>
-                  <div className={`text-[10.5px] uppercase tracking-wide font-bold mb-0.5 ${_CAT[cat].tone}`}>{_CAT[cat].label}</div>
-                  <div className="space-y-1">
-                    {items.map((c, i) => (
-                      <div key={i} className="flex items-baseline justify-between gap-2 text-[12px] border-b border-pb-hairline/50 pb-1">
-                        <div>
-                          <span className="text-pb-text">{c.label}</span>
-                          {c.detail && <div className="text-pb-faintest text-[10.5px]">{c.detail}</div>}
-                        </div>
-                        <span className={`font-display font-bold whitespace-nowrap ${_CAT[cat].tone}`}>+{c.points}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              {data.is_customer && (
-                <p className="text-[10.5px] text-pb-faintest pt-0.5">
-                  Setup/registration is a score <em>floor</em> (the score is the higher of this and the activity tally), not an added total.
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className="text-[12px] text-pb-faintest">
-              {engagementOnly ? 'No engagement signals — this score is from setup/registration only.'
-                : 'No engagement signals — this club has had no tracked activity.'}
-            </p>
-          )}
+          <EngagementSources data={data} />
           {s && (
             <div className="grid grid-cols-4 gap-2 text-[12px] pt-1">
               <div className="pb-card px-2.5 py-2">

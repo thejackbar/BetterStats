@@ -1,5 +1,70 @@
 # BetterStats — Claude Session Notes
 
+## Where an engagement score came from, charted and filterable (migration 270, v9.38.0, Aug 2026)
+
+Asked for so the CRM can say which clubs found us through Meta ads, which
+registered themselves, and how much of a score each of those is worth.
+
+- **The scorer records what it awards; nothing re-derives it.**
+  `twenty_sync._engagement()` builds `_sourcePoints` (`{key: points}`) as the
+  points are handed out, and `services/engagement_sources.py` only labels,
+  groups and orders them. The old breakdown route recomputed its own
+  itemisation beside the score, which is how it came to be **missing
+  `BONUS_VISIT_TRIAL` entirely** — a club that hit /trial had a card whose
+  contributions did not add up to its own number, and nobody could see it.
+- **A source can be PRESENT at zero points, and that is the whole point of the
+  filter.** A club whose score is pinned by a direct enquiry, or held up by the
+  registration floor, still clicked those ads. `_sourcePresent` carries them;
+  the chart draws only what is paying, and the filter matches on key presence.
+  Reporting them as absent would answer "did this club come to us through Meta
+  ads" with a flat no.
+- **`_note` only ever fires for something that really happened.** An
+  unconditional note is how every club ends up listed under every source.
+- **The customer branch is itemised for the first time.** `min(freq*0.5, 20)`
+  folds reach, web, email and ads into one capped figure, so the parts are
+  split back out **in proportion to what each put in** — exact below the cap,
+  and the fairest reading of it at the cap. One opaque "product use" bar cannot
+  answer "did this customer come back through the ads or the emails".
+- **`marketing_clubs.engagement_sources` (migration 270) is cached beside the
+  score, for the same reason the score is.** The board holds hundreds of deals;
+  a per-club scan of `usage_events` per card is not a page-load cost. NULL means
+  "not scored since this shipped", which the filter treats as unknown and
+  EXCLUDES — sweeping it in would read as a confident "none of the above".
+  `recalc_engagement` fills the table; opening a club's card self-heals its row.
+- **A source key is permanent.** Renaming one drops every saved filter naming
+  it and orphans the cached maps until a full recalc.
+- **Email opens and clicks are split in the scorer's own query**, not a second
+  scan in the route, and the combined `email_decay_pts` is now DERIVED from the
+  two (`_decay_case_sql` builds both from the one weight table) rather than a
+  third copy of the same CASE sitting next to them.
+- **`reset_marketing_club_engagement` clears the map too** — a purged club that
+  kept its sources would stay listed under the very ones the reset exists to
+  forget.
+- **One chart component, two panes.** `components/admin/crm/EngagementSources.jsx`
+  is drawn by both the deal card and the Sales Workspace drawer, so a rep and a
+  super admin reading the same club are never shown two accounts of its score.
+  Category colours are fixed hues, not accent mixes: the same chart sits inside
+  the amber admin chrome and the violet BetterIQ one, and a category that
+  changes hue with its surroundings cannot be learned.
+- **The board filter is client-side**, like every other CRM filter there — the
+  cached map rides on the deal card (`_deal_dict`), so no new endpoint is
+  needed. `any of these` / `all of these` are both wanted and neither is a
+  sensible default for the other. `GET /club-admin/marketing/engagement-sources`
+  serves the vocabulary for anything that would rather fetch it than hold a copy.
+- **Verified against a real Postgres** (51 checks through the shipped scorer,
+  the shipped route body and `_deal_dict`: migration 270 applied three times to
+  a populated pre-270 table, all four drivers' contributions reconciling to
+  their own score, a staff registration scoring below a self-serve one, an old
+  ad click still listed at zero, a purged club forgetting its sources, and the
+  any-of/all-of JSONB filter) and **driven in Chromium** (19: the picker
+  narrowing the board, a second source ORing, the all-of switch, an unscored
+  club never claimed, the composition bar's segment count, the category shares,
+  the folded-away unpaid signals, the same chart in the Sales Workspace drawer,
+  and the filter named in the export summary).
+- **Noticed, NOT fixed**: the CRM board overflows horizontally at 390px by
+  283px. Confirmed pre-existing by re-running the same measurement with this
+  branch's frontend stashed — identical figure, identical elements.
+
 ## A player's date of birth, and who is told their age (migration 269, v9.37.0, Aug 2026)
 
 Asked for so a selector can see a young quick's age while deciding bowling
