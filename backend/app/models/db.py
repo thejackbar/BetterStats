@@ -1624,8 +1624,11 @@ class NetSession(Base):
     batted) and feed the attendance reports + per-player profile stat. The live
     batting-queue + timer that the net manager runs pitch-side is purely
     client-side (single device); only the durable bits — the session, its timer
-    settings and the attendance list — are persisted here. Club-wide; created_by
-    tracks which admin opened it.
+    settings and the attendance list — are persisted here. The batting queue and
+    timer are persisted too (see version / live_state below): the same admin
+    account is routinely open on a phone by the nets and a laptop in the
+    clubroom, and both have to see and drive the one session. Club-wide;
+    created_by tracks which admin opened it.
     """
     __tablename__ = "net_sessions"
 
@@ -1640,6 +1643,16 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # Bumped by every write that changes what the live screen shows, so a
+    # second device polling with the version it last saw is told "nothing has
+    # changed" in two fields instead of re-reading the whole session. Always
+    # incremented in SQL (version + 1), never read-then-write — see migration 268.
+    version = Column(Integer, nullable=False, server_default="0")
+    # The batting timer: {running, ends_at, remaining_seconds, duration_seconds,
+    # turn_seq}. Here rather than in the browser because every device watching
+    # the session has to see the same clock. ends_at is absolute, so each device
+    # derives its own countdown from it against the server time it is handed.
+    live_state = Column(JSONB, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

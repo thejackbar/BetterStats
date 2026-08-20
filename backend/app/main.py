@@ -1135,6 +1135,15 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS idx_net_attendance_player "
             "ON net_attendance(player_id) WHERE player_id IS NOT NULL"
         ))
+        # Migration 268: the live session is driven from several devices at
+        # once, so its version counter and batting timer live on the row rather
+        # than in whichever browser happened to start it.
+        await conn.execute(text(
+            "ALTER TABLE net_sessions ADD COLUMN IF NOT EXISTS version INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_sessions ADD COLUMN IF NOT EXISTS live_state JSONB"
+        ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_settings JSONB"
         ))

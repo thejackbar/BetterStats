@@ -133,23 +133,53 @@ function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
  * A quiet line under the snapshot showing how often this player turns up to
  * nets. Self-contained fetch; renders nothing until there's something to show
  * (so clubs not running the Net Manager never see it), and swallows the 402 a
- * non-BetterSelect club would get. */
+ * non-BetterSelect club would get.
+ *
+ * The session tally opens into the dates behind it. A number on its own can't
+ * be checked, and "which Tuesdays did he actually make?" is the question a
+ * coach is really asking when they look at it. */
+function netDate(d) {
+  try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) }
+  catch { return d || '' }
+}
+
 function NetAttendanceStat({ playerId }) {
   const [data, setData] = useState(null)
+  const [open, setOpen] = useState(false)
   useEffect(() => {
     let alive = true
+    setData(null); setOpen(false)
     api.nmPlayerAttendance(playerId).then((r) => { if (alive) setData(r) }).catch(() => {})
     return () => { alive = false }
   }, [playerId])
   if (!data || !data.attended) return null
+  const sessions = data.sessions || []
   return (
     <div className="mt-[18px] pt-[18px] border-t border-pb-hairline">
       <div className="text-xs text-pb-faint mb-2">Net attendance</div>
       <div className="flex items-center gap-4">
-        <span><b className="pb-num font-display font-bold text-base text-pb-text">{data.attended}</b> <span className="text-[11.5px] text-pb-faintest">session{data.attended === 1 ? '' : 's'}</span></span>
+        <button type="button" onClick={() => setOpen((v) => !v)} disabled={!sessions.length}
+          title={sessions.length ? 'Show every session attended' : undefined}
+          className="inline-flex items-center gap-1 disabled:cursor-default enabled:hover:text-pb-accent transition-colors">
+          <b className="pb-num font-display font-bold text-base text-pb-text">{data.attended}</b>
+          <span className="text-[11.5px] text-pb-faintest">session{data.attended === 1 ? '' : 's'}</span>
+          {sessions.length > 0 && <Icon name="chevron" size={12} className={`text-pb-faint transition-transform ${open ? 'rotate-90' : ''}`} />}
+        </button>
         <span><b className="pb-num font-display font-bold text-base text-pb-accent">{data.batted}</b> <span className="text-[11.5px] text-pb-faintest">batted</span></span>
         {data.last_attended && <span className="text-[11.5px] text-pb-faintest ml-auto">last {new Date(data.last_attended + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>}
       </div>
+      {open && sessions.length > 0 && (
+        <div className="mt-2.5 max-h-[220px] overflow-y-auto rounded-lg border border-pb-hairline bg-pb-surface2/40">
+          {sessions.map((sess) => (
+            <div key={sess.session_id} className="flex items-center gap-2 px-2.5 py-1.5 border-b border-pb-hairline last:border-0">
+              <span className="flex-1 min-w-0 text-[12px] text-pb-dim truncate">
+                {netDate(sess.session_date)}{sess.label ? ` · ${sess.label}` : ''}
+              </span>
+              {sess.batted && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-accent shrink-0">Batted</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

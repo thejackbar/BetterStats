@@ -1,5 +1,109 @@
 # BetterStats — Claude Session Notes
 
+## A net session is run from several devices at once (migration 268, v9.36.0, Aug 2026)
+
+Reported: the same admin account open on a phone by the nets and a laptop in the
+clubroom showed two different sessions. Plus: download who attended, put the
+tally on the player's profile, and open it into the dates.
+
+### The live session moved onto the server, and that is the whole change
+
+- **It was a client-side state machine that pushed a debounced full-replace
+  snapshot** (`PUT /nets/sessions/{id}/attendance`, the whole attendance list,
+  700ms after the last tap). So the second device's check-in survived exactly
+  until the first device's next write, which silently replaced the list with the
+  one IT was holding. **Never reintroduce a full-replace attendance write** —
+  replacing the list IS the bug.
+- **Every change is a small, discrete write now** (check in, remove, mark
+  batted, re-order, rotate, drive the clock), each bumping
+  `net_sessions.version`, and every open screen polls `GET /sessions/{id}/live?since=`.
+  Matching versions come back as `{version, server_time, unchanged: true}`, so a
+  phone left open on the boundary costs one tiny query every 2.5s.
+- **The version is bumped as `version = version + 1` IN SQL** (`_touch` assigns
+  the SQLAlchemy expression, never `s.version + 1` read in Python). Two coaches
+  tapping at the same moment would otherwise compute the same next value, and
+  one device's change would land with the version unmoved — invisible to
+  everyone else's poll. Verified by racing two real database sessions.
+- **The clock is an absolute deadline (`live_state.ends_at`), not a local
+  stopwatch.** Each device works out its own countdown from it against
+  `server_time`, which rides on every poll — a phone an hour fast still stops
+  the batter's turn at the same second as the laptop. A passed deadline READS as
+  stopped for everyone before anyone writes it down (`_timer_payload` resolves
+  `remaining_seconds` at read time), so the devices can't disagree while the
+  write is in flight.
+- **Rotating is the one action that must not repeat**, because doing it twice
+  skips a whole group of batters. `RotateBody.turn_seq` is what the sending
+  device was looking at; a request carrying a turn that has already moved on is
+  ignored. Tapping "Next group" deliberately twice still works — the first
+  response hands back the new turn number.
+- **Auto-roll happens on the SERVER, inside the `expire` action**, not on
+  whichever device noticed the clock run out. Every open screen notices within a
+  second of each other, so a device-side rotation would race. `expire` is
+  idempotent and refuses a deadline that hasn't actually passed, so a fast clock
+  can't end a turn early.
+- **A duplicate check-in is a no-op, not an error**, at two levels: an
+  app-level existence check for the ordinary case, and `IntegrityError` on the
+  partial unique for the genuinely simultaneous one. **The rollback path caught a
+  MissingGreenlet**: `club.id` read after `db.rollback()` is a lazy load in the
+  wrong place, so `club_id` is captured before the flush. Found by racing three
+  simultaneous check-ins of one player, not by reading the code.
+- **A stale re-order can't drop anyone.** `reorder_queue` takes the ids the
+  sending device knew about and appends anyone it didn't — a player checked in
+  from another phone a second earlier keeps their place at the back rather than
+  vanishing.
+- **`position` is re-laid as 0..n-1 after every mutation** (`_renumber`), over
+  the canonical order (still waiting first, then those who have batted). Sending
+  someone back to the queue puts them at the END, which is what "they need
+  another go" means.
+
+### The lists a club can take away
+
+- **`GET /nets/sessions/{id}/attendance.csv`** is the register for the night and
+  **includes guests** — a trialist who came along is part of who turned up.
+  Offered on the live screen and on every past session row.
+- **`GET /nets/reports/attendance.csv`** is the per-player report and
+  **excludes guests**, because it is keyed on real players and links to their
+  profiles. Same split the on-screen report already made.
+- **`days=0` means all time** (the range param went `ge=1` → `ge=0`), which is
+  what "how many has he been to" actually asks. The `since` filter is a
+  `CAST(:since AS date) IS NULL OR ...` — the asyncpg bare-`:param IS NULL` trap
+  the vote-medals note describes.
+- **Downloads are plain `<a href>`**, so the session cookie rides along and
+  there is no blob to build and hold. `Btn` gained `href`, since a link inside a
+  button is markup no browser agrees on — which is also why the session ROW
+  became a div with `role="button"`.
+
+### The tally opens into the dates
+
+- **`GET /nets/players/{id}/attendance` returns every session** (capped at 500),
+  not the eight it used to. `attended` is now the length of that list rather
+  than a separate COUNT, so the number and the dates behind it cannot disagree.
+- Clicking the tally expands it in place on the player profile
+  (`NetAttendanceStat`, shared by BetterSelect Players and Admin → Players) and
+  opens a modal from the Nets report. The modal deliberately reads the player's
+  WHOLE history, not the window the report is showing — a coach clicking a
+  number is asking about the person, not about the last 90 days.
+
+### Verification
+
+**67 checks against a real Postgres** through the shipped route bodies
+(migration 268 applied three times to a populated pre-268 table and matching the
+lifespan mirror, which is read out of `main.py` rather than retyped; the poll's
+cheap answer; the duplicate check-in; the stale re-order; the rotate turn guard;
+the early-expire refusal; server-side auto-roll and the second device's expiry
+rotating nobody; a mid-turn duration change not jumping the batter's clock; the
+guest split between the two CSVs; cross-club rejection on every read and write),
+**including 5 that race two genuine parallel database sessions** — twelve
+check-ins interleaved with none lost and the version landing on exactly 12.
+
+**31 checks driven in Chromium** against the real router and a real Postgres,
+with TWO browser contexts on one session: check-ins crossing between them
+untouched, both clocks agreeing within two seconds, pause on one stopping the
+other, a rotation moving the batters on both, a screen woken from a pocket
+catching up at once, both downloads' contents and filenames, the report's
+columns and All time, and the tally opening on the profile. No page errors, no
+overflow at 390px on any of the three screens.
+
 ## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
 `vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly
