@@ -2115,6 +2115,16 @@ export const api = {
     return request(`/club-admin/sales-workspace/performance${qs}`)
   },
   salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
+  // Fetched separately from the drawer payload on purpose — a club whose
+  // suburb polygon has never been cached costs an upstream Nominatim
+  // lookup, which used to hold up the whole detail pane.
+  salesWorkspaceClubBoundary: (dealId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/boundary`),
+  // Where the club came from — the /trial pick, how far its registration got,
+  // and the Meta ad behind it. Its own request so the beacon reads behind it
+  // can't hold up the detail pane.
+  salesWorkspaceClubSignals: (dealId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/signals`),
   salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
   salesWorkspaceLogCall: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),

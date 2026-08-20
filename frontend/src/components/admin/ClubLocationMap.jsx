@@ -30,14 +30,17 @@ function FitToBoundary({ geojson }) {
   return null
 }
 
-// `preloadedBoundary` lets a caller that already has the geojson (e.g. the
-// Sales Workspace drawer, which embeds it in the same payload as everything
-// else — a 'sales' rep can't call the Club Directory's own super-admin-only
-// /boundary endpoint this component otherwise self-fetches from) skip the
+// `preloadedBoundary` lets a caller that already has the geojson skip the
 // internal fetch entirely. `undefined` (the default) means "no preload was
 // given, fetch it yourself" — `null` is a real, already-resolved "no
 // boundary found" so it must be distinguished from "hasn't loaded yet".
-export default function ClubLocationMap({ clubId, latitude, longitude, postcode, state, preloadedBoundary }) {
+//
+// `fetchBoundary` overrides WHERE it self-fetches from, for a caller whose
+// user can't reach the Club Directory's super-admin-only /boundary route —
+// the Sales Workspace drawer passes its own deal-scoped endpoint. It takes
+// the clubId and resolves to the same `{ geojson }` shape.
+export default function ClubLocationMap({ clubId, latitude, longitude, postcode, state,
+                                          preloadedBoundary, fetchBoundary }) {
   const hasPreload = preloadedBoundary !== undefined
   const [boundary, setBoundary] = useState(hasPreload ? preloadedBoundary : null)
   const [boundaryLoaded, setBoundaryLoaded] = useState(hasPreload)
@@ -48,11 +51,14 @@ export default function ClubLocationMap({ clubId, latitude, longitude, postcode,
     setBoundaryLoaded(false)
     if (!clubId) return
     let cancelled = false
-    api.mktClubBoundary(clubId)
+    const load = fetchBoundary || api.mktClubBoundary
+    load(clubId)
       .then(d => { if (!cancelled) setBoundary(d?.geojson || null) })
       .catch(() => {})
       .finally(() => { if (!cancelled) setBoundaryLoaded(true) })
     return () => { cancelled = true }
+    // fetchBoundary is deliberately not a dependency — a caller declaring it
+    // inline would otherwise re-fetch on every parent render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clubId, hasPreload, preloadedBoundary])
 
