@@ -355,22 +355,36 @@ async def availability_matrix(
                     "period_end": info["end"],
                 }
 
+    # The club's association rules, as they stand for a player with no
+    # particular match in mind — fees, registration, training, an age limit
+    # written across the whole club. A rule scoped to one grade has no grade to
+    # compare with here and stays out of it, as does anything that only means
+    # something against a fixture; the selection board answers those.
+    # Imported here, not at module scope: selection_pool imports this module,
+    # and a module-level import back would close the circle.
+    from app.services.selection_pool import club_rule_context
+    rules = await club_rule_context(db, club, players)
+
     return {
         "dates": [
             {"date": d, "fixtures": by_date[d]}
             for d in sorted(by_date.keys())
         ],
         "players": [
-            _player_entry(p, last_played_map.get(p.id), squads_map.get(p.id), cutoff)
+            _player_entry(p, last_played_map.get(p.id), squads_map.get(p.id), cutoff, rules)
             for p in players
         ],
         "availability": avail_map,
         "all_squads": sorted({s for names in squads_map.values() for s in names}),
         "dormancy_months": months,
+        # Empty for a club that has written no rules, which is what keeps the
+        # roster and the matrix looking exactly as they did.
+        "rules": {"active": rules.active, "applied": rules.rules},
     }
 
 
-def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date) -> dict:
+def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set], cutoff: date,
+                  rules=None) -> dict:
     # Derived recency. inactive (manual) takes precedence; otherwise dormant if
     # they've played but not since the cutoff. Never-played players are neither
     # (e.g. a freshly-added manual player with no appearance history yet).
@@ -390,7 +404,18 @@ def _player_entry(p: Player, last_played: Optional[date], squads: Optional[set],
         # Convenience flag the UI defaults its filter on: a "current" player is
         # neither manually inactive nor dormant.
         "is_current": not manual_inactive and not dormant,
+        # Club rules this player falls foul of whatever the match. Same shape
+        # the selection pool sends, so one component draws both.
+        "rule_flags": (rules.player_flags.get(str(p.id), []) if rules else []),
+        "rule_notes": (rules.player_notes.get(str(p.id), []) if rules else []),
+        "rule_state": _rule_state(rules.player_flags.get(str(p.id), []) if rules else []),
     }
+
+
+def _rule_state(flags: list) -> str:
+    if any(f["severity"] == "block" for f in flags):
+        return "block"
+    return "warn" if any(f["severity"] == "warn" for f in flags) else "ok"
 
 
 @router.post("")

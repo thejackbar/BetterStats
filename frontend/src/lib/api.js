@@ -2875,6 +2875,27 @@ export const api = {
   // powers the cross-screen "Selected" filter.
   bsSelectedPlayers: (on) => request(`/selection/selected-players?on=${encodeURIComponent(on)}`),
 
+  // ─── BetterSelect: association rules ────────────────────
+  // The club's own competition rules — age limits, overseas caps, bowling
+  // workloads, finals qualification — plus the BetterSelect settings that sit
+  // with them. All MANAGE_SELECTIONS: these are a selector's settings.
+  bsRules: () => request('/selection-rules'),
+  bsCreateRule: (data) => request('/selection-rules', { method: 'POST', body: JSON.stringify(data) }),
+  bsUpdateRule: (id, data) =>
+    request(`/selection-rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  bsDeleteRule: (id) => request(`/selection-rules/${id}`, { method: 'DELETE' }),
+  bsReorderRules: (ids) =>
+    request('/selection-rules/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  bsRuleSettings: (data) =>
+    request('/selection-rules/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  // Per-player exceptions to one rule: a permit, an association clearance, or
+  // the tick a free-text rule asks for.
+  bsRulePlayers: (id) => request(`/selection-rules/${id}/players`),
+  bsSetRulePlayer: (id, playerId, state, note) =>
+    request(`/selection-rules/${id}/players/${playerId}`,
+      { method: 'PUT', body: JSON.stringify({ state, note }) }),
+  bsSeedStarterRules: () => request('/selection-rules/starter', { method: 'POST' }),
+
   // ─── BetterSelect: Net Manager ──────────────────────────
   // Active roster to check players in from (same pool as availability).
   nmRoster: () => request('/nets/roster'),

@@ -293,6 +293,11 @@ class Organisation(Base):
     # club never sends an adult's age to a browser at all.
     select_show_age = Column(Boolean, nullable=False, server_default="false", default=False)
     select_show_age_under = Column(Integer, nullable=True)
+    # Club-wide defaults for BetterSelect's association rules (migration 271) —
+    # chiefly how the competition measures age, since one association counts it
+    # as at 1 September and the next as at 1 January. NULL = the platform
+    # default. Written and read only through services/selection_rules.py.
+    selection_rules_config = Column(JSONB, nullable=True)
     # Public player-profile attribute visibility (per-club). Overseas is always
     # shown; these gate the descriptive attributes on the public /players/:id
     # profile so each club chooses how much of a player's profile is public
@@ -1359,6 +1364,11 @@ class Fixture(Base):
     opponent_name = Column(Text, nullable=True)
     venue = Column(Text, nullable=True)
     status = Column(Text, nullable=False, server_default="UPCOMING")  # UPCOMING|IN_PROGRESS|FINAL|CANCELLED|BYE
+    # Whether this fixture is a final, for the selection rules that only bite
+    # in finals (migration 271). NULL = work it out from the round name, which
+    # is what every synced fixture carries; set by hand when an association
+    # names its finals something the heuristic can't read.
+    is_final = Column(Boolean, nullable=True)
     notes = Column(Text, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

@@ -513,6 +513,28 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     unavailable = [p["name"] for p in players if "unavailable" in p["flags"]]
     if unavailable:
         warnings.append({"level": "warn", "text": "Selected but marked unavailable: " + ", ".join(unavailable) + "."})
+    # The club's own association rules, from the same pool BetterSelect draws
+    # its board from — so IQ and the board never disagree about who may play.
+    # Blocking breaches read as warnings here; this screen advises, it doesn't
+    # save anything.
+    picked_ids = {p["player_id"] for p in players}
+    rule_lines: dict[str, list[str]] = {}
+    for entry in sel.get("pool", []):
+        if entry["id"] not in picked_ids:
+            continue
+        for f in entry.get("rule_flags", []):
+            rule_lines.setdefault(f["name"], []).append(f"{entry['display_name']} ({f['detail']})")
+    for rule_name, who in rule_lines.items():
+        warnings.append({"level": "warn", "text": f"{rule_name}: " + ", ".join(who) + "."})
+    for team_rule in (sel.get("rules", {}) or {}).get("team", []):
+        if team_rule["kind"] != "overseas":
+            continue
+        n = len([pid for pid in team_rule.get("player_ids", []) if pid in picked_ids])
+        cap = (team_rule.get("config") or {}).get("max_in_xi", 1)
+        if n > cap:
+            warnings.append({"level": "warn",
+                             "text": f"{team_rule['name']}: {n} overseas players named, {cap} allowed."})
+
     not_recent = [p["name"] for p in players if "not-recent" in p["flags"]]
     if not_recent:
         warnings.append({"level": "warn", "text": "Outside BetterSelect's 12-month selection window: " + ", ".join(not_recent) + "."})

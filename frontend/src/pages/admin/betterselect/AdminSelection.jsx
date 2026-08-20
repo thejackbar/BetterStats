@@ -23,12 +23,13 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { availRank } from '../../../lib/availability'
-import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears } from './ui'
+import { Icon, Avatar, Btn, RoleChips, Tag, Empty, QuickAvailModal, playedWithinYears, RuleTags } from './ui'
 import { useFilters } from './filters'
 import SelectionFilters from './SelectionFilters'
 import { DnD } from './selectionDnd'
 import { DualRailView, TeamSheetView } from './SelectionViews'
 import { classifyBowl, formBucket, matchesAge } from './selectionMeta'
+import { matchesRuleFilter, xiCompliance } from './selectionRules'
 
 // Soft role-band each batting slot prefers — drives auto-fill placement (the
 // displayed positional *hints* are gone, but the eligibility model is useful).
@@ -281,6 +282,8 @@ export default function AdminSelection() {
     // is no filter at all, and the pool's age is already the club's own
     // answer (see services/player_age.py) — this only reads it.
     { key: 'age', type: 'single' },
+    // The club's association rules — clear / has a problem / ineligible.
+    { key: 'rules', type: 'single' },
   ], [])
   const filters = useFilters(facets)
   const { values, search } = filters
@@ -307,6 +310,9 @@ export default function AdminSelection() {
     else if (values.training === 'missing') list = list.filter((p) => p.trained_recently === false)
     else if (values.training === 'unknown') list = list.filter((p) => p.trained_recently == null)
     if (values.age) list = list.filter((p) => matchesAge(p, values.age))
+    // The club's own association rules. Only offered when the club has one
+    // bearing on this fixture — SelectionFilters drops the group otherwise.
+    if (values.rules) list = list.filter((p) => matchesRuleFilter(p, values.rules))
     if (yearsF) list = list.filter((p) => playedWithinYears(p.last_played, yearsF))
     if (values.status === 'unselected') list = list.filter((p) => !(p.clash?.length > 0))
     else if (values.status === 'clash') list = list.filter((p) => p.clash?.length > 0)
@@ -474,6 +480,15 @@ export default function AdminSelection() {
       const diff = count > target ? `${count - target} too many` : `${target - count} too few`
       if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nSave anyway?`)) return
     }
+    // A warning-level rule is the selector's to weigh, so it asks rather than
+    // refuses. A blocking one never gets this far — the server decides, and
+    // its answer comes back below.
+    const { warnings } = xiCompliance(data?.rules, poolById, filled)
+    if (warnings.length) {
+      const lines = warnings.slice(0, 6).map((w) => `• ${w.player ? w.player + ' — ' : ''}${w.detail}`).join('\n')
+      const more = warnings.length > 6 ? `\n…and ${warnings.length - 6} more` : ''
+      if (!window.confirm(`This side breaks ${warnings.length} club rule${warnings.length === 1 ? '' : 's'}:\n\n${lines}${more}\n\nSave anyway?`)) return
+    }
     setSaving(true)
     try {
       const players = filled.map((id, i) => ({ player_id: id, batting_order: i + 1, is_captain: id === capId, is_wicket_keeper: id === wkId }))
@@ -487,11 +502,17 @@ export default function AdminSelection() {
       setDirty(false)
       load()
     } catch (e) {
-      toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
+      // A blocking rule comes back as a structured 409 listing exactly what
+      // broke, which is more use than "save failed".
+      const breaches = e?.detail?.breaches || e?.data?.detail?.breaches
+      if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
+      else toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
     } finally { setSaving(false) }
   }
 
   const { title, sub, kicker } = fmtHeader(fx)
+  // The same verdict the board's rule strip shows, for the shareable sheet.
+  const sheetRules = xiCompliance(data?.rules, poolById, filled)
   const lineupText = () => {
     const lines = filled.map((id, i) => {
       const p = poolById[id]
@@ -544,12 +565,13 @@ export default function AdminSelection() {
   const filterBar = (
     <SelectionFilters filters={filters} sort={sort} setSort={setSort} squadOptions={squadOptions}
       yearsF={yearsF} setYearsF={setYearsF} count={pool.length} total={available.length}
-      flags={data?.flags} />
+      flags={data?.flags} rules={data?.rules} />
   )
 
   const vm = {
     title, sub, kicker, teamName, contextLeft, filterBar, squadShort, canEdit,
     poolById, pool, slots, capId, wkId, focus, format, count, target, balance,
+    rules: data?.rules,
     filledSet: usedIds, canAutofill, hasPrev,
     changeFormat, tapPlayer, placeInSlot, removeAt, swapSlots, setFocus, toggleCap, toggleWk,
     autofill: () => fillEmpty(false), fillLastWeek: () => fillEmpty(true), clearXI, setAvailEdit,
@@ -596,13 +618,25 @@ export default function AdminSelection() {
                   <div key={id} className="flex items-center gap-3 px-4 py-2 border-b pb-hairline">
                     <span className="font-mono text-xs text-pb-faintest w-5 text-right">{i + 1}</span>
                     <Avatar player={p} size={26} />
-                    <span className="flex-1 text-[13.5px] truncate">{p?.display_name}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}</span>
+                    <span className="flex-1 text-[13.5px] truncate">
+                      {p?.display_name}{id === capId && <> <Tag>C</Tag></>}{id === wkId && <> <Tag tone="amber">WK</Tag></>}
+                      {' '}<RuleTags player={p} />
+                    </span>
                     <RoleChips roles={p?.skill_positions} muted />
                   </div>
                 )
               })}
               {count === 0 && <div className="p-4"><Empty>No players selected.</Empty></div>}
               {offCount && <div className="px-4 py-2 text-[12px] text-pb-amber">{count > target ? `${count - target} over` : `${target - count} short of`} your {target}-a-side format.</div>}
+              {/* Club rules, on the sheet as well as the board — this is the
+                  copy that gets sent to a captain, so it should not be the one
+                  place a problem is invisible. */}
+              {sheetRules.blocking.concat(sheetRules.warnings).map((w, i) => (
+                <div key={i} className="px-4 py-1.5 text-[12px]"
+                  style={{ color: sheetRules.blocking.includes(w) ? 'var(--pb-red)' : 'var(--pb-amber)' }}>
+                  {w.player ? `${w.player} — ` : ''}{w.detail}
+                </div>
+              ))}
             </div>
             <div className="px-4 py-3 border-t pb-hairline flex items-center gap-2">
               <Btn variant="soft" sm icon="check" onClick={copyLineup}>{copied ? 'Copied!' : 'Copy lineup as text'}</Btn>

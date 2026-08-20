@@ -9,10 +9,11 @@
 // + a quiet form indicator (selectionMeta.roleLine / FormBars) — never the old
 // hardcoded positional hints.
 import { useState } from 'react'
-import { Icon, Avatar, Dot, Tag } from './ui'
+import { Icon, Avatar, Dot, Tag, RuleTags } from './ui'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { useDrag } from './selectionDnd'
 import { roleLine, formMeta, spark } from './selectionMeta'
+import { hasRuleFlag, ruleNotes, isBlocked, xiCompliance } from './selectionRules'
 
 const ROLE_CODES = ['BAT', 'ALL', 'BWL', 'WKT']
 const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
@@ -22,13 +23,29 @@ const ROLE_LBL = { BAT: 'BAT', ALL: 'ALL', BWL: 'BWL', WKT: 'WK' }
  * negative case draws — a paid-up player who was at training is the normal
  * state and does not need a badge, and "we can't tell" (null) says nothing
  * rather than accusing anyone. */
+/* A club's own association rules add their badges here too. Where a rule
+ * speaks to the same fact the plain badge did — fees, training — the rule's
+ * badge replaces it rather than sitting beside it: same two letters, now
+ * coloured by how seriously the club takes it. */
 function FlagTags({ p }) {
   return (
     <>
-      {p.is_financial === false && <Tag tone="red" title="Owes the club money">$</Tag>}
-      {p.trained_recently === false && <Tag tone="faint" title="Not at training recently">NT</Tag>}
+      <RuleTags player={p} />
+      {p.is_financial === false && !hasRuleFlag(p, 'fees') && (
+        <Tag tone="red" title="Owes the club money">$</Tag>
+      )}
+      {p.trained_recently === false && !hasRuleFlag(p, 'training') && (
+        <Tag tone="faint" title="Not at training recently">NT</Tag>
+      )}
     </>
   )
+}
+/* The quiet half of the rules: a junior's bowling limit, or a permit that
+ * cleared them. Not a warning, so it reads as a line rather than a badge. */
+function RuleNotes({ p }) {
+  const notes = ruleNotes(p)
+  if (!notes.length) return null
+  return <div className="text-[11px] text-pb-faint mt-0.5 truncate" title={notes.join(' · ')}>{notes.join(' · ')}</div>
 }
 /* Age, when the club shows it. The server has already applied both halves of
  * the club's rule (on/off, and any "juniors only" limit), so a present `age`
@@ -148,6 +165,54 @@ export function BalanceStrip({ vm }) {
   )
 }
 
+/* ── The club's own rules, against the side as it stands ──────────────────
+ * Drawn only when the club has a rule bearing on this fixture, so a club that
+ * has written none sees the board it has always seen. Blocking breaches read
+ * red because the save will refuse them; warnings read amber because they are
+ * the selector's to weigh. */
+export function RuleStrip({ vm }) {
+  const rules = vm.rules
+  if (!rules?.active) return null
+  const { blocking, warnings } = xiCompliance(rules, vm.poolById, vm.slots)
+  const problems = [...blocking, ...warnings]
+  const tone = blocking.length ? 'var(--pb-red)' : warnings.length ? 'var(--pb-amber)' : 'var(--pb-positive)'
+  return (
+    <div className="pb-card rounded-xl px-4 py-2 mb-2.5 text-[13px]"
+      style={{ borderColor: `color-mix(in srgb, ${tone} 34%, transparent)` }}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Club rules</span>
+        <span className="inline-flex items-center gap-1.5" style={{ color: tone }}>
+          <Icon name={problems.length ? 'info' : 'check'} size={13} />
+          {blocking.length
+            ? `${blocking.length} to fix before you can save`
+            : warnings.length
+              ? `${warnings.length} to check`
+              : 'This side meets every rule'}
+        </span>
+        {rules.is_final && <Tag tone="amber" title="Finals rules apply to this fixture">FINAL</Tag>}
+        <span className="ml-auto text-[11.5px] text-pb-faintest truncate hidden sm:block"
+          title={(rules.applied || []).map((r) => r.summary).join(' · ')}>
+          {(rules.applied || []).map((r) => r.name).join(' · ')}
+        </span>
+      </div>
+      {problems.length > 0 && (
+        <ul className="mt-1.5 flex flex-col gap-0.5">
+          {problems.slice(0, 6).map((p, i) => (
+            <li key={i} className="text-[12px] text-pb-dim truncate">
+              <span style={{ color: tone }}>•</span>{' '}
+              {p.player ? <b className="font-semibold text-pb-text">{p.player}</b> : <b className="font-semibold text-pb-text">{p.name}</b>}
+              {' — '}{p.detail}
+            </li>
+          ))}
+          {problems.length > 6 && (
+            <li className="text-[11.5px] text-pb-faintest">and {problems.length - 6} more</li>
+          )}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 /* ── Captain / keeper / remove control cluster ───────────────────────────── */
 function SlotControls({ vm, id, idx }) {
   if (!vm.canEdit) return null
@@ -175,8 +240,11 @@ function DualCard({ p, kind, idx, vm, drag }) {
   const blocked = clash && p.clash_blocks
   const dragItem = kind === 'pool' ? { kind: 'pool', player: p } : { kind: 'slot', idx, player: p }
   const interactive = vm.canEdit && !blocked
+  // A player a club rule bars stays pickable — the save is where it bites, and
+  // a selector may be about to grant a permit — but the card says so.
+  const barred = isBlocked(p)
   return (
-    <div className={`group relative shrink-0 flex items-center gap-2.5 pl-3.5 pr-3 py-1.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} border-pb-hairline`}
+    <div className={`group relative shrink-0 flex items-center gap-2.5 pl-3.5 pr-3 py-1.5 rounded-xl border bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''} ${barred ? 'border-pb-red/45' : 'border-pb-hairline'}`}
       {...(kind === 'pool' && interactive ? drag.bind(dragItem) : {})}
       onClick={kind === 'pool' && interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
@@ -201,6 +269,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
               ? <div className="text-[11px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[11px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : p.availability_reason && <div className="text-[11px] text-pb-faint mt-0.5 truncate">{p.availability_reason}</div>}
+        <RuleNotes p={p} />
       </div>
       {kind === 'pool' ? (
         <div className="flex flex-col items-end gap-0.5 shrink-0">
@@ -244,6 +313,7 @@ export function DualRailView({ vm }) {
     <div>
       <FixtureBar vm={vm} />
       <BalanceStrip vm={vm} />
+      <RuleStrip vm={vm} />
 
       {/* Mobile Pool ⇄ XI switcher */}
       <div className="grid grid-cols-2 gap-1.5 sticky top-[56px] z-20 mb-3 p-1.5 pb-card rounded-xl lg:hidden">
@@ -322,11 +392,13 @@ function SheetRow({ i, id, vm, drag }) {
               <span className="font-display font-semibold text-[16.5px] tracking-tight truncate">{p.display_name}</span>
               {id === vm.capId && <Tag>C</Tag>}{id === vm.wkId && <Tag tone="amber">WK</Tag>}
               <AgeTag p={p} />
+              <FlagTags p={p} />
             </div>
             <div className="flex items-center gap-2 mt-0.5 min-w-0">
               <span className="text-[12.5px] text-pb-dim truncate">{roleLine(p)}</span>
               <span className="shrink-0"><FormInline p={p} /></span>
             </div>
+            <RuleNotes p={p} />
           </div>
           <SlotControls vm={vm} id={id} idx={i} />
         </>
@@ -346,8 +418,9 @@ function TrayCard({ p, vm, drag }) {
   // Unavailable players stay pickable (see DualCard) — only a hard clash blocks.
   const blocked = clash && p.clash_blocks
   const interactive = vm.canEdit && !blocked
+  const barred = isBlocked(p)
   return (
-    <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border border-pb-hairline bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
+    <div className={`group relative flex items-center gap-3 pl-4 pr-3 py-2.5 rounded-xl border ${barred ? 'border-pb-red/45' : 'border-pb-hairline'} bg-pb-surface2 overflow-hidden transition-colors ${blocked ? 'opacity-50 cursor-not-allowed' : interactive ? 'cursor-pointer hover:border-pb-accent/45' : ''}`}
       {...(interactive ? drag.bind({ kind: 'pool', player: p }) : {})}
       onClick={interactive ? drag.clickGuard(() => vm.tapPlayer(p)) : undefined}>
       <span className="absolute left-0 top-0 bottom-0 w-1" style={{ background: p.availability === 'NO_RESPONSE' ? 'var(--pb-faintest)' : meta.cssVar }} />
@@ -368,6 +441,7 @@ function TrayCard({ p, vm, drag }) {
               ? <div className="text-[10.5px] text-pb-amber mt-0.5 truncate">↑ Call-up from {p.clash.join(', ')}</div>
               : <div className="text-[10.5px] text-pb-red mt-0.5 truncate">⛔ Picked for {p.clash.join(', ')}</div>)
           : <div className="mt-1"><FormInline p={p} /></div>}
+        <RuleNotes p={p} />
       </div>
       {!blocked && <span className="text-pb-faintest shrink-0 group-hover:text-pb-accent transition-colors"><Icon name="plus" size={14} /></span>}
     </div>
@@ -410,6 +484,8 @@ export function TeamSheetView({ vm }) {
         </div>
         </div>
       </div>
+
+      <div className="mt-2.5"><RuleStrip vm={vm} /></div>
 
       {/* The sheet */}
       <div className="rounded-b-2xl border border-t-0 pb-hairline bg-pb-surface overflow-hidden mb-4">

@@ -9,6 +9,7 @@
 // anything status-coloured uses the CSS variable directly.
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { ruleBadges } from './selectionRules'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
 
 /* ── Icons — simple geometric line glyphs (stroke = currentColor) ────────── */
@@ -169,6 +170,22 @@ export function Tag({ children, tone = 'accent', className = '', title }) {
       className={`inline-flex items-center font-mono text-[9.5px] font-bold tracking-wide2 px-1.5 py-0.5 rounded ${TAG_TONE[tone] || TAG_TONE.accent} ${className}`}>
       {children}
     </span>
+  )
+}
+
+/* ── Club-rule badges ─────────────────────────────────────────────────────
+   One component for every screen that shows them — the selection board, the
+   availability matrix and the Players roster — so a player reads the same
+   wherever they appear. Draws nothing at all for a club with no rules. */
+export function RuleTags({ player, className = '' }) {
+  const badges = ruleBadges(player)
+  if (!badges.length) return null
+  return (
+    <>
+      {badges.map((r) => (
+        <Tag key={r.key} tone={r.tone} title={r.title} className={className}>{r.label}</Tag>
+      ))}
+    </>
   )
 }
 

@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
-from app.services import player_age
+from app.services import player_age, selection_rules
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -93,6 +93,71 @@ async def _trained_player_ids(session: AsyncSession, club, as_of: date) -> set[s
     if not any_session:
         return None
     return {str(r[0]) for r in rows}
+
+
+def _flag_maps(players, owing_ids: set[str] | None, trained_ids: set[str] | None
+               ) -> tuple[dict[str, bool | None], dict[str, bool | None]]:
+    """Per player: are they square with the club, and have they been training.
+
+    The player's own override wins outright, else what the module says, else
+    None for "we can't tell" — which the board shows as no badge rather than
+    guessing. Built here rather than in the pool loop because the rules engine
+    is handed the same two maps: a rule and the badge beside it must never
+    disagree about the same player.
+    """
+    financial: dict[str, bool | None] = {}
+    trained: dict[str, bool | None] = {}
+    for p in players:
+        pid = str(p.id)
+        if p.is_financial_override is not None:
+            financial[pid] = bool(p.is_financial_override)
+        elif owing_ids is not None:
+            financial[pid] = pid not in owing_ids
+        else:
+            financial[pid] = None
+        if p.trained_override is not None:
+            trained[pid] = bool(p.trained_override)
+        elif trained_ids is not None:
+            trained[pid] = pid in trained_ids
+        else:
+            trained[pid] = None
+    return financial, trained
+
+
+async def rule_context(db: AsyncSession, club, fx, players=None):
+    """The club's association rules judged for a fixture, with the fees and
+    training answers resolved exactly as the board resolves them.
+
+    The save path calls this rather than rebuilding the whole pool: it needs
+    the same verdict on the same players, not the form scores and squad tiers
+    that go with it.
+    """
+    if players is None:
+        players = (await db.execute(
+            select(Player).where(Player.organisation_id == club.id, Player.is_player.is_(True))
+        )).scalars().all()
+    owing_ids = await _owing_player_ids(db, club)
+    trained_ids = await _trained_player_ids(db, club, fx.played_on or date.today())
+    financial, trained = _flag_maps(players, owing_ids, trained_ids)
+    return await selection_rules.evaluate(
+        db, club, fx, players, financial=financial, trained=trained
+    )
+
+
+async def club_rule_context(db: AsyncSession, club, players=None):
+    """The club's rules as they stand with no particular match in mind, for the
+    roster and availability screens. Same fees/training resolution as the
+    board, so a player reads the same on every screen."""
+    if players is None:
+        players = (await db.execute(
+            select(Player).where(Player.organisation_id == club.id, Player.is_player.is_(True))
+        )).scalars().all()
+    owing_ids = await _owing_player_ids(db, club)
+    trained_ids = await _trained_player_ids(db, club, date.today())
+    financial, trained = _flag_maps(players, owing_ids, trained_ids)
+    return await selection_rules.evaluate_club_wide(
+        db, club, players, financial=financial, trained=trained
+    )
 
 
 def _compute_score(skill_positions: list[str] | None,
@@ -459,6 +524,21 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     autofill_cutoff = months_ago(date.today(), AUTOFILL_RECENCY_MONTHS)
     _fixture_team_id = str(fx.team_id) if fx.team_id else None
 
+    financial_by_id, trained_by_id = _flag_maps(players, owing_ids, trained_ids)
+
+    # The club's own association rules, judged against this fixture. A club
+    # that has written none gets an empty context and everything below reads
+    # exactly as it did before rules existed.
+    rules = await selection_rules.evaluate(
+        db, club, fx, players, financial=financial_by_id, trained=trained_by_id
+    )
+    # An age rule moves the age on the card to the date the COMPETITION counts
+    # it on — a player is the same age all season under a 1 September cutoff,
+    # and that is the number a selector is checking against the handbook. With
+    # no age rule it stays today's age. The club's display setting still gates
+    # it either way, server-side (services/player_age.visible_age).
+    age_at = rules.age_as_at if any(r["kind"] == "age" for r in rules.rules) else None
+
     pool = []
     for p in players:
         pid = str(p.id)
@@ -487,21 +567,19 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         form_word = _form_word(rlevel, _season_level(skills_set, ss), has_recent)
         recent_series = _recent_series(skills_set, rb, rw)
 
-        # Financial + training, each resolved the same way: the player's own
-        # override wins outright, else what the module says, else None for
-        # "unknown" — which the board shows as no badge rather than guessing.
-        if p.is_financial_override is not None:
-            financial = bool(p.is_financial_override)
-        elif owing_ids is not None:
-            financial = pid not in owing_ids
-        else:
-            financial = None
-        if p.trained_override is not None:
-            trained = bool(p.trained_override)
-        elif trained_ids is not None:
-            trained = pid in trained_ids
-        else:
-            trained = None
+        financial = financial_by_id.get(pid)
+        trained = trained_by_id.get(pid)
+
+        # What the club's own rules say about this player for THIS fixture.
+        # `rule_state` is the worst of them, which is what a filter and a card
+        # border key on; the flags themselves carry the wording.
+        rule_flags = rules.player_flags.get(pid, [])
+        rule_notes = rules.player_notes.get(pid, [])
+        rule_state = (
+            "block" if any(f["severity"] == "block" for f in rule_flags)
+            else "warn" if any(f["severity"] == "warn" for f in rule_flags)
+            else "ok"
+        )
 
         pool.append({
             "id": pid,
@@ -519,12 +597,16 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "bowling_type": p.bowling_type,
             "is_opening_batsman": p.is_opening_batsman,
             "gender": p.gender,
+            # Sent so the board can count an overseas cap filling up as the XI
+            # is built — the one rule whose answer depends on who ELSE is in.
+            # The server re-counts it on save; the browser's copy is for show.
+            "is_overseas": p.is_overseas,
             # Age, never the date of birth, and None unless the club has
             # turned it on (and this player is inside whatever age it
             # restricted the display to) — see services/player_age.py. The
             # case it was built for is bowling workload: a selector needs to
             # know the quick they are about to bowl into the ground is 14.
-            "age": player_age.visible_age(p.date_of_birth, club),
+            "age": player_age.visible_age(p.date_of_birth, club, as_of=age_at),
             "is_dormant": dormant and not manual_inactive,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,
@@ -556,7 +638,19 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
                 "override" if p.trained_override is not None
                 else "nets" if trained_ids is not None else None
             ),
-            "autofill_eligible": bool(tier in (1, 2, 3) and recent_ok and gender_ok and not manual_inactive),
+            # The club's association rules. Empty for a club that has written
+            # none, which is what keeps every screen unchanged until one is.
+            "rule_flags": rule_flags,
+            "rule_notes": rule_notes,
+            "rule_state": rule_state,
+            # A rule the club made blocking keeps auto-fill off that player:
+            # auto-fill must not build a side the save would then refuse. A
+            # warning is left alone — that is the club saying "tell me, don't
+            # decide for me".
+            "autofill_eligible": bool(
+                tier in (1, 2, 3) and recent_ok and gender_ok and not manual_inactive
+                and rule_state != "block"
+            ),
         })
 
     _AVAIL_RANK = {"AVAILABLE": 0, "MAYBE": 1, "NO_RESPONSE": 2, "UNAVAILABLE": 3}
@@ -612,7 +706,30 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "age": {
                 "shown": bool(club.select_show_age),
                 "under": player_age.clean_age_limit(club.select_show_age_under),
+                # The date the age on the card is worked out on, when an age
+                # rule moved it off today. The board says so rather than
+                # leaving a selector to wonder which birthday it counted.
+                "as_at": age_at.isoformat() if age_at else None,
+                "as_at_label": (
+                    selection_rules.age_basis_label(rules.age_basis) if age_at else None
+                ),
             },
+            # Whether the club has any rule at all bearing on this fixture.
+            # A screen draws no rule filter, no rule badge and no compliance
+            # line when this is false — a dead control is worse than none.
+            "rules": rules.active,
+        },
+        # The club's association rules for THIS fixture. `team` is the subset
+        # judged against the whole XI rather than one player (the overseas
+        # cap), which the board re-counts live as the side is built and the
+        # save path re-counts for real.
+        "rules": {
+            "active": rules.active,
+            "applied": rules.rules,
+            "team": rules.team_rules,
+            "is_final": rules.is_final,
+            "age_as_at": rules.age_as_at.isoformat() if rules.age_as_at else None,
+            "age_basis_label": selection_rules.age_basis_label(rules.age_basis),
         },
         "dormancy_months": months,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,

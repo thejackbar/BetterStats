@@ -18,7 +18,7 @@ import { Profile, draftFromProfile, patchFromDraft } from '../../../components/p
 import {
   Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
   QuickAvailModal, RecencySelect, playedWithinYears,
-  AVAIL_ORDER, AVAILABILITY,
+  AVAIL_ORDER, AVAILABILITY, RuleTags,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import '../../../styles/players-list.css'
@@ -30,7 +30,7 @@ function statusOfMatrixRow(row) {
 }
 
 /* ── List row ─────────────────────────────────────────────────────────────── */
-function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel, onEditAvail, canEditAvail }) {
+function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, onOpenProfile, onToggleSel, onEditAvail, canEditAvail }) {
   const inactive = p.status === 'inactive'
   const hasContact = !!(p.email || p.phone)
   return (
@@ -47,6 +47,7 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium truncate">{p.display_name || p.name}</span>
+          <RuleTags player={rules} />
           {p.is_overseas && (
             <span title={`Overseas${p.overseas_country ? ` — ${p.overseas_country}` : ''}`}
               className="font-mono text-[8.5px] text-pb-amber bg-pb-amber/10 px-[5px] py-px rounded">OS</span>
@@ -82,7 +83,7 @@ function PlayerRow({ p, active, selected, status, squadName, onSelect, onOpenPro
 }
 
 /* ── List panel ───────────────────────────────────────────────────────────── */
-function PlayerList({ players, statusOf, squadNameOf, selectedIds, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive, onEditAvail }) {
+function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, selectedId, onSelect, onOpenProfile, canEdit, teams, onBulkSquad, onBulkInactive, onEditAvail }) {
   const [years, setYears] = useState(0)        // 0 = any time (quiet recency control)
   const [sel, setSel] = useState(() => new Set())
   const [bulkSquad, setBulkSquad] = useState('')
@@ -197,7 +198,7 @@ function PlayerList({ players, statusOf, squadNameOf, selectedIds, selectedId, o
                   <span>{L}</span><i>{glist.length}</i>
                 </div>
                 {glist.map((p) => (
-                  <PlayerRow key={p.id} p={p} active={p.id === selectedId} selected={sel.has(p.id)}
+                  <PlayerRow key={p.id} p={p} rules={rulesById?.[p.id]} active={p.id === selectedId} selected={sel.has(p.id)}
                     status={statusOf(p.id)} squadName={squadNameOf(p)}
                     onSelect={() => onSelect(p.id)} onOpenProfile={() => onOpenProfile(p.id)} onToggleSel={() => toggleSel(p.id)}
                     onEditAvail={onEditAvail} canEditAvail={!!onEditAvail} />
@@ -259,6 +260,7 @@ export default function BetterSelectPlayers() {
   const [savedTick, setSavedTick] = useState(false)
   const [saving, setSaving] = useState(false)
   const [availEdit, setAvailEdit] = useState(null) // { player, date } for the quick-update modal
+  const [rulesById, setRulesById] = useState({})
 
   // Load roster + teams + availability matrix (matrix degrades gracefully).
   const loadRoster = useCallback(() => {
@@ -299,8 +301,11 @@ export default function BetterSelectPlayers() {
       .then((d) => {
         setAvailability(d?.availability || {})
         setFirstDate((d?.dates || [])[0]?.date || null)
+        // The club's own rules ride on the matrix's player rows, so the roster
+        // gets them without a second request. Empty for a club with no rules.
+        setRulesById(Object.fromEntries((d?.players || []).map((p) => [p.id, p])))
       })
-      .catch(() => { setAvailability({}); setFirstDate(null) })
+      .catch(() => { setAvailability({}); setFirstDate(null); setRulesById({}) })
   }, [])
 
   useEffect(() => {
@@ -427,7 +432,7 @@ export default function BetterSelectPlayers() {
     <BetterSelectLayout title="Players">
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
         <PlayerList
-          players={players} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
+          players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
           selectedId={selId} onSelect={setSelId} onOpenProfile={setSelId}
           canEdit={canEdit} teams={teams} onBulkSquad={onBulkSquad} onBulkInactive={onBulkInactive}
           onEditAvail={canEdit ? (p) => openAvail(p, null) : undefined} />

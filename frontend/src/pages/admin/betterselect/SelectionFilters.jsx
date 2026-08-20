@@ -14,6 +14,7 @@ import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import { Icon, Chip, Search, RecencySelect, Dot, Segmented, FilterButton } from './ui'
 import { SortMenu, SquadPicker } from './filters'
 import { BOWL_KINDS, HAND_KINDS, FORM_BUCKETS, SORTS, ageFilterOptions, ageFilterLabel } from './selectionMeta'
+import { RULE_FILTERS } from './selectionRules'
 
 const ROLE_QUICK = [['BAT', 'Bat'], ['BWL', 'Bowl'], ['ALL', 'All'], ['WKT', 'WK']]
 const ROLE_LABEL = { BAT: 'Batter', BWL: 'Bowler', ALL: 'All-rounder', WKT: 'Keeper' }
@@ -61,7 +62,7 @@ function Check({ label, checked, onChange, dot }) {
   )
 }
 
-export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, flags }) {
+export default function SelectionFilters({ filters, sort, setSort, squadOptions, yearsF, setYearsF, count, total, flags, rules }) {
   const [open, setOpen] = useState(false)
   const { values, search, setSearch, toggle, setValue, setMulti, clearAll, activeCount } = filters
   const hideUnavail = !!values.hideUnavail
@@ -69,6 +70,10 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   // dropped rather than shown dead — the same call the Fees and Training
   // notes make about a filter their module can't answer.
   const ageOptions = ageFilterOptions(flags)
+  // Same call for the club's own rules: no rule bearing on this fixture, no
+  // group at all. A control that can only ever answer "everybody is fine" is
+  // worse than none.
+  const showRules = !!rules?.active
 
   const pills = []
   ;(values.role || []).forEach((r) => pills.push({ k: 'r' + r, label: ROLE_LABEL[r] || r, rm: () => toggle('role', r) }))
@@ -82,6 +87,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
   if (values.fees) pills.push({ k: 'fee', label: optLabel(FEES_OPTS, values.fees), rm: () => setValue('fees', '') })
   if (values.training) pills.push({ k: 'trn', label: optLabel(TRAINING_OPTS, values.training), rm: () => setValue('training', '') })
   if (values.age && ageFilterLabel(values.age, flags)) pills.push({ k: 'age', label: ageFilterLabel(values.age, flags), rm: () => setValue('age', '') })
+  if (showRules && values.rules) pills.push({ k: 'rul', label: optLabel(RULE_FILTERS, values.rules), rm: () => setValue('rules', '') })
   // (recency has its own dedicated dropdown control, so it isn't duplicated as a pill)
 
   const resetAll = () => { clearAll(); setYearsF(0) }
@@ -146,6 +152,14 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
                 {flags?.age?.under
                   ? `Ages are shown for players under ${flags.age.under}. Set a date of birth on a player's profile.`
                   : "Worked out from the date of birth on a player's profile."}
+              </div>
+            </PanelGroup>
+          )}
+          {showRules && (
+            <PanelGroup label="Club rules">
+              <Segmented sm value={values.rules || ''} onChange={(v) => setValue('rules', v)} options={RULE_FILTERS} />
+              <div className="text-[10.5px] leading-snug text-pb-faintest mt-1.5">
+                {(rules.applied || []).map((r) => r.name).join(' · ') || 'Your association rules.'}
               </div>
             </PanelGroup>
           )}

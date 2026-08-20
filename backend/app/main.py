@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace
@@ -824,6 +824,12 @@ async def lifespan(app: FastAPI):
         # — see services/engagement_params.py.
         from app.services.engagement_param_ddl import ENGAGEMENT_PARAM_STATEMENTS
         for _stmt in ENGAGEMENT_PARAM_STATEMENTS:
+            await conn.execute(text(_stmt))
+        # BetterSelect association rules (migration 271) — age limits, overseas
+        # caps, bowling workloads, finals qualification. Runs the migration's
+        # own statement list so the two can't drift; every one is idempotent.
+        from app.services.selection_rule_ddl import SELECTION_RULE_STATEMENTS
+        for _stmt in SELECTION_RULE_STATEMENTS:
             await conn.execute(text(_stmt))
         # Setup Wizard analytics: real "ever opened" signal (migration 163).
         await conn.execute(text(
@@ -5825,6 +5831,7 @@ app.include_router(fixtures.router, dependencies=[Depends(require_module("select
 app.include_router(teams.router, dependencies=[Depends(require_module("select"))])        # BetterSelect
 app.include_router(availability.router, dependencies=[Depends(require_module("select"))]) # BetterSelect
 app.include_router(selection.router, dependencies=[Depends(require_module("select"))])    # BetterSelect
+app.include_router(selection_rules.router, dependencies=[Depends(require_module("select"))])  # BetterSelect
 app.include_router(net_manager.router, dependencies=[Depends(require_module("select"))])  # BetterSelect (Net Manager)
 app.include_router(votes.router, dependencies=[Depends(require_module("select"))])        # BetterSelect (vote collection)
 # Player-facing self-service availability (magic link + PIN). Unauthenticated by

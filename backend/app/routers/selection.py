@@ -27,7 +27,7 @@ from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import Fixture, FixtureLineup, Grade, Organisation, Player, Team, User, get_db
 from app.routers.auth import get_current_club
 from app.routers.availability import resolve_period_statuses
-from app.services.selection_pool import assemble_selection
+from app.services.selection_pool import assemble_selection, rule_context
 
 router = APIRouter(prefix="/selection", tags=["selection"])
 
@@ -445,6 +445,28 @@ async def set_selection(
                             is_wicket_keeper=False,
                             selected_by=user.id,
                         ))
+
+    # The club's own association rules. Only a rule the club marked BLOCKING
+    # refuses a save; a warning has already been shown on the board and is the
+    # selector's to weigh. Re-checked here rather than trusted from the
+    # browser — the board counts an overseas cap live so it can be watched
+    # filling up, but this is the copy that decides.
+    if seen:
+        picked = (await db.execute(
+            select(Player).where(Player.id.in_(seen))
+        )).scalars().all()
+        breaches = (await rule_context(db, club, fx, picked)).blocking_for(
+            [str(pid) for pid in seen]
+        )
+        if breaches:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "selection_rules",
+                    "message": "This side breaks a rule your club has set as blocking.",
+                    "breaches": breaches,
+                },
+            )
 
     # Replace: clear existing rows, insert the new set.
     await db.execute(

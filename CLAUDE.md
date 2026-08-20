@@ -1,5 +1,120 @@
 # BetterStats — Claude Session Notes
 
+## A club writes its association's rules down once (migration 271, v9.39.0, Aug 2026)
+
+Asked for so a selector isn't holding the handbook in their head on a Friday
+night: age limits per division, a cap on overseas players, the overs a young
+quick may bowl, qualifying games for a final, plus fees and training. Built
+from a WASTCA handbook but deliberately NOT as its rulebook.
+
+- **`selection_rules` is one table with a `kind`, a `scope` and a `config`,
+  and `services/selection_rules.py` is the only place either blob is read or
+  written.** Ten kinds: `age`, `overseas`, `bowling_workload`,
+  `finals_qualification`, `grade_cap`, `fees`, `training`, `registration`,
+  `rest`, `custom`. A per-kind table would have been ten migrations and ten
+  screens for what is one question — "does this player break something".
+- **THE DATE AN AGE IS MEASURED ON IS A SETTING, and that is the whole reason
+  this generalises.** One competition counts age as at 1 September of the year
+  the season started, the next as at 1 January, a third on the day of the
+  match. `age_basis` is a month, a day and which END of the season the year
+  comes from, so all three fall out of one field. A cutoff resolves against
+  the SEASON, not the calendar — 1 September 2025 for every match of a 2025/26
+  season, February ones included — which is what makes a player the same age
+  all season, the entire point of a cutoff. `season_start_month` (default 7)
+  is the fallback for a fixture with no season to read, and is what lets a club
+  playing an English April-to-September season land its ages in the right year.
+- **A rule names its grades, never their ids.** Grades are per-season rows, so
+  a rule keyed on ids silently stops applying the day the new season's grades
+  are created — mid-rollover, with nothing to see. The same call `vote_medals`
+  had to make. Names are matched sponsor-suffix-stripped and case-folded, so
+  "A Grade (Gatorade)" and "A Grade" are one rule's worth. **An EMPTY scope
+  means EVERY fixture**, which is what a club's first rule means before anyone
+  has thought about divisions. A rule can be scoped by grade CATEGORY or
+  FORMAT instead, so "every junior grade" is one rule rather than eleven.
+- **Severity is the club's, not ours.** The same age limit is a hard bar at one
+  association and a guideline at the next, so each rule carries `warn` (say so,
+  ask before saving) or `block` (refuse the save). `bowling_workload` is the
+  one kind forced to `info`: a fourteen year old is not ineligible, there is
+  simply a limit on what may be asked of them once they are out there. Making
+  it a breach would have been us inventing a rule nobody wrote.
+- **`selection_rule_players` is the escape hatch, and it is per RULE.**
+  Associations grant permits, and a system that can't express one gets switched
+  off rather than corrected. A fourteen year old cleared for Division 1 is not
+  thereby cleared of everything else, which is why this is not a flag on
+  `players`. It doubles as the tick a free-text rule asks for.
+- **SILENCE IS THE ANSWER WHENEVER THE CLUB'S DATA CAN'T ANSWER.** No date of
+  birth, no fees module and no override, no registration row, no nets session
+  in the window, no squad seniority — every one of those is "we cannot say",
+  never a breach. A rule that flags the whole squad because nobody filled a
+  field in gets turned off, and then it flags nothing at all. This is the same
+  discipline the `is_financial` / `trained_recently` tri-states already keep.
+- **The overseas cap is the ONE rule whose answer depends on who else is
+  picked**, so it rides on the payload as a definition the browser counts live
+  (a selector watches it fill up) and the SAVE re-counts for real. Every other
+  rule is per-player and decided server-side. Never let the browser's count be
+  the one that decides.
+- **`selection_pool.assemble_selection` resolves fees and training FIRST and
+  hands the two maps to the rules engine** (`_flag_maps`), rather than the
+  engine asking again. A rule and the badge beside it disagreeing about the
+  same player is exactly the bug this shape prevents. `rule_context` /
+  `club_rule_context` are the same resolution for the save path and for the
+  screens with no fixture, so there is one answer everywhere.
+- **An age rule moves the age ON THE CARD to the date the competition counts
+  it on** (`visible_age(dob, club, as_of=age_at)`), because that is the number
+  a selector is checking against the handbook. The club's display gate still
+  applies, server-side: a club that shows ages for under-16s only never sends
+  an adult's age to a browser, rule or no rule.
+- **A blocking rule takes the player out of AUTO-FILL** (`autofill_eligible`),
+  since auto-fill must not build a side the save would then refuse. A warning
+  is left alone — that is the club saying "tell me, don't decide for me".
+- **Qualifying games count scorecards AND named XIs, deduped on the DATE.** A
+  final is picked the week after the last round, before that round has synced;
+  counting only what has synced would tell a club its own captain hasn't
+  qualified. A synced game and the fixture it came from share their date, so
+  a match counted from both sources counts once.
+- **`_FIXTURE_ONLY_KINDS` is what keeps the roster honest.** The availability
+  matrix and the Players roster have no fixture, so they answer only the rules
+  that hold whatever the match — fees, registration, training, a club-wide age
+  limit. "Has this player qualified for a final" has no answer until you say
+  which final, so it isn't answered badly there.
+- **Every screen asks the payload whether the club has any rules at all**
+  (`flags.rules` / `rules.active`) and draws nothing when it doesn't — no
+  badge, no filter, no compliance strip. Same call `ageFilterOptions` and the
+  Fees/Training source notes already make: a control that can only ever answer
+  "everyone is fine" is worse than no control.
+- **The starter is the published CA Junior Cricket Policy bowling ladder and
+  nothing else.** Every other kind needs the club's own numbers, and a number
+  we invented would be quoted back at us. Skip-don't-replace, so pressing it
+  twice can't overwrite a club's own workload rule.
+- **The BetterSelect settings moved out of Club Settings** (age display,
+  dormant-player window, default side size) onto this screen, which is gated on
+  `MANAGE_SELECTIONS` rather than `MANAGE_SETTINGS` — a selector holds the
+  handbook, and may not hold the club's colours. Club Settings links across.
+- **Found while verifying: `shrink-0` on a rule's action cluster pushed the
+  settings screen 79px sideways at 390px.** `flex-wrap` on the parent cannot
+  save a child that has been told not to shrink — the same trap the Selection
+  header note below describes. Measured, not eyeballed.
+- **Verified against a real Postgres** (79 checks through the shipped route
+  bodies and services: migration 271 applied three times, the two age bases
+  disagreeing about the same player, a name-scoped rule still applying after
+  the season rollover, category scoping, warn saving and block refusing, a
+  permit clearing and a manual block flagging, the overseas cap both ways,
+  the workload note firing for a junior quick and not a spinner the same age,
+  qualifying games from both sources deduped on the date, the grade cap, all
+  five module-derived rules incl. every "we can't tell" branch, five validation
+  guards, cross-club rejection, the tri-state age-limit setting, a 29 February
+  cutoff in a non-leap year, and BetterIQ reading the same verdict) and
+  **driven in Chromium** (35: the exact params on the wire for the basis and a
+  new rule, grades scoped by name, the badges and the workload note, the strip
+  turning red as a barred player is picked, the overseas cap counted live, a
+  refused save quoting the server's reason, the rules filter, the same badge on
+  the availability matrix and the roster, a rules-free club seeing none of it,
+  no page errors, no overflow at 390px).
+- **Not built**: a bowling-overs COUNT against what a junior actually bowled —
+  the app holds scorecards, so it could report a breach after the fact, but the
+  rule is a limit on the day and the umpires enforce it. Nothing here writes to
+  PlayHQ or claims an association has approved anything.
+
 ## A player's date of birth, and who is told their age (migration 269, v9.37.0, Aug 2026)
 
 Asked for so a selector can see a young quick's age while deciding bowling

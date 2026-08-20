@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 import ImageEditorModal from '../../components/ImageEditorModal'
@@ -697,58 +698,22 @@ export default function AdminSettings() {
             <p className="font-mono text-[10px] text-pb-faintest mt-1">Applies to all player names across the site</p>
           </div>
 
-          {/* --- BetterSelect: dormancy window --- */}
+          {/* --- BetterSelect settings moved to their own screen ---
+               The dormant-player window, default side size and age display now
+               live with the association rules they belong to, under
+               BetterSelect → Setup, which is gated on MANAGE_SELECTIONS —
+               the person picking sides, rather than whoever edits the club's
+               colours. Nothing else on this page changed. */}
           <div className="pt-5 pb-hairline-t">
-            <label className={LABEL}>Dormant player window (BetterSelect)</label>
-            <select value={form.dormancy_months ?? 24}
-              onChange={e => setForm(f => ({ ...f, dormancy_months: Number(e.target.value) }))}
-              className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-              <option value={6}>6 months</option>
-              <option value={12}>1 year</option>
-              <option value={18}>18 months</option>
-              <option value={24}>2 years</option>
-              <option value={36}>3 years</option>
-              <option value={60}>5 years</option>
-            </select>
-            <p className="font-mono text-[10px] text-pb-faintest mt-1">
-              Players with no appearance in this window are hidden from the default selection roster and squad suggestions
-            </p>
-          </div>
-
-          {/* --- BetterSelect: player age --- */}
-          <div className="pt-5 pb-hairline-t">
-            <label className={LABEL}>Player age (BetterSelect)</label>
+            <label className={LABEL}>BetterSelect</label>
             <p className="font-mono text-[10px] text-pb-faintest mb-3">
-              Shows a player's age beside their name on the selection board and the BetterSelect
-              roster, so bowling workloads can be judged at a glance. Worked out from the date of
-              birth on each player's profile, which you fill in yourself. Never shown on your
-              public website.
+              The dormant-player window, default side size and whether ages show on the selection
+              board have moved in with your association's selection rules.
             </p>
-            <label className="flex items-start gap-2.5 cursor-pointer">
-              <input type="checkbox" checked={!!form.select_show_age}
-                onChange={e => setForm(f => ({ ...f, select_show_age: e.target.checked }))}
-                className="accent-pb-accent mt-0.5 shrink-0" />
-              <span className="leading-tight">
-                <span className="text-pb-text text-sm">Show age in BetterSelect</span>
-                <span className="font-mono text-[10px] text-pb-faintest block">A player with no date of birth recorded shows nothing</span>
-              </span>
-            </label>
-            {form.select_show_age && (
-              <div className="mt-3 pl-7">
-                <label className="font-mono text-[10px] text-pb-faintest block mb-1.5">Show it for</label>
-                <select value={form.select_show_age_under ?? ''}
-                  onChange={e => setForm(f => ({ ...f, select_show_age_under: e.target.value ? Number(e.target.value) : null }))}
-                  className="bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-                  <option value="">Every player</option>
-                  {[13, 14, 15, 16, 17, 18, 19, 21].map(n => (
-                    <option key={n} value={n}>Players under {n} only</option>
-                  ))}
-                </select>
-                <p className="font-mono text-[10px] text-pb-faintest mt-1">
-                  Anyone at or over that age shows no age at all — their birthday never leaves the profile
-                </p>
-              </div>
-            )}
+            <Link to="/admin/betterselect/rules"
+              className="inline-flex items-center gap-1.5 text-sm text-pb-accent hover:underline">
+              Selection rules &amp; settings →
+            </Link>
           </div>
 
           {/* --- Public profile: visible player attributes --- */}

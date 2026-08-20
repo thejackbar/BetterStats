@@ -53,6 +53,14 @@ export const GROUPS = [
     ],
   },
   {
+    key: 'setup',
+    label: 'Setup',
+    desc: 'The rules your competition runs on, and what the board shows.',
+    items: [
+      { to: '/admin/betterselect/rules', label: 'Selection rules', icon: 'settings', cap: CAP.MANAGE_SELECTIONS, desc: "Your association's age limits, overseas caps and eligibility." },
+    ],
+  },
+  {
     key: 'club',
     label: 'Club Life',
     desc: 'Training, best-player voting and competition ladders.',
@@ -75,7 +83,7 @@ export const NAV = [
   ]),
 ]
 
-export default function BetterSelectLayout({ children, title, actions, headerLeft }) {
+export default function BetterSelectLayout({ children, title, caption, actions, headerLeft }) {
   const { user, logout, hasCapability } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
@@ -181,7 +189,10 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
         <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-4 gap-y-2">
           <div className="flex items-center gap-3">
             <button onClick={() => setMobileOpen(true)} className="md:hidden text-pb-faint">☰</button>
-            <h1 className="font-display font-bold text-lg md:text-xl truncate min-w-0">{title}</h1>
+            <div className="min-w-0">
+              <h1 className="font-display font-bold text-lg md:text-xl truncate min-w-0">{title}</h1>
+              {caption && <div className="font-mono text-[10.5px] text-pb-faintest truncate">{caption}</div>}
+            </div>
             {headerLeft && (
               <>
                 <span className="h-[22px] w-px bg-pb-hairline2 hidden sm:block shrink-0" />

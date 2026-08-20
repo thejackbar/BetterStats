@@ -10,7 +10,7 @@ import { PbSpinner } from '../../../lib/presskit'
 import { AVAILABILITY, AVAIL_ORDER } from '../../../lib/availability'
 import {
   Icon, Avatar, RoleChips, Btn, Segmented, Empty, AvailSummary, QuickAvailModal,
-  RecencySelect, playedWithinYears,
+  RecencySelect, playedWithinYears, RuleTags,
 } from './ui'
 import { useFilters, FilterBar } from './filters'
 import SelfServiceLinkPanel from './SelfServiceLinkPanel'
@@ -425,6 +425,7 @@ export default function AdminAvailability() {
                     )}
                     <Avatar player={p} size={28} />
                     <span className="text-sm font-medium truncate">{p.display_name}</span>
+                    <RuleTags player={p} />
                     {p.is_dormant && <span className="font-mono text-[9px] text-amber-300/80 uppercase shrink-0" title={`Dormant${p.last_played ? ' since ' + fmtYear(p.last_played) : ''}`}>dormant</span>}
                     {p.is_inactive && <span className="font-mono text-[9px] text-pb-red/80 uppercase shrink-0" title="Marked inactive">inactive</span>}
                   </div>
