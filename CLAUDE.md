@@ -18,7 +18,8 @@ as sections with their own buttons rather than three tabs and a manage page.
   has stopped disagreeing with the invoice.
 - **Committee's buttons are Meetings (default), Motions & Actions, Plans,
   Documents, Calendar, Positions**, with a second row where a section holds more
-  than one thing and a third under Actions. Every key lives in `st`
+  than one thing (Meetings → All Meetings | Meeting Templates) and a third under
+  Actions. Every key lives in `st`
   (`cteMeetingsView` / `cteMaView` / `cteActionsView` / `ctePlansView`), so a
   label can be renamed without moving anyone's view. **Positions is kept even
   though the brief's list did not name it** — dropping a working screen is not

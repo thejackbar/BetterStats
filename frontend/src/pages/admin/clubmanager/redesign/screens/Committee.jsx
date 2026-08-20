@@ -25,7 +25,7 @@ const TABS = [
   { key: 'calendar', label: 'Calendar' },
   { key: 'positions', label: 'Positions' },
 ]
-const MEETING_VIEWS = [{ key: 'meetings', label: 'Meetings' }, { key: 'templates', label: 'Meeting Templates' }]
+const MEETING_VIEWS = [{ key: 'meetings', label: 'All Meetings' }, { key: 'templates', label: 'Meeting Templates' }]
 const MA_VIEWS = [{ key: 'actions', label: 'Actions' }, { key: 'motions', label: 'Motions' }]
 const ACTION_VIEWS = [{ key: 'list', label: 'List' }, { key: 'board', label: 'Board' }, { key: 'timeline', label: 'Timeline' }]
 const PLAN_VIEWS = [{ key: 'plans', label: 'Plans' }, { key: 'themes', label: 'Themes' }, { key: 'objectives', label: 'Objectives' }]
@@ -500,7 +500,7 @@ export default function Committee({ st, patch, narrow }) {
       {tab === 'meetings' && meetingsView === 'meetings' && (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
-            <div style={cap}>MEETINGS</div>
+            <div style={cap}>ALL MEETINGS</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               {meetings.map(m => {
                 const s = meetingStatus(m)
