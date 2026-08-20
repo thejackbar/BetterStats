@@ -283,6 +283,16 @@ class Organisation(Base):
     # suggestions. Default 24 (migration 048).
     dormancy_months = Column(Integer, nullable=False, server_default="24", default=24)
     default_team_size = Column(Integer, nullable=False, server_default="11", default=11)  # 0 = no limit
+    # BetterSelect: show a player's age beside their name on the selection
+    # board and the roster (migration 269). Default off, so no club starts
+    # showing dates of birth to its selectors because of an upgrade.
+    # select_show_age_under is NULL for every player, or an age to show it
+    # only BELOW — the case this was built for, a coach wanting the juniors'
+    # ages in front of them when deciding bowling workloads. Applied
+    # server-side through services/player_age.visible_age, so a restricted
+    # club never sends an adult's age to a browser at all.
+    select_show_age = Column(Boolean, nullable=False, server_default="false", default=False)
+    select_show_age_under = Column(Integer, nullable=True)
     # Public player-profile attribute visibility (per-club). Overseas is always
     # shown; these gate the descriptive attributes on the public /players/:id
     # profile so each club chooses how much of a player's profile is public
@@ -1235,6 +1245,13 @@ class Player(Base):
     # BetterSelect "attended training" filter (migration 265). NULL = no
     # override, so the answer comes from Net Manager attendance.
     trained_override = Column(Boolean, nullable=True)
+    # Date of birth (migration 269), entered by hand on the player profile —
+    # no feed carries one. The AGE is never stored: services/player_age.py
+    # works it out on read, because a stored age is wrong the day after it
+    # was written. Only ever served on the MANAGE_PLAYERS-gated profile
+    # payload; every other surface gets the derived age instead, and only
+    # when the club's own BetterSelect setting allows it.
+    date_of_birth = Column(Date, nullable=True)
 
     organisation = relationship("Organisation", back_populates="players")
     batting_innings = relationship("BattingInnings", back_populates="player")
@@ -1624,8 +1641,11 @@ class NetSession(Base):
     batted) and feed the attendance reports + per-player profile stat. The live
     batting-queue + timer that the net manager runs pitch-side is purely
     client-side (single device); only the durable bits — the session, its timer
-    settings and the attendance list — are persisted here. Club-wide; created_by
-    tracks which admin opened it.
+    settings and the attendance list — are persisted here. The batting queue and
+    timer are persisted too (see version / live_state below): the same admin
+    account is routinely open on a phone by the nets and a laptop in the
+    clubroom, and both have to see and drive the one session. Club-wide;
+    created_by tracks which admin opened it.
     """
     __tablename__ = "net_sessions"
 
@@ -1640,6 +1660,16 @@ class NetSession(Base):
     # carries no net column — the default lives in the most recent session).
     settings = Column(JSONB, nullable=True)
     status = Column(Text, nullable=False, server_default="active")  # active | done
+    # Bumped by every write that changes what the live screen shows, so a
+    # second device polling with the version it last saw is told "nothing has
+    # changed" in two fields instead of re-reading the whole session. Always
+    # incremented in SQL (version + 1), never read-then-write — see migration 268.
+    version = Column(Integer, nullable=False, server_default="0")
+    # The batting timer: {running, ends_at, remaining_seconds, duration_seconds,
+    # turn_seq}. Here rather than in the browser because every device watching
+    # the session has to see the same clock. ends_at is absolute, so each device
+    # derives its own countdown from it against the server time it is handed.
+    live_state = Column(JSONB, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now())

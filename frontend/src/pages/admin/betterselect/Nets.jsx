@@ -76,7 +76,11 @@ function SessionsTab({ canEdit, onOpen }) {
         {sessions.length === 0
           ? <Empty className="px-4 py-10 text-center">No net sessions yet. Start one above to begin checking players in.</Empty>
           : sessions.map((s) => (
-            <button key={s.id} onClick={() => onOpen(s.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-pb-surface2/50 transition-colors">
+            // A div rather than a button: the row now holds a download link,
+            // and a link inside a button is markup no browser agrees on.
+            <div key={s.id} role="button" tabIndex={0} onClick={() => onOpen(s.id)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(s.id) } }}
+              className="w-full flex items-center gap-3 px-4 py-3 text-left cursor-pointer hover:bg-pb-surface2/50 transition-colors">
               <span className="w-9 h-9 rounded-lg bg-pb-accent/12 text-pb-accent flex items-center justify-center shrink-0"><Icon name="nets" size={18} /></span>
               <div className="flex-1 min-w-0">
                 <div className="font-display font-semibold text-[14.5px] truncate">{s.label || 'Net session'}</div>
@@ -92,26 +96,38 @@ function SessionsTab({ canEdit, onOpen }) {
                   <div className="text-[10px] text-pb-faint">batted</div>
                 </div>
               )}
+              {s.attendee_count > 0 && (
+                <a href={api.nmSessionCsvUrl(s.id)} onClick={(e) => e.stopPropagation()}
+                  className="text-pb-faint hover:text-pb-accent p-1.5 rounded-md" title="Download who attended this session">
+                  <Icon name="download" size={15} />
+                </a>
+              )}
               {canEdit && <span onClick={(e) => remove(s.id, e)} className="text-pb-faint hover:text-pb-red p-1.5 rounded-md" title="Delete session"><Icon name="trash" size={15} /></span>}
               <Icon name="chevron" size={15} className="text-pb-faint shrink-0" />
-            </button>
+            </div>
           ))}
       </div>
     </div>
   )
 }
 
-/* ── Attendance report tab ────────────────────────────────────────────────── */
+/* ── Attendance report tab ──────────────────────────────────────────────────
+ * Every player, the last night they were at nets and how many they have been
+ * to. A tally opens into the dates behind it, so "12 sessions" can be checked
+ * rather than taken on trust, and the whole thing downloads as a spreadsheet
+ * for a coach or a selection meeting. */
 const RANGES = [
   { value: 30, label: '30 days' },
   { value: 90, label: '90 days' },
   { value: 180, label: '6 months' },
   { value: 365, label: '12 months' },
+  { value: 0, label: 'All time' },
 ]
 function ReportTab() {
   const toast = useToast()
   const [days, setDays] = useState(90)
   const [data, setData] = useState(null)
+  const [openPlayer, setOpenPlayer] = useState(null)
 
   useEffect(() => {
     let alive = true
@@ -124,7 +140,10 @@ function ReportTab() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <Segmented options={RANGES} value={days} onChange={setDays} sm />
-        {data && <span className="text-[12.5px] text-pb-faint">{data.session_count} session{data.session_count === 1 ? '' : 's'} in range</span>}
+        <div className="flex items-center gap-3">
+          {data && <span className="text-[12.5px] text-pb-faint">{data.session_count} session{data.session_count === 1 ? '' : 's'} {days ? 'in range' : 'all time'}</span>}
+          <Btn variant="ghost" sm icon="download" href={api.nmAttendanceReportCsvUrl(days)} disabled={!data || !data.players.length}>Download</Btn>
+        </div>
       </div>
       {data === null ? <PbSpinner message="Loading report…" /> : data.players.length === 0 ? (
         <div className="pb-card"><Empty className="px-4 py-10 text-center">No attendance recorded in this window.</Empty></div>
@@ -143,10 +162,12 @@ function ReportTab() {
               <Avatar player={{ ...p, id: p.player_id }} size={30} />
               <div className="flex-1 min-w-0">
                 <div className="font-display font-semibold text-[13.5px] truncate">{p.name}</div>
-                <div className="sm:hidden text-[11px] text-pb-faint">{p.attended} attended · {p.attendance_pct}%</div>
+                <button type="button" onClick={() => setOpenPlayer(p)}
+                  className="sm:hidden text-[11px] text-pb-faint underline decoration-dotted underline-offset-2">{p.attended} attended · {p.attendance_pct}%</button>
               </div>
               <RoleChips roles={(p.skill_positions || []).slice(0, 2)} muted />
-              <span className="hidden sm:block w-20 text-right font-display font-bold pb-num">{p.attended}</span>
+              <button type="button" onClick={() => setOpenPlayer(p)} title={`Every session ${p.name} has been to`}
+                className="hidden sm:block w-20 text-right font-display font-bold pb-num hover:text-pb-accent transition-colors">{p.attended}</button>
               <span className="hidden sm:block w-16 text-right pb-num text-pb-dim">{p.batted}</span>
               <span className="hidden sm:flex w-24 items-center justify-end gap-2">
                 <span className="h-1.5 w-10 rounded-full bg-pb-surface2 overflow-hidden"><span className="block h-full bg-pb-accent" style={{ width: `${p.attendance_pct}%` }} /></span>
@@ -157,6 +178,61 @@ function ReportTab() {
           ))}
         </div>
       )}
+      {openPlayer && <PlayerSessionsModal player={openPlayer} onClose={() => setOpenPlayer(null)} />}
+    </div>
+  )
+}
+
+/* ── Every session one player has been to ────────────────────────────────────
+ * What the tally opens into. Reads the player's whole net history, not just
+ * the window the report is showing — a coach clicking a number is asking about
+ * the person, not about the last 90 days. */
+function PlayerSessionsModal({ player, onClose }) {
+  const [data, setData] = useState(null)
+  useEffect(() => {
+    let alive = true
+    api.nmPlayerAttendance(player.player_id)
+      .then((r) => { if (alive) setData(r) })
+      .catch(() => { if (alive) setData({ sessions: [] }) })
+    return () => { alive = false }
+  }, [player.player_id])
+
+  const sessions = (data && data.sessions) || []
+  return (
+    <div onClick={onClose} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm">
+      <div onClick={(e) => e.stopPropagation()} className="w-full sm:w-[420px] max-h-[85vh] bg-pb-surface sm:rounded-2xl rounded-t-2xl border border-pb-hairline2 overflow-hidden shadow-2xl flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3.5 border-b pb-hairline">
+          <Avatar player={{ ...player, id: player.player_id }} size={34} noLink />
+          <div className="flex-1 min-w-0">
+            <div className="font-display font-bold text-[15px] truncate">{player.name}</div>
+            <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint">Net sessions attended</div>
+          </div>
+          <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
+        </div>
+        {data === null ? <PbSpinner message="Loading sessions…" /> : sessions.length === 0 ? (
+          <Empty className="px-4 py-8 text-center">No sessions recorded.</Empty>
+        ) : (
+          <>
+            <div className="px-4 py-2.5 border-b pb-hairline flex items-center gap-4 text-[12.5px] text-pb-faint">
+              <span><b className="pb-num font-display font-bold text-pb-text">{data.attended}</b> attended</span>
+              <span><b className="pb-num font-display font-bold text-pb-accent">{data.batted}</b> batted</span>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {sessions.map((sess) => (
+                <div key={sess.session_id} className="flex items-center gap-3 px-4 py-2.5 border-b pb-hairline last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13.5px] text-pb-text">{fmtDate(sess.session_date)}</div>
+                    {sess.label && <div className="text-[11.5px] text-pb-faint truncate">{sess.label}</div>}
+                  </div>
+                  {sess.batted
+                    ? <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-accent">Batted</span>
+                    : <span className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">Attended</span>}
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

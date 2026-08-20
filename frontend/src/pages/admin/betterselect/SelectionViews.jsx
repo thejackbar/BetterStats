@@ -30,6 +30,15 @@ function FlagTags({ p }) {
     </>
   )
 }
+/* Age, when the club shows it. The server has already applied both halves of
+ * the club's rule (on/off, and any "juniors only" limit), so a present `age`
+ * is one this selector is meant to see. Drawn plainly rather than as a
+ * warning: it is there to be read alongside the bowling style when working
+ * out a young quick's workload, not to flag anyone. */
+function AgeTag({ p }) {
+  if (p.age == null) return null
+  return <Tag tone="faint" title={`${p.age} years old`}>{p.age}y</Tag>
+}
 function FormBars({ p, h = 14, w = 3, gap = 2 }) {
   const bars = spark(p.recent)
   const fm = formMeta(p)
@@ -183,6 +192,7 @@ function DualCard({ p, kind, idx, vm, drag }) {
           <span className="text-[14px] font-semibold truncate">{p.display_name}</span>
           {p.id === vm.capId && <Tag>C</Tag>}{p.id === vm.wkId && <Tag tone="amber">WK</Tag>}
           {p.squads?.[0] && (kind === 'pool') && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
+          <AgeTag p={p} />
           <FlagTags p={p} />
         </div>
         <div className="text-[12px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>
@@ -311,6 +321,7 @@ function SheetRow({ i, id, vm, drag }) {
             <div className="flex items-center gap-2 min-w-0">
               <span className="font-display font-semibold text-[16.5px] tracking-tight truncate">{p.display_name}</span>
               {id === vm.capId && <Tag>C</Tag>}{id === vm.wkId && <Tag tone="amber">WK</Tag>}
+              <AgeTag p={p} />
             </div>
             <div className="flex items-center gap-2 mt-0.5 min-w-0">
               <span className="text-[12.5px] text-pb-dim truncate">{roleLine(p)}</span>
@@ -348,6 +359,7 @@ function TrayCard({ p, vm, drag }) {
         <div className="flex items-center gap-1.5">
           <span className="text-[13.5px] font-semibold truncate">{p.display_name}</span>
           {p.squads?.[0] && <Tag tone={p.squad_match ? 'accent' : 'faint'}>{vm.squadShort(p.squads[0])}</Tag>}
+          <AgeTag p={p} />
           <FlagTags p={p} />
         </div>
         <div className="text-[11.5px] text-pb-dim mt-0.5 truncate">{roleLine(p)}</div>

@@ -167,17 +167,38 @@ export default function BetterSelectLayout({ children, title, actions, headerLef
 
       {/* Main */}
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+        {/* The three groups WRAP rather than collide. Reported from the
+            Selection screen: its Dual rail / Team sheet toggle was being
+            painted over by the module pills and the Share button from about
+            1440px down. The first group carried min-w-0, so flex shrank the
+            BOX below its content while the title and the toggle inside it
+            could not shrink — the overflow slid under the later siblings,
+            which paint on top. Three rules keep it apart now: the TITLE is
+            the thing that gives way (truncate), the toggle and the actions
+            never shrink, and anything that still does not fit moves to a
+            second line. Tab rows wrap in this app; they do not scroll
+            sideways and they certainly do not overlap. */}
+        <header className="sticky top-0 z-30 bg-pb-surface/80 backdrop-blur border-b pb-hairline px-4 md:px-6 py-3 flex flex-wrap xl:flex-nowrap items-center justify-between gap-x-4 gap-y-2">
+          <div className="flex items-center gap-3">
             <button onClick={() => setMobileOpen(true)} className="md:hidden text-pb-faint">☰</button>
-            <h1 className="font-display font-bold text-lg md:text-xl">{title}</h1>
-            {headerLeft && <><span className="h-[22px] w-px bg-pb-hairline2 hidden sm:block" />{headerLeft}</>}
+            <h1 className="font-display font-bold text-lg md:text-xl truncate min-w-0">{title}</h1>
+            {headerLeft && (
+              <>
+                <span className="h-[22px] w-px bg-pb-hairline2 hidden sm:block shrink-0" />
+                <span className="shrink-0">{headerLeft}</span>
+              </>
+            )}
           </div>
           <ModuleSwitcher className="hidden md:flex min-w-0" />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 shrink-0">
             {actions}
             <BookmarkButton pageLabel={bookmarkLabel} />
-            <div className="hidden sm:flex items-center gap-2 text-sm text-pb-faint">
+            {/* Who you are signed in as, from xl up. It used to show from sm,
+                which is ~110px of the least useful thing in the bar at exactly
+                the widths where the bar has too much in it. Below xl the
+                header wraps instead, and this is what it can most afford to
+                drop; logging out stays reachable from the admin dashboard. */}
+            <div className="hidden xl:flex items-center gap-2 text-sm text-pb-faint">
               <span>{user?.display_name || user?.username}</span>
               <button onClick={async () => { await logout(); navigate('/login') }} className="text-pb-faint hover:text-pb-text underline">Logout</button>
             </div>

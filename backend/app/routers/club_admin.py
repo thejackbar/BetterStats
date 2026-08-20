@@ -46,6 +46,7 @@ from app.services.name_format import name_sort_key
 from app.services import fonts as font_service
 from app.services import theme_config as theme_config_service
 from app.services import grade_scope
+from app.services import player_age
 
 # Keep strong references to background tasks so they aren't GC'd before completing
 _background_tasks: set = set()
@@ -207,6 +208,12 @@ async def list_players(
             "trained_override": p.trained_override,
             "squad_team_id": str(p.squad_team_id) if p.squad_team_id else None,
             "last_played": last_played.get(str(p.id)),
+            # Age, not date of birth, and only when the club's own
+            # BetterSelect setting says so (migration 269) — a club showing
+            # ages for its juniors alone should not be sending its adults'
+            # ages to a browser that has merely been told not to draw them.
+            # The BetterSelect roster renders it; Admin → Players doesn't.
+            "age": player_age.visible_age(p.date_of_birth, club),
         }
         for p in players
     ]
@@ -780,6 +787,13 @@ class SettingsPatch(BaseModel):
     player_name_format: Optional[str] = None
     dormancy_months: Optional[int] = None
     default_team_size: Optional[int] = None
+    # Show a player's age on BetterSelect's selection board and roster
+    # (migration 269), and for whom. select_show_age_under is a genuine
+    # tri-state on the wire: absent leaves it alone, null means every
+    # player, a number means only players under that age. Read through
+    # model_fields_set below for that reason.
+    select_show_age: Optional[bool] = None
+    select_show_age_under: Optional[int] = None
     # Public player-profile attribute visibility (overseas is always shown).
     public_show_role: Optional[bool] = None
     public_show_batting: Optional[bool] = None
@@ -906,6 +920,8 @@ async def get_settings(
         "player_name_format": club.player_name_format or "last_first",
         "dormancy_months": club.dormancy_months if club.dormancy_months is not None else 24,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        "select_show_age": bool(club.select_show_age),
+        "select_show_age_under": player_age.clean_age_limit(club.select_show_age_under),
         "public_show_role": bool(club.public_show_role),
         "public_show_batting": bool(club.public_show_batting),
         "public_show_bowling": bool(club.public_show_bowling),
@@ -965,6 +981,14 @@ async def patch_settings(
         club.dormancy_months = max(1, min(600, int(data.dormancy_months)))
     if data.default_team_size is not None and int(data.default_team_size) in (0, 11, 12, 13):
         club.default_team_size = int(data.default_team_size)
+    if data.select_show_age is not None:
+        club.select_show_age = bool(data.select_show_age)
+    # Presence is the intent here, not a value: "every player" is a null, and
+    # `is not None` would make it unsettable once a club had picked an age.
+    # clean_age_limit also turns a junk or out-of-range number into that same
+    # every-player null rather than saving a rule nobody could satisfy.
+    if "select_show_age_under" in data.model_fields_set:
+        club.select_show_age_under = player_age.clean_age_limit(data.select_show_age_under)
     # Public player-attribute visibility toggles.
     if data.public_show_role is not None:
         club.public_show_role = bool(data.public_show_role)

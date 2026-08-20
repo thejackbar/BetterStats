@@ -72,3 +72,29 @@ export function genderLabel(g) {
   if (v === 'female') return 'Female'
   return g || null
 }
+
+// Whole years old from a stored "YYYY-MM-DD", or null when we can't say —
+// nothing recorded, a date in the future, or one far enough back to be a
+// typo. Mirrors services/player_age.age_on, and exists so the profile can
+// show the age moving as someone types a date of birth in; every other
+// screen is served an age the server already worked out (and already
+// decided the club is allowed to see).
+export function ageFromDob(dob, asOf) {
+  if (!dob) return null
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dob).trim())
+  if (!m) return null
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
+  // Parsed as local-time parts, never `new Date(dob)` — that reads a bare
+  // date string as UTC, so a birthday lands a day early west of Greenwich.
+  const born = new Date(y, mo - 1, d)
+  if (born.getFullYear() !== y || born.getMonth() !== mo - 1 || born.getDate() !== d) return null
+  const now = asOf || new Date()
+  let age = now.getFullYear() - y
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < d)) age -= 1
+  return age < 0 || age > 120 ? null : age
+}
+
+// Compact form for a card or a chip: "15y".
+export function ageShort(age) {
+  return age == null ? null : `${age}y`
+}

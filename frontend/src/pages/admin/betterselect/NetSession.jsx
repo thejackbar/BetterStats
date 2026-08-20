@@ -1,9 +1,18 @@
 // BetterSelect → Net Manager (live runner). The pitch-side screen the net
-// manager drives on one device: check players in, queue them, and run a batting
-// timer that rotates a group of N batters through the nets with staged audible
-// alerts. All the live state (queue order, who's on, the countdown) is held in
-// the browser — only the durable snapshot (who turned up, who batted) is synced
-// back so the attendance reports and player profiles fill in.
+// manager drives: check players in, queue them, and run a batting timer that
+// rotates a group of N batters through the nets with staged audible alerts.
+//
+// THE SESSION LIVES ON THE SERVER, not in this browser. The same admin account
+// is routinely open on a phone by the nets and a laptop in the clubroom, and
+// both have to see and drive the one session — so every tap here is a small
+// write (check someone in, re-order, rotate, start the clock), and every open
+// screen polls for the version it last saw. A version that has moved brings the
+// whole state back and this screen adopts it.
+//
+// The clock is a server deadline, not a local stopwatch: each device counts
+// down to the same moment, correcting for its own clock against the server time
+// that comes back with every poll. Alert beeps fire per device — everyone
+// standing near a screen should hear them.
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
@@ -14,20 +23,10 @@ import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { Icon, Btn, Avatar, RoleChips, Search, Empty } from './ui'
 
-let _uid = 0
-const uid = () => `g-${++_uid}-${Math.random().toString(36).slice(2, 6)}`
+const POLL_MS = 2500
 const TONE_COLOR = { info: 'var(--pb-accent)', amber: 'var(--pb-amber)', red: 'var(--pb-red)' }
 const clock = (t) => { const s = Math.max(0, Math.round(t)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }
 const fmtDate = (d) => { try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) } catch { return d || '' } }
-
-const toItem = (a) => ({
-  key: a.player_id || uid(),
-  player_id: a.player_id || null,
-  guest_name: a.guest_name || null,
-  name: a.name,
-  photo_url: a.photo_url || null,
-  skill_positions: a.skill_positions || [],
-})
 
 export default function NetSession() {
   const { id } = useParams()
@@ -36,27 +35,35 @@ export default function NetSession() {
   const { hasCapability } = useAuth()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
 
-  const [session, setSession] = useState(null)
+  const [live, setLive] = useState(null)       // null = loading, false = not found
   const [roster, setRoster] = useState([])
-  const [settings, setSettings] = useState(null)
-  const [queue, setQueue] = useState([])     // ordered; first `nets` are "on now"
-  const [batted, setBatted] = useState([])   // completed a turn this session
-
-  // Timer
-  const [remaining, setRemaining] = useState(0)
-  const [running, setRunning] = useState(false)
-  const [banner, setBanner] = useState(null)     // { label, tone } most-recent alert
-  const [activeTone, setActiveTone] = useState(null)
-  const [turnOver, setTurnOver] = useState(false)
   const [checkInOpen, setCheckInOpen] = useState(false)
+  const [banner, setBanner] = useState(null)   // most recent alert, this device
+  const [activeTone, setActiveTone] = useState(null)
+  const [tick, setTick] = useState(() => Date.now())
 
-  const deadlineRef = useRef(null)
-  const firedRef = useRef(new Set())
-  const settingsRef = useRef(settings)
-  const queueRef = useRef(queue)
+  const liveRef = useRef(null)
+  // How far this device's clock sits behind the server's, in ms. Kept fresh by
+  // every poll — a phone that is a minute fast must still stop the batter's
+  // turn at the same moment as the laptop.
+  const skewRef = useRef(0)
+  // Writes and polls must not overlap: a poll that started before a write
+  // landed would otherwise come back with the older state and undo it on screen.
+  const inflightRef = useRef(0)
   const audioRef = useRef(null)
-  useEffect(() => { settingsRef.current = settings }, [settings])
-  useEffect(() => { queueRef.current = queue }, [queue])
+  const firedRef = useRef({ seq: -1, fired: new Set() })
+  const expiredRef = useRef(-1)
+
+  const adopt = useCallback((payload) => {
+    if (!payload) return
+    if (payload.server_time) {
+      const t = new Date(payload.server_time).getTime()
+      if (!Number.isNaN(t)) skewRef.current = t - Date.now()
+    }
+    if (payload.unchanged) return
+    liveRef.current = payload
+    setLive(payload)
+  }, [])
 
   // ── Load ────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -66,40 +73,61 @@ export default function NetSession() {
       api.nmRoster().then((r) => r.players || []).catch(() => []),
     ]).then(([s, rs]) => {
       if (!alive) return
-      setSession(s)
       setRoster(rs)
-      setSettings(s.settings)
-      setRemaining(s.settings.duration_seconds)
-      const items = (s.attendees || []).map(toItem)
-      setQueue(items.filter((_, i) => !s.attendees[i].batted))
-      setBatted(items.filter((_, i) => s.attendees[i].batted))
-    }).catch((e) => { toast.error(e.message); setSession(false) })
+      adopt(s)
+    }).catch((e) => { if (alive) { toast.error(e.message); setLive(false) } })
     return () => { alive = false }
-  }, [id, toast])
+  }, [id, toast, adopt])
 
-  // ── Persist attendance snapshot (debounced) ───────────────────────────────
-  const firstSave = useRef(true)
+  // ── Poll for what the other devices have done ───────────────────────────
   useEffect(() => {
-    if (firstSave.current) { firstSave.current = false; return }
-    if (!canEdit) return
-    const snap = [
-      ...queue.map((q, i) => ({ player_id: q.player_id, guest_name: q.guest_name, batted: false, position: i })),
-      ...batted.map((q, i) => ({ player_id: q.player_id, guest_name: q.guest_name, batted: true, position: queue.length + i })),
-    ]
-    const t = setTimeout(() => { api.nmSetAttendance(id, snap).catch(() => {}) }, 700)
-    return () => clearTimeout(t)
-  }, [queue, batted, id, canEdit])
+    if (!id) return
+    let alive = true
+    const poll = async () => {
+      if (!alive || inflightRef.current > 0 || document.hidden || !liveRef.current) return
+      try { adopt(await api.nmLive(id, liveRef.current.version)) } catch { /* keep showing what we have */ }
+    }
+    const iv = setInterval(poll, POLL_MS)
+    // Coming back to a screen that was in a pocket should catch up at once
+    // rather than after the next interval.
+    const onVisible = () => { if (!document.hidden) poll() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      alive = false
+      clearInterval(iv)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [id, adopt])
+
+  // Run a write, then adopt what the server hands back so the device that acted
+  // is instantly right instead of waiting for its next poll.
+  const act = useCallback(async (fn) => {
+    inflightRef.current += 1
+    try {
+      adopt(await fn())
+    } catch (e) {
+      toast.error(e.message)
+      try { adopt(await api.nmLive(id)) } catch { /* leave the screen as it is */ }
+    } finally {
+      inflightRef.current -= 1
+    }
+  }, [adopt, toast, id])
 
   // ── Audio ─────────────────────────────────────────────────────────────────
-  const unlockAudio = () => {
-    if (!settingsRef.current?.sound) return
+  const settings = live && live.settings
+  const soundOn = !!(settings && settings.sound)
+  const unlockAudio = useCallback(() => {
+    if (!soundOn) return
     try {
       if (!audioRef.current) audioRef.current = new (window.AudioContext || window.webkitAudioContext)()
       if (audioRef.current.state === 'suspended') audioRef.current.resume()
     } catch { /* no audio */ }
-  }
-  const beep = (tone) => {
-    if (!settingsRef.current?.sound || !audioRef.current) return
+  }, [soundOn])
+
+  const beep = useCallback((tone) => {
+    if (!soundOn || !audioRef.current) return
     const ctx = audioRef.current
     const [freq, n] = { info: [660, 1], amber: [560, 2], red: [440, 3] }[tone] || [660, 1]
     for (let k = 0; k < n; k++) {
@@ -112,114 +140,120 @@ export default function NetSession() {
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16)
       o.start(t); o.stop(t + 0.18)
     }
-  }
+  }, [soundOn])
 
-  // ── Timer engine ──────────────────────────────────────────────────────────
-  const begin = useCallback((secs) => {
-    unlockAudio()
-    const s = secs != null ? secs : remaining
-    if (s <= 0) return
-    deadlineRef.current = Date.now() + s * 1000
-    setRemaining(s)
-    setTurnOver(false)
-    setRunning(true)
-  }, [remaining])
-
-  const resetTimer = useCallback(() => {
-    firedRef.current = new Set()
-    setBanner(null); setActiveTone(null); setTurnOver(false)
-    setRemaining(settingsRef.current?.duration_seconds || 0)
-    setRunning(false)
-  }, [])
-
-  const rotate = useCallback((autostart) => {
-    const q = queueRef.current
-    const n = settingsRef.current?.nets || 1
-    const group = q.slice(0, n)
-    if (group.length) {
-      setBatted((b) => [...b, ...group])
-      setQueue(q.slice(n))
-    }
-    firedRef.current = new Set()
-    setBanner(null); setActiveTone(null); setTurnOver(false)
-    const dur = settingsRef.current?.duration_seconds || 0
-    // Only keep the clock rolling if batters remain after this rotation.
-    if (autostart && (q.length - n) > 0 && dur > 0) { begin(dur) }
-    else { setRemaining(dur); setRunning(false) }
-  }, [begin])
-
-  const handleEnd = useCallback(() => {
-    setRunning(false); setRemaining(0)
-    beep('red')
-    setBanner({ label: 'Time — rotate to the next group', tone: 'red' }); setActiveTone('red')
-    if (settingsRef.current?.auto_roll) setTimeout(() => rotate(true), 400)
-    else setTurnOver(true)
-  }, [rotate])
-
+  // ── The clock ─────────────────────────────────────────────────────────────
+  const timer = live && live.timer
+  const running = !!(timer && timer.running)
   useEffect(() => {
     if (!running) return
-    const iv = setInterval(() => {
-      const rem = (deadlineRef.current - Date.now()) / 1000
-      if (rem <= 0) { clearInterval(iv); handleEnd(); return }
-      setRemaining(rem)
-      const alerts = settingsRef.current?.alerts || []
-      alerts.forEach((a, i) => {
-        if (!firedRef.current.has(i) && rem <= a.seconds_remaining) {
-          firedRef.current.add(i)
-          setBanner(a); setActiveTone(a.tone); beep(a.tone)
-        }
-      })
-    }, 200)
+    const iv = setInterval(() => setTick(Date.now()), 200)
     return () => clearInterval(iv)
-  }, [running, handleEnd])
+  }, [running, timer && timer.ends_at])
 
-  // ── Queue ops ─────────────────────────────────────────────────────────────
+  const remaining = useMemo(() => {
+    if (!timer) return 0
+    if (timer.running && timer.ends_at) {
+      const ends = new Date(timer.ends_at).getTime()
+      if (Number.isNaN(ends)) return timer.remaining_seconds || 0
+      return Math.max(0, (ends - (tick + skewRef.current)) / 1000)
+    }
+    return timer.remaining_seconds || 0
+  }, [timer, tick])
+
+  // Alerts, fired on this device. A screen opened part-way through a turn
+  // silently arms every alert that has already gone, so it doesn't play the
+  // whole session's beeps at once on load.
+  useEffect(() => {
+    if (!timer || !settings) return
+    const alerts = settings.alerts || []
+    if (firedRef.current.seq !== timer.turn_seq) {
+      firedRef.current = { seq: timer.turn_seq, fired: new Set() }
+      alerts.forEach((a, i) => { if (remaining <= a.seconds_remaining) firedRef.current.fired.add(i) })
+      setBanner(null); setActiveTone(null)
+      return
+    }
+    if (!timer.running) return
+    alerts.forEach((a, i) => {
+      if (!firedRef.current.fired.has(i) && remaining <= a.seconds_remaining) {
+        firedRef.current.fired.add(i)
+        setBanner(a); setActiveTone(a.tone); beep(a.tone)
+      }
+    })
+  }, [remaining, timer, settings, beep])
+
+  // The clock reaching zero is written down once, by whichever device notices
+  // first; the server stops it (and rotates, if auto-roll is on) so every other
+  // device picks the change up on its next poll rather than racing to do it.
+  useEffect(() => {
+    if (!timer || !timer.running || remaining > 0) return
+    if (expiredRef.current === timer.turn_seq) return
+    expiredRef.current = timer.turn_seq
+    beep('red')
+    setBanner({ label: 'Time — rotate to the next group', tone: 'red' })
+    setActiveTone('red')
+    if (canEdit) act(() => api.nmTimer(id, 'expire'))
+  }, [remaining, timer, canEdit, act, id, beep])
+
+  // ── Derived lists ─────────────────────────────────────────────────────────
+  const attendees = (live && live.attendees) || []
+  const waiting = useMemo(() => attendees.filter((a) => !a.batted), [attendees])
+  const done = useMemo(() => attendees.filter((a) => a.batted), [attendees])
   const inSession = useMemo(() => {
     const s = new Set()
-    queue.forEach((q) => q.player_id && s.add(q.player_id))
-    batted.forEach((q) => q.player_id && s.add(q.player_id))
+    attendees.forEach((a) => { if (a.player_id) s.add(a.player_id) })
     return s
-  }, [queue, batted])
+  }, [attendees])
 
+  // ── Queue ops ─────────────────────────────────────────────────────────────
   const addPlayer = (p) => {
-    if (p.id && inSession.has(p.id)) { setQueue((q) => q.filter((x) => x.player_id !== p.id)); return }
-    setQueue((q) => [...q, toItem({ player_id: p.id, name: p.name, photo_url: p.photo_url, skill_positions: p.skill_positions })])
+    const existing = attendees.find((a) => a.player_id === p.id)
+    if (existing) { act(() => api.nmRemoveAttendee(id, existing.id)); return }
+    act(() => api.nmAddAttendee(id, { player_id: p.id }))
   }
   const addGuest = (name) => {
-    const n = name.trim(); if (!n) return
-    setQueue((q) => [...q, { key: uid(), player_id: null, guest_name: n, name: n, photo_url: null, skill_positions: [] }])
+    const n = (name || '').trim()
+    if (!n) return
+    act(() => api.nmAddAttendee(id, { guest_name: n }))
   }
-  const removeFromQueue = (key) => setQueue((q) => q.filter((x) => x.key !== key))
-  const move = (key, dir) => setQueue((q) => {
-    const i = q.findIndex((x) => x.key === key); if (i < 0) return q
-    const j = i + dir; if (j < 0 || j >= q.length) return q
-    const cp = q.slice();[cp[i], cp[j]] = [cp[j], cp[i]]; return cp
-  })
-  const bumpToFront = (key) => setQueue((q) => { const it = q.find((x) => x.key === key); return it ? [it, ...q.filter((x) => x.key !== key)] : q })
-  const retire = (key) => setQueue((q) => {
-    const it = q.find((x) => x.key === key); if (!it) return q
-    setBatted((b) => [...b, it]); return q.filter((x) => x.key !== key)
-  })
-  const unbat = (key) => setBatted((b) => { const it = b.find((x) => x.key === key); if (it) setQueue((q) => [...q, it]); return b.filter((x) => x.key !== key) })
-
-  // ── Live settings tweaks (persisted to the session) ───────────────────────
-  const patchSettings = (partial) => {
-    setSettings((cur) => {
-      const next = { ...cur, ...partial }
-      api.nmUpdateSession(id, { settings: next }).catch(() => {})
-      if (partial.duration_seconds != null && !running) setRemaining(partial.duration_seconds)
-      return next
-    })
+  const reorder = (ids) => act(() => api.nmReorderQueue(id, ids))
+  const move = (attId, dir) => {
+    const ids = waiting.map((a) => a.id)
+    const i = ids.indexOf(attId)
+    const j = i + dir
+    if (i < 0 || j < 0 || j >= ids.length) return
+    ;[ids[i], ids[j]] = [ids[j], ids[i]]
+    reorder(ids)
   }
+  const bumpToFront = (attId) => reorder([attId, ...waiting.map((a) => a.id).filter((x) => x !== attId)])
+  const setBatted = (attId, batted) => act(() => api.nmPatchAttendee(id, attId, { batted }))
+  const removeAttendee = (attId) => act(() => api.nmRemoveAttendee(id, attId))
 
-  if (session === null || !settings) return <BetterSelectLayout title="Net session"><PbSpinner message="Loading session…" /></BetterSelectLayout>
-  if (session === false) return <BetterSelectLayout title="Net session"><div className="pb-card px-5 py-10 text-center"><Empty>Session not found.</Empty><div className="mt-3"><Btn variant="ghost" sm icon="back" onClick={() => navigate('/admin/betterselect/nets')}>Back to sessions</Btn></div></div></BetterSelectLayout>
+  const start = () => { unlockAudio(); act(() => api.nmTimer(id, 'start')) }
+  const pause = () => act(() => api.nmTimer(id, 'pause'))
+  const resetTimer = () => act(() => api.nmTimer(id, 'reset'))
+  const rotate = () => { unlockAudio(); act(() => api.nmRotate(id, true, timer && timer.turn_seq)) }
+
+  const patchSettings = (partial) => act(() => api.nmUpdateSession(id, { settings: { ...settings, ...partial } }))
+
+  if (live === null) return <BetterSelectLayout title="Net session"><PbSpinner message="Loading session…" /></BetterSelectLayout>
+  if (live === false) {
+    return (
+      <BetterSelectLayout title="Net session">
+        <div className="pb-card px-5 py-10 text-center">
+          <Empty>Session not found.</Empty>
+          <div className="mt-3"><Btn variant="ghost" sm icon="back" onClick={() => navigate('/admin/betterselect/nets')}>Back to sessions</Btn></div>
+        </div>
+      </BetterSelectLayout>
+    )
+  }
 
   const nets = settings.nets
-  const onNow = queue.slice(0, nets)
-  const upNext = queue.slice(nets)
+  const onNow = waiting.slice(0, nets)
+  const upNext = waiting.slice(nets)
   const timerColor = activeTone ? TONE_COLOR[activeTone] : 'var(--pb-text)'
   const pct = settings.duration_seconds ? Math.max(0, Math.min(100, (remaining / settings.duration_seconds) * 100)) : 0
+  const turnOver = !running && remaining <= 0 && onNow.length > 0
 
   return (
     <BetterSelectLayout
@@ -230,10 +264,14 @@ export default function NetSession() {
         {/* Session header */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
-            <div className="font-display font-bold text-[20px] leading-tight">{session.label || 'Net session'}</div>
-            <div className="text-[13px] text-pb-faint">{fmtDate(session.session_date)} · {queue.length + batted.length} checked in · {batted.length} batted</div>
+            <div className="font-display font-bold text-[20px] leading-tight">{live.label || 'Net session'}</div>
+            <div className="text-[13px] text-pb-faint">{fmtDate(live.session_date)} · {attendees.length} checked in · {done.length} batted</div>
           </div>
-          {canEdit && <Btn variant="primary" icon="plus" onClick={() => setCheckInOpen(true)}>Check in players</Btn>}
+          <div className="flex items-center gap-2">
+            <LiveDot />
+            <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
+            {canEdit && <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>}
+          </div>
         </div>
 
         {/* Timer hero */}
@@ -255,16 +293,16 @@ export default function NetSession() {
                 <Icon name="bolt" size={14} /> {banner.label}
               </div>
             )}
-            {turnOver && !running && <div className="mt-3 text-[13px] text-pb-faint">Turn over — hit <b className="text-pb-text">Next group</b> to rotate.</div>}
+            {turnOver && <div className="mt-3 text-[13px] text-pb-faint">Turn over — hit <b className="text-pb-text">Next group</b> to rotate.</div>}
 
             {/* Controls */}
             {canEdit && (
               <div className="flex flex-wrap items-center justify-center gap-2.5 mt-5">
                 {!running
-                  ? <Btn variant="primary" icon="play" onClick={() => begin()} disabled={remaining <= 0}>Start</Btn>
-                  : <Btn variant="soft" icon="pause" onClick={() => setRunning(false)}>Pause</Btn>}
+                  ? <Btn variant="primary" icon="play" onClick={start} disabled={remaining <= 0 && settings.duration_seconds <= 0}>Start</Btn>
+                  : <Btn variant="soft" icon="pause" onClick={pause}>Pause</Btn>}
                 <Btn variant="ghost" icon="reset" onClick={resetTimer}>Reset</Btn>
-                <Btn variant="ghost" icon="next" onClick={() => rotate(true)} disabled={!onNow.length}>Next group</Btn>
+                <Btn variant="ghost" icon="next" onClick={rotate} disabled={!onNow.length}>Next group</Btn>
               </div>
             )}
           </div>
@@ -283,7 +321,7 @@ export default function NetSession() {
               <button onClick={() => patchSettings({ auto_roll: !settings.auto_roll })} className={`inline-flex items-center gap-1.5 ${settings.auto_roll ? 'text-pb-accent' : ''}`}>
                 <Icon name={settings.auto_roll ? 'check' : 'reset'} size={14} /> Auto-roll {settings.auto_roll ? 'on' : 'off'}
               </button>
-              <button onClick={() => patchSettings({ sound: !settings.sound })} className={`inline-flex items-center gap-1.5 ${settings.sound ? 'text-pb-accent' : ''}`}>
+              <button onClick={() => { unlockAudio(); patchSettings({ sound: !settings.sound }) }} className={`inline-flex items-center gap-1.5 ${settings.sound ? 'text-pb-accent' : ''}`}>
                 <Icon name={settings.sound ? 'sound' : 'mute'} size={15} /> Sound {settings.sound ? 'on' : 'off'}
               </button>
             </div>
@@ -298,14 +336,14 @@ export default function NetSession() {
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {onNow.map((p, i) => (
-                <div key={p.key} className="pb-card px-3.5 py-3 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
+                <div key={p.id} className="pb-card px-3.5 py-3 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-accent) 30%, transparent)' }}>
                   <span className="font-mono text-[11px] text-pb-accent w-5 shrink-0">N{i + 1}</span>
-                  <Avatar player={p} size={38} />
+                  <Avatar player={{ ...p, id: p.player_id }} size={38} />
                   <div className="flex-1 min-w-0">
-                    <div className="font-display font-semibold text-[14px] truncate">{p.name}{p.player_id ? '' : ' '}{!p.player_id && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
+                    <div className="font-display font-semibold text-[14px] truncate">{p.name}{p.is_guest && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
                     <RoleChips roles={(p.skill_positions || []).slice(0, 3)} muted />
                   </div>
-                  {canEdit && <Btn variant="ghost" sm icon="check" onClick={() => retire(p.key)} title="Mark done / next in">Out</Btn>}
+                  {canEdit && <Btn variant="ghost" sm icon="check" onClick={() => setBatted(p.id, true)} title="Mark done / next in">Out</Btn>}
                 </div>
               ))}
             </div>
@@ -322,18 +360,18 @@ export default function NetSession() {
             {upNext.length === 0 ? <Empty className="py-3">Queue is empty.</Empty> : (
               <div className="flex flex-col">
                 {upNext.map((p, i) => (
-                  <div key={p.key} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
+                  <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
                     <span className="font-mono text-[11px] text-pb-faintest w-5 shrink-0">{i + 1}</span>
-                    <Avatar player={p} size={30} />
+                    <Avatar player={{ ...p, id: p.player_id }} size={30} />
                     <div className="flex-1 min-w-0">
-                      <div className="font-display font-medium text-[13.5px] truncate">{p.name}{!p.player_id && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
+                      <div className="font-display font-medium text-[13.5px] truncate">{p.name}{p.is_guest && <span className="font-mono text-[9px] text-pb-faint ml-1">GUEST</span>}</div>
                     </div>
                     {canEdit && (
                       <div className="flex items-center gap-0.5 text-pb-faint">
-                        <button onClick={() => bumpToFront(p.key)} title="Bat next" className="p-1 hover:text-pb-accent"><Icon name="bolt" size={15} /></button>
-                        <button onClick={() => move(p.key, -1)} title="Up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
-                        <button onClick={() => move(p.key, 1)} title="Down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
-                        <button onClick={() => removeFromQueue(p.key)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
+                        <button onClick={() => bumpToFront(p.id)} title="Bat next" className="p-1 hover:text-pb-accent"><Icon name="bolt" size={15} /></button>
+                        <button onClick={() => move(p.id, -1)} title="Up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
+                        <button onClick={() => move(p.id, 1)} title="Down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
+                        <button onClick={() => removeAttendee(p.id)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
                       </div>
                     )}
                   </div>
@@ -345,16 +383,16 @@ export default function NetSession() {
           <div className="pb-card px-4 py-3.5">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-display font-bold text-[15px]">Done</span>
-              <span className="font-mono text-[11px] text-pb-accent">{batted.length} batted</span>
+              <span className="font-mono text-[11px] text-pb-accent">{done.length} batted</span>
             </div>
-            {batted.length === 0 ? <Empty className="py-3">No completed turns yet.</Empty> : (
+            {done.length === 0 ? <Empty className="py-3">No completed turns yet.</Empty> : (
               <div className="flex flex-col">
-                {batted.map((p) => (
-                  <div key={p.key} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
-                    <Avatar player={p} size={26} />
+                {done.map((p) => (
+                  <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
+                    <Avatar player={{ ...p, id: p.player_id }} size={26} />
                     <span className="flex-1 min-w-0 text-[13px] text-pb-dim truncate">{p.name}</span>
                     <Icon name="check" size={15} className="text-pb-accent" />
-                    {canEdit && <button onClick={() => unbat(p.key)} title="Back to queue" className="p-1 text-pb-faint hover:text-pb-text"><Icon name="reset" size={14} /></button>}
+                    {canEdit && <button onClick={() => setBatted(p.id, false)} title="Back to queue" className="p-1 text-pb-faint hover:text-pb-text"><Icon name="reset" size={14} /></button>}
                   </div>
                 ))}
               </div>
@@ -367,6 +405,18 @@ export default function NetSession() {
         <CheckInModal roster={roster} inSession={inSession} onAdd={addPlayer} onGuest={addGuest} onClose={() => setCheckInOpen(false)} />
       )}
     </BetterSelectLayout>
+  )
+}
+
+/* ── Live indicator ───────────────────────────────────────────────────────────
+ * Says out loud that this screen is one of possibly several on the session, so
+ * a coach seeing the queue change under them knows why. */
+function LiveDot() {
+  return (
+    <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint"
+      title="This session updates live on every device it's open on">
+      <span className="w-1.5 h-1.5 rounded-full bg-pb-accent animate-pulse" /> Live
+    </span>
   )
 }
 

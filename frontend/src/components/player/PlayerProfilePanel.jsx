@@ -17,7 +17,7 @@ import ImageEditorModal from '../ImageEditorModal'
 import { Avatar, Tag, Btn, Dot, Icon } from '../../pages/admin/betterselect/ui'
 import {
   ROLE_OPTS, ROLE_TO_SKILLS, BAT_HANDS, GENDER_OPTS, BOWLING_OPTS,
-  bowlingLabel, bowlingFromLabel, bowls, normalizeGender,
+  bowlingLabel, bowlingFromLabel, bowls, normalizeGender, ageFromDob,
 } from '../../lib/playerAttributes'
 import { splitDisplayName, joinDisplayName } from '../../lib/nameFormat'
 
@@ -133,23 +133,53 @@ function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
  * A quiet line under the snapshot showing how often this player turns up to
  * nets. Self-contained fetch; renders nothing until there's something to show
  * (so clubs not running the Net Manager never see it), and swallows the 402 a
- * non-BetterSelect club would get. */
+ * non-BetterSelect club would get.
+ *
+ * The session tally opens into the dates behind it. A number on its own can't
+ * be checked, and "which Tuesdays did he actually make?" is the question a
+ * coach is really asking when they look at it. */
+function netDate(d) {
+  try { return new Date(d + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) }
+  catch { return d || '' }
+}
+
 function NetAttendanceStat({ playerId }) {
   const [data, setData] = useState(null)
+  const [open, setOpen] = useState(false)
   useEffect(() => {
     let alive = true
+    setData(null); setOpen(false)
     api.nmPlayerAttendance(playerId).then((r) => { if (alive) setData(r) }).catch(() => {})
     return () => { alive = false }
   }, [playerId])
   if (!data || !data.attended) return null
+  const sessions = data.sessions || []
   return (
     <div className="mt-[18px] pt-[18px] border-t border-pb-hairline">
       <div className="text-xs text-pb-faint mb-2">Net attendance</div>
       <div className="flex items-center gap-4">
-        <span><b className="pb-num font-display font-bold text-base text-pb-text">{data.attended}</b> <span className="text-[11.5px] text-pb-faintest">session{data.attended === 1 ? '' : 's'}</span></span>
+        <button type="button" onClick={() => setOpen((v) => !v)} disabled={!sessions.length}
+          title={sessions.length ? 'Show every session attended' : undefined}
+          className="inline-flex items-center gap-1 disabled:cursor-default enabled:hover:text-pb-accent transition-colors">
+          <b className="pb-num font-display font-bold text-base text-pb-text">{data.attended}</b>
+          <span className="text-[11.5px] text-pb-faintest">session{data.attended === 1 ? '' : 's'}</span>
+          {sessions.length > 0 && <Icon name="chevron" size={12} className={`text-pb-faint transition-transform ${open ? 'rotate-90' : ''}`} />}
+        </button>
         <span><b className="pb-num font-display font-bold text-base text-pb-accent">{data.batted}</b> <span className="text-[11.5px] text-pb-faintest">batted</span></span>
         {data.last_attended && <span className="text-[11.5px] text-pb-faintest ml-auto">last {new Date(data.last_attended + 'T00:00:00').toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}</span>}
       </div>
+      {open && sessions.length > 0 && (
+        <div className="mt-2.5 max-h-[220px] overflow-y-auto rounded-lg border border-pb-hairline bg-pb-surface2/40">
+          {sessions.map((sess) => (
+            <div key={sess.session_id} className="flex items-center gap-2 px-2.5 py-1.5 border-b border-pb-hairline last:border-0">
+              <span className="flex-1 min-w-0 text-[12px] text-pb-dim truncate">
+                {netDate(sess.session_date)}{sess.label ? ` · ${sess.label}` : ''}
+              </span>
+              {sess.batted && <span className="font-mono text-[9px] uppercase tracking-wide2 text-pb-accent shrink-0">Batted</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -341,6 +371,7 @@ function AliasManager({ playerId }) {
 
 function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
+  const age = ageFromDob(draft.date_of_birth)
   return (
     <div className="px-5 py-[18px]">
       <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-faint mb-3.5">Details</div>
@@ -352,6 +383,24 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             <PInput value={draft.display_last} onChange={(v) => set('display_last', v)}
               placeholder="Last" />
           </div>
+        </Field>
+        {/* Date of birth, with the age it works out to on the caption line —
+            moving as the date is typed, and never stored (see
+            services/player_age.py). Full width, and the age sits beside the
+            LABEL rather than the input: a native date input clips its own
+            year segment the moment anything shares its row, and this column
+            is narrow at the lg breakpoint. Nothing syncs a birthday, so this
+            is the club writing down what its own registration form holds. */}
+        <Field label={
+          <span className="flex items-center justify-between gap-2">
+            <span>Date of birth</span>
+            <span className="font-mono text-[10px] tracking-wide2 shrink-0"
+              style={{ color: age == null ? 'var(--pb-faintest)' : 'var(--pb-dim)' }}>
+              {age == null ? 'AGE —' : `${age} YRS`}
+            </span>
+          </span>
+        }>
+          <PInput value={draft.date_of_birth} onChange={(v) => set('date_of_birth', v)} type="date" />
         </Field>
         <Field label="Squad (selection pool)" half>
           <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
@@ -450,6 +499,10 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
   const showBowlMeta = bowls(draft.bowling_action, draft.bowling_type)
   const playerName = profile.display_name || profile.name
+  // Current age, from the draft so it tracks an unsaved date of birth. Shown
+  // here whatever the club's BetterSelect setting says — that rule governs
+  // the selection screens, not the record an admin is editing.
+  const age = ageFromDob(draft.date_of_birth)
 
   return (
     <div className="overflow-auto h-full">
@@ -467,6 +520,10 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
               {draft.is_public === false && <Tag tone="faint">Hidden</Tag>}
             </div>
             <div className="flex items-center gap-2.5 mt-1.5 text-pb-dim text-[13px] flex-wrap">
+              {age != null && (
+                <><span>{age} years old</span>
+                  {(draft.player_role || handLabel || showBowlMeta) && <span className="text-pb-faintest">·</span>}</>
+              )}
               {draft.player_role && <><span>{draft.player_role}</span><span className="text-pb-faintest">·</span></>}
               {handLabel && <span>{handLabel}</span>}
               {showBowlMeta && <><span className="text-pb-faintest">·</span><span>{bowlingLabel(draft.bowling_action, draft.bowling_type)}</span></>}
@@ -543,6 +600,9 @@ export function draftFromProfile(p) {
     is_public: p.is_public !== false,
     is_financial_override: p.is_financial_override ?? null,
     trained_override: p.trained_override ?? null,
+    // "YYYY-MM-DD" or '' — the shape <input type="date"> speaks. The age is
+    // always derived from this, never carried in the draft.
+    date_of_birth: p.date_of_birth || '',
   }
 }
 
@@ -574,5 +634,7 @@ export function patchFromDraft(d) {
     // the PATCH reads exclude_unset, so a present null IS the intent.
     is_financial_override: d.is_financial_override ?? null,
     trained_override: d.trained_override ?? null,
+    // Cleared as an explicit null, same reason as the two overrides above.
+    date_of_birth: norm(d.date_of_birth),
   }
 }

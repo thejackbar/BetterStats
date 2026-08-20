@@ -50,6 +50,7 @@ const ICON_PATHS = {
   sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5.6 5.6 4.2 4.2M19.8 19.8l-1.4-1.4M18.4 5.6l1.4-1.4M4.2 19.8l1.4-1.4" /></>,
   moon: <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></>,
   tv: <><rect x="2.5" y="5" width="19" height="13" rx="2" /><path d="M8 21h8M12 18v3" /></>,
+  download: <><path d="M12 3v12M7.5 10.5L12 15l4.5-4.5" /><path d="M4 17v2.5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5V17" /></>,
 }
 
 export function Icon({ name, size = 18, strokeWidth = 1.6, className = '', style }) {
@@ -180,12 +181,21 @@ const BTN_VARIANTS = {
   soft: 'bg-pb-surface2 text-pb-text border border-pb-hairline hover:border-pb-hairline2',
   danger: 'bg-transparent text-pb-red border border-pb-red/40 hover:bg-pb-red/10',
 }
-export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title }) {
+export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download }) {
   const size = sm ? 'text-[12.5px] px-2.5 py-1.5 gap-1.5' : 'text-[13.5px] px-3.5 py-2 gap-2'
+  const cls = `inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`
+  const inner = <>{icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}</>
+  // A file download is a plain link: the session cookie rides along on its own,
+  // so there is nothing to fetch, hold in memory and hand back as a blob.
+  if (href) {
+    return (
+      <a href={disabled ? undefined : href} download={download} title={title}
+        className={`${cls}${disabled ? ' opacity-40 pointer-events-none' : ''}`}>{inner}</a>
+    )
+  }
   return (
-    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title}
-      className={`inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`}>
-      {icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}
+    <button type={type} onClick={disabled ? undefined : onClick} disabled={disabled} title={title} className={cls}>
+      {inner}
     </button>
   )
 }

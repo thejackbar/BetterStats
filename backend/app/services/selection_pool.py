@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import FixtureLineup, Grade, Player, Season, Team
 from app.routers.availability import DEFAULT_DORMANCY_MONTHS, months_ago, resolve_period_statuses
 from app.auth.modules import org_has_module
+from app.services import player_age
 
 # Autofill scoring constants ─────────────────────────────────────────────────
 # Window for "recent form" — last N batting innings & bowling spells per player.
@@ -518,6 +519,12 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "bowling_type": p.bowling_type,
             "is_opening_batsman": p.is_opening_batsman,
             "gender": p.gender,
+            # Age, never the date of birth, and None unless the club has
+            # turned it on (and this player is inside whatever age it
+            # restricted the display to) — see services/player_age.py. The
+            # case it was built for is bowling workload: a selector needs to
+            # know the quick they are about to bowl into the ground is 14.
+            "age": player_age.visible_age(p.date_of_birth, club),
             "is_dormant": dormant and not manual_inactive,
             "is_inactive": manual_inactive,
             "is_current": not manual_inactive and not dormant,
@@ -596,6 +603,16 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             "financial": "fees" if owing_ids is not None else None,
             "training": "nets" if trained_ids is not None else None,
             "training_window_days": TRAINING_WINDOW_DAYS,
+            # The club's own age rule, echoed so the filter can offer only
+            # what it can answer and say what it covers. Under a limit, an
+            # adult's `age` is null for the same reason a player with no
+            # birthday recorded is — so "no age shown" is NOT the same
+            # question as "no date of birth", and the board must not offer it
+            # as though it were.
+            "age": {
+                "shown": bool(club.select_show_age),
+                "under": player_age.clean_age_limit(club.select_show_age_under),
+            },
         },
         "dormancy_months": months,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,

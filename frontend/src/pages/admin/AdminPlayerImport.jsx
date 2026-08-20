@@ -5,7 +5,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterStatsLayout from '../../components/admin/BetterStatsLayout'
 import Dropdown from '../../components/Dropdown'
 import { PbSpinner } from '../../lib/presskit'
-import { genderLabel, battingHandLabel, bowlingLabel } from '../../lib/playerAttributes'
+import { genderLabel, battingHandLabel, bowlingLabel, ageFromDob } from '../../lib/playerAttributes'
 
 // ── the columns this importer understands ────────────────────────────────────
 // Player name is required, matched by NameColumnFields below (one combined
@@ -21,6 +21,14 @@ const FIELDS = [
   ['batting_hand', 'Batting hand', false, 'Right / Left handed.'],
   ['bowling', 'Bowling', false, 'e.g. Right-arm fast-medium, Off spin.'],
   ['gender', 'Gender', false, 'Male / Female.'],
+  ['date_of_birth', 'Date of birth', false, '2012-03-04, 4 Mar 2012 or 04/03/2012 (day first).'],
+  ['is_opening_batsman', 'Opening batter', false, 'Yes / No.'],
+  ['is_overseas', 'Overseas player', false, 'Yes / No.'],
+  ['overseas_country', 'Overseas country', false, 'Filling this in marks them overseas.'],
+  ['status', 'Active / inactive', false, 'Inactive hides them from availability and selection.'],
+  ['is_public', 'Show on public website', false, 'Show / Hide.'],
+  ['financial', 'Fees status', false, 'Financial / Not financial. Only sets it — clear it on the profile.'],
+  ['training', 'Training', false, 'At training / Not at training.'],
 ]
 const FIELD_LABEL = {
   player_name: 'Player name', player_first_name: 'First name', player_last_name: 'Surname',
@@ -37,17 +45,37 @@ const NAME_FORMAT_OPTIONS = [
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
 
 // ── per-field display for the review screen (codes → human labels) ───────────
+const yesNo = (v) => (v === true ? 'Yes' : v === false ? 'No' : '—')
+// A date of birth arrives as an ISO string on both sides of the comparison
+// (the server sends what it holds and what it would write), so the age it
+// works out to comes from the shared helper rather than a second parser.
+const dobFmt = (v) => {
+  if (!v) return '—'
+  const iso = String(v).slice(0, 10)
+  const age = ageFromDob(iso)
+  return age == null ? iso : `${iso} · ${age} yrs`
+}
 const SIMPLE = {
   email: { label: 'Email', fmt: (v) => v || '—' },
   phone: { label: 'Phone', fmt: (v) => v || '—' },
   gender: { label: 'Gender', fmt: (v) => genderLabel(v) || '—' },
   player_role: { label: 'Role', fmt: (v) => v || '—' },
   batting_hand: { label: 'Batting', fmt: (v) => battingHandLabel(v) || '—' },
+  date_of_birth: { label: 'Born', fmt: dobFmt },
+  is_opening_batsman: { label: 'Opener', fmt: yesNo },
+  is_overseas: { label: 'Overseas', fmt: yesNo },
+  overseas_country: { label: 'Country', fmt: (v) => v || '—' },
+  status: { label: 'Status', fmt: (v) => (v === 'inactive' ? 'Inactive' : v === 'active' ? 'Active' : '—') },
+  is_public: { label: 'Website', fmt: (v) => (v === false ? 'Hidden' : v === true ? 'Shown' : '—') },
+  is_financial_override: { label: 'Fees', fmt: (v) => (v === true ? 'Financial' : v === false ? 'Not financial' : 'Automatic') },
+  trained_override: { label: 'Training', fmt: (v) => (v === true ? 'At training' : v === false ? 'Not at training' : 'Automatic') },
 }
 function changeRows(p) {
   const rows = []
   const cur = p.current || {}, prop = p.proposed || {}
-  for (const f of ['email', 'phone', 'gender', 'player_role', 'batting_hand']) {
+  for (const f of ['email', 'phone', 'gender', 'player_role', 'batting_hand',
+                   'date_of_birth', 'is_opening_batsman', 'is_overseas', 'overseas_country',
+                   'status', 'is_public', 'is_financial_override', 'trained_override']) {
     if (f in prop) rows.push({ label: SIMPLE[f].label, from: SIMPLE[f].fmt(cur[f]), to: SIMPLE[f].fmt(prop[f]) })
   }
   if ('bowling_action' in prop || 'bowling_type' in prop) {
@@ -87,19 +115,26 @@ function StatusBadge({ status }) {
 
 const STEP_LABELS = { upload: 'Upload', map: 'Columns', players: 'Players', squads: 'Squads', review: 'Review' }
 
-// One column-mapping row: "BetterStats field ← your column".
-function FieldRow({ field, label, required, value, headers, conf, onMap }) {
+// One column-mapping row: "BetterStats field ← your column", with the field's
+// own note underneath. FIELDS has carried a hint per field since it was
+// written and nothing ever drew it — which only started to matter with the
+// date of birth, where "04/03/2012 is 4 March" is the difference between a
+// junior's age being right and being three weeks out.
+function FieldRow({ field, label, required, hint, value, headers, conf, onMap }) {
   return (
-    <div className={`flex items-center gap-2 rounded px-2 py-1.5 border ${value ? 'border-green-300/30' : 'pb-hairline'}`}>
-      <span className="text-[11px] font-semibold text-green-300 w-36 shrink-0 leading-tight">
-        {label}{required && <span className="text-pb-red/70 ml-0.5">*</span>}
-      </span>
-      <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
-      <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={(e) => onMap(field, e.target.value)}>
-        <option value="">— not in my file —</option>
-        {headers.map((h) => <option key={h} value={h}>{h}</option>)}
-      </select>
-      {conf != null && <Pct score={conf} />}
+    <div className={`rounded px-2 py-1.5 border ${value ? 'border-green-300/30' : 'pb-hairline'}`}>
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-semibold text-green-300 w-36 shrink-0 leading-tight">
+          {label}{required && <span className="text-pb-red/70 ml-0.5">*</span>}
+        </span>
+        <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
+        <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={(e) => onMap(field, e.target.value)}>
+          <option value="">— not in my file —</option>
+          {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+        </select>
+        {conf != null && <Pct score={conf} />}
+      </div>
+      {hint && <div className="text-[10.5px] text-pb-faintest leading-snug mt-1 ml-[152px]">{hint}</div>}
     </div>
   )
 }
@@ -642,8 +677,9 @@ export default function AdminPlayerImport() {
         <Link to="/admin/players" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← PLAYERS</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import player details</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed max-w-3xl">
-          Upload a spreadsheet to fill in players' contact details in bulk. Mainly email and phone, plus optional
-          squad, role, batting hand, bowling and gender. We match each row to a player by name (the same smart
+          Upload a spreadsheet to fill in player details in bulk. Mainly email and phone, plus any of squad,
+          role, batting hand, bowling, gender, date of birth, opening batter, overseas, active or inactive,
+          website visibility, fees and training. We match each row to a player by name (the same smart
           matching used across the site) and show you exactly what will change before anything is saved.
         </p>
 
@@ -685,7 +721,8 @@ export default function AdminPlayerImport() {
               One row per player, a Name column plus whichever details you have. Headers can be anything, we map them next.{' '}
               Start from a template:{' '}
               <a href="/api/club-admin/player-import/template.xlsx" className="text-pb-accent hover:underline">Excel with dropdowns</a>
-              {' '}(Role, Batting, Bowling, Gender and your BetterSelect squads are pick lists){' '}or{' '}
+              {' '}(Role, Batting, Bowling, Gender, Opening batter, Overseas, Status, Website, Fees, Training
+              and your BetterSelect squads are all pick lists){' '}or{' '}
               <a href="/api/club-admin/player-import/template.csv" className="text-pb-accent hover:underline">plain CSV</a>.
             </p>
           </div>
@@ -713,8 +750,8 @@ export default function AdminPlayerImport() {
               <NameColumnFields nameMode={nameMode} setNameMode={setNameMode} nameFormat={nameFormat} setNameFormat={setNameFormat}
                 mapping={mapping} setMap={setMap} headers={parsed.headers} confByField={confByField} />
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {FIELDS.map(([f, label, required]) => (
-                  <FieldRow key={f} field={f} label={label} required={required}
+                {FIELDS.map(([f, label, required, hint]) => (
+                  <FieldRow key={f} field={f} label={label} required={required} hint={hint}
                     value={mapping[f]} headers={parsed.headers} conf={confByField[f]} onMap={setMap} />
                 ))}
               </div>

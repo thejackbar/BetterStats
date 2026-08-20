@@ -1,5 +1,264 @@
 # BetterStats — Claude Session Notes
 
+## A player's date of birth, and who is told their age (migration 269, v9.37.0, Aug 2026)
+
+Asked for so a selector can see a young quick's age while deciding bowling
+workloads. `players.date_of_birth`, plus a club rule for whether BetterSelect
+shows the age it works out to.
+
+- **The AGE IS NEVER STORED.** `services/player_age.py` derives it on every
+  read, because a stored age is wrong from the day after it is written and a
+  volunteer who fills a birthday in once should not have to maintain it.
+  `age_on` returns None for no date, a future date and anything past 120 years
+  — all three mean "we cannot say", which a screen renders as nothing rather
+  than as a number. The month/day tuple comparison is what makes 29 February
+  turn a year older on 1 March in a non-leap year.
+- **Nothing syncs a birthday.** CA's feeds carry none and PlayHQ redacts its
+  juniors' names rather than dating them, so this is the club writing down
+  what its own registration form already holds. Entered on the profile only.
+- **The club's rule is applied SERVER-SIDE, in one place**
+  (`player_age.visible_age`). `organisations.select_show_age` is off by
+  default, and `select_show_age_under` is NULL for every player or an age to
+  show it only BELOW. A club restricted to under-16s never sends an adult's
+  age to a browser at all — the alternative, sending every age and telling the
+  browser not to draw some, is a leak dressed as a setting. Two copies of "can
+  this screen show an age" is how one screen ends up disagreeing with another.
+- **The profile is the exception, deliberately.** It returns the date of birth
+  itself and an ungated `age`: the club rule governs the SELECTION screens, not
+  the record a `MANAGE_PLAYERS` admin is editing. It also returns
+  `age_visible`, the gated answer, so a screen that has just saved a birthday
+  corrects its own roster row to what everyone else sees rather than to the
+  number the editor is looking at.
+- **`select_show_age_under` is a genuine tri-state on the wire**, so
+  `patch_settings` reads `model_fields_set`, not `is not None` — otherwise
+  "every player" (a null) would be unsettable the moment a club picked an age.
+  `clean_age_limit` turns 0, junk or an out-of-range number into that same
+  every-player null, so the setting can never mean "show nobody" while reading
+  as switched on.
+- **Never public.** No `public_show_age` was added and none should be without
+  asking: a date of birth is the personal data a junior's family is most
+  likely to object to, and the ask was about selection. `clone_demo_club` does
+  not copy it, alongside the contact details it already drops.
+- **A native date input clips its own year the moment anything shares its
+  row.** The first cut put the age beside the input in a half-width field and
+  it measured 82px at 1400 and 22px at 1024. The age sits on the CAPTION line
+  now and the field is full width: 274 / 129 / 316px at 1400 / 1024 / 390,
+  comfortably wider than the neighbouring fields everywhere.
+- **Verified against a real Postgres** (37 checks through the shipped route
+  bodies: migration 269 applied three times to a populated pre-269 table, an
+  existing club defaulting to off, both refusal guards leaving the stored date
+  intact, a null clearing the birthday and a null clearing the age limit
+  without switching ages off, an out-of-range limit storing as every-player,
+  and the roster and selection payloads withholding an adult's age under an
+  under-16 rule while carrying the junior's) plus 20 on the age maths itself
+  (the leap-day birthday both sides of 1 March, and "exactly 16 is not under
+  16"), and **driven in Chromium** (21: the picker hidden until ages are on,
+  the exact params on the wire including the explicit null, the roster row,
+  the profile field and its live age, the selection board's tag, no page
+  errors, no overflow at 390px).
+- **The Age filter offers only what the club's own rule can answer.**
+  `ageFilterOptions` (selectionMeta.js) reads the `flags.age` echo the
+  selection payload carries: no rule, no group at all — a dead control is
+  worse than none, the same call the Fees and Training source notes make. A
+  club limited to under-16s is offered thresholds up to 16 and NOT "18 and
+  over" (no adult carries an age, so it would always be empty) and NOT "no
+  date of birth" (under a limit a null means "an adult, OR nobody recorded
+  one", which is two questions wearing one label). A fixed ladder rather than
+  one option per age present, so "Under 16" is where a coach expects it week
+  to week.
+- **Not built**: any bowling-workload limit encoded in the app. What counts
+  as too many overs for a fourteen year old is a policy call the club's own
+  association makes, and a number we invented would be quoted back at us.
+
+### The profile importer only knew the fields it was born with (v9.37.1)
+
+Reported: Import player details was missing the date of birth. It was missing
+eight fields — every profile column added after it was built. A field added to
+`players` and to the profile editor does NOT reach this importer on its own,
+and nothing failed to tell anyone.
+
+- **`profile_import.VALUE_FIELDS` is the list, and `PLAYER_FIELDS` is what
+  gets written.** Adding a profile column means adding to both, plus a
+  `FIELD_LABELS` entry, a `SYNONYMS` block for auto-mapping, a branch in
+  `row_profile`, a line in the router's `_current_profile` (or a sheet
+  re-stating a value a player already has reads as a change), the two
+  templates and the wizard's own `FIELDS`/`SIMPLE` maps. The suite asserts
+  it structurally now: every field on `PlayerProfileUpdate` is either
+  importable or on a short named list of ones deliberately left out
+  (display name, PlayHQ id, skill positions, the non-player flag).
+- **A date of birth is read four ways** — ISO, `4 Mar 2012`, `04/03/2012`, and
+  an Excel serial — because `import_ingest` stringifies every cell, so an
+  Excel date cell arrives as `"2012-03-04 00:00:00"` and a date column nobody
+  formatted arrives as `"40972"`. **A slashed date is DAY FIRST**: this app
+  serves Australian and British clubs, the parser has to pick one, and the
+  column hint and template say which. The serial floor is deliberately above
+  any 4-digit year, so a bare `1998` typed into a date column reads as
+  unreadable rather than as 20 May 1905.
+- **It refuses what the profile editor refuses**, through the same
+  `player_age.dob_error` — a future date or one past 120 years is reported
+  and the player left alone, so a bulk upload can't write a birthday the
+  single-player form would reject.
+- **A country on its own marks a player overseas**, since that is the only
+  reading under which naming one means anything, but an explicit "No" in the
+  overseas column still wins.
+- **The two BetterSelect overrides can be SET from a sheet, never cleared.**
+  A blank cell already means "leave this player alone" everywhere in this
+  importer and it cannot also mean "back to automatic"; clearing stays a
+  profile-screen action, and the field hint says so.
+- **`FIELDS` had carried a hint per field since it was written and the wizard
+  never drew it** — `FIELDS.map(([f, label, required]) => …)` dropped the
+  fourth element. Harmless while the hints were "Male / Female", and not
+  harmless at all for a date whose day/month order has to be stated.
+- **The AFL silo's importer is a different, deliberately simpler one**
+  (`routers/afl/player_import.py` — name, email, phone, gender, no squads,
+  nothing auto-created) and is untouched.
+- **Verified against a real Postgres** (69 checks through the shipped
+  preview → resolve → commit bodies with a real uploaded sheet: every new
+  field auto-mapped from a club's own header wording, both date shapes
+  stored, an all-unreadable row changing nothing and reporting three notes,
+  a re-upload of the same sheet proposing no further changes, and both
+  templates round-tripping back through the importer's own parser) plus 24
+  on the date and boolean normalisers, and **driven in Chromium** (24: every
+  new field on the mapping screen with its hint, the before/after rows, the
+  age beside the date, no page errors, no overflow at 390px).
+
+### A `min-w-0` flex group whose children can't shrink OVERLAPS its siblings
+
+Reported off the same screen: the Selection board's Dual rail / Team sheet
+toggle was being painted over by the module pills and the Share button. Not a
+z-index problem and nothing to do with the age work — the header's first group
+carried `min-w-0`, so flex shrank the BOX below its content while the title
+and the toggle inside it could not shrink. The overflow slid under the later
+siblings, which paint on top. Measured, not eyeballed: the toggle's right edge
+sat at 591px while its own group ended at 315px, and from 1100px down an
+`elementFromPoint` at the centre of the last tab returned a module icon.
+
+- **`min-w-0` belongs on the ELEMENT that may shrink, not the group.** The
+  `<h1>` carries `truncate min-w-0` and the toggle carries `shrink-0`, so the
+  group's automatic minimum is now "hamburger + toggle" and flex will not
+  squeeze it past that. Putting `min-w-0` on the group instead is what removed
+  that floor.
+- **Shrinking alone was not enough and the fix is not one line.** With nowrap
+  the overlap went away and the page started overflowing horizontally at
+  ≤900px instead, and the module switcher was crushed to a 21px stub at 1024.
+  `flex-wrap xl:flex-nowrap` is the answer: one row at ≥1280 (byte-identical
+  to what it was, 65px), and below that the bar wraps rather than overlapping.
+  The signed-in user's name + Logout moved from `sm` to `xl` for the same
+  reason — ~110px of the least useful thing in the bar at exactly the widths
+  where the bar has too much in it.
+- **Every other BetterSelect screen is untouched** (53px, one row, no
+  overflow at 1440/1024/390): only Selection passes `headerLeft`, so only
+  Selection had the extra 214px to fit.
+- **Verified by measuring at eight widths with the change stashed and again
+  with it applied** — the baseline overlaps from 1100px down and never
+  overflows the page; the fix overlaps nowhere and overflows nowhere. When a
+  header looks crowded, measure `elementFromPoint` over the thing that is
+  meant to be clickable rather than judging it from a screenshot.
+
+## A net session is run from several devices at once (migration 268, v9.36.0, Aug 2026)
+
+Reported: the same admin account open on a phone by the nets and a laptop in the
+clubroom showed two different sessions. Plus: download who attended, put the
+tally on the player's profile, and open it into the dates.
+
+### The live session moved onto the server, and that is the whole change
+
+- **It was a client-side state machine that pushed a debounced full-replace
+  snapshot** (`PUT /nets/sessions/{id}/attendance`, the whole attendance list,
+  700ms after the last tap). So the second device's check-in survived exactly
+  until the first device's next write, which silently replaced the list with the
+  one IT was holding. **Never reintroduce a full-replace attendance write** —
+  replacing the list IS the bug.
+- **Every change is a small, discrete write now** (check in, remove, mark
+  batted, re-order, rotate, drive the clock), each bumping
+  `net_sessions.version`, and every open screen polls `GET /sessions/{id}/live?since=`.
+  Matching versions come back as `{version, server_time, unchanged: true}`, so a
+  phone left open on the boundary costs one tiny query every 2.5s.
+- **The version is bumped as `version = version + 1` IN SQL** (`_touch` assigns
+  the SQLAlchemy expression, never `s.version + 1` read in Python). Two coaches
+  tapping at the same moment would otherwise compute the same next value, and
+  one device's change would land with the version unmoved — invisible to
+  everyone else's poll. Verified by racing two real database sessions.
+- **The clock is an absolute deadline (`live_state.ends_at`), not a local
+  stopwatch.** Each device works out its own countdown from it against
+  `server_time`, which rides on every poll — a phone an hour fast still stops
+  the batter's turn at the same second as the laptop. A passed deadline READS as
+  stopped for everyone before anyone writes it down (`_timer_payload` resolves
+  `remaining_seconds` at read time), so the devices can't disagree while the
+  write is in flight.
+- **Rotating is the one action that must not repeat**, because doing it twice
+  skips a whole group of batters. `RotateBody.turn_seq` is what the sending
+  device was looking at; a request carrying a turn that has already moved on is
+  ignored. Tapping "Next group" deliberately twice still works — the first
+  response hands back the new turn number.
+- **Auto-roll happens on the SERVER, inside the `expire` action**, not on
+  whichever device noticed the clock run out. Every open screen notices within a
+  second of each other, so a device-side rotation would race. `expire` is
+  idempotent and refuses a deadline that hasn't actually passed, so a fast clock
+  can't end a turn early.
+- **A duplicate check-in is a no-op, not an error**, at two levels: an
+  app-level existence check for the ordinary case, and `IntegrityError` on the
+  partial unique for the genuinely simultaneous one. **The rollback path caught a
+  MissingGreenlet**: `club.id` read after `db.rollback()` is a lazy load in the
+  wrong place, so `club_id` is captured before the flush. Found by racing three
+  simultaneous check-ins of one player, not by reading the code.
+- **A stale re-order can't drop anyone.** `reorder_queue` takes the ids the
+  sending device knew about and appends anyone it didn't — a player checked in
+  from another phone a second earlier keeps their place at the back rather than
+  vanishing.
+- **`position` is re-laid as 0..n-1 after every mutation** (`_renumber`), over
+  the canonical order (still waiting first, then those who have batted). Sending
+  someone back to the queue puts them at the END, which is what "they need
+  another go" means.
+
+### The lists a club can take away
+
+- **`GET /nets/sessions/{id}/attendance.csv`** is the register for the night and
+  **includes guests** — a trialist who came along is part of who turned up.
+  Offered on the live screen and on every past session row.
+- **`GET /nets/reports/attendance.csv`** is the per-player report and
+  **excludes guests**, because it is keyed on real players and links to their
+  profiles. Same split the on-screen report already made.
+- **`days=0` means all time** (the range param went `ge=1` → `ge=0`), which is
+  what "how many has he been to" actually asks. The `since` filter is a
+  `CAST(:since AS date) IS NULL OR ...` — the asyncpg bare-`:param IS NULL` trap
+  the vote-medals note describes.
+- **Downloads are plain `<a href>`**, so the session cookie rides along and
+  there is no blob to build and hold. `Btn` gained `href`, since a link inside a
+  button is markup no browser agrees on — which is also why the session ROW
+  became a div with `role="button"`.
+
+### The tally opens into the dates
+
+- **`GET /nets/players/{id}/attendance` returns every session** (capped at 500),
+  not the eight it used to. `attended` is now the length of that list rather
+  than a separate COUNT, so the number and the dates behind it cannot disagree.
+- Clicking the tally expands it in place on the player profile
+  (`NetAttendanceStat`, shared by BetterSelect Players and Admin → Players) and
+  opens a modal from the Nets report. The modal deliberately reads the player's
+  WHOLE history, not the window the report is showing — a coach clicking a
+  number is asking about the person, not about the last 90 days.
+
+### Verification
+
+**67 checks against a real Postgres** through the shipped route bodies
+(migration 268 applied three times to a populated pre-268 table and matching the
+lifespan mirror, which is read out of `main.py` rather than retyped; the poll's
+cheap answer; the duplicate check-in; the stale re-order; the rotate turn guard;
+the early-expire refusal; server-side auto-roll and the second device's expiry
+rotating nobody; a mid-turn duration change not jumping the batter's clock; the
+guest split between the two CSVs; cross-club rejection on every read and write),
+**including 5 that race two genuine parallel database sessions** — twelve
+check-ins interleaved with none lost and the version landing on exactly 12.
+
+**31 checks driven in Chromium** against the real router and a real Postgres,
+with TWO browser contexts on one session: check-ins crossing between them
+untouched, both clocks agreeing within two seconds, pause on one stopping the
+other, a rotation moving the batters on both, a screen woken from a pocket
+catching up at once, both downloads' contents and filenames, the report's
+columns and All time, and the tally opening on the profile. No page errors, no
+overflow at 390px on any of the three screens.
+
 ## A club runs several medals, in both sports (migration 267, v9.33.0 / v9.34.0, Aug 2026)
 
 `vote_settings` had `organisation_id` as its PRIMARY KEY, so a club held exactly
