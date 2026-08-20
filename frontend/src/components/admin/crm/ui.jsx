@@ -284,6 +284,16 @@ export const sortModuleKeys = (keys) => {
 // every other small vocab/label helper in this codebase.
 export const townStateLabel = (suburb, state) => [suburb, state].filter(Boolean).join(', ') || null
 
+// The colour that line is drawn in on a card: --pb-faintest lifted about 20%
+// in brightness. Expressed as a mix toward --pb-text rather than a flat
+// filter:brightness(), because the faint scale is INVERTED between themes —
+// on dark, faintest is the darkest grey (#3a3f50 -> #464b5b here, roughly
+// x1.2 per channel); on light it is the PALEST (#b6bac6 -> #abafbb), so the
+// same 7% resolves to a slightly darker grey. Either way it is one notch
+// more legible, where multiplying the channels would have got dark right and
+// light exactly backwards.
+export const TOWN_STATE_COLOR = 'color-mix(in srgb, var(--pb-faintest) 93%, var(--pb-text))'
+
 // Every association a club plays in — Club Directory's own PlayHQ crawl,
 // marketing_clubs.associations (`[{id, name, competition}, …]`, set via
 // _deal_dict server-side). NULL = not yet crawled, [] = crawled, none found —

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useToast } from '../../../contexts/ToastContext'
-import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS, townStateLabel, associationNames } from './ui'
+import { money, Pill, DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_LABELS, townStateLabel, associationNames, TOWN_STATE_COLOR } from './ui'
 import { CalendarIcon, eventSummaryText } from './EventForm'
 import { moduleBrand } from '../../../lib/moduleBrand'
 
@@ -244,7 +244,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                   )}
                   <div className="font-medium text-[13px] truncate mb-1">{deal.title}</div>
                   {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state) && (
-                    <div className="text-[10.5px] text-pb-faintest -mt-0.5 mb-1">
+                    <div className="text-[10.5px] -mt-0.5 mb-1" style={{ color: TOWN_STATE_COLOR }}>
                       {townStateLabel(deal.marketing_club_suburb, deal.marketing_club_state)}
                     </div>
                   )}
@@ -313,6 +313,16 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                       title={deal.next_event.stale ? 'Past event (no upcoming one scheduled)' : 'Next scheduled event'}>
                       <CalendarIcon />
                       <span className="truncate">{eventSummaryText(deal.next_event)}</span>
+                    </div>
+                  )}
+                  {/* The rep who EARNED this deal — the first to log a real
+                      call outcome on it or email one of its contacts. Not the
+                      owner: a reassignment never moves this, which is the
+                      whole point of showing it. Last line on the card. */}
+                  {deal.commission_rep_name && (
+                    <div className="text-[10.5px] truncate mt-1.5" style={{ color: TOWN_STATE_COLOR }}
+                      title="First sales rep to contact this club — commission attribution, which reassigning the deal never changes">
+                      Contacted by {deal.commission_rep_name}
                     </div>
                   )}
                   {deal.status === 'won' && <Pill tone="green">{t.won}</Pill>}

@@ -721,6 +721,15 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
     except Exception:  # noqa: BLE001
         logger.exception("super_list_deals: next_events_by_deal failed")
         next_event_by_deal = {}
+    try:
+        # The rep who EARNED each deal, by name — the card's own bottom line.
+        # One query for the whole board, same batched shape as every other
+        # enrichment above.
+        from app.services import sales_workspace as sw
+        commission_names = await sw.commission_rep_names(db, deals)
+    except Exception:  # noqa: BLE001
+        logger.exception("super_list_deals: commission_rep_names failed")
+        commission_names = {}
 
     out = []
     for d in deals:
@@ -755,6 +764,7 @@ async def super_list_deals(status: Optional[str] = None, include_archived: bool 
         # Soonest upcoming (else most recent) scheduled event — the calendar
         # summary line at the bottom of the Kanban card.
         row["next_event"] = next_event_by_deal.get(d.id)
+        row["commission_rep_name"] = commission_names.get(d.commission_rep_user_id)
         out.append(row)
     return {"deals": out}
 

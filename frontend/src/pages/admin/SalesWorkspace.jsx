@@ -5,7 +5,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER } from '../../components/admin/crm/ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER, TOWN_STATE_COLOR } from '../../components/admin/crm/ui'
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
@@ -1465,7 +1465,7 @@ export default function SalesWorkspace() {
                     <PriorityBadge score={c.priority_score} />
                   </div>
                   {townStateLabel(c.marketing_club_suburb, c.marketing_club_state) && (
-                    <div className="text-[10.5px] text-pb-faintest mt-0.5">
+                    <div className="text-[10.5px] mt-0.5" style={{ color: TOWN_STATE_COLOR }}>
                       {townStateLabel(c.marketing_club_suburb, c.marketing_club_state)}
                     </div>
                   )}
@@ -1537,7 +1537,7 @@ export default function SalesWorkspace() {
                             picker, not only in the confirm that follows. */}
                         {drawer.deal.commission_rep_name && (
                           <span className="block text-[10.5px] text-pb-faintest mt-1 text-right">
-                            Earned by {drawer.deal.commission_rep_name}
+                            Contacted by {drawer.deal.commission_rep_name}
                           </span>
                         )}
                       </div>

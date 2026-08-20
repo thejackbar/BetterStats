@@ -369,7 +369,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                 </Select>
                 {deal.commission_rep_user_id && (
                   <span className="block text-[10.5px] text-pb-faintest mt-1">
-                    Earned by {ownerOptions.find(o => (o.ids || [o.id]).includes(deal.commission_rep_user_id))?.name
+                    Contacted by {ownerOptions.find(o => (o.ids || [o.id]).includes(deal.commission_rep_user_id))?.name
                       || 'a sales rep'}
                   </span>
                 )}
