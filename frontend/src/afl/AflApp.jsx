@@ -13,6 +13,8 @@ import Match from './pages/Match'
 import Records from './pages/Records'
 import Leaderboard from './pages/Leaderboard'
 import Compare from './pages/Compare'
+import Premierships from './pages/Premierships'
+import HonourBoard from './pages/HonourBoard'
 import AflLogin from './pages/AflLogin'
 import AflPublicVoting from './pages/AflPublicVoting'
 import TeamLists from './pages/TeamLists'
@@ -24,6 +26,7 @@ import AflAdminImport from './pages/admin/AflAdminImport'
 import AflAdminResultsImport from './pages/admin/AflAdminResultsImport'
 import AflAdminAwardsImport from './pages/admin/AflAdminAwardsImport'
 import AflAdminSeasons from './pages/admin/AflAdminSeasons'
+import AflAdminManualEntries from './pages/admin/AflAdminManualEntries'
 import AflAdminMergePlayers from './pages/admin/AflAdminMergePlayers'
 import AflAdminMergeGrades from './pages/admin/AflAdminMergeGrades'
 import AflAdminAwardDefinitions from './pages/admin/AflAdminAwardDefinitions'
@@ -62,6 +65,7 @@ export default function AflApp() {
                   <Route path="import-results" element={<AflAdminResultsImport />} />
                   <Route path="import-awards" element={<AflAdminAwardsImport />} />
                   <Route path="seasons" element={<AflAdminSeasons />} />
+                  <Route path="manual-entries" element={<AflAdminManualEntries />} />
                   <Route path="merge" element={<AflAdminMergePlayers />} />
                   <Route path="merge-grades" element={<AflAdminMergeGrades />} />
                   <Route path="award-definitions" element={<AflAdminAwardDefinitions />} />
@@ -82,6 +86,8 @@ export default function AflApp() {
                   <Route path="team-lists" element={<TeamLists />} />
                   <Route path="records" element={<Records />} />
                   <Route path="leaderboard" element={<Leaderboard />} />
+                  <Route path="premierships" element={<Premierships />} />
+                  <Route path="honour-board" element={<HonourBoard />} />
                   <Route path="compare" element={<Compare />} />
                 </Route>
                 <Route path="/" element={<Navigate to="/login" replace />} />

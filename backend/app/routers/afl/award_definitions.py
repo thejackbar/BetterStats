@@ -48,9 +48,32 @@ def _build_starter_template():
     for a in ['100 Goals', '250 Goals', '500 Goals', '1000 Goals']:
         r.append(('Milestone', 'Goals', a))
 
+    # Office Bearer, in the same five groups cricket uses (Executive
+    # Committee / General Committee / Captains / Coaches / Other Roles)
+    # rather than the one flat "Committee" list this started with. The groups
+    # are what the Honour Board reads: a club with every seat under one
+    # heading gets one undifferentiated column, where a President board and a
+    # Coaches board are what somebody is actually looking for. Roles are
+    # football's own — a football club has a Runner and a Property Steward and
+    # no Curator. **A club that already has definitions keeps them** — seeding
+    # is a no-op once any exist, so this only changes what a NEW club starts
+    # with, and the extra rows are a starting point a club edits.
     for a in ['President', 'Vice President', 'Secretary', 'Treasurer',
-              'Committee Member', 'Head Coach', 'Captain']:
-        r.append(('Office Bearer', 'Committee', a))
+              'Football Operations Manager', 'Registrar']:
+        r.append(('Office Bearer', 'Executive Committee', a))
+    for a in ['Committee Member', 'Junior Committee', 'Womens Committee']:
+        r.append(('Office Bearer', 'General Committee', a))
+    for a in ['Senior Captain', 'Reserves Captain', 'Under 19s Captain',
+              "Women's Captain", 'Vice Captain']:
+        r.append(('Office Bearer', 'Captains', a))
+    for a in ['Senior Coach', 'Club Coach', 'Assistant Coach', 'Reserves Coach',
+              'Under 19s Coach', "Women's Coach", 'Development Coach']:
+        r.append(('Office Bearer', 'Coaches', a))
+    for a in ['Chairman of Selectors', 'Team Manager', 'Runner', 'Trainer',
+              'Head Trainer', 'Property Steward', 'Ground Manager',
+              'Sponsorship Manager', 'Social Media Manager',
+              'Canteen Manager', 'Bar Manager', 'League Delegate']:
+        r.append(('Office Bearer', 'Other Roles', a))
 
     r.append(('Hall of Fame', 'Club', 'Hall of Fame'))
     r.append(('Life Membership', 'Club', 'Life Membership'))

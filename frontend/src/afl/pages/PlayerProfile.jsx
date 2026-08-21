@@ -91,12 +91,45 @@ const STAT_TABS = [
   { key: 'bogs', label: 'BOG' },
 ]
 
-function SeasonGradeTable({ seasonRows, gradeRows }) {
+// The same two boards the Leaderboard offers, per player. Both carry the
+// club's own opt-out (Settings → Public leaderboard, whose copy is explicitly
+// about a club that "would rather keep vote counts private") — and a vote
+// count appears nowhere else on this page, so honouring the switch here is
+// what makes it mean anything.
+//
+// Shown on whether the CLUB records that count (vote_boards, off the player
+// payload), not on whether this player has any. A player with none reads as
+// zeros, which is the true answer; hiding the tab for them would mean one
+// team-mate's page carries the button and the next one doesn't.
+const VOTE_TABS = [
+  { key: 'club_bf_votes', board: 'club', label: 'Club B&F votes', short: 'Club B&F', flag: 'public_show_club_bf_leaderboard' },
+  { key: 'comp_bf_votes', board: 'comp', label: 'Competition B&F votes', short: 'Comp B&F', flag: 'public_show_comp_bf_leaderboard' },
+]
+
+function SeasonGradeTable({ seasonRows, gradeRows, club, voteBoards }) {
   const { sorted, sortKey, sortDir, request } = useSortable(seasonRows, 'year', 'desc')
   // One measure at a time. Three columns per grade would be unreadable across
   // six teams on a phone, and a club reads games, goals and BOG separately
   // anyway.
   const [stat, setStat] = useState('games')
+
+  // A payload from before vote_boards existed falls back to this player's own
+  // rows, so a stale cached response still shows a tally it does carry.
+  const voteTabs = useMemo(() => VOTE_TABS.filter(t =>
+    club?.[t.flag] !== false
+    && (voteBoards
+      ? voteBoards[t.board]
+      : [...(seasonRows || []), ...(gradeRows || [])].some(r => (r[t.key] || 0) > 0))
+  ), [club, voteBoards, seasonRows, gradeRows])
+  const tabs = [...STAT_TABS, ...voteTabs]
+
+  // A player with no votes, or a club that has since switched a vote board
+  // off, must not be left looking at a tab that no longer exists.
+  useEffect(() => {
+    if (!STAT_TABS.some(t => t.key === stat) && !voteTabs.some(t => t.key === stat)) {
+      setStat('games')
+    }
+  }, [voteTabs, stat])
 
   // One column per grade this player actually turned out in, in the CLUB's own
   // reading order (grade_order, set on the admin Grades screen). Sorted
@@ -141,14 +174,14 @@ function SeasonGradeTable({ seasonRows, gradeRows }) {
 
   // With no per-grade rows at all — a career that came in as season totals
   // from an Import Stats upload — there is nothing to spread across columns,
-  // so the table falls back to the three plain stat columns.
+  // so the table falls back to a plain column per stat.
   const asGrid = columns.length > 0
 
   return (
     <div className="space-y-2">
       {asGrid && (
         <div className="flex flex-wrap gap-1">
-          {STAT_TABS.map(t => (
+          {tabs.map(t => (
             <button
               key={t.key} onClick={() => setStat(t.key)}
               className={`px-2.5 py-1 rounded text-xs font-medium ${
@@ -182,6 +215,12 @@ function SeasonGradeTable({ seasonRows, gradeRows }) {
                   <SortTh label="GP" sKey="games" cur={sortKey} dir={sortDir} onSort={request} />
                   <SortTh label="Goals" sKey="goals" cur={sortKey} dir={sortDir} onSort={request} />
                   <SortTh label="BOG" sKey="bogs" cur={sortKey} dir={sortDir} onSort={request} />
+                  {/* With no grades to spread across columns there are no
+                      tabs either, so the vote counts are plain columns here
+                      rather than being unreachable. */}
+                  {voteTabs.map(t => (
+                    <SortTh key={t.key} label={t.short} sKey={t.key} cur={sortKey} dir={sortDir} onSort={request} />
+                  ))}
                 </>
               )}
             </tr>
@@ -217,13 +256,16 @@ function SeasonGradeTable({ seasonRows, gradeRows }) {
                     <td className="px-3 py-2.5 text-right pb-num">{s.games}</td>
                     <td className="px-3 py-2.5 text-right pb-num font-semibold" style={{ color: 'var(--pb-accent)' }}>{s.goals}</td>
                     <td className="px-3 py-2.5 text-right pb-num">{s.bogs}</td>
+                    {voteTabs.map(t => (
+                      <td key={t.key} className="px-3 py-2.5 text-right pb-num">{s[t.key] || 0}</td>
+                    ))}
                   </>
                 )}
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={asGrid ? columns.length + 2 : 4} className="px-3 py-4 text-center text-pb-faint text-sm">
+                <td colSpan={asGrid ? columns.length + 2 : 4 + voteTabs.length} className="px-3 py-4 text-center text-pb-faint text-sm">
                   No seasons recorded yet.
                 </td>
               </tr>
@@ -383,7 +425,8 @@ export default function PlayerProfile() {
         <SectionTitle right={<span className="hidden sm:inline text-[10px] text-pb-faintest font-mono normal-case tracking-normal">One column per grade, with each season's total at the end</span>}>
           Season by season
         </SectionTitle>
-        <SeasonGradeTable seasonRows={seasonRows} gradeRows={gradeRows} />
+        <SeasonGradeTable seasonRows={seasonRows} gradeRows={gradeRows} club={club}
+                          voteBoards={data.vote_boards} />
       </div>
 
       <div>

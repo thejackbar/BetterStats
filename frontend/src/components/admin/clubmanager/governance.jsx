@@ -196,6 +196,22 @@ export function AttachedDocuments({ entityType, entityId }) {
 
 /* ── One action, opened for editing ─────────────────────────────────────── */
 
+// An editor is a dialog when it is opened over a list, and plain content when
+// it IS the pane — the Strategic Plans tree opens an action in the detail pane
+// beside it, where an overlay would be a dialog over nothing.
+function EditorShell({ inline, onClose, busy, children }) {
+  if (inline) return <div className="space-y-4">{children}</div>
+  return (
+    <div onClick={() => { if (!busy) onClose?.() }}
+      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
+      style={{ background: 'rgba(0,0,0,0.55)' }}>
+      <div onClick={e => e.stopPropagation()} className="pb-card w-full max-w-3xl p-5 space-y-4">
+        {children}
+      </div>
+    </div>
+  )
+}
+
 // The vocabulary an action is filed under, in ONE place. The board, the list,
 // the timeline and this editor all read these, so a status added here shows up
 // everywhere rather than in whichever screen was edited last.
@@ -255,7 +271,7 @@ function ObjectiveLink({ objective, noun = 'ACTION' }) {
 // grid of dates and money in a 200px-wide column, which is why it read as a
 // jumble. Opened from the list, the board and the timeline alike, so there is
 // one place an action is edited however you reached it.
-export function ActionEditor({ task, allTasks, objectives, members, onClose, onSaved, onDeleted }) {
+export function ActionEditor({ task, allTasks, objectives, members, inline, onClose, onSaved, onDeleted }) {
   const toast = useToast()
   const [form, setForm] = useState({
     title: task.title || '',
@@ -323,20 +339,17 @@ export function ActionEditor({ task, allTasks, objectives, members, onClose, onS
   const blockers = candidates.filter(t => deps.includes(t.id) && t.status !== 'done')
 
   return (
-    <div onClick={() => { if (!busy) onClose?.() }}
-      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
-      style={{ background: 'rgba(0,0,0,0.55)' }}>
-      <div onClick={e => e.stopPropagation()}
-        className="pb-card w-full max-w-3xl p-5 space-y-4">
-
+    <EditorShell inline={inline} onClose={onClose} busy={busy}>
         <div className="flex items-start gap-3">
           <label className="flex-1 min-w-0 block">
             <span className={`${cap} block mb-1`}>ACTION</span>
             <input className={`${inp} !text-[15px] !py-2`} value={form.title}
               onChange={e => set('title', e.target.value)} placeholder="What has to happen" />
           </label>
-          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
-            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+          {!inline && (
+            <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+              className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+          )}
         </div>
 
         <div>
@@ -455,18 +468,19 @@ export function ActionEditor({ task, allTasks, objectives, members, onClose, onS
             style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
             {busy ? 'SAVING…' : 'SAVE'}
           </button>
-          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
-            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
-            Cancel
-          </button>
+          {!inline && (
+            <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+              className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+              Cancel
+            </button>
+          )}
           <button onClick={remove} disabled={busy}
             className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
             style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
             Delete action
           </button>
         </div>
-      </div>
-    </div>
+    </EditorShell>
   )
 }
 
@@ -482,7 +496,7 @@ const outcomeLabel = s => s.charAt(0).toUpperCase() + s.slice(1)
 // finding the meeting it was moved at. A motion belongs to its meeting, so the
 // meeting's id rides along with the row and every write goes to that meeting's
 // own endpoint.
-export function MotionEditor({ meetingId, motion, members, objectives, onClose, onSaved, onDeleted }) {
+export function MotionEditor({ meetingId, motion, members, objectives, inline, onClose, onSaved, onDeleted }) {
   const toast = useToast()
   const [form, setForm] = useState({
     description: motion.description || '',
@@ -536,11 +550,7 @@ export function MotionEditor({ meetingId, motion, members, objectives, onClose, 
   const objective = (objectives || []).find(o => o.id === form.objective_id) || null
 
   return (
-    <div onClick={() => { if (!busy) onClose?.() }}
-      className="fixed inset-0 z-[120] flex items-start justify-center overflow-y-auto p-4 sm:p-8"
-      style={{ background: 'rgba(0,0,0,0.55)' }}>
-      <div onClick={e => e.stopPropagation()} className="pb-card w-full max-w-3xl p-5 space-y-4">
-
+    <EditorShell inline={inline} onClose={onClose} busy={busy}>
         <div className="flex items-start gap-3">
           <label className="flex-1 min-w-0 block">
             <span className={`${cap} block mb-1`}>MOTION</span>
@@ -548,8 +558,10 @@ export function MotionEditor({ meetingId, motion, members, objectives, onClose, 
               onChange={e => set('description', e.target.value)}
               placeholder="That the committee…" />
           </label>
-          <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
-            className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+          {!inline && (
+            <button onClick={() => { if (!busy) onClose?.() }} aria-label="Close"
+              className="text-pb-faint hover:text-pb-text text-[15px] leading-none px-1 pt-6">✕</button>
+          )}
         </div>
 
         <div>
@@ -617,18 +629,19 @@ export function MotionEditor({ meetingId, motion, members, objectives, onClose, 
             style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
             {busy ? 'SAVING…' : 'SAVE'}
           </button>
-          <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
-            className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
-            Cancel
-          </button>
+          {!inline && (
+            <button onClick={() => { if (!busy) onClose?.() }} disabled={busy}
+              className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+              Cancel
+            </button>
+          )}
           <button onClick={remove} disabled={busy}
             className="px-3 py-2 rounded font-mono text-[10px] border text-pb-red hover:text-pb-text ml-auto"
             style={{ borderColor: 'color-mix(in srgb, var(--pb-red) 40%, transparent)' }}>
             Delete motion
           </button>
         </div>
-      </div>
-    </div>
+    </EditorShell>
   )
 }
 
@@ -876,16 +889,102 @@ export function useObjectives() {
 
 export { objectiveLabel, objectiveTiers }
 
-export function ObjectiveSelect({ objectives, value, onChange, className, label = 'OBJECTIVE' }) {
+// Picking the objective an action or a motion serves.
+//
+// This was a plain <select> of every objective the club holds, each option
+// reading "Plan › Theme › a whole sentence" — fifteen rows of the same plan
+// name, every title clipped at the width of the control. Reported as
+// overwhelming, and it was: the repetition was 80% of the text and the part
+// that tells them apart was the part being cut off.
+//
+// So the plan and the theme are said ONCE, as a heading over the objectives
+// filed under them, each objective's own title is given a full line to wrap
+// onto, and a search box narrows a long plan to the one being looked for. The
+// closed control shows the choice as the breadcrumb it is, which is also what
+// the card above the picker spells out in full.
+export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIVE' }) {
   const rows = objectives || []
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const chosen = rows.find(o => o.id === value) || null
+
+  // Plan › Theme, in the order the objectives arrive (which is the club's own
+  // sort order), so a heading never jumps around between renders.
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    const out = []
+    const byKey = {}
+    for (const o of rows) {
+      if (needle && !`${o.title} ${o.plan_name || ''} ${o.pillar_name || ''}`.toLowerCase().includes(needle)) continue
+      const key = `${o.plan_name || '~'}¦${o.pillar_name || '~'}`
+      if (!byKey[key]) { byKey[key] = { key, plan: o.plan_name, theme: o.pillar_name, rows: [] }; out.push(byKey[key]) }
+      byKey[key].rows.push(o)
+    }
+    return out
+  }, [rows, q])
+
+  const pick = (id) => { onChange(id || null); setOpen(false); setQ('') }
+
   return (
-    <label className="block">
+    <div className="block">
       {label && <span className={`${cap} block mb-1`}>{label}</span>}
-      <select className={className || inp} value={value || ''} onChange={e => onChange(e.target.value || null)}>
-        <option value="">— not on the plan —</option>
-        {rows.map(o => <option key={o.id} value={o.id}>{objectiveLabel(o)}</option>)}
-      </select>
-    </label>
+      <button type="button" onClick={() => setOpen(v => !v)}
+        aria-expanded={open} aria-haspopup="listbox"
+        className={`${inp} flex items-start gap-2 text-left`}>
+        <span className="flex-1 min-w-0">
+          {chosen ? (
+            <>
+              {(chosen.plan_name || chosen.pillar_name) && (
+                <span className={`${cap} block truncate`}>
+                  {[chosen.plan_name, chosen.pillar_name].filter(Boolean).join(' › ')}
+                </span>
+              )}
+              <span className="block text-pb-text leading-snug">{chosen.title}</span>
+            </>
+          ) : (
+            <span className="text-pb-faint">— not on the plan —</span>
+          )}
+        </span>
+        <span className="text-pb-faint text-[11px] leading-none pt-1">{open ? '▴' : '▾'}</span>
+      </button>
+
+      {open && (
+        <div className="mt-1 rounded border pb-hairline bg-pb-surface2 overflow-hidden">
+          {rows.length > 6 && (
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)}
+              placeholder="Search objectives…"
+              className="w-full bg-transparent border-b pb-hairline px-2.5 py-1.5 text-[12.5px] text-pb-text focus:outline-none" />
+          )}
+          <div className="max-h-64 overflow-y-auto pb-scroll" role="listbox">
+            <button type="button" onClick={() => pick('')}
+              className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface ${value ? 'text-pb-faint' : 'text-pb-text'}`}>
+              — not on the plan —
+            </button>
+            {groups.map(g => (
+              <div key={g.key}>
+                {/* The plan and the theme, once, over everything filed under
+                    them — instead of on the front of every single row. */}
+                <div className={`${cap} px-2.5 py-1 bg-pb-surface/70 border-y pb-hairline sticky top-0`}>
+                  {[g.plan || 'NOT ON A PLAN', g.theme || 'NO THEME'].join(' › ').toUpperCase()}
+                </div>
+                {g.rows.map(o => (
+                  <button key={o.id} type="button" onClick={() => pick(o.id)} role="option"
+                    aria-selected={o.id === value}
+                    className={`w-full text-left px-2.5 py-1.5 text-[12.5px] leading-snug hover:bg-pb-surface ${o.id === value ? 'text-pb-text' : 'text-pb-dim'}`}
+                    style={o.id === value ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
+                    {o.id === value && <span style={{ color: 'var(--pb-accent-ink)' }}>✓ </span>}
+                    {o.title}
+                  </button>
+                ))}
+              </div>
+            ))}
+            {groups.length === 0 && (
+              <div className="px-2.5 py-3 font-mono text-[10px] text-pb-faintest">Nothing matches that.</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -1295,6 +1394,731 @@ function ObjectiveCard({ objective, plans, pillars, positions, members, memberNa
   )
 }
 
+/* ── Strategic Plans: the tree, and one thing open beside it ────────────── */
+
+// The club's plan is four levels deep — plan, theme, objective, and the actions
+// and motions doing the work — and reading it as one long scrolling page meant
+// scrolling past everything to reach anything. So it is the same two panes the
+// meetings list uses: the whole plan as a tree you can fold down the left, and
+// whatever is selected open on the right.
+//
+// A THEME IS CLUB-SCOPED, not plan-scoped (migration 232) — the same theme
+// groups objectives in several plans at once. It is drawn under a plan here
+// because that is how a committee reads its plan, but it belongs to the club,
+// which is what makes deleting one reach further than this plan and why the
+// confirm counts across all of them.
+
+const TREE_ROW = 'w-full text-left flex items-start gap-1.5 rounded px-1.5 py-1 hover:bg-pb-surface2 select-none'
+
+function Twisty({ open, hidden }) {
+  if (hidden) return <span className="w-3.5 shrink-0" />
+  return (
+    <span className="w-3.5 shrink-0 text-[11px] leading-[18px] text-pb-faint hover:text-pb-text">
+      {open ? '▾' : '▸'}
+    </span>
+  )
+}
+
+// A row's ✕. Never on an action or a motion: those are deleted from the thing
+// itself, where the confirm can say what goes with them.
+function DelDot({ onClick, title }) {
+  return (
+    <button onClick={e => { e.stopPropagation(); onClick() }} title={title} aria-label={title}
+      className="shrink-0 font-mono text-[9px] text-pb-faintest hover:text-pb-red px-1 leading-5">✕</button>
+  )
+}
+
+function TreeLabel({ kind, children, active, dim }) {
+  return (
+    <span className="min-w-0 flex-1">
+      <span className={`${cap} block leading-3`}>{kind}</span>
+      <span className={`block text-[12.5px] leading-snug ${active ? 'text-pb-text font-semibold' : dim ? 'text-pb-faint' : 'text-pb-dim'}`}>
+        {children}
+      </span>
+    </span>
+  )
+}
+
+// Actions and motions under one objective, either kept apart or run together in
+// the order they were raised. A committee reads it both ways: "what are we
+// doing about this" and "what has happened on this, in order".
+function workRows(objective, mode) {
+  const actions = (objective.action_list || []).map(a => ({ ...a, _kind: 'action', _label: a.title }))
+  const motions = (objective.motion_list || []).map(m => ({ ...m, _kind: 'motion', _label: m.description }))
+  if (mode !== 'date') return [...actions, ...motions]
+  // The plan report carries the meeting each was raised at, which is the only
+  // date the club actually keeps for both. An action raised outside a meeting
+  // falls back to its own dates so it still lands somewhere sensible.
+  const at = r => r.meeting_date || r.start_date || r.due_date || ''
+  return [...actions, ...motions].sort((x, y) => String(at(x)).localeCompare(String(at(y))))
+}
+
+function StatTile({ value, label, tone }) {
+  return (
+    <div>
+      <div className="text-[22px] font-bold leading-none" style={{ color: tone || 'var(--pb-accent-ink)' }}>{value}</div>
+      <div className={`${cap} mt-1`}>{label}</div>
+    </div>
+  )
+}
+
+// A theme is a name and, if the club wants one, a line about what it means.
+// It used to be renamed through window.prompt, which is the one control on this
+// screen that cannot show a description or be cancelled cleanly.
+function ThemeForm({ pillar, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    name: pillar?.name || '',
+    description: pillar?.description || '',
+  })
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <div className={cap}>{pillar ? 'EDIT THEME' : 'NEW THEME'}</div>
+      <label className="block">
+        <span className={`${cap} block mb-1`}>NAME *</span>
+        <input autoFocus className={inp} value={form.name} placeholder="e.g. Community & Club Culture"
+          onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+      </label>
+      <label className="block">
+        <span className={`${cap} block mb-1`}>DESCRIPTION</span>
+        <textarea rows={2} className={inp} value={form.description}
+          placeholder="What this theme covers, in a line."
+          onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+      </label>
+      <div className="flex items-center gap-2">
+        <button disabled={busy || !form.name.trim()}
+          onClick={async () => { setBusy(true); try { await onSave({ name: form.name.trim(), description: form.description || null }) } finally { setBusy(false) } }}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+          {busy ? 'SAVING…' : 'SAVE'}
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function StrategicPlansSection({ report, pillars, positions, members, memberName, onChanged }) {
+  const toast = useToast()
+  const [openIds, setOpenIds] = useState(null)     // null until the first plan seeds it
+  const [sel, setSel] = useState(null)
+  const [workMode, setWorkMode] = useState('grouped')
+  const [editingPlan, setEditingPlan] = useState(null)
+  const [addingPlan, setAddingPlan] = useState(false)
+  const [editingObjective, setEditingObjective] = useState(null)
+  const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)
+  const [editingTheme, setEditingTheme] = useState(null)
+  const [addingTheme, setAddingTheme] = useState(false)
+  const [allTasks, setAllTasks] = useState([])
+  // The row being dragged. `level` is what makes a drop legal: a plan only
+  // lands among plans, a theme among themes, an objective among the objectives
+  // of its OWN branch — dropping it under another theme would be a re-parent,
+  // which is a different act from putting it in order.
+  const [drag, setDrag] = useState(null)
+  const [dropOn, setDropOn] = useState(null)
+
+  // The waits-on list in the action editor should offer every action the club
+  // holds, not only the ones already on a plan.
+  useEffect(() => {
+    api.committeeListTasks().then(d => setAllTasks(d.tasks || [])).catch(() => {})
+  }, [])
+
+  const plans = report.plans || []
+  const unassigned = report.unassigned || { objective_list: [] }
+  // "Not on a plan" is a group in the tree like any other, so an objective that
+  // has lost its plan is still reachable rather than invisible.
+  const groups = [...plans, ...((unassigned.objective_list || []).length
+    ? [{ id: '', name: 'Not on a plan', ...unassigned }] : [])]
+
+  // Open the first plan and select it, once, when the tree first has one.
+  useEffect(() => {
+    if (openIds !== null || groups.length === 0) return
+    setOpenIds(new Set([`plan:${groups[0].id}`]))
+    setSel({ kind: 'plan', id: groups[0].id })
+  }, [groups, openIds])
+
+  const isOpen = k => !!openIds?.has(k)
+  const toggle = k => setOpenIds(s => {
+    const next = new Set(s || [])
+    next.has(k) ? next.delete(k) : next.add(k)
+    return next
+  })
+  const select = (kind, id, extra = {}) => setSel({ kind, id, ...extra })
+  const isSel = (kind, id) => sel?.kind === kind && sel?.id === id
+
+  // Themes present in one plan, in the club's own pillar order, anything
+  // untagged last. A theme with no objective in this plan is not drawn here —
+  // it belongs to the club, not to this plan.
+  const themesIn = (plan) => {
+    const objs = plan.objective_list || []
+    const out = pillars
+      .map(p => ({ id: p.id, name: p.name, rows: objs.filter(o => o.pillar_id === p.id) }))
+      .filter(g => g.rows.length)
+    const loose = objs.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
+    if (loose.length) out.push({ id: '', name: 'No theme', rows: loose })
+    return out
+  }
+
+  const allObjectives = groups.flatMap(g => g.objective_list || [])
+  const objectiveById = id => allObjectives.find(o => o.id === id)
+  const workById = (kind, id) => {
+    for (const o of allObjectives) {
+      const hit = (kind === 'action' ? o.action_list : o.motion_list)?.find(r => r.id === id)
+      if (hit) return { row: hit, objective: o }
+    }
+    return null
+  }
+
+  /* ── deleting, with the cascade spelled out before it happens ─────────── */
+
+  const tally = (objs) => {
+    const a = objs.reduce((n, o) => n + (o.action_list || []).length, 0)
+    const m = objs.reduce((n, o) => n + (o.motion_list || []).length, 0)
+    return { a, m }
+  }
+  const keptLine = ({ a, m }) => {
+    if (!a && !m) return ''
+    const bits = []
+    if (a) bits.push(`${a} action${a === 1 ? '' : 's'}`)
+    if (m) bits.push(`${m} motion${m === 1 ? '' : 's'}`)
+    return `\n\n${bits.join(' and ')} serving ${a + m === 1 ? 'it' : 'them'} will be KEPT — they simply stop being linked to an objective.`
+  }
+
+  async function removePlan(plan) {
+    const objs = plan.objective_list || []
+    const msg = `Delete “${plan.name}”?`
+      + (objs.length
+        ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it.` + keptLine(tally(objs))
+        : '')
+      + `\n\nThe club's themes are kept — a theme is shared across plans.\n\nThis cannot be undone.`
+    if (!window.confirm(msg)) return
+    try {
+      await api.committeeDeletePlan(plan.id, true)
+      setSel(null)
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function removeTheme(pillarId, name) {
+    // Club-scoped, so this counts every plan's objectives, not this plan's.
+    const objs = allObjectives.filter(o => o.pillar_id === pillarId)
+    const plansHit = new Set(objs.map(o => o.plan_name).filter(Boolean))
+    const msg = `Delete the theme “${name}”?`
+      + (objs.length
+        ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it`
+          + (plansHit.size > 1 ? `, across ${plansHit.size} plans` : '') + '.' + keptLine(tally(objs))
+        : '')
+      + `\n\nThis cannot be undone.`
+    if (!window.confirm(msg)) return
+    try {
+      await api.committeeDeletePillar(pillarId, true)
+      setSel(null)
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function removeObjective(o) {
+    const t = tally([o])
+    const msg = `Delete “${o.title}”?` + keptLine(t) + `\n\nThis cannot be undone.`
+    if (!window.confirm(msg)) return
+    try {
+      await api.committeeDeleteObjective(o.id)
+      setSel(null)
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  async function savePlan(id, data) {
+    try { await api.committeeUpdatePlan(id, data); toast.success('Plan saved'); setEditingPlan(null); onChanged() }
+    catch (e) { toast.error(e.message) }
+  }
+  async function createPlan(data) {
+    try {
+      const made = await api.committeeCreatePlan(data)
+      toast.success('Plan created')
+      setAddingPlan(false)
+      if (made?.id) {
+        await spliceAfter(api.committeeReorderPlans, plans.map(p => p.id),
+          sel?.kind === 'plan' ? sel.id : null, made.id)
+        // Open what was just written, rather than leaving the pane on whatever
+        // happened to be selected before.
+        setSel({ kind: 'plan', id: made.id })
+        setOpenIds(o => new Set([...(o || []), `plan:${made.id}`]))
+      }
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+  async function saveObjective(id, data) {
+    try {
+      if (id) await api.committeeUpdateObjective(id, data)
+      else {
+        const made = await api.committeeCreateObjective(data)
+        if (made?.id) {
+          await spliceAfter(api.committeeReorderObjectives, allObjectives.map(o => o.id),
+            sel?.kind === 'objective' ? sel.id : null, made.id)
+          setSel({ kind: 'objective', id: made.id })
+        }
+      }
+      toast.success(id ? 'Objective saved' : 'Objective added')
+      setEditingObjective(null); setAddingObjectiveTo(null); onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+  async function saveTheme(id, data) {
+    try {
+      if (id) await api.committeeUpdatePillar(id, data)
+      else {
+        const made = await api.committeeCreatePillar(data)
+        // A new theme lands directly below the one that was selected, so it
+        // appears where the person was looking rather than at the bottom.
+        if (made?.id) {
+          await spliceAfter(api.committeeReorderPillars, pillars.map(x => x.id),
+            sel?.kind === 'theme' ? sel.id : null, made.id)
+          setSel({ kind: 'theme', id: made.id })
+        }
+      }
+      toast.success(id ? 'Theme saved' : 'Theme added')
+      setEditingTheme(null); setAddingTheme(false); onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  // Put `newId` straight after `afterId` in a level's order and persist it.
+  // Everything at that level is sent, since sort_order is club-wide.
+  async function spliceAfter(reorder, ids, afterId, newId) {
+    const rest = ids.filter(i => i !== newId)
+    const at = afterId ? rest.indexOf(afterId) : -1
+    const next = at >= 0 ? [...rest.slice(0, at + 1), newId, ...rest.slice(at + 1)] : [...rest, newId]
+    await reorder(next).catch(() => {})
+  }
+
+  // The tree's own order for each level, which is what gets persisted: a move
+  // inside one theme still sends every objective, since sort_order is club-wide
+  // and renumbering one group alone would interleave it with another's.
+  const planOrder = plans.map(p => p.id)
+  const pillarOrder = pillars.map(p => p.id)
+  const objectiveOrder = groups.flatMap(g => themesIn(g).flatMap(th => th.rows.map(o => o.id)))
+
+  const REORDER = {
+    plan: [() => planOrder, api.committeeReorderPlans],
+    theme: [() => pillarOrder, api.committeeReorderPillars],
+    objective: [() => objectiveOrder, api.committeeReorderObjectives],
+  }
+
+  async function moveWithin(level, fromId, toId) {
+    setDrag(null); setDropOn(null)
+    if (!fromId || fromId === toId) return
+    const [orderOf, reorder] = REORDER[level]
+    const rest = orderOf().filter(i => i !== fromId)
+    const at = rest.indexOf(toId)
+    if (at < 0) return
+    try {
+      await reorder([...rest.slice(0, at), fromId, ...rest.slice(at)])
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  // A row can only be dropped on a sibling: same level, same branch, and never
+  // on itself. Anything else does not preventDefault, so the cursor says no
+  // before the mouse is released rather than the drop silently doing nothing.
+  const dragProps = (level, id, branch) => ({
+    draggable: true,
+    onDragStart: e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDrag({ level, id, branch }) },
+    onDragEnd: () => { setDrag(null); setDropOn(null) },
+    onDragOver: e => {
+      if (!drag || drag.level !== level || drag.branch !== branch || drag.id === id) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      if (dropOn !== id) setDropOn(id)
+    },
+    onDragLeave: () => setDropOn(d => (d === id ? null : d)),
+    onDrop: e => {
+      if (!drag || drag.level !== level || drag.branch !== branch) return
+      e.preventDefault(); e.stopPropagation()
+      moveWithin(level, drag.id, id)
+    },
+  })
+  const dragStyle = (level, id) => ({
+    cursor: 'grab',
+    opacity: drag?.id === id && drag?.level === level ? 0.45 : 1,
+    boxShadow: dropOn === id && drag && drag.id !== id ? 'inset 0 2px 0 var(--pb-accent)' : undefined,
+  })
+
+  // Which level the rail's add button offers, and what pressing it opens.
+  const addLevel = sel?.kind === 'theme' ? 'theme'
+    : ['objective', 'action', 'motion'].includes(sel?.kind) ? 'objective'
+      : 'plan'
+  function startAdd() {
+    setEditingPlan(null); setEditingObjective(null); setEditingTheme(null)
+    setAddingPlan(false); setAddingTheme(false); setAddingObjectiveTo(null)
+    if (addLevel === 'plan') setAddingPlan(true)
+    else if (addLevel === 'theme') setAddingTheme(true)
+    else {
+      // Under the objective that is selected, so it lands in the same branch.
+      const near = sel?.kind === 'objective' ? objectiveById(sel.id)
+        : workById(sel.kind, sel.id)?.objective
+      setAddingObjectiveTo({ planId: near?.plan_id || '', pillarId: near?.pillar_id || null })
+    }
+  }
+
+  /* ── the tree ─────────────────────────────────────────────────────────── */
+
+  const tree = (
+    <div className="space-y-1">
+      {groups.map(plan => {
+        const pk = `plan:${plan.id}`
+        const themes = themesIn(plan)
+        return (
+          <div key={plan.id || '__none'}>
+            <div className={`${TREE_ROW} ${isSel('plan', plan.id) ? 'bg-pb-surface2' : ''}`}
+              {...(plan.id ? dragProps('plan', plan.id, 'plans') : {})}
+              title={plan.id ? 'Drag to reorder' : undefined}
+              style={{
+                ...(isSel('plan', plan.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                ...(plan.id ? dragStyle('plan', plan.id) : {}),
+              }}>
+              <button onClick={() => toggle(pk)} aria-label={isOpen(pk) ? 'Collapse' : 'Expand'}
+                className="shrink-0"><Twisty open={isOpen(pk)} hidden={themes.length === 0} /></button>
+              <button onClick={() => select('plan', plan.id)} className="min-w-0 flex-1 text-left">
+                <TreeLabel kind={plan.id ? 'PLAN' : ''} active={isSel('plan', plan.id)}>{plan.name}</TreeLabel>
+              </button>
+              {plan.id && <DelDot onClick={() => removePlan(plan)} title={`Delete ${plan.name}`} />}
+            </div>
+
+            {isOpen(pk) && themes.map(th => {
+              const tk = `theme:${plan.id}:${th.id}`
+              return (
+                <div key={tk} className="ml-3">
+                  <div className={`${TREE_ROW} ${isSel('theme', th.id) ? 'bg-pb-surface2' : ''}`}
+                    {...(th.id ? dragProps('theme', th.id, `themes:${plan.id}`) : {})}
+                    title={th.id ? 'Drag to reorder' : undefined}
+                    style={{
+                      ...(isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                      ...(th.id ? dragStyle('theme', th.id) : {}),
+                    }}>
+                    <button onClick={() => toggle(tk)} aria-label={isOpen(tk) ? 'Collapse' : 'Expand'}
+                      className="shrink-0"><Twisty open={isOpen(tk)} /></button>
+                    <button onClick={() => th.id && select('theme', th.id, { planId: plan.id })}
+                      className="min-w-0 flex-1 text-left" disabled={!th.id}>
+                      <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={!th.id}>{th.name}</TreeLabel>
+                    </button>
+                    {th.id && <DelDot onClick={() => removeTheme(th.id, th.name)} title={`Delete ${th.name}`} />}
+                  </div>
+
+                  {isOpen(tk) && th.rows.map(o => {
+                    const ok = `obj:${o.id}`
+                    const work = workRows(o, workMode)
+                    return (
+                      <div key={o.id} className="ml-3">
+                        <div className={`${TREE_ROW} ${isSel('objective', o.id) ? 'bg-pb-surface2' : ''}`}
+                          {...dragProps('objective', o.id, `objs:${plan.id}:${th.id}`)}
+                          title="Drag to reorder"
+                          style={{
+                            ...(isSel('objective', o.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                            ...dragStyle('objective', o.id),
+                          }}>
+                          <button onClick={() => toggle(ok)} aria-label={isOpen(ok) ? 'Collapse' : 'Expand'}
+                            className="shrink-0"><Twisty open={isOpen(ok)} hidden={work.length === 0} /></button>
+                          <button onClick={() => select('objective', o.id)} className="min-w-0 flex-1 text-left">
+                            <TreeLabel kind="OBJECTIVE" active={isSel('objective', o.id)}>{o.title}</TreeLabel>
+                          </button>
+                          <DelDot onClick={() => removeObjective(o)} title={`Delete ${o.title}`} />
+                        </div>
+                        {isOpen(ok) && (
+                          <div className="ml-3">
+                            {work.map(r => (
+                              <button key={`${r._kind}-${r.id}`} onClick={() => select(r._kind, r.id)}
+                                className={`${TREE_ROW} ${isSel(r._kind, r.id) ? 'bg-pb-surface2' : ''}`}
+                                style={isSel(r._kind, r.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
+                                <Twisty hidden />
+                                <TreeLabel kind={r._kind === 'action' ? 'ACTION' : 'MOTION'} active={isSel(r._kind, r.id)}>
+                                  {r._label}
+                                </TreeLabel>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        )
+      })}
+      {groups.length === 0 && (
+        <div className="text-pb-faint text-[13px] px-1.5 py-3 leading-relaxed">
+          No plans written down yet.
+        </div>
+      )}
+    </div>
+  )
+
+  /* ── the pane ─────────────────────────────────────────────────────────── */
+
+  let pane = <div className="text-pb-faint text-[13px]">Pick something on the left to open it.</div>
+
+  const adding = addingPlan || addingTheme || !!addingObjectiveTo
+  if (addingPlan) {
+    pane = <div className="max-w-3xl"><PlanForm onSave={createPlan} onCancel={() => setAddingPlan(false)} /></div>
+  } else if (addingTheme) {
+    pane = <div className="max-w-3xl"><ThemeForm onSave={d => saveTheme(null, d)} onCancel={() => setAddingTheme(false)} /></div>
+  } else if (addingObjectiveTo) {
+    pane = (
+      <div className="max-w-3xl">
+        <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+          planId={addingObjectiveTo.planId} pillarId={addingObjectiveTo.pillarId}
+          members={members} onSave={d => saveObjective(null, d)}
+          onCancel={() => setAddingObjectiveTo(null)} />
+      </div>
+    )
+  } else if (sel?.kind === 'plan') {
+    const plan = groups.find(g => g.id === sel.id)
+    if (plan && editingPlan === plan.id) {
+      pane = <PlanForm plan={plan} onSave={d => savePlan(plan.id, d)} onCancel={() => setEditingPlan(null)} />
+    } else if (plan) {
+      const objs = plan.objective_list || []
+      pane = (
+        <div className="space-y-5 max-w-3xl">
+          <div className="pb-card p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className={`${cap} mb-1`}>{plan.id ? 'STRATEGIC PLAN' : ''}</div>
+                <h2 className="text-pb-text text-[21px] font-bold leading-tight">{plan.name}</h2>
+                <div className={`${cap} mt-1`}>
+                  {[plan.start_year && plan.end_year ? `${plan.start_year}–${plan.end_year}` : (plan.start_year || null),
+                    `${objs.length} OBJECTIVE${objs.length === 1 ? '' : 'S'}`,
+                    plan.late_objectives ? `${plan.late_objectives} LATE` : null].filter(Boolean).join(' · ')}
+                </div>
+              </div>
+              {plan.id && (
+                <div className="flex gap-2 shrink-0">
+                  <button onClick={() => setEditingPlan(plan.id)}
+                    className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+                  <button onClick={() => removePlan(plan)}
+                    className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+              <StatTile value={`${plan.objectives_done || 0}/${objs.length}`} label="OBJECTIVES DONE" />
+              <StatTile value={`${plan.percent_complete || 0}%`} label="PROGRESS" />
+              <StatTile value={money(plan.budget || 0)} label="BUDGET" />
+              <StatTile value={money(plan.spent || 0)} label="SPENT"
+                tone={plan.over_budget ? 'var(--pb-red-ink)' : undefined} />
+            </div>
+            <div className="mt-4"><Bar percent={plan.percent_complete || 0} /></div>
+            <div className="mt-2 flex justify-end">
+              <span className={cap}>{plan.percent_spent ?? 0}% OF BUDGET SPENT</span>
+            </div>
+          </div>
+
+          {plan.description && (
+            <div className="pb-card p-4">
+              <div className={`${cap} mb-1.5`}>DESCRIPTION</div>
+              <div className="text-pb-dim text-[13px] leading-relaxed whitespace-pre-wrap">{plan.description}</div>
+            </div>
+          )}
+
+          {plan.id && (
+            <button onClick={() => setAddingObjectiveTo({ planId: plan.id, pillarId: null })}
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
+              style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
+          )}
+        </div>
+      )
+    }
+  }
+
+  if (!adding && sel?.kind === 'theme') {
+    const p = pillars.find(x => x.id === sel.id)
+    const objs = allObjectives.filter(o => o.pillar_id === sel.id)
+    const plansHit = [...new Set(objs.map(o => o.plan_name).filter(Boolean))]
+    const done = objs.filter(o => (o.percent_complete || 0) >= 100).length
+    const pct = objs.length ? Math.round(objs.reduce((n, o) => n + (o.percent_complete || 0), 0) / objs.length) : 0
+    if (p && editingTheme === p.id) {
+      pane = <div className="max-w-3xl"><ThemeForm pillar={p} onSave={d => saveTheme(p.id, d)}
+        onCancel={() => setEditingTheme(null)} /></div>
+    } else pane = p && (
+      <div className="space-y-5 max-w-3xl">
+        <div className="pb-card p-4 sm:p-5">
+          {/* No flex-wrap: the actions belong in the corner, and wrapping put
+              them under the meta line instead. */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className={`${cap} mb-1`}>THEME</div>
+              <h2 className="text-pb-text text-[21px] font-bold leading-tight">{p.name}</h2>
+              {/* Club-scoped, so this says where else it is used before anyone
+                  reaches for Delete. */}
+              <div className={`${cap} mt-1`}>
+                {plansHit.length > 1 ? `USED BY ${plansHit.length} PLANS` : (plansHit[0] || 'NOT USED BY A PLAN YET').toUpperCase()}
+              </div>
+            </div>
+            <div className="flex gap-2 shrink-0">
+              <button onClick={() => setEditingTheme(p.id)}
+                className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+              <button onClick={() => removeTheme(p.id, p.name)}
+                className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-5">
+            <StatTile value={`${done}/${objs.length}`} label="OBJECTIVES DONE" />
+            <StatTile value={`${pct}%`} label="PROGRESS" />
+            <StatTile value={String(tally(objs).a + tally(objs).m)} label="ACTIONS & MOTIONS" />
+          </div>
+          <div className="mt-4"><Bar percent={pct} /></div>
+        </div>
+        {p.description && (
+          <div className="pb-card p-4">
+            <div className={`${cap} mb-1.5`}>DESCRIPTION</div>
+            <div className="text-pb-dim text-[13px] leading-relaxed whitespace-pre-wrap">{p.description}</div>
+          </div>
+        )}
+        <div className="pb-card p-4">
+          <div className={`${cap} mb-2`}>OBJECTIVES UNDER THIS THEME</div>
+          {objs.length === 0 ? (
+            <div className="font-mono text-[10px] text-pb-faintest">Nothing filed under it yet.</div>
+          ) : (
+            <div className="space-y-1">
+              {objs.map(o => (
+                <button key={o.id} onClick={() => select('objective', o.id)}
+                  className="w-full text-left text-[12.5px] text-pb-dim hover:text-pb-text leading-snug">
+                  {o.plan_name ? <span className={cap}>{o.plan_name.toUpperCase()} · </span> : null}{o.title}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (!adding && sel?.kind === 'objective') {
+    const o = objectiveById(sel.id)
+    if (o && editingObjective === o.id) {
+      pane = <ObjectiveForm objective={o} plans={plans} pillars={pillars} positions={positions}
+        members={members} onSave={d => saveObjective(o.id, d)} onCancel={() => setEditingObjective(null)} />
+    } else if (o) {
+      const work = workRows(o, workMode)
+      pane = (
+        <div className="space-y-5 max-w-3xl">
+          <div className="pb-card p-4 sm:p-5">
+            {/* No flex-wrap here either — Edit and Delete were ending up under
+                the owner line instead of in the corner. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className={`${cap} mb-1`}>
+                  {[o.plan_name, o.pillar_name].filter(Boolean).map(x => x.toUpperCase()).join(' › ') || 'OBJECTIVE'}
+                </div>
+                <h2 className="text-pb-text text-[19px] font-bold leading-snug flex items-start gap-2 flex-wrap">
+                  {o.title}<LateTag row={o} />
+                </h2>
+                <div className={`${cap} mt-1 flex flex-wrap gap-x-2`}>
+                  {o.owner_position_name && <span>{o.owner_position_name.toUpperCase()}</span>}
+                  {!o.owner_position_name && o.owner_member_id && <span>{memberName(o.owner_member_id).toUpperCase()}</span>}
+                  {o.due_date && <span>DUE {o.due_date}</span>}
+                </div>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <button onClick={() => setEditingObjective(o.id)}
+                  className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+                <button onClick={() => removeObjective(o)}
+                  className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
+              </div>
+            </div>
+            {o.description && <div className="text-pb-faint text-[12.5px] mt-2 leading-relaxed">{o.description}</div>}
+            <Delivery row={o} level="objective" />
+          </div>
+
+          <div className="pb-card p-4">
+            <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+              <div className={cap}>THE WORK SERVING IT</div>
+              <span className={cap}>{workMode === 'date' ? 'IN THE ORDER RAISED' : 'ACTIONS, THEN MOTIONS'}</span>
+            </div>
+            {work.length === 0 ? (
+              <div className="font-mono text-[10px] text-pb-faintest">
+                Nothing points at this objective yet.
+              </div>
+            ) : (
+              <div className="space-y-1">
+                {work.map(r => (
+                  <button key={`${r._kind}-${r.id}`} onClick={() => select(r._kind, r.id)}
+                    className="w-full text-left flex items-start gap-2 hover:bg-pb-surface2 rounded px-1 py-1">
+                    <span className={`${cap} w-12 shrink-0 pt-0.5`}>{r._kind === 'action' ? 'ACTION' : 'MOTION'}</span>
+                    <span className="text-[12.5px] text-pb-dim leading-snug flex-1 min-w-0">{r._label}</span>
+                    {r.meeting_date && <span className={`${cap} shrink-0 pt-0.5`}>{r.meeting_date}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="pb-card p-4"><NoteThread entityType="objective" entityId={o.id} /></div>
+        </div>
+      )
+    }
+  }
+
+  if (!adding && sel?.kind === 'action') {
+    const hit = workById('action', sel.id)
+    // The report's row carries the plan context; the tasks fetch carries the
+    // dependencies. Merge, so the editor has both.
+    const task = hit && { ...hit.row, ...(allTasks.find(t => t.id === sel.id) || {}) }
+    pane = task
+      ? <div className="max-w-3xl"><ActionEditor key={task.id} task={task} allTasks={allTasks}
+          objectives={allObjectives} members={members} inline
+          onSaved={onChanged} onDeleted={() => { setSel(null); onChanged() }} /></div>
+      : <div className="text-pb-faint text-[13px]">That action is no longer on the plan.</div>
+  }
+
+  if (!adding && sel?.kind === 'motion') {
+    const hit = workById('motion', sel.id)
+    pane = hit
+      ? <div className="max-w-3xl"><MotionEditor key={hit.row.id} meetingId={hit.row.meeting_id}
+          motion={hit.row} members={members} objectives={allObjectives} inline
+          onSaved={onChanged} onDeleted={() => { setSel(null); onChanged() }} /></div>
+      : <div className="text-pb-faint text-[13px]">That motion is no longer on the plan.</div>
+  }
+
+  return (
+    // Two panes side by side where there is room for them; on a phone the tree
+    // sits above what it opens, because 320px of rail leaves a detail pane too
+    // narrow to read and pushes the page sideways.
+    <div className="flex flex-col lg:flex-row flex-1 min-h-0">
+      <div className="pb-scroll w-full lg:w-[320px] lg:shrink-0 max-h-[45vh] lg:max-h-none
+        border-b lg:border-b-0 lg:border-r pb-hairline overflow-y-auto p-3">
+        <div className="flex items-center gap-2 mb-2">
+          <span className={cap}>STRATEGIC PLANS</span>
+          {/* Adding at the level you are standing on: a plan when a plan is
+              selected, a theme under a theme, an objective under an objective.
+              Selecting an action or a motion still offers an objective, since
+              that is the nearest level anything can be added at. */}
+          <button onClick={startAdd} title={`Add a ${addLevel}`}
+            className="ml-auto font-mono text-[10px] font-semibold px-2 py-1 rounded"
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            + {addLevel.toUpperCase()}
+          </button>
+        </div>
+        {/* How the work under an objective is laid out. Both readings are
+            useful, so it is a toggle rather than a decision made for them. */}
+        <div className="flex gap-1 mb-3">
+          {[['grouped', 'Grouped'], ['date', 'By date']].map(([k, l]) => (
+            <button key={k} onClick={() => setWorkMode(k)}
+              className={`px-2 py-1 rounded text-[11.5px] ${workMode === k ? 'bg-pb-surface2 text-pb-text' : 'text-pb-faint hover:text-pb-text'}`}>{l}</button>
+          ))}
+        </div>
+        {tree}
+        {groups.length > 0 && (
+          <div className={`${cap} mt-3`}>DRAG A ROW TO REORDER IT WITHIN ITS OWN LEVEL</div>
+        )}
+      </div>
+      <div className="pb-scroll flex-1 min-w-0 overflow-y-auto p-5 sm:p-6">{pane}</div>
+    </div>
+  )
+}
+
 /* ── The Plan tab ───────────────────────────────────────────────────────── */
 
 /* ── The club's themes ──────────────────────────────────────────────────────
@@ -1536,6 +2360,13 @@ export function PlanTab({ members, section }) {
   // caller that draws its own buttons (BetterAdmin → Committee → Plans).
   // Passing nothing keeps the whole tab as it was, which is what the manage
   // screen still renders.
+  if (section === 'plans') {
+    return (
+      <StrategicPlansSection report={report} pillars={pillars} positions={positions}
+        members={members} memberName={memberName} onChanged={load} />
+    )
+  }
+
   if (section === 'themes') {
     return <ThemesSection pillars={pillars} plans={plans} unassigned={unassigned} onChanged={load} />
   }

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/afl-leaderboard", tags=["afl-leaderboard"])
 
@@ -41,30 +42,47 @@ async def leaderboard(org_id: uuid.UUID,
     params: dict = {"org": str(org_id), "lim": limit}
 
     if stat in _VOTE_STATS:
-        # Club/competition B&F votes only ever come from an Import Stats
-        # upload — PlayHQ has no concept of club-internal B&F voting, so
-        # afl_player_season_stats never carries them at all.
+        # Club/competition B&F votes never come from PlayHQ — it has no concept
+        # of club-internal best & fairest voting, so afl_player_season_stats
+        # doesn't carry them at all. The two sources that do are an Import
+        # Stats upload and a manual adjustment, and both are summed straight:
+        # there is no synced figure for either to reconcile against, which is
+        # why this branch has no NOT EXISTS gate on either side.
         col = _VOTE_STATS[stat]
         clauses = ["i.organisation_id = :org"]
+        manual_where = ""
         if season_id:
             clauses.append("i.season_id = :season")
+            manual_where += " AND m.season_id = :season"
             params["season"] = str(season_id)
         if grade_id:
             clauses.append("i.grade_id = ANY(:grade)")
+            manual_where += " AND m.grade_id = ANY(:grade)"
             params["grade"] = await matching_grade_ids(db, org_id, grade_id)
         where = " AND ".join(clauses)
+        manual = manual_branch(
+            ["player_id", "games", "goals", "behinds", "bog_count", col],
+            where=manual_where,
+        )
         res = await db.execute(text(f"""
-            SELECT i.player_id, p.name, p.display_name_override, p.photo_url,
-                   SUM(i.games_played) AS games,
-                   SUM(i.goals) AS goals,
-                   SUM(i.behinds) AS behinds,
-                   SUM(i.bog_count) AS bogs,
-                   SUM(i.{col}) AS value
-            FROM afl_imported_stats i
-            JOIN players p ON p.id = i.player_id
-            WHERE {where}
-            GROUP BY i.player_id, p.name, p.display_name_override, p.photo_url
-            HAVING SUM(i.{col}) > 0
+            WITH combined AS (
+                SELECT i.player_id, i.games_played AS games, i.goals, i.behinds,
+                       i.bog_count, i.{col} AS value
+                FROM afl_imported_stats i
+                WHERE {where}
+                UNION ALL
+                {manual}
+            )
+            SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
+                   SUM(c.games) AS games,
+                   SUM(c.goals) AS goals,
+                   SUM(c.behinds) AS behinds,
+                   SUM(c.bog_count) AS bogs,
+                   SUM(c.value) AS value
+            FROM combined c
+            JOIN players p ON p.id = c.player_id
+            GROUP BY c.player_id, p.name, p.display_name_override, p.photo_url
+            HAVING SUM(c.value) > 0
             ORDER BY value DESC, games ASC, p.name
             LIMIT :lim
         """), params)
@@ -72,10 +90,12 @@ async def leaderboard(org_id: uuid.UUID,
 
     value_col = _STATS[stat]
 
+    manual_clauses = ""
     if grade_id:
         params["grade"] = await matching_grade_ids(db, org_id, grade_id)
         synced_grade_clause = "s.grade_id = ANY(:grade)"
         imported_grade_clause = "i.grade_id = ANY(:grade)"
+        manual_clauses += " AND m.grade_id = ANY(:grade)"
     else:
         synced_grade_clause = "s.grade_id IS NULL"
         imported_grade_clause = "TRUE"
@@ -86,7 +106,15 @@ async def leaderboard(org_id: uuid.UUID,
         params["season"] = str(season_id)
         season_clause_s = "AND s.season_id = :season"
         season_clause_i = "AND i.season_id = :season"
+        manual_clauses += " AND m.season_id = :season"
 
+    # A manual adjustment is a delta, so it joins with no NOT EXISTS gate and
+    # no grade_id IS NULL default — an adjustment has no whole-season twin to
+    # double count against, exactly like an imported row.
+    manual = manual_branch(
+        ["player_id", "games", "goals", "behinds", "bog_count"],
+        where=manual_clauses,
+    )
     res = await db.execute(text(f"""
         WITH combined AS (
             SELECT s.player_id, s.games, s.goals, s.behinds, s.bog_count
@@ -101,6 +129,8 @@ async def leaderboard(org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual}
         )
         SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
                SUM(c.games) AS games,

@@ -1193,11 +1193,24 @@ async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields)
     return _pillar_dict(p)
 
 
-async def delete_pillar(session: AsyncSession, org_id, pillar_id) -> bool:
-    """Delete a pillar. Its objectives survive and simply stop being grouped
-    under it (FK SET NULL) — a theme being dropped from the plan is not a reason
-    to bin the work that was filed under it."""
-    from app.models.db import ClubStrategicPillar
+async def delete_pillar(session: AsyncSession, org_id, pillar_id, *, cascade: bool = False) -> bool:
+    """Delete a pillar.
+
+    By default its objectives survive and simply stop being grouped under it
+    (FK SET NULL) — a theme being dropped from the plan is not a reason to bin
+    the work that was filed under it.
+
+    `cascade` deletes the objectives under it as well, for a caller that has
+    asked the club to confirm exactly that. **A pillar is CLUB-scoped, not
+    plan-scoped**, so its objectives can belong to several plans and a cascade
+    reaches every one of them — which is why it is never the default and why
+    the screen counts what will go before asking.
+
+    Either way the actions and motions serving those objectives are KEPT and
+    simply stop being linked (`club_objectives` → tasks/motions is SET NULL).
+    Work the club committed to is not deleted because the heading above it was.
+    """
+    from app.models.db import ClubStrategicPillar, ClubObjective
 
     p = (await session.execute(
         select(ClubStrategicPillar).where(ClubStrategicPillar.id == pillar_id,
@@ -1205,8 +1218,41 @@ async def delete_pillar(session: AsyncSession, org_id, pillar_id) -> bool:
     )).scalar_one_or_none()
     if not p:
         return False
+    if cascade:
+        for o in (await session.execute(
+            select(ClubObjective).where(ClubObjective.pillar_id == p.id,
+                                        ClubObjective.organisation_id == org_id)
+        )).scalars().all():
+            await session.delete(o)
+        await session.flush()
     await session.delete(p)
     return True
+
+
+async def reorder_plan_tree(session: AsyncSession, org_id, model, ids) -> None:
+    """Stamp `sort_order` across one level of the plan tree, by position.
+
+    The browser sends every id at that level in the order it is drawing them,
+    so a move inside one theme still renumbers the whole level consistently —
+    objectives are ordered club-wide and only GROUPED by plan and theme, so
+    renumbering the dragged group alone would interleave it with another
+    group's numbers.
+
+    Ids that are not this club's are ignored rather than refused: the list
+    comes from a browser, and one stale row must not stop the rest reordering.
+    Same rule `reorder_agenda_items` follows.
+    """
+    rows = (await session.execute(
+        select(model).where(model.id.in_(list(ids)), model.organisation_id == org_id)
+    )).scalars().all()
+    by_id = {str(r.id): r for r in rows}
+    idx = 0
+    for i in ids:
+        row = by_id.get(str(i))
+        if row is None:
+            continue
+        row.sort_order = idx
+        idx += 1
 
 
 def _plan_dict(p) -> dict:
@@ -1262,12 +1308,20 @@ async def upsert_plan(session: AsyncSession, org_id, plan_id=None, **fields) -> 
     return _plan_dict(p)
 
 
-async def delete_plan(session: AsyncSession, org_id, plan_id) -> bool:
-    """Delete a plan. Its objectives survive and fall back to belonging to no
-    plan (FK SET NULL) — an objective is real work the club committed to, and
-    binning it because the document it was written in was deleted would lose
-    every action and motion serving it too."""
-    from app.models.db import ClubStrategicPlan
+async def delete_plan(session: AsyncSession, org_id, plan_id, *, cascade: bool = False) -> bool:
+    """Delete a plan.
+
+    By default its objectives survive and fall back to belonging to no plan
+    (FK SET NULL). `cascade` deletes them with it, for a caller that has told
+    the club how many go and had that confirmed.
+
+    Neither mode touches the ACTIONS and MOTIONS serving those objectives —
+    they are kept and simply stop being linked. An action is work somebody is
+    doing; the plan it was written under being deleted is not a reason to lose
+    it. The club's THEMES are untouched too: a pillar is club-scoped and shared
+    across plans, so it outlives any one of them.
+    """
+    from app.models.db import ClubStrategicPlan, ClubObjective
 
     p = (await session.execute(
         select(ClubStrategicPlan).where(ClubStrategicPlan.id == plan_id,
@@ -1275,6 +1329,13 @@ async def delete_plan(session: AsyncSession, org_id, plan_id) -> bool:
     )).scalar_one_or_none()
     if not p:
         return False
+    if cascade:
+        for o in (await session.execute(
+            select(ClubObjective).where(ClubObjective.plan_id == p.id,
+                                        ClubObjective.organisation_id == org_id)
+        )).scalars().all():
+            await session.delete(o)
+        await session.flush()
     await session.delete(p)
     return True
 

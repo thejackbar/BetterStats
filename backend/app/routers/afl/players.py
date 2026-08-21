@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import Player, get_db
 from app.services.afl import aggregations
+from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/afl-players", tags=["afl-players"])
 
@@ -80,6 +81,35 @@ async def compare_players(org_id: uuid.UUID,
     return {"players": out}
 
 
+async def _vote_boards(db: AsyncSession, org_id) -> dict:
+    """Which B&F counts this CLUB records at all — not this player's own.
+
+    Both sources that can carry a vote (an Import Stats upload and a manual
+    adjustment), matching the leaderboard's own vote path — a club whose
+    votes were all typed in as corrections still gets the tabs.
+
+    The profile's vote tabs are offered on the club's answer, so a player
+    with none shows a column of zeros rather than losing the tab. Gating on
+    the player's own tally instead would mean one team-mate's page carries
+    the button and the next one doesn't, with nothing on either saying why.
+    """
+    manual = manual_branch(["club_bf_votes", "comp_bf_votes"])
+    row = await db.execute(text(f"""
+        WITH src AS (
+            SELECT club_bf_votes, comp_bf_votes
+            FROM afl_imported_stats
+            WHERE organisation_id = :org
+            UNION ALL
+            {manual}
+        )
+        SELECT COALESCE(SUM(club_bf_votes), 0) > 0 AS club,
+               COALESCE(SUM(comp_bf_votes), 0) > 0 AS comp
+        FROM src
+    """), {"org": str(org_id)})
+    r = row.mappings().first()
+    return {"club": bool(r and r["club"]), "comp": bool(r and r["comp"])}
+
+
 @router.get("/{player_id}")
 async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     player = await db.get(Player, player_id)
@@ -102,6 +132,7 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "grade_breakdown": grades,
         "game_log": games,
         "achievements": await _player_achievements(db, org_id, player_id, player.display_name),
+        "vote_boards": await _vote_boards(db, org_id),
         "best_haul": {
             "goals": best_haul["goals"],
             "game_id": str(best_haul["game_id"]),

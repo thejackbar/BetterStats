@@ -197,24 +197,36 @@ async def list_grades_with_stats(
     # same "sync wins per season" exclusion the leaderboard/records use, so
     # a season covered by both sources is never double-counted here.
     imported = await db.execute(text("""
+        WITH rows AS (
+            SELECT i.grade_id, i.player_id, i.games_played AS games, i.goals
+            FROM afl_imported_stats i
+            WHERE i.grade_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s2
+                WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
+                  AND s2.grade_id IS NULL AND s2.games > 0
+              )
+            UNION ALL
+            -- A grade an admin only ever named on an adjustment is in the
+            -- same position as an imported one: real figures, no games rows,
+            -- and 0 games forever without this arm.
+            SELECT m.grade_id, m.player_id, m.games_played AS games, m.goals
+            FROM afl_manual_adjustments m
+            WHERE m.grade_id IS NOT NULL
+        )
         SELECT
             gr.name AS grade_name,
             COALESCE(MAX(gr.display_name_override), gr.name) AS display_name,
             MAX(gr.category) AS category,
             MIN(gr.display_order) AS display_order,
             bool_and(COALESCE(gr.is_public, true)) AS is_public,
-            COALESCE(SUM(i.games_played), 0) AS games,
-            COUNT(DISTINCT i.player_id) AS players,
-            COALESCE(SUM(i.goals), 0) AS goals
-        FROM afl_imported_stats i
-        JOIN grades gr ON gr.id = i.grade_id
+            COALESCE(SUM(r.games), 0) AS games,
+            COUNT(DISTINCT r.player_id) AS players,
+            COALESCE(SUM(r.goals), 0) AS goals
+        FROM rows r
+        JOIN grades gr ON gr.id = r.grade_id
         JOIN seasons s ON s.id = gr.season_id
         WHERE s.organisation_id = :org
-          AND NOT EXISTS (
-            SELECT 1 FROM afl_player_season_stats s2
-            WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
-              AND s2.grade_id IS NULL AND s2.games > 0
-          )
         GROUP BY gr.name
     """), {"org": org_id})
     raw_rows += [dict(r) for r in imported.mappings().all()]
@@ -686,7 +698,19 @@ async def _move_side_tables(db: AsyncSession, org_id: uuid.UUID,
     explicitly, and a merge that forgets to leaves them pointing at a deleted
     player where every read silently drops them.
 
-    Org-scoped on both, so an id arriving from a browser can never reach
+    ``afl_manual_adjustments`` DOES cascade on the player FK, which is the
+    worse outcome, not a safer one: the removed player's corrections would be
+    deleted outright rather than following them onto the kept record. Moved
+    here for the same reason, and its ids recorded so an undo hands back
+    exactly those rows.
+
+    Two adjustments can land on one (player, season, grade) this way — the
+    kept player's own and the removed player's — and that is allowed on
+    purpose. They are additive deltas, so two rows read as one figure; the
+    alternative is refusing a legitimate merge or silently summing rows an
+    admin never asked to combine.
+
+    Org-scoped on all three, so an id arriving from a browser can never reach
     another club's rows.
     """
     imported = (await db.execute(text("""
@@ -699,7 +723,12 @@ async def _move_side_tables(db: AsyncSession, org_id: uuid.UUID,
         WHERE player_id = :from AND org_id = :org
         RETURNING id
     """), {"to": str(to_id), "from": str(from_id), "org": str(org_id)})).scalars().all()
-    return [int(i) for i in imported], [int(i) for i in achievements]
+    adjustments = (await db.execute(text("""
+        UPDATE afl_manual_adjustments SET player_id = :to
+        WHERE player_id = :from AND organisation_id = :org
+        RETURNING id
+    """), {"to": str(to_id), "from": str(from_id), "org": str(org_id)})).scalars().all()
+    return [int(i) for i in imported], [int(i) for i in achievements], [int(i) for i in adjustments]
 
 
 class MergePlayersRequest(BaseModel):
@@ -737,7 +766,7 @@ async def _merge_players_core(
         # players (career totals, the profile, the leaderboards) dropped them
         # without a word. A club whose history came from Import Stats lost the
         # removed player's whole career to a routine duplicate merge.
-        imported_ids, achievement_ids = await _move_side_tables(
+        imported_ids, achievement_ids, adjustment_ids = await _move_side_tables(
             db, org_id, remove_id, keep_id)
 
         removed_playhq_id = remove.playhq_id
@@ -755,9 +784,10 @@ async def _merge_players_core(
             INSERT INTO afl_merge_logs
                 (org_id, keep_player_id, keep_player_name, removed_player_id, removed_player_name,
                  removed_player_playhq_id, keep_original_playhq_id, line_ids,
-                 imported_stat_ids, achievement_ids)
+                 imported_stat_ids, achievement_ids, adjustment_ids)
             VALUES (:org, :kid, :kname, :rid, :rname, :rphq, :kphq, CAST(:line_ids AS JSONB),
-                    CAST(:imported_ids AS JSONB), CAST(:achievement_ids AS JSONB))
+                    CAST(:imported_ids AS JSONB), CAST(:achievement_ids AS JSONB),
+                    CAST(:adjustment_ids AS JSONB))
         """), {
             "org": str(org_id), "kid": str(keep_id), "kname": keep.display_name,
             "rid": str(remove_id), "rname": removed_display_name,
@@ -765,6 +795,7 @@ async def _merge_players_core(
             "line_ids": json.dumps(line_ids),
             "imported_ids": json.dumps(imported_ids),
             "achievement_ids": json.dumps(achievement_ids),
+            "adjustment_ids": json.dumps(adjustment_ids),
         })
 
         # afl_player_season_stats is fully derived from game lines (delete +
@@ -779,7 +810,8 @@ async def _merge_players_core(
             details={"removed_player_id": str(remove_id), "removed_player_name": removed_display_name,
                     "game_lines_moved": len(line_ids),
                     "imported_seasons_moved": len(imported_ids),
-                    "achievements_moved": len(achievement_ids)},
+                    "achievements_moved": len(achievement_ids),
+                    "adjustments_moved": len(adjustment_ids)},
         )
         await db.commit()
     except IntegrityError as exc:
@@ -789,7 +821,8 @@ async def _merge_players_core(
     return {"status": "merged", "kept_player_id": str(keep_id), "removed_player_id": str(remove_id),
             "game_lines_moved": len(line_ids),
             "imported_seasons_moved": len(imported_ids),
-            "achievements_moved": len(achievement_ids)}
+            "achievements_moved": len(achievement_ids),
+            "adjustments_moved": len(adjustment_ids)}
 
 
 @router.post("/merge-players")
@@ -870,6 +903,12 @@ async def undo_merge_players(
             "UPDATE player_achievements SET player_id = :rid "
             "WHERE id = ANY(:ids) AND org_id = :org"
         ), {"rid": str(remove_id), "ids": [int(i) for i in achievement_ids], "org": org_id})
+    adjustment_ids = _ids("adjustment_ids")
+    if adjustment_ids:
+        await db.execute(text(
+            "UPDATE afl_manual_adjustments SET player_id = :rid "
+            "WHERE id = ANY(:ids) AND organisation_id = :org"
+        ), {"rid": str(remove_id), "ids": [int(i) for i in adjustment_ids], "org": org_id})
 
     await _rollup_season_stats(db, club.id)
 
@@ -929,6 +968,7 @@ async def get_split_preview(
                COALESCE(SUM(x.goals), 0)    AS goals,
                COALESCE(SUM(x.behinds), 0)  AS behinds,
                COUNT(*) FILTER (WHERE x.src = 'imported') AS imported_rows,
+               COUNT(*) FILTER (WHERE x.src = 'adjustment') AS adjustment_rows,
                COUNT(*) FILTER (WHERE x.src = 'line')     AS game_lines
         FROM (
             SELECT i.season_id, i.games_played AS games, i.goals, i.behinds,
@@ -936,6 +976,12 @@ async def get_split_preview(
             FROM afl_imported_stats i
             WHERE i.organisation_id = :org AND i.player_id = :pid
               AND i.season_id IS NOT NULL
+            UNION ALL
+            SELECT m.season_id, m.games_played AS games, m.goals, m.behinds,
+                   'adjustment' AS src
+            FROM afl_manual_adjustments m
+            WHERE m.organisation_id = :org AND m.player_id = :pid
+              AND m.season_id IS NOT NULL
             UNION ALL
             SELECT gr.season_id,
                    CASE WHEN l.played THEN 1 ELSE 0 END AS games,
@@ -956,8 +1002,10 @@ async def get_split_preview(
     # to, so it can't be split and stays with the original player. Reported
     # rather than hidden — otherwise a split looks like it lost something.
     unattributed = int((await db.execute(text("""
-        SELECT COUNT(*) FROM afl_imported_stats
-        WHERE organisation_id = :org AND player_id = :pid AND season_id IS NULL
+        SELECT (SELECT COUNT(*) FROM afl_imported_stats
+                WHERE organisation_id = :org AND player_id = :pid AND season_id IS NULL)
+             + (SELECT COUNT(*) FROM afl_manual_adjustments
+                WHERE organisation_id = :org AND player_id = :pid AND season_id IS NULL)
     """), {"org": str(club.id), "pid": str(player_id)})).scalar() or 0)
 
     return {
@@ -1051,6 +1099,16 @@ async def split_player(
             RETURNING id
         """), sid_params)).scalars().all()
 
+        # A manual adjustment is keyed on a season the same way an imported row
+        # is, so it splits the same way. A CAREER-ONLY adjustment has no season
+        # to attribute it to and stays with the original player, exactly like
+        # an imported row whose season never resolved.
+        adjustments = (await db.execute(text("""
+            UPDATE afl_manual_adjustments SET player_id = :new
+            WHERE organisation_id = :org AND player_id = :pid AND season_id = ANY(:sids)
+            RETURNING id
+        """), sid_params)).scalars().all()
+
         # afl_player_season_stats is wholly derived from the game lines, so it
         # is recomputed rather than moved — both players come out correct in
         # one pass, same as a merge.
@@ -1061,7 +1119,8 @@ async def split_player(
             action="split_player", target_type="player", target_id=str(player.id),
             details={"new_player_id": str(new_id), "new_player_name": name,
                      "seasons": season_ids, "imported_rows_moved": len(imported),
-                     "game_lines_moved": len(lines), "achievements_moved": len(awards)},
+                     "game_lines_moved": len(lines), "achievements_moved": len(awards),
+                     "adjustments_moved": len(adjustments)},
         )
         await db.commit()
     except IntegrityError as exc:
@@ -1075,6 +1134,7 @@ async def split_player(
         "new_player_name": name,
         "seasons_moved": len(season_ids),
         "imported_rows_moved": len(imported),
+        "adjustments_moved": len(adjustments),
         "game_lines_moved": len(lines),
         "achievements_moved": len(awards),
     }

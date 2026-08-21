@@ -1265,6 +1265,41 @@ async def delete_note(note_id: str, _: User = _require, club: Organisation = Dep
 
 # ─── Strategic pillars (migration 232) ────────────────────────────────────────
 
+class TreeReorder(BaseModel):
+    """Every id at one level of the plan tree, in the order it is drawn."""
+    ids: List[str]
+
+
+@router.post("/plans/reorder")
+async def reorder_plans(data: TreeReorder, _: User = _require,
+                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubStrategicPlan
+    await committee_service.reorder_plan_tree(db, club.id, ClubStrategicPlan,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/pillars/reorder")
+async def reorder_pillars(data: TreeReorder, _: User = _require,
+                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubStrategicPillar
+    await committee_service.reorder_plan_tree(db, club.id, ClubStrategicPillar,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/objectives/reorder")
+async def reorder_objectives(data: TreeReorder, _: User = _require,
+                             club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubObjective
+    await committee_service.reorder_plan_tree(db, club.id, ClubObjective,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
 class PillarUpsert(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
@@ -1302,9 +1337,13 @@ async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
 
 
 @router.delete("/pillars/{pillar_id}")
-async def delete_pillar(pillar_id: str, _: User = _require,
+async def delete_pillar(pillar_id: str, cascade: bool = False, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id)):
+    """`cascade=true` takes this theme's objectives with it. Off by default —
+    a pillar is club-scoped, so its objectives can span several plans and the
+    caller has to have counted them and had that confirmed. Actions and motions
+    are never deleted either way; they just stop being linked."""
+    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id), cascade=cascade):
         raise HTTPException(status_code=404, detail="Pillar not found")
     await db.commit()
     return {"deleted": True}
@@ -1369,9 +1408,11 @@ async def update_plan(plan_id: str, data: PlanUpsert, _: User = _require,
 
 
 @router.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str, _: User = _require,
+async def delete_plan(plan_id: str, cascade: bool = False, _: User = _require,
                       club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id)):
+    """`cascade=true` takes this plan's objectives with it. Actions and motions
+    serving them are kept either way and simply stop being linked."""
+    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id), cascade=cascade):
         raise HTTPException(status_code=404, detail="Plan not found")
     await db.commit()
     return {"deleted": True}

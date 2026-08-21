@@ -489,10 +489,20 @@ export const api = {
     request('/club-admin/committee/pillars', { method: 'POST', body: JSON.stringify(data) }),
   committeeUpdatePillar: (id, data) =>
     request(`/club-admin/committee/pillars/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  committeeDeletePillar: (id) =>
-    request(`/club-admin/committee/pillars/${id}`, { method: 'DELETE' }),
+  // `cascade` takes the theme's objectives with it. The actions and motions
+  // serving those objectives are kept either way — they stop being linked.
+  committeeDeletePillar: (id, cascade) =>
+    request(`/club-admin/committee/pillars/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
   // The four pillars, a plan for this year and an example objective under each,
   // so a committee edits rather than starts from nothing.
+  // One level of the plan tree, in the order the browser is drawing it. Plans,
+  // themes and objectives each reorder within their own level.
+  committeeReorderPlans: (ids) =>
+    request('/club-admin/committee/plans/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  committeeReorderPillars: (ids) =>
+    request('/club-admin/committee/pillars/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  committeeReorderObjectives: (ids) =>
+    request('/club-admin/committee/objectives/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   committeeSeedStarterPlan: () =>
     request('/club-admin/committee/plans/seed-starter', { method: 'POST' }),
   committeeListPlans: (includeArchived) =>
@@ -503,8 +513,10 @@ export const api = {
     request('/club-admin/committee/plans', { method: 'POST', body: JSON.stringify(data) }),
   committeeUpdatePlan: (id, data) =>
     request(`/club-admin/committee/plans/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  committeeDeletePlan: (id) =>
-    request(`/club-admin/committee/plans/${id}`, { method: 'DELETE' }),
+  // `cascade` takes the plan's objectives with it; without it they survive
+  // under "Not on a plan". Actions and motions are never deleted by either.
+  committeeDeletePlan: (id, cascade) =>
+    request(`/club-admin/committee/plans/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
   committeeListObjectives: (includeArchived) =>
     request(`/club-admin/committee/objectives${includeArchived ? '?include_archived=true' : ''}`),
   committeeObjectiveProgress: () => request('/club-admin/committee/objectives/progress'),
@@ -2591,6 +2603,10 @@ export const api = {
     request(`/club-admin/website/gallery/images/${id}`, { method: 'DELETE' }),
 
   // Records
+  // Premiership squads and office-bearer boards, both read out of the
+  // honours a club has already recorded against its players.
+  getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
+  getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
