@@ -7,7 +7,11 @@ Two different shapes of record here, and only one of them can use imported
   career) are built from afl_player_season_stats combined with
   afl_imported_stats — same "sync wins per season, imported fills the gap"
   rule the leaderboard/dashboard use, since a season-total upload genuinely
-  has this data.
+  has this data — plus afl_manual_adjustments, which is a delta and so is
+  added to both rather than gated against either. Because an adjustment CAN
+  sit alongside a synced row for the same player-season (that is what a
+  correction is), the season record sums per player-season before ranking;
+  without that a +5 correction would list as its own 5-goal season.
 - Single-game records (most goals in a game, biggest win, highest score) stay
   synced-only — a season-total spreadsheet has no per-game breakdown to draw
   a single-game record from, so there's nothing to combine.
@@ -21,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.services.afl.aggregations import matching_grade_ids
+from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/afl-records", tags=["afl-records"])
 
@@ -33,6 +38,7 @@ async def get_records(org_id: uuid.UUID,
     grade_line = ""
     grade_pss = "AND pss.grade_id IS NULL"
     grade_i = ""
+    grade_m = ""
     if grade_id:
         # Every grade_id (any season) merged into/with this one — so a
         # merged grade's games count under whichever name you filter by.
@@ -40,6 +46,16 @@ async def get_records(org_id: uuid.UUID,
         grade_line = "AND gr.id = ANY(:grade)"
         grade_pss = "AND pss.grade_id = ANY(:grade)"
         grade_i = "AND i.grade_id = ANY(:grade)"
+        grade_m = "AND m.grade_id = ANY(:grade)"
+
+    # Manual adjustments are the third source, added on top of both rather
+    # than gated against either — see services/afl/manual_stats.py. The
+    # season record below INNER JOINs seasons, which is what keeps a
+    # career-only adjustment out of a per-season record without a clause.
+    manual_goals_season = manual_branch(["player_id", "goals", "season_id"], where=grade_m)
+    manual_games = manual_branch(["player_id", "season_id", "games"], where=grade_m)
+    manual_goals = manual_branch(["player_id", "season_id", "goals"], where=grade_m)
+    manual_bogs = manual_branch(["player_id", "season_id", "bog_count"], where=grade_m)
 
     most_goals_game = await db.execute(text(f"""
         SELECT l.player_id, p.name, p.display_name_override, l.goals,
@@ -71,14 +87,18 @@ async def get_records(org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual_goals_season}
         )
-        SELECT c.player_id, p.name, p.display_name_override, c.goals,
+        SELECT c.player_id, p.name, p.display_name_override,
+               SUM(c.goals) AS goals,
                s.name AS season_name, s.year
         FROM combined c
         JOIN players p ON p.id = c.player_id
         JOIN seasons s ON s.id = c.season_id
-        WHERE c.goals > 0
-        ORDER BY c.goals DESC, s.year ASC
+        GROUP BY c.player_id, p.name, p.display_name_override, s.id, s.name, s.year
+        HAVING SUM(c.goals) > 0
+        ORDER BY goals DESC, s.year ASC
         LIMIT 10
     """), params)
 
@@ -96,6 +116,8 @@ async def get_records(org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual_games}
         )
         SELECT c.player_id, p.name, p.display_name_override,
                SUM(c.games) AS games
@@ -120,6 +142,8 @@ async def get_records(org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual_goals}
         )
         SELECT c.player_id, p.name, p.display_name_override,
                SUM(c.goals) AS goals
@@ -145,6 +169,8 @@ async def get_records(org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual_bogs}
         )
         SELECT c.player_id, p.name, p.display_name_override,
                SUM(c.bog_count) AS bogs

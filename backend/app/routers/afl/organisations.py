@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import get_db
 from app.services.afl import aggregations
+from app.services.afl.manual_stats import manual_branch
 from app.services.afl.aggregations import matching_grade_ids
 
 router = APIRouter(prefix="/organisations", tags=["afl-organisations"])
@@ -105,18 +106,31 @@ async def get_summary(org_id: uuid.UUID,
     # real history, which reads as a complete total when it isn't. A season-
     # scoped view doesn't need this — summary.played for that one season is
     # either real or it isn't.
-    has_imported = await db.execute(text(
-        "SELECT EXISTS(SELECT 1 FROM afl_imported_stats WHERE organisation_id = :org)"
-    ), {"org": str(org_id)})
+    # A manual adjustment carrying games counts here for the same reason an
+    # import does: those matches are in the club's totals and in nobody's
+    # games table, so the W/L/D card is describing a fraction of the history
+    # the rest of the page shows. An adjustment with no games (a goals-only
+    # correction) says nothing about match coverage and is left out.
+    has_imported = await db.execute(text("""
+        SELECT EXISTS(SELECT 1 FROM afl_imported_stats WHERE organisation_id = :org)
+            OR EXISTS(SELECT 1 FROM afl_manual_adjustments
+                      WHERE organisation_id = :org AND games_played > 0)
+    """), {"org": str(org_id)})
     has_imported_history = bool(has_imported.scalar())
 
     params: dict = {"org": str(org_id)}
     season_clause_s = ""
     season_clause_i = ""
+    season_clause_m = ""
     if season_id:
         params["season"] = str(season_id)
         season_clause_s = "AND s.season_id = :season"
         season_clause_i = "AND i.season_id = :season"
+        season_clause_m = "AND m.season_id = :season"
+    manual = manual_branch(
+        ["player_id", "season_id", "games", "goals", "bog_count"],
+        where=season_clause_m,
+    )
 
     _TOP_COLS = {"goals": "goals", "games": "games"}
 
@@ -148,6 +162,8 @@ async def get_summary(org_id: uuid.UUID,
                     WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                       AND s2.grade_id IS NULL AND s2.games > 0
                   )
+                UNION ALL
+                {manual}
             )
             SELECT c.player_id, p.name, p.display_name_override, p.photo_url,
                    COALESCE(SUM(c.games),0) AS games,

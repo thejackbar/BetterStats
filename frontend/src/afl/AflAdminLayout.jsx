@@ -19,6 +19,7 @@ const NAV = [
   { to: '/admin/import', label: 'Import Stats' },
   { to: '/admin/import-results', label: 'Import Results' },
   { to: '/admin/import-awards', label: 'Import Awards' },
+  { to: '/admin/manual-entries', label: 'Manual Entries' },
   { to: '/admin/seasons', label: 'Seasons' },
   { heading: 'Clean Your Data' },
   { to: '/admin/merge', label: 'Merge Players' },
