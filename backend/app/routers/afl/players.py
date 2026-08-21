@@ -80,6 +80,24 @@ async def compare_players(org_id: uuid.UUID,
     return {"players": out}
 
 
+async def _vote_boards(db: AsyncSession, org_id) -> dict:
+    """Which B&F counts this CLUB records at all — not this player's own.
+
+    The profile's vote tabs are offered on the club's answer, so a player
+    with none shows a column of zeros rather than losing the tab. Gating on
+    the player's own tally instead would mean one team-mate's page carries
+    the button and the next one doesn't, with nothing on either saying why.
+    """
+    row = await db.execute(text("""
+        SELECT COALESCE(SUM(club_bf_votes), 0) > 0 AS club,
+               COALESCE(SUM(comp_bf_votes), 0) > 0 AS comp
+        FROM afl_imported_stats
+        WHERE organisation_id = :org
+    """), {"org": str(org_id)})
+    r = row.mappings().first()
+    return {"club": bool(r and r["club"]), "comp": bool(r and r["comp"])}
+
+
 @router.get("/{player_id}")
 async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     player = await db.get(Player, player_id)
@@ -102,6 +120,7 @@ async def get_player(player_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
         "grade_breakdown": grades,
         "game_log": games,
         "achievements": await _player_achievements(db, org_id, player_id, player.display_name),
+        "vote_boards": await _vote_boards(db, org_id),
         "best_haul": {
             "goals": best_haul["goals"],
             "game_id": str(best_haul["game_id"]),
