@@ -1,7 +1,7 @@
 export default {
   version: 'v9.43.0',
-  date: '2026-08-21',
-  sortKey: '2026-08-21T23:30:00Z',
+  date: '2026-08-22',
+  sortKey: '2026-08-22T01:00:00Z',
   title: 'BetterFootball can correct a player’s totals by hand',
   items: [
     'New Manual Entries screen in the BetterFootball admin: add or correct a player’s games, goals, behinds, best on ground, games as captain and B&F votes for a season PlayHQ never had, or got wrong.',
