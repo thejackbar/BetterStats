@@ -495,6 +495,15 @@ as sections with their own buttons rather than three tabs and a manage page.
   reads its plan, but deleting one reaches every plan it groups objectives in —
   so the confirm counts across all of them and says how many plans are hit.
   Deleting a PLAN leaves the club's themes alone for the same reason.
+- **The PANE adds the level below; the RAIL adds at the level you are on.**
+  A plan's pane offers + THEME, a theme's + OBJECTIVE, which is the shape of
+  plan → theme → objective. A pillar is club-scoped and carries no plan, so
+  three rules decide which themes a plan draws: the ones its objectives use,
+  every club theme when the plan has NO objectives yet (or a new plan opens on
+  an empty tree and its + THEME mints a fifth copy of a theme the club already
+  has), and any theme with no work anywhere (so one just created is reachable).
+  The plan an objective is added under comes from `sel.planId`, stamped when a
+  theme is selected in the tree — the theme itself cannot say.
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a

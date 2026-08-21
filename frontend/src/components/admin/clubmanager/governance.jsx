@@ -1511,7 +1511,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   const [editingObjective, setEditingObjective] = useState(null)
   const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)
   const [editingTheme, setEditingTheme] = useState(null)
-  const [addingTheme, setAddingTheme] = useState(false)
+  // null, or { planId } — the plan the new theme is being added from, so it
+  // can be selected under that plan once it exists.
+  const [addingTheme, setAddingTheme] = useState(null)
   const [allTasks, setAllTasks] = useState([])
   // The row being dragged. `level` is what makes a drop legal: a plan only
   // lands among plans, a theme among themes, an objective among the objectives
@@ -1552,17 +1554,33 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   // Themes present in one plan, in the club's own pillar order, anything
   // untagged last. A theme with no objective in this plan is not drawn here —
   // it belongs to the club, not to this plan.
+  const allObjectives = groups.flatMap(g => g.objective_list || [])
+
+  // Which themes a plan draws, and two of the three cases are about a plan
+  // that has nothing under it yet.
+  //
+  // A pillar is CLUB-SCOPED and carries no plan of its own, so a plan's themes
+  // are normally the ones its objectives are filed under. That leaves a plan
+  // with no objectives showing an empty tree, with no way to hang the first
+  // objective off — and a "+ THEME" that would mint a fifth copy of a theme
+  // the club already has. So an EMPTY plan starts from the club's whole set,
+  // and a theme with no work anywhere shows under every plan until it has
+  // some, which is what makes one just created reachable.
   const themesIn = (plan) => {
     const objs = plan.objective_list || []
+    const planEmpty = plan.id && objs.length === 0
     const out = pillars
-      .map(p => ({ id: p.id, name: p.name, rows: objs.filter(o => o.pillar_id === p.id) }))
-      .filter(g => g.rows.length)
+      .map(p => ({
+        id: p.id, name: p.name,
+        rows: objs.filter(o => o.pillar_id === p.id),
+        unused: !allObjectives.some(o => o.pillar_id === p.id),
+      }))
+      .filter(g => g.rows.length || planEmpty || (plan.id && g.unused))
     const loose = objs.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
     if (loose.length) out.push({ id: '', name: 'No theme', rows: loose })
     return out
   }
 
-  const allObjectives = groups.flatMap(g => g.objective_list || [])
   const objectiveById = id => allObjectives.find(o => o.id === id)
   const workById = (kind, id) => {
     for (const o of allObjectives) {
@@ -1660,6 +1678,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
           await spliceAfter(api.committeeReorderObjectives, allObjectives.map(o => o.id),
             sel?.kind === 'objective' ? sel.id : null, made.id)
           setSel({ kind: 'objective', id: made.id })
+          // Open the branch it landed in, so it is visible in the tree rather
+          // than folded away under the theme it was just added to.
+          const planId = data.plan_id || addingObjectiveTo?.planId || ''
+          const pillarId = data.pillar_id || addingObjectiveTo?.pillarId || ''
+          setOpenIds(o => new Set([...(o || []),
+            `plan:${planId}`, `theme:${planId}:${pillarId}`, `obj:${made.id}`]))
         }
       }
       toast.success(id ? 'Objective saved' : 'Objective added')
@@ -1676,11 +1700,15 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
         if (made?.id) {
           await spliceAfter(api.committeeReorderPillars, pillars.map(x => x.id),
             sel?.kind === 'theme' ? sel.id : null, made.id)
-          setSel({ kind: 'theme', id: made.id })
+          // Selected under the plan it was added from, so the pane can offer
+          // "+ OBJECTIVE" against the right plan straight away.
+          const planId = addingTheme?.planId || sel?.planId || plans[0]?.id || ''
+          setSel({ kind: 'theme', id: made.id, planId })
+          setOpenIds(o => new Set([...(o || []), `plan:${planId}`, `theme:${planId}:${made.id}`]))
         }
       }
       toast.success(id ? 'Theme saved' : 'Theme added')
-      setEditingTheme(null); setAddingTheme(false); onChanged()
+      setEditingTheme(null); setAddingTheme(null); onChanged()
     } catch (e) { toast.error(e.message) }
   }
 
@@ -1750,9 +1778,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       : 'plan'
   function startAdd() {
     setEditingPlan(null); setEditingObjective(null); setEditingTheme(null)
-    setAddingPlan(false); setAddingTheme(false); setAddingObjectiveTo(null)
+    setAddingPlan(false); setAddingTheme(null); setAddingObjectiveTo(null)
     if (addLevel === 'plan') setAddingPlan(true)
-    else if (addLevel === 'theme') setAddingTheme(true)
+    else if (addLevel === 'theme') setAddingTheme({ planId: sel?.planId || null })
     else {
       // Under the objective that is selected, so it lands in the same branch.
       const near = sel?.kind === 'objective' ? objectiveById(sel.id)
@@ -1800,7 +1828,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                       className="shrink-0"><Twisty open={isOpen(tk)} /></button>
                     <button onClick={() => th.id && select('theme', th.id, { planId: plan.id })}
                       className="min-w-0 flex-1 text-left" disabled={!th.id}>
-                      <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={!th.id}>{th.name}</TreeLabel>
+                      <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={!th.id || th.rows.length === 0}>
+                        {th.name}
+                      </TreeLabel>
                     </button>
                     {th.id && <DelDot onClick={() => removeTheme(th.id, th.name)} title={`Delete ${th.name}`} />}
                   </div>
@@ -1863,7 +1893,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   if (addingPlan) {
     pane = <div className="max-w-3xl"><PlanForm onSave={createPlan} onCancel={() => setAddingPlan(false)} /></div>
   } else if (addingTheme) {
-    pane = <div className="max-w-3xl"><ThemeForm onSave={d => saveTheme(null, d)} onCancel={() => setAddingTheme(false)} /></div>
+    pane = <div className="max-w-3xl"><ThemeForm onSave={d => saveTheme(null, d)} onCancel={() => setAddingTheme(null)} /></div>
   } else if (addingObjectiveTo) {
     pane = (
       <div className="max-w-3xl">
@@ -1922,10 +1952,13 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
             </div>
           )}
 
+          {/* The pane adds the level BELOW what it is showing, because the
+              structure is plan → theme → objective. The rail's button adds at
+              the level you are standing on. */}
           {plan.id && (
-            <button onClick={() => setAddingObjectiveTo({ planId: plan.id, pillarId: null })}
+            <button onClick={() => { setAddingTheme({ planId: plan.id }); setAddingObjectiveTo(null) }}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
-              style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
+              style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
           )}
         </div>
       )
@@ -1970,6 +2003,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
           </div>
           <div className="mt-4"><Bar percent={pct} /></div>
         </div>
+        {/* The level below a theme, added against the plan it is being read
+            under — a theme belongs to the club, so the plan has to come from
+            where you are rather than from the theme itself. */}
+        <button onClick={() => setAddingObjectiveTo({ planId: sel.planId || plans[0]?.id || '', pillarId: p.id })}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
         {p.description && (
           <div className="pb-card p-4">
             <div className={`${cap} mb-1.5`}>DESCRIPTION</div>
