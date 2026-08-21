@@ -8,6 +8,7 @@ import { Icon } from './betterselect/ui'
 import PostEditorShell from '../../components/admin/socialpost/PostEditorShell'
 import SelectionInspector from '../../components/admin/socialpost/SelectionInspector'
 import MediaLibraryPanel from '../../components/admin/socialpost/MediaLibraryPanel'
+import HeroFocusControl from '../../components/admin/socialpost/HeroFocusControl'
 import { TOOL_TITLE } from '../../components/admin/socialpost/ToolRail'
 import StartScreen from '../../components/admin/socialpost/StartScreen'
 import MobileQuickPost from '../../components/admin/socialpost/MobileQuickPost'
@@ -18,10 +19,10 @@ import LayersPanel from '../../components/admin/socialpost/panels/LayersPanel'
 import { api } from '../../lib/api'
 import {
   T1_HeroList, T2_CardGrid, T3_SideNumbered, T4_BattingOrder,
-  T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer,
+  T5_Brutalist, T6_Diagonal, T7_CaptainSpotlight, T8_Mosaic, T9_Flyer, T10_TeamSheet,
   C1_CaptainAnnounce, C2_TossWon, C3_ManOfMatch, C4_FinalScore,
   SC1_Broadcast, SC2_Brutalist, SC3_Dashboard,
-  PALETTES, orgAccent, orgAccent2, orgToPalette,
+  PALETTES, orgAccent, orgAccent2, orgToPalette, featuredOf, DEFAULT_HERO_FOCUS,
 } from '../../social/cricket-templates'
 import {
   FixtureList, FixtureHype, FixtureGrid, FixtureBoard, FixtureHeadline, FixtureSchedule,
@@ -57,6 +58,7 @@ const TEMPLATES = [
   { id: 'T7', name: 'Milestone',       component: T7_CaptainSpotlight, desc: 'Milestone achievement showcase',  maxPlayers: 13 },
   { id: 'T8', name: 'Mosaic',          component: T8_Mosaic,          desc: 'Asymmetric photo mosaic',         maxPlayers: 11 },
   { id: 'T9', name: 'Flyer',           component: T9_Flyer,           desc: 'Festival poster style',           maxPlayers: 11 },
+  { id: 'T10', name: 'Team Sheet',     component: T10_TeamSheet,      desc: 'Full-bleed photo + torn strip',   maxPlayers: 13 },
   { id: 'C1', name: 'Announcement',    component: C1_CaptainAnnounce, desc: 'Captain / debut / award',         maxPlayers: 1 },
   { id: 'C2', name: 'Toss',            component: C2_TossWon,         desc: 'Toss result post',                maxPlayers: 0 },
   { id: 'C3', name: 'Player Spotlight',component: C3_ManOfMatch,      desc: 'Man of match / player stats',     maxPlayers: 1 },
@@ -93,9 +95,16 @@ const TEMPLATES = [
   { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 
+// The lineup templates that crop the hero photo into a fixed box, and the shape
+// of that box — the framing control previews the same crop the post will make.
+// T6 and T7 size the element to a free-standing cutout instead, so there is no
+// crop window to reposition and they are deliberately absent.
+const HERO_CROP_ASPECT = { T1: 480 / 845, T3: 380 / 1080, T10: 720 / 1080 }
+const HERO_FOCUS_TEMPLATES = Object.keys(HERO_CROP_ASPECT)
+
 const TAB_MAP = {
   T1: 'lineup', T2: 'lineup', T3: 'lineup', T4: 'lineup', T5: 'lineup',
-  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup',
+  T6: 'lineup', T7: 'lineup', T8: 'lineup', T9: 'lineup', T10: 'lineup',
   FX1: 'fixtures', FX2: 'fixtures', FX3: 'fixtures', FX4: 'fixtures', FX5: 'fixtures', FX6: 'fixtures',
   C1: 'announcement', C2: 'toss', C3: 'motm',
   C4: 'result', RS1: 'result', RS2: 'result', RS3: 'result', RS4: 'result', RS5: 'result', RS6: 'result',
@@ -950,6 +959,10 @@ export default function AdminSocialPost() {
   const [templatesOpen, setTemplatesOpen] = useState(true)
 
   const [heroImage, setHeroImage] = useState({ blobUrl: null })
+  // Where the hero photo sits inside the template's crop window, and how far
+  // in. Reset whenever a different image lands in the slot — framing belongs
+  // to the photo it was set on, not to the post.
+  const [heroFocus, setHeroFocus] = useState(DEFAULT_HERO_FOCUS)
   const [heroMode, setHeroMode] = useState('player')
   // Which selected player's photo fills the hero slot on lineup templates
   // (T1 / T3 / T6). '' = auto (captain, else first in the order).
@@ -2036,10 +2049,15 @@ export default function AdminSocialPost() {
       summary: motm.summary,
     }
   }
-  if (['T1', 'T3', 'T6', 'T7'].includes(templateId) && heroImage.blobUrl) {
+  if (['T1', 'T3', 'T6', 'T7', 'T10'].includes(templateId) && heroImage.blobUrl) {
     extraProps.heroImage = heroImage.blobUrl
   }
-  if (['T1', 'T3', 'T6'].includes(templateId) && heroPlayerId) {
+  // Only the templates that crop a photo into a box can act on a focal point;
+  // T6/T7 scale a free-standing cutout, so there is no crop window to move.
+  if (HERO_FOCUS_TEMPLATES.includes(templateId)) {
+    extraProps.heroFocus = heroFocus
+  }
+  if (['T1', 'T3', 'T6', 'T10'].includes(templateId) && heroPlayerId) {
     extraProps.featuredId = heroPlayerId
   }
   if (templateId === 'C4') {
@@ -2195,6 +2213,7 @@ export default function AdminSocialPost() {
     setOpponent({ name: '', short: '', monogram: '', logo: null })
     setSelectedPlayers([])
     setHeroImage({ blobUrl: null })
+    setHeroFocus(DEFAULT_HERO_FOCUS)
     setHeroMode('player')
     setHeroPlayerId('')
     setMilestone({ value: '', unit: 'GAMES', reason: '', detail: '', playerIdx: 0 })
@@ -2247,7 +2266,7 @@ export default function AdminSocialPost() {
   const showMatchInfo = !['scorecard', 'events', 'blank'].includes(activeTab)
   const showOpponent  = !['scorecard', 'fixtures', 'results', 'events', 'blank'].includes(activeTab)
   const showPlayers   = activeTab !== 'scorecard' && activeTab !== 'blank' && tmpl.maxPlayers > 0
-  const showHeroImage = ['T1','T3','T6','T7','C1','C3'].includes(templateId)
+  const showHeroImage = ['T1','T3','T6','T7','T10','C1','C3'].includes(templateId)
 
   // ─── Mobile quick post ────────────────────────────────────────────────────
   if (isMobile && !forceFullEditor) {
@@ -3315,7 +3334,7 @@ export default function AdminSocialPost() {
               <section className="pb-card p-4">
                 <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Hero Image</h2>
                 <p className="text-[11px] text-pb-faint mb-3">Transparent PNG recommended for best results.</p>
-                {['T1', 'T3', 'T6'].includes(templateId) && selectedPlayers.length > 0 && (
+                {['T1', 'T3', 'T6', 'T10'].includes(templateId) && selectedPlayers.length > 0 && (
                   <div className="mb-3">
                     <label className="block font-mono text-[10px] tracking-wide2 text-pb-faint uppercase mb-1">Hero Player</label>
                     <select
@@ -3366,10 +3385,22 @@ export default function AdminSocialPost() {
                           >
                             ✎ Edit (crop / remove background)
                           </button>
-                          <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }) }}
+                          <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setHeroFocus(DEFAULT_HERO_FOCUS) }}
                             className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
                         </div>
                       </div>
+                    )}
+                    {/* Framing works on whatever is actually in the slot — an
+                        upload, or the featured player's own headshot when
+                        there is no upload to override it. */}
+                    {HERO_FOCUS_TEMPLATES.includes(templateId) && (
+                      <HeroFocusControl
+                        src={heroImage.blobUrl || featuredOf(templatePlayers, heroPlayerId)?.headshot || null}
+                        value={heroFocus}
+                        onChange={setHeroFocus}
+                        defaults={DEFAULT_HERO_FOCUS}
+                        aspect={HERO_CROP_ASPECT[templateId]}
+                      />
                     )}
                   </div>
                 )}
@@ -3598,7 +3629,7 @@ export default function AdminSocialPost() {
                           <div className="flex flex-col gap-2 flex-1">
                             <button onClick={() => setEditor({ key: 'hero', source: heroImage.blobUrl })}
                               className="text-xs font-mono text-pb-faint hover:text-pb-text text-left">✎ Edit (crop / remove background)</button>
-                            <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }) }}
+                            <button onClick={() => { URL.revokeObjectURL(heroImage.blobUrl); setHeroImage({ blobUrl: null }); setHeroFocus(DEFAULT_HERO_FOCUS) }}
                               className="text-xs text-pb-faintest hover:text-red-400 font-mono text-left">Remove image</button>
                           </div>
                         </div>
@@ -4112,7 +4143,7 @@ export default function AdminSocialPost() {
           if (!e) return
           if (e.key === 'hero') {
             if (heroImage.blobUrl) URL.revokeObjectURL(heroImage.blobUrl)
-            setHeroImage({ blobUrl: URL.createObjectURL(file) })
+            setHeroImage({ blobUrl: URL.createObjectURL(file) }); setHeroFocus(DEFAULT_HERO_FOCUS)
           } else if (e.key === 'blankimg' && e.itemId) {
             record('Replace image')
             layer.update(e.itemId, { src: URL.createObjectURL(file) })

@@ -2732,6 +2732,19 @@ export const api = {
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // ─── Public: net check-in (no admin auth; player cookie) ───
+  // Reached by scanning the QR code on the fence or tapping the NFC tag —
+  // both hold this same URL. check-in joins every session running right now.
+  netsPublicLanding: (token) => request(`/public/net-checkin/${token}`),
+  netsPublicVerify: (token, player_id, pin) =>
+    request(`/public/net-checkin/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  netsPublicSwitch: (token) =>
+    request(`/public/net-checkin/${token}/switch`, { method: 'POST' }),
+  netsPublicCheckIn: (token) =>
+    request(`/public/net-checkin/${token}/check-in`, { method: 'POST' }),
+  netsPublicRegister: (token, data) =>
+    request(`/public/net-checkin/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
+
   // ─── BetterSelect: vote collection (admin) ───
   // Every admin vote call names the MEDAL it acts on. Omitting medalId falls
   // back server-side to the club's first medal, which is what keeps a link
@@ -2946,27 +2959,29 @@ export const api = {
       body: JSON.stringify({ action, duration_seconds: durationSeconds ?? null }),
     }),
   // Reports. days = 0 means all time.
-  // The self check-in link — the iPad on the door, so whoever is running the
-  // timer isn't also ticking names off. One durable per-club token that resolves
-  // to whichever session is open today.
-  nmGetCheckinLink: () => request('/nets/checkin-link'),
-  nmSetCheckinLink: (data) =>
-    request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
-  nmRegenerateCheckinLink: () => request('/nets/checkin-link/regenerate', { method: 'POST' }),
-
-  // Public side of the same link (no login — players tap their own name).
-  // Deliberately no session cookie: it's a shared device, so every tap stands
-  // on its own rather than the screen remembering whoever touched it last.
-  netCheckinLanding: (token) => request(`/public/nets/${token}`),
-  netCheckinSubmit: (token, data) =>
-    request(`/public/nets/${token}/checkin`, { method: 'POST', body: JSON.stringify(data) }),
-  netCheckinUndo: (token, data) =>
-    request(`/public/nets/${token}/undo`, { method: 'POST', body: JSON.stringify(data) }),
-
   nmAttendanceReport: (days = 120) => request(`/nets/reports/attendance?days=${days}`),
   nmAttendanceReportCsvUrl: (days = 120) => `${BASE}/nets/reports/attendance.csv?days=${days}`,
   nmSessionCsvUrl: (id) => `${BASE}/nets/sessions/${id}/attendance.csv`,
   nmPlayerAttendance: (playerId) => request(`/nets/players/${playerId}/attendance`),
+  // Self check-in link — the one URL behind both the printed QR code and the
+  // NFC tag. The backend returns a PATH; the panel prefixes the origin.
+  nmGetCheckInLink: () => request('/nets/checkin-link'),
+  nmSetCheckInLink: (data) =>
+    request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
+  nmRegenerateCheckInLink: () =>
+    request('/nets/checkin-link/regenerate', { method: 'POST' }),
+  // People who scanned in without being on the list.
+  nmListRegistrations: (status = 'pending') =>
+    request(`/nets/registrations?status=${encodeURIComponent(status)}`),
+  // playerId folds the registration into someone already on the roster;
+  // omitted, a new player is created from what they typed.
+  nmApproveRegistration: (id, playerId = null) =>
+    request(`/nets/registrations/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    }),
+  nmDismissRegistration: (id) =>
+    request(`/nets/registrations/${id}/dismiss`, { method: 'POST' }),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),

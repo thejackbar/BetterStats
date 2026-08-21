@@ -43,7 +43,7 @@ function ConditionalNavbar() {
   // mobile page — it renders its own minimal header, no club nav. The BetterPosts
   // editor is a full-viewport takeover with its own header, so suppress the club
   // nav there too.
-  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/nets/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
+  const isStandalone = pathname.startsWith('/avail/') || pathname.startsWith('/vote/') || pathname.startsWith('/room/') || pathname.startsWith('/fantasy/') || pathname.startsWith('/events/') || pathname.startsWith('/portal/') || pathname.startsWith('/shop/') || pathname.startsWith('/nets-checkin/') || pathname.startsWith('/admin/social-post') || pathname.startsWith('/betterscout')
   return (isMarketing || isStandalone) ? null : <Navbar />
 }
 
@@ -253,7 +253,8 @@ const AdminWebsite = lazy(() => import('./pages/admin/website/AdminWebsite'))
 // Public, login-free self-service availability (BetterSelect magic link + PIN)
 const PublicAvailability = lazy(() => import('./pages/PublicAvailability'))
 const PublicVoting = lazy(() => import('./pages/PublicVoting'))
-// The iPad on the door at nets — players tap their own name in
+// Public, login-free net check-in — the QR code on the fence and the NFC tag
+// beside it hold this same URL.
 const PublicNetCheckIn = lazy(() => import('./pages/PublicNetCheckIn'))
 const PublicClubRoom = lazy(() => import('./pages/PublicClubRoom'))
 // Public, login-free fantasy play (BetterFantasyCricket magic link + PIN)
@@ -365,7 +366,8 @@ export default function App() {
           {/* Public self-service availability (no login — magic link + PIN) */}
           <Route path="/avail/:token" element={<PublicAvailability />} />
           <Route path="/vote/:token" element={<PublicVoting />} />
-          <Route path="/nets/:token" element={<PublicNetCheckIn />} />
+          {/* Public net check-in (no login — QR code / NFC tag + optional PIN) */}
+          <Route path="/nets-checkin/:token" element={<PublicNetCheckIn />} />
           <Route path="/room/:token" element={<PublicClubRoom />} />
           {/* Public fantasy play (no login — magic link + PIN) */}
           <Route path="/fantasy/:token" element={<PublicFantasy />} />

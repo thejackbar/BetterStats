@@ -37,12 +37,17 @@ export default function NetSession() {
 
   const [live, setLive] = useState(null)       // null = loading, false = not found
   const [roster, setRoster] = useState([])
-  // The club's self check-in link, if they've turned it on — so the coach can
-  // put it on the second device without going hunting through Settings.
+  // The club's check-in link, if they've turned it on, so the coach can put it
+  // on the second device without going hunting for it. Taking the check-in and
+  // running the timer on one screen is what a club reported back.
   const [checkinUrl, setCheckinUrl] = useState(null)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [banner, setBanner] = useState(null)   // most recent alert, this device
   const [activeTone, setActiveTone] = useState(null)
+  // Who has just scanned themselves in, for the pop-up. Names only — this is a
+  // notice, not a second copy of the queue.
+  const [arrivals, setArrivals] = useState([])
+  const [audioReady, setAudioReady] = useState(false)
   const [tick, setTick] = useState(() => Date.now())
   // The row-button key: on until this coach turns it off, per person and per
   // browser, so one coach putting it away doesn't take it from the next.
@@ -59,6 +64,11 @@ export default function NetSession() {
   const audioRef = useRef(null)
   const firedRef = useRef({ seq: -1, fired: new Set() })
   const expiredRef = useRef(-1)
+  // Every attendee id this screen has already drawn. A screen opening halfway
+  // through a session must NOT announce the twenty people who were already
+  // there, so the first payload seeds this set silently and only what arrives
+  // afterwards is an arrival.
+  const seenRef = useRef(null)
 
   const adopt = useCallback((payload) => {
     if (!payload) return
@@ -77,11 +87,14 @@ export default function NetSession() {
     Promise.all([
       api.nmGetSession(id),
       api.nmRoster().then((r) => r.players || []).catch(() => []),
-      api.nmGetCheckinLink().catch(() => null),
+      api.nmGetCheckInLink().catch(() => null),
     ]).then(([s, rs, link]) => {
       if (!alive) return
       setRoster(rs)
-      if (link && link.enabled && link.token) setCheckinUrl(`${window.location.origin}/nets/${link.token}`)
+      // `path` comes back from the server rather than being built here, so this
+      // shortcut and the QR on the Check-in tab can never point at different
+      // URLs for the same club.
+      if (link && link.enabled && link.path) setCheckinUrl(window.location.origin + link.path)
       adopt(s)
     }).catch((e) => { if (alive) { toast.error(e.message); setLive(false) } })
     return () => { alive = false }
@@ -131,6 +144,7 @@ export default function NetSession() {
     try {
       if (!audioRef.current) audioRef.current = new (window.AudioContext || window.webkitAudioContext)()
       if (audioRef.current.state === 'suspended') audioRef.current.resume()
+      setAudioReady(audioRef.current.state === 'running')
     } catch { /* no audio */ }
   }, [soundOn])
 
@@ -149,6 +163,35 @@ export default function NetSession() {
       o.start(t); o.stop(t + 0.18)
     }
   }, [soundOn])
+
+  // ── Somebody just scanned themselves in ───────────────────────────────────
+  // The poll already brings self check-ins down within a couple of seconds;
+  // this is what makes the iPad on the fence SAY so rather than quietly
+  // growing its list. Only `source === 'self'` announces — a name the manager
+  // just tapped on this very screen must not pop up at them.
+  const liveAttendees = live && live.attendees
+  useEffect(() => {
+    if (!liveAttendees) return
+    const ids = liveAttendees.map((a) => a.id)
+    if (seenRef.current === null) { seenRef.current = new Set(ids); return }  // first paint: seed, stay quiet
+    const fresh = liveAttendees.filter((a) => !seenRef.current.has(a.id) && a.source === 'self')
+    ids.forEach((x) => seenRef.current.add(x))
+    if (!fresh.length) return
+
+    setArrivals((prev) => [...prev, ...fresh.map((a) => ({ id: a.id, name: a.name, isNew: a.is_guest }))])
+    beep('info')
+    // Android honours this; iOS Safari ignores it entirely, which is why the
+    // pop-up and the chime carry the alert rather than the buzz.
+    try { navigator.vibrate?.([90, 60, 90]) } catch { /* not supported */ }
+  }, [liveAttendees, beep])
+
+  // Clear the pop-up on its own — nobody is going to dismiss this by hand
+  // mid-session, and a notice that stays up forever stops being a notice.
+  useEffect(() => {
+    if (!arrivals.length) return
+    const t = setTimeout(() => setArrivals([]), 9000)
+    return () => clearTimeout(t)
+  }, [arrivals])
 
   // ── The clock ─────────────────────────────────────────────────────────────
   const timer = live && live.timer
@@ -276,7 +319,50 @@ export default function NetSession() {
       title="Net session"
       actions={<Btn variant="ghost" sm icon="back" onClick={() => navigate('/admin/betterselect/nets')}>Sessions</Btn>}
     >
+      {/* Somebody scanned themselves in. Fixed and high on the screen so it
+          reads from across the nets, not tucked into a corner. */}
+      {arrivals.length > 0 && (
+        <div className="fixed inset-x-0 top-3 z-[120] flex justify-center px-3 pointer-events-none">
+          <div
+            className="pointer-events-auto rounded-2xl px-5 py-4 shadow-lg max-w-md w-full text-center animate-[fadeIn_120ms_ease-out]"
+            style={{
+              background: 'color-mix(in srgb, var(--pb-positive) 16%, var(--pb-surface))',
+              border: '1px solid color-mix(in srgb, var(--pb-positive) 45%, transparent)',
+            }}
+            role="status"
+            aria-live="polite"
+            onClick={() => setArrivals([])}
+          >
+            <div className="font-mono text-[10px] uppercase tracking-wide2" style={{ color: 'var(--pb-positive)' }}>
+              Checked in
+            </div>
+            <div className="font-display font-bold text-[19px] mt-1 leading-tight">
+              {arrivals.map((a) => a.name).join(', ')}
+            </div>
+            {arrivals.some((a) => a.isNew) && (
+              <div className="text-[12.5px] text-pb-faint mt-1.5">
+                New to the club — their details are waiting on the Check-in tab.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col gap-4">
+        {/* A browser won't play a sound until someone has touched the page, so
+            an iPad propped on the fence stays silent unless it is asked. Say
+            so rather than letting the club think the chime is broken. */}
+        {soundOn && !audioReady && (
+          <button
+            onClick={unlockAudio}
+            className="pb-card px-4 py-2.5 text-left text-[12.5px] flex items-center gap-2"
+            style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 40%, transparent)', color: 'var(--pb-amber)' }}
+          >
+            <Icon name="bolt" size={14} />
+            Tap once to turn on sound for check-ins and timer alerts.
+          </button>
+        )}
+
         {/* Session header */}
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
