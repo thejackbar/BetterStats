@@ -202,6 +202,36 @@ export const aflApi = {
   adminRenameSeason: (id, body) => request(`/club-admin/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   adminDeleteSeason: (id) => request(`/club-admin/seasons/${id}`, { method: 'DELETE' }),
 
+  // Admin — Manual stat entries (adjustments). Seasons come from the Import
+  // Stats endpoints below: same club seasons, same create path, deliberately
+  // not duplicated.
+  adjustmentsList: () => request('/club-admin/manual-entries/adjustments'),
+  adjustmentsCreate: (body) => request('/club-admin/manual-entries/adjustments', {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+  adjustmentsUpdate: (id, body) => request(`/club-admin/manual-entries/adjustments/${id}`, {
+    method: 'PATCH', body: JSON.stringify(body),
+  }),
+  adjustmentsDelete: (id) => request(`/club-admin/manual-entries/adjustments/${id}`, { method: 'DELETE' }),
+  adjustmentsTemplateUrl: () => `${BASE}/club-admin/manual-entries/adjustments/template.csv`,
+  adjustmentsImport: (file) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return fetch(`${BASE}/club-admin/manual-entries/adjustments/import`, {
+      method: 'POST', body: fd, credentials: 'include',
+    }).then(async (res) => {
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.detail || 'Upload failed')
+      return body
+    })
+  },
+  manualGrades: () => request('/club-admin/manual-entries/grades'),
+  manualCreateGrade: (body) => request('/club-admin/manual-entries/grades', {
+    method: 'POST', body: JSON.stringify(body),
+  }),
+  manualAudit: () => request('/club-admin/manual-entries/audit'),
+  manualUndo: (logId) => request(`/club-admin/manual-entries/audit/${logId}/undo`, { method: 'POST' }),
+
   // Admin — Import Stats (historical CSV import)
   importsTemplateUrl: () => `${BASE}/club-admin/imports/template.csv`,
   importsSeasons: () => request('/club-admin/imports/seasons'),

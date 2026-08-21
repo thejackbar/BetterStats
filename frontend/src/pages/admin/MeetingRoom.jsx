@@ -324,7 +324,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
           follows report against the same objective. */}
       <div className="mt-1.5 max-w-md">
         <ObjectiveSelect objectives={objectives} value={motion.objective_id}
-          onChange={v => onChange({ objective_id: v })} className={`${inp} text-[12px]`} label="SERVES OBJECTIVE" />
+          onChange={v => onChange({ objective_id: v })} label="SERVES OBJECTIVE" />
       </div>
 
       {showVotes && (

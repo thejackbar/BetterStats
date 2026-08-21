@@ -343,3 +343,60 @@ class AflVoteNudge(Base):
     game_id = Column(UUID(as_uuid=True), ForeignKey("games.id", ondelete="CASCADE"), nullable=False)
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
     sent_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=func.now())
+
+
+# ─── Manual stat entries (BetterFootball adjustments) ────────────────────────
+
+
+class AflManualAdjustment(Base):
+    """One admin-entered correction to a player's totals — the football
+    equivalent of cricket's manual_season_adjustments + manual_career_adjustments.
+
+    ONE table covers both, because ``season_id`` is nullable and that IS the
+    distinction: a row with a season is a season adjustment and reads
+    everywhere a season is counted; a row with no season is career-only, so it
+    lands in a player's lifetime totals and is invisible to every season- or
+    grade-keyed board. Cricket needed two tables because its career deltas
+    carry a different column set; football's don't, and one table is what lets
+    the screen offer "leave the season blank" as a plain choice rather than two
+    forms that look the same.
+
+    A row is a DELTA, added on top of whatever the sync and Import Stats
+    already hold — never a replacement. That is why it carries no
+    ``NOT EXISTS`` gate anywhere it is read, unlike ``afl_imported_stats``,
+    whose rows only fill a genuine gap. Correcting a season the sync already
+    covers means entering the shortfall, and the screen says so.
+
+    Deliberately NOT unique on (player, season, grade): merging two players
+    legitimately brings two rows onto one key, and additive rows read
+    correctly as two. Creating a second one by hand is refused at the API
+    (409, "edit the existing one"), which is where a duplicate would be a
+    mistake rather than a merge.
+
+    Sync never touches this table — ``_rollup_season_stats`` deletes and
+    reinserts ``afl_player_season_stats`` on every run, which is exactly why a
+    correction cannot live there.
+    """
+    __tablename__ = "afl_manual_adjustments"
+    __table_args__ = (
+        Index("ix_afl_manual_adj_org", "organisation_id"),
+        Index("ix_afl_manual_adj_player", "player_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=False)
+    # NULL season = career-only. NULL grade = the whole season.
+    season_id = Column(UUID(as_uuid=True), ForeignKey("seasons.id", ondelete="CASCADE"), nullable=True)
+    grade_id = Column(UUID(as_uuid=True), ForeignKey("grades.id", ondelete="SET NULL"), nullable=True)
+    games_played = Column(Integer, server_default="0", nullable=False)
+    goals = Column(Integer, server_default="0", nullable=False)
+    behinds = Column(Integer, server_default="0", nullable=False)
+    bog_count = Column(Integer, server_default="0", nullable=False)
+    captain_games = Column(Integer, server_default="0", nullable=False)
+    club_bf_votes = Column(Integer, server_default="0", nullable=False)
+    comp_bf_votes = Column(Integer, server_default="0", nullable=False)
+    notes = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

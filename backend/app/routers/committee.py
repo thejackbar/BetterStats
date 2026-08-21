@@ -1302,9 +1302,13 @@ async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
 
 
 @router.delete("/pillars/{pillar_id}")
-async def delete_pillar(pillar_id: str, _: User = _require,
+async def delete_pillar(pillar_id: str, cascade: bool = False, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id)):
+    """`cascade=true` takes this theme's objectives with it. Off by default —
+    a pillar is club-scoped, so its objectives can span several plans and the
+    caller has to have counted them and had that confirmed. Actions and motions
+    are never deleted either way; they just stop being linked."""
+    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id), cascade=cascade):
         raise HTTPException(status_code=404, detail="Pillar not found")
     await db.commit()
     return {"deleted": True}
@@ -1369,9 +1373,11 @@ async def update_plan(plan_id: str, data: PlanUpsert, _: User = _require,
 
 
 @router.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str, _: User = _require,
+async def delete_plan(plan_id: str, cascade: bool = False, _: User = _require,
                       club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id)):
+    """`cascade=true` takes this plan's objectives with it. Actions and motions
+    serving them are kept either way and simply stop being linked."""
+    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id), cascade=cascade):
         raise HTTPException(status_code=404, detail="Plan not found")
     await db.commit()
     return {"deleted": True}

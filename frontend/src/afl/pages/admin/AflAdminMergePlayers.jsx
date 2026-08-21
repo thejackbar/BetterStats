@@ -244,9 +244,10 @@ function SplitPlayer({ players, onSplit }) {
                   </div>
                   {preview.unattributed_imported_rows > 0 && (
                     <p className="text-[11px] text-pb-faintest">
-                      {preview.unattributed_imported_rows} imported row
-                      {preview.unattributed_imported_rows === 1 ? '' : 's'} never resolved to a
-                      season, so {preview.unattributed_imported_rows === 1 ? 'it stays' : 'they stay'} with
+                      {preview.unattributed_imported_rows} row
+                      {preview.unattributed_imported_rows === 1 ? '' : 's'} aren't tied to a season
+                      — an import that never resolved one, or a career-only adjustment — so
+                      {preview.unattributed_imported_rows === 1 ? ' it stays' : ' they stay'} with
                       the original record.
                     </p>
                   )}

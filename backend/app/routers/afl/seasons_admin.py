@@ -42,7 +42,11 @@ async def list_seasons(
                COALESCE((SELECT SUM(pss.games) FROM afl_player_season_stats pss
                          WHERE pss.season_id = s.id AND pss.grade_id IS NULL), 0) AS synced_games,
                COALESCE((SELECT SUM(i.games_played) FROM afl_imported_stats i
-                         WHERE i.season_id = s.id), 0) AS imported_games
+                         WHERE i.season_id = s.id), 0) AS imported_games,
+               COALESCE((SELECT SUM(m.games_played) FROM afl_manual_adjustments m
+                         WHERE m.season_id = s.id), 0) AS adjustment_games,
+               (SELECT COUNT(*) FROM afl_manual_adjustments m
+                WHERE m.season_id = s.id) AS adjustments
         FROM seasons s
         WHERE s.organisation_id = :org
         ORDER BY s.year DESC NULLS LAST, s.name
@@ -100,7 +104,8 @@ async def _season_in_use(db: AsyncSession, season_id: uuid.UUID) -> bool:
         SELECT
             EXISTS(SELECT 1 FROM grades WHERE season_id = :sid) AS has_grades,
             EXISTS(SELECT 1 FROM afl_player_season_stats WHERE season_id = :sid) AS has_synced_stats,
-            EXISTS(SELECT 1 FROM afl_imported_stats WHERE season_id = :sid) AS has_imported_stats
+            EXISTS(SELECT 1 FROM afl_imported_stats WHERE season_id = :sid) AS has_imported_stats,
+            EXISTS(SELECT 1 FROM afl_manual_adjustments WHERE season_id = :sid) AS has_adjustments
     """), {"sid": str(season_id)})
     row = res.mappings().first()
     return bool(row and any(row.values()))
