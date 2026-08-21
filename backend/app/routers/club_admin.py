@@ -1254,7 +1254,7 @@ def _remove_player_photo(photo_url: Optional[str]) -> None:
 # The two photographs a player can have, and the columns each lands in. A
 # headshot reads at 44px on a roster row; an action shot fills the hero slot on
 # a match-day post. Cropping either into the other's slot is what asked for the
-# split (migration 272) — one set of handlers, keyed on which.
+# split (migration 274) — one set of handlers, keyed on which.
 _PLAYER_PHOTO_KINDS = {
     "photo": ("photo_data", "photo_mime", "photo_url", "photo"),
     "hero": ("hero_photo_data", "hero_photo_mime", "hero_photo_url", "hero-photo"),

@@ -66,7 +66,7 @@ function PToggle({ on, onChange, label }) {
    Two photographs, one row component. The HEADSHOT is the square mugshot that
    reads at 44px on a roster row; the ACTION SHOT fills the hero slot on a
    match-day post. Neither crops into the other's slot, which is why they are
-   stored separately (migration 272) rather than one being derived from the
+   stored separately (migration 274) rather than one being derived from the
    other. `kind` picks which. ──────────────────────────────────────────────── */
 const PHOTO_KINDS = {
   photo: {

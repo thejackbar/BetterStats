@@ -22,13 +22,13 @@ Served from ``GET /api/images/players/{id}/hero-photo``.
 Nothing syncs this. Cricket Australia's feeds carry no photography at all,
 so both columns are the club uploading what it holds.
 
-Revision ID: 272
-Revises: 271
+Revision ID: 274
+Revises: 273
 """
 from alembic import op
 
-revision = "272"
-down_revision = "271"
+revision = "274"
+down_revision = "273"
 branch_labels = None
 depends_on = None
 

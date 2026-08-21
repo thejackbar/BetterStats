@@ -15,6 +15,7 @@ import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../.
 import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../../components/player/PlayerProfilePanel'
+import UnrosteredGuests from '../../../components/player/UnrosteredGuests'
 import {
   Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
   QuickAvailModal, RecencySelect, playedWithinYears,
@@ -437,6 +438,10 @@ export default function BetterSelectPlayers() {
 
   return (
     <BetterSelectLayout title="Players">
+      {/* People turning up to nets who aren't on the list. Renders nothing when
+          there is nobody to sort out, which is the ordinary case — so the
+          master/detail grid below keeps its full height almost always. */}
+      <UnrosteredGuests onPromoted={loadRoster} />
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
         <PlayerList
           players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}

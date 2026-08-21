@@ -141,7 +141,7 @@ async def get_player_photo(player_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.get("/players/{player_id}/hero-photo")
 async def get_player_hero_photo(player_id: str, db: AsyncSession = Depends(get_db)):
-    """The player's action shot — see migration 272 for why it is a separate
+    """The player's action shot — see migration 274 for why it is a separate
     photograph from the headshot above. Same no-auth posture as that one: a
     low-sensitivity image behind an unguessable id."""
     player = await db.get(Player, _parse_uuid(player_id))

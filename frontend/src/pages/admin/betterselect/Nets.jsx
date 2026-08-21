@@ -12,6 +12,7 @@ import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
 import { Icon, Btn, Segmented, Avatar, Empty, RoleChips, NumText } from './ui'
+import NetCheckInPanel from './NetCheckInPanel'
 
 const NET_URL = '/admin/betterselect/nets/'
 
@@ -347,22 +348,144 @@ function ToggleRow({ label, hint, on, onChange, disabled }) {
   )
 }
 
+/* ── Check-in tab ─────────────────────────────────────────────────────────── */
+// The QR/NFC link, plus everyone who scanned in without being on the list.
+function CheckInTab({ canEdit, onCount }) {
+  const toast = useToast()
+  const [regs, setRegs] = useState(null)
+  const [status, setStatus] = useState('pending')
+  const [busy, setBusy] = useState(null)
+  const [roster, setRoster] = useState([])
+  const [linking, setLinking] = useState(null)  // registration id being matched
+  const [q, setQ] = useState('')
+
+  const load = useCallback(() => {
+    api.nmListRegistrations(status)
+      .then((r) => { setRegs(r.registrations || []); onCount?.(r.pending_count || 0) })
+      .catch((e) => { toast.error(e.message); setRegs([]) })
+  }, [status, toast, onCount])
+  useEffect(() => { load() }, [load])
+  // The roster only matters for "they're already on the list under another
+  // spelling", so it is fetched once and filtered here rather than per row.
+  useEffect(() => { api.nmRoster().then((r) => setRoster(r.players || [])).catch(() => setRoster([])) }, [])
+
+  const decide = async (id, fn, okMsg) => {
+    setBusy(id)
+    try { const r = await fn(); toast.success(okMsg(r)); setLinking(null); setQ(''); load() }
+    catch (e) { toast.error(e.message || 'That didn’t work') }
+    finally { setBusy(null) }
+  }
+
+  const matches = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    if (!s) return roster.slice(0, 8)
+    return roster.filter((p) => (p.name || '').toLowerCase().includes(s)).slice(0, 8)
+  }, [roster, q])
+
+  return (
+    <div>
+      <NetCheckInPanel onChanged={load} />
+
+      <div className="flex items-center justify-between gap-3 mb-3 flex-wrap">
+        <div className="font-display font-bold text-[15px]">New people who scanned in</div>
+        <Segmented sm value={status} onChange={setStatus} options={[
+          { value: 'pending', label: 'To review' },
+          { value: 'approved', label: 'Added' },
+          { value: 'dismissed', label: 'Dismissed' },
+        ]} />
+      </div>
+
+      {regs === null && <div className="py-10 text-center"><PbSpinner /></div>}
+      {regs !== null && regs.length === 0 && (
+        <Empty title={status === 'pending' ? 'Nobody waiting' : 'Nothing here'}
+          body={status === 'pending'
+            ? 'When someone checks in who isn’t on the list, their details land here for you to look at.'
+            : 'No registrations with that status yet.'} />
+      )}
+
+      <div className="flex flex-col gap-2.5">
+        {(regs || []).map((r) => (
+          <div key={r.id} className="pb-card p-4">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="min-w-0">
+                <div className="font-display font-bold text-[15px]">{r.full_name}</div>
+                <div className="text-[12.5px] text-pb-faint mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+                  {r.phone && <span>{r.phone}</span>}
+                  {r.email && <span>{r.email}</span>}
+                  {r.date_of_birth && <span>Born {fmtDate(r.date_of_birth)}</span>}
+                  {r.previous_club && <span>Previously {r.previous_club}</span>}
+                </div>
+                <div className="font-mono text-[10px] text-pb-faintest mt-1.5 uppercase tracking-wide2">
+                  Scanned in {r.created_at ? new Date(r.created_at).toLocaleString() : ''}
+                  {r.player_name ? ` · now ${r.player_name}` : ''}
+                </div>
+              </div>
+              {r.status === 'pending' && canEdit && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Btn sm variant="primary" disabled={busy === r.id}
+                    onClick={() => decide(r.id, () => api.nmApproveRegistration(r.id), (x) => `${x.player_name} added to the club`)}>
+                    Add as a player
+                  </Btn>
+                  <Btn sm onClick={() => { setLinking(linking === r.id ? null : r.id); setQ('') }}>Already on the list</Btn>
+                  <Btn sm variant="ghost" disabled={busy === r.id}
+                    onClick={() => decide(r.id, () => api.nmDismissRegistration(r.id), () => 'Dismissed')}>
+                    Dismiss
+                  </Btn>
+                </div>
+              )}
+            </div>
+
+            {linking === r.id && (
+              <div className="mt-3 pt-3 border-t pb-hairline">
+                <p className="text-[12.5px] text-pb-faint mb-2">
+                  Point this at whoever they already are. Their check-in tonight moves onto that player.
+                </p>
+                <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search the roster…"
+                  className="w-full bg-pb-surface2 border pb-hairline rounded-lg px-3 py-2 text-sm mb-2" />
+                <div className="flex flex-wrap gap-2">
+                  {matches.map((p) => (
+                    <Btn key={p.id} sm disabled={busy === r.id}
+                      onClick={() => decide(r.id, () => api.nmApproveRegistration(r.id, p.id), () => `Matched to ${p.name}`)}>
+                      {p.name}
+                    </Btn>
+                  ))}
+                  {matches.length === 0 && <span className="text-[12.5px] text-pb-faintest">No players match “{q}”.</span>}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 /* ── Page ─────────────────────────────────────────────────────────────────── */
-const TABS = [
-  { value: 'sessions', label: 'Sessions' },
-  { value: 'report', label: 'Attendance' },
-  { value: 'settings', label: 'Settings' },
-]
 export default function Nets() {
   const { hasCapability } = useAuth()
   const navigate = useNavigate()
   const canEdit = hasCapability(CAP.MANAGE_SELECTIONS)
   const [tab, setTab] = useState('sessions')
+  const [pending, setPending] = useState(0)
+
+  // Read the pending count on load so the badge is right before anyone opens
+  // the tab — a registration nobody looks at is the failure mode here.
+  useEffect(() => {
+    api.nmGetCheckInLink().then((c) => setPending(c.pending_registrations || 0)).catch(() => {})
+  }, [])
+
+  const tabs = useMemo(() => [
+    { value: 'sessions', label: 'Sessions' },
+    { value: 'report', label: 'Attendance' },
+    { value: 'checkin', label: pending ? `Check-in (${pending})` : 'Check-in' },
+    { value: 'settings', label: 'Settings' },
+  ], [pending])
 
   return (
-    <BetterSelectLayout title="Net Manager" actions={<Segmented options={TABS} value={tab} onChange={setTab} sm />}>
+    <BetterSelectLayout title="Net Manager" actions={<Segmented options={tabs} value={tab} onChange={setTab} sm />}>
       {tab === 'sessions' && <SessionsTab canEdit={canEdit} onOpen={(id) => navigate(NET_URL + id)} />}
       {tab === 'report' && <ReportTab />}
+      {tab === 'checkin' && <CheckInTab canEdit={canEdit} onCount={setPending} />}
       {tab === 'settings' && <SettingsTab canEdit={canEdit} />}
     </BetterSelectLayout>
   )
