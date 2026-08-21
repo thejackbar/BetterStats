@@ -475,6 +475,19 @@ class Organisation(Base):
     # auto_roll, sound, alerts[]). New net sessions seed from this; NULL falls
     # back to net_manager.DEFAULT_NET_SETTINGS.
     net_settings = Column(JSONB, nullable=True)
+    # Net Manager: the self check-in link (migration 272) — the iPad on the door,
+    # so the person running the timer isn't also ticking names off. One durable
+    # per-club token, the same shape as availability_link_token, resolving to
+    # whichever session is open TODAY rather than naming one, so a QR taped to
+    # the clubroom wall keeps working every week.
+    #
+    # require_pin defaults to FALSE where the availability link's defaults to
+    # true, and that difference is deliberate: this screen is a supervised
+    # device in the clubroom recording who turned up, not a link in a group
+    # chat writing a player's own answer. A club that wants the gate can have it.
+    net_checkin_token = Column(Text, nullable=True)
+    net_checkin_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    net_checkin_require_pin = Column(Boolean, nullable=False, server_default="false", default=False)
     # ─── BetterComms: outbound email sender identity (migration 069) ──────────
     # from_name / reply_to fall back to the club name / contact_email when NULL.
     # sender_footer carries the Spam Act 2003 sender identification (legal name /
@@ -1711,6 +1724,16 @@ class NetAttendance(Base):
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
     guest_name = Column(Text, nullable=True)
     batted = Column(Boolean, nullable=False, server_default="false")
+    # Turning up and batting are two different facts. Someone who arrives with a
+    # sore shoulder, or to bowl, or to keep, is present and counts towards
+    # attendance — they just aren't in the batting rotation, and leaving them in
+    # it means a net stands empty when their turn comes round (migration 272).
+    bats = Column(Boolean, nullable=False, server_default="true")
+    # What they said on the way in ("bowling only", "sore back"). Never required.
+    note = Column(Text, nullable=True)
+    # 'admin' (a coach ticked them off) or 'self' (they tapped their own name on
+    # the check-in screen), the same split player_availability.source makes.
+    source = Column(Text, nullable=False, server_default="admin")
     position = Column(Integer, nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 

@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_nets, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace
@@ -1159,6 +1159,31 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_settings JSONB"
+        ))
+        # Migration 272: turning up and batting are two different facts (someone
+        # can be present and out of the rotation), and a club can hand the
+        # check-in to the players themselves on an iPad by the door.
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS bats BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS note TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'admin'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_checkin_token TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_checkin_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_checkin_require_pin BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_organisations_net_checkin_token "
+            "ON organisations(net_checkin_token) WHERE net_checkin_token IS NOT NULL"
         ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
@@ -5838,6 +5863,7 @@ app.include_router(votes.router, dependencies=[Depends(require_module("select"))
 # design — it resolves the club from the link token and enforces entitlement +
 # enabled-flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_availability.router)                                            # BetterSelect (public)
+app.include_router(public_nets.router)                                                    # BetterSelect (public net check-in)
 # Player/supporter-facing vote collection (magic link + PIN). Unauthenticated by
 # necessity — resolves the club from its vote-link token and checks entitlement +
 # the enabled flag itself, so it is NOT wrapped in require_module.

@@ -5,6 +5,7 @@
 // + timer lives in NetSession.jsx.
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import QRCode from 'qrcode'
 import BetterSelectLayout from '../../../components/admin/BetterSelectLayout'
 import { useAuth } from '../../../contexts/AuthContext'
 import { useToast } from '../../../contexts/ToastContext'
@@ -237,6 +238,133 @@ function PlayerSessionsModal({ player, onClose }) {
   )
 }
 
+/* ── The self check-in link ───────────────────────────────────────────────────
+ * One durable per-club link for a spare device by the door, so whoever is
+ * running the timer isn't also ticking names off a list. It names no session —
+ * it resolves to whichever one is open today — which is what lets a club print
+ * the QR once and leave it on the clubroom wall. */
+function CheckInLinkPanel({ canEdit }) {
+  const toast = useToast()
+  const [cfg, setCfg] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [qr, setQr] = useState(null)
+
+  const fullUrl = cfg?.token ? `${window.location.origin}/nets/${cfg.token}` : ''
+
+  const load = useCallback(() => {
+    api.nmGetCheckinLink().then(setCfg).catch(() => setCfg(null))
+  }, [])
+  useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    if (!fullUrl) { setQr(null); return }
+    let alive = true
+    QRCode.toDataURL(fullUrl, { margin: 1, width: 240, errorCorrectionLevel: 'M' })
+      .then((u) => { if (alive) setQr(u) })
+      .catch(() => { if (alive) setQr(null) })
+    return () => { alive = false }
+  }, [fullUrl])
+
+  const update = async (patch) => {
+    if (!canEdit) return
+    setBusy(true)
+    try { setCfg(await api.nmSetCheckinLink(patch)) }
+    catch (e) { toast.error(e.message || 'Update failed') }
+    finally { setBusy(false) }
+  }
+
+  const regenerate = async () => {
+    if (!canEdit) return
+    if (!window.confirm('Generate a new link? The old link and any QR code you have printed stop working immediately.')) return
+    setBusy(true)
+    try {
+      setCfg(await api.nmRegenerateCheckinLink())
+      toast.success('New link generated — reprint the QR.')
+    } catch (e) { toast.error(e.message || 'Regenerate failed') }
+    finally { setBusy(false) }
+  }
+
+  const copy = async (text, what) => {
+    try { await navigator.clipboard.writeText(text); toast.success(`${what} copied`) }
+    catch { toast.error('Copy failed — select and copy manually') }
+  }
+
+  if (!cfg) return null
+  const enabled = !!cfg.enabled
+
+  return (
+    <div className="pb-card px-5 py-4 flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <div className="font-display font-bold text-[15px] flex items-center gap-2">
+            Self check-in screen
+            <span className="font-mono text-[10px] px-2 py-0.5 rounded-full" style={enabled
+              ? { background: 'color-mix(in srgb, var(--pb-positive) 16%, transparent)', color: 'var(--pb-positive)' }
+              : { background: 'var(--pb-surface2)', color: 'var(--pb-faintest)' }}>
+              {enabled ? 'ON' : 'OFF'}
+            </span>
+          </div>
+          <div className="text-[12.5px] text-pb-faint mt-0.5 max-w-[420px]">
+            Open this on a spare phone or iPad by the door and players tap their own name on the way in, so whoever is running the nets isn’t doing both jobs at once.
+          </div>
+        </div>
+        {canEdit && (
+          <Segmented sm value={enabled ? 'on' : 'off'} onChange={(v) => update({ enabled: v === 'on' })}
+            options={[{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }]} />
+        )}
+      </div>
+
+      {enabled && (
+        <>
+          <div>
+            <label className="block font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1.5">Check-in link</label>
+            <div className="flex flex-wrap items-center gap-2">
+              <input readOnly value={fullUrl} onFocus={(e) => e.target.select()}
+                className="flex-1 min-w-[220px] bg-pb-surface2 border pb-hairline rounded-lg px-3 py-2 text-sm font-mono text-pb-dim" />
+              <Btn sm onClick={() => copy(fullUrl, 'Link')}>Copy link</Btn>
+              <Btn sm variant="ghost" href={fullUrl} target="_blank" rel="noopener noreferrer">Open</Btn>
+              {canEdit && <Btn sm variant="ghost" onClick={regenerate} disabled={busy}>Regenerate</Btn>}
+            </div>
+            <p className="text-[11px] text-pb-faintest mt-1.5">
+              The same link every week — it finds whichever session you’ve got open today, so a printed QR keeps working.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-start gap-5">
+            {qr && (
+              <div className="text-center">
+                <img src={qr} alt="Net check-in QR code" className="w-40 h-40 rounded-lg bg-white p-2" />
+                <div className="font-mono text-[10px] text-pb-faintest mt-1.5">Print for the clubroom</div>
+              </div>
+            )}
+            <div className="flex-1 min-w-[220px] flex flex-col gap-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1.5">PIN</div>
+                <Segmented sm value={cfg.require_pin ? 'pin' : 'nopin'} onChange={(v) => canEdit && update({ require_pin: v === 'pin' })}
+                  options={[{ value: 'nopin', label: 'No PIN' }, { value: 'pin', label: 'Last-4 PIN' }]} />
+                <p className="text-[11px] text-pb-faintest mt-1.5">
+                  A PIN on every tap slows the door down, so it’s off by default — the screen only records who turned up, and you can fix anything from the session screen. Turn it on if the device isn’t supervised.
+                </p>
+              </div>
+              <div className="text-[12.5px]">
+                {cfg.open_session ? (
+                  <span className="text-pb-dim">
+                    Working now — pointing at <b className="text-pb-text">{cfg.open_session.label || 'today’s session'}</b>.
+                  </span>
+                ) : (
+                  <span className="rounded-lg px-3 py-2 block" style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', color: 'var(--pb-amber)' }}>
+                    No session open today, so the screen will say so. Start one on the Sessions tab and it comes to life.
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 /* ── Settings tab ─────────────────────────────────────────────────────────── */
 const TONES = [{ value: 'info', label: 'Notify' }, { value: 'amber', label: 'Warn' }, { value: 'red', label: 'Final' }]
 function SettingsTab({ canEdit }) {
@@ -266,6 +394,8 @@ function SettingsTab({ canEdit }) {
 
   return (
     <div className="flex flex-col gap-4 max-w-[640px]">
+      <CheckInLinkPanel canEdit={canEdit} />
+
       <div className="pb-card px-5 py-4 flex flex-col gap-4">
         <div className="font-display font-bold text-[15px]">Batting turn</div>
         <div className="flex flex-wrap items-end gap-5">

@@ -21,7 +21,7 @@ import { useToast } from '../../../contexts/ToastContext'
 import { api } from '../../../lib/api'
 import { CAP } from '../../../lib/capabilities'
 import { PbSpinner } from '../../../lib/presskit'
-import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText } from './ui'
+import { Icon, Btn, Avatar, RoleChips, Search, Empty, NumText, usePref } from './ui'
 
 const POLL_MS = 2500
 const TONE_COLOR = { info: 'var(--pb-accent)', amber: 'var(--pb-amber)', red: 'var(--pb-red)' }
@@ -37,10 +37,16 @@ export default function NetSession() {
 
   const [live, setLive] = useState(null)       // null = loading, false = not found
   const [roster, setRoster] = useState([])
+  // The club's self check-in link, if they've turned it on — so the coach can
+  // put it on the second device without going hunting through Settings.
+  const [checkinUrl, setCheckinUrl] = useState(null)
   const [checkInOpen, setCheckInOpen] = useState(false)
   const [banner, setBanner] = useState(null)   // most recent alert, this device
   const [activeTone, setActiveTone] = useState(null)
   const [tick, setTick] = useState(() => Date.now())
+  // The row-button key: on until this coach turns it off, per person and per
+  // browser, so one coach putting it away doesn't take it from the next.
+  const [showKey, setShowKey] = usePref('nets_row_key', true)
 
   const liveRef = useRef(null)
   // How far this device's clock sits behind the server's, in ms. Kept fresh by
@@ -71,9 +77,11 @@ export default function NetSession() {
     Promise.all([
       api.nmGetSession(id),
       api.nmRoster().then((r) => r.players || []).catch(() => []),
-    ]).then(([s, rs]) => {
+      api.nmGetCheckinLink().catch(() => null),
+    ]).then(([s, rs, link]) => {
       if (!alive) return
       setRoster(rs)
+      if (link && link.enabled && link.token) setCheckinUrl(`${window.location.origin}/nets/${link.token}`)
       adopt(s)
     }).catch((e) => { if (alive) { toast.error(e.message); setLive(false) } })
     return () => { alive = false }
@@ -196,8 +204,13 @@ export default function NetSession() {
   }, [remaining, timer, canEdit, act, id, beep])
 
   // ── Derived lists ─────────────────────────────────────────────────────────
+  // Three lists, and the split matters: someone sitting out is HERE (their
+  // attendance counts) but not in the rotation, because leaving them in it
+  // leaves a net standing empty when their name comes up. Same rule the server
+  // applies in _waiting, so the queue can't disagree with what rotating does.
   const attendees = (live && live.attendees) || []
-  const waiting = useMemo(() => attendees.filter((a) => !a.batted), [attendees])
+  const waiting = useMemo(() => attendees.filter((a) => !a.batted && a.bats !== false), [attendees])
+  const sittingOut = useMemo(() => attendees.filter((a) => !a.batted && a.bats === false), [attendees])
   const done = useMemo(() => attendees.filter((a) => a.batted), [attendees])
   const inSession = useMemo(() => {
     const s = new Set()
@@ -227,6 +240,9 @@ export default function NetSession() {
   }
   const bumpToFront = (attId) => reorder([attId, ...waiting.map((a) => a.id).filter((x) => x !== attId)])
   const setBatted = (attId, batted) => act(() => api.nmPatchAttendee(id, attId, { batted }))
+  // Moving someone in or out of the rotation. Coming back in puts them at the
+  // back of the queue, which is the server's call, not this screen's.
+  const setBats = (attId, bats) => act(() => api.nmPatchAttendee(id, attId, { bats }))
   const removeAttendee = (attId) => act(() => api.nmRemoveAttendee(id, attId))
 
   const start = () => { unlockAudio(); act(() => api.nmTimer(id, 'start')) }
@@ -265,10 +281,22 @@ export default function NetSession() {
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
             <div className="font-display font-bold text-[20px] leading-tight">{live.label || 'Net session'}</div>
-            <div className="text-[13px] text-pb-faint">{fmtDate(live.session_date)} · {attendees.length} checked in · {done.length} batted</div>
+            <div className="text-[13px] text-pb-faint">
+              {fmtDate(live.session_date)} · {attendees.length} checked in · {done.length} batted
+              {sittingOut.length > 0 && ` · ${sittingOut.length} not batting`}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          {/* Wraps, rather than pushing the page sideways. The row gained a
+              fourth control and measured 418px against a 390px screen — the
+              outer flex-wrap can't save a group that won't wrap itself. */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
             <LiveDot />
+            {/* The second device. Opening it here rather than making a coach
+                find it in Settings is the whole point — it's needed at 6pm. */}
+            {checkinUrl && (
+              <Btn variant="ghost" sm icon="teams" href={checkinUrl} target="_blank"
+                title="Open the self check-in screen — put this on a spare phone or iPad by the door">Check-in screen</Btn>
+            )}
             <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
             {canEdit && <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>}
           </div>
@@ -356,8 +384,23 @@ export default function NetSession() {
           <div className="pb-card px-4 py-3.5">
             <div className="flex items-center justify-between mb-1.5">
               <span className="font-display font-bold text-[15px]">Up next</span>
-              <span className="font-mono text-[11px] text-pb-faint">{upNext.length} waiting</span>
+              <div className="flex items-center gap-3">
+                {canEdit && (
+                  <button onClick={() => setShowKey((k) => !k)}
+                    className="font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest hover:text-pb-accent">
+                    {showKey ? 'Hide key' : 'Key'}
+                  </button>
+                )}
+                <span className="font-mono text-[11px] text-pb-faint">{upNext.length} waiting</span>
+              </div>
             </div>
+
+            {/* What the row buttons do. Shown by default because these glyphs
+                are the club's own vocabulary rather than anything universal —
+                and hideable, because a coach who has run a few sessions knows
+                them and would rather have the rows. */}
+            {canEdit && showKey && <RowKey />}
+
             {upNext.length === 0 ? <Empty className="py-3">Queue is empty.</Empty> : (
               <div className="flex flex-col">
                 {upNext.map((p, i) => (
@@ -369,9 +412,11 @@ export default function NetSession() {
                     </div>
                     {canEdit && (
                       <div className="flex items-center gap-0.5 text-pb-faint">
-                        <button onClick={() => bumpToFront(p.id)} title="Bat next" className="p-1 hover:text-pb-accent"><Icon name="bolt" size={15} /></button>
-                        <button onClick={() => move(p.id, -1)} title="Up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
-                        <button onClick={() => move(p.id, 1)} title="Down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
+                        <button onClick={() => bumpToFront(p.id)} title="Bat next" className="p-1 hover:text-pb-accent"><Icon name="batNext" size={16} /></button>
+                        <button onClick={() => move(p.id, -1)} title="Move up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
+                        <button onClick={() => move(p.id, 1)} title="Move down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
+                        <button onClick={() => setBatted(p.id, true)} title="Mark as batted" className="p-1 hover:text-pb-accent"><Icon name="batDone" size={16} /></button>
+                        <button onClick={() => setBats(p.id, false)} title="Not batting — here tonight, but out of the rotation" className="p-1 hover:text-pb-amber"><Icon name="batNotOut" size={16} /></button>
                         <button onClick={() => removeAttendee(p.id)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
                       </div>
                     )}
@@ -381,21 +426,55 @@ export default function NetSession() {
             )}
           </div>
 
-          <div className="pb-card px-4 py-3.5">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="font-display font-bold text-[15px]">Done</span>
-              <span className="font-mono text-[11px] text-pb-accent">{done.length} batted</span>
+          {/* Batted, then Not batting — both out of the queue, for different
+              reasons, and both kept off the Up next list so it stays as short
+              as what is actually still to come. */}
+          <div className="flex flex-col gap-4">
+            <div className="pb-card px-4 py-3.5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="font-display font-bold text-[15px]">Batted</span>
+                <span className="font-mono text-[11px] text-pb-accent">{done.length} done</span>
+              </div>
+              {done.length === 0 ? <Empty className="py-3">No completed turns yet.</Empty> : (
+                <div className="flex flex-col">
+                  {done.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
+                      <Avatar player={{ ...p, id: p.player_id }} size={26} />
+                      <span className="flex-1 min-w-0 text-[13px] text-pb-dim truncate">{p.name}</span>
+                      <Icon name="check" size={15} className="text-pb-accent" />
+                      {canEdit && <button onClick={() => setBatted(p.id, false)} title="Back to queue" className="p-1 text-pb-faint hover:text-pb-text"><Icon name="reset" size={14} /></button>}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {done.length === 0 ? <Empty className="py-3">No completed turns yet.</Empty> : (
-              <div className="flex flex-col">
-                {done.map((p) => (
-                  <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
-                    <Avatar player={{ ...p, id: p.player_id }} size={26} />
-                    <span className="flex-1 min-w-0 text-[13px] text-pb-dim truncate">{p.name}</span>
-                    <Icon name="check" size={15} className="text-pb-accent" />
-                    {canEdit && <button onClick={() => setBatted(p.id, false)} title="Back to queue" className="p-1 text-pb-faint hover:text-pb-text"><Icon name="reset" size={14} /></button>}
-                  </div>
-                ))}
+
+            {/* Here, but out of the rotation. Still on the screen rather than
+                tucked away — they turned up, and the coach needs to know who is
+                about to bowl or field even though the queue skips them. */}
+            {sittingOut.length > 0 && (
+              <div className="pb-card px-4 py-3.5">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="font-display font-bold text-[15px]">Not batting</span>
+                  <span className="font-mono text-[11px] text-pb-amber">{sittingOut.length} here</span>
+                </div>
+                <div className="flex flex-col">
+                  {sittingOut.map((p) => (
+                    <div key={p.id} className="flex items-center gap-2.5 py-2 border-b pb-hairline last:border-0">
+                      <Avatar player={{ ...p, id: p.player_id }} size={26} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] text-pb-dim truncate">{p.name}</div>
+                        {p.note && <div className="text-[11px] text-pb-faint truncate">{p.note}</div>}
+                      </div>
+                      {canEdit && (
+                        <div className="flex items-center gap-0.5 text-pb-faint">
+                          <button onClick={() => setBats(p.id, true)} title="Put back in the queue" className="p-1 hover:text-pb-accent"><Icon name="batNext" size={16} /></button>
+                          <button onClick={() => removeAttendee(p.id)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -406,6 +485,31 @@ export default function NetSession() {
         <CheckInModal roster={roster} inSession={inSession} onAdd={addPlayer} onGuest={addGuest} onClose={() => setCheckInOpen(false)} />
       )}
     </BetterSelectLayout>
+  )
+}
+
+/* ── What the row buttons mean ────────────────────────────────────────────────
+ * The queue's controls are five small glyphs on a crowded row, and three of
+ * them are bats doing different things. Spelling them out once above the list
+ * beats a coach discovering them by tapping — and it costs a line, which is why
+ * it can be put away. */
+const ROW_KEY = [
+  { icon: 'batNext', label: 'Bat next' },
+  { icon: 'chevron', label: 'Move up or down', rotate: true },
+  { icon: 'batDone', label: 'Mark as batted' },
+  { icon: 'batNotOut', label: 'Not batting' },
+  { icon: 'close', label: 'Remove' },
+]
+function RowKey() {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-2.5 px-2.5 py-2 rounded-lg bg-pb-surface2/50">
+      {ROW_KEY.map((k) => (
+        <span key={k.icon} className="inline-flex items-center gap-1.5 text-[11.5px] text-pb-faint">
+          <Icon name={k.icon} size={15} className={k.rotate ? '-rotate-90' : ''} />
+          {k.label}
+        </span>
+      ))}
+    </div>
   )
 }
 
@@ -421,14 +525,37 @@ function LiveDot() {
   )
 }
 
-/* ── Check-in modal ───────────────────────────────────────────────────────── */
+/* ── Check-in modal ───────────────────────────────────────────────────────────
+ * Every name the club holds is reachable from here, and that is the point.
+ *
+ * This list used to be the same pool the availability screens use, which drops
+ * anyone who hasn't played inside the club's dormancy window — so a player who
+ * reads as active on Admin → Players simply wasn't here, with nothing on screen
+ * saying why, and the only way to record them was as a guest under their own
+ * name. Reported from a club's Thursday nets.
+ *
+ * The current squad still comes first, because that's who turns up week to
+ * week. Everyone else sits under their own heading, and searching reaches the
+ * whole club — so the answer to "why can't I find him" is never "you can't". */
 function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
   const [q, setQ] = useState('')
   const [guest, setGuest] = useState('')
-  const filtered = useMemo(() => {
+  const [showAll, setShowAll] = useState(false)
+
+  const { squad, others } = useMemo(() => {
     const t = q.trim().toLowerCase()
-    return roster.filter((p) => !t || (p.name || '').toLowerCase().includes(t))
+    const hit = (p) => !t || (p.name || '').toLowerCase().includes(t)
+    const inSquad = (p) => !p.dormant && !p.inactive
+    return {
+      squad: roster.filter((p) => hit(p) && inSquad(p)),
+      others: roster.filter((p) => hit(p) && !inSquad(p)),
+    }
   }, [roster, q])
+
+  // A search is someone looking for a specific person, so it always reaches
+  // past the squad; with no search, the rest are one tap away.
+  const searching = q.trim().length > 0
+  const showOthers = searching || showAll
 
   return (
     <div onClick={onClose} className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/60 backdrop-blur-sm">
@@ -441,24 +568,34 @@ function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1"><Icon name="close" size={18} /></button>
         </div>
         <div className="px-4 py-3 border-b pb-hairline">
-          <Search value={q} onChange={setQ} placeholder="Search the roster…" />
+          <Search value={q} onChange={setQ} placeholder="Search every player at the club…" />
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-1">
-          {filtered.length === 0 ? <Empty className="px-3 py-6 text-center">No matching players.</Empty> : filtered.map((p) => {
-            const on = inSession.has(p.id)
-            return (
-              <button key={p.id} onClick={() => onAdd(p)} className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-pb-surface2/60 text-left">
-                <Avatar player={p} size={32} noLink />
-                <div className="flex-1 min-w-0">
-                  <div className="font-display font-medium text-[13.5px] truncate">{p.name}</div>
-                  <RoleChips roles={(p.skill_positions || []).slice(0, 3)} muted />
-                </div>
-                <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${on ? 'bg-pb-accent text-[#08110b]' : 'border border-pb-hairline2 text-pb-faint'}`}>
-                  <Icon name={on ? 'check' : 'plus'} size={15} />
-                </span>
-              </button>
-            )
-          })}
+          {squad.length === 0 && (!showOthers || others.length === 0) ? (
+            <Empty className="px-3 py-6 text-center">
+              {searching ? 'Nobody by that name — add them as a guest below.' : 'No players on the roster yet.'}
+            </Empty>
+          ) : (
+            <>
+              {squad.map((p) => <RosterRow key={p.id} p={p} on={inSession.has(p.id)} onAdd={onAdd} />)}
+
+              {!showOthers && others.length > 0 && (
+                <button onClick={() => setShowAll(true)}
+                  className="w-full px-2.5 py-2.5 mt-1 text-left text-[12.5px] text-pb-faint hover:text-pb-accent">
+                  + Show {others.length} more player{others.length === 1 ? '' : 's'} (not played recently, or marked inactive)
+                </button>
+              )}
+
+              {showOthers && others.length > 0 && (
+                <>
+                  <div className="px-2.5 pt-3 pb-1 font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest">
+                    Not in the current squad
+                  </div>
+                  {others.map((p) => <RosterRow key={p.id} p={p} on={inSession.has(p.id)} onAdd={onAdd} />)}
+                </>
+              )}
+            </>
+          )}
         </div>
         <div className="px-4 py-3 border-t pb-hairline flex items-center gap-2">
           <input value={guest} onChange={(e) => setGuest(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { onGuest(guest); setGuest('') } }}
@@ -468,5 +605,27 @@ function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
         </div>
       </div>
     </div>
+  )
+}
+
+/* One name on the check-in list. A player outside the current squad is tagged
+ * with why rather than hidden — a coach can then tell "he's had a season off"
+ * from "wrong person". */
+function RosterRow({ p, on, onAdd }) {
+  const tag = p.inactive ? 'INACTIVE' : p.dormant ? 'NOT PLAYED RECENTLY' : null
+  return (
+    <button onClick={() => onAdd(p)} className="w-full flex items-center gap-3 px-2.5 py-2 rounded-lg hover:bg-pb-surface2/60 text-left">
+      <Avatar player={p} size={32} noLink />
+      <div className="flex-1 min-w-0">
+        <div className="font-display font-medium text-[13.5px] truncate">
+          {p.name}
+          {tag && <span className="font-mono text-[9px] text-pb-faintest ml-1.5">{tag}</span>}
+        </div>
+        <RoleChips roles={(p.skill_positions || []).slice(0, 3)} muted />
+      </div>
+      <span className={`inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${on ? 'bg-pb-accent text-[#08110b]' : 'border border-pb-hairline2 text-pb-faint'}`}>
+        <Icon name={on ? 'check' : 'plus'} size={15} />
+      </span>
+    </button>
   )
 }

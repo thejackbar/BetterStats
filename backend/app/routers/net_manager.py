@@ -9,7 +9,9 @@ surface in BetterSelect and on the player profile.
                       counter every write bumps
   * net_attendance  — one attendee per session (real player OR an ad-hoc guest);
                       the row's existence = "turned up", `batted` = completed a
-                      turn, `position` = where they sit in the queue
+                      turn, `bats` = in the batting rotation at all (someone can
+                      be here and sitting out), `position` = where they sit in
+                      the queue
 
 THE LIVE SESSION IS SERVER-AUTHORITATIVE, and that is the whole shape of this
 router. It used to be a client-side state machine on one device that pushed a
@@ -26,6 +28,11 @@ screen left open on the boundary is cheap.
 exactly how one device silently undoes another's check-in, which is the bug
 this design exists to prevent.
 
+Running the night and taking the check-in are two jobs, and one person doing
+both on one screen is what a club reported back. `check_in` here is the one
+write behind both, and `public_nets.py` puts it on a per-club link for the iPad
+by the door so players tap their own names in — see `open_session_today`.
+
 All endpoints are scoped to the caller's club via get_current_club and gated by
 the MANAGE_SELECTIONS capability (same as the rest of BetterSelect), except the
 reads, which any club admin may open. The whole router sits behind
@@ -35,6 +42,7 @@ from __future__ import annotations
 
 import csv
 import io
+import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -51,7 +59,9 @@ from app.models.db import (
     NetAttendance, NetSession, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club
-from app.routers.availability import active_self_service_players
+from app.routers.availability import (
+    DEFAULT_DORMANCY_MONTHS, club_player_roster, dormant_player_ids,
+)
 
 router = APIRouter(prefix="/nets", tags=["net-manager"])
 
@@ -183,13 +193,20 @@ def _timer_payload(live: dict) -> dict:
     return out
 
 
-def _player_card(p: Player) -> dict:
+def _player_card(p: Player, dormant: bool = False) -> dict:
+    """One name on the check-in list.
+
+    `dormant` and `inactive` say why a name isn't in the current squad; neither
+    hides it. See net_roster for why that matters.
+    """
     return {
         "id": str(p.id),
         "name": p.display_name,
         "photo_url": p.photo_url,
         "skill_positions": p.skill_positions or [],
         "batting_hand": p.batting_hand,
+        "dormant": bool(dormant),
+        "inactive": p.status == "inactive",
     }
 
 
@@ -220,10 +237,16 @@ class SessionUpdate(BaseModel):
 class AttendeeAdd(BaseModel):
     player_id: Optional[str] = None
     guest_name: Optional[str] = None
+    # Here, but not batting — carrying a knock, bowling only, keeping. They still
+    # count as having turned up; they just aren't put in the queue.
+    bats: Optional[bool] = None
+    note: Optional[str] = None
 
 
 class AttendeePatch(BaseModel):
     batted: Optional[bool] = None
+    bats: Optional[bool] = None
+    note: Optional[str] = None
 
 
 class QueueOrder(BaseModel):
@@ -286,6 +309,17 @@ async def _attendee_rows(db: AsyncSession, session_id) -> list[NetAttendance]:
     return list(res.scalars().all())
 
 
+def _waiting(rows: list[NetAttendance]) -> list[NetAttendance]:
+    """The batting queue: present, not yet had a turn, and actually batting.
+
+    Someone sitting out (`bats` false — carrying a knock, here to bowl, keeping)
+    is NOT in it. Leaving them in leaves a net standing empty when their name
+    comes up, which is the thing the queue exists to prevent. They are still
+    attendees, so the register and the club's report still say they were here.
+    """
+    return [r for r in rows if not r.batted and r.bats]
+
+
 async def _renumber(db: AsyncSession, session_id) -> list[NetAttendance]:
     """Re-lay `position` as 0..n-1 over the canonical order above, so the queue
     reads the same however it was last edited and from whichever device."""
@@ -319,6 +353,9 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
             "skill_positions": (p.skill_positions or []) if p else [],
             "is_guest": r.player_id is None,
             "batted": bool(r.batted),
+            "bats": bool(r.bats),
+            "note": r.note,
+            "source": r.source or "admin",
             "position": r.position,
         })
 
@@ -336,6 +373,7 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "attendees": attendees,
         "attendee_count": len(attendees),
         "batted_count": sum(1 for a in attendees if a["batted"]),
+        "sitting_out_count": sum(1 for a in attendees if not a["bats"]),
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
 
@@ -355,11 +393,33 @@ async def net_roster(
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
-    """The active, non-dormant roster to check players in from — the same pool
-    the availability matrix and self-service link use, so the Net Manager never
-    drowns in decades of historical names."""
-    players = await active_self_service_players(db, club)
-    return {"players": [_player_card(p) for p in players]}
+    """EVERY player on the club's books, each tagged with why they are or aren't
+    in the current squad. The check-in list must never be missing a name.
+
+    This used to be `active_self_service_players`, which drops anyone who last
+    appeared before the club's dormancy window opened — so a player reading as
+    active on Admin → Players was simply absent from check-in, with nothing on
+    screen to say why, and the only way to record them was as a guest under
+    their own name. Reported from a club's Thursday nets, and dormancy is only
+    one of the reasons a name could go missing: a player between clubs, one
+    marked inactive over winter, or anyone whose games are logged under another
+    record all read the same way to the person holding the iPad.
+
+    So nothing is filtered out here. `dormant` and `inactive` are flags the
+    screen groups by, not exclusions — the current squad is what it shows
+    first, and every other name is one search away instead of unreachable.
+    """
+    players = await club_player_roster(db, club)
+    dormant = await dormant_player_ids(db, club)
+    cards = [_player_card(p, p.id in dormant) for p in players]
+    return {
+        "players": cards,
+        # What the screen shows before anyone searches, so it can say how many
+        # more names are behind the search box rather than implying the squad
+        # is the whole club.
+        "squad_count": sum(1 for c in cards if not c["dormant"] and not c["inactive"]),
+        "dormancy_months": club.dormancy_months or DEFAULT_DORMANCY_MONTHS,
+    }
 
 
 # ── Club default timer settings ──────────────────────────────────────────────
@@ -384,6 +444,94 @@ async def put_settings(
     club.net_settings = _clean_settings(merged)
     await db.commit()
     return {"settings": club.net_settings}
+
+
+# ── The self check-in link ────────────────────────────────────────────────────
+# One durable per-club link for the iPad on the door, so the person running the
+# timer isn't also ticking names off a list. It names no session: it resolves to
+# whichever session is open TODAY, which is what lets a club print the QR once
+# and stick it on the wall.
+async def open_session_today(db: AsyncSession, club_id) -> Optional[NetSession]:
+    """The club's open session for today, or None.
+
+    Strictly TODAY. A session left open from last week must not quietly collect
+    tonight's check-ins — attendance filed against the wrong night is worse than
+    a screen saying nobody has opened one yet, because nothing on either screen
+    would ever show it was wrong.
+    """
+    res = await db.execute(
+        select(NetSession)
+        .where(
+            NetSession.organisation_id == club_id,
+            NetSession.session_date == date.today(),
+            NetSession.status == "active",
+        )
+        .order_by(NetSession.created_at.desc())
+        .limit(1)
+    )
+    return res.scalar_one_or_none()
+
+
+async def _checkin_link_payload(db: AsyncSession, club: Organisation) -> dict:
+    session = await open_session_today(db, club.id)
+    return {
+        "enabled": bool(club.net_checkin_enabled),
+        "require_pin": bool(club.net_checkin_require_pin),
+        "token": club.net_checkin_token,
+        # So the admin panel can say whether the link would work right now
+        # rather than leaving a coach to find out at 6pm.
+        "open_session": None if session is None else {
+            "id": str(session.id),
+            "label": session.label,
+            "session_date": session.session_date.isoformat(),
+        },
+    }
+
+
+class CheckinLinkUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    require_pin: Optional[bool] = None
+
+
+@router.get("/checkin-link")
+async def get_checkin_link(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    return await _checkin_link_payload(db, club)
+
+
+@router.post("/checkin-link")
+async def set_checkin_link(
+    body: CheckinLinkUpdate,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Turn the check-in screen on or off, and choose whether tapping your own
+    name needs a PIN. Enabling for the first time mints the token."""
+    if body.require_pin is not None:
+        club.net_checkin_require_pin = bool(body.require_pin)
+    if body.enabled is not None:
+        club.net_checkin_enabled = bool(body.enabled)
+        if body.enabled and not club.net_checkin_token:
+            club.net_checkin_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _checkin_link_payload(db, club)
+
+
+@router.post("/checkin-link/regenerate")
+async def regenerate_checkin_link(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Rotate the token — the old link and the QR on the wall stop working."""
+    club.net_checkin_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _checkin_link_payload(db, club)
 
 
 # ── Sessions ──────────────────────────────────────────────────────────────────
@@ -539,31 +687,37 @@ async def delete_session(
 
 
 # ── Attendance: one small write per action ───────────────────────────────────
-@router.post("/sessions/{session_id}/attendees")
-async def add_attendee(
+async def check_in(
+    db: AsyncSession,
     session_id: str,
-    body: AttendeeAdd,
-    db: AsyncSession = Depends(get_db),
-    club: Organisation = Depends(get_current_club),
-    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
-):
-    """Check one person in, at the back of the queue.
+    club_id,
+    *,
+    player_id: Optional[str] = None,
+    guest_name: Optional[str] = None,
+    bats: bool = True,
+    note: Optional[str] = None,
+    source: str = "admin",
+) -> dict:
+    """Check one person in, at the back of the queue, and hand back the session.
+
+    The one write behind both a coach ticking a name off and a player tapping
+    their own on the check-in screen, so the two can never drift apart on what
+    a check-in is. `bats=False` records someone who is here but not batting.
 
     Checking in someone already in the session is a no-op rather than an error:
     two devices tapping the same name at the same moment is an ordinary thing
-    to happen at a net session, and neither coach should see a failure for it.
+    to happen at a net session, and nobody should see a failure for it. What it
+    is NOT is a way to quietly rewrite their state — someone already on the list
+    keeps whatever the coach last set, so a stray tap on the door iPad can't put
+    a player who has been marked as sitting out back into the rotation.
     """
-    # Read the club id up front: the rollback below expires every loaded object,
-    # and reaching for `club.id` afterwards is a lazy load in the wrong place —
-    # the MissingGreenlet trap this repo has hit before.
-    club_id = club.id
     s = await _owned_session(db, session_id, club_id)
 
     pid = None
     guest = None
-    if body.player_id:
+    if player_id:
         try:
-            cand = uuid.UUID(str(body.player_id))
+            cand = uuid.UUID(str(player_id))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="Unknown player")
         p = await db.get(Player, cand)
@@ -579,12 +733,11 @@ async def add_attendee(
             return await _live_payload(db, s)
         pid = cand
     else:
-        guest = (body.guest_name or "").strip()[:80]
+        guest = (guest_name or "").strip()[:80]
         if not guest:
             raise HTTPException(status_code=422, detail="Give the guest a name")
 
     rows = await _attendee_rows(db, s.id)
-    waiting = [r for r in rows if not r.batted]
     db.add(NetAttendance(
         id=uuid.uuid4(),
         session_id=s.id,
@@ -592,12 +745,15 @@ async def add_attendee(
         player_id=pid,
         guest_name=guest,
         batted=False,
-        position=len(waiting),
+        bats=bool(bats),
+        note=((note or "").strip()[:120] or None),
+        source=source if source in ("admin", "self") else "admin",
+        position=len(_waiting(rows)),
     ))
     try:
         await db.flush()
     except IntegrityError:
-        # Two coaches tapped the same name in the same second, so the read above
+        # Two people tapped the same name in the same second, so the read above
         # couldn't see the other's row yet and the unique index caught it. Same
         # answer as the check above: they're in, once. Verified by racing three
         # simultaneous check-ins of one player against a real Postgres.
@@ -606,6 +762,29 @@ async def add_attendee(
         return await _live_payload(db, s)
     await _renumber(db, s.id)
     return await _commit_live(db, s)
+
+
+@router.post("/sessions/{session_id}/attendees")
+async def add_attendee(
+    session_id: str,
+    body: AttendeeAdd,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Check one person in from the admin screen."""
+    # Read the club id up front: a rollback inside check_in expires every loaded
+    # object, and reaching for `club.id` afterwards is a lazy load in the wrong
+    # place — the MissingGreenlet trap this repo has hit before.
+    club_id = club.id
+    return await check_in(
+        db, session_id, club_id,
+        player_id=body.player_id,
+        guest_name=body.guest_name,
+        bats=True if body.bats is None else bool(body.bats),
+        note=body.note,
+        source="admin",
+    )
 
 
 async def _owned_attendee(db: AsyncSession, s: NetSession, attendee_id: str) -> NetAttendance:
@@ -652,16 +831,38 @@ async def patch_attendee(
     club: Organisation = Depends(get_current_club),
     user: User = Depends(require_cap(MANAGE_SELECTIONS)),
 ):
-    """Mark one attendee as having had their turn, or send them back to the
-    queue. Sending someone back puts them at the END of it, which is what the
-    manager means by "they need another go"."""
+    """Mark one attendee as having had their turn, send them back to the queue,
+    or move them in or out of the rotation.
+
+    Both re-entry paths put them at the END of the queue — "they need another
+    go" and "his shoulder has loosened up, put him in" both mean the back of
+    the line, not a place ahead of someone who has been waiting.
+    """
     s = await _owned_session(db, session_id, club.id)
     r = await _owned_attendee(db, s, attendee_id)
+    changed = False
+
+    if body.note is not None:
+        note = (body.note or "").strip()[:120] or None
+        if note != r.note:
+            r.note = note
+            changed = True
+
+    rejoined = False
+    if body.bats is not None and bool(r.bats) != bool(body.bats):
+        r.bats = bool(body.bats)
+        rejoined = r.bats
+        changed = True
     if body.batted is not None and bool(r.batted) != bool(body.batted):
         r.batted = bool(body.batted)
-        if not r.batted:
-            rows = await _attendee_rows(db, s.id)
-            r.position = sum(1 for x in rows if not x.batted and x.id != r.id)
+        rejoined = rejoined or not r.batted
+        changed = True
+
+    if rejoined and not r.batted and r.bats:
+        rows = await _attendee_rows(db, s.id)
+        r.position = sum(1 for x in _waiting(rows) if x.id != r.id)
+
+    if changed:
         await db.flush()
         await _renumber(db, s.id)
     return await _commit_live(db, s)
@@ -682,7 +883,7 @@ async def reorder_queue(
     """
     s = await _owned_session(db, session_id, club.id)
     rows = await _attendee_rows(db, s.id)
-    waiting = {str(r.id): r for r in rows if not r.batted}
+    waiting = {str(r.id): r for r in _waiting(rows)}
 
     ordered: list[NetAttendance] = []
     seen: set[str] = set()
@@ -704,7 +905,7 @@ async def _rotate(db: AsyncSession, s: NetSession, settings: dict, live: dict, a
     """End the current turn: the batters in the nets are marked as having had
     theirs, the next group steps up and the clock resets for them."""
     rows = await _attendee_rows(db, s.id)
-    waiting = [r for r in rows if not r.batted]
+    waiting = _waiting(rows)
 
     group = waiting[: settings["nets"]]
     for r in group:
@@ -962,12 +1163,15 @@ async def session_attendance_csv(
             a["name"],
             "Guest" if a["is_guest"] else "Player",
             "Yes" if a["batted"] else "No",
+            "Sitting out" if not a["bats"] else "",
+            a["note"] or "",
+            "Self" if a["source"] == "self" else "Coach",
         ]
         for i, a in enumerate(payload["attendees"])
     ]
     label = payload["label"] or "net-session"
     return _csv_response(
-        ["#", "Player", "Type", "Batted"],
+        ["#", "Player", "Type", "Batted", "Rotation", "Note", "Checked in by"],
         rows,
         f"{_safe_slug(label, 'net-session')}-{payload['session_date'] or 'undated'}.csv",
     )

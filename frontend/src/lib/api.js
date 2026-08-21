@@ -2897,7 +2897,9 @@ export const api = {
   bsSeedStarterRules: () => request('/selection-rules/starter', { method: 'POST' }),
 
   // ─── BetterSelect: Net Manager ──────────────────────────
-  // Active roster to check players in from (same pool as availability).
+  // EVERY player on the club's books, each tagged `dormant` / `inactive` so the
+  // check-in list can group them. Nothing is filtered out: a player standing at
+  // the door has to be findable whatever the app thinks of their last game.
   nmRoster: () => request('/nets/roster'),
   // Club default timer/rotation settings.
   nmGetSettings: () => request('/nets/settings'),
@@ -2944,6 +2946,23 @@ export const api = {
       body: JSON.stringify({ action, duration_seconds: durationSeconds ?? null }),
     }),
   // Reports. days = 0 means all time.
+  // The self check-in link — the iPad on the door, so whoever is running the
+  // timer isn't also ticking names off. One durable per-club token that resolves
+  // to whichever session is open today.
+  nmGetCheckinLink: () => request('/nets/checkin-link'),
+  nmSetCheckinLink: (data) =>
+    request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
+  nmRegenerateCheckinLink: () => request('/nets/checkin-link/regenerate', { method: 'POST' }),
+
+  // Public side of the same link (no login — players tap their own name).
+  // Deliberately no session cookie: it's a shared device, so every tap stands
+  // on its own rather than the screen remembering whoever touched it last.
+  netCheckinLanding: (token) => request(`/public/nets/${token}`),
+  netCheckinSubmit: (token, data) =>
+    request(`/public/nets/${token}/checkin`, { method: 'POST', body: JSON.stringify(data) }),
+  netCheckinUndo: (token, data) =>
+    request(`/public/nets/${token}/undo`, { method: 'POST', body: JSON.stringify(data) }),
+
   nmAttendanceReport: (days = 120) => request(`/nets/reports/attendance?days=${days}`),
   nmAttendanceReportCsvUrl: (days = 120) => `${BASE}/nets/reports/attendance.csv?days=${days}`,
   nmSessionCsvUrl: (id) => `${BASE}/nets/sessions/${id}/attendance.csv`,

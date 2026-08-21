@@ -7,8 +7,9 @@
 // Colours come from `cssVar` on AVAILABILITY (inline styles), not dynamically
 // built Tailwind classes — Tailwind's JIT only sees literal class strings, so
 // anything status-coloured uses the CSS variable directly.
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../../../contexts/AuthContext'
 import { ruleBadges } from './selectionRules'
 import { AVAILABILITY, AVAIL_STATUSES, AVAIL_ORDER, availRank } from '../../../lib/availability'
 
@@ -53,6 +54,59 @@ const ICON_PATHS = {
   moon: <><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></>,
   tv: <><rect x="2.5" y="5" width="19" height="13" rx="2" /><path d="M8 21h8M12 18v3" /></>,
   download: <><path d="M12 3v12M7.5 10.5L12 15l4.5-4.5" /><path d="M4 17v2.5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5V17" /></>,
+  // A cricket bat, plus what is being asked of it. A lightning bolt said
+  // "something happens fast"; on a queue of batters the thing that matters is
+  // batting, so the bat carries the meaning and the mark beside it says which
+  // way.
+  //
+  // The bat is TWO STROKES ON THE DIAGONAL — a thick round-capped blade and a
+  // thin handle — and both of those are load-bearing. Drawn upright, and drawn
+  // as an outlined rounded rectangle with a stick on top, it reads as a bottle
+  // at every size a row button uses; rendered side by side at 16/22/40/72px
+  // that was unmistakable. The diagonal and the weight difference between
+  // blade and handle are what make it a bat. It also frees the bottom-right
+  // corner for the mark, so neither half has to shrink.
+  batNext: <>
+    <path d="M5.4 18.6L11.6 12.4" strokeWidth="5.6" /><path d="M12.9 11.1L18.4 5.6" strokeWidth="1.9" />
+    {/* Green in its own right: this is the one row action that is a promotion. */}
+    <path d="M18.6 21.2v-8.4M15.9 15.5l2.7-2.7 2.7 2.7" stroke="var(--pb-positive)" strokeWidth="1.9" />
+  </>,
+  // The same bat, told no: here tonight, out of the rotation.
+  batNotOut: <>
+    <path d="M5.4 18.6L11.6 12.4" strokeWidth="5.6" /><path d="M12.9 11.1L18.4 5.6" strokeWidth="1.9" />
+    <circle cx="18.4" cy="17.4" r="4.3" /><path d="M15.4 20.4l6-6" />
+  </>,
+  // The same bat, ticked: their turn is done. Accent rather than green, to
+  // match the tick the Batted list already draws beside every finished name.
+  batDone: <>
+    <path d="M5.4 18.6L11.6 12.4" strokeWidth="5.6" /><path d="M12.9 11.1L18.4 5.6" strokeWidth="1.9" />
+    <path d="M15.1 17.2l2.4 2.4 4.2-5.4" stroke="var(--pb-accent)" strokeWidth="1.9" />
+  </>,
+}
+
+/* ── A per-person, per-browser screen preference ──────────────────────────────
+ * Whether a panel is open, a key is showing — the kind of thing one coach wants
+ * and the next doesn't. Read in the state initialiser, never an effect, or a
+ * hidden panel renders open for one frame before snapping shut.
+ *
+ * A twin of the Clubhouse kit's own `usePref` and deliberately a separate four
+ * lines rather than an import: that module is a different bundle, and a screen
+ * remembering a toggle shouldn't pull it into first paint. */
+export function usePref(key, fallback) {
+  const { user } = useAuth()
+  const full = `bs_pref_${key}_${user?.id || 'anon'}`
+  const [value, setValue] = useState(() => {
+    try { const v = localStorage.getItem(full); return v == null ? fallback : JSON.parse(v) }
+    catch { return fallback }
+  })
+  const set = useCallback((next) => {
+    setValue((prev) => {
+      const v = typeof next === 'function' ? next(prev) : next
+      try { localStorage.setItem(full, JSON.stringify(v)) } catch { /* private mode */ }
+      return v
+    })
+  }, [full])
+  return [value, set]
 }
 
 export function Icon({ name, size = 18, strokeWidth = 1.6, className = '', style }) {
@@ -199,7 +253,7 @@ const BTN_VARIANTS = {
   soft: 'bg-pb-surface2 text-pb-text border border-pb-hairline hover:border-pb-hairline2',
   danger: 'bg-transparent text-pb-red border border-pb-red/40 hover:bg-pb-red/10',
 }
-export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download }) {
+export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, disabled = false, type = 'button', className = '', title, href, download, target, rel }) {
   const size = sm ? 'text-[12.5px] px-2.5 py-1.5 gap-1.5' : 'text-[13.5px] px-3.5 py-2 gap-2'
   const cls = `inline-flex items-center justify-center rounded-lg font-display leading-none transition whitespace-nowrap disabled:opacity-40 disabled:cursor-default ${size} ${BTN_VARIANTS[variant] || BTN_VARIANTS.ghost} ${className}`
   const inner = <>{icon && <Icon name={icon} size={sm ? 14 : 16} />}{children}</>
@@ -208,6 +262,7 @@ export function Btn({ children, variant = 'ghost', sm = false, icon, onClick, di
   if (href) {
     return (
       <a href={disabled ? undefined : href} download={download} title={title}
+        target={target} rel={target === '_blank' ? (rel || 'noopener noreferrer') : rel}
         className={`${cls}${disabled ? ' opacity-40 pointer-events-none' : ''}`}>{inner}</a>
     )
   }

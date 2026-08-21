@@ -1,5 +1,80 @@
 # BetterStats — Claude Session Notes
 
+## The nets check-in list was hiding players, and one screen was doing two jobs (migration 272, v9.42.0, Aug 2026)
+
+Reported from a club's Thursday nets: "I can't add Amardeep Gill though he is on
+the active list", people being entered as guests because they weren't there to
+find, and separately "it's not easy doing check-in and net management at the
+same time, hence the two iPad system".
+
+- **The roster was `active_self_service_players`, which DROPS DORMANT PLAYERS**
+  — anyone whose last appearance falls outside the club's dormancy window
+  (default 24 months). Right for a self-service availability link, wrong for a
+  door list: Admin → Players shows that player as active, so the two screens
+  disagreed and nothing on either said why. `GET /nets/roster` now returns
+  **every** `is_player` player the club holds, tagged `dormant` / `inactive`,
+  and the screen groups rather than filters. **Nothing is excluded, and that is
+  the point** — a player standing at the door with their kit on is there
+  whatever the app thinks of their last game, and dormancy was only one of the
+  ways a name could go missing.
+- **`availability.dormant_player_ids` / `club_player_roster` were extracted so
+  both readings share one definition.** `active_self_service_players` is now
+  those two composed and is byte-for-byte what it was — asserted, because the
+  public availability link and the phone-coverage denominator read it.
+- **`net_attendance.bats` splits turning up from batting.** Someone arriving
+  with a sore shoulder, or to bowl, or to keep, is present and counts towards
+  attendance; leaving them in the queue means a net stands empty when their
+  name comes up. `_waiting()` is the one definition of the batting queue and
+  `_rotate` reads it, so the screen and the rotation cannot disagree. Coming
+  back in puts them at the BACK of the queue, same as returning from batted.
+- **`check_in()` is the one write behind both a coach ticking a name off and a
+  player tapping their own**, so the two can't drift. A duplicate check-in stays
+  a no-op rather than an error (two devices, one name, same second — the
+  IntegrityError path, raced against real parallel sessions), and it must NOT
+  rewrite state: someone a coach marked as sitting out stays that way when a
+  stray tap on the door screen names them again.
+- **`public_nets.py` is the door screen**, mirroring `public_availability.py`
+  throughout. One per-club token that names NO session: it resolves to whichever
+  is open **today**, which is what lets a club print the QR once. **Strictly
+  today** — a session left open from last week must never quietly collect
+  tonight's names, because attendance filed against the wrong night is invisible
+  afterwards on every screen.
+- **No session cookie, deliberately.** It's a SHARED device: fifteen people use
+  it in five minutes, so remembering the last of them is exactly wrong. Every
+  tap stands on its own, and the screen always returns to the list.
+- **The PIN defaults OFF here where the availability link's defaults ON.** That
+  link goes in a group chat and writes a player's own answer about the weekend;
+  this is a supervised device in a clubroom writing down who walked in, and a
+  PIN on every tap puts the queue back at the door.
+- **A player can undo their own tap only, and only before they've batted** —
+  after that the night is the coach's record.
+- **The row icons are a cricket bat drawn as TWO DIAGONAL STROKES**, a thick
+  round-capped blade and a thin handle, with the mark in the freed bottom-right
+  corner. Rendered side by side at 16/22/40/72px, every upright outlined-blade
+  version reads as a BOTTLE; the diagonal and the weight difference between
+  blade and handle are what make it a bat. Judged from a comparison sheet, not
+  from the code.
+- **Found while verifying: the button I added to the session header pushed the
+  page 44px sideways at 390px.** The cluster measured 418px and could not wrap;
+  the outer `flex-wrap` cannot save a group that won't wrap itself. Confirmed
+  NEW by re-measuring with the change stashed (baseline 390 = 390), not assumed.
+- **Verified against a real Postgres** (82 checks through the shipped route
+  bodies: migration 272 applied three times to a populated pre-272 table and the
+  lifespan mirror matching it, the reported player reachable with a control
+  asserting the old roster really did hide him, availability's own pool
+  unchanged, rotation skipping a non-batter, a repeat check-in not dragging one
+  back into the queue, every branch of the door screen incl. both PIN outcomes
+  and the no-mobile case, cross-club rejection, an undo bumping the version, and
+  three genuinely parallel taps on one name landing once) and **driven in
+  Chromium** (56: the three lists, all three bat icons and what they write, the
+  key showing by default and its hidden state surviving a reload, the modal
+  reaching a dormant player and the exact payload on the wire, the door screen's
+  whole flow, no page errors, no overflow at 390px).
+- **Not built**: promoting a guest to a real player after the fact (a guest
+  added last night still can't be linked to a record), and nothing here writes
+  availability for fixtures — "available/injured" at check-in is about tonight's
+  nets only.
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out
