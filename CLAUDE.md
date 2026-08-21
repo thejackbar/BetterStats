@@ -421,6 +421,21 @@ as sections with their own buttons rather than three tabs and a manage page.
   reads its plan, but deleting one reaches every plan it groups objectives in —
   so the confirm counts across all of them and says how many plans are hit.
   Deleting a PLAN leaves the club's themes alone for the same reason.
+- **`sort_order` is stamped by POSITION over a WHOLE level**
+  (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
+  Objectives are ordered club-wide and only GROUPED by plan and theme, so a
+  move inside one theme sends every objective in the tree's display order —
+  renumbering the dragged group alone would interleave it with another group's
+  numbers. A foreign or stale id is skipped without leaving a gap in the
+  numbering, the same rule `reorder_agenda_items` follows. Adding a row reuses
+  the same endpoint: create, then splice the new id in after the selected one,
+  which is what makes "+ THEME" land below the theme you were standing on
+  rather than at the bottom.
+- **A row only drops on a SIBLING** — same level AND same branch. A cross-level
+  or cross-branch dragover deliberately does not `preventDefault`, so the cursor
+  refuses before the mouse is released instead of the drop silently doing
+  nothing. Moving an objective under a different theme would be a re-parent,
+  which is a different act from putting it in order, so it is not a drag.
 - **`?cascade=true` is opt-in on both plan and pillar delete**, and the default
   is still the documented "deleting never takes work with it". The screen asks
   first and counts what goes; a caller that has not asked gets the old

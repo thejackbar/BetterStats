@@ -1229,6 +1229,32 @@ async def delete_pillar(session: AsyncSession, org_id, pillar_id, *, cascade: bo
     return True
 
 
+async def reorder_plan_tree(session: AsyncSession, org_id, model, ids) -> None:
+    """Stamp `sort_order` across one level of the plan tree, by position.
+
+    The browser sends every id at that level in the order it is drawing them,
+    so a move inside one theme still renumbers the whole level consistently —
+    objectives are ordered club-wide and only GROUPED by plan and theme, so
+    renumbering the dragged group alone would interleave it with another
+    group's numbers.
+
+    Ids that are not this club's are ignored rather than refused: the list
+    comes from a browser, and one stale row must not stop the rest reordering.
+    Same rule `reorder_agenda_items` follows.
+    """
+    rows = (await session.execute(
+        select(model).where(model.id.in_(list(ids)), model.organisation_id == org_id)
+    )).scalars().all()
+    by_id = {str(r.id): r for r in rows}
+    idx = 0
+    for i in ids:
+        row = by_id.get(str(i))
+        if row is None:
+            continue
+        row.sort_order = idx
+        idx += 1
+
+
 def _plan_dict(p) -> dict:
     return {
         "id": str(p.id), "name": p.name, "description": p.description,

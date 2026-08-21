@@ -1408,7 +1408,7 @@ function ObjectiveCard({ objective, plans, pillars, positions, members, memberNa
 // which is what makes deleting one reach further than this plan and why the
 // confirm counts across all of them.
 
-const TREE_ROW = 'w-full text-left flex items-start gap-1.5 rounded px-1.5 py-1 hover:bg-pb-surface2'
+const TREE_ROW = 'w-full text-left flex items-start gap-1.5 rounded px-1.5 py-1 hover:bg-pb-surface2 select-none'
 
 function Twisty({ open, hidden }) {
   if (hidden) return <span className="w-3.5 shrink-0" />
@@ -1462,6 +1462,45 @@ function StatTile({ value, label, tone }) {
   )
 }
 
+// A theme is a name and, if the club wants one, a line about what it means.
+// It used to be renamed through window.prompt, which is the one control on this
+// screen that cannot show a description or be cancelled cleanly.
+function ThemeForm({ pillar, onSave, onCancel }) {
+  const [form, setForm] = useState({
+    name: pillar?.name || '',
+    description: pillar?.description || '',
+  })
+  const [busy, setBusy] = useState(false)
+  return (
+    <div className="pb-card p-4 space-y-3">
+      <div className={cap}>{pillar ? 'EDIT THEME' : 'NEW THEME'}</div>
+      <label className="block">
+        <span className={`${cap} block mb-1`}>NAME *</span>
+        <input autoFocus className={inp} value={form.name} placeholder="e.g. Community & Club Culture"
+          onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+      </label>
+      <label className="block">
+        <span className={`${cap} block mb-1`}>DESCRIPTION</span>
+        <textarea rows={2} className={inp} value={form.description}
+          placeholder="What this theme covers, in a line."
+          onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+      </label>
+      <div className="flex items-center gap-2">
+        <button disabled={busy || !form.name.trim()}
+          onClick={async () => { setBusy(true); try { await onSave({ name: form.name.trim(), description: form.description || null }) } finally { setBusy(false) } }}
+          className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-50"
+          style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+          {busy ? 'SAVING…' : 'SAVE'}
+        </button>
+        <button onClick={onCancel} disabled={busy}
+          className="px-3 py-2 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text">
+          Cancel
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function StrategicPlansSection({ report, pillars, positions, members, memberName, onChanged }) {
   const toast = useToast()
   const [openIds, setOpenIds] = useState(null)     // null until the first plan seeds it
@@ -1471,7 +1510,15 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   const [addingPlan, setAddingPlan] = useState(false)
   const [editingObjective, setEditingObjective] = useState(null)
   const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)
+  const [editingTheme, setEditingTheme] = useState(null)
+  const [addingTheme, setAddingTheme] = useState(false)
   const [allTasks, setAllTasks] = useState([])
+  // The row being dragged. `level` is what makes a drop legal: a plan only
+  // lands among plans, a theme among themes, an objective among the objectives
+  // of its OWN branch — dropping it under another theme would be a re-parent,
+  // which is a different act from putting it in order.
+  const [drag, setDrag] = useState(null)
+  const [dropOn, setDropOn] = useState(null)
 
   // The waits-on list in the action editor should offer every action the club
   // holds, not only the ones already on a plan.
@@ -1593,25 +1640,125 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       const made = await api.committeeCreatePlan(data)
       toast.success('Plan created')
       setAddingPlan(false)
-      // Open what was just written, rather than leaving the pane on whatever
-      // happened to be selected before.
-      if (made?.id) { setSel({ kind: 'plan', id: made.id }); setOpenIds(o => new Set([...(o || []), `plan:${made.id}`])) }
+      if (made?.id) {
+        await spliceAfter(api.committeeReorderPlans, plans.map(p => p.id),
+          sel?.kind === 'plan' ? sel.id : null, made.id)
+        // Open what was just written, rather than leaving the pane on whatever
+        // happened to be selected before.
+        setSel({ kind: 'plan', id: made.id })
+        setOpenIds(o => new Set([...(o || []), `plan:${made.id}`]))
+      }
       onChanged()
     } catch (e) { toast.error(e.message) }
   }
   async function saveObjective(id, data) {
     try {
       if (id) await api.committeeUpdateObjective(id, data)
-      else await api.committeeCreateObjective(data)
+      else {
+        const made = await api.committeeCreateObjective(data)
+        if (made?.id) {
+          await spliceAfter(api.committeeReorderObjectives, allObjectives.map(o => o.id),
+            sel?.kind === 'objective' ? sel.id : null, made.id)
+          setSel({ kind: 'objective', id: made.id })
+        }
+      }
       toast.success(id ? 'Objective saved' : 'Objective added')
       setEditingObjective(null); setAddingObjectiveTo(null); onChanged()
     } catch (e) { toast.error(e.message) }
   }
-  async function renameTheme(p) {
-    const name = window.prompt('Rename this theme', p.name)
-    if (!name || !name.trim() || name === p.name) return
-    try { await api.committeeUpdatePillar(p.id, { name: name.trim() }); onChanged() }
-    catch (e) { toast.error(e.message) }
+  async function saveTheme(id, data) {
+    try {
+      if (id) await api.committeeUpdatePillar(id, data)
+      else {
+        const made = await api.committeeCreatePillar(data)
+        // A new theme lands directly below the one that was selected, so it
+        // appears where the person was looking rather than at the bottom.
+        if (made?.id) {
+          await spliceAfter(api.committeeReorderPillars, pillars.map(x => x.id),
+            sel?.kind === 'theme' ? sel.id : null, made.id)
+          setSel({ kind: 'theme', id: made.id })
+        }
+      }
+      toast.success(id ? 'Theme saved' : 'Theme added')
+      setEditingTheme(null); setAddingTheme(false); onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  // Put `newId` straight after `afterId` in a level's order and persist it.
+  // Everything at that level is sent, since sort_order is club-wide.
+  async function spliceAfter(reorder, ids, afterId, newId) {
+    const rest = ids.filter(i => i !== newId)
+    const at = afterId ? rest.indexOf(afterId) : -1
+    const next = at >= 0 ? [...rest.slice(0, at + 1), newId, ...rest.slice(at + 1)] : [...rest, newId]
+    await reorder(next).catch(() => {})
+  }
+
+  // The tree's own order for each level, which is what gets persisted: a move
+  // inside one theme still sends every objective, since sort_order is club-wide
+  // and renumbering one group alone would interleave it with another's.
+  const planOrder = plans.map(p => p.id)
+  const pillarOrder = pillars.map(p => p.id)
+  const objectiveOrder = groups.flatMap(g => themesIn(g).flatMap(th => th.rows.map(o => o.id)))
+
+  const REORDER = {
+    plan: [() => planOrder, api.committeeReorderPlans],
+    theme: [() => pillarOrder, api.committeeReorderPillars],
+    objective: [() => objectiveOrder, api.committeeReorderObjectives],
+  }
+
+  async function moveWithin(level, fromId, toId) {
+    setDrag(null); setDropOn(null)
+    if (!fromId || fromId === toId) return
+    const [orderOf, reorder] = REORDER[level]
+    const rest = orderOf().filter(i => i !== fromId)
+    const at = rest.indexOf(toId)
+    if (at < 0) return
+    try {
+      await reorder([...rest.slice(0, at), fromId, ...rest.slice(at)])
+      onChanged()
+    } catch (e) { toast.error(e.message) }
+  }
+
+  // A row can only be dropped on a sibling: same level, same branch, and never
+  // on itself. Anything else does not preventDefault, so the cursor says no
+  // before the mouse is released rather than the drop silently doing nothing.
+  const dragProps = (level, id, branch) => ({
+    draggable: true,
+    onDragStart: e => { e.stopPropagation(); e.dataTransfer.effectAllowed = 'move'; setDrag({ level, id, branch }) },
+    onDragEnd: () => { setDrag(null); setDropOn(null) },
+    onDragOver: e => {
+      if (!drag || drag.level !== level || drag.branch !== branch || drag.id === id) return
+      e.preventDefault(); e.dataTransfer.dropEffect = 'move'
+      if (dropOn !== id) setDropOn(id)
+    },
+    onDragLeave: () => setDropOn(d => (d === id ? null : d)),
+    onDrop: e => {
+      if (!drag || drag.level !== level || drag.branch !== branch) return
+      e.preventDefault(); e.stopPropagation()
+      moveWithin(level, drag.id, id)
+    },
+  })
+  const dragStyle = (level, id) => ({
+    cursor: 'grab',
+    opacity: drag?.id === id && drag?.level === level ? 0.45 : 1,
+    boxShadow: dropOn === id && drag && drag.id !== id ? 'inset 0 2px 0 var(--pb-accent)' : undefined,
+  })
+
+  // Which level the rail's add button offers, and what pressing it opens.
+  const addLevel = sel?.kind === 'theme' ? 'theme'
+    : ['objective', 'action', 'motion'].includes(sel?.kind) ? 'objective'
+      : 'plan'
+  function startAdd() {
+    setEditingPlan(null); setEditingObjective(null); setEditingTheme(null)
+    setAddingPlan(false); setAddingTheme(false); setAddingObjectiveTo(null)
+    if (addLevel === 'plan') setAddingPlan(true)
+    else if (addLevel === 'theme') setAddingTheme(true)
+    else {
+      // Under the objective that is selected, so it lands in the same branch.
+      const near = sel?.kind === 'objective' ? objectiveById(sel.id)
+        : workById(sel.kind, sel.id)?.objective
+      setAddingObjectiveTo({ planId: near?.plan_id || '', pillarId: near?.pillar_id || null })
+    }
   }
 
   /* ── the tree ─────────────────────────────────────────────────────────── */
@@ -1624,7 +1771,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
         return (
           <div key={plan.id || '__none'}>
             <div className={`${TREE_ROW} ${isSel('plan', plan.id) ? 'bg-pb-surface2' : ''}`}
-              style={isSel('plan', plan.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
+              {...(plan.id ? dragProps('plan', plan.id, 'plans') : {})}
+              title={plan.id ? 'Drag to reorder' : undefined}
+              style={{
+                ...(isSel('plan', plan.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                ...(plan.id ? dragStyle('plan', plan.id) : {}),
+              }}>
               <button onClick={() => toggle(pk)} aria-label={isOpen(pk) ? 'Collapse' : 'Expand'}
                 className="shrink-0"><Twisty open={isOpen(pk)} hidden={themes.length === 0} /></button>
               <button onClick={() => select('plan', plan.id)} className="min-w-0 flex-1 text-left">
@@ -1638,7 +1790,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               return (
                 <div key={tk} className="ml-3">
                   <div className={`${TREE_ROW} ${isSel('theme', th.id) ? 'bg-pb-surface2' : ''}`}
-                    style={isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
+                    {...(th.id ? dragProps('theme', th.id, `themes:${plan.id}`) : {})}
+                    title={th.id ? 'Drag to reorder' : undefined}
+                    style={{
+                      ...(isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                      ...(th.id ? dragStyle('theme', th.id) : {}),
+                    }}>
                     <button onClick={() => toggle(tk)} aria-label={isOpen(tk) ? 'Collapse' : 'Expand'}
                       className="shrink-0"><Twisty open={isOpen(tk)} /></button>
                     <button onClick={() => th.id && select('theme', th.id, { planId: plan.id })}
@@ -1654,7 +1811,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                     return (
                       <div key={o.id} className="ml-3">
                         <div className={`${TREE_ROW} ${isSel('objective', o.id) ? 'bg-pb-surface2' : ''}`}
-                          style={isSel('objective', o.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
+                          {...dragProps('objective', o.id, `objs:${plan.id}:${th.id}`)}
+                          title="Drag to reorder"
+                          style={{
+                            ...(isSel('objective', o.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
+                            ...dragStyle('objective', o.id),
+                          }}>
                           <button onClick={() => toggle(ok)} aria-label={isOpen(ok) ? 'Collapse' : 'Expand'}
                             className="shrink-0"><Twisty open={isOpen(ok)} hidden={work.length === 0} /></button>
                           <button onClick={() => select('objective', o.id)} className="min-w-0 flex-1 text-left">
@@ -1697,8 +1859,20 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
 
   let pane = <div className="text-pb-faint text-[13px]">Pick something on the left to open it.</div>
 
+  const adding = addingPlan || addingTheme || !!addingObjectiveTo
   if (addingPlan) {
     pane = <div className="max-w-3xl"><PlanForm onSave={createPlan} onCancel={() => setAddingPlan(false)} /></div>
+  } else if (addingTheme) {
+    pane = <div className="max-w-3xl"><ThemeForm onSave={d => saveTheme(null, d)} onCancel={() => setAddingTheme(false)} /></div>
+  } else if (addingObjectiveTo) {
+    pane = (
+      <div className="max-w-3xl">
+        <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
+          planId={addingObjectiveTo.planId} pillarId={addingObjectiveTo.pillarId}
+          members={members} onSave={d => saveObjective(null, d)}
+          onCancel={() => setAddingObjectiveTo(null)} />
+      </div>
+    )
   } else if (sel?.kind === 'plan') {
     const plan = groups.find(g => g.id === sel.id)
     if (plan && editingPlan === plan.id) {
@@ -1708,7 +1882,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       pane = (
         <div className="space-y-5 max-w-3xl">
           <div className="pb-card p-4 sm:p-5">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className={`${cap} mb-1`}>{plan.id ? 'STRATEGIC PLAN' : ''}</div>
                 <h2 className="text-pb-text text-[21px] font-bold leading-tight">{plan.name}</h2>
@@ -1748,12 +1922,8 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
             </div>
           )}
 
-          {addingObjectiveTo === plan.id ? (
-            <ObjectiveForm plans={plans} pillars={pillars} positions={positions} planId={plan.id}
-              members={members} onSave={d => saveObjective(null, d)}
-              onCancel={() => setAddingObjectiveTo(null)} />
-          ) : plan.id && (
-            <button onClick={() => setAddingObjectiveTo(plan.id)}
+          {plan.id && (
+            <button onClick={() => setAddingObjectiveTo({ planId: plan.id, pillarId: null })}
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
               style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
           )}
@@ -1762,16 +1932,21 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     }
   }
 
-  if (!addingPlan && sel?.kind === 'theme') {
+  if (!adding && sel?.kind === 'theme') {
     const p = pillars.find(x => x.id === sel.id)
     const objs = allObjectives.filter(o => o.pillar_id === sel.id)
     const plansHit = [...new Set(objs.map(o => o.plan_name).filter(Boolean))]
     const done = objs.filter(o => (o.percent_complete || 0) >= 100).length
     const pct = objs.length ? Math.round(objs.reduce((n, o) => n + (o.percent_complete || 0), 0) / objs.length) : 0
-    pane = p && (
+    if (p && editingTheme === p.id) {
+      pane = <div className="max-w-3xl"><ThemeForm pillar={p} onSave={d => saveTheme(p.id, d)}
+        onCancel={() => setEditingTheme(null)} /></div>
+    } else pane = p && (
       <div className="space-y-5 max-w-3xl">
         <div className="pb-card p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3 flex-wrap">
+          {/* No flex-wrap: the actions belong in the corner, and wrapping put
+              them under the meta line instead. */}
+          <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className={`${cap} mb-1`}>THEME</div>
               <h2 className="text-pb-text text-[21px] font-bold leading-tight">{p.name}</h2>
@@ -1782,8 +1957,8 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               </div>
             </div>
             <div className="flex gap-2 shrink-0">
-              <button onClick={() => renameTheme(p)}
-                className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Rename</button>
+              <button onClick={() => setEditingTheme(p.id)}
+                className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
               <button onClick={() => removeTheme(p.id, p.name)}
                 className="font-mono text-[9px] text-pb-faintest hover:text-pb-red">Delete</button>
             </div>
@@ -1820,7 +1995,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     )
   }
 
-  if (!addingPlan && sel?.kind === 'objective') {
+  if (!adding && sel?.kind === 'objective') {
     const o = objectiveById(sel.id)
     if (o && editingObjective === o.id) {
       pane = <ObjectiveForm objective={o} plans={plans} pillars={pillars} positions={positions}
@@ -1830,7 +2005,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       pane = (
         <div className="space-y-5 max-w-3xl">
           <div className="pb-card p-4 sm:p-5">
-            <div className="flex items-start justify-between gap-3 flex-wrap">
+            {/* No flex-wrap here either — Edit and Delete were ending up under
+                the owner line instead of in the corner. */}
+            <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className={`${cap} mb-1`}>
                   {[o.plan_name, o.pillar_name].filter(Boolean).map(x => x.toUpperCase()).join(' › ') || 'OBJECTIVE'}
@@ -1884,7 +2061,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     }
   }
 
-  if (!addingPlan && sel?.kind === 'action') {
+  if (!adding && sel?.kind === 'action') {
     const hit = workById('action', sel.id)
     // The report's row carries the plan context; the tasks fetch carries the
     // dependencies. Merge, so the editor has both.
@@ -1896,7 +2073,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       : <div className="text-pb-faint text-[13px]">That action is no longer on the plan.</div>
   }
 
-  if (!addingPlan && sel?.kind === 'motion') {
+  if (!adding && sel?.kind === 'motion') {
     const hit = workById('motion', sel.id)
     pane = hit
       ? <div className="max-w-3xl"><MotionEditor key={hit.row.id} meetingId={hit.row.meeting_id}
@@ -1914,9 +2091,15 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
         border-b lg:border-b-0 lg:border-r pb-hairline overflow-y-auto p-3">
         <div className="flex items-center gap-2 mb-2">
           <span className={cap}>STRATEGIC PLANS</span>
-          <button onClick={() => { setAddingPlan(true); setEditingPlan(null) }} title="Add a strategic plan"
+          {/* Adding at the level you are standing on: a plan when a plan is
+              selected, a theme under a theme, an objective under an objective.
+              Selecting an action or a motion still offers an objective, since
+              that is the nearest level anything can be added at. */}
+          <button onClick={startAdd} title={`Add a ${addLevel}`}
             className="ml-auto font-mono text-[10px] font-semibold px-2 py-1 rounded"
-            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ PLAN</button>
+            style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
+            + {addLevel.toUpperCase()}
+          </button>
         </div>
         {/* How the work under an objective is laid out. Both readings are
             useful, so it is a toggle rather than a decision made for them. */}
@@ -1927,6 +2110,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
           ))}
         </div>
         {tree}
+        {groups.length > 0 && (
+          <div className={`${cap} mt-3`}>DRAG A ROW TO REORDER IT WITHIN ITS OWN LEVEL</div>
+        )}
       </div>
       <div className="pb-scroll flex-1 min-w-0 overflow-y-auto p-5 sm:p-6">{pane}</div>
     </div>

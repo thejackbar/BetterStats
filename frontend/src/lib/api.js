@@ -495,6 +495,14 @@ export const api = {
     request(`/club-admin/committee/pillars/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
   // The four pillars, a plan for this year and an example objective under each,
   // so a committee edits rather than starts from nothing.
+  // One level of the plan tree, in the order the browser is drawing it. Plans,
+  // themes and objectives each reorder within their own level.
+  committeeReorderPlans: (ids) =>
+    request('/club-admin/committee/plans/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  committeeReorderPillars: (ids) =>
+    request('/club-admin/committee/pillars/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+  committeeReorderObjectives: (ids) =>
+    request('/club-admin/committee/objectives/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
   committeeSeedStarterPlan: () =>
     request('/club-admin/committee/plans/seed-starter', { method: 'POST' }),
   committeeListPlans: (includeArchived) =>

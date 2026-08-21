@@ -1265,6 +1265,41 @@ async def delete_note(note_id: str, _: User = _require, club: Organisation = Dep
 
 # ─── Strategic pillars (migration 232) ────────────────────────────────────────
 
+class TreeReorder(BaseModel):
+    """Every id at one level of the plan tree, in the order it is drawn."""
+    ids: List[str]
+
+
+@router.post("/plans/reorder")
+async def reorder_plans(data: TreeReorder, _: User = _require,
+                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubStrategicPlan
+    await committee_service.reorder_plan_tree(db, club.id, ClubStrategicPlan,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/pillars/reorder")
+async def reorder_pillars(data: TreeReorder, _: User = _require,
+                          club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubStrategicPillar
+    await committee_service.reorder_plan_tree(db, club.id, ClubStrategicPillar,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/objectives/reorder")
+async def reorder_objectives(data: TreeReorder, _: User = _require,
+                             club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    from app.models.db import ClubObjective
+    await committee_service.reorder_plan_tree(db, club.id, ClubObjective,
+                                              [uuid.UUID(x) for x in data.ids])
+    await db.commit()
+    return {"ok": True}
+
+
 class PillarUpsert(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
