@@ -298,6 +298,16 @@ async def office_bearer_boards(db: AsyncSession, org_id: uuid.UUID) -> dict:
                 "photo_url": h["photo_url"],
                 "from_year": spans[0][0] if spans else None,
                 "to_year": (None if h["_open"] else spans[-1][1]) if spans else None,
+                # The spans themselves, not only the sentence built from them.
+                # A screen laying the years out in aligned columns needs the
+                # two numbers apart; handing it one string would leave it
+                # splitting on a dash it did not write.
+                "spans": [
+                    {"from": a,
+                     "to": None if (h["_open"] and i == len(spans) - 1) else (b if b > a else None),
+                     "open": h["_open"] and i == len(spans) - 1}
+                    for i, (a, b) in enumerate(spans)
+                ],
                 "years": _span_label(spans, h["_open"]) if spans else None,
                 "seasons": len(h["_years"]),
             })
