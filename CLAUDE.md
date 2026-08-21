@@ -71,6 +71,33 @@ as sections with their own buttons rather than three tabs and a manage page.
   `meeting_id` it was moved at and each write goes to that meeting's own
   endpoint — the register is assembled from several meetings and has no id of
   its own to write against.
+- **Strategic Plans is a TREE beside a detail pane** (`StrategicPlansSection`,
+  governance.jsx), the same two panes All Meetings uses: plan → theme →
+  objective → the actions and motions serving it, each branch foldable, the
+  first plan opened on load. Clicking an action or a motion opens the SAME
+  editor the lists open, `inline` — `EditorShell` is a dialog when it is opened
+  over a list and plain content when it IS the pane, so there is one editor
+  either way rather than a second read-only copy.
+- **A THEME IS CLUB-SCOPED, NOT PLAN-SCOPED** (migration 232), and every delete
+  decision here turns on it. Drawn under a plan because that is how a committee
+  reads its plan, but deleting one reaches every plan it groups objectives in —
+  so the confirm counts across all of them and says how many plans are hit.
+  Deleting a PLAN leaves the club's themes alone for the same reason.
+- **`?cascade=true` is opt-in on both plan and pillar delete**, and the default
+  is still the documented "deleting never takes work with it". The screen asks
+  first and counts what goes; a caller that has not asked gets the old
+  behaviour (objectives survive, ungrouped or off the plan). **Neither mode
+  ever deletes an ACTION or a MOTION** — `club_objectives` → tasks/motions is
+  ON DELETE SET NULL, so they are kept and simply stop being linked. That is
+  the one rule not to relax.
+- **The objective PICKER groups rather than repeating.** A flat `<select>` of
+  "Plan › Theme › a whole sentence" was reported as overwhelming, and the
+  repetition really was ~80% of the text while the part that tells two
+  objectives apart was the part being clipped. `ObjectiveSelect` now says the
+  plan and theme ONCE as a group heading, gives each objective its own
+  wrapping line, ticks the current one and offers a search box past six rows.
+  It is not a `<select>` any more, so a test asserting `<option>` text is
+  asserting the old control.
 - **`planLabels.js` is the one place an objective is NAMED from elsewhere**,
   and it names all three tiers: PLAN › THEME › OBJECTIVE. Skipping the theme
   was the reported bug, and it matters because an objective's own title is

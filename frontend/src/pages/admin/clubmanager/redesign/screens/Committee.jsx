@@ -31,7 +31,7 @@ const TABS = [
 const MEETING_VIEWS = [{ key: 'meetings', label: 'All Meetings' }, { key: 'templates', label: 'Meeting Templates' }]
 const MA_VIEWS = [{ key: 'actions', label: 'Actions' }, { key: 'motions', label: 'Motions' }]
 const ACTION_VIEWS = [{ key: 'list', label: 'List' }, { key: 'board', label: 'Board' }, { key: 'timeline', label: 'Timeline' }]
-const PLAN_VIEWS = [{ key: 'plans', label: 'Plans' }, { key: 'themes', label: 'Themes' }, { key: 'objectives', label: 'Objectives' }]
+const PLAN_VIEWS = [{ key: 'plans', label: 'Strategic Plans' }, { key: 'themes', label: 'Themes' }, { key: 'objectives', label: 'Objectives' }]
 
 // Committee — positions, meetings (agenda / attendance / motions) and the
 // club's committee tasks (the closest thing to action items), all on real data.
@@ -994,7 +994,13 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'plans' && (
+      {tab === 'plans' && plansView === 'plans' && (
+        <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+          <Suspense fallback={<Loading />}><PlanTab members={members} section="plans" /></Suspense>
+        </div>
+      )}
+
+      {tab === 'plans' && plansView !== 'plans' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div className="max-w-5xl"><Suspense fallback={<Loading />}><PlanTab members={members} section={plansView} /></Suspense></div>
         </div>
