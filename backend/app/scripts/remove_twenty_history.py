@@ -12,7 +12,7 @@ cutover record, not something a rep working the Sales Workspace's own
 History/Notes wants to see mixed in with what THEY actually did — the
 Sales Workspace drawer (``routers/sales_workspace.py::get_club``) no
 longer shows either going forward (``services.sales_workspace.
-list_activities_excluding_twenty``), but that only hides FUTURE reads;
+list_activities_for_workspace``), but that only hides FUTURE reads;
 this script clears out what the backfill already wrote.
 
 WHAT IT DOES

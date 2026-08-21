@@ -539,7 +539,7 @@ async def get_club(
     club = await db.get(MarketingClub, deal.marketing_club_id) if deal.marketing_club_id else None
 
     contacts = await sw.merged_contacts(db, deal.marketing_club_id)
-    activities = await sw.list_activities_excluding_twenty(db, deal_id=deal.id)
+    activities = await sw.list_activities_for_workspace(db, deal_id=deal.id)
     activities_out = [crm_service._activity_dict(a) for a in activities]
     # Who logged each call/note/email/assign/extend-trial — every one of
     # those writers already stamps created_by_user_id, this just names it for

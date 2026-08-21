@@ -540,20 +540,43 @@ def _is_twenty_imported(activity: CrmActivity) -> bool:
     return any(k in meta for k in _TWENTY_IMPORT_META_KEYS)
 
 
-async def list_activities_excluding_twenty(
+# A reassignment is still WRITTEN (log_reassignment, below) — it is the deal's
+# audit trail of who has owned it — it is just no longer drawn in the drawer's
+# History feed, per direct instruction: a rep reading a club's history wants
+# what happened with the CLUB, and a row saying the deal changed hands is
+# housekeeping between reps. Matched on the meta stamp first; the body text is
+# the fallback for every row written before that stamp existed, which is all of
+# them until this shipped. Both wordings go, since they are one event with and
+# without an owner.
+_REASSIGNMENT_KIND = "reassignment"
+_REASSIGNMENT_BODIES = ("Unassigned",)
+_REASSIGNMENT_PREFIX = "Reassigned to "
+
+
+def _is_reassignment(activity: CrmActivity) -> bool:
+    if (activity.meta or {}).get("kind") == _REASSIGNMENT_KIND:
+        return True
+    if activity.type != "system":
+        return False
+    body = (activity.body or "").strip()
+    return body.startswith(_REASSIGNMENT_PREFIX) or body in _REASSIGNMENT_BODIES
+
+
+async def list_activities_for_workspace(
     session: AsyncSession, *, deal_id, limit: int = 200,
 ) -> list[CrmActivity]:
     """The same query crm_service.list_activities runs, minus anything the
-    Twenty pipeline backfill imported. Filtered in Python after an
-    over-fetch (rather than in the SQL WHERE clause) specifically to dodge
-    a JSONB NULL trap: an ordinary rep-logged call/note has meta=NULL, and
-    ``NOT (meta ? 'key')`` evaluates to NULL — not TRUE — for a NULL meta,
-    which would silently exclude every real, ordinary activity from the
-    result along with the Twenty-imported ones. Scoped to the Sales
-    Workspace only — the CRM Pipeline board (routers/crm.py) still calls
-    crm_service.list_activities directly and shows everything, by design."""
+    Twenty pipeline backfill imported and minus the reassignment audit rows.
+    Filtered in Python after an over-fetch (rather than in the SQL WHERE
+    clause) specifically to dodge a JSONB NULL trap: an ordinary rep-logged
+    call/note has meta=NULL, and ``NOT (meta ? 'key')`` evaluates to NULL —
+    not TRUE — for a NULL meta, which would silently exclude every real,
+    ordinary activity from the result along with the Twenty-imported ones.
+    Scoped to the Sales Workspace only — the CRM Pipeline board
+    (routers/crm.py) still calls crm_service.list_activities directly and
+    shows everything, by design."""
     rows = await crm_service.list_activities(session, deal_id=deal_id, limit=max(limit * 3, limit))
-    return [a for a in rows if not _is_twenty_imported(a)][:limit]
+    return [a for a in rows if not _is_twenty_imported(a) and not _is_reassignment(a)][:limit]
 
 
 async def log_note(
@@ -582,13 +605,19 @@ async def edit_note(
 
 
 async def log_reassignment(session: AsyncSession, *, deal: CrmDeal, owner_name: Optional[str], created_by_user_id) -> None:
-    """The lightweight Phase-1 reassignment audit trail — a searchable system
-    entry on the deal's own activity timeline rather than a dedicated table
-    (deferred alongside Sales Lists)."""
+    """The lightweight Phase-1 reassignment audit trail — a system entry on
+    the deal's own activity timeline rather than a dedicated table (deferred
+    alongside Sales Lists). NOT shown in the Sales Workspace drawer's History
+    feed (see _is_reassignment); it is a record of who owned the deal, not of
+    anything that happened with the club."""
     body = f"Reassigned to {owner_name}" if owner_name else "Unassigned"
     await crm_service.log_activity(
         session, deal_id=deal.id, type="system", body=body,
         created_by_user_id=created_by_user_id,
+        # Stamped so the drawer's History feed can drop it without reading the
+        # wording (_is_reassignment) — the row stays as the audit trail it was
+        # written to be, it is simply not something a rep is shown.
+        meta={"kind": _REASSIGNMENT_KIND},
     )
 
 
