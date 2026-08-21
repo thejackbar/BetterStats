@@ -23,9 +23,10 @@ from app.services import email_service
 
 TEMPLATE_LABELS = {
     "information": "Send information",
-    "voicemail_followup": "Email following voicemail",
+    "voicemail_followup": "Email following voicemail - general",
+    "voicemail_followup_extend_trial": "Email following voicemail - offer to extend trial",
     "trial_information": "Trial information",
-    "trial_extension": "Wants a trial extension",
+    "trial_extension": "Confirmation of trial extension",
     "demo": "Book a demo",
     "subscribe": "Wants to buy/subscribe",
     "custom": "Custom email",
@@ -33,10 +34,10 @@ TEMPLATE_LABELS = {
 # The comms_templates row a key's content is seeded/read from — same as
 # TEMPLATE_LABELS (the rep-facing dropdown text) for every key EXCEPT
 # 'custom'/'subscribe'/'trial_extension': the dropdown reads the outcome the
-# rep is acting on ("Custom email", "Wants to buy/subscribe", "Wants a trial
-# extension"), but the editable templates behind them carry more descriptive
-# names in Comms -> Templates for the super admin maintaining them there.
-# Falls back to TEMPLATE_LABELS for any key with no override.
+# rep is acting on ("Custom email", "Wants to buy/subscribe", "Confirmation
+# of trial extension"), but the editable templates behind them carry more
+# descriptive names in Comms -> Templates for the super admin maintaining
+# them there. Falls back to TEMPLATE_LABELS for any key with no override.
 TEMPLATE_DB_NAMES = {
     "custom": "Custom sales rep email",
     "subscribe": "Sales rep subscribe link",
@@ -53,7 +54,8 @@ def _db_name(key: str) -> Optional[str]:
 # the rest: pre-filled from its own editable template, which the rep edits
 # in Design mode rather than starting from nothing.
 BUILT_IN_TEMPLATES = (
-    "information", "voicemail_followup", "trial_information", "trial_extension", "demo", "subscribe", "custom",
+    "information", "voicemail_followup", "voicemail_followup_extend_trial", "trial_information",
+    "trial_extension", "demo", "subscribe", "custom",
 )
 
 
@@ -126,6 +128,23 @@ def _render_template_hardcoded(
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
             f"voicemail. Wanted to follow up here too — BetterCricket for {club_name}. "
             f"Have a look through what's on offer: {base} "
+            "Happy to answer any questions — just reply to this email, or give me a call back."
+        )
+    elif key == "voicemail_followup_extend_trial":
+        subject = f"BetterCricket for {club_name} - more time on your trial"
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
+            f"but couldn't get through, so I've left a voicemail. If {club_name} needs more time "
+            "on its BetterCricket trial, I'm happy to extend it. Just reply and let me know.</p>"
+            '<p style="font-size:14px;line-height:1.5">In the meantime you can pick up where you left off:</p>'
+            + _button("Log in to BetterCricket", f"{base}/login")
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+        )
+        text = (
+            f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
+            f"voicemail. If {club_name} needs more time on its BetterCricket trial, I'm happy to "
+            "extend it. Just reply and let me know. In the meantime you can pick up where you "
+            f"left off: {base}/login "
             "Happy to answer any questions — just reply to this email, or give me a call back."
         )
     elif key == "trial_information":
@@ -239,6 +258,24 @@ _SEED_BODY = {
         '<p><a href="{base}" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">See BetterCricket</a></p>'
+        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
+    # Cloned from "Send information" (_SEED_BODY["information"]) per direct
+    # instruction — same shell, same one-button layout, reworded for a rep
+    # following up in writing after a call that went to voicemail AND
+    # offering the club more time on its trial. The button goes to /login
+    # rather than the marketing site: the club already has an account, so
+    # what they need is a way back into it.
+    "voicemail_followup_extend_trial": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
+        "If {{club}} needs more time on its BetterCricket trial, I'm happy to extend it. "
+        "Just reply and let me know.</p>"
+        "<p>In the meantime you can pick up where you left off:</p>"
+        '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Log in to BetterCricket</a></p>'
         "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
@@ -428,6 +465,7 @@ _SEED_BODY = {
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
     "voicemail_followup": "BetterCricket for {{club}} - following up",
+    "voicemail_followup_extend_trial": "BetterCricket for {{club}} - more time on your trial",
     "trial_information": "Start your free BetterCricket trial - {{club}}",
     "trial_extension": "Your BetterCricket trial extension for {{club}}",
     "demo": "Book a demo - BetterCricket for {{club}}",
@@ -451,6 +489,21 @@ async def seed_sales_templates(session) -> int:
         return 0
     from sqlalchemy import text as _text
     base = settings.public_base_url
+    # "Email following voicemail" was renamed "Email following voicemail -
+    # general" when the offer-to-extend-trial sibling was added, so the two
+    # can be told apart in Comms -> Templates. Guarded on the OLD default
+    # name, so a super admin who has since renamed this row themselves keeps
+    # their own name — the dropdown resolves by sales_template_key, not by
+    # name, so nothing breaks either way.
+    await session.execute(
+        _text("""
+            UPDATE comms_templates SET name = :new_name
+            WHERE organisation_id = :org_id
+              AND sales_template_key = 'voicemail_followup'
+              AND name = 'Email following voicemail'
+        """),
+        {"org_id": org.id, "new_name": TEMPLATE_LABELS["voicemail_followup"]},
+    )
     total = 0
     for key in BUILT_IN_TEMPLATES:
         result = await session.execute(

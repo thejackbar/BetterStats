@@ -35,14 +35,16 @@ def check(name, cond, detail=""):
 async def main():
     # ── Part 1: vocabulary + ordering (pure) ─────────────────────────────
     template_keys = list(se.TEMPLATE_LABELS.keys())
-    check("voicemail_followup exists, labelled 'Email following voicemail'",
-          se.TEMPLATE_LABELS.get("voicemail_followup") == "Email following voicemail")
+    # Renamed "Email following voicemail - general" in a later release, when
+    # the offer-to-extend-trial sibling was added beside it.
+    check("voicemail_followup exists, labelled 'Email following voicemail - general'",
+          se.TEMPLATE_LABELS.get("voicemail_followup") == "Email following voicemail - general")
     check("voicemail_followup sits immediately after 'information' (Send information)",
           template_keys[template_keys.index("information") + 1] == "voicemail_followup", str(template_keys))
     check("voicemail_followup is in BUILT_IN_TEMPLATES",
           "voicemail_followup" in se.BUILT_IN_TEMPLATES)
     check("DB name for voicemail_followup falls back to its own label (no override needed)",
-          se._db_name("voicemail_followup") == "Email following voicemail")
+          se._db_name("voicemail_followup") == "Email following voicemail - general")
     check("no TEMPLATE_DB_NAMES override was added for voicemail_followup",
           "voicemail_followup" not in se.TEMPLATE_DB_NAMES)
 
@@ -60,16 +62,18 @@ async def main():
 
         seeded = await se.seed_sales_templates(db)
         await db.commit()
-        check("seed_sales_templates inserted 7 rows (6 original + 1 new)", seeded == 7, str(seeded))
+        # 8 keys as of the offer-to-extend-trial release (was 7 at round 10).
+        check("seed_sales_templates inserts one row per built-in key",
+              seeded == len(se.BUILT_IN_TEMPLATES), str(seeded))
 
         rows = (await db.execute(
             select(CommsTemplate).where(CommsTemplate.organisation_id == outreach.id)
         )).scalars().all()
         names = {r.name for r in rows}
-        check("'Email following voicemail' row exists in Comms Templates",
-              "Email following voicemail" in names, str(names))
+        check("'Email following voicemail - general' row exists in Comms Templates",
+              "Email following voicemail - general" in names, str(names))
 
-        vm_row = next(r for r in rows if r.name == "Email following voicemail")
+        vm_row = next(r for r in rows if r.name == "Email following voicemail - general")
         check("seeded subject mentions following up", "following up" in vm_row.subject.lower(), vm_row.subject)
         check("seeded html preserved the double-brace merge token (no str.format corruption)",
               "{{first_name}}" in vm_row.html, vm_row.html[:300])

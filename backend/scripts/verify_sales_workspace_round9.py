@@ -66,8 +66,11 @@ async def main():
     template_keys = list(se.TEMPLATE_LABELS.keys())
     check("subscribe template exists, labelled 'Wants to buy/subscribe'",
           se.TEMPLATE_LABELS.get("subscribe") == "Wants to buy/subscribe")
-    check("trial_extension template exists, labelled 'Wants a trial extension'",
-          se.TEMPLATE_LABELS.get("trial_extension") == "Wants a trial extension")
+    # Renamed "Confirmation of trial extension" in a later release — this is
+    # the email sent to confirm an extension the rep has just applied, not
+    # the call outcome that asked for one.
+    check("trial_extension template exists, labelled 'Confirmation of trial extension'",
+          se.TEMPLATE_LABELS.get("trial_extension") == "Confirmation of trial extension")
     check("subscribe sits immediately after 'demo' (Book a demo)",
           template_keys[template_keys.index("demo") + 1] == "subscribe", str(template_keys))
     check("trial_extension sits immediately after 'trial_information' (Trial info)",
@@ -95,7 +98,9 @@ async def main():
 
         seeded = await se.seed_sales_templates(db)
         await db.commit()
-        check("seed_sales_templates inserted 6 rows (4 original + 2 new)", seeded == 6, str(seeded))
+        # 8 keys as of the offer-to-extend-trial release (was 6 at round 9).
+        check("seed_sales_templates inserts one row per built-in key",
+              seeded == len(se.BUILT_IN_TEMPLATES), str(seeded))
 
         rows = (await db.execute(
             select(CommsTemplate).where(CommsTemplate.organisation_id == outreach.id)
