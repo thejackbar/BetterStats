@@ -14,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
-from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
+from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
     public_club_room, sales_workspace
@@ -1159,6 +1159,64 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_settings JSONB"
+        ))
+        # Migration 272: a player checks themselves in at the nets, from a QR
+        # code or an NFC tag. One token behind both — a tag holds a URL and
+        # nothing else — mirroring availability_link_token down to the partial
+        # unique index.
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS net_checkin_token TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "net_checkin_enabled BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "net_checkin_require_pin BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
+            "net_checkin_allow_registration BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_organisations_net_checkin_token "
+            "ON organisations (net_checkin_token) WHERE net_checkin_token IS NOT NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS "
+            "source TEXT NOT NULL DEFAULT 'admin'"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS net_checkin_registrations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                organisation_id UUID NOT NULL REFERENCES organisations(id) ON DELETE CASCADE,
+                session_id UUID REFERENCES net_sessions(id) ON DELETE SET NULL,
+                attendance_id UUID REFERENCES net_attendance(id) ON DELETE SET NULL,
+                full_name TEXT NOT NULL,
+                phone TEXT,
+                email TEXT,
+                date_of_birth DATE,
+                previous_club TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                player_id UUID REFERENCES players(id) ON DELETE SET NULL,
+                reviewed_by UUID REFERENCES users(id) ON DELETE SET NULL,
+                reviewed_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS idx_net_checkin_registrations_org_status "
+            "ON net_checkin_registrations (organisation_id, status, created_at DESC)"
+        ))
+        # Migration 273: turning up and batting are two different facts — someone
+        # can be present and out of the rotation, so a net never stands empty
+        # when their turn comes round.
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS bats BOOLEAN NOT NULL DEFAULT true"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS note TEXT"
         ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
@@ -3496,6 +3554,18 @@ async def lifespan(app: FastAPI):
         # whom). Age is never stored — see services/player_age.py.
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS date_of_birth DATE"
+        ))
+        # Migration 274: a player's action shot, kept apart from their
+        # headshot — the two photographs do different jobs and neither
+        # crops into the other's slot. See the migration for why.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_mime TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_url TEXT"
         ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
@@ -5842,6 +5912,10 @@ app.include_router(public_availability.router)                                  
 # necessity — resolves the club from its vote-link token and checks entitlement +
 # the enabled flag itself, so it is NOT wrapped in require_module.
 app.include_router(public_votes.router)                                                   # BetterSelect (public votes)
+# Player-facing net check-in (QR code / NFC tag + optional PIN). Unauthenticated
+# by necessity — resolves the club from its check-in token and checks entitlement
+# + the enabled flag itself, so it is NOT wrapped in require_module.
+app.include_router(public_net_checkin.router)                                             # BetterSelect (public net check-in)
 # Club Room Mode's public link (magic link + PIN). Unauthenticated by design —
 # resolves the club from its own link token and checks public_link_enabled
 # itself, so it is NOT wrapped in require_module (Club Room is Core anyway).

@@ -38,7 +38,7 @@ const HINT = 'text-[11.5px] leading-snug text-pb-faintest mt-1.5'
 /* Sensible starting numbers per rule type — the SHAPE a club edits, never a
  * rule we invented for them. Nothing is saved until they press Add. */
 const BLANK = {
-  age: { min_age: 15, under_age: null },
+  age: { min_age: 15, min_op: 'gte', under_age: null, max_op: 'lt' },
   overseas: { max_in_xi: 1, max_in_round: null },
   bowling_workload: {
     applies_to: 'pace',
@@ -55,6 +55,20 @@ const BLANK = {
 }
 
 const num = (v) => (v === '' || v == null ? null : Number(v))
+
+/* The words the server uses for an age rule (services/selection_rules.py's
+ * _min_phrase / _max_phrase), so the editor previews exactly what the board
+ * will say. */
+function agePhrase(config) {
+  const bits = []
+  if (config?.min_age != null) {
+    bits.push(config.min_op === 'gt' ? `over ${config.min_age}` : `${config.min_age} and over`)
+  }
+  if (config?.under_age != null) {
+    bits.push(config.max_op === 'lte' ? `${config.under_age} or under` : `under ${config.under_age}`)
+  }
+  return bits.join(' · ') || 'no age limit yet'
+}
 
 function Card({ children, className = '' }) {
   return <section className={`pb-card rounded-xl p-4 sm:p-5 ${className}`}>{children}</section>
@@ -82,26 +96,50 @@ function AgeBasisCard({ settings, onSave, canEdit }) {
     setStartMonth(settings.season_start_month || 7)
   }, [settings])
 
-  const isCutoff = basis.basis !== 'match_date'
+  const mode = basis.basis === 'match_date' ? 'match_date'
+    : basis.basis === 'fixed_date' ? 'fixed_date' : 'cutoff'
+  const isCutoff = mode === 'cutoff'
   const save = async () => {
     setSaving(true)
     try { await onSave({ age_basis: basis, season_start_month: Number(startMonth) }) }
     finally { setSaving(false) }
   }
-  const example = isCutoff
+  const fixedLabel = (() => {
+    if (!basis.date) return 'a date you set'
+    const d = new Date(`${basis.date}T00:00:00`)
+    return Number.isNaN(d.getTime()) ? 'a date you set'
+      : `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+  })()
+  const example = mode === 'cutoff'
     ? `A player's age is taken as at ${basis.day} ${MONTHS[(basis.month || 1) - 1]} of the year the season ${basis.year === 'season_end' ? 'ends' : 'started'}, so it doesn't change mid-season.`
-    : "A player's age is taken on the day of each match, so a birthday mid-season changes what they're eligible for."
+    : mode === 'fixed_date'
+      ? `A player's age is taken as at ${fixedLabel}, whichever season the match belongs to. You'll need to move it each year.`
+      : "A player's age is taken on the day of each match, so a birthday mid-season changes what they're eligible for."
 
   return (
     <Card>
       <SectionHead title="How your association measures age"
         sub="Competitions don't agree on this, so it's yours to set. Everything the age rules below decide is worked out on this date." />
       <div className="flex flex-col gap-3">
-        <Segmented value={isCutoff ? 'cutoff' : 'match_date'}
-          onChange={(v) => setBasis(v === 'cutoff'
-            ? { basis: 'cutoff', month: 9, day: 1, year: 'season_start' }
-            : { basis: 'match_date' })}
-          options={[{ value: 'cutoff', label: 'As at a set date' }, { value: 'match_date', label: 'On the day of the match' }]} />
+        <Segmented value={mode}
+          onChange={(v) => setBasis(
+            v === 'cutoff' ? { basis: 'cutoff', month: 9, day: 1, year: 'season_start' }
+              : v === 'fixed_date' ? { basis: 'fixed_date', date: basis.date || `${new Date().getFullYear()}-09-01` }
+                : { basis: 'match_date' })}
+          options={[{ value: 'cutoff', label: 'The same date each season' },
+                    { value: 'fixed_date', label: 'One exact date' },
+                    { value: 'match_date', label: 'On the day of the match' }]} />
+        {mode === 'fixed_date' && (
+          <div>
+            <label className={LABEL}>Measured on</label>
+            <input type="date" className={`${FIELD} sm:w-[260px]`} value={basis.date || ''}
+              onChange={(e) => setBasis({ basis: 'fixed_date', date: e.target.value })} />
+            <p className={HINT}>
+              A single calendar date, exactly as your association publishes it. It does not move
+              with the season, so put next season's date in when the season turns over.
+            </p>
+          </div>
+        )}
         {isCutoff && (
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
@@ -152,7 +190,15 @@ function AgeBasisCard({ settings, onSave, canEdit }) {
  * quietly stop applying the day it appeared. */
 function ScopePicker({ scope, setScope, options }) {
   const [q, setQ] = useState('')
-  const grades = (options.grades || []).filter((g) => !q || g.name.toLowerCase().includes(q.toLowerCase()))
+  const [showOld, setShowOld] = useState(false)
+  const all = options.grades || []
+  const picked = new Set(scope.grade_names || [])
+  // The grades the club runs now come first and alone: a decade of history
+  // buries this season's eleven in a list of forty. A grade already ticked
+  // always shows, so a selection can be seen and un-ticked whatever its age.
+  const older = all.filter((g) => !g.recent && !picked.has(g.name))
+  const grades = (showOld || q ? all : all.filter((g) => g.recent || picked.has(g.name)))
+    .filter((g) => !q || g.name.toLowerCase().includes(q.toLowerCase()))
   const toggle = (key, value) => setScope((s) => {
     const cur = s[key] || []
     return { ...s, [key]: cur.includes(value) ? cur.filter((v) => v !== value) : [...cur, value] }
@@ -172,10 +218,17 @@ function ScopePicker({ scope, setScope, options }) {
           ))}
           {!grades.length && <span className="text-[12px] text-pb-faintest">No grades yet — this rule will cover every fixture.</span>}
         </div>
+        {older.length > 0 && !q && (
+          <button type="button" onClick={() => setShowOld((v) => !v)}
+            className="mt-2 text-[11.5px] text-pb-accent hover:underline">
+            {showOld ? 'Show only the grades you run now' : `Show ${older.length} older grade${older.length === 1 ? '' : 's'}`}
+          </button>
+        )}
         <p className={HINT}>
           {none
             ? 'Nothing ticked, so this rule covers every fixture.'
             : 'Ticked by name, so the rule keeps working when next season’s grades arrive.'}
+          {' '}Names, order and merges all come from Manage Grades.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -213,19 +266,39 @@ function ScopePicker({ scope, setScope, options }) {
 function ConfigFields({ kind, config, setConfig, ageBasisLabel }) {
   const set = (patch) => setConfig((c) => ({ ...c, ...patch }))
   if (kind === 'age') {
+    // Both ends, each with its own comparison, because an association writes
+    // them either way round: "15 and over" is not "over 15", and "under 21" is
+    // not "21 or under". Leave an end blank for no limit at that end.
     return (
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
-          <label className={LABEL}>Minimum age</label>
-          <input type="number" min="5" max="99" className={FIELD} value={config.min_age ?? ''}
-            placeholder="No minimum" onChange={(e) => set({ min_age: num(e.target.value) })} />
+          <label className={LABEL}>Old enough</label>
+          <div className="flex gap-2">
+            <select className={FIELD} value={config.min_op || 'gte'}
+              onChange={(e) => set({ min_op: e.target.value })}>
+              <option value="gte">At least</option>
+              <option value="gt">Over</option>
+            </select>
+            <input type="number" min="5" max="99" className={FIELD} value={config.min_age ?? ''}
+              placeholder="No minimum" onChange={(e) => set({ min_age: num(e.target.value) })} />
+          </div>
         </div>
         <div>
-          <label className={LABEL}>Must be under</label>
-          <input type="number" min="5" max="99" className={FIELD} value={config.under_age ?? ''}
-            placeholder="No maximum" onChange={(e) => set({ under_age: num(e.target.value) })} />
+          <label className={LABEL}>Young enough</label>
+          <div className="flex gap-2">
+            <select className={FIELD} value={config.max_op || 'lt'}
+              onChange={(e) => set({ max_op: e.target.value })}>
+              <option value="lt">Under</option>
+              <option value="lte">At most</option>
+            </select>
+            <input type="number" min="5" max="99" className={FIELD} value={config.under_age ?? ''}
+              placeholder="No maximum" onChange={(e) => set({ under_age: num(e.target.value) })} />
+          </div>
         </div>
-        <p className={`${HINT} sm:col-span-2`}>Measured {ageBasisLabel}. A player with no date of birth on their profile is never flagged.</p>
+        <p className={`${HINT} sm:col-span-2`}>
+          Reads as “{agePhrase(config)}”, measured {ageBasisLabel}. A player with no date of
+          birth on their profile is never flagged.
+        </p>
       </div>
     )
   }
@@ -550,6 +623,8 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
         select_show_age_under: form.select_show_age_under ?? null,
         dormancy_months: Number(form.dormancy_months),
         default_team_size: Number(form.default_team_size),
+        show_fees: form.show_fees !== false,
+        show_training: form.show_training !== false,
       })
     } finally { setSaving(false) }
   }
@@ -577,11 +652,37 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
               <select className={`${FIELD} sm:w-[280px]`} value={form.select_show_age_under ?? ''}
                 onChange={(e) => setForm((f) => ({ ...f, select_show_age_under: e.target.value ? Number(e.target.value) : null }))}>
                 <option value="">Every player</option>
-                {[13, 14, 15, 16, 17, 18, 19, 21].map((n) => <option key={n} value={n}>Players under {n} only</option>)}
+                {[13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map((n) => <option key={n} value={n}>Players under {n} only</option>)}
               </select>
               <p className={HINT}>Anyone at or over that age shows no age at all — their birthday never leaves their profile.</p>
             </div>
           )}
+        </div>
+        {/* The two plain notes beside a player. A club that doesn't run fees
+            through BetterFees, or would rather its selectors not see who owes,
+            switches them off here and the badge, the filter and the value all
+            go. A RULE about either still shows: that one was asked for. */}
+        <div className="pt-4 pb-hairline-t">
+          <label className={LABEL}>Notes beside a player</label>
+          <div className="flex flex-col gap-2.5">
+            {[['show_fees', 'Fees', 'A $ beside anyone who owes the club money.'],
+              ['show_training', 'Training', "An NT beside anyone who hasn't been at nets lately."]]
+              .map(([key, label, hint]) => (
+                <label key={key} className="flex items-start gap-2.5 cursor-pointer">
+                  <input type="checkbox" className="accent-pb-accent mt-0.5 shrink-0"
+                    checked={form[key] !== false}
+                    onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.checked }))} />
+                  <span className="leading-tight">
+                    <span className="text-pb-text text-[13.5px]">{label}</span>
+                    <span className={`${HINT} block mt-0.5`}>{hint}</span>
+                  </span>
+                </label>
+              ))}
+          </div>
+          <p className={HINT}>
+            Switching one off takes its badge and its pool filter with it. A rule you've set for
+            fees or training still shows, because that one you asked for.
+          </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2 pt-4 pb-hairline-t">
           <div>

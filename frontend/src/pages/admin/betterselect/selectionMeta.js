@@ -96,7 +96,7 @@ export const FORM_BUCKETS = [
  * every age — under a limit an adult has no age at all, so "18 and over"
  * would always be empty and "no age shown" would mean "an adult, or someone
  * with no birthday recorded", which is two questions wearing one label. */
-export const AGE_UNDER_LADDER = [13, 14, 15, 16, 17, 18, 19]
+export const AGE_UNDER_LADDER = [13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
 
 export function ageFilterOptions(flags) {
   const rule = flags?.age

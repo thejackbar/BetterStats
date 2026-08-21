@@ -15,6 +15,7 @@ import { ALPHABET, RANGES, letterOfName, rangeOfName, groupByLetter } from '../.
 import { PbSpinner } from '../../../lib/presskit'
 import { bowls, bowlingLabel } from '../../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../../components/player/PlayerProfilePanel'
+import UnrosteredGuests from '../../../components/player/UnrosteredGuests'
 import {
   Icon, Avatar, AvailDot, RoleChips, Btn, Empty,
   QuickAvailModal, RecencySelect, playedWithinYears,
@@ -404,6 +405,13 @@ export default function BetterSelectPlayers() {
     setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, photo_url: url } : r))
   }, [selId])
 
+  // The action shot is only ever read by the post templates, so it reflects
+  // into the open panel and the row's own record, not into any avatar.
+  const onHeroPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, hero_photo_url: url } : p)
+    setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, hero_photo_url: url } : r))
+  }, [selId])
+
   const onBulkSquad = async (ids, squadId) => {
     try {
       await Promise.all(ids.map((id) => api.bsUpdatePlayerProfile(id, { squad_team_id: squadId })))
@@ -430,6 +438,10 @@ export default function BetterSelectPlayers() {
 
   return (
     <BetterSelectLayout title="Players">
+      {/* People turning up to nets who aren't on the list. Renders nothing when
+          there is nobody to sort out, which is the ordinary case — so the
+          master/detail grid below keeps its full height almost always. */}
+      <UnrosteredGuests onPromoted={loadRoster} />
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-[minmax(380px,1fr)_1.35fr] lg:h-[calc(100vh-140px)]">
         <PlayerList
           players={players} rulesById={rulesById} statusOf={statusOf} squadNameOf={squadNameOf} selectedIds={selectedIds}
@@ -444,7 +456,7 @@ export default function BetterSelectPlayers() {
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
                   onEditAvail={openAvail} canEditAvail={canEdit}
-                  onPhotoChange={onPhotoChange} />}
+                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} />}
         </div>
       </div>
 

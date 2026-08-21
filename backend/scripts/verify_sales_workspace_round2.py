@@ -189,7 +189,8 @@ async def main():
         # ── Part E: editable email templates ─────────────────────────────
         seeded = await se.seed_sales_templates(db)
         await db.commit()
-        check("seed_sales_templates inserted 6 rows", seeded == 6, str(seeded))
+        check("seed_sales_templates inserts one row per built-in key",
+              seeded == len(se.BUILT_IN_TEMPLATES), str(seeded))
         reseeded = await se.seed_sales_templates(db)
         await db.commit()
         check("seed_sales_templates is idempotent (no dup insert)", reseeded == 0, str(reseeded))
@@ -200,7 +201,8 @@ async def main():
         rows = (await db.execute(
             __import__("sqlalchemy").select(CommsTemplate).where(CommsTemplate.organisation_id == outreach.id)
         )).scalars().all()
-        check("6 templates exist in the outreach org", len(rows) == 6, str(len(rows)))
+        check("one template per built-in key exists in the outreach org",
+              len(rows) == len(se.BUILT_IN_TEMPLATES), str(len(rows)))
         info_row = next((r for r in rows if r.name == "Send information"), None)
         check("Send information has a subject", info_row is not None and "{{club}}" in (info_row.subject or ""))
 

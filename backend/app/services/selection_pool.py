@@ -532,6 +532,7 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
     rules = await selection_rules.evaluate(
         db, club, fx, players, financial=financial_by_id, trained=trained_by_id
     )
+    rule_cfg = selection_rules.club_config(club)
     # An age rule moves the age on the card to the date the COMPETITION counts
     # it on — a player is the same age all season under a 1 September cutoff,
     # and that is the number a selector is checking against the handbook. With
@@ -626,14 +627,19 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
             # unpaid player can be picked is a club's own call, and plenty
             # would rather see the flag and decide than have autofill quietly
             # leave someone out.
-            "is_financial": financial,
+            # Withheld entirely when the club has switched the badge off,
+            # rather than sent and drawn conditionally — the same call
+            # player_age.visible_age makes about an age. A fees RULE is
+            # unaffected: its verdict rides in rule_flags, which the club
+            # asked for explicitly.
+            "is_financial": financial if rule_cfg["show_fees"] else None,
             "financial_source": (
                 "override" if p.is_financial_override is not None
                 else "fees" if owing_ids is not None else None
             ),
             # True = at nets inside the last TRAINING_WINDOW_DAYS, False = not,
             # None = the club records no sessions so we cannot say.
-            "trained_recently": trained,
+            "trained_recently": trained if rule_cfg["show_training"] else None,
             "training_source": (
                 "override" if p.trained_override is not None
                 else "nets" if trained_ids is not None else None
@@ -694,8 +700,14 @@ async def assemble_selection(db: AsyncSession, club, fx) -> dict:
         # board can label the filter honestly ("from BetterFees" vs "set by
         # hand") and hide a filter nothing can answer.
         "flags": {
-            "financial": "fees" if owing_ids is not None else None,
-            "training": "nets" if trained_ids is not None else None,
+            # A club that has switched a badge off reads as though it can't
+            # answer: no badge, and no filter offered for it either. Same shape
+            # the "we genuinely can't tell" case already takes, so no screen
+            # needs a second branch for it.
+            "financial": ("fees" if owing_ids is not None else None) if rule_cfg["show_fees"] else None,
+            "training": ("nets" if trained_ids is not None else None) if rule_cfg["show_training"] else None,
+            "show_fees": rule_cfg["show_fees"],
+            "show_training": rule_cfg["show_training"],
             "training_window_days": TRAINING_WINDOW_DAYS,
             # The club's own age rule, echoed so the filter can offer only
             # what it can answer and say what it covers. Under a limit, an

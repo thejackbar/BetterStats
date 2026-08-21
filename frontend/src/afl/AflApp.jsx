@@ -24,6 +24,7 @@ import AflAdminImport from './pages/admin/AflAdminImport'
 import AflAdminResultsImport from './pages/admin/AflAdminResultsImport'
 import AflAdminAwardsImport from './pages/admin/AflAdminAwardsImport'
 import AflAdminSeasons from './pages/admin/AflAdminSeasons'
+import AflAdminManualEntries from './pages/admin/AflAdminManualEntries'
 import AflAdminMergePlayers from './pages/admin/AflAdminMergePlayers'
 import AflAdminMergeGrades from './pages/admin/AflAdminMergeGrades'
 import AflAdminAwardDefinitions from './pages/admin/AflAdminAwardDefinitions'
@@ -62,6 +63,7 @@ export default function AflApp() {
                   <Route path="import-results" element={<AflAdminResultsImport />} />
                   <Route path="import-awards" element={<AflAdminAwardsImport />} />
                   <Route path="seasons" element={<AflAdminSeasons />} />
+                  <Route path="manual-entries" element={<AflAdminManualEntries />} />
                   <Route path="merge" element={<AflAdminMergePlayers />} />
                   <Route path="merge-grades" element={<AflAdminMergeGrades />} />
                   <Route path="award-definitions" element={<AflAdminAwardDefinitions />} />

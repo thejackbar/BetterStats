@@ -275,6 +275,39 @@ export function PlayerImage({ player, team, palette, fit = 'contain', size = 200
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HERO FOCAL POINT
+// A club's hero photo is whatever they had on the night — a cutout, a phone
+// snap, a wide team shot — and the templates that crop one into a box have to
+// guess where the subject is standing. These let the club say instead.
+//
+// Only the templates that CROP a photo into a fixed box take this (T1, T3,
+// T10). T6 and T7 scale a free-standing cutout to fit, so the element is sized
+// to the image and there is no crop window to move.
+// ─────────────────────────────────────────────────────────────────────────────
+export const DEFAULT_HERO_FOCUS = { x: 50, y: 0, scale: 1 }
+
+// The default reproduces the `center top` every one of those templates used
+// before this existed, so an untouched post is byte-for-byte what it was.
+export function heroFocusStyle(focus) {
+  const f = { ...DEFAULT_HERO_FOCUS, ...(focus || {}) }
+  const pos = `${f.x}% ${f.y}%`
+  // Zoom is anchored on the focal point rather than the centre, so pushing in
+  // moves you INTO the spot that was picked instead of drifting off it.
+  return f.scale && f.scale !== 1
+    ? { objectPosition: pos, transform: `scale(${f.scale})`, transformOrigin: pos }
+    : { objectPosition: pos }
+}
+
+// The photo for a player's BIG slot. A club can store two: a square headshot
+// that reads at 44px, and an action shot for exactly this. The action shot
+// wins here and nowhere else — a grid or a card front stays on the headshot,
+// which is the photo that works at that size.
+export function heroSrcOf(player) {
+  if (!player) return null
+  return player.hero || player.headshot || null
+}
+
 // Picks the player shown in the hero image slot. An explicit `featuredId`
 // (the chosen player's id) wins; otherwise it falls back to the captain, then
 // the first player in the order.
@@ -363,7 +396,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
   // Size the name rows down as the squad grows so a full 13 always fits the
   // available space (sized for the worst case: a tall headline + a wrapped vs
@@ -406,7 +439,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
-          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          const src = heroImage || heroSrcOf(featured) || team.logo
           // No hero, no headshot and no crest is an ordinary state (a
           // club that hasn't uploaded a logo yet). Rendering an <img>
           // with a null src puts a broken-image glyph and its alt text
@@ -417,7 +450,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
               style={{
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'center top',
+                objectFit: 'cover', ...heroFocusStyle(heroFocus),
                 filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
               }} />
           )
@@ -628,7 +661,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
@@ -659,8 +692,8 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
-          const hasHead = !!(heroImage || (featured && featured.headshot))
-          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          const hasHead = !!(heroImage || heroSrcOf(featured))
+          const src = heroImage || heroSrcOf(featured) || team.logo
           // No hero, no headshot and no crest is an ordinary state (a
           // club that hasn't uploaded a logo yet). Rendering an <img>
           // with a null src puts a broken-image glyph and its alt text
@@ -672,7 +705,9 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%',
                 objectFit: hasHead ? 'cover' : 'contain',
-                objectPosition: hasHead ? 'top center' : 'center',
+                // The crest fallback is a contained logo, not a crop — there is
+                // nothing to reposition, so the focal point stays out of it.
+                ...(hasHead ? heroFocusStyle(heroFocus) : { objectPosition: 'center' }),
                 padding: hasHead ? 0 : 40,
               }} />
           )
@@ -919,8 +954,8 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
         <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
             const featured = featuredOf(players, featuredId)
-            const hasHead = !!(heroImage || (featured && featured.headshot))
-            const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+            const hasHead = !!(heroImage || heroSrcOf(featured))
+            const src = heroImage || heroSrcOf(featured) || team.logo
             // No hero, no headshot and no crest is an ordinary state (a club
             // that hasn't uploaded a logo yet). Rendering an <img> with a
             // null src puts a broken-image glyph and its alt text on the
@@ -1003,7 +1038,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
       </div>
       <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {(heroImage || hasHead) ? (
-          <img src={heroImage || player.headshot} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}
@@ -1214,6 +1249,205 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
         <CreditMark ink={palette.ink} h={44} />
       </div>
       <GrainSVG opacity={0.4} id="g9" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 10 — Match-day team sheet (full-bleed photo, torn sponsor strip)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A fixed profile for the torn-paper edge. Hand-written rather than generated,
+// because a template re-renders on every keystroke and again inside the export
+// clone — a Math.random() tear would move between the preview and the file.
+// Each value is the height the tear reaches at that point, 0 (flat) to 1 (full).
+const TORN_PROFILE = [
+  0.62, 0.28, 0.74, 0.36, 0.90, 0.20, 0.55, 0.82, 0.30, 0.68, 0.42, 0.86,
+  0.24, 0.60, 0.78, 0.34, 0.70, 0.46, 0.88, 0.26, 0.58, 0.80, 0.40, 0.66,
+]
+
+function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
+  const step = width / (TORN_PROFILE.length - 1)
+  const pts = TORN_PROFILE.map((v, i) => `${(i * step).toFixed(1)},${(height * (1 - v)).toFixed(1)}`)
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', ...style }}>
+      <path d={`M0,${height} L${pts.join(' L')} L${width},${height} Z`} fill={color} />
+    </svg>
+  )
+}
+
+export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
+  const P = players.slice(0, 13)
+  // Shrink the rows as the squad grows so a full 13 still fits the column.
+  const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
+  const featured = featuredOf(players, featuredId)
+  const photo = heroImage || heroSrcOf(featured)
+  // The strip is the club's ink colour (off-white on every built-in palette),
+  // so it reads as the reference's cream paper without hardcoding a hue that
+  // would fight a club's own colours.
+  const paper = palette.ink
+  const paperInk = palette.primary
+  const STRIP_H = 104
+  const TEAR_H = 26
+  // The photo is deliberately SMALLER than the canvas. objectFit:cover scales
+  // an image to fill its box, so a box the full height of the post renders a
+  // headshot at 1080px tall and turns a face into a billboard — narrowing the
+  // box only crops it, it does not shrink it. Reducing the HEIGHT is what
+  // reduces the picture. It sits on the strip, so its bottom edge is hidden
+  // under the paper and only the top needs feathering.
+  const PHOTO_W = 600
+  const PHOTO_H = 780
+  const meta = [match.date, match.time].filter(Boolean).join('  ·  ')
+  const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
+  const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
+      color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      {/* Photo sits on the right two-thirds and bleeds behind everything, with
+          the left edge faded out so the names always have something to sit on.
+          A club with no hero photo and no headshot gets the gradient and the
+          crest instead of a broken image. */}
+      <div style={{ position: 'absolute', right: 0, bottom: STRIP_H, width: PHOTO_W, height: PHOTO_H, overflow: 'hidden' }}>
+        {photo
+          ? <img src={photo} alt={featured ? `${featured.first} ${featured.last}` : (team.short || 'team')}
+              style={{
+                position: 'absolute', inset: 0, width: '100%', height: '100%',
+                objectFit: 'cover', ...heroFocusStyle(heroFocus),
+                filter: 'saturate(0.92) contrast(1.06)',
+                // The photo stops short of the top edge, so it is FEATHERED
+                // rather than washed out with a colour. A colour overlay has to
+                // match whatever is behind it, and what is behind it here is a
+                // two-colour gradient — on a palette whose two colours differ
+                // much at all, that leaves a visible seam across the post. A
+                // mask has nothing to match. Its bottom edge needs none of
+                // this: it sits under the paper strip.
+                WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 26%)',
+                maskImage: 'linear-gradient(180deg, transparent 0%, #000 26%)',
+              }} />
+          : team.logo
+            ? <img src={team.logo} alt={team.short || 'club'}
+                style={{ position: 'absolute', right: 40, top: 120, width: 380, height: 380, objectFit: 'contain', opacity: 0.16 }} />
+            : <div style={{
+                position: 'absolute', left: 0, right: 0, top: 150, textAlign: 'center',
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 170,
+                lineHeight: 1, letterSpacing: -6, color: palette.ink, opacity: 0.07,
+              }}>{team.monogram || (team.short || team.name || '').slice(0, 3).toUpperCase()}</div>}
+      </div>
+      {/* The wash the names sit on. It spans the WHOLE canvas rather than the
+          photo's box: starting it at the box's own left edge painted a hard
+          vertical line wherever the canvas gradient behind it was not already
+          this colour. It has to clear the subject too — a face sits around the
+          middle of the photo, and carrying the wash that far across leaves it
+          muddy — so it is heavy only where the names actually are. */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        // Solid until past the photo's own left edge (600px in from the right,
+        // so 44.4% across) — anything less and that edge shows through as a
+        // faint vertical line down the post. It clears the subject by 77%.
+        background: `linear-gradient(90deg, ${palette.primary} 0%, ${palette.primary} 46%, ${palette.primary}e6 51%, ${palette.primary}99 58%, ${palette.primary}40 67%, transparent 77%)`,
+      }} />
+      <div style={{
+        position: 'absolute', left: 0, right: 0, top: 0, height: 200,
+        background: `linear-gradient(180deg, ${palette.primary}cc 0%, transparent 100%)`,
+      }} />
+      <div style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: 320,
+        background: `linear-gradient(0deg, ${palette.primary}dd 0%, transparent 100%)`,
+      }} />
+      <Halftone color={palette.ink} opacity={0.06} size={10} />
+      <Stripes color={palette.ink} opacity={0.035} gap={26} angle={-24} />
+
+      {/* Top meta rail — dates, the fixture, the ground. */}
+      <div style={{
+        position: 'absolute', left: 44, right: 44, top: 34, zIndex: 4,
+        display: 'flex', alignItems: 'center', gap: 20,
+        fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2.2,
+        color: palette.ink, opacity: 0.88, textTransform: 'uppercase',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AutoFitText text={meta || 'MATCH DAY'} max={13} min={8} lines={1} style={{ letterSpacing: 2.2 }} />
+        </div>
+        <div style={{ flex: 1.3, minWidth: 0, textAlign: 'center' }}>
+          <AutoFitText text={fixture} max={13} min={8} lines={1} style={{ letterSpacing: 2.2, textAlign: 'center' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
+          <AutoFitText text={(match.venue || '').toUpperCase()} max={13} min={8} lines={1} style={{ letterSpacing: 2.2, textAlign: 'right' }} />
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 44, right: 44, top: 66, height: 1, background: palette.ink, opacity: 0.22, zIndex: 4 }} />
+
+      {/* The wordmark. Short headlines ("XI") fill the box; a long one wraps
+          rather than shrinking to nothing. The clamp is 3 lines, not 2, because
+          AutoFitText sizes to fit the BOX and the clamp then cuts whatever is
+          left over — at 2 a three-line headline lost its last word to an
+          ellipsis even though it had already been shrunk to fit. */}
+      <div style={{ position: 'absolute', left: 42, top: 96, width: 500, height: 232, zIndex: 4 }}>
+        <AutoFitText
+          text={(headline || 'XI').toUpperCase()} max={230} min={52} lines={3} pad={10}
+          style={{
+            fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+            lineHeight: 0.84, letterSpacing: -4, color: palette.ink,
+            textShadow: `0 18px 50px ${palette.primary}aa`,
+          }} />
+      </div>
+
+      {/* The XI itself. */}
+      <div style={{
+        position: 'absolute', left: 44, top: 348, width: 560, bottom: STRIP_H + TEAR_H + 34,
+        zIndex: 4, display: 'flex', flexDirection: 'column',
+        gap: 2, justifyContent: P.length >= 10 ? 'space-between' : 'flex-start',
+      }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? '(C)' : p.viceCaptain ? '(VC)' : p.keeper ? '(WK)' : null
+          return (
+            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0]}
+              style={{
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+                lineHeight: 1.08, letterSpacing: 0.6, color: palette.ink,
+                textShadow: `0 6px 22px ${palette.primary}99`,
+              }}>
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.3em', whiteSpace: 'nowrap' }}>
+                <span>{`${p.first || ''} ${p.last || ''}`.trim().toUpperCase()}</span>
+                {chip && <span style={{ color: palette.accent, fontSize: '0.62em', letterSpacing: 1 }}>{chip}</span>}
+              </span>
+            </AutoFitText>
+          )
+        })}
+      </div>
+
+      {/* Torn paper strip — crests, competition, credit. */}
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: STRIP_H, zIndex: 5 }}>
+        <TornEdge color={paper} height={TEAR_H} />
+      </div>
+      <div style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: STRIP_H, zIndex: 5,
+        background: paper, color: paperInk,
+        display: 'flex', alignItems: 'center', gap: 22, padding: '0 44px',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          background: `${paperInk}14`, borderRadius: 10, padding: '8px 14px',
+        }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={paperInk} size={54} shape="shield" />
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={paperInk} size={54} shape="shield" />
+        </div>
+        {comp && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <AutoFitText text={comp} max={26} min={11} lines={1}
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: paperInk, lineHeight: 1 }} />
+            {match.season && (
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.6, opacity: 0.6, marginTop: 4 }}>{match.season}</div>
+            )}
+          </div>
+        )}
+        <div style={{ flexShrink: 0, marginLeft: 'auto' }}>
+          <CreditMark ink={paperInk} h={40} />
+        </div>
+      </div>
+      <GrainSVG opacity={0.4} id="g10" />
     </div>
   )
 }

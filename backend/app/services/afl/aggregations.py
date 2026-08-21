@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import grade_labels, milestone_rules
+from .manual_stats import manual_branch
 
 # Reading order for the per-team results split when the club has NOT set its
 # own: the senior program first, juniors last. Anything unclassified sorts
@@ -53,11 +54,19 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
     """Career totals per player, combining the synced whole-season rollup
     (grade_id IS NULL so per-grade rows don't double count) with imported
     (Import Stats upload) rows — sync wins per season, imported only fills a
-    genuine gap, same rule the leaderboard/dashboard/records use. A LEFT JOIN
-    to seasons (not INNER) so an imported row with no resolved season still
-    counts toward the totals — it just can't move first_year/last_year."""
+    genuine gap, same rule the leaderboard/dashboard/records use — plus any
+    manual adjustment, which is a delta and so is always added on top of both
+    (see services/afl/manual_stats.py). A LEFT JOIN to seasons (not INNER) so
+    an imported row with no resolved season, or a career-only adjustment with
+    no season at all, still counts toward the totals — it just can't move
+    first_year/last_year."""
     where_player_s = "AND s.player_id = ANY(:pids)" if player_ids else ""
     where_player_i = "AND i.player_id = ANY(:pids)" if player_ids else ""
+    where_player_m = "AND m.player_id = ANY(:pids)" if player_ids else ""
+    manual = manual_branch(
+        ["player_id", "season_id", "games", "goals", "behinds", "bog_count", "captain_games"],
+        where=where_player_m,
+    )
     params: dict = {"org": str(org_id)}
     if player_ids:
         params["pids"] = [str(p) for p in player_ids]
@@ -75,6 +84,8 @@ async def career_totals(db: AsyncSession, org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual}
         )
         SELECT c.player_id,
                p.name,
@@ -109,12 +120,29 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
     what the sync's own rollup would have produced. compare_players()
     filters this list down to grade_id IS NULL rows only, so without this
     synthesis an import-only season would silently vanish from Compare too.
+
+    Manual adjustments join in as a third arm, always (a delta is never gated
+    on what the sync holds). A career-only one has no season to sit under and
+    is labelled as such rather than rendering as a nameless row — it is real
+    and it is in the career total above this table, so leaving it out would
+    make the two disagree.
+
+    Club/competition B&F votes ride along on every row, read on their own
+    terms — see the vote query below for why they can't go through the
+    sync-wins union with the rest.
     """
-    res = await db.execute(text("""
+    manual = manual_branch(
+        ["season_id", "COALESCE(s.name, 'Career adjustment') AS season_name", "s.year",
+         "grade_id", "gr.name AS grade_name",
+         "games", "goals", "behinds", "bogs", "captain_games", "'manual' AS src"],
+        joins="LEFT JOIN seasons s ON s.id = m.season_id\n            LEFT JOIN grades gr ON gr.id = m.grade_id",
+        where="AND m.player_id = :pid",
+    )
+    res = await db.execute(text(f"""
         SELECT pss.season_id, s.name AS season_name, s.year,
                pss.grade_id, gr.name AS grade_name,
                pss.games, pss.goals, pss.behinds, pss.bog_count AS bogs,
-               pss.captain_games
+               pss.captain_games, 'synced' AS src
         FROM afl_player_season_stats pss
         JOIN seasons s ON s.id = pss.season_id
         LEFT JOIN grades gr ON gr.id = pss.grade_id
@@ -123,7 +151,7 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
         SELECT i.season_id, s.name AS season_name, s.year,
                i.grade_id, gr.name AS grade_name,
                i.games_played AS games, i.goals, i.behinds, i.bog_count AS bogs,
-               i.captain_games
+               i.captain_games, 'imported' AS src
         FROM afl_imported_stats i
         LEFT JOIN seasons s ON s.id = i.season_id
         LEFT JOIN grades gr ON gr.id = i.grade_id
@@ -133,8 +161,52 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
             WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
               AND s2.grade_id IS NULL AND s2.games > 0
           )
+        UNION ALL
+        {manual}
     """), {"org": str(org_id), "pid": str(player_id)})
     rows = [dict(r._mapping) for r in res]
+    for r in rows:
+        r["club_bf_votes"] = 0
+        r["comp_bf_votes"] = 0
+
+    # Club/competition B&F votes are read SEPARATELY, and deliberately not
+    # through the sync-wins union above. They only ever come from an Import
+    # Stats upload — PlayHQ has no concept of club-internal B&F voting, so
+    # afl_player_season_stats never carries them (see afl_main.py's note on
+    # why the columns live on afl_imported_stats alone). Putting them in the
+    # union would mean a season that was BOTH synced and imported loses its
+    # votes to the NOT EXISTS gate: the imported row is dropped because sync
+    # has better games/goals for that season, and the votes go with it. So
+    # this is a straight sum of every imported row, exactly what the
+    # leaderboard's own vote path and the admin Players list already do.
+    vres = await db.execute(text("""
+        SELECT i.season_id, s.name AS season_name, s.year,
+               i.grade_id, gr.name AS grade_name,
+               COALESCE(SUM(i.club_bf_votes), 0) AS club_bf_votes,
+               COALESCE(SUM(i.comp_bf_votes), 0) AS comp_bf_votes
+        FROM afl_imported_stats i
+        LEFT JOIN seasons s ON s.id = i.season_id
+        LEFT JOIN grades gr ON gr.id = i.grade_id
+        WHERE i.organisation_id = :org AND i.player_id = :pid
+        GROUP BY i.season_id, s.name, s.year, i.grade_id, gr.name
+        HAVING COALESCE(SUM(i.club_bf_votes), 0) > 0
+            OR COALESCE(SUM(i.comp_bf_votes), 0) > 0
+    """), {"org": str(org_id), "pid": str(player_id)})
+    vote_rows = [dict(r._mapping) for r in vres]
+
+    # A manual adjustment entered against ONE grade of a season still belongs
+    # in that season's whole-season line, and nothing downstream can put it
+    # there: the synced rollup row already exists and was computed without it,
+    # and the synthesis below only fires for a season that has no whole-season
+    # row at all (where the manual per-grade row is already summed in). Held
+    # aside now, applied after that step — folding by merge group loses which
+    # source a row came from, which is the whole reason `src` rides along.
+    manual_grade_delta: dict = {}
+    for r in rows:
+        if r.pop("src") == "manual" and r["grade_id"] is not None:
+            slot = manual_grade_delta.setdefault(r["season_id"], {})
+            for f in ("games", "goals", "behinds", "bogs", "captain_games"):
+                slot[f] = slot.get(f, 0) + (r[f] or 0)
 
     # Fold the per-grade rows by merge group and stamp each with the club's
     # own label + reading order, so two spellings of one competition are one
@@ -161,7 +233,89 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
             slot[f] = (slot[f] or 0) + (r[f] or 0)
     rows = passthrough + list(folded.values())
 
+    # One whole-season row per season, always. A season can now legitimately
+    # produce more than one grade-less row — the sync's own rollup plus a
+    # manual adjustment entered against the whole season — and two of them
+    # renders the same year twice on the profile's season table, once with
+    # each half of the figure. Folding them is also what puts a correction
+    # into the number a reader actually looks at. Rows that HAVE a grade are
+    # untouched here whether or not the merge map recognised it.
+    whole: dict = {}
+    keep: list[dict] = []
+    for r in rows:
+        if r["grade_id"] is not None:
+            keep.append(r)
+            continue
+        slot = whole.get(r["season_id"])
+        if slot is None:
+            whole[r["season_id"]] = r
+            continue
+        for f in ("games", "goals", "behinds", "bogs", "captain_games"):
+            slot[f] = (slot[f] or 0) + (r[f] or 0)
+        # A real season's own name beats the "Career adjustment" placeholder,
+        # which only ever appears on a row with no season at all.
+        slot["season_name"] = slot["season_name"] or r["season_name"]
+        slot["year"] = slot["year"] if slot["year"] is not None else r["year"]
+    rows = keep + list(whole.values())
+
+    # Votes onto the per-grade cells, folded through the same merge map so a
+    # vote recorded under one spelling of a competition lands in the column
+    # the club actually reads. The cell key mirrors the profile table's own
+    # (grade_key, falling back to the raw name for a grade the merge map
+    # can't place), so a vote can never land in a column nothing looks at.
+    by_cell: dict[tuple, dict] = {}
+    votes_by_season: dict = {}
+    for v in vote_rows:
+        club_v = v["club_bf_votes"] or 0
+        comp_v = v["comp_bf_votes"] or 0
+        season_slot = votes_by_season.setdefault(
+            v["season_id"], {"club_bf_votes": 0, "comp_bf_votes": 0})
+        season_slot["club_bf_votes"] += club_v
+        season_slot["comp_bf_votes"] += comp_v
+        if v["grade_id"] is None:
+            continue
+        info = gmap.get(v["grade_name"]) if v["grade_name"] else None
+        key = info["key"] if info else v["grade_name"]
+        slot = by_cell.setdefault((v["season_id"], key), {
+            "season_id": v["season_id"], "season_name": v["season_name"], "year": v["year"],
+            "grade_id": v["grade_id"],
+            "grade_name": info["label"] if info else v["grade_name"],
+            "grade_key": info["key"] if info else None,
+            "grade_order": info["display_order"] if info else None,
+            # Nulls, not zeros: this row only exists where the union above
+            # had no cell for that (season, grade) — a season carrying BOTH
+            # synced figures and an imported sheet — and "didn't play there"
+            # must not read as "played and scored nothing".
+            "games": None, "goals": None, "behinds": None, "bogs": None,
+            "captain_games": None,
+            "club_bf_votes": 0, "comp_bf_votes": 0,
+        })
+        slot["club_bf_votes"] += club_v
+        slot["comp_bf_votes"] += comp_v
+
+    for r in rows:
+        if r["grade_id"] is None:
+            continue
+        cell = by_cell.pop((r["season_id"], r["grade_key"] or r["grade_name"]), None)
+        if cell:
+            r["club_bf_votes"] = cell["club_bf_votes"]
+            r["comp_bf_votes"] = cell["comp_bf_votes"]
+    rows.extend(by_cell.values())
+
     have_total = {r["season_id"] for r in rows if r["grade_id"] is None and r["season_id"] is not None}
+
+    # The per-grade manual deltas held aside above, added into the
+    # whole-season line for the seasons that already had one. A season with no
+    # whole-season line is left to the synthesis below, which sums its
+    # per-grade rows — manual ones included — and so already has them.
+    for sid, delta in manual_grade_delta.items():
+        if sid not in have_total:
+            continue
+        for r in rows:
+            if r["grade_id"] is None and r["season_id"] == sid:
+                for f, v in delta.items():
+                    r[f] = (r[f] or 0) + v
+                break
     synthesised: dict = {}
     for r in rows:
         sid = r["season_id"]
@@ -172,10 +326,31 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
             "grade_id": None, "grade_name": None,
             "grade_key": None, "grade_order": None,
             "games": 0, "goals": 0, "behinds": 0, "bogs": 0, "captain_games": 0,
+            "club_bf_votes": 0, "comp_bf_votes": 0,
         })
         for f in ("games", "goals", "behinds", "bogs", "captain_games"):
             t[f] += r[f] or 0
     rows.extend(synthesised.values())
+
+    # A season's own vote total, NOT the sum of its grade cells — a sheet
+    # that recorded votes without naming a grade has no column to sit in,
+    # and re-adding the cells would quietly lose it. Same rule the season
+    # table's Total column already follows for games and goals, and it keeps
+    # a player's season line agreeing with the leaderboard, which sums every
+    # imported row for the club regardless of grade.
+    # Stamped onto the FIRST whole-season row for a season only, so a season
+    # that somehow carried two of them couldn't be given the full tally twice
+    # and double it in the profile's career line. The fold above now leaves
+    # exactly one, which makes this belt-and-braces rather than load-bearing.
+    stamped: set = set()
+    for r in rows:
+        if r["grade_id"] is not None or r["season_id"] in stamped:
+            continue
+        stamped.add(r["season_id"])
+        totals = votes_by_season.get(r["season_id"])
+        if totals:
+            r["club_bf_votes"] = totals["club_bf_votes"]
+            r["comp_bf_votes"] = totals["comp_bf_votes"]
 
     # Four stable sorts, least-significant first (Python's sort is stable, so
     # each later pass only breaks ties the previous pass left standing) —
@@ -212,7 +387,11 @@ async def grade_breakdown(db: AsyncSession, org_id: uuid.UUID,
     The caller shows that gap rather than this function inventing a bucket
     for it.
     """
-    res = await db.execute(text("""
+    manual = manual_branch(
+        ["grade_id", "games", "goals"],
+        where="AND m.player_id = :pid AND m.grade_id IS NOT NULL",
+    )
+    res = await db.execute(text(f"""
         WITH combined AS (
             SELECT s.grade_id, s.games, s.goals
             FROM afl_player_season_stats s
@@ -228,6 +407,8 @@ async def grade_breakdown(db: AsyncSession, org_id: uuid.UUID,
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual}
         )
         SELECT gr.name AS name,
                MAX(gr.display_name_override) AS display_name_override,
@@ -543,7 +724,8 @@ async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 
     decades-retired player's long-crossed totals don't clutter the list —
     career-wide totals, not season-scoped, since a milestone is a lifetime
     tally regardless of which season the dashboard filter has picked."""
-    res = await db.execute(text("""
+    manual = manual_branch(["player_id", "season_id", "games", "goals"])
+    res = await db.execute(text(f"""
         WITH combined AS (
             SELECT s.player_id, s.season_id, s.games, s.goals
             FROM afl_player_season_stats s
@@ -557,6 +739,8 @@ async def upcoming_milestones(db: AsyncSession, org_id: uuid.UUID, limit: int = 
                 WHERE s2.player_id = i.player_id AND s2.season_id = i.season_id
                   AND s2.grade_id IS NULL AND s2.games > 0
               )
+            UNION ALL
+            {manual}
         ),
         recent_seasons AS (
             SELECT s.id

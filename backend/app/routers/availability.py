@@ -40,28 +40,17 @@ def phone_last4(phone: Optional[str]) -> Optional[str]:
     return digits[-4:] if len(digits) >= 4 else None
 
 
-async def active_self_service_players(db: AsyncSession, club: Organisation) -> list[Player]:
-    """Active (non-dormant) real players for the club — the self-service name
-    list and the admin phone-coverage denominator.
+async def dormant_player_ids(db: AsyncSession, club: Organisation) -> set[uuid.UUID]:
+    """The club's players who last appeared before its dormancy window opened.
 
-    "Active" = a real player not manually marked inactive and not dormant (last
-    appeared inside the club's dormancy window). Never-played players (freshly
-    added) are kept — they're current additions, not dormant history. Mirrors
-    the matrix's recency rule so the public name list matches the admin roster.
+    Never-played players are NOT dormant — a name added last week has no
+    appearance to be old, and treating "no games yet" as "long gone" would hide
+    every new signing. Extracted so the roster screens that want to SHOW dormant
+    players (the Net Manager's check-in list) and the ones that want them gone
+    (the self-service name list) work off one definition rather than two.
     """
     months = club.dormancy_months if club.dormancy_months else DEFAULT_DORMANCY_MONTHS
     cutoff = months_ago(date.today(), months)
-    res = await db.execute(
-        select(Player)
-        .where(
-            Player.organisation_id == club.id,
-            Player.is_player.is_(True),
-            Player.status != "inactive",
-        )
-        .order_by(func.coalesce(Player.display_name_override, Player.name))
-    )
-    players = res.scalars().all()
-    last_played: dict[uuid.UUID, date] = {}
     lp_res = await db.execute(
         text(
             "SELECT ga.player_id, MAX(g.played_at) AS last_played "
@@ -73,15 +62,38 @@ async def active_self_service_players(db: AsyncSession, club: Organisation) -> l
         ),
         {"org": club.id},
     )
-    for pid, lp in lp_res.fetchall():
-        last_played[pid] = lp
-    out = []
-    for p in players:
-        lp = last_played.get(p.id)
-        if lp and lp < cutoff:
-            continue  # dormant
-        out.append(p)
-    return out
+    return {pid for pid, lp in lp_res.fetchall() if lp and lp < cutoff}
+
+
+async def club_player_roster(db: AsyncSession, club: Organisation) -> list[Player]:
+    """Every real player on the club's books, by name — whatever their status.
+
+    The list Admin → Players shows. Callers narrow it themselves; nothing is
+    dropped here, so a screen that reads this can never leave a name a club
+    admin can plainly see somewhere else unreachable.
+    """
+    res = await db.execute(
+        select(Player)
+        .where(Player.organisation_id == club.id, Player.is_player.is_(True))
+        .order_by(func.coalesce(Player.display_name_override, Player.name))
+    )
+    return list(res.scalars().all())
+
+
+async def active_self_service_players(db: AsyncSession, club: Organisation) -> list[Player]:
+    """Active (non-dormant) real players for the club — the self-service name
+    list and the admin phone-coverage denominator.
+
+    "Active" = a real player not manually marked inactive and not dormant (last
+    appeared inside the club's dormancy window). Never-played players (freshly
+    added) are kept — they're current additions, not dormant history. Mirrors
+    the matrix's recency rule so the public name list matches the admin roster.
+    """
+    dormant = await dormant_player_ids(db, club)
+    return [
+        p for p in await club_player_roster(db, club)
+        if p.status != "inactive" and p.id not in dormant
+    ]
 
 VALID_STATUSES = {"AVAILABLE", "UNAVAILABLE", "MAYBE", "NO_RESPONSE"}
 # A period asserts a state, so NO_RESPONSE (the absence of an answer) isn't valid.

@@ -58,36 +58,33 @@ class SettingsBody(BaseModel):
     select_show_age_under: Optional[int] = None
     dormancy_months: Optional[int] = None
     default_team_size: Optional[int] = None
+    # Whether the board draws the plain fees / training notes beside a player.
+    # A rule about either still shows: that one the club asked for.
+    show_fees: Optional[bool] = None
+    show_training: Optional[bool] = None
 
 
 async def _grade_options(db: AsyncSession, org_id) -> list[dict]:
-    """Every grade NAME the club runs, once, with what it is.
+    """Every grade a rule can name, as Manage Grades lists them.
 
     Names rather than ids, because a rule keyed on ids stops applying the day
-    next season's grades are created. Sponsor suffixes are stripped so "A Grade
-    (Gatorade)" and "A Grade" are one option rather than two that each match
-    half a club's fixtures.
+    next season's grades are created. Merges, renames and the club's own
+    reading order all come from :func:`selection_rules.club_grades`, so this
+    picker and the Manage Grades screen can't disagree about what the club
+    runs or what order it reads in.
     """
-    rows = (await db.execute(
-        text("SELECT DISTINCT COALESCE(gr.display_name_override, gr.name) AS name "
-             "FROM grades gr JOIN seasons s ON s.id = gr.season_id "
-             "WHERE s.organisation_id = :org ORDER BY name"),
-        {"org": org_id},
-    )).fetchall()
+    grades = await rules_svc.club_grades(db, org_id)
     cats = await grade_labels.org_grade_category_sets(db, org_id)
     fmts = await grade_labels.org_grade_format_sets(db, org_id)
-    seen: dict[str, dict] = {}
-    for (name,) in rows:
-        clean = grade_labels.strip_sponsor_suffix(name)
-        key = clean.lower()
-        if key in seen or not clean:
-            continue
-        seen[key] = {
-            "name": clean,
-            "categories": sorted(grade_labels.categories_for_name(cats, clean)),
-            "formats": sorted(grade_labels.formats_for_name(fmts, clean)),
+    return [
+        {
+            "name": g["name"],
+            "recent": g["recent"],
+            "categories": sorted(grade_labels.categories_for_name(cats, g["name"])),
+            "formats": sorted(grade_labels.formats_for_name(fmts, g["name"])),
         }
-    return list(seen.values())
+        for g in grades
+    ]
 
 
 async def _team_names(db: AsyncSession, org_id) -> dict[str, str]:
@@ -109,6 +106,8 @@ def _settings_out(club: Organisation) -> dict:
         "select_show_age_under": player_age.clean_age_limit(club.select_show_age_under),
         "dormancy_months": club.dormancy_months if club.dormancy_months is not None else 24,
         "default_team_size": club.default_team_size if club.default_team_size is not None else 11,
+        "show_fees": cfg["show_fees"],
+        "show_training": cfg["show_training"],
     }
 
 
@@ -167,7 +166,6 @@ async def patch_settings(
         if not 1 <= month <= 12:
             raise HTTPException(status_code=400, detail="Pick a month.")
         cfg["season_start_month"] = month
-    club.selection_rules_config = cfg or None
     if body.select_show_age is not None:
         club.select_show_age = bool(body.select_show_age)
     # Presence is the intent: "every player" is a null, so `is not None` would
@@ -178,6 +176,11 @@ async def patch_settings(
         club.dormancy_months = max(1, min(600, int(body.dormancy_months)))
     if body.default_team_size is not None and int(body.default_team_size) in (0, 11, 12, 13):
         club.default_team_size = int(body.default_team_size)
+    if body.show_fees is not None:
+        cfg["show_fees"] = bool(body.show_fees)
+    if body.show_training is not None:
+        cfg["show_training"] = bool(body.show_training)
+    club.selection_rules_config = cfg or None
     await db.commit()
     return _settings_out(club)
 

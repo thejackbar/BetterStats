@@ -1,5 +1,343 @@
 # BetterStats — Claude Session Notes
 
+## BetterFootball gets Manual Entries — a delta, not a replacement (v9.43.0, Aug 2026)
+
+Asked for by pointing at cricket's `/admin/manual-entries#season` and saying
+"build this for betterat.football". That hash is the **Adjustments** tab: add
+or correct a player's totals, season blank for a career-only one.
+
+- **ONE table, `afl_manual_adjustments`, because `season_id` is nullable and
+  that IS the distinction.** Cricket needs `manual_season_adjustments` AND
+  `manual_career_adjustments` because its career deltas carry a different
+  column set; football's don't. One table is what lets the screen offer "leave
+  the season blank" as a plain choice rather than two forms that look the same,
+  and it is why the cricket UI already merges its two lists back together.
+- **AN ADJUSTMENT IS ADDITIVE, and that is the whole design.** It carries no
+  `NOT EXISTS` gate against the synced rollup anywhere it is read, unlike
+  `afl_imported_stats`, whose rows only ever fill a gap the sync hasn't
+  covered. An adjustment is a delta an admin typed BECAUSE of what the sync
+  holds, so suppressing it where the sync already covers that player-season
+  would do nothing in exactly the case it was entered for. Correcting a season
+  means entering the SHORTFALL, and every confirm on the screen says so.
+- **`services/afl/manual_stats.py::manual_branch` is the one definition of the
+  UNION arm**, pasted by name into all thirteen reads. Thirteen hand-written
+  copies of the same arm is how the leaderboard and the record book start
+  disagreeing about a player's career. Each entry in `columns` is either a name
+  from its map (aliased, so the arm lines up with the branch above it) or a raw
+  expression passed through — a UNION matches by POSITION, so the two kinds
+  interleave in whatever order the caller already uses.
+- **A career-only row needs no exclusion clause anywhere.** A season-scoped read
+  binds `m.season_id = :season` and a season-keyed one INNER JOINs `seasons`;
+  both drop a NULL season for free. What's left is the career reads, which is
+  exactly where it belongs.
+- **`season_by_season` needed two things nothing else did.** A season can now
+  produce more than one grade-less row (the sync's rollup plus a whole-season
+  adjustment), which rendered the same year TWICE on the profile — they fold.
+  And an adjustment entered against ONE grade of a season still belongs in that
+  season's headline: the synced rollup was computed without it, and the
+  existing synthesis only fires for a season with no whole-season row at all.
+  So a `src` marker rides along, the per-grade manual deltas are held aside
+  before the merge-group fold loses it, and applied after. The suite asserts
+  the season table sums to the career total.
+- **`most_goals_in_a_season` now SUMS per player-season before ranking.** An
+  imported row can't coexist with a synced one for the same player-season (the
+  gate), but an adjustment can — that is what a correction is — so without the
+  grouping a +5 correction listed as its own 5-goal season in the record book.
+- **`manual_edit_logs` is reused, not reinvented.** It is ORM-mapped on the
+  shared Base, so it already exists in an AFL database. The undo is richer than
+  cricket's on one point: an import snapshots each row's BEFORE state, so
+  undoing an upload puts an overwritten adjustment back rather than leaving the
+  overwrite standing.
+- **Deliberately NOT unique on (player, season, grade).** Merging two players
+  legitimately brings two rows onto one key, and additive rows read correctly as
+  two; the alternative is refusing a legitimate merge or silently summing rows
+  nobody asked to combine. A second one created BY HAND is refused (409), which
+  is where a duplicate would be a mistake rather than a merge.
+- **A merge MUST move them, and the reason is the opposite of the imported
+  case.** `afl_imported_stats` has no FK, so forgetting it orphans rows;
+  `afl_manual_adjustments` DOES cascade on `players`, so forgetting it DELETES
+  the removed player's corrections outright. `_move_side_tables` carries them
+  and `afl_merge_logs.adjustment_ids` (idempotent ALTER in the lifespan) is what
+  lets an undo hand back exactly those rows. A split moves a season's
+  adjustment; a career-only one has no season to attribute and stays put, same
+  as an imported row whose season never resolved.
+- **No new season endpoint.** The Import Stats wizard already owns
+  `POST /club-admin/imports/seasons` and creates the identical row. A grade
+  create is new (`/manual-entries/grades`) because nothing else offered one.
+- **Deliberately NOT built: per-game manual entry.** Football's answer to
+  "type a match in" is Import Results, which writes real `games` rows from the
+  club's own register — a better answer than a hand-typed scorecard, and not
+  what `#season` points at.
+- **Noticed, NOT fixed**: `merge._enrich_player` counts `afl_player_season_stats`
+  only, so a club whose history came from an import or an adjustment reads
+  0/0/0/0 on the Merge Duplicates cards. Pre-existing, and the same gap cricket
+  documents for its own `_enrich_player`.
+- **Verified against a real Postgres** (75 checks through the shipped route
+  bodies and read helpers, with the schema built by the real AFL lifespan run
+  twice: every refusal, the audit summary, additivity against a synced season,
+  the season table reconciling with the career total, the leaderboard both
+  scoped and not, the vote board, the record book's summed season row, the
+  dashboard panels, the admin roster, cross-club isolation, the season-delete
+  guard, the CSV template round-tripping through the importer's own parser, a
+  re-upload correcting rather than doubling, all five undo paths, and merge /
+  undo-merge / split carrying the rows) and **driven in Chromium** (47: the
+  exact payload on the wire for create and for the spreadsheet's CSV, the
+  career-only confirm wording, a dismissed confirm sending nothing, an inline
+  season create, the delete and undo requests, the deep-linked tab, no page
+  errors, no overflow at 390px).
+
+## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.2, Aug 2026)
+
+Reported from a club's Thursday nets, alongside the QR check-in the note below
+describes: "I can't add Amardeep Gill though he is on the active list", and
+people being entered as guests because they weren't there to find.
+
+- **The roster was `active_self_service_players`, which DROPS DORMANT PLAYERS**
+  — anyone whose last appearance falls outside the club's dormancy window
+  (default 24 months). Right for a self-service availability link, wrong for a
+  door list: Admin → Players shows that player as active, so the two screens
+  disagreed and nothing on either said why. `GET /nets/roster` now returns
+  **every** `is_player` player the club holds, tagged `dormant` / `inactive`,
+  and the screen groups rather than filters. **Nothing is excluded, and that is
+  the point** — a player standing at the door with their kit on is there
+  whatever the app thinks of their last game, and dormancy was only one of the
+  ways a name could go missing.
+- **`availability.dormant_player_ids` / `club_player_roster` were extracted so
+  both readings share one definition.** `active_self_service_players` is now
+  those two composed and is byte-for-byte what it was — asserted, because the
+  public availability link and the phone-coverage denominator read it.
+- **`net_attendance.bats` splits turning up from batting** (migration 273).
+  Someone arriving with a sore shoulder, or to bowl, or to keep, is present and
+  counts towards attendance; leaving them in the queue means a net stands empty
+  when their name comes up. **`_waiting()` is the one definition of the batting
+  queue** and `_rotate` reads it, so the screen and the rotation cannot
+  disagree. Coming back in puts them at the BACK, same as returning from batted.
+  `note` carries what they said on the way in.
+- **`check_in_person` gained `bats` / `note` rather than growing a second
+  writer.** A duplicate check-in stays a no-op, and it must NOT rewrite state:
+  someone a coach marked as sitting out stays that way when their name is tapped
+  again.
+- **Up next holds only what is still to come.** Batted and Not batting are their
+  own lists, which is what stops a 31-name queue reading as 31 still to bat.
+- **The row icons are a cricket bat drawn as TWO DIAGONAL STROKES**, a thick
+  round-capped blade and a thin handle, with the mark in the freed bottom-right
+  corner (green arrow = bat next, accent tick = mark as batted, no-entry = not
+  batting). Rendered side by side at 16/22/40/72px, every upright
+  outlined-blade version reads as a BOTTLE; the diagonal and the weight
+  difference between blade and handle are what make it a bat. Judged from a
+  comparison sheet, not from the code. A key above the list names them, shown by
+  default and hideable per person via `usePref` (a four-line twin of the
+  Clubhouse kit's, deliberately not an import — that module is a different
+  bundle and a remembered toggle shouldn't pull it into first paint).
+- **Found while verifying: the shortcut button added to the session header
+  pushed the page 44px sideways at 390px.** The cluster measured 418px and could
+  not wrap; the outer `flex-wrap` cannot save a group that won't wrap itself.
+  Confirmed NEW by re-measuring with the change stashed (baseline 390 = 390).
+- **This landed ALONGSIDE the QR check-in below, which shipped from another
+  branch the same day.** Both had built a per-club check-in link, both numbered
+  their migration 272 and both wrote a `v9.42.0`. The QR version won on the
+  overlap (its token, its `require_pin` default of true, its
+  `allow_registration` and registration queue, its `/nets-checkin/{token}` path
+  and `public_net_checkin.py`); this branch kept the roster fix, the batting
+  split and the screen work, and moved to migration 273. **Two migrations with
+  one revision id break Alembic outright**, so check `origin/main` before
+  numbering one.
+- **Verified against a real Postgres** (82 checks through the shipped route
+  bodies: the migration applied three times to a populated table and the
+  lifespan mirror matching it, the reported player reachable with a control
+  asserting the old roster really did hide him, availability's own pool
+  unchanged, rotation skipping a non-batter, a repeat check-in not dragging one
+  back into the queue, and three genuinely parallel taps on one name landing
+  once) and **driven in Chromium** (56: the three lists, all three bat icons and
+  what they write, the key showing by default and its hidden state surviving a
+  reload, the modal reaching a dormant player and the exact payload on the wire,
+  no page errors, no overflow at 390px).
+- **Not built here**: nothing writes fixture availability — "here, not batting"
+  is about tonight only. Promoting a guest to a real player landed separately in
+  v9.42.1 ("Not on the roster" on the Players screens).
+
+## A player checks themselves in at the nets (migration 272, v9.42.0, Aug 2026)
+
+Asked for as an NFC tag by the gate, then as a QR code alongside it. Checking
+in was an admin action — a manager tapping each name on the iPad — and this is
+the same check-in done by the player on their own phone on the way past.
+
+- **The QR code and the NFC tag are ONE link, and that is not a shortcut.** A
+  tag stores a URL and nothing else, so writing the page's address to a tag and
+  printing it as a QR code are two ways of handing over one string. One token,
+  one `organisations.net_checkin_token`, mirroring `availability_link_token`
+  down to the partial unique index. Two tokens would be two things to keep
+  alive and two to reprint on a rotate.
+- **SCANNING JOINS EVERY LIVE SESSION, not one picked off a list.** Somebody
+  walking into the nets does not know which of the club's two concurrent
+  sessions the seniors' one is called, and asking them is a question the club
+  can already answer. `net_manager.live_sessions` is active sessions dated
+  within a day either side of today — the app holds no per-club timezone, so a
+  club whose evening is the server's tomorrow would otherwise scan in to
+  nothing. Narrow at BOTH ends deliberately: a session somebody forgot to mark
+  done last week must not quietly collect tonight's arrivals.
+- **A NEWCOMER IS CHECKED IN AS A GUEST, NEVER AS A PLAYER.** `net_attendance`
+  has carried guest rows (`player_id` NULL + `guest_name`) since it was
+  written, for exactly this person — the trialist not yet in the system — so
+  the mechanism was already there and this uses it rather than inventing one.
+  It is what stops a stranger who found the QR code writing an unvetted row
+  into the club's player table. What they type lands in
+  `net_checkin_registrations`, `status='pending'`, and approving it is the ONE
+  place this ever creates a player.
+- **Approving CONVERTS the guest row, it does not add a second one.** The row
+  that already says they turned up has its `player_id` filled in and its
+  `guest_name` cleared, so the night counts towards the new player's own tally
+  instead of being logged twice. Where the club had also checked them in
+  properly, the real row is kept and the guest row dropped — the unique index
+  would refuse the pair, and two rows for one person is the wrong answer anyway.
+- **Dismissing leaves the guest row alone.** They did turn up; the session's
+  record of the night should say so. Dismissing is a decision about the roster,
+  not a claim that the evening did not happen.
+- **`previous_club` has no home on `players` and does not get one.** One line
+  of free text somebody typed about themselves is not a reason for a column;
+  it stays with the rest of what they typed.
+- **The PIN cannot gate registration, and that is why there are two switches.**
+  `net_checkin_require_pin` proves an existing player is themselves via
+  last-4-of-phone. A club has no number on file for someone it has never met,
+  so `net_checkin_allow_registration` is its own setting rather than something
+  read off the PIN one.
+- **`net_attendance.source` ('admin' | 'self') is what makes the alert
+  possible.** A self check-in has no `recorded_by` to read, so nothing else
+  separates a name the manager just tapped from one that scanned itself in.
+  Mirrors `player_availability.source`. Rows written before 272 read 'admin',
+  which is what they were.
+- **`check_in_person` is the one place a check-in is written**, shared by the
+  admin screen and the public page; `add_attendee` was refactored onto it.
+  Two copies is how the two paths start disagreeing about what a check-in is.
+  It returns None for "already in" — a no-op at two levels, app-level read and
+  IntegrityError on the unique index — and **the caller must not touch a lazily
+  -loaded attribute after that None**, since the rollback expires every loaded
+  object (the MissingGreenlet trap this file already documents).
+- **`touch_session` is `_touch` under an importable name.** A self check-in has
+  to move `net_sessions.version` or the iPad's next poll is told nothing
+  changed and the arrival never appears.
+- **The live screen ANNOUNCES an arrival** — pop-up, chime (reusing the timer's
+  existing `beep`/`unlockAudio`, not new machinery) and `navigator.vibrate`.
+  Only `source === 'self'` fires it: a name the manager tapped on that very
+  screen must not pop up at them. A screen opening mid-session seeds its seen
+  set silently, or it would announce the twenty people already there.
+  **iOS Safari ignores `navigator.vibrate` entirely**, so the pop-up and the
+  chime carry the alert and the buzz is a bonus on Android. A browser plays no
+  sound until the page has been touched, so an iPad propped on a fence gets a
+  "tap once to turn on sound" prompt rather than being silently mute.
+- **Deliberately NOT built: Web Push.** Real OS-level notifications need a
+  service worker, VAPID keys, a subscriptions table and `pywebpush`, none of
+  which exist here, and on iOS they only work once the site is installed to the
+  Home Screen — a per-device setup step. The device this was asked for is
+  already looking at the live screen, which is most of the reason push exists.
+  A smartwatch has no direct path at all: a watch mirrors notifications from a
+  paired phone, so it would ride on push rather than being targetable.
+- **The landing payload never says who is already checked in.** This page is
+  served to whoever holds the link.
+- **Verified against a real Postgres** (103 checks through the shipped route
+  bodies: the token resolving and every 404-not-403 refusal, the live-session
+  window at both ends, the PIN gate incl. no-mobile as a 409 rather than a
+  failure and a cross-club player reading as a wrong PIN, an availability
+  cookie not replayable as a check-in one, a double tap adding nobody, one scan
+  joining two sessions, a newcomer landing as a guest with the roster untouched,
+  every registration guard, approval converting the guest row and refusing
+  twice, matching onto an existing player minting nobody, dismissal leaving the
+  attendance alone, cross-club rejection, migration 272 applied three times to a
+  populated pre-272 table, and the partial index tolerating NULLs) and **driven
+  in Chromium** (82: the exact params on the wire for verify/check-in/register,
+  a wrong PIN checking nobody in, one-tap check-in with the PIN off, a returning
+  player never re-verified, every registration field on the wire, the QR
+  rendering and its download, the review queue's three decisions and the roster
+  match, the live screen's pop-up firing for a self check-in and staying quiet
+  for an admin one, no page errors, no overflow at 390px).
+
+### Turning a nets guest into a player (v9.42.1)
+
+Reported straight after the above: "how do we turn a guest into a player within
+the Players section?" The answer was **you can't** — and it was a real dead end,
+not a missing button.
+
+- **A guest row is written two ways and only one of them had an exit.** Somebody
+  who scans the QR code lands in the Check-in queue with the details they typed.
+  A guest the manager TYPES on the live screen has no `net_checkin_registrations`
+  row, so `approve_registration` — which reaches the attendance row only through
+  `NetCheckInRegistration.attendance_id` — could never see them. They turned up
+  week after week and could only become a player by an admin retyping them,
+  which stranded every night they had already attended on rows nothing reads.
+  **`AttendeePatch` accepts `batted` only**, so nothing else could attach a
+  `player_id` either, and `claim-fill-in` hard-validates a UUID participant id
+  so it cannot serve a guest who has none.
+- **`GET /nets/guests` groups by NAME, not by row**, because the question is
+  about a person: "this bloke has been to five sessions, should he be on the
+  list". `_guest_key` folds case and surrounding space and **nothing else** —
+  deliberately not fuzzy. Two people really can be typed in under one name, and
+  quietly folding "J Smith" into "Jack Smith" would put one person's attendance
+  on another. The most recent spelling is the one shown.
+- **Anyone carrying a PENDING registration is left OUT and counted instead.**
+  They already sit in Check-in *with* their mobile, email and date of birth, and
+  one person offered on two screens with different information behind each is
+  how the two start disagreeing about who they are. The panel links across.
+  Settle their registration and they become an ordinary guest here again.
+- **`POST /nets/guests/promote` moves their WHOLE history, not the window.**
+  The 90 days is a filter for who is worth looking at; somebody joining the club
+  should not leave half their nights behind. Where they are already checked in
+  properly for a session the real row is kept and the guest row dropped — the
+  unique index would refuse the pair — and two guest rows on one night collapse
+  to one for the same reason.
+- **It settles any registration pointing at those rows too**, or a person
+  promoted from Players would sit in the Check-in queue forever.
+- **The key is resolved server-side against the club's own rows**, never a raw
+  name off a browser, so a key cannot reach another club's guests.
+- **Gated on EITHER `MANAGE_SELECTIONS` or `MANAGE_PLAYERS`** (`require_any_cap`):
+  a selections manager runs the nets and can already do this from Check-in, and
+  a player manager owns the roster. That is also why the panel is on BOTH
+  Players screens — an admin should not have to know which one owns it.
+- **`UnrosteredGuests` renders NOTHING when there is nobody to sort out**, and
+  never calls the endpoint for a club without BetterSelect (the router is behind
+  `require_module("select")`, so it would 402). Same rule as `ageFilterOptions`:
+  a control that can only ever answer "everyone is fine" is worse than none.
+- **`AdminPlayers`' roster fetch was inline in an effect** and had to be
+  extracted to `loadPlayers` so promoting can pull the list again — the person
+  is a player now and the screen they were missing from should say so.
+- **Verified**: the Postgres suite is 138 checks (the 103 above plus one person
+  across three spellings, the window at both ends, another club's guest never
+  listed, the pending exclusion both ways, all three nights moving, the clash
+  and double-entry collapses, five refusals, and a promotion settling its
+  registration) and the Chromium run is 108 across four suites, including the
+  panel on both Players screens, the exact payload for create and match, a club
+  without BetterSelect never calling the endpoint, and nothing drawn when
+  everyone is on the list.
+
+
+### Ending the night (v9.42.3)
+
+Reported from a live session: nets were running and there was no way to say they
+had finished.
+
+- **Ending STOPS THE CLOCK in the same write**, server-side in `update_session`,
+  not as a second call from the browser. A finished session otherwise sits there
+  counting down on every device it is open on, and whichever one notices the
+  deadline pass would rotate a group that has gone home.
+- **Ending is what closes the QR code**, because `live_sessions` only ever
+  returns active sessions. That is the real cost of the button and the confirm
+  names it: a late arrival scans in to nothing rather than joining a session
+  that is over. The confirm also counts who is still in the queue.
+- **Nothing is destroyed.** Attendance stays, the per-session CSV still
+  downloads, and Reopen sets it back to active — which is why ending is a plain
+  confirm rather than a typed one.
+- **`ended` is read off the server payload**, never a local flag, so a coach
+  ending it on the phone by the nets has the laptop in the clubroom follow on
+  its next poll. The timer controls, the check-in button and the check-in-screen
+  shortcut are all withdrawn on an ended session; the shortcut would only land
+  on "no nets on right now".
+- **Verified**: 149 Postgres checks (the 138 above plus the clock stopping and
+  the deadline clearing, the version moving, a scan no longer joining, the
+  attendance untouched, and reopening restoring all three) and 134 in Chromium
+  across five suites, including the confirm's wording, dismissing it changing
+  nothing, and every control that should disappear.
+
+
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out
@@ -238,6 +576,53 @@ from a WASTCA handbook but deliberately NOT as its rulebook.
   the app holds scorecards, so it could report a breach after the fact, but the
   rule is a limit on the day and the umpires enforce it. Nothing here writes to
   PlayHQ or claims an association has approved anything.
+
+### What the first round of use changed (v9.41.2)
+
+- **The rule scope picker reads Manage Grades, not `grades` directly.** The
+  first cut listed every distinct grade name in the club, alphabetically — a
+  decade of history in an order nobody chose, with merged grades listed twice.
+  `selection_rules.club_grades` now mirrors that screen exactly: aliases folded
+  onto the grade that was kept, the club's `display_order` first and unplaced
+  grades after, and a `recent` flag for the two most recent seasons so the
+  picker offers what the club RUNS and hides the rest behind a link. **A picker
+  and the screen that owns the thing it is picking must agree**, or a selector
+  is choosing from a list they don't recognise.
+- **The fixture's grade is folded the same way before a rule is matched**
+  (`grade_alias_map`), so a rule naming the kept grade covers a fixture
+  arriving under a name merged into it. Scoping by name is only standing if
+  both sides resolve names the same way.
+- **A blocking rule now filters the pool for you.** The board opens on
+  eligible-only when any rule in play can bar someone — once per fixture, as an
+  ordinary filter pill, so clearing it sticks until you move to another
+  fixture. WARNINGS are deliberately still shown: a warning is the selector's
+  to weigh, and hiding those people would be deciding for them.
+- **An age rule carries a comparison at each end** (`min_op` gte/gt, `max_op`
+  lt/lte). "15 and over" is not "over 15" and "under 21" is not "21 or under",
+  and an association writes them either way round. `_min_phrase` / `_max_phrase`
+  are the one wording, shared by the summary, the breach text and the editor's
+  live preview. A stored config with no operator reads as gte/lt, which is what
+  every pre-existing rule meant.
+- **`fixed_date` is a third age basis**: one calendar date, typed in, for a
+  competition that publishes a date rather than a rule about the season. It
+  deliberately does NOT move with the season — the screen says so, because
+  somebody has to change it each year.
+- **The age ladder runs to 23**, on the rule, the display setting and the pool
+  filter. Colts and under-21 competitions are ordinary, and stopping at 19 made
+  them unexpressible.
+- **The fees and training notes can each be switched off**
+  (`selection_rules_config.show_fees` / `show_training`) and the value is then
+  WITHHELD rather than sent and hidden — the same call `visible_age` makes. The
+  filter goes with it, since there is nothing left to filter on. A fees or
+  training RULE still flags: that one the club asked for explicitly.
+- **"Has a problem" reads as "Flagged".** A player a rule has something to say
+  about is not a problem.
+- **Verified**: the Postgres suite is 102 checks now (the 79 above plus the age
+  comparisons both ways, an exactly-one-age rule, a fixed date not moving with
+  the season, junk falling back to the default, the Manage Grades order with an
+  unplaced and a merged grade, `recent` excluding a 2010 grade, a rule matching
+  through a merge, and a switched-off note withheld while its rule still
+  flags), and the Chromium run is 49.
 
 ## Season × grade matches on a player profile, and the undercount it exposed (v9.37.3, Aug 2026)
 

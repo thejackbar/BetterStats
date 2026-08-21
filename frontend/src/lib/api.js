@@ -1647,6 +1647,20 @@ export const api = {
       })
   },
   adminDeletePlayerPhoto: (playerId) => request(`/club-admin/players/${playerId}/photo`, { method: 'DELETE' }),
+  // The action shot, stored alongside the headshot rather than replacing it.
+  adminUploadPlayerHeroPhoto: (playerId, file) => {
+    const form = new FormData()
+    form.append('file', file)
+    return fetch(`${BASE}/club-admin/players/${playerId}/hero-photo`, { method: 'POST', body: form, credentials: 'include' })
+      .then(async r => {
+        if (!r.ok) {
+          const e = await r.json().catch(() => ({}))
+          throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${r.status}`)
+        }
+        return r.json()
+      })
+  },
+  adminDeletePlayerHeroPhoto: (playerId) => request(`/club-admin/players/${playerId}/hero-photo`, { method: 'DELETE' }),
   adminListPartnershipRecords: () => request('/club-admin/partnership-records'),
   adminCreatePartnershipRecord: (data) =>
     request('/club-admin/partnership-records', { method: 'POST', body: JSON.stringify(data) }),
@@ -2736,6 +2750,19 @@ export const api = {
   availPublicSet: (token, data) =>
     request(`/public/availability/${token}/me`, { method: 'POST', body: JSON.stringify(data) }),
 
+  // ─── Public: net check-in (no admin auth; player cookie) ───
+  // Reached by scanning the QR code on the fence or tapping the NFC tag —
+  // both hold this same URL. check-in joins every session running right now.
+  netsPublicLanding: (token) => request(`/public/net-checkin/${token}`),
+  netsPublicVerify: (token, player_id, pin) =>
+    request(`/public/net-checkin/${token}/verify`, { method: 'POST', body: JSON.stringify({ player_id, pin }) }),
+  netsPublicSwitch: (token) =>
+    request(`/public/net-checkin/${token}/switch`, { method: 'POST' }),
+  netsPublicCheckIn: (token) =>
+    request(`/public/net-checkin/${token}/check-in`, { method: 'POST' }),
+  netsPublicRegister: (token, data) =>
+    request(`/public/net-checkin/${token}/register`, { method: 'POST', body: JSON.stringify(data) }),
+
   // ─── BetterSelect: vote collection (admin) ───
   // Every admin vote call names the MEDAL it acts on. Omitting medalId falls
   // back server-side to the club's first medal, which is what keeps a link
@@ -2901,7 +2928,9 @@ export const api = {
   bsSeedStarterRules: () => request('/selection-rules/starter', { method: 'POST' }),
 
   // ─── BetterSelect: Net Manager ──────────────────────────
-  // Active roster to check players in from (same pool as availability).
+  // EVERY player on the club's books, each tagged `dormant` / `inactive` so the
+  // check-in list can group them. Nothing is filtered out: a player standing at
+  // the door has to be findable whatever the app thinks of their last game.
   nmRoster: () => request('/nets/roster'),
   // Club default timer/rotation settings.
   nmGetSettings: () => request('/nets/settings'),
@@ -2952,6 +2981,36 @@ export const api = {
   nmAttendanceReportCsvUrl: (days = 120) => `${BASE}/nets/reports/attendance.csv?days=${days}`,
   nmSessionCsvUrl: (id) => `${BASE}/nets/sessions/${id}/attendance.csv`,
   nmPlayerAttendance: (playerId) => request(`/nets/players/${playerId}/attendance`),
+  // Self check-in link — the one URL behind both the printed QR code and the
+  // NFC tag. The backend returns a PATH; the panel prefixes the origin.
+  nmGetCheckInLink: () => request('/nets/checkin-link'),
+  nmSetCheckInLink: (data) =>
+    request('/nets/checkin-link', { method: 'POST', body: JSON.stringify(data) }),
+  nmRegenerateCheckInLink: () =>
+    request('/nets/checkin-link/regenerate', { method: 'POST' }),
+  // People who scanned in without being on the list.
+  nmListRegistrations: (status = 'pending') =>
+    request(`/nets/registrations?status=${encodeURIComponent(status)}`),
+  // playerId folds the registration into someone already on the roster;
+  // omitted, a new player is created from what they typed.
+  nmApproveRegistration: (id, playerId = null) =>
+    request(`/nets/registrations/${id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ player_id: playerId }),
+    }),
+  nmDismissRegistration: (id) =>
+    request(`/nets/registrations/${id}/dismiss`, { method: 'POST' }),
+  // Guests from recent net sessions who aren't on the roster, grouped by name.
+  // days = 0 means all time.
+  nmUnresolvedGuests: (days = 90) => request(`/nets/guests?days=${days}`),
+  // Turn one into a player. playerId matches them to someone already on the
+  // roster; omitted, a player is created. Their whole attendance history moves
+  // across either way, not just the sessions the list was showing.
+  nmPromoteGuest: (key, { playerId = null, name = null } = {}) =>
+    request('/nets/guests/promote', {
+      method: 'POST',
+      body: JSON.stringify({ key, player_id: playerId, name }),
+    }),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),

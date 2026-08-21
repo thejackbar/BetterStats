@@ -475,6 +475,20 @@ class Organisation(Base):
     # auto_roll, sound, alerts[]). New net sessions seed from this; NULL falls
     # back to net_manager.DEFAULT_NET_SETTINGS.
     net_settings = Column(JSONB, nullable=True)
+    # ─── Net Manager: self check-in at the nets (migration 272) ───────────────
+    # One club-wide link behind BOTH the printed QR code and the NFC tag on the
+    # gate — a tag holds a URL and nothing else, so there is one token, not two.
+    # Mirrors availability_link_token: minted on first enable, rotatable, and
+    # low-trust by design since it is pinned somewhere public.
+    #
+    # require_pin gates the EXISTING-PLAYER path on last-4-of-phone. It cannot
+    # gate a newcomer registering — someone the club has never met has no phone
+    # number on file to check against — which is why allow_registration is its
+    # own switch rather than something read off require_pin.
+    net_checkin_token = Column(Text, nullable=True)
+    net_checkin_enabled = Column(Boolean, nullable=False, server_default="false", default=False)
+    net_checkin_require_pin = Column(Boolean, nullable=False, server_default="true", default=True)
+    net_checkin_allow_registration = Column(Boolean, nullable=False, server_default="true", default=True)
     # ─── BetterComms: outbound email sender identity (migration 069) ──────────
     # from_name / reply_to fall back to the club name / contact_email when NULL.
     # sender_footer carries the Spam Act 2003 sender identification (legal name /
@@ -1213,6 +1227,11 @@ class Player(Base):
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)
+    # The action shot (migration 274) — a separate photograph from the
+    # headshot above, for the full-bleed hero slot on a match-day post.
+    hero_photo_url = Column(Text, nullable=True)
+    hero_photo_data = Column(LargeBinary, nullable=True)
+    hero_photo_mime = Column(Text, nullable=True)
     gender = Column(Text, nullable=True)
     is_player = Column(Boolean, default=True, nullable=True)
     player_role = Column(Text, nullable=True)
@@ -1711,11 +1730,59 @@ class NetAttendance(Base):
     player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="CASCADE"), nullable=True)
     guest_name = Column(Text, nullable=True)
     batted = Column(Boolean, nullable=False, server_default="false")
+    # Turning up and batting are two different facts. Someone who arrives with a
+    # sore shoulder, or to bowl, or to keep, is present and counts towards
+    # attendance — they just aren't in the batting rotation, and leaving them in
+    # it means a net stands empty when their turn comes round (migration 273).
+    bats = Column(Boolean, nullable=False, server_default="true")
+    # What they said on the way in ("bowling only", "sore back"). Never required.
+    note = Column(Text, nullable=True)
     position = Column(Integer, nullable=True)
+    # 'admin' (a manager tapped the name) or 'self' (the player scanned the QR
+    # code or tapped the NFC tag on the way in). Mirrors
+    # player_availability.source and exists for the same reason: a self
+    # check-in has no recorded_by to read, so nothing else separates the two.
+    # The live screen uses it to announce somebody arriving on their own and
+    # stay quiet for a row the manager just added themselves.
+    source = Column(Text, nullable=False, server_default="admin")
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
     session = relationship("NetSession", back_populates="attendees")
     player = relationship("Player")
+
+
+class NetCheckInRegistration(Base):
+    """Someone who scanned in at the nets and was not on the club's list.
+
+    They are checked in as a GUEST (a net_attendance row with player_id NULL),
+    never as a player: that guest mechanism has existed since the table was
+    written, for exactly this person, and it is what stops a stranger with the
+    QR code writing an unvetted row into the club's player table. What they
+    typed about themselves lands here instead, `status='pending'`, for an admin
+    to turn into a real player or point at somebody already on the roster.
+
+    `previous_club` has no column on `players` and does not get one for this —
+    it is one line of free text somebody typed about themselves, and it is kept
+    with the rest of what they typed.
+    """
+    __tablename__ = "net_checkin_registrations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    # Both SET NULL: a deleted session must not take the registration with it.
+    # The person still turned up, and the club still has to decide about them.
+    session_id = Column(UUID(as_uuid=True), ForeignKey("net_sessions.id", ondelete="SET NULL"), nullable=True)
+    attendance_id = Column(UUID(as_uuid=True), ForeignKey("net_attendance.id", ondelete="SET NULL"), nullable=True)
+    full_name = Column(Text, nullable=False)
+    phone = Column(Text, nullable=True)
+    email = Column(Text, nullable=True)
+    date_of_birth = Column(Date, nullable=True)
+    previous_club = Column(Text, nullable=True)
+    status = Column(Text, nullable=False, server_default="pending")  # pending | approved | dismissed
+    player_id = Column(UUID(as_uuid=True), ForeignKey("players.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(TIMESTAMP(timezone=True), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
 
 
 class BattingInnings(Base):

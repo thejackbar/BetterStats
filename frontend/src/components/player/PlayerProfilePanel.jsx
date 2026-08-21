@@ -62,8 +62,43 @@ function PToggle({ on, onChange, label }) {
   )
 }
 
-/* ── Photo management (admin only) ────────────────────────────────────────── */
-function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
+/* ── Photo management (admin only) ──────────────────────────────────────────
+   Two photographs, one row component. The HEADSHOT is the square mugshot that
+   reads at 44px on a roster row; the ACTION SHOT fills the hero slot on a
+   match-day post. Neither crops into the other's slot, which is why they are
+   stored separately (migration 274) rather than one being derived from the
+   other. `kind` picks which. ──────────────────────────────────────────────── */
+const PHOTO_KINDS = {
+  photo: {
+    label: 'Headshot',
+    hint: 'Square. Used on rosters, squad grids and beside a name.',
+    aspect: 1,
+    thumb: 'w-11 h-11',
+    addLabel: 'Upload photo',
+    title: 'Edit Player Photo',
+    upload: (id, file) => api.adminUploadPlayerPhoto(id, file),
+    remove: (id) => api.adminDeletePlayerPhoto(id),
+    read: (r) => r.photo_url,
+    file: 'photo',
+  },
+  hero: {
+    label: 'Action shot',
+    hint: 'Tall. Fills the big photo on match-day posts. Free crop \u2014 the post\u2019s own Framing control does the final positioning.',
+    // Free crop on purpose: forcing a ratio here would crop twice and fight
+    // the Framing control on the post itself.
+    aspect: null,
+    thumb: 'w-11 h-16',
+    addLabel: 'Upload action shot',
+    title: 'Edit Action Shot',
+    upload: (id, file) => api.adminUploadPlayerHeroPhoto(id, file),
+    remove: (id) => api.adminDeletePlayerHeroPhoto(id),
+    read: (r) => r.hero_photo_url,
+    file: 'hero',
+  },
+}
+
+function PhotoRow({ playerId, photoUrl, onPhotoChange, kind = 'photo', divider = true }) {
+  const K = PHOTO_KINDS[kind]
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [editorSource, setEditorSource] = useState(null)
@@ -72,28 +107,28 @@ function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
     setEditorSource(null)
     setBusy(true); setErr('')
     try {
-      const r = await api.adminUploadPlayerPhoto(playerId, file)
-      onPhotoChange?.(r.photo_url)
+      const r = await K.upload(playerId, file)
+      onPhotoChange?.(K.read(r))
     } catch (e) { setErr(e.message || 'Upload failed') }
     finally { setBusy(false) }
   }
   const remove = async () => {
     setBusy(true); setErr('')
-    try { await api.adminDeletePlayerPhoto(playerId); onPhotoChange?.(null) }
+    try { await K.remove(playerId); onPhotoChange?.(null) }
     catch (e) { setErr(e.message || 'Remove failed') }
     finally { setBusy(false) }
   }
 
   return (
-    <div className="mt-3 pt-3 border-t border-pb-hairline">
-      <div className="block text-[11.5px] text-pb-faint mb-[7px]">Photo</div>
+    <div className={divider ? 'mt-3 pt-3 border-t border-pb-hairline' : 'mt-3'}>
+      <div className="block text-[11.5px] text-pb-faint mb-[7px]">{K.label}</div>
       <div className="flex items-center gap-3 flex-wrap">
         {photoUrl
-          ? <img src={photoUrl} alt="" className="w-11 h-11 rounded-lg object-cover border border-pb-hairline2" />
-          : <span className="w-11 h-11 rounded-lg bg-pb-surface2 border border-pb-hairline2 flex items-center justify-center text-pb-faint"><Icon name="player" size={20} /></span>}
+          ? <img src={photoUrl} alt="" className={`${K.thumb} rounded-lg object-cover border border-pb-hairline2`} />
+          : <span className={`${K.thumb} rounded-lg bg-pb-surface2 border border-pb-hairline2 flex items-center justify-center text-pb-faint`}><Icon name="player" size={20} /></span>}
         <div className="flex items-center gap-2 flex-wrap">
           <label className={`font-mono text-[10px] px-2.5 py-1.5 rounded-lg border border-pb-hairline2 text-pb-dim hover:text-pb-text cursor-pointer transition ${busy ? 'opacity-50 pointer-events-none' : ''}`}>
-            {busy ? '…' : (photoUrl ? 'Replace' : 'Upload photo')}
+            {busy ? '…' : (photoUrl ? 'Replace' : K.addLabel)}
             <input type="file" accept=".jpg,.jpeg,.png,.webp,.gif" className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]
@@ -114,14 +149,15 @@ function PhotoRow({ playerId, photoUrl, onPhotoChange }) {
           )}
         </div>
       </div>
+      <p className="font-mono text-[9.5px] text-pb-faintest mt-1.5">{K.hint}</p>
       {err && <p className="font-mono text-[10px] text-pb-red mt-1.5">{err}</p>}
       <ImageEditorModal
         open={!!editorSource}
         source={editorSource}
-        title="Edit Player Photo"
-        aspect={1}
+        title={K.title}
+        aspect={K.aspect}
         outputType="image/png"
-        outputName={`player-${playerId}.png`}
+        outputName={`player-${playerId}-${K.file}.png`}
         onCancel={() => setEditorSource(null)}
         onApply={upload}
       />
@@ -369,7 +405,7 @@ function AliasManager({ playerId }) {
   )
 }
 
-function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange }) {
+function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, onPhotoChange, heroPhotoUrl, onHeroPhotoChange }) {
   const bowlingLabelVal = bowlingLabel(draft.bowling_action, draft.bowling_type)
   const age = ageFromDob(draft.date_of_birth)
   return (
@@ -472,7 +508,11 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
       </div>
 
       {canEdit && playerId && (
-        <PhotoRow playerId={playerId} photoUrl={photoUrl} onPhotoChange={onPhotoChange} />
+        <>
+          <PhotoRow playerId={playerId} photoUrl={photoUrl} onPhotoChange={onPhotoChange} />
+          <PhotoRow playerId={playerId} kind="hero" divider={false}
+            photoUrl={heroPhotoUrl} onPhotoChange={onHeroPhotoChange} />
+        </>
       )}
 
       {/* PlayHQ ID + non-player flag */}
@@ -493,7 +533,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
 }
 
 /* ── Profile panel ────────────────────────────────────────────────────────── */
-export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, footer }) {
+export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdit, onEditAvail, canEditAvail, onClose, onPhotoChange, onHeroPhotoChange, footer }) {
   const set = (k, v) => setDraft((d) => ({ ...d, [k]: v }))
   const squad = profile.squad
   const handLabel = (BAT_HANDS.find((h) => h[0] === (draft.batting_hand || '')) || [])[1]
@@ -555,7 +595,8 @@ export function Profile({ profile, draft, setDraft, dirty, saved, onSave, canEdi
           player={profile} onEditAvail={onEditAvail} canEditAvail={canEditAvail} />
         <Details draft={draft} set={set} teams={profile._teams || []}
           canEdit={canEdit} playerId={profile.id} playerName={profile.name}
-          photoUrl={profile.photo_url} onPhotoChange={onPhotoChange} />
+          photoUrl={profile.photo_url} onPhotoChange={onPhotoChange}
+          heroPhotoUrl={profile.hero_photo_url} onHeroPhotoChange={onHeroPhotoChange} />
       </div>
       {footer}
     </div>

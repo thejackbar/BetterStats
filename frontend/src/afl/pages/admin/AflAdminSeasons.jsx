@@ -16,7 +16,10 @@ function SeasonRow({ season, onSaved, onDeleted }) {
   const [year, setYear] = useState(season.year != null ? String(season.year) : '')
   const [busy, setBusy] = useState(false)
 
-  const canDelete = !season.synced && season.grades === 0 && season.synced_games === 0 && season.imported_games === 0
+  // Mirrors _season_in_use server-side: an adjustment typed against a season
+  // counts as data recorded against it, same as a synced or imported game.
+  const canDelete = !season.synced && season.grades === 0 && season.synced_games === 0
+    && season.imported_games === 0 && !season.adjustments
 
   async function save() {
     const n = name.trim()
@@ -53,7 +56,7 @@ function SeasonRow({ season, onSaved, onDeleted }) {
           </div>
         </td>
         <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.grades}</td>
-        <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.synced_games + season.imported_games}</td>
+        <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.synced_games + season.imported_games + (season.adjustment_games || 0)}</td>
         <td className="py-2 pr-2 text-right">
           <button onClick={save} disabled={busy}
             className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1 text-black bg-[var(--pb-accent)] disabled:opacity-50 mr-2">
@@ -70,7 +73,7 @@ function SeasonRow({ season, onSaved, onDeleted }) {
       <td className="py-2 pr-2 text-pb-text">{season.name}</td>
       <td className="py-2 pr-2 font-mono text-[11px] text-pb-faint">{season.year || '—'}</td>
       <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.grades}</td>
-      <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.synced_games + season.imported_games}</td>
+      <td className="py-2 pr-2 text-right font-mono text-[10px] text-pb-faint">{season.synced_games + season.imported_games + (season.adjustment_games || 0)}</td>
       <td className="py-2 pr-2 text-right whitespace-nowrap">
         {season.synced && (
           <span className="font-mono text-[9px] tracking-wide2 border rounded px-1.5 py-0.5 text-green-300 border-green-300/30 mr-2">SYNCED</span>

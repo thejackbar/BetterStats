@@ -1,14 +1,14 @@
 export default {
   version: 'v9.42.0',
   date: '2026-08-21',
-  sortKey: '2026-08-21T04:00:00Z',
-  title: 'The strategic plan reads as a plan, and picking an objective is easy again',
+  sortKey: '2026-08-21T12:00:00Z',
+  title: 'Players check themselves in at the nets',
   items: [
-    'Picking the objective an action or a motion serves is no longer a list of fifteen rows all starting with the same plan name and all cut off before the part that tells them apart. The plan and the theme are a heading over the objectives filed under them, each objective gets a full line, and there is a search box. Same picker in the meeting room, on the board, and in the action and motion editors.',
-    'Plans is now Strategic Plans, and it works like the meetings list: the whole plan as a tree down the left, whatever you click open beside it. Plan, theme, objective, then the actions and motions serving each one — fold any branch open or shut.',
-    'It opens on the first plan with its summary: objectives done, progress, budget, spent, and the plan’s own name, years and description.',
-    'Click a theme, an objective, an action or a motion in the tree and it opens in the pane. Actions and motions are edited right there, no dialog.',
-    'The work under an objective reads two ways: actions and motions kept apart, or run together in the order they were raised.',
-    'Anything in the tree can be deleted, and the confirm counts what goes with it first. Deleting a plan takes its objectives; deleting a theme takes its objectives across every plan that uses it. Actions and motions are never deleted by any of this — they are kept and simply stop being linked to an objective.',
+    'Nets → Check-in gives your club a link that works as a QR code on the fence or an NFC tag beside it. A player scans or taps it on the way in, picks their name, and they are checked in. Both hold the same address, so a tag and a printed code sit side by side and do the same thing.',
+    'Checking in adds a player to every net session running at the time, so nobody has to work out which session they are meant to be in.',
+    'Someone who is not on the list can leave their name, mobile, email, date of birth and previous club. They are in for the night as a guest, and their details wait on the Check-in tab for you to add them properly or match them to whoever they already are.',
+    'Adding them as a player moves the check-in they just made onto their new record, so the night counts towards their attendance rather than being logged twice.',
+    'The screen running the session says so out loud: a player scanning in raises a pop-up with a chime, and a newcomer is flagged as new to the club. A name you tap in yourself stays quiet.',
+    'The last four digits of a player’s mobile can be required, or turned off for speed. New registrations can be switched off on their own, so a club can keep the code up without taking on anyone who scans it.',
   ],
 }
