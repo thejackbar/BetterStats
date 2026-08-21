@@ -1,5 +1,101 @@
 # BetterStats — Claude Session Notes
 
+## A player checks themselves in at the nets (migration 272, v9.42.0, Aug 2026)
+
+Asked for as an NFC tag by the gate, then as a QR code alongside it. Checking
+in was an admin action — a manager tapping each name on the iPad — and this is
+the same check-in done by the player on their own phone on the way past.
+
+- **The QR code and the NFC tag are ONE link, and that is not a shortcut.** A
+  tag stores a URL and nothing else, so writing the page's address to a tag and
+  printing it as a QR code are two ways of handing over one string. One token,
+  one `organisations.net_checkin_token`, mirroring `availability_link_token`
+  down to the partial unique index. Two tokens would be two things to keep
+  alive and two to reprint on a rotate.
+- **SCANNING JOINS EVERY LIVE SESSION, not one picked off a list.** Somebody
+  walking into the nets does not know which of the club's two concurrent
+  sessions the seniors' one is called, and asking them is a question the club
+  can already answer. `net_manager.live_sessions` is active sessions dated
+  within a day either side of today — the app holds no per-club timezone, so a
+  club whose evening is the server's tomorrow would otherwise scan in to
+  nothing. Narrow at BOTH ends deliberately: a session somebody forgot to mark
+  done last week must not quietly collect tonight's arrivals.
+- **A NEWCOMER IS CHECKED IN AS A GUEST, NEVER AS A PLAYER.** `net_attendance`
+  has carried guest rows (`player_id` NULL + `guest_name`) since it was
+  written, for exactly this person — the trialist not yet in the system — so
+  the mechanism was already there and this uses it rather than inventing one.
+  It is what stops a stranger who found the QR code writing an unvetted row
+  into the club's player table. What they type lands in
+  `net_checkin_registrations`, `status='pending'`, and approving it is the ONE
+  place this ever creates a player.
+- **Approving CONVERTS the guest row, it does not add a second one.** The row
+  that already says they turned up has its `player_id` filled in and its
+  `guest_name` cleared, so the night counts towards the new player's own tally
+  instead of being logged twice. Where the club had also checked them in
+  properly, the real row is kept and the guest row dropped — the unique index
+  would refuse the pair, and two rows for one person is the wrong answer anyway.
+- **Dismissing leaves the guest row alone.** They did turn up; the session's
+  record of the night should say so. Dismissing is a decision about the roster,
+  not a claim that the evening did not happen.
+- **`previous_club` has no home on `players` and does not get one.** One line
+  of free text somebody typed about themselves is not a reason for a column;
+  it stays with the rest of what they typed.
+- **The PIN cannot gate registration, and that is why there are two switches.**
+  `net_checkin_require_pin` proves an existing player is themselves via
+  last-4-of-phone. A club has no number on file for someone it has never met,
+  so `net_checkin_allow_registration` is its own setting rather than something
+  read off the PIN one.
+- **`net_attendance.source` ('admin' | 'self') is what makes the alert
+  possible.** A self check-in has no `recorded_by` to read, so nothing else
+  separates a name the manager just tapped from one that scanned itself in.
+  Mirrors `player_availability.source`. Rows written before 272 read 'admin',
+  which is what they were.
+- **`check_in_person` is the one place a check-in is written**, shared by the
+  admin screen and the public page; `add_attendee` was refactored onto it.
+  Two copies is how the two paths start disagreeing about what a check-in is.
+  It returns None for "already in" — a no-op at two levels, app-level read and
+  IntegrityError on the unique index — and **the caller must not touch a lazily
+  -loaded attribute after that None**, since the rollback expires every loaded
+  object (the MissingGreenlet trap this file already documents).
+- **`touch_session` is `_touch` under an importable name.** A self check-in has
+  to move `net_sessions.version` or the iPad's next poll is told nothing
+  changed and the arrival never appears.
+- **The live screen ANNOUNCES an arrival** — pop-up, chime (reusing the timer's
+  existing `beep`/`unlockAudio`, not new machinery) and `navigator.vibrate`.
+  Only `source === 'self'` fires it: a name the manager tapped on that very
+  screen must not pop up at them. A screen opening mid-session seeds its seen
+  set silently, or it would announce the twenty people already there.
+  **iOS Safari ignores `navigator.vibrate` entirely**, so the pop-up and the
+  chime carry the alert and the buzz is a bonus on Android. A browser plays no
+  sound until the page has been touched, so an iPad propped on a fence gets a
+  "tap once to turn on sound" prompt rather than being silently mute.
+- **Deliberately NOT built: Web Push.** Real OS-level notifications need a
+  service worker, VAPID keys, a subscriptions table and `pywebpush`, none of
+  which exist here, and on iOS they only work once the site is installed to the
+  Home Screen — a per-device setup step. The device this was asked for is
+  already looking at the live screen, which is most of the reason push exists.
+  A smartwatch has no direct path at all: a watch mirrors notifications from a
+  paired phone, so it would ride on push rather than being targetable.
+- **The landing payload never says who is already checked in.** This page is
+  served to whoever holds the link.
+- **Verified against a real Postgres** (103 checks through the shipped route
+  bodies: the token resolving and every 404-not-403 refusal, the live-session
+  window at both ends, the PIN gate incl. no-mobile as a 409 rather than a
+  failure and a cross-club player reading as a wrong PIN, an availability
+  cookie not replayable as a check-in one, a double tap adding nobody, one scan
+  joining two sessions, a newcomer landing as a guest with the roster untouched,
+  every registration guard, approval converting the guest row and refusing
+  twice, matching onto an existing player minting nobody, dismissal leaving the
+  attendance alone, cross-club rejection, migration 272 applied three times to a
+  populated pre-272 table, and the partial index tolerating NULLs) and **driven
+  in Chromium** (82: the exact params on the wire for verify/check-in/register,
+  a wrong PIN checking nobody in, one-tap check-in with the PIN off, a returning
+  player never re-verified, every registration field on the wire, the QR
+  rendering and its download, the review queue's three decisions and the roster
+  match, the live screen's pop-up firing for a self check-in and staying quiet
+  for an admin one, no page errors, no overflow at 390px).
+
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out
