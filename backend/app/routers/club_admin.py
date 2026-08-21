@@ -2514,11 +2514,11 @@ class GeneralSettingsUpdate(BaseModel):
     # Calendly (or similar) booking URL. Same whole-table-replace semantics
     # as bundle_discount_schedule above.
     demo_booking_links: Optional[dict] = None
-    # Daily automated backup — read by the host backup script on every timer
-    # tick (see ops/backup/backup.sh), not enforced by anything in-process.
-    backup_hour: Optional[int] = None
-    backup_minute: Optional[int] = None
-    backup_retention_days: Optional[int] = None
+    # The backup schedule is deliberately NOT settable here — it moved to its
+    # own screen (PATCH /club-admin/super/backups/settings), where the time is
+    # a Perth wall-clock one and the stored bundles are managed alongside it.
+    # Two editors of one schedule is how the two start disagreeing. It is
+    # still RETURNED below, so General Settings can say what it is set to.
 
 
 @router.patch("/super/general-settings")
@@ -2531,19 +2531,12 @@ async def patch_general_settings(
     patch = body.model_dump(exclude_unset=True)
     schedule = patch.pop("bundle_discount_schedule", None)
     demo_links = patch.pop("demo_booking_links", None)
-    backup_hour = patch.pop("backup_hour", None)
-    backup_minute = patch.pop("backup_minute", None)
-    backup_retention_days = patch.pop("backup_retention_days", None)
     try:
         await ps.update_settings(db, patch)
         if schedule is not None:
             await ps.update_bundle_discount_schedule(db, schedule)
         if demo_links is not None:
             await ps.update_demo_booking_links(db, demo_links)
-        if backup_hour is not None or backup_minute is not None or backup_retention_days is not None:
-            await ps.update_backup_schedule(
-                db, hour=backup_hour, minute=backup_minute, retention_days=backup_retention_days,
-            )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return {

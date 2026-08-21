@@ -17,13 +17,20 @@
 #
 # Intended to run frequently (e.g. every 15 minutes) via the accompanying
 # systemd timer, NOT once a day at a fixed OnCalendar time — the schedule
-# hour/minute is a super-admin-editable app setting (General Settings ->
-# Backups), not a value baked into a host-level timer file. Each tick:
-#   1. asks the backend for the configured hour/minute/retention (a plain DB
-#      read — cheap)
-#   2. does nothing unless the current wall-clock hour/minute matches AND no
-#      backup has completed yet today (idempotent — a slow run or a timer
-#      catch-up after downtime can't produce two backups in one day)
+# hour/minute is a super-admin-editable app setting (Super Admin -> Backup
+# settings), not a value baked into a host-level timer file. Each tick asks
+# the backend one question — `backup_task should-run` — and does nothing
+# unless the answer is yes.
+#
+# THE SCHEDULE IS PERTH (AWST) WALL-CLOCK TIME, and this script deliberately
+# does no timezone arithmetic of its own: the whole decision is made in
+# app/services/backup_schedule.py, so the screen, the "next run" line and
+# this tick cannot disagree about what 03:00 means. A run is due once the
+# configured time has passed for the day and that Perth day has no completed
+# backup yet — so a box that was down at 03:00, or a tick pattern that steps
+# over the configured minute, catches up on the next tick instead of costing
+# a whole day's backup. Still at most one automatic backup per day: the
+# completed-today check is what makes the frequent tick idempotent.
 #
 # Manual run: BACKUP_FORCE=1 ./backup.sh  (ignores the schedule check, still
 # respects "already ran today" — pass BACKUP_FORCE=2 to also ignore that).
@@ -69,23 +76,17 @@ fi
 
 # --- Schedule check (skipped entirely with BACKUP_FORCE) ----------------------
 read -r SCHED_HOUR SCHED_MINUTE RETENTION_DAYS < <(exec_backend python -m app.scripts.backup_task get-schedule)
+log "Configured: $(printf '%02d:%02d' "$SCHED_HOUR" "$SCHED_MINUTE") Perth, keeping $RETENTION_DAYS days"
 
 if [ "${BACKUP_FORCE:-0}" = "0" ]; then
-  now_hour=$(date -u +%H | sed 's/^0*//')
-  now_minute=$(date -u +%M | sed 's/^0*//')
-  now_hour=${now_hour:-0}; now_minute=${now_minute:-0}
-  # Match within the same hour, minute window of the timer's own tick interval
-  # (assumes a >=15min-interval timer; a coarser one just backs up a bit later
-  # in the hour, never skips the day).
-  if [ "$now_hour" != "$SCHED_HOUR" ]; then
-    log "Not the scheduled hour ($SCHED_HOUR:$(printf '%02d' "$SCHED_MINUTE") UTC configured, now ${now_hour}:$(printf '%02d' "$now_minute") UTC) — skipping."
+  due_answer=$(exec_backend python -m app.scripts.backup_task should-run | tr -d '\r')
+  due_flag=${due_answer%% *}
+  due_reason=${due_answer#* }
+  if [ "$due_flag" != "1" ]; then
+    log "Skipping — ${due_reason}."
     exit 0
   fi
-  already=$(exec_backend python -m app.scripts.backup_task has-run-today)
-  if [ "$(echo "$already" | tr -d '\r')" = "1" ]; then
-    log "Already have a completed backup today — skipping."
-    exit 0
-  fi
+  log "Running — ${due_reason}."
 elif [ "${BACKUP_FORCE}" = "1" ]; then
   already=$(exec_backend python -m app.scripts.backup_task has-run-today)
   if [ "$(echo "$already" | tr -d '\r')" = "1" ]; then
@@ -213,7 +214,18 @@ exec_backend python -m app.scripts.backup_task finish-task "$TASK_ID" --status c
   --bundle-path "$BUNDLE_DIR" --uploads-size-bytes "$UPLOADS_SIZE_BYTES"
 
 # --- retention: prune bundles older than RETENTION_DAYS ------------------------
+# Each pruned bundle is stamped back onto its backup_tasks row, so the
+# Backups page says "files deleted (retention)" rather than offering a
+# download and a restore of a directory that is no longer there. The row
+# itself is kept — a run's sizes and per-club stats are worth having after
+# its files have gone.
 log "Pruning backups older than $RETENTION_DAYS days..."
-find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS" -print -exec rm -rf {} \;
+while IFS= read -r old_bundle; do
+  [ -z "$old_bundle" ] && continue
+  log "Pruning $(basename "$old_bundle")"
+  rm -rf "$old_bundle"
+  exec_backend python -m app.scripts.backup_task mark-bundle-deleted \
+    "$(basename "$old_bundle")" --reason retention >/dev/null || true
+done < <(find "$BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -mtime "+$RETENTION_DAYS")
 
 log "Done."

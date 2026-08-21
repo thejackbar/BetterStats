@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import { MODULE_TOGGLES, SUBSCRIPTION_STATUSES, BILLING_CYCLES, statusLabel, statusIsLive } from '../../lib/modules'
 import { moduleBrand } from '../../lib/moduleBrand'
@@ -90,15 +91,6 @@ const normalizeBundleSchedule = (raw) => {
   return out
 }
 
-// Backup schedule is stored/read by the host script in UTC (server clock),
-// but a super admin thinks in Perth, WA time — so the General Settings form
-// converts at the load/save boundary, once, rather than carrying a timezone
-// concept through the whole stack. WA doesn't observe daylight saving, so a
-// flat +8 offset is always correct, no DST table needed.
-const PERTH_UTC_OFFSET_HOURS = 8
-const utcHourToPerth = (h) => (Number(h) + PERTH_UTC_OFFSET_HOURS) % 24
-const perthHourToUtc = (h) => (((Number(h) - PERTH_UTC_OFFSET_HOURS) % 24) + 24) % 24
-
 export default function SuperClubs() {
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
@@ -136,7 +128,6 @@ export default function SuperClubs() {
     merch_storefront_enabled: false,
     bundle_discount_schedule: { 1: 0, 2: 48, 3: 97, 4: 146, 5: 0, 6: 0 },
     demo_booking_links: [],
-    backup_hour: 3, backup_minute: 0, backup_retention_days: 30,
   })
   const [settingsSaving, setSettingsSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(null)
@@ -232,10 +223,6 @@ export default function SuperClubs() {
         merch_storefront_enabled: !!s?.merch_storefront_enabled,
         bundle_discount_schedule: normalizeBundleSchedule(s?.bundle_discount_schedule),
         demo_booking_links: Object.entries(s?.demo_booking_links || {}).map(([name, url]) => ({ name, url })),
-        // Stored/returned by the API in UTC — shown to the admin in Perth time.
-        backup_hour: utcHourToPerth(s?.backup_schedule?.hour ?? 19), // 19:00 UTC = 03:00 Perth
-        backup_minute: s?.backup_schedule?.minute ?? 0,
-        backup_retention_days: s?.backup_schedule?.retention_days ?? 30,
       })
     } catch { /* fall back to the defaults shown */ }
     setShowSettings(true)
@@ -263,10 +250,6 @@ export default function SuperClubs() {
             .filter(r => r.name.trim() && r.url.trim())
             .map(r => [r.name.trim(), r.url.trim()])
         ),
-        // Convert the admin's Perth-time entry back to UTC for storage.
-        backup_hour: perthHourToUtc(Math.min(23, Math.max(0, Number(settingsForm.backup_hour) || 0))),
-        backup_minute: Math.min(59, Math.max(0, Number(settingsForm.backup_minute) || 0)),
-        backup_retention_days: Math.max(1, Number(settingsForm.backup_retention_days) || 30),
       })
       setMsg('General settings saved')
       setShowSettings(false)
@@ -973,31 +956,13 @@ export default function SuperClubs() {
                   Backups
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
-                  When the daily automated backup runs (Perth, WA time) and how many days
-                  of daily backups are kept before the oldest is deleted. Stored as UTC on the
-                  server and converted for display here — no redeploy needed to change either.
-                  See the Backups page for run history and current database size.
+                  The backup time, how many days of backups are kept, and deleting stored
+                  backup files all live on their own screen now, so one place decides what the
+                  schedule is:{' '}
+                  <Link to="/admin/super/backup-settings" className="underline hover:text-pb-text">
+                    Backup settings
+                  </Link>.
                 </p>
-                <div className="flex items-end gap-3">
-                  <label className="font-mono text-[10px] text-pb-faint">
-                    <span className="block mb-1">Hour (Perth time)</span>
-                    <input type="number" min="0" max="23" value={settingsForm.backup_hour}
-                      onChange={e => setSettingsForm(f => ({ ...f, backup_hour: e.target.value }))}
-                      className={INPUT_CLS + ' w-16'} />
-                  </label>
-                  <label className="font-mono text-[10px] text-pb-faint">
-                    <span className="block mb-1">Minute</span>
-                    <input type="number" min="0" max="59" value={settingsForm.backup_minute}
-                      onChange={e => setSettingsForm(f => ({ ...f, backup_minute: e.target.value }))}
-                      className={INPUT_CLS + ' w-16'} />
-                  </label>
-                  <label className="font-mono text-[10px] text-pb-faint flex-1">
-                    <span className="block mb-1">Retention (days)</span>
-                    <input type="number" min="1" value={settingsForm.backup_retention_days}
-                      onChange={e => setSettingsForm(f => ({ ...f, backup_retention_days: e.target.value }))}
-                      className={INPUT_CLS} />
-                  </label>
-                </div>
               </div>
               </div>
 

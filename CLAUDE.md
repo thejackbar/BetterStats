@@ -1,5 +1,85 @@
 # BetterStats — Claude Session Notes
 
+## Backup settings: the time is Perth, retention is a number, files can be deleted (migration 275, v9.47.0, Aug 2026)
+
+Asked for directly: "parameterise the number of days that we backup, I think
+it's currently 30 days but I'd like 7", the run time chosen in Perth time
+rather than UTC, and a way to select old backup files and delete one or more.
+
+- **THE SCHEDULE IS STORED IN PERTH, and that is the whole change to how the
+  time works.** It was a UTC hour that only the General Settings form
+  converted, so the number in the database, the number on the screen and the
+  number the host script compared against were three different things saying
+  one time. `platform_settings.get_backup_schedule` now returns Perth local,
+  `services/backup_schedule.py` is the one place that maths lives, and
+  `backup.sh` does no timezone arithmetic at all — it asks
+  `backup_task should-run` and logs the reason it was given.
+- **A pre-Perth row is converted ON READ (+8h) and re-stamped on the first
+  save** (`tz: "Australia/Perth"`), so an existing club's backup keeps the
+  real-world moment it already had rather than jumping eight hours the day
+  this shipped. The absence of the marker IS the legacy signal; a row with no
+  `hour` at all has nothing to convert and reads as the 03:00 Perth default.
+- **A MISSED RUN IS NOW CAUGHT UP, NOT SKIPPED.** The old check matched the
+  UTC HOUR ONLY, so the configured minute decided nothing, and a tick that
+  stepped past the hour cost a whole day's backup with nothing to see. The
+  rule is "the time has passed today (Perth) and today has no completed
+  backup yet"; the completed-today check is what keeps the 15-minute timer
+  idempotent. "Today" is the PERTH day at both ends — a completion is a
+  TIMESTAMPTZ, so judging it on the server's date would file a 03:00 Perth
+  backup under yesterday.
+- **Retention is applied by the NEXT run's prune, never on save**, and the
+  screen says so — a super admin dropping 30 days to 7 is not asking for 23
+  days of backups to disappear as they click Save. The file list is the
+  answer to "I want the space back now".
+- **DISK IS THE SOURCE OF TRUTH for what can be deleted**, not `backup_tasks`:
+  a bundle from before task logging, or one whose run died part-way, is a
+  directory taking up space either way. The listing comes from the agent
+  (`GET /bundles`) and task rows are matched onto it, not the other way round.
+- **Deleting removes FILES ONLY.** The run's row stays as history — its sizes
+  and per-club record counts are worth having afterwards — and is stamped
+  `bundle_deleted_at` / `_by` / `_reason` (migration 275, nullable, no
+  backfill: NULL means "still expected on disk", which is what every
+  pre-275 row meant). `_resolve_bundle` then refuses that task with a 410, so
+  a tab left open before a delete cannot fire a download or a restore at
+  nothing — the page hiding the buttons is not the guard.
+- **The most recent bundle takes its own second confirmation** (`include_latest`),
+  because it is the one a restore would reach for and a select-all must not
+  sweep it up. Deletion is per-bundle rather than all-or-nothing, so one name
+  the agent can't find doesn't stop the rest and every outcome comes back
+  named.
+- **RETENTION PRUNING STAMPS THE SAME COLUMNS** (`backup_task
+  mark-bundle-deleted --reason retention`, called from backup.sh's prune
+  loop), so an automatically pruned run reads the same as a deliberately
+  deleted one, minus the who. Without it the page would keep offering a
+  restore of whatever the nightly prune had already removed.
+- **The backup fields LEFT General Settings** (`GeneralSettingsUpdate` no
+  longer accepts them; it still returns `backup_schedule` so the modal can
+  link across and say what it is set to). Two editors of one schedule is how
+  the two start disagreeing — the same call the BetterSelect settings move
+  made.
+- **Verified against a real Postgres** (91 checks through the shipped route
+  bodies, the shipped settings getters/setters, the shipped due maths and the
+  shipped host-script CLI, **with the REAL backup-agent mounted over an
+  in-process ASGI transport against a real temporary BACKUP_ROOT** — so
+  "delete these" is checked end to end, files leaving the disk included:
+  migration 275 applied three times to a populated table and the lifespan
+  mirror landing on the same columns, the legacy UTC row converting exactly
+  once, every refusal, midnight being settable, the Perth-day judgement of a
+  UTC-stored completion, a bundle with no task row still listed, a task with
+  no bundle reported as history, the traversal and newest-bundle guards, a
+  missing bundle not stopping the rest, and the 410) **with a control** that
+  replays the old hour-only check and shows the same missed slot skipping the
+  day. **Driven in Chromium** (41: the Perth hour on screen, the exact PATCH
+  for a 7-day retention and for a 21:30 Perth time, the past-retention flags,
+  the select-older-than button, the confirm naming each bundle, a dismissed
+  confirm sending nothing, the exact delete payload, the newest needing its
+  own tick before `include_latest` goes on the wire, the Backups page's
+  "Files deleted (retention)" row losing its download and restore, no page
+  errors, no overflow at 390px).
+- **Not built**: no offsite copy and no automatic upload — unchanged, per the
+  standing instruction in docs/backup-system.md. Nothing deletes a bundle on
+  a schedule other than the existing retention prune.
+
 ## The Squads board's unassigned side is three pools (v9.46.0, Aug 2026)
 
 Reported off BetterSelect → Squads: "the hidden people, people who have never

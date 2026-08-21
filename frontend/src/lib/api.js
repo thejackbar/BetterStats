@@ -1893,6 +1893,17 @@ export const api = {
     return request(`/club-admin/super/backups${q ? `?${q}` : ''}`)
   },
   superBackupStats: () => request('/club-admin/super/backups/stats'),
+  // Backup settings — the daily run's time (PERTH local, stored that way, no
+  // UTC conversion anywhere on this side) and how many days of bundles are
+  // kept, plus what is actually on disk and deleting some of it.
+  superBackupSettings: () => request('/club-admin/super/backups/settings'),
+  superUpdateBackupSettings: (data) =>
+    request('/club-admin/super/backups/settings', { method: 'PATCH', body: JSON.stringify(data) }),
+  superBackupFiles: () => request('/club-admin/super/backups/files'),
+  superDeleteBackupFiles: (bundles, includeLatest = false) =>
+    request('/club-admin/super/backups/files/delete', {
+      method: 'POST', body: JSON.stringify({ bundles, include_latest: includeLatest }),
+    }),
   superRunBackupNow: () => request('/club-admin/super/backups/run', { method: 'POST' }),
   // Manual, on-demand download of a backup bundle file — still age-encrypted
   // in transit, same as it sits on disk (no offsite auto-sync anywhere).

@@ -9,6 +9,8 @@ Fixed, narrow API — no arbitrary command execution:
   POST /run-restore-full   body: {"bundle": "<timestamp>", "private_key": "<age identity>"}
   POST /run-restore-club   body: {"bundle": "<timestamp>", "org_id": "<uuid>", "private_key": "<age identity>"}
   GET  /backup-file        ?bundle=<timestamp>&file=<db|uploads|manifest|checksums>
+  GET  /bundles            what is actually on disk under BACKUP_ROOT
+  POST /delete-bundle      body: {"bundle": "<timestamp>"}
   GET  /health
 
 Auth: a shared secret in the X-Agent-Secret header, checked against
@@ -19,6 +21,14 @@ network boundary, not the only line of defence.
 
 /backup-file only ever serves the STILL-ENCRYPTED bundle files as-is
 (db.dump.age, uploads.tar.zst.age, ...).
+
+/bundles and /delete-bundle are how the Backup settings page sees and clears
+what is on disk. Deletion is the same act retention pruning already performs
+nightly, just chosen by a person — so it is the same narrow shape as
+everything else here: a directory name matching backup.sh's own timestamp
+stamp, resolved under BACKUP_ROOT and refused if it lands anywhere else. It
+removes files only; the backup_tasks row stays as history and is stamped by
+the backend (see routers/backup_admin.py).
 
 RESTORE AND THE PRIVATE KEY — the web-restore endpoints below are the
 *supplement* to (not a replacement for) SSH-run restore.sh: both remain
@@ -42,6 +52,7 @@ agent's own gate is the cryptographic key-match check.
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -88,6 +99,10 @@ class RunBackupBody(BaseModel):
 class RestoreFullBody(BaseModel):
     bundle: str
     private_key: str
+
+
+class DeleteBundleBody(BaseModel):
+    bundle: str
 
 
 class RestoreClubBody(BaseModel):
@@ -253,6 +268,64 @@ async def run_restore_club(body: RestoreClubBody, x_agent_secret: str | None = H
             ["restore-club", body.bundle, body.org_id, "--apply"], key_path, "restore.sh restore-club",
         ))
     return {"status": "started"}
+
+
+def _bundle_dir(bundle: str) -> Path:
+    """Resolves a bundle name to its directory, refusing anything that isn't
+    backup.sh's own timestamp stamp AND anything that resolves outside
+    BACKUP_ROOT. The name check is the real defence (see _BUNDLE_RE above);
+    the containment check is the belt to its braces."""
+    if not _BUNDLE_RE.match(bundle):
+        raise HTTPException(status_code=400, detail="Invalid bundle timestamp")
+    path = (BACKUP_ROOT / bundle).resolve()
+    if path.parent != BACKUP_ROOT.resolve():
+        raise HTTPException(status_code=400, detail="Invalid bundle path")
+    return path
+
+
+@app.get("/bundles")
+async def list_bundles(x_agent_secret: str | None = Header(default=None)):
+    """Every backup bundle currently on disk, newest first — the source of
+    truth for what can still be downloaded, restored or deleted. A bundle
+    with no matching backup_tasks row (an old run, or one from before task
+    logging) is listed too: it is taking up space either way."""
+    _check_secret(x_agent_secret)
+    if not BACKUP_ROOT.is_dir():
+        return {"bundles": [], "backup_root": str(BACKUP_ROOT), "root_missing": True}
+    bundles = []
+    for entry in BACKUP_ROOT.iterdir():
+        if not entry.is_dir() or not _BUNDLE_RE.match(entry.name):
+            continue
+        files, total = [], 0
+        for f in sorted(entry.iterdir()):
+            if not f.is_file():
+                continue
+            size = f.stat().st_size
+            total += size
+            files.append({"name": f.name, "size_bytes": size})
+        bundles.append({
+            "bundle": entry.name,
+            "size_bytes": total,
+            "modified_at": entry.stat().st_mtime,
+            "files": files,
+            "complete": any(f["name"] == "db.dump.age" for f in files),
+        })
+    bundles.sort(key=lambda b: b["bundle"], reverse=True)
+    return {"bundles": bundles, "backup_root": str(BACKUP_ROOT), "root_missing": False}
+
+
+@app.post("/delete-bundle")
+async def delete_bundle(body: DeleteBundleBody, x_agent_secret: str | None = Header(default=None)):
+    """Deletes one bundle directory and everything in it. Deliberately not a
+    list — the backend loops, so one bad name can't take the rest of a
+    selection down with it, and each result is reported on its own."""
+    _check_secret(x_agent_secret)
+    path = _bundle_dir(body.bundle)
+    if not path.is_dir():
+        raise HTTPException(status_code=404, detail="No such backup bundle")
+    freed = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    shutil.rmtree(path)
+    return {"status": "deleted", "bundle": body.bundle, "freed_bytes": freed}
 
 
 @app.get("/backup-file")

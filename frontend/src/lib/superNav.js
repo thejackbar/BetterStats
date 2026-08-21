@@ -53,6 +53,7 @@ export const SUPER_SECTIONS = [
     label: 'Clubs & Data',
     blurb: 'Backups, merges, migration and onboarding enquiries.',
     items: [
+      { to: '/admin/super/backup-settings', label: 'Backup Settings', blurb: 'Backup time, how long backups are kept, and deleting stored backups.' },
       { to: '/admin/super/backups', label: 'Backups', blurb: 'Database backups and restore points.' },
       { to: '/admin/super/migration', label: 'KlubPro Migration', blurb: 'Import player profiles and sponsors from a legacy KlubPro club.' },
       { to: '/admin/super/merge-clubs', label: 'Merge Clubs', blurb: 'Combine two club records into one.' },

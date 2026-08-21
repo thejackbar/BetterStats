@@ -734,30 +734,45 @@ async def update_background_process_settings(
 # (which treats 0 as "unset") — same reasoning as the bundle discount schedule
 # above having its own dedicated getter/setter.
 #
-# Stored and enforced here (and by backup.sh, which reads the host's clock) in
-# UTC — the General Settings UI is what converts to/from Perth, WA time
-# (AWST, UTC+8, no daylight saving) for display, since that's what a super
-# admin actually thinks in. DEFAULT_BACKUP_HOUR = 19 UTC = 03:00 Perth, an
-# off-peak default for a club's admin activity.
+# STORED AND ENFORCED IN PERTH, WA TIME (AWST, UTC+8, no daylight saving) —
+# the time a super admin picked is the time that gets written down, rather
+# than a UTC figure every reader converts back and forth for itself. The maths
+# lives in services/backup_schedule.py, so the screen, the due check and the
+# "next run" line cannot disagree about what 03:00 means.
+#
+# An install predating this stored the hour as UTC and carries no `tz` marker.
+# Such a row is converted on read (+8h), so an existing backup keeps running
+# at the same real-world moment it always did; the first save from the Backup
+# settings screen stamps `tz` and settles it.
 
-DEFAULT_BACKUP_HOUR = 19
+BACKUP_TIMEZONE = "Australia/Perth"
+_LEGACY_UTC_OFFSET_HOURS = 8  # AWST is a fixed UTC+8 — no DST to resolve
+DEFAULT_BACKUP_HOUR = 3       # 03:00 Perth — off-peak for a club's admins
 DEFAULT_BACKUP_MINUTE = 0
 DEFAULT_BACKUP_RETENTION_DAYS = 30
+BACKUP_RETENTION_MIN_DAYS = 1
+BACKUP_RETENTION_MAX_DAYS = 365
 
 
 async def get_backup_schedule(db: AsyncSession) -> dict:
-    """The configured daily backup time (24h, UTC — the General Settings UI
-    converts to/from Perth, WA time for display) and retention window in
-    days. Falls back to 19:00 UTC (03:00 Perth) / 30 days when unset or
-    malformed."""
+    """The configured daily backup time (24h, PERTH local) and how many days
+    of bundles are kept. Falls back to 03:00 Perth / 30 days when unset or
+    malformed; a pre-Perth row (no ``tz``) is read as UTC and converted, so
+    the run keeps the real-world time it has always had."""
     settings = await get_settings(db)
     raw = settings.get("backup_schedule")
     raw = raw if isinstance(raw, dict) else {}
+    # A row with no hour at all has nothing to convert — only a stored legacy
+    # hour is a UTC one.
+    legacy_utc = "hour" in raw and raw.get("tz") != BACKUP_TIMEZONE
     try:
         hour = int(raw.get("hour", DEFAULT_BACKUP_HOUR))
-        hour = hour if 0 <= hour <= 23 else DEFAULT_BACKUP_HOUR
+        if not (0 <= hour <= 23):
+            hour, legacy_utc = DEFAULT_BACKUP_HOUR, False
     except (TypeError, ValueError):
-        hour = DEFAULT_BACKUP_HOUR
+        hour, legacy_utc = DEFAULT_BACKUP_HOUR, False
+    if legacy_utc:
+        hour = (hour + _LEGACY_UTC_OFFSET_HOURS) % 24
     try:
         minute = int(raw.get("minute", DEFAULT_BACKUP_MINUTE))
         minute = minute if 0 <= minute <= 59 else DEFAULT_BACKUP_MINUTE
@@ -765,18 +780,25 @@ async def get_backup_schedule(db: AsyncSession) -> dict:
         minute = DEFAULT_BACKUP_MINUTE
     try:
         retention_days = int(raw.get("retention_days", DEFAULT_BACKUP_RETENTION_DAYS))
-        retention_days = retention_days if retention_days > 0 else DEFAULT_BACKUP_RETENTION_DAYS
+        if not (BACKUP_RETENTION_MIN_DAYS <= retention_days <= BACKUP_RETENTION_MAX_DAYS):
+            retention_days = DEFAULT_BACKUP_RETENTION_DAYS
     except (TypeError, ValueError):
         retention_days = DEFAULT_BACKUP_RETENTION_DAYS
-    return {"hour": hour, "minute": minute, "retention_days": retention_days}
+    return {
+        "hour": hour,
+        "minute": minute,
+        "retention_days": retention_days,
+        "timezone": BACKUP_TIMEZONE,
+    }
 
 
 async def update_backup_schedule(db: AsyncSession, *, hour=None, minute=None,
                                   retention_days=None) -> dict:
-    """Set any of the backup schedule fields. Commits. Raises ValueError on a
-    bad request."""
+    """Set any of the backup schedule fields (hour/minute are PERTH local).
+    Commits. Raises ValueError on a bad request."""
     current = await get_backup_schedule(db)
-    out = dict(current)
+    out = {"hour": current["hour"], "minute": current["minute"],
+           "retention_days": current["retention_days"], "tz": BACKUP_TIMEZONE}
     if hour is not None:
         try:
             h = int(hour)
@@ -794,7 +816,11 @@ async def update_backup_schedule(db: AsyncSession, *, hour=None, minute=None,
             raise ValueError("minute must be between 0 and 59")
         out["minute"] = m
     if retention_days is not None:
-        out["retention_days"] = _pos_int(retention_days, "retention_days")
+        days = _pos_int(retention_days, "retention_days")
+        if days > BACKUP_RETENTION_MAX_DAYS:
+            raise ValueError(f"retention_days must be between {BACKUP_RETENTION_MIN_DAYS} "
+                             f"and {BACKUP_RETENTION_MAX_DAYS}")
+        out["retention_days"] = days
     s = await get_settings(db)
     merged = dict(s)
     merged["backup_schedule"] = out

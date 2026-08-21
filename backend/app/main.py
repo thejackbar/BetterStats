@@ -1582,6 +1582,21 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS progress JSONB"
         ))
+        # Migration 275: a bundle's files can now be deleted deliberately (Backup
+        # settings page) as well as by retention pruning, so a task row can say
+        # its files are gone instead of offering a download/restore that can't
+        # work. NULL = still expected on disk, which is what every pre-275 row
+        # meant.
+        await conn.execute(text(
+            "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS bundle_deleted_at TIMESTAMPTZ"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS bundle_deleted_by UUID "
+            "REFERENCES users(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE backup_tasks ADD COLUMN IF NOT EXISTS bundle_deleted_reason TEXT"
+        ))
         # Login attempts — append-only audit of every sign-in attempt (success
         # or failure), so we can see which username/email is being tried, from
         # where, and whether it succeeded. IP is stored as a truncated SHA-256

@@ -1,4 +1,5 @@
 import { Fragment, useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../lib/api'
 import AdminLayout from '../../components/admin/AdminLayout'
 
@@ -363,8 +364,11 @@ export default function SuperBackups() {
           <div>
             <h1 className="text-xl font-semibold text-pb-text">Backups</h1>
             <p className="text-sm text-pb-dim mt-1">
-              Daily automated backup history, plus current database size. Schedule and retention
-              are set from General Settings → Backups.
+              Daily automated backup history, plus current database size. The run time,
+              how long backups are kept and deleting stored backup files are on{' '}
+              <Link to="/admin/super/backup-settings" className="underline hover:text-pb-text">
+                Backup settings
+              </Link>.
             </p>
             <p className="text-xs text-pb-faint mt-2 max-w-2xl">
               Backup and restore both run as host-level scripts (see docs/backup-system.md) —
@@ -533,7 +537,13 @@ export default function SuperBackups() {
                             {expanded === t.id ? 'Hide' : 'Per-club'}
                           </button>
                         )}
-                        {t.task_type === 'backup' && t.status === 'completed' && (
+                        {t.task_type === 'backup' && t.status === 'completed' && t.bundle_deleted_at && (
+                          <span className="block font-mono text-[10px] text-pb-faintest"
+                            title={`Deleted ${fmtDateTime(t.bundle_deleted_at)}`}>
+                            Files deleted{t.bundle_deleted_reason === 'retention' ? ' (retention)' : ''}
+                          </span>
+                        )}
+                        {t.task_type === 'backup' && t.status === 'completed' && !t.bundle_deleted_at && (
                           <>
                             <div className="flex gap-2">
                               <DownloadLink taskId={t.id} file="db" label="DB" />

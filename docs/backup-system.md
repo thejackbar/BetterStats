@@ -1,11 +1,13 @@
 # BetterStats backup system
 
 Automated daily backups (with a "Run backup now" button), a manual full
-restore, and a manual per-club restore, plus a Super Admin "Backups" page
-showing run history and current database size stats. No downtime for backup;
-a full restore needs a brief app stop only at the final cutover step; a
-per-club restore needs no downtime at all. Restore is deliberately
-SSH-only — see "Why restore has no UI button" below.
+restore, and a manual per-club restore, plus two Super Admin screens:
+**Backups** (run history, current database size, downloads, restore) and
+**Backup Settings** (when the daily run happens, how long backups are kept,
+and deleting stored ones). No downtime for backup; a full restore needs a
+brief app stop only at the final cutover step; a per-club restore needs no
+downtime at all. Restore runs either over SSH or from the web — see "Restore
+from the web" below for how the web path stays safe.
 
 ## What's backed up
 
@@ -77,18 +79,67 @@ changes rarely and shouldn't live in a daily-rotated, app-readable bundle.
 5. **Confirm `age`, `zstd`, `numfmt` are installed** on the host (`apt
    install age zstd coreutils` on Debian/Ubuntu).
 
-6. Set the schedule and retention from **Super Admin → All Clubs → General
-   Settings → Backups** (defaults to 03:00 Perth/AWST time — stored as 19:00
-   UTC on the server, converted for display in the UI — 30 days retention if
-   you don't touch it) — no config file edit or redeploy needed to change
-   either. The host script itself (`backup.sh`) always compares against the
-   UTC server clock; Perth time only exists as a display convenience in the
-   General Settings form.
+6. Set the schedule and retention from **Super Admin → Clubs & Data → Backup
+   Settings** (defaults to 03:00 Perth/AWST, 30 days retention) — no config
+   file edit or redeploy needed to change either. See "The schedule is Perth
+   time" below for what that setting actually controls.
 
 7. **(Optional) Set up the backup-agent** so Super Admin gets a "Run backup
    now" button instead of needing SSH for a manual run — see the next
    section. Skip this step and the button just shows "not configured yet";
    scheduled backups and SSH manual runs work either way.
+
+## The schedule is Perth time, and it lives on one screen
+
+**Super Admin → Backup Settings** owns the daily run: what time it happens,
+how many days of bundles are kept, and what is currently stored on disk. The
+Backups page next to it stays what it was — run history, live database size,
+downloads and restore.
+
+- **Perth (AWST) end to end.** The hour and minute a super admin picks are
+  stored as-is, and the due check reads them as Perth wall-clock time. There
+  is no UTC conversion on the way in or out any more, so the screen, the
+  "next run" line and the host script cannot disagree about what 03:00
+  means. WA has no daylight saving, so a time set once is right all year.
+  All the maths is in `app/services/backup_schedule.py`.
+- **An install predating this** stored the hour in UTC with no timezone
+  marker; such a row is converted on read (+8h) so the backup keeps the
+  real-world time it already had, and the first save from the screen settles
+  it. `platform_settings.get_backup_schedule` is the only place that
+  conversion exists.
+- **A missed run is caught up, not skipped.** The rule is "the configured
+  time has passed today (Perth) and today has no completed backup yet", so a
+  box that was down at 03:00 backs up on the next tick instead of costing a
+  day. The completed-today check is what keeps the every-15-minutes timer
+  idempotent — still at most one automatic backup per Perth day. The minute
+  is honoured too, which the old hour-only comparison never did.
+- **Retention is applied by the NEXT run's prune step**, so shortening the
+  window doesn't delete anything at the moment it's saved. The stored-backup
+  list below is how a super admin frees the space straight away.
+
+## Deleting stored backups
+
+The same screen lists every bundle actually on disk — size, age, which files
+are in it, and which run wrote it — and deletes the ones a super admin
+selects. **Disk is the source of truth for that list**, not `backup_tasks`: a
+bundle from before task logging, or one whose run died part-way, is still a
+directory taking up space.
+
+- Deleting removes the FILES only. The `backup_tasks` row stays as history —
+  its sizes and per-club record counts are worth keeping — and is stamped
+  `bundle_deleted_at` / `_by` / `_reason` (migration 275). The Backups page
+  then says the files are gone and withdraws that run's download and restore
+  buttons; the server also refuses those requests outright (410), so a tab
+  left open before a delete can't fire one at nothing.
+- **The most recent bundle takes a second, separate confirmation** — it's
+  the one a restore would reach for, so a select-all can't sweep it up.
+- **Retention pruning stamps the same columns** (`backup_task
+  mark-bundle-deleted --reason retention`), so an automatically pruned run
+  reads the same way as a deliberately deleted one, minus the "who".
+- The agent does the actual removal (`POST /delete-bundle`), validated
+  against backup.sh's own timestamp shape and resolved under `BACKUP_ROOT` —
+  the same narrow, fixed-shape API as every other agent endpoint. `GET
+  /bundles` is the listing behind the screen.
 
 ## Backup-agent — enables the "Run backup now" button
 
@@ -133,10 +184,10 @@ containers on the same internal Docker network.
    Setting the `.env` value alone does nothing without this — then redeploy
    the backend so it picks up the new env vars (`deploy.sh`).
 
-The agent runs `backup.sh` (with `BACKUP_FORCE=1`) and serves already-
-encrypted bundle files back for manual download (see "Manual download"
-below) — it has no restore endpoint. See "Why restore has no UI button"
-below.
+The agent runs `backup.sh` (with `BACKUP_FORCE=1`), serves already-encrypted
+bundle files back for manual download (see "Manual download" below), lists
+what is on disk and deletes a bundle a super admin has selected — plus the
+two restore endpoints described in the next section.
 
 ## Restore from the web — how it stays safe without storing the private key
 
