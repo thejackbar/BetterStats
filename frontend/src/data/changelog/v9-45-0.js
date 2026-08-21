@@ -1,7 +1,7 @@
 export default {
   version: 'v9.45.0',
   date: '2026-08-22',
-  sortKey: '2026-08-22T05:00:00Z',
+  sortKey: '2026-08-22T05:30:00Z',
   title: 'Premierships and an Honour Board, in both codes',
   items: [
     'Premierships is a new page listing every flag the club has recorded as the squad that won it — one card per season and team, with the captain first and anyone named player of the final marked. It reads the Premiership awards already on players\' profiles, so a club that has filled in its honour roll has this page already.',
