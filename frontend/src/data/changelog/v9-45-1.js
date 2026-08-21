@@ -1,7 +1,7 @@
 export default {
-  version: 'v9.42.4.1',
+  version: 'v9.45.1',
   date: '2026-08-21',
-  sortKey: '2026-08-22T00:00:00Z',
+  sortKey: '2026-08-22T06:00:00Z',
   title: 'A second voicemail follow-up email, for offering more time on a trial',
   items: [
     'Sales Workspace, Send an Email: "Email following voicemail" is now "Email following voicemail - general", and a second entry sits under it, "Email following voicemail - offer to extend trial", for a club whose trial is running down.',
