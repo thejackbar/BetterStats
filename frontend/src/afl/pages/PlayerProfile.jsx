@@ -95,24 +95,32 @@ const STAT_TABS = [
 // club's own opt-out (Settings → Public leaderboard, whose copy is explicitly
 // about a club that "would rather keep vote counts private") — and a vote
 // count appears nowhere else on this page, so honouring the switch here is
-// what makes it mean anything. They're also dropped for a player with no
-// votes recorded at all, rather than offered as a column of dashes.
+// what makes it mean anything.
+//
+// Shown on whether the CLUB records that count (vote_boards, off the player
+// payload), not on whether this player has any. A player with none reads as
+// zeros, which is the true answer; hiding the tab for them would mean one
+// team-mate's page carries the button and the next one doesn't.
 const VOTE_TABS = [
-  { key: 'club_bf_votes', label: 'Club B&F votes', short: 'Club B&F', flag: 'public_show_club_bf_leaderboard' },
-  { key: 'comp_bf_votes', label: 'Competition B&F votes', short: 'Comp B&F', flag: 'public_show_comp_bf_leaderboard' },
+  { key: 'club_bf_votes', board: 'club', label: 'Club B&F votes', short: 'Club B&F', flag: 'public_show_club_bf_leaderboard' },
+  { key: 'comp_bf_votes', board: 'comp', label: 'Competition B&F votes', short: 'Comp B&F', flag: 'public_show_comp_bf_leaderboard' },
 ]
 
-function SeasonGradeTable({ seasonRows, gradeRows, club }) {
+function SeasonGradeTable({ seasonRows, gradeRows, club, voteBoards }) {
   const { sorted, sortKey, sortDir, request } = useSortable(seasonRows, 'year', 'desc')
   // One measure at a time. Three columns per grade would be unreadable across
   // six teams on a phone, and a club reads games, goals and BOG separately
   // anyway.
   const [stat, setStat] = useState('games')
 
+  // A payload from before vote_boards existed falls back to this player's own
+  // rows, so a stale cached response still shows a tally it does carry.
   const voteTabs = useMemo(() => VOTE_TABS.filter(t =>
     club?.[t.flag] !== false
-    && [...(seasonRows || []), ...(gradeRows || [])].some(r => (r[t.key] || 0) > 0)
-  ), [club, seasonRows, gradeRows])
+    && (voteBoards
+      ? voteBoards[t.board]
+      : [...(seasonRows || []), ...(gradeRows || [])].some(r => (r[t.key] || 0) > 0))
+  ), [club, voteBoards, seasonRows, gradeRows])
   const tabs = [...STAT_TABS, ...voteTabs]
 
   // A player with no votes, or a club that has since switched a vote board
@@ -417,7 +425,8 @@ export default function PlayerProfile() {
         <SectionTitle right={<span className="hidden sm:inline text-[10px] text-pb-faintest font-mono normal-case tracking-normal">One column per grade, with each season's total at the end</span>}>
           Season by season
         </SectionTitle>
-        <SeasonGradeTable seasonRows={seasonRows} gradeRows={gradeRows} club={club} />
+        <SeasonGradeTable seasonRows={seasonRows} gradeRows={gradeRows} club={club}
+                          voteBoards={data.vote_boards} />
       </div>
 
       <div>
