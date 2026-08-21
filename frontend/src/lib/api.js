@@ -2603,6 +2603,10 @@ export const api = {
     request(`/club-admin/website/gallery/images/${id}`, { method: 'DELETE' }),
 
   // Records
+  // Premiership squads and office-bearer boards, both read out of the
+  // honours a club has already recorded against its players.
+  getPremierships: (orgId) => request(`/honours/${orgId}/premierships`),
+  getOfficeBearers: (orgId) => request(`/honours/${orgId}/office-bearers`),
   getRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, captainOnly, gender, categories, formats } = {}) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

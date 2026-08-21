@@ -17,7 +17,7 @@ from app.auth.modules import require_module
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
-    public_club_room, sales_workspace
+    public_club_room, sales_workspace, honours
 # BetterScout — a separate tenant type (Scout Org) with its own login,
 # unrelated to the club Organisation model. Imported separately since it's a
 # submodule of routers.scout, not a top-level routers module; aliased to
@@ -5834,6 +5834,7 @@ app.include_router(players.router)
 app.include_router(games.router)
 app.include_router(leaderboard.router)
 app.include_router(records.router)
+app.include_router(honours.router)
 app.include_router(webhooks.router)
 app.include_router(admin.router)
 app.include_router(social_media.router)   # BetterSocials media library + brand kit

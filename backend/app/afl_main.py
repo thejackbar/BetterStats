@@ -54,6 +54,7 @@ from app.routers.afl import (
     votes as afl_votes,
     public_votes as afl_public_votes,
     lineups as afl_lineups,
+    honours as afl_honours,
 )
 
 logger = logging.getLogger(__name__)
@@ -412,6 +413,7 @@ app.include_router(afl_games.router)
 app.include_router(afl_players.router)
 app.include_router(afl_records.router)
 app.include_router(afl_leaderboard.router)
+app.include_router(afl_honours.router)
 app.include_router(afl_club_admin.router)
 app.include_router(afl_players_admin.router)
 app.include_router(afl_player_import.router)
