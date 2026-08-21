@@ -12,28 +12,65 @@ import { useNameFormat } from '../lib/nameFormat'
 // Premiership awards already sitting on players' profiles, so a club that has
 // filled in its honour roll gets this for nothing.
 //
-// A card is one (season, team) pair, which is what a premiership IS: a club
-// whose 1st XI and 3rd XI both won in one season gets two cards, not one squad
-// of twice the size. Cricket's twin of the football page — both read the same
-// backend service.
+// A card is one (season, team, competition). The competition is the card's own
+// title and is never repeated under each name: every player on the card
+// already means "was in the side that won this". What sits under a name is a
+// genuine part in the win — Captain, Player of the Match, 12th Man.
+// Cricket's twin of the football page; both read the same backend service.
 
-function PlayerLine({ player, fmt }) {
+// A photo where the club holds one, the club crest where it doesn't, so a
+// squad never renders as a column of blank circles. Same pattern the Lineups
+// page uses, and the same reason: a hotlinked photo can 404 at any time.
+function Avatar({ photoUrl, logoUrl, name, size = 26 }) {
+  const [failed, setFailed] = useState(false)
+  if (photoUrl && !failed) {
+    return (
+      <img src={photoUrl} alt="" onError={() => setFailed(true)}
+           className="shrink-0 rounded-full object-cover bg-pb-surface2"
+           style={{ width: size, height: size }} />
+    )
+  }
+  const initials = (name || '?').replace(/,/g, ' ').trim().split(/\s+/)
+    .slice(0, 2).map(w => w[0]).join('').toUpperCase()
+  if (logoUrl) {
+    return <img src={logoUrl} alt="" className="shrink-0 rounded-full object-contain bg-pb-surface2"
+                style={{ width: size, height: size }} />
+  }
+  return (
+    <span className="shrink-0 rounded-full grid place-items-center font-semibold"
+          style={{ width: size, height: size, fontSize: Math.round(size * 0.38),
+                   background: 'color-mix(in srgb, var(--pb-accent) 14%, transparent)',
+                   color: 'var(--pb-accent)' }}>
+      {initials}
+    </span>
+  )
+}
+
+function PlayerLine({ player, logoUrl, fmt }) {
   const name = fmt(player.name)
   const extra = [...player.roles, player.detail].filter(Boolean).join(' · ')
+  const body = (
+    <>
+      <Avatar photoUrl={player.photo_url} logoUrl={logoUrl} name={player.name} />
+      {/* min-w-0 + truncate: a long name is cut with an ellipsis rather than
+          wrapping onto a second line and breaking the grid's rhythm. The
+          title attribute keeps the whole name reachable. */}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate" title={player.name}>{name}</span>
+        {extra && (
+          <span className="block truncate font-mono text-[10px] tracking-wide2 uppercase"
+                title={extra} style={{ color: 'var(--pb-accent)' }}>{extra}</span>
+        )}
+      </span>
+    </>
+  )
+  const cls = 'flex items-center gap-2 min-w-0 py-0.5'
   return (
     <li className="min-w-0">
       {player.player_id
         ? <Link to={`/players/${player.player_id}`}
-                className="text-pb-text hover:text-pb-accent transition-colors">{name}</Link>
-        : <span className="text-pb-text">{name}</span>}
-      {/* A part beyond "was in the side" — captain, player of the final —
-          plus whatever the club typed against the row. The plain Premiership
-          award is what every name on the card already means, so it is not
-          repeated under each one. */}
-      {extra && (
-        <span className="block font-mono text-[10px] tracking-wide2 uppercase"
-              style={{ color: 'var(--pb-accent)' }}>{extra}</span>
-      )}
+                className={`${cls} text-pb-text hover:text-pb-accent transition-colors`}>{body}</Link>
+        : <span className={`${cls} text-pb-text`}>{body}</span>}
     </li>
   )
 }
@@ -102,18 +139,27 @@ export default function Premierships() {
 
             <div className="space-y-4">
               {shown.map(p => (
-                <div key={`${p.season}|${p.team}`} className="pb-card overflow-hidden">
-                  <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40 flex flex-wrap items-center gap-3">
+                <div key={`${p.season}|${p.team}|${p.competition}`} className="pb-card overflow-hidden">
+                  <div className="px-4 sm:px-5 py-3 pb-hairline-b bg-pb-surface2/40 flex flex-wrap items-baseline gap-x-3 gap-y-1">
                     <Label style={{ color: 'var(--pb-accent)' }}>
                       {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                     </Label>
-                    <span className="ml-auto font-mono text-[11px] text-pb-faint">
+                    {/* The competition the flag was won in — the card's own
+                        title, which is why it is not repeated under every
+                        name below. */}
+                    {p.competition && (
+                      <span className="min-w-0 truncate text-[13px] text-pb-dim" title={p.competition}>
+                        {p.competition}
+                      </span>
+                    )}
+                    <span className="sm:ml-auto font-mono text-[11px] text-pb-faint whitespace-nowrap">
                       {p.player_count} player{p.player_count === 1 ? '' : 's'}
                     </span>
                   </div>
-                  <ul className="px-5 py-4 grid gap-x-6 gap-y-2 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
+                  <ul className="px-4 sm:px-5 py-4 grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2 lg:grid-cols-3">
                     {p.players.map(pl => (
-                      <PlayerLine key={pl.player_id || pl.name} player={pl} fmt={fmt} />
+                      <PlayerLine key={pl.player_id || pl.name} player={pl}
+                                  logoUrl={club?.logo_url} fmt={fmt} />
                     ))}
                   </ul>
                 </div>

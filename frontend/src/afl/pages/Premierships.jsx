@@ -8,9 +8,10 @@ import { SectionTitle, PlayerCell, Select } from '../components/bits'
 // the Premiership awards already sitting on players' profiles, so nothing is
 // entered twice.
 //
-// A card is one (season, team) pair, which is what a premiership IS: a club
-// whose Seniors and Reserves both won in one year gets two cards, not one
-// squad of twice the size.
+// A card is one (season, team, competition). The competition is the card's own
+// title and is never repeated under each name: every player on the card
+// already means "was in the side that won this". What sits under a name is a
+// genuine part in the win — Captain, Best on Ground, 12th Man.
 export default function Premierships() {
   const { club } = useOutletContext()
   const [data, setData] = useState(null)
@@ -56,26 +57,33 @@ export default function Premierships() {
           </p>
           <div className="space-y-5">
             {shown.map(p => (
-              <div key={`${p.season}|${p.team}`}>
+              <div key={`${p.season}|${p.team}|${p.competition}`}>
                 <SectionTitle right={
-                  <span className="font-mono text-[10px] text-pb-faintest normal-case tracking-normal">
+                  <span className="font-mono text-[10px] text-pb-faintest normal-case tracking-normal whitespace-nowrap">
                     {p.player_count} player{p.player_count === 1 ? '' : 's'}
                   </span>
                 }>
                   {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                 </SectionTitle>
+                {/* The competition the flag was won in — the card's own title,
+                    which is why it is not repeated under every name below. */}
+                {p.competition && (
+                  <p className="-mt-1 mb-1.5 truncate text-[13px] text-pb-dim" title={p.competition}>
+                    {p.competition}
+                  </p>
+                )}
                 <div className="pb-card p-4">
                   <ul className="grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
                     {p.players.map(pl => (
                       <li key={pl.player_id || pl.name} className="min-w-0 text-sm">
                         <PlayerCell id={pl.player_id} name={pl.name} base={base} photoUrl={pl.photo_url} />
-                        {/* A role beyond "was in the side" — captain, best on
-                            ground — plus whatever the club typed against the
-                            row. The plain Premiership award itself is what
-                            every name here already means, so it isn't
-                            repeated under each one. */}
+                        {/* A part in the win beyond being in the side —
+                            captain, best on ground — however the club
+                            recorded it. Truncated rather than wrapped, so a
+                            long note can't push the grid out of rhythm. */}
                         {(pl.roles.length > 0 || pl.detail) && (
-                          <span className="block pl-8 font-mono text-[10px] uppercase tracking-wide text-[var(--pb-accent)]">
+                          <span className="block pl-8 truncate font-mono text-[10px] uppercase tracking-wide text-[var(--pb-accent)]"
+                                title={[...pl.roles, pl.detail].filter(Boolean).join(' · ')}>
                             {[...pl.roles, pl.detail].filter(Boolean).join(' · ')}
                           </span>
                         )}

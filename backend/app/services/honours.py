@@ -73,9 +73,42 @@ _SQUAD_ROLE_PRIORITY = {
     "best on ground - grand final": 2,
     "coach": 3,
 }
-# The plain "they were in the side" award, which is not worth printing under
-# somebody's name — it is what every row on the card already means.
-_PLAIN_SQUAD_AWARDS = {"premiership", "premierships", "player"}
+# The award that just means "they were in the side that won it". A real club
+# spells this as the competition — "3rd Grade Two Day Premiership", "PSWL
+# South A Premiership" — not the bare word, so this matches on the ENDING
+# rather than a fixed list, which is what a fixed list kept missing. What it
+# catches becomes the card's own title; what it doesn't (Captain, Player of
+# the Match, 12th Man) is a genuine part in the win and sits under the name.
+_PREMIERSHIP_AWARD_RE = re.compile(r"premiership(s)?$", re.I)
+
+
+def is_premiership_award(name: Optional[str]) -> bool:
+    return bool(_PREMIERSHIP_AWARD_RE.search((name or "").strip()))
+
+
+def _competition_title(label: str) -> Optional[str]:
+    """The competition a flag was won in, where the club named one.
+
+    A club that records the bare word "Premiership" has named nothing — that
+    is the page's own subject, and printing it as the card's title would say
+    the same thing twice. It still keys the group; it just isn't shown.
+    """
+    stripped = _PREMIERSHIP_AWARD_RE.sub("", label).strip(" -–—:")
+    return label if stripped else None
+
+
+# A club types its own season label, and "2025_26" is a real one. The
+# underscore is a filename convention that escaped into a heading; it means
+# the same season a slash does, so it is shown the way a season is written.
+_SEASON_UNDERSCORE_RE = re.compile(r"^(\d{4})[_](\d{2}|\d{4})$")
+
+
+def season_label(raw: Optional[str]) -> Optional[str]:
+    s = (raw or "").strip()
+    if not s:
+        return None
+    m = _SEASON_UNDERSCORE_RE.match(s)
+    return f"{m.group(1)}/{m.group(2)}" if m else s
 
 
 def year_of(label: Optional[str], year: Optional[int] = None) -> Optional[int]:
@@ -152,9 +185,17 @@ async def _renames(db: AsyncSession, org_id: uuid.UUID) -> dict:
 async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
     """Every flag the club has recorded, as the squad that won it.
 
-    A flag is one (season, team) pair — that pairing IS the premiership, so a
-    club whose Seniors and Reserves both won in one year gets two cards rather
-    than one squad of twice the size.
+    A flag is one (season, team, COMPETITION) — the competition is in the key
+    because a club can win two in one season with the one side: Applecross's
+    Women's A took both the PSWL Spring South and the PSWL Summer South flags
+    in 2019/20, and keyed on (season, team) alone those became a single card
+    claiming an 18-player squad. Two flags are two cards.
+
+    The competition is the CARD'S OWN TITLE and is never repeated under each
+    player: every name on the card already means "was in the side that won
+    this". What does sit under a name is a genuine part in the win — Captain,
+    Player of the Match, 12th Man — whether the club recorded it as its own
+    award row or typed it in the note beside the player.
 
     Somebody recorded only as that side's Captain is in the squad like anyone
     else: they plainly played, and a card that lists the team but leaves out
@@ -169,19 +210,22 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
     for r in rows:
         if not r["name"]:
             continue
-        season = (r["season_name"] or "").strip()
+        season = season_label(r["season_name"])
         team = (r["subcategory"] or "").strip()
-        key = (season.lower(), team.lower())
+        # The club's own label for this award, where it has renamed one.
+        label = (renames.get((PREMIERSHIP_CATEGORY, team, r["achievement"]))
+                 or r["achievement"] or "").strip()
+        is_flag = is_premiership_award(label)
+        key = ((season or "").lower(), team.lower(), label.lower() if is_flag else "")
         g = groups.get(key)
         if g is None:
             g = groups[key] = {
-                "season": season or None,
+                "season": season,
                 "year": year_of(season, r["season_year"]),
                 "team": team or None,
+                "competition": _competition_title(label) if is_flag else None,
                 "players": {},
             }
-        # The club's own label for this award, where it has renamed one.
-        label = renames.get((PREMIERSHIP_CATEGORY, team, r["achievement"])) or r["achievement"]
         pkey = _person_key(r["player_id"], r["name"])
         p = g["players"].get(pkey)
         if p is None:
@@ -192,19 +236,47 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
                 "roles": [],
                 "detail": None,
             }
-        if label and (label or "").strip().lower() not in _PLAIN_SQUAD_AWARDS:
-            if label not in p["roles"]:
-                p["roles"].append(label)
-        # A note the club typed against the row ("12th man", "played 3") is
-        # the club's own words and outranks nothing — it just rides along.
+        if label and not is_flag and label not in p["roles"]:
+            p["roles"].append(label)
+        # A note the club typed against the row ("Player of the Match /
+        # Captain", "12th player") is where a real club records the part
+        # somebody played, so it is read as a role rather than a footnote.
         if r["detail"] and not p["detail"]:
             p["detail"] = r["detail"]
+
+    # A club that records a side's captain as its own award row leaves that
+    # row with no competition of its own. Where the (season, team) has exactly
+    # one flag, that is plainly the one they captained, so they join it rather
+    # than standing alone as a one-person card. Where there are two, nothing
+    # in the data says which, so it is left as its own group rather than
+    # guessed at.
+    for key in [k for k in groups if not k[2]]:
+        season_l, team_l, _ = key
+        flags = [k for k in groups if k[0] == season_l and k[1] == team_l and k[2]]
+        if len(flags) != 1:
+            continue
+        loose = groups.pop(key)
+        target = groups[flags[0]]
+        for pkey, p in loose["players"].items():
+            existing = target["players"].get(pkey)
+            if existing is None:
+                target["players"][pkey] = p
+                continue
+            for role in p["roles"]:
+                if role not in existing["roles"]:
+                    existing["roles"].append(role)
+            if p["detail"] and not existing["detail"]:
+                existing["detail"] = p["detail"]
 
     out = []
     for g in groups.values():
         players = list(g["players"].values())
         players.sort(key=lambda p: (
-            min((_SQUAD_ROLE_PRIORITY.get(x.lower(), 50) for x in p["roles"]), default=50),
+            # A part played counts however the club recorded it — as its own
+            # award row, or typed into the note as "Player of the Match /
+            # Captain", which is why the note is split on the slash too.
+            min((_SQUAD_ROLE_PRIORITY.get(x.strip().lower(), 50)
+                 for x in [*p["roles"], *(p["detail"] or "").split("/")]), default=50),
             _sort_name(p["name"]),
         ))
         out.append({**g, "players": players, "player_count": len(players)})
@@ -212,7 +284,8 @@ async def premiership_squads(db: AsyncSession, org_id: uuid.UUID) -> dict:
     # Newest first, and a flag whose season nobody recorded sorts last rather
     # than reading as year zero at the top of the page.
     out.sort(key=lambda g: (g["year"] is None, -(g["year"] or 0),
-                            (g["team"] or "").lower()))
+                            (g["team"] or "").lower(),
+                            (g["competition"] or "").lower()))
     return {"premierships": out}
 
 
