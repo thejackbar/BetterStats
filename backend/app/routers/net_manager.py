@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import csv
 import io
+import secrets
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional
@@ -48,10 +49,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
 from app.models.db import (
-    NetAttendance, NetSession, Organisation, Player, User, get_db,
+    NetAttendance, NetCheckInRegistration, NetSession, Organisation, Player, User, get_db,
 )
 from app.routers.auth import get_current_club
-from app.routers.availability import active_self_service_players
+from app.routers.availability import active_self_service_players, phone_last4
 
 router = APIRouter(prefix="/nets", tags=["net-manager"])
 
@@ -271,6 +272,12 @@ def _touch(s: NetSession) -> None:
     s.updated_at = func.now()
 
 
+# The same bump, under a name the public check-in router can import without
+# reaching for a private one. A self check-in has to move the version too, or
+# the iPad's next poll is told nothing changed and never shows the arrival.
+touch_session = _touch
+
+
 async def _attendee_rows(db: AsyncSession, session_id) -> list[NetAttendance]:
     """Every attendee in queue order: still waiting first, then those who have
     had their turn, each in `position` order."""
@@ -320,6 +327,11 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
             "is_guest": r.player_id is None,
             "batted": bool(r.batted),
             "position": r.position,
+            # 'admin' or 'self' — what lets the live screen announce someone
+            # who scanned themselves in and stay quiet for a name the manager
+            # just tapped. Rows written before migration 272 read 'admin',
+            # which is what they were.
+            "source": r.source or "admin",
         })
 
     settings = _clean_settings(s.settings)
@@ -338,6 +350,94 @@ async def _live_payload(db: AsyncSession, s: NetSession) -> dict:
         "batted_count": sum(1 for a in attendees if a["batted"]),
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+
+
+async def live_sessions(db: AsyncSession, club_id) -> list[NetSession]:
+    """The sessions a person scanning the QR code right now should be added to.
+
+    Every ACTIVE session dated within a day either side of today. Not just
+    "today": the app holds no per-club timezone, so a club whose evening is the
+    server's tomorrow would otherwise scan in to nothing, and a session opened
+    the night before for an early start is an ordinary thing to do. The window
+    is deliberately narrow at both ends — a session somebody forgot to mark
+    done last week must not quietly collect tonight's arrivals.
+
+    Ordered oldest-first so a club running two overlapping sessions gets a
+    stable answer whichever device asks.
+    """
+    today = datetime.now(timezone.utc).date()
+    res = await db.execute(
+        select(NetSession)
+        .where(
+            NetSession.organisation_id == club_id,
+            NetSession.status == "active",
+            NetSession.session_date >= today - timedelta(days=1),
+            NetSession.session_date <= today + timedelta(days=1),
+        )
+        .order_by(NetSession.session_date.asc(), NetSession.created_at.asc())
+    )
+    return list(res.scalars().all())
+
+
+async def check_in_person(
+    db: AsyncSession,
+    s: NetSession,
+    club_id,
+    *,
+    player_id=None,
+    guest_name: Optional[str] = None,
+    source: str = "admin",
+) -> Optional[NetAttendance]:
+    """Put one person at the back of a session's queue, and flush.
+
+    The ONE place a check-in is written, shared by the manager tapping a name
+    on the iPad and by the player scanning the QR code on the way in — two
+    copies of this is how the two paths start disagreeing about what a
+    check-in is.
+
+    Returns the new row, or None when the person was already checked in. That
+    is a no-op rather than an error at both levels: an app-level read for the
+    ordinary case, and IntegrityError on the unique index for two devices
+    landing in the same second. **The caller must not touch a lazily-loaded
+    attribute after a None caused by the rollback** — that path expires every
+    loaded object, which is why club_id is passed in rather than read off the
+    club here.
+
+    Does not commit. The caller decides, because a self check-in writes
+    several sessions' rows in one transaction.
+    """
+    if player_id is not None:
+        existing = await db.execute(
+            select(NetAttendance).where(
+                NetAttendance.session_id == s.id,
+                NetAttendance.player_id == player_id,
+            )
+        )
+        if existing.scalar_one_or_none() is not None:
+            return None
+
+    rows = await _attendee_rows(db, s.id)
+    waiting = [r for r in rows if not r.batted]
+    row = NetAttendance(
+        id=uuid.uuid4(),
+        session_id=s.id,
+        organisation_id=club_id,
+        player_id=player_id,
+        guest_name=guest_name,
+        batted=False,
+        position=len(waiting),
+        source=source if source in ("admin", "self") else "admin",
+    )
+    db.add(row)
+    try:
+        await db.flush()
+    except IntegrityError:
+        # Two people tapped the same name in the same second, so the read above
+        # couldn't see the other's row yet and the unique index caught it. Same
+        # answer as the check above: they're in, once.
+        await db.rollback()
+        return None
+    return row
 
 
 async def _commit_live(db: AsyncSession, s: NetSession) -> dict:
@@ -583,25 +683,14 @@ async def add_attendee(
         if not guest:
             raise HTTPException(status_code=422, detail="Give the guest a name")
 
-    rows = await _attendee_rows(db, s.id)
-    waiting = [r for r in rows if not r.batted]
-    db.add(NetAttendance(
-        id=uuid.uuid4(),
-        session_id=s.id,
-        organisation_id=club_id,
-        player_id=pid,
-        guest_name=guest,
-        batted=False,
-        position=len(waiting),
-    ))
-    try:
-        await db.flush()
-    except IntegrityError:
-        # Two coaches tapped the same name in the same second, so the read above
-        # couldn't see the other's row yet and the unique index caught it. Same
-        # answer as the check above: they're in, once. Verified by racing three
-        # simultaneous check-ins of one player against a real Postgres.
-        await db.rollback()
+    row = await check_in_person(
+        db, s, club_id, player_id=pid, guest_name=guest, source="admin",
+    )
+    if row is None:
+        # Already in, or the unique index caught a simultaneous tap — and that
+        # path rolled back, so re-read the session rather than using the stale
+        # object. Verified by racing three simultaneous check-ins of one player
+        # against a real Postgres.
         s = await _owned_session(db, session_id, club_id)
         return await _live_payload(db, s)
     await _renumber(db, s.id)
@@ -1019,3 +1108,268 @@ async def player_attendance(
         "last_attended": sessions[0]["session_date"] if sessions else None,
         "sessions": sessions,
     }
+
+
+# ── The self check-in link (QR code / NFC tag) ───────────────────────────────
+# Mirrors availability's self-service panel: the backend hands back a PATH and
+# the admin screen prefixes window.location.origin, so one token serves the
+# printed QR code and the NFC tag alike. The public side of this lives in
+# routers/public_net_checkin.py.
+class CheckInLinkUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    require_pin: Optional[bool] = None
+    allow_registration: Optional[bool] = None
+
+
+async def _checkin_link_payload(db: AsyncSession, club: Organisation) -> dict:
+    players = await active_self_service_players(db, club)
+    with_phone = sum(1 for p in players if phone_last4(p.phone))
+    pending = await db.execute(
+        select(func.count(NetCheckInRegistration.id)).where(
+            NetCheckInRegistration.organisation_id == club.id,
+            NetCheckInRegistration.status == "pending",
+        )
+    )
+    return {
+        "enabled": bool(club.net_checkin_enabled),
+        "require_pin": bool(club.net_checkin_require_pin),
+        "allow_registration": bool(club.net_checkin_allow_registration),
+        "token": club.net_checkin_token,
+        "path": f"/nets-checkin/{club.net_checkin_token}" if club.net_checkin_token else None,
+        # A club whose players have no phone numbers on file cannot use the PIN
+        # gate, and should be told that before they turn it on rather than
+        # after nobody can check in.
+        "phone_coverage": {"with_phone": with_phone, "total": len(players)},
+        "pending_registrations": int(pending.scalar() or 0),
+    }
+
+
+@router.get("/checkin-link")
+async def get_checkin_link(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    return await _checkin_link_payload(db, club)
+
+
+@router.post("/checkin-link")
+async def set_checkin_link(
+    body: CheckInLinkUpdate,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    if body.enabled is not None:
+        club.net_checkin_enabled = bool(body.enabled)
+    if body.require_pin is not None:
+        club.net_checkin_require_pin = bool(body.require_pin)
+    if body.allow_registration is not None:
+        club.net_checkin_allow_registration = bool(body.allow_registration)
+    # Minted lazily on first enable, so a club that never turns this on never
+    # has a live link sitting on its row.
+    if club.net_checkin_enabled and not club.net_checkin_token:
+        club.net_checkin_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _checkin_link_payload(db, club)
+
+
+@router.post("/checkin-link/regenerate")
+async def regenerate_checkin_link(
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """New token. Every printed QR code and every NFC tag already stuck to the
+    gate stops working the moment this returns — which is the point, and why
+    the screen confirms first."""
+    club.net_checkin_token = secrets.token_urlsafe(24)
+    await db.commit()
+    await db.refresh(club)
+    return await _checkin_link_payload(db, club)
+
+
+# ── New people who scanned in ────────────────────────────────────────────────
+class RegistrationDecision(BaseModel):
+    # Set to fold this registration into somebody already on the roster (they
+    # were here all along under a different spelling). Omitted, a new player
+    # row is created from what they typed.
+    player_id: Optional[str] = None
+
+
+def _registration_card(r: NetCheckInRegistration, player_name: Optional[str] = None) -> dict:
+    return {
+        "id": str(r.id),
+        "full_name": r.full_name,
+        "phone": r.phone,
+        "email": r.email,
+        "date_of_birth": r.date_of_birth.isoformat() if r.date_of_birth else None,
+        "previous_club": r.previous_club,
+        "status": r.status,
+        "player_id": str(r.player_id) if r.player_id else None,
+        "player_name": player_name,
+        "session_id": str(r.session_id) if r.session_id else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "reviewed_at": r.reviewed_at.isoformat() if r.reviewed_at else None,
+    }
+
+
+@router.get("/registrations")
+async def list_registrations(
+    status: str = Query("pending"),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Everyone who scanned in without being on the list, newest first."""
+    q = select(NetCheckInRegistration).where(
+        NetCheckInRegistration.organisation_id == club.id
+    )
+    if status in ("pending", "approved", "dismissed"):
+        q = q.where(NetCheckInRegistration.status == status)
+    res = await db.execute(
+        q.order_by(NetCheckInRegistration.created_at.desc()).limit(limit)
+    )
+    rows = list(res.scalars().all())
+
+    names: dict = {}
+    pids = [r.player_id for r in rows if r.player_id]
+    if pids:
+        pr = await db.execute(select(Player).where(Player.id.in_(pids)))
+        names = {p.id: p.display_name for p in pr.scalars().all()}
+
+    pending = await db.execute(
+        select(func.count(NetCheckInRegistration.id)).where(
+            NetCheckInRegistration.organisation_id == club.id,
+            NetCheckInRegistration.status == "pending",
+        )
+    )
+    return {
+        "registrations": [_registration_card(r, names.get(r.player_id)) for r in rows],
+        "pending_count": int(pending.scalar() or 0),
+    }
+
+
+async def _owned_registration(db: AsyncSession, reg_id: str, club_id) -> NetCheckInRegistration:
+    try:
+        rid = uuid.UUID(str(reg_id))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Registration not found")
+    r = await db.get(NetCheckInRegistration, rid)
+    if not r or r.organisation_id != club_id:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    return r
+
+
+@router.post("/registrations/{reg_id}/approve")
+async def approve_registration(
+    reg_id: str,
+    body: RegistrationDecision,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Turn a scanned-in stranger into a real player.
+
+    Either creates a player from what they typed, or — with `player_id` —
+    points the registration at somebody already on the roster who turned out
+    to be the same person under a different spelling.
+
+    **Their guest attendance row is converted, never duplicated**: the row that
+    already says they turned up tonight has its `player_id` filled in and its
+    `guest_name` cleared, so the session they scanned into keeps exactly the
+    attendance it had and the night now counts towards the player's own tally.
+    A club that already had that player checked in separately keeps the
+    original row and the guest row is dropped, since the unique index would
+    refuse the pair and two rows for one person is the wrong answer anyway.
+    """
+    club_id = club.id
+    r = await _owned_registration(db, reg_id, club_id)
+    if r.status != "pending":
+        raise HTTPException(status_code=409, detail="Already dealt with")
+
+    if body.player_id:
+        try:
+            cand = uuid.UUID(str(body.player_id))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Unknown player")
+        player = await db.get(Player, cand)
+        if not player or player.organisation_id != club_id:
+            raise HTTPException(status_code=422, detail="Unknown player")
+    else:
+        # Stored "Last, First" like every other player row, so the roster sorts
+        # and reads the same however the person got there. A mononym is stored
+        # as typed — same rule the rest of the app follows.
+        typed = (r.full_name or "").strip()
+        parts = typed.split()
+        name = f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else typed
+        player = Player(
+            id=uuid.uuid4(),
+            organisation_id=club_id,
+            name=name or typed,
+            phone=r.phone,
+            email=r.email,
+            date_of_birth=r.date_of_birth,
+            status="active",
+        )
+        db.add(player)
+        await db.flush()
+
+    touched: list[NetSession] = []
+    if r.attendance_id:
+        row = await db.get(NetAttendance, r.attendance_id)
+        if row is not None and row.organisation_id == club_id:
+            clash = await db.execute(
+                select(NetAttendance).where(
+                    NetAttendance.session_id == row.session_id,
+                    NetAttendance.player_id == player.id,
+                )
+            )
+            s = await db.get(NetSession, row.session_id)
+            if clash.scalar_one_or_none() is not None:
+                # They were already checked in properly as well. Keep the real
+                # row, drop the duplicate guest one.
+                await db.delete(row)
+            else:
+                row.player_id = player.id
+                row.guest_name = None
+            if s is not None:
+                touched.append(s)
+
+    r.status = "approved"
+    r.player_id = player.id
+    r.reviewed_by = user.id
+    r.reviewed_at = datetime.now(timezone.utc)
+
+    for s in touched:
+        _touch(s)
+    await db.commit()
+    return {
+        "status": "ok",
+        "player_id": str(player.id),
+        "player_name": player.display_name,
+    }
+
+
+@router.post("/registrations/{reg_id}/dismiss")
+async def dismiss_registration(
+    reg_id: str,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_cap(MANAGE_SELECTIONS)),
+):
+    """Not someone the club wants on the roster.
+
+    The guest attendance row is deliberately LEFT ALONE. They did turn up, the
+    session's own record of the night should say so, and dismissing a
+    registration is a decision about the roster rather than a claim that the
+    evening did not happen.
+    """
+    r = await _owned_registration(db, reg_id, club.id)
+    if r.status != "pending":
+        raise HTTPException(status_code=409, detail="Already dealt with")
+    r.status = "dismissed"
+    r.reviewed_by = user.id
+    r.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok"}
