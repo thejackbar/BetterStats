@@ -24,7 +24,12 @@ from app.services import email_service
 TEMPLATE_LABELS = {
     "information": "Send information",
     "voicemail_followup": "Email following voicemail - general",
-    "voicemail_followup_extend_trial": "Email following voicemail - offer to extend trial",
+    # Approaching expiry comes FIRST: it is the earlier moment in a trial, and
+    # a rep works down this list in the order the club's trial is running out.
+    "voicemail_followup_extend_trial_soon":
+        "Email following voicemail. Trial approaching expiry - offer to extend trial",
+    "voicemail_followup_extend_trial":
+        "Email following voicemail. Trial already expired - offer to extend trial",
     "trial_information": "Trial information",
     "trial_extension": "Confirmation of trial extension",
     "demo": "Book a demo",
@@ -42,6 +47,14 @@ TEMPLATE_DB_NAMES = {
     "custom": "Custom sales rep email",
     "subscribe": "Sales rep subscribe link",
     "trial_extension": "Sales rep trial extension",
+    # The two extend-trial rows carry a shorter name than their dropdown text,
+    # because the Templates list already prints "Sales: <dropdown label>" as
+    # the caption underneath — repeating the whole sentence in the name would
+    # say the same thing twice on one row.
+    "voicemail_followup_extend_trial_soon":
+        "Email following voicemail. Trial approaching expiry - offer to extend",
+    "voicemail_followup_extend_trial":
+        "Email following voicemail. Trial expired - offer to extend",
 }
 
 
@@ -54,7 +67,8 @@ def _db_name(key: str) -> Optional[str]:
 # the rest: pre-filled from its own editable template, which the rep edits
 # in Design mode rather than starting from nothing.
 BUILT_IN_TEMPLATES = (
-    "information", "voicemail_followup", "voicemail_followup_extend_trial", "trial_information",
+    "information", "voicemail_followup", "voicemail_followup_extend_trial_soon",
+    "voicemail_followup_extend_trial", "trial_information",
     "trial_extension", "demo", "subscribe", "custom",
 )
 
@@ -130,21 +144,40 @@ def _render_template_hardcoded(
             f"Have a look through what's on offer: {base} "
             "Happy to answer any questions — just reply to this email, or give me a call back."
         )
-    elif key == "voicemail_followup_extend_trial":
+    elif key == "voicemail_followup_extend_trial_soon":
         subject = f"BetterCricket for {club_name} - more time on your trial"
         body = (
             f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
-            f"but couldn't get through, so I've left a voicemail. If {club_name} needs more time "
-            "on its BetterCricket trial, I'm happy to extend it. Just reply and let me know.</p>"
+            f"but couldn't get through, so I've left a voicemail. {club_name}'s BetterCricket "
+            "trial finishes shortly, and if you need longer with it I'm happy to extend it. "
+            "Just reply and let me know.</p>"
             '<p style="font-size:14px;line-height:1.5">In the meantime you can pick up where you left off:</p>'
             + _button("Log in to BetterCricket", f"{base}/login")
             + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
         )
         text = (
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
-            f"voicemail. If {club_name} needs more time on its BetterCricket trial, I'm happy to "
-            "extend it. Just reply and let me know. In the meantime you can pick up where you "
-            f"left off: {base}/login "
+            f"voicemail. {club_name}'s BetterCricket trial finishes shortly, and if you need "
+            "longer with it I'm happy to extend it. Just reply and let me know. In the meantime "
+            f"you can pick up where you left off: {base}/login "
+            "Happy to answer any questions — just reply to this email, or give me a call back."
+        )
+    elif key == "voicemail_followup_extend_trial":
+        subject = f"BetterCricket for {club_name} - more time on your trial"
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
+            f"but couldn't get through, so I've left a voicemail. {club_name}'s BetterCricket "
+            "trial has finished, and if you did not get a proper run at it I'm happy to put it "
+            "back on for a bit longer. Just reply and let me know.</p>"
+            '<p style="font-size:14px;line-height:1.5">Everything you set up is still there:</p>'
+            + _button("Log in to BetterCricket", f"{base}/login")
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+        )
+        text = (
+            f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
+            f"voicemail. {club_name}'s BetterCricket trial has finished, and if you did not get a "
+            "proper run at it I'm happy to put it back on for a bit longer. Just reply and let me "
+            f"know. Everything you set up is still there: {base}/login "
             "Happy to answer any questions — just reply to this email, or give me a call back."
         )
     elif key == "trial_information":
@@ -267,12 +300,29 @@ _SEED_BODY = {
     # offering the club more time on its trial. The button goes to /login
     # rather than the marketing site: the club already has an account, so
     # what they need is a way back into it.
+    #
+    # There are two of these because the two moments read differently to the
+    # club: a trial with days left on it is offered an extension, one that
+    # has already run out is offered another go. Same shell, one paragraph
+    # apart — a rep can edit either in Comms -> Templates.
+    "voicemail_followup_extend_trial_soon": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
+        "{{club}}'s BetterCricket trial finishes shortly, and if you need longer with it "
+        "I'm happy to extend it. Just reply and let me know.</p>"
+        "<p>In the meantime you can pick up where you left off:</p>"
+        '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Log in to BetterCricket</a></p>'
+        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
     "voicemail_followup_extend_trial": (
         "<p>Hi {{first_name}},</p>"
         "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
-        "If {{club}} needs more time on its BetterCricket trial, I'm happy to extend it. "
-        "Just reply and let me know.</p>"
-        "<p>In the meantime you can pick up where you left off:</p>"
+        "{{club}}'s BetterCricket trial has finished, and if you did not get a proper run at it "
+        "I'm happy to put it back on for a bit longer. Just reply and let me know.</p>"
+        "<p>Everything you set up is still there:</p>"
         '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">Log in to BetterCricket</a></p>'
@@ -465,6 +515,7 @@ _SEED_BODY = {
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
     "voicemail_followup": "BetterCricket for {{club}} - following up",
+    "voicemail_followup_extend_trial_soon": "BetterCricket for {{club}} - more time on your trial",
     "voicemail_followup_extend_trial": "BetterCricket for {{club}} - more time on your trial",
     "trial_information": "Start your free BetterCricket trial - {{club}}",
     "trial_extension": "Your BetterCricket trial extension for {{club}}",
@@ -495,15 +546,30 @@ async def seed_sales_templates(session) -> int:
     # name, so a super admin who has since renamed this row themselves keeps
     # their own name — the dropdown resolves by sales_template_key, not by
     # name, so nothing breaks either way.
-    await session.execute(
-        _text("""
-            UPDATE comms_templates SET name = :new_name
-            WHERE organisation_id = :org_id
-              AND sales_template_key = 'voicemail_followup'
-              AND name = 'Email following voicemail'
-        """),
-        {"org_id": org.id, "new_name": TEMPLATE_LABELS["voicemail_followup"]},
-    )
+    # Each entry is (key, the name this row was seeded with before it was
+    # renamed, the name it should carry now). Guarded on the OLD default name,
+    # so a super admin who has since renamed the row themselves keeps their own
+    # — the dropdown resolves by sales_template_key, not by name, so nothing
+    # breaks either way.
+    for _key, _was, _now in (
+        # Renamed when the offer-to-extend-trial sibling was added, so the two
+        # could be told apart in Comms -> Templates.
+        ("voicemail_followup", "Email following voicemail",
+         TEMPLATE_LABELS["voicemail_followup"]),
+        # Renamed again when a SECOND extend-trial email was added, for a
+        # trial approaching expiry rather than one already over.
+        ("voicemail_followup_extend_trial", "Email following voicemail - offer to extend trial",
+         TEMPLATE_DB_NAMES["voicemail_followup_extend_trial"]),
+    ):
+        await session.execute(
+            _text("""
+                UPDATE comms_templates SET name = :new_name
+                WHERE organisation_id = :org_id
+                  AND sales_template_key = :key
+                  AND name = :old_name
+            """),
+            {"org_id": org.id, "key": _key, "old_name": _was, "new_name": _now},
+        )
     total = 0
     for key in BUILT_IN_TEMPLATES:
         result = await session.execute(

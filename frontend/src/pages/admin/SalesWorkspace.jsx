@@ -999,7 +999,8 @@ export default function SalesWorkspace() {
   // 'custom' opens the same way as the other three now — pre-filled from its
   // own editable template ("Custom sales rep email" in Comms -> Templates)
   // in the Design editor, not a blank plain-text form.
-  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'voicemail_followup', 'voicemail_followup_extend_trial',
+  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'voicemail_followup',
+    'voicemail_followup_extend_trial_soon', 'voicemail_followup_extend_trial',
     'trial_information', 'trial_extension', 'demo', 'subscribe', 'custom']
 
   useEffect(() => {

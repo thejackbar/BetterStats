@@ -3994,6 +3994,33 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   full-page editor with no surrounding sidebar (it always was); the BetterStats
   nav links to it but the page itself doesn't wrap in `BetterStatsLayout`.
 
+## Two voicemail follow-ups, for a trial running down and one already over (v9.46.1, Aug 2026)
+
+`voicemail_followup_extend_trial` gained a sibling,
+`voicemail_followup_extend_trial_soon`, and the pair now name the moment
+rather than the offer.
+
+- **The dropdown order IS `TEMPLATE_LABELS`' insertion order**
+  (`email_templates` maps over the dict), so approaching-expiry is declared
+  before already-expired — the order a rep works down a trial.
+- **A sales template's row in Comms → Templates prints its NAME and, under it,
+  `Sales: <dropdown label>`.** So the two are allowed to differ, and for these
+  two they do: `TEMPLATE_DB_NAMES` gives each a shorter name, because repeating
+  the whole dropdown sentence in the name says the same thing twice on one row.
+- **The rename is a guarded UPDATE inside `seed_sales_templates`**, keyed on
+  `sales_template_key` AND the row's OLD default name, so a super admin who has
+  renamed it themselves keeps their own. The list of (key, was, now) triples is
+  the one place a rename lands; add to it rather than writing another UPDATE.
+- **Two templates that read the same are one template with two names**, so the
+  bodies differ by a paragraph: one says the trial finishes shortly and offers
+  to extend it, the other says it has finished and offers to put it back on.
+- **Verified against a real Postgres** (18 checks through the shipped
+  `seed_sales_templates` against a database already carrying the previous
+  seed: the new key inserted exactly once, the rename landing, a hand-renamed
+  row left alone, a second run doing nothing, the seeded body's `{{merge}}`
+  tokens surviving the `{base}` substitution, and the two built bodies
+  differing).
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI
