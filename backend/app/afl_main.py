@@ -47,6 +47,7 @@ from app.routers.afl import (
     users_admin as afl_users_admin,
     super_clubs as afl_super_clubs,
     imports as afl_imports,
+    manual_entries as afl_manual_entries,
     result_imports as afl_result_imports,
     award_imports as afl_award_imports,
     seasons_admin as afl_seasons_admin,
@@ -269,6 +270,14 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE afl_merge_logs ADD COLUMN IF NOT EXISTS imported_stat_ids JSONB DEFAULT '[]'"))
         await conn.execute(text(
             "ALTER TABLE afl_merge_logs ADD COLUMN IF NOT EXISTS achievement_ids JSONB DEFAULT '[]'"))
+        # Manual adjustments (routers/afl/manual_entries.py) move with a merge
+        # too. Unlike the two above they DO cascade on the player FK, so
+        # without the move a merge would delete the removed player's
+        # corrections outright — worse than orphaning them. A log written
+        # before this column existed reads as [], which is the right answer
+        # for it: that merge never moved any.
+        await conn.execute(text(
+            "ALTER TABLE afl_merge_logs ADD COLUMN IF NOT EXISTS adjustment_ids JSONB DEFAULT '[]'"))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS afl_merge_pair_ignores (
                 id SERIAL PRIMARY KEY,
@@ -416,6 +425,7 @@ app.include_router(afl_imports.router)
 app.include_router(afl_result_imports.router)
 app.include_router(afl_award_imports.router)
 app.include_router(afl_seasons_admin.router)
+app.include_router(afl_manual_entries.router)
 app.include_router(afl_lineups.router)
 app.include_router(afl_votes.router)
 # Unauthenticated by necessity — trust comes from the medal's link token, the

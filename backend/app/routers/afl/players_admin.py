@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.capabilities import MANAGE_PLAYERS, require_cap
 from app.models.db import Organisation, Player, User, get_db
 from app.routers.auth import get_current_club, get_current_user
+from app.services.afl.manual_stats import manual_branch
 
 router = APIRouter(prefix="/club-admin", tags=["afl-players-admin"])
 
@@ -50,34 +51,53 @@ async def list_players(
     # Historical CSV import (Import Stats) totals, added on top of the synced
     # figures — but only for a (player, season) the sync doesn't already have
     # games for, so a season covered by both never double-counts (sync wins).
-    imported_res = await db.execute(text("""
-        SELECT i.player_id,
-               COALESCE(SUM(i.games_played), 0) AS games,
-               COALESCE(SUM(i.goals), 0) AS goals,
-               COALESCE(SUM(i.behinds), 0) AS behinds,
-               COALESCE(SUM(i.bog_count), 0) AS bogs
-        FROM afl_imported_stats i
-        WHERE i.organisation_id = :org
-          AND NOT EXISTS (
-            SELECT 1 FROM afl_player_season_stats s
-            WHERE s.player_id = i.player_id AND s.season_id = i.season_id
-              AND s.grade_id IS NULL AND s.games > 0
-          )
-        GROUP BY i.player_id
+    # A manual adjustment rides in the same bucket but with no such gate: it
+    # is a delta an admin typed BECAUSE of what the sync holds, so suppressing
+    # it where the sync already covers that season would do nothing in exactly
+    # the case it was entered for.
+    manual_totals = manual_branch(["player_id", "games", "goals", "behinds", "bog_count"])
+    manual_votes = manual_branch(["player_id", "club_bf_votes", "comp_bf_votes"])
+    imported_res = await db.execute(text(f"""
+        WITH combined AS (
+            SELECT i.player_id, i.games_played AS games, i.goals, i.behinds, i.bog_count
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org
+              AND NOT EXISTS (
+                SELECT 1 FROM afl_player_season_stats s
+                WHERE s.player_id = i.player_id AND s.season_id = i.season_id
+                  AND s.grade_id IS NULL AND s.games > 0
+              )
+            UNION ALL
+            {manual_totals}
+        )
+        SELECT c.player_id,
+               COALESCE(SUM(c.games), 0) AS games,
+               COALESCE(SUM(c.goals), 0) AS goals,
+               COALESCE(SUM(c.behinds), 0) AS behinds,
+               COALESCE(SUM(c.bog_count), 0) AS bogs
+        FROM combined c
+        GROUP BY c.player_id
     """), {"org": str(club.id)})
     imported = {str(r.player_id): dict(r._mapping) for r in imported_res}
 
     # Club/competition B&F vote tallies have no synced counterpart at all —
     # PlayHQ carries no concept of club-internal best & fairest voting, so
     # unlike games/goals/behinds/bogs there's nothing to reconcile against
-    # afl_player_season_stats here, just a straight sum of every imported row.
-    votes_res = await db.execute(text("""
-        SELECT player_id,
-               COALESCE(SUM(club_bf_votes), 0) AS club_bf_votes,
-               COALESCE(SUM(comp_bf_votes), 0) AS comp_bf_votes
-        FROM afl_imported_stats
-        WHERE organisation_id = :org
-        GROUP BY player_id
+    # afl_player_season_stats here, just a straight sum of every imported and
+    # manually-adjusted row.
+    votes_res = await db.execute(text(f"""
+        WITH combined AS (
+            SELECT i.player_id, i.club_bf_votes, i.comp_bf_votes
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org
+            UNION ALL
+            {manual_votes}
+        )
+        SELECT c.player_id,
+               COALESCE(SUM(c.club_bf_votes), 0) AS club_bf_votes,
+               COALESCE(SUM(c.comp_bf_votes), 0) AS comp_bf_votes
+        FROM combined c
+        GROUP BY c.player_id
     """), {"org": str(club.id)})
     votes = {str(r.player_id): dict(r._mapping) for r in votes_res}
 

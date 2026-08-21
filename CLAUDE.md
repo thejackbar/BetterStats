@@ -1,5 +1,91 @@
 # BetterStats — Claude Session Notes
 
+## BetterFootball gets Manual Entries — a delta, not a replacement (v9.43.0, Aug 2026)
+
+Asked for by pointing at cricket's `/admin/manual-entries#season` and saying
+"build this for betterat.football". That hash is the **Adjustments** tab: add
+or correct a player's totals, season blank for a career-only one.
+
+- **ONE table, `afl_manual_adjustments`, because `season_id` is nullable and
+  that IS the distinction.** Cricket needs `manual_season_adjustments` AND
+  `manual_career_adjustments` because its career deltas carry a different
+  column set; football's don't. One table is what lets the screen offer "leave
+  the season blank" as a plain choice rather than two forms that look the same,
+  and it is why the cricket UI already merges its two lists back together.
+- **AN ADJUSTMENT IS ADDITIVE, and that is the whole design.** It carries no
+  `NOT EXISTS` gate against the synced rollup anywhere it is read, unlike
+  `afl_imported_stats`, whose rows only ever fill a gap the sync hasn't
+  covered. An adjustment is a delta an admin typed BECAUSE of what the sync
+  holds, so suppressing it where the sync already covers that player-season
+  would do nothing in exactly the case it was entered for. Correcting a season
+  means entering the SHORTFALL, and every confirm on the screen says so.
+- **`services/afl/manual_stats.py::manual_branch` is the one definition of the
+  UNION arm**, pasted by name into all thirteen reads. Thirteen hand-written
+  copies of the same arm is how the leaderboard and the record book start
+  disagreeing about a player's career. Each entry in `columns` is either a name
+  from its map (aliased, so the arm lines up with the branch above it) or a raw
+  expression passed through — a UNION matches by POSITION, so the two kinds
+  interleave in whatever order the caller already uses.
+- **A career-only row needs no exclusion clause anywhere.** A season-scoped read
+  binds `m.season_id = :season` and a season-keyed one INNER JOINs `seasons`;
+  both drop a NULL season for free. What's left is the career reads, which is
+  exactly where it belongs.
+- **`season_by_season` needed two things nothing else did.** A season can now
+  produce more than one grade-less row (the sync's rollup plus a whole-season
+  adjustment), which rendered the same year TWICE on the profile — they fold.
+  And an adjustment entered against ONE grade of a season still belongs in that
+  season's headline: the synced rollup was computed without it, and the
+  existing synthesis only fires for a season with no whole-season row at all.
+  So a `src` marker rides along, the per-grade manual deltas are held aside
+  before the merge-group fold loses it, and applied after. The suite asserts
+  the season table sums to the career total.
+- **`most_goals_in_a_season` now SUMS per player-season before ranking.** An
+  imported row can't coexist with a synced one for the same player-season (the
+  gate), but an adjustment can — that is what a correction is — so without the
+  grouping a +5 correction listed as its own 5-goal season in the record book.
+- **`manual_edit_logs` is reused, not reinvented.** It is ORM-mapped on the
+  shared Base, so it already exists in an AFL database. The undo is richer than
+  cricket's on one point: an import snapshots each row's BEFORE state, so
+  undoing an upload puts an overwritten adjustment back rather than leaving the
+  overwrite standing.
+- **Deliberately NOT unique on (player, season, grade).** Merging two players
+  legitimately brings two rows onto one key, and additive rows read correctly as
+  two; the alternative is refusing a legitimate merge or silently summing rows
+  nobody asked to combine. A second one created BY HAND is refused (409), which
+  is where a duplicate would be a mistake rather than a merge.
+- **A merge MUST move them, and the reason is the opposite of the imported
+  case.** `afl_imported_stats` has no FK, so forgetting it orphans rows;
+  `afl_manual_adjustments` DOES cascade on `players`, so forgetting it DELETES
+  the removed player's corrections outright. `_move_side_tables` carries them
+  and `afl_merge_logs.adjustment_ids` (idempotent ALTER in the lifespan) is what
+  lets an undo hand back exactly those rows. A split moves a season's
+  adjustment; a career-only one has no season to attribute and stays put, same
+  as an imported row whose season never resolved.
+- **No new season endpoint.** The Import Stats wizard already owns
+  `POST /club-admin/imports/seasons` and creates the identical row. A grade
+  create is new (`/manual-entries/grades`) because nothing else offered one.
+- **Deliberately NOT built: per-game manual entry.** Football's answer to
+  "type a match in" is Import Results, which writes real `games` rows from the
+  club's own register — a better answer than a hand-typed scorecard, and not
+  what `#season` points at.
+- **Noticed, NOT fixed**: `merge._enrich_player` counts `afl_player_season_stats`
+  only, so a club whose history came from an import or an adjustment reads
+  0/0/0/0 on the Merge Duplicates cards. Pre-existing, and the same gap cricket
+  documents for its own `_enrich_player`.
+- **Verified against a real Postgres** (75 checks through the shipped route
+  bodies and read helpers, with the schema built by the real AFL lifespan run
+  twice: every refusal, the audit summary, additivity against a synced season,
+  the season table reconciling with the career total, the leaderboard both
+  scoped and not, the vote board, the record book's summed season row, the
+  dashboard panels, the admin roster, cross-club isolation, the season-delete
+  guard, the CSV template round-tripping through the importer's own parser, a
+  re-upload correcting rather than doubling, all five undo paths, and merge /
+  undo-merge / split carrying the rows) and **driven in Chromium** (47: the
+  exact payload on the wire for create and for the spreadsheet's CSV, the
+  career-only confirm wording, a dismissed confirm sending nothing, an inline
+  season create, the delete and undo requests, the deep-linked tab, no page
+  errors, no overflow at 390px).
+
 ## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.2, Aug 2026)
 
 Reported from a club's Thursday nets, alongside the QR check-in the note below
