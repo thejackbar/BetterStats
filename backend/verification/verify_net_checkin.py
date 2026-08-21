@@ -13,7 +13,10 @@ import os
 import sys
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 
+# Runnable from anywhere: `app` lives one level up, beside this directory.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("SECRET_KEY", "verify-secret-key-for-tests-only")
 
 from sqlalchemy import text
