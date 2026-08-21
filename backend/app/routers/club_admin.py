@@ -192,6 +192,9 @@ async def list_players(
             "display_name_override": p.display_name_override,
             "playhq_id": p.playhq_id,
             "photo_url": p.photo_url,
+            # The post designer builds its lineup from THIS list, so the action
+            # shot has to ride along here or the hero slot never sees one.
+            "hero_photo_url": p.hero_photo_url,
             "gender": p.gender,
             "is_player": p.is_player,
             "player_role": p.player_role,
@@ -1248,19 +1251,31 @@ def _remove_player_photo(photo_url: Optional[str]) -> None:
     p.unlink(missing_ok=True)
 
 
-@router.post("/players/{player_id}/photo")
-async def upload_player_photo(
-    player_id: str,
-    file: UploadFile = File(...),
-    current_user: User = Depends(get_current_user),
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
+# The two photographs a player can have, and the columns each lands in. A
+# headshot reads at 44px on a roster row; an action shot fills the hero slot on
+# a match-day post. Cropping either into the other's slot is what asked for the
+# split (migration 272) — one set of handlers, keyed on which.
+_PLAYER_PHOTO_KINDS = {
+    "photo": ("photo_data", "photo_mime", "photo_url", "photo"),
+    "hero": ("hero_photo_data", "hero_photo_mime", "hero_photo_url", "hero-photo"),
+}
+
+
+async def _player_for_photo(db: AsyncSession, player_id: str, club: Organisation) -> Player:
     import uuid as _uuid
-    player = await db.get(Player, _uuid.UUID(player_id))
+    try:
+        pid = _uuid.UUID(player_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(404, "Player not found")
+    player = await db.get(Player, pid)
     if not player or str(player.organisation_id) != str(club.id):
         raise HTTPException(404, "Player not found")
+    return player
 
+
+async def _store_player_photo(db, player: Player, file: UploadFile, kind: str) -> dict:
+    import uuid as _uuid
+    data_col, mime_col, url_col, route = _PLAYER_PHOTO_KINDS[kind]
     ext = Path(file.filename or "").suffix.lower()
     if ext not in PHOTO_ALLOWED_EXTS:
         raise HTTPException(400, "Image files only (jpg, png, webp, gif)")
@@ -1270,12 +1285,39 @@ async def upload_player_photo(
     if len(data) > PHOTO_MAX_BYTES:
         raise HTTPException(400, "Photo must be 8 MB or smaller")
 
-    _remove_player_photo(player.photo_url)  # clean up any legacy on-disk file
-    player.photo_data = data
-    player.photo_mime = _IMAGE_MIME.get(ext, "image/png")
-    player.photo_url = f"/api/images/players/{player.id}/photo?v={_uuid.uuid4().hex[:8]}"
+    # Only the headshot ever had an on-disk form to clean up; the action shot
+    # has been in-table since the day it existed.
+    if kind == "photo":
+        _remove_player_photo(player.photo_url)
+    url = f"/api/images/players/{player.id}/{route}?v={_uuid.uuid4().hex[:8]}"
+    setattr(player, data_col, data)
+    setattr(player, mime_col, _IMAGE_MIME.get(ext, "image/png"))
+    setattr(player, url_col, url)
     await db.commit()
-    return {"photo_url": player.photo_url}
+    return {url_col: url}
+
+
+async def _clear_player_photo(db, player: Player, kind: str) -> dict:
+    data_col, mime_col, url_col, _ = _PLAYER_PHOTO_KINDS[kind]
+    if kind == "photo":
+        _remove_player_photo(player.photo_url)
+    setattr(player, data_col, None)
+    setattr(player, mime_col, None)
+    setattr(player, url_col, None)
+    await db.commit()
+    return {"status": "cleared"}
+
+
+@router.post("/players/{player_id}/photo")
+async def upload_player_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _store_player_photo(db, player, file, "photo")
 
 
 @router.delete("/players/{player_id}/photo")
@@ -1285,16 +1327,31 @@ async def delete_player_photo(
     club: Organisation = Depends(get_current_club),
     db: AsyncSession = Depends(get_db),
 ):
-    import uuid as _uuid
-    player = await db.get(Player, _uuid.UUID(player_id))
-    if not player or str(player.organisation_id) != str(club.id):
-        raise HTTPException(404, "Player not found")
-    _remove_player_photo(player.photo_url)
-    player.photo_data = None
-    player.photo_mime = None
-    player.photo_url = None
-    await db.commit()
-    return {"status": "cleared"}
+    player = await _player_for_photo(db, player_id, club)
+    return await _clear_player_photo(db, player, "photo")
+
+
+@router.post("/players/{player_id}/hero-photo")
+async def upload_player_hero_photo(
+    player_id: str,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _store_player_photo(db, player, file, "hero")
+
+
+@router.delete("/players/{player_id}/hero-photo")
+async def delete_player_hero_photo(
+    player_id: str,
+    current_user: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    player = await _player_for_photo(db, player_id, club)
+    return await _clear_player_photo(db, player, "hero")
 
 
 # ---------------------------------------------------------------------------

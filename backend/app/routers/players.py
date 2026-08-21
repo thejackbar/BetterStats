@@ -128,6 +128,7 @@ async def list_players(
             "display_name": p.display_name,
             "claimed": p.claimed,
             "photo_url": p.photo_url,
+            "hero_photo_url": p.hero_photo_url,
             "player_role": p.player_role,
         }
         for p in players
@@ -824,6 +825,7 @@ def _profile_fields(player: Player) -> dict:
         "email": player.email,
         "phone": player.phone,
         "photo_url": player.photo_url,
+        "hero_photo_url": player.hero_photo_url,
         "playhq_id": player.playhq_id,
         "squad_team_id": str(player.squad_team_id) if player.squad_team_id else None,
         "is_overseas": player.is_overseas,

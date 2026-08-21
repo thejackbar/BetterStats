@@ -1213,6 +1213,11 @@ class Player(Base):
     photo_url = Column(Text, nullable=True)
     photo_data = Column(LargeBinary, nullable=True)
     photo_mime = Column(Text, nullable=True)
+    # The action shot (migration 272) — a separate photograph from the
+    # headshot above, for the full-bleed hero slot on a match-day post.
+    hero_photo_url = Column(Text, nullable=True)
+    hero_photo_data = Column(LargeBinary, nullable=True)
+    hero_photo_mime = Column(Text, nullable=True)
     gender = Column(Text, nullable=True)
     is_player = Column(Boolean, default=True, nullable=True)
     player_role = Column(Text, nullable=True)

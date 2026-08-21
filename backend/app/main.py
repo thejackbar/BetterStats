@@ -3497,6 +3497,18 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE players ADD COLUMN IF NOT EXISTS date_of_birth DATE"
         ))
+        # Migration 272: a player's action shot, kept apart from their
+        # headshot — the two photographs do different jobs and neither
+        # crops into the other's slot. See the migration for why.
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_data BYTEA"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_mime TEXT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE players ADD COLUMN IF NOT EXISTS hero_photo_url TEXT"
+        ))
         await conn.execute(text(
             "ALTER TABLE organisations ADD COLUMN IF NOT EXISTS "
             "select_show_age BOOLEAN NOT NULL DEFAULT false"

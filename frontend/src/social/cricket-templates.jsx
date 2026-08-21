@@ -299,6 +299,15 @@ export function heroFocusStyle(focus) {
     : { objectPosition: pos }
 }
 
+// The photo for a player's BIG slot. A club can store two: a square headshot
+// that reads at 44px, and an action shot for exactly this. The action shot
+// wins here and nowhere else — a grid or a card front stays on the headshot,
+// which is the photo that works at that size.
+export function heroSrcOf(player) {
+  if (!player) return null
+  return player.hero || player.headshot || null
+}
+
 // Picks the player shown in the hero image slot. An explicit `featuredId`
 // (the chosen player's id) wins; otherwise it falls back to the captain, then
 // the first player in the order.
@@ -430,7 +439,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
         }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
-          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          const src = heroImage || heroSrcOf(featured) || team.logo
           // No hero, no headshot and no crest is an ordinary state (a
           // club that hasn't uploaded a logo yet). Rendering an <img>
           // with a null src puts a broken-image glyph and its alt text
@@ -683,8 +692,8 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
         <div style={{ position: 'absolute', left: -120, bottom: -120, width: 600, height: 600, background: `radial-gradient(circle at center, ${palette.accent}33 0%, transparent 60%)` }} />
         {(() => {
           const featured = featuredOf(players, featuredId)
-          const hasHead = !!(heroImage || (featured && featured.headshot))
-          const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+          const hasHead = !!(heroImage || heroSrcOf(featured))
+          const src = heroImage || heroSrcOf(featured) || team.logo
           // No hero, no headshot and no crest is an ordinary state (a
           // club that hasn't uploaded a logo yet). Rendering an <img>
           // with a null src puts a broken-image glyph and its alt text
@@ -945,8 +954,8 @@ export function T6_Diagonal({ team, opponent, match, players, palette, heroImage
         <div style={{ flex: 1, height: 370, display: 'grid', placeItems: 'end center', position: 'relative', overflow: 'hidden' }}>
           {(() => {
             const featured = featuredOf(players, featuredId)
-            const hasHead = !!(heroImage || (featured && featured.headshot))
-            const src = heroImage || (featured && featured.headshot ? featured.headshot : null) || team.logo
+            const hasHead = !!(heroImage || heroSrcOf(featured))
+            const src = heroImage || heroSrcOf(featured) || team.logo
             // No hero, no headshot and no crest is an ordinary state (a club
             // that hasn't uploaded a logo yet). Rendering an <img> with a
             // null src puts a broken-image glyph and its alt text on the
@@ -1029,7 +1038,7 @@ export function T7_CaptainSpotlight({ team, opponent, match, players, palette, m
       </div>
       <div style={{ position: 'absolute', right: 0, top: 60, width: 540, height: 660, display: 'grid', placeItems: 'end center', overflow: 'hidden' }}>
         {(heroImage || hasHead) ? (
-          <img src={heroImage || player.headshot} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
+          <img src={heroImage || heroSrcOf(player)} alt={player.last} style={{ height: 720, width: 'auto', objectFit: 'contain', objectPosition: 'bottom', filter: `drop-shadow(0 40px 80px ${palette.primary}ee)` }} />
         ) : (
           <img src={team.logo} alt={team.short} style={{ width: 380, height: 380, objectFit: 'contain', marginBottom: 40 }} />
         )}
@@ -1272,7 +1281,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
   // Shrink the rows as the squad grows so a full 13 still fits the column.
   const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
   const featured = featuredOf(players, featuredId)
-  const photo = heroImage || (featured && featured.headshot) || null
+  const photo = heroImage || heroSrcOf(featured)
   // The strip is the club's ink colour (off-white on every built-in palette),
   // so it reads as the reference's cream paper without hardcoding a hue that
   // would fight a club's own colours.
@@ -1280,6 +1289,14 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
   const paperInk = palette.primary
   const STRIP_H = 104
   const TEAR_H = 26
+  // The photo is deliberately SMALLER than the canvas. objectFit:cover scales
+  // an image to fill its box, so a box the full height of the post renders a
+  // headshot at 1080px tall and turns a face into a billboard — narrowing the
+  // box only crops it, it does not shrink it. Reducing the HEIGHT is what
+  // reduces the picture. It sits on the strip, so its bottom edge is hidden
+  // under the paper and only the top needs feathering.
+  const PHOTO_W = 600
+  const PHOTO_H = 780
   const meta = [match.date, match.time].filter(Boolean).join('  ·  ')
   const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
   const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
@@ -1293,30 +1310,45 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
           the left edge faded out so the names always have something to sit on.
           A club with no hero photo and no headshot gets the gradient and the
           crest instead of a broken image. */}
-      <div style={{ position: 'absolute', right: 0, top: 0, width: 720, bottom: 0, overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', right: 0, bottom: STRIP_H, width: PHOTO_W, height: PHOTO_H, overflow: 'hidden' }}>
         {photo
           ? <img src={photo} alt={featured ? `${featured.first} ${featured.last}` : (team.short || 'team')}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
                 objectFit: 'cover', ...heroFocusStyle(heroFocus),
                 filter: 'saturate(0.92) contrast(1.06)',
+                // The photo stops short of the top edge, so it is FEATHERED
+                // rather than washed out with a colour. A colour overlay has to
+                // match whatever is behind it, and what is behind it here is a
+                // two-colour gradient — on a palette whose two colours differ
+                // much at all, that leaves a visible seam across the post. A
+                // mask has nothing to match. Its bottom edge needs none of
+                // this: it sits under the paper strip.
+                WebkitMaskImage: 'linear-gradient(180deg, transparent 0%, #000 26%)',
+                maskImage: 'linear-gradient(180deg, transparent 0%, #000 26%)',
               }} />
           : team.logo
             ? <img src={team.logo} alt={team.short || 'club'}
-                style={{ position: 'absolute', right: 60, top: 180, width: 420, height: 420, objectFit: 'contain', opacity: 0.16 }} />
+                style={{ position: 'absolute', right: 40, top: 120, width: 380, height: 380, objectFit: 'contain', opacity: 0.16 }} />
             : <div style={{
-                position: 'absolute', left: 0, right: 0, top: 220, textAlign: 'center',
-                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 200,
+                position: 'absolute', left: 0, right: 0, top: 150, textAlign: 'center',
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 170,
                 lineHeight: 1, letterSpacing: -6, color: palette.ink, opacity: 0.07,
               }}>{team.monogram || (team.short || team.name || '').slice(0, 3).toUpperCase()}</div>}
-        {/* The fade has to clear the subject: a cutout player's face sits around
-            the middle of this box, and carrying the wash that far across leaves
-            them muddy. It is heavy for the first third, where the names are. */}
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: `linear-gradient(90deg, ${palette.primary} 0%, ${palette.primary}e6 12%, ${palette.primary}99 30%, ${palette.primary}33 46%, transparent 62%)`,
-        }} />
       </div>
+      {/* The wash the names sit on. It spans the WHOLE canvas rather than the
+          photo's box: starting it at the box's own left edge painted a hard
+          vertical line wherever the canvas gradient behind it was not already
+          this colour. It has to clear the subject too — a face sits around the
+          middle of the photo, and carrying the wash that far across leaves it
+          muddy — so it is heavy only where the names actually are. */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        // Solid until past the photo's own left edge (600px in from the right,
+        // so 44.4% across) — anything less and that edge shows through as a
+        // faint vertical line down the post. It clears the subject by 77%.
+        background: `linear-gradient(90deg, ${palette.primary} 0%, ${palette.primary} 46%, ${palette.primary}e6 51%, ${palette.primary}99 58%, ${palette.primary}40 67%, transparent 77%)`,
+      }} />
       <div style={{
         position: 'absolute', left: 0, right: 0, top: 0, height: 200,
         background: `linear-gradient(180deg, ${palette.primary}cc 0%, transparent 100%)`,

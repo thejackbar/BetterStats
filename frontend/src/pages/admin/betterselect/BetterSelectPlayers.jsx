@@ -404,6 +404,13 @@ export default function BetterSelectPlayers() {
     setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, photo_url: url } : r))
   }, [selId])
 
+  // The action shot is only ever read by the post templates, so it reflects
+  // into the open panel and the row's own record, not into any avatar.
+  const onHeroPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, hero_photo_url: url } : p)
+    setPlayers((rows) => (rows || []).map((r) => r.id === selId ? { ...r, hero_photo_url: url } : r))
+  }, [selId])
+
   const onBulkSquad = async (ids, squadId) => {
     try {
       await Promise.all(ids.map((id) => api.bsUpdatePlayerProfile(id, { squad_team_id: squadId })))
@@ -444,7 +451,7 @@ export default function BetterSelectPlayers() {
               : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                   dirty={dirty} saved={savedTick} onSave={onSave} canEdit={canEdit}
                   onEditAvail={openAvail} canEditAvail={canEdit}
-                  onPhotoChange={onPhotoChange} />}
+                  onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange} />}
         </div>
       </div>
 

@@ -83,8 +83,11 @@ export default function HeroFocusControl({ src, value, onChange, aspect = 2 / 3,
           <p className="text-[11px] text-pb-faintest leading-snug">Drag the photo to move it inside the post.</p>
           <div className="flex items-center gap-2">
             <span className="font-mono text-[10px] text-pb-faint uppercase w-8 shrink-0">Zoom</span>
+            {/* Below 1 the photo pulls back off the edges of its box and the
+                post's own background shows around it, which is the right
+                answer for a cutout and a deliberate look for a photograph. */}
             <input
-              type="range" min={1} max={2.5} step={0.05} value={v.scale}
+              type="range" min={0.5} max={2.5} step={0.05} value={v.scale}
               onChange={e => onChange({ ...v, scale: Number(e.target.value) })}
               className="flex-1 min-w-0 accent-[var(--pb-accent)]"
             />

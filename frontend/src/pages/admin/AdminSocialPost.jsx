@@ -227,6 +227,18 @@ function splitName(displayName, nameFormat = 'last_first') {
   return { first: parts.slice(1).join(' '), last: parts[0].toUpperCase() }
 }
 
+// A lineup post's headline names the SIDE — "1st XI", "A Grade", "6th XI".
+// Both auto-fill paths can hand back the club's own name instead (a
+// Play.Cricket team is routinely just the club under its own name, and a
+// fixture's home/away team can be too), which reads as the club announcing
+// itself rather than naming a team. Fall back to the grade in that case.
+function teamHeadline(teamName, clubName, grade) {
+  const norm = (x) => (x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+  const t = (teamName || '').trim()
+  if (t && norm(t) && norm(t) !== norm(clubName)) return t
+  return (grade || '').trim()
+}
+
 function deriveShort(name) {
   return name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 3)
 }
@@ -240,6 +252,10 @@ function playerToTemplatePlayer(p, { captain = false, viceCaptain = false, keepe
     roleLong: { BAT: 'Batter', BOWL: 'Bowler', AR: 'All-Rounder', WK: 'Wicket-Keeper' }[role] || role,
     captain, viceCaptain, keeper,
     headshot: p.photo_url ? `${BASE_URL}/images/players/${p.id}/photo` : null,
+    // The action shot, when the club has one. Only the big hero slot reaches
+    // for it — grids and card fronts stay on the headshot, which is the photo
+    // that actually reads at that size.
+    hero: p.hero_photo_url ? `${BASE_URL}/images/players/${p.id}/hero-photo` : null,
     _id: p.id,
     _name: p.display_name || p.name,
   }
@@ -2387,7 +2403,9 @@ export default function AdminSocialPost() {
       if (fx) {
         setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.played_on || m.date, time: fx.start_time || m.time }))
         if (fx.opponent_name) setOpponent((o) => ({ ...o, name: fx.opponent_name }))
-        const tn = (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || ''
+        const tn = teamHeadline(
+          (fx.home_away === 'AWAY' ? fx.away_team : fx.home_team) || '',
+          settings?.name, fx.grade || match.competition)
         if (tn) setHeadline(tn)
       }
       setLineupLoad(`ok:${picked.length}`)
@@ -2419,7 +2437,7 @@ export default function AdminSocialPost() {
     setSelectedPlayers(picked)
     setMatch((m) => ({ ...m, round: fx.round || m.round, venue: fx.venue || m.venue, date: fx.date || m.date, time: fx.time || m.time }))
     if (oppTeam?.club || oppTeam?.name) setOpponent((o) => ({ ...o, name: oppTeam.club || oppTeam.name || o.name, logo: oppTeam.logo_url || o.logo }))
-    const tn = ourTeam.name || ourTeam.club || ''
+    const tn = teamHeadline(ourTeam.name || ourTeam.club || '', settings?.name, fx.grade || match.competition)
     if (tn) setHeadline(tn)
     setLineupLoad(`ok:${picked.length}`)
   }

@@ -102,6 +102,12 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
     onSaved?.({ id: playerId, photo_url: url })
   }, [playerId, onSaved])
 
+  // The action shot never appears on a list row — only the headshot does — so
+  // this reflects into the open panel alone.
+  const onHeroPhotoChange = useCallback((url) => {
+    setProfile((p) => p ? { ...p, hero_photo_url: url } : p)
+  }, [])
+
   const pickAvail = async (status) => {
     const ed = availEdit
     setAvailEdit(null)
@@ -148,7 +154,7 @@ function ProfileModal({ playerId, teams, canEdit, index, total, onPrev, onNext, 
             : <Profile profile={profileForView} draft={draft} setDraft={setDraft}
                 dirty={dirty} saved={saved} onSave={onSave} canEdit={canEdit}
                 canEditAvail={canEdit} onEditAvail={(pl, date) => setAvailEdit({ player: pl, date })}
-                onClose={onClose} onPhotoChange={onPhotoChange}
+                onClose={onClose} onPhotoChange={onPhotoChange} onHeroPhotoChange={onHeroPhotoChange}
                 footer={showMerch ? <PlayerMerchPanel playerId={playerId} /> : null} />}
         </div>
       </div>
