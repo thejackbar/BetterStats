@@ -551,9 +551,27 @@ async def set_squad(db: AsyncSession, org_id, player_id, team_id) -> None:
         ), {"t": team_id, "org": org_id})).scalar()
         if not ok:
             raise ValueError("Team not found")
+    old_team_id = (await db.execute(text(
+        "SELECT squad_team_id FROM players WHERE id = :pid AND organisation_id = :org"
+    ), {"pid": player_id, "org": org_id})).scalar()
     await db.execute(text(
         "UPDATE players SET squad_team_id = :t WHERE id = :pid AND organisation_id = :org"
     ), {"t": team_id, "pid": player_id, "org": org_id})
+    # Mirror into team_members, exactly as services/squad_membership.py does for
+    # every other squad write — done in raw SQL here to keep this module out of
+    # the ORM graph. Without it the Directory was the one squad write that left
+    # team_members stale, so the "Squad" filter on Availability and Selection
+    # disagreed with the Squads board about who is in a squad.
+    if old_team_id != team_id:
+        if old_team_id:
+            await db.execute(text(
+                "DELETE FROM team_members WHERE team_id = :t AND player_id = :pid"
+            ), {"t": old_team_id, "pid": player_id})
+        if team_id:
+            await db.execute(text(
+                "INSERT INTO team_members (team_id, player_id, organisation_id) "
+                "VALUES (:t, :pid, :org) ON CONFLICT DO NOTHING"
+            ), {"t": team_id, "pid": player_id, "org": org_id})
 
 
 async def set_fee_tier(db: AsyncSession, org_id, member_id, season_id, fee_schedule_id) -> None:

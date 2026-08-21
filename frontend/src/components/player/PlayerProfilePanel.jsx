@@ -472,8 +472,12 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             <PInput value={draft.overseas_country} onChange={(v) => set('overseas_country', v)} placeholder="Country" />
           </div>
         )}
+        {/* Saving this on takes them out of their squad too (routers/players.py):
+            inactive means "not in this season's selection pool", and a player
+            left filed in a squad goes on being offered for an XI. Turning it
+            back off does NOT re-file them — that's the club's call. */}
         <PToggle on={draft.status === 'inactive'} onChange={(v) => set('status', v ? 'inactive' : 'active')}
-          label="Inactive — hide from availability & selection" />
+          label="Inactive — out of availability, selection and their squad" />
         {/* Public visibility. Separate from Inactive on purpose: inactive is
             about selection, this is about whether the person is findable at
             all on the club's public site. Asked for by juniors who would

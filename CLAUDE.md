@@ -1,5 +1,79 @@
 # BetterStats — Claude Session Notes
 
+## The Squads board's unassigned side is three pools (v9.46.0, Aug 2026)
+
+Reported off BetterSelect → Squads: "the hidden people, people who have never
+played are on the list… best to filter out inactive, so just active players who
+haven't been assigned. Maybe another group with potential fill-ins, with the 1
+and 3 year filter. Also maybe if they are made inactive that automatically get
+taken out of any squad."
+
+- **UNASSIGNED IS A WORKING LIST, NOT A REMAINDER, and that is the whole
+  change.** It was every player with `squad_team_id IS NULL`, thinned by a
+  client-side "played ≤ N years" dropdown — so a club's whole history sat in the
+  column a selector actually reads. It is now active players who are still
+  around and unsquadded; everyone else is FILED, not hidden: `Potential fill-ins`
+  (played before, but not lately) and `Not yet played` (no appearance yet).
+  Nothing is dropped and a card in any pool still drags into a squad, which is
+  what makes filing defensible where hiding would not be.
+- **The split runs on the club's own `dormancy_months`, read off the
+  availability-matrix payload** — the same definition of "still around" the
+  matrix and `selection_pool` already use. The board had invented its own
+  3-year number, so it disagreed with every other BetterSelect screen about who
+  had dropped off.
+- **A never-played player gets their OWN pool rather than being hidden**, because
+  `playedWithinYears` deliberately keeps them ("a new manual add") and both
+  readings are right: a brand-new signing must be pickable, and a synced name
+  who never turned out is noise in the main list. Two facts, two places.
+- **The fill-in reach only offers windows WIDER than the dormancy boundary.**
+  With a 24-month window, "≤ 1 yr" and "≤ 2 yrs" can only ever answer "nobody" —
+  anyone inside the window is already in Unassigned. So the options are built
+  from `dormancy_months` (24 → 3/5/10/any, 12 → 2/3/5/10/any) rather than being
+  the fixed ladder. Same call `ageFilterOptions` makes: a control that can only
+  answer "nobody" is worse than none.
+- **INACTIVE IS OFF THE BOARD, AND MARKING SOMEONE INACTIVE NOW CLEARS THEIR
+  SQUAD** in the same write (`routers/players.py::update_player_profile`, and
+  the profile importer). Gated on the request actually SETTING the status, so
+  editing an already-inactive player's phone number doesn't quietly move them.
+  Reactivating deliberately does NOT re-file them — which squad they belong in
+  now is the club's call. `auto_assign_suggest` skips them for the same reason:
+  one half taking them out while the other puts them back is the two disagreeing.
+- **The count of what's held back is shown, with a `Show inactive players`
+  filter** — the board says "N inactive not shown" rather than a club wondering
+  where somebody went. Bulk add never offers an inactive player at all, since
+  the assign would only be undone.
+- **Fixed while here: `services/directory.py::set_squad` was the one squad write
+  that never mirrored into `team_members`**, so a squad set from the Clubhouse
+  Directory left the "Squad" filter on Availability and Selection disagreeing
+  with the board. Mirrored in raw SQL to keep that module's stated
+  out-of-the-ORM-graph posture.
+- **Also fixed: `SquadColumn` spread `onCardDragStart`/`onCardDragEnd` onto its
+  column `<div>`**, so React warned about unknown DOM props on every render.
+  Pre-existing; found because the browser suite asserts no page errors.
+- **Verified against a real Postgres** (29 checks through the shipped route
+  bodies: the squad and its `team_members` mirror both cleared, an unrelated
+  edit to an already-inactive player leaving them alone, squad + inactive in one
+  request leaving no stale mirror row either side, reactivation not re-filing,
+  auto-assign skipping an inactive player, the Directory write mirroring on
+  assign/reassign/unassign and staying idempotent) **with a control run**: with
+  the fix stashed, 8 of them fail on exactly the reported behaviour. Driven in
+  **Chromium** (33: the three pools and who lands in each, the two secondary
+  ones opening collapsed, the reach control never offering a window inside the
+  dormancy boundary, opening it to ≤ 5 yrs pulling a 4-year-dormant player in, a
+  fill-in card dragging into a squad, the inactive hint and the Show-inactive
+  escape hatch, the card badges, Bulk add, no page errors).
+- **Noticed, NOT fixed**: the module header's action cluster (Auto-seed /
+  Auto-assign / Fix order / Manage squads / New squad) measures 693px inside a
+  `shrink-0` wrapper and pushes the page 319px sideways at 390px — the trap the
+  Selection-header note below describes. Confirmed pre-existing by re-measuring
+  with this change stashed (709px either way); the board's own columns don't
+  overflow. It lives in the shared `ModuleLayout` header, so fixing it reaches
+  every module surface.
+- **Not built**: nothing changes what `GET /club-admin/players` returns — it is
+  still the club's whole roster and the board does the filing. The AFL silo's
+  own player-status write (`routers/afl/players_admin.py`) is untouched, since
+  AFL has no BetterSelect squad board.
+
 ## BetterFootball gets Manual Entries — a delta, not a replacement (v9.43.0, Aug 2026)
 
 Asked for by pointing at cricket's `/admin/manual-entries#season` and saying

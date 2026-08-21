@@ -761,6 +761,11 @@ async def auto_assign_suggest(
     for p in players:
         if only_unassigned and p.squad_team_id is not None:
             continue
+        # Never suggest a squad for someone the club has marked inactive: the
+        # profile screen takes an inactive player OUT of their squad, so
+        # auto-assign putting them back is the two halves disagreeing.
+        if p.status == "inactive" or p.is_player is False:
+            continue
         top_team = _top(team_tot.get(p.id))
         if not top_team:
             continue  # no appearances in the window — leave untouched

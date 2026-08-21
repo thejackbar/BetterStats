@@ -1059,6 +1059,17 @@ async def update_player_profile(
                 await sync_squad_membership(db, player.organisation_id, player.id, old_team_id, new_team_id, user.id)
     for key, value in data.items():
         setattr(player, key, value)
+    # Marking someone inactive takes them out of their squad in the SAME write.
+    # An inactive player is not in this season's selection pool, so leaving them
+    # filed in a squad is what makes the Squads board disagree with the roster —
+    # and the board would go on offering them for an XI. Gated on this request
+    # actually setting the status, so editing an already-inactive player's phone
+    # number doesn't quietly move them. Reactivating does NOT put them back:
+    # which squad they belong in now is the club's call, not ours.
+    if data.get("status") == "inactive" and player.squad_team_id is not None:
+        old_squad_id = player.squad_team_id
+        player.squad_team_id = None
+        await sync_squad_membership(db, player.organisation_id, player.id, old_squad_id, None, user.id)
     if old_display_name and old_display_name != player.display_name:
         await seed_alias_on_rename(db, player.organisation_id, player.id, old_display_name)
     await db.commit()

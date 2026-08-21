@@ -458,6 +458,16 @@ async def commit(
             squads_assigned += 1
             touched = True
 
+        # A row that marks someone inactive takes them out of their squad too,
+        # same rule as the profile screen (routers/players.py). Read off the
+        # sheet's own patch, not the stored status, so a row that says nothing
+        # about status never moves a player who is already inactive.
+        if tgt["patch"].get("status") == "inactive" and player.squad_team_id is not None:
+            old_squad_id = player.squad_team_id
+            player.squad_team_id = None
+            await sync_squad_membership(db, club.id, player.id, old_squad_id, None, current_user.id)
+            touched = True
+
         if touched and tgt["kind"] != "new":
             players_updated += 1
 

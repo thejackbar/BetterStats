@@ -952,6 +952,7 @@ export default function Directory({ st, patch, narrow }) {
                       <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                         {[['active', 'Playing'], ['inactive', 'Not playing']].map(([v, label]) => (
                           <button key={v} disabled={busy} onClick={() => setPlayerStatus(sel, v)}
+                            title={v === 'inactive' ? 'Also takes them out of their BetterSelect squad' : undefined}
                             style={{ ...pill((sel.player_status || 'active') === v), opacity: busy ? 0.6 : 1 }}>{label}</button>
                         ))}
                       </div>

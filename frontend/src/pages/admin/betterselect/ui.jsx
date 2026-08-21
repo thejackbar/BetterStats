@@ -339,13 +339,26 @@ export function playedWithinYears(lastPlayed, years) {
   const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - years)
   return new Date(lastPlayed + 'T00:00:00') >= cutoff
 }
-export function RecencySelect({ value, onChange, title = 'Hide players who haven’t played recently', className = '' }) {
+// A date N months back as a plain YYYY-MM-DD string, so it compares directly
+// against a `last_played` off the API with no timezone in the way. Clamped to
+// the target month's length, matching the backend's months_ago() — otherwise
+// "24 months before the 31st" lands in the following month and a player flips
+// pools for a day.
+export function monthsAgoISO(months) {
+  const now = new Date()
+  const target = new Date(now.getFullYear(), now.getMonth() - months, 1)
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate()
+  target.setDate(Math.min(now.getDate(), lastDay))
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
+}
+export function RecencySelect({ value, onChange, title = 'Hide players who haven’t played recently', className = '', options = RECENCY_OPTIONS }) {
   return (
     <select value={value} onChange={(e) => onChange(Number(e.target.value))} title={title}
       className={`bg-transparent text-[11.5px] rounded-md border px-1.5 py-1 focus:outline-none focus:border-pb-accent transition-colors ${
         value ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint border-pb-hairline hover:text-pb-text'
       } ${className}`}>
-      {RECENCY_OPTIONS.map((o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>)}
+      {options.map((o) => <option key={o.value} value={o.value} className="bg-pb-surface text-pb-text">{o.label}</option>)}
     </select>
   )
 }

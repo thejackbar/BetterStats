@@ -388,8 +388,14 @@ export default function BetterSelectPlayers() {
       // `age` comes from the saved profile's own age_visible, not from the
       // draft: the list shows the age the club's setting allows, which is
       // not necessarily the one the person editing can see on the profile.
+      // `squad_team_id` comes off the saved profile for the same reason —
+      // marking someone inactive clears their squad server-side, so the draft
+      // is no longer the truth about where they are filed.
       setPlayers((rows) => (rows || []).map((r) => r.id === selId
-        ? { ...r, ...patchFromDraft(draft), display_name: updated.display_name, age: updated.age_visible ?? null }
+        ? {
+          ...r, ...patchFromDraft(draft), display_name: updated.display_name,
+          squad_team_id: updated.squad_team_id ?? null, age: updated.age_visible ?? null,
+        }
         : r))
     } catch (e) {
       toast.error('Save failed: ' + e.message)
@@ -423,9 +429,11 @@ export default function BetterSelectPlayers() {
   const onBulkInactive = async (ids) => {
     try {
       await Promise.all(ids.map((id) => api.bsUpdatePlayerProfile(id, { status: 'inactive' })))
-      setPlayers((rows) => (rows || []).map((r) => ids.includes(r.id) ? { ...r, status: 'inactive' } : r))
-      if (ids.includes(selId)) setDraft((d) => d ? { ...d, status: 'inactive' } : d)
-      toast.success(`Marked ${ids.length} player${ids.length === 1 ? '' : 's'} inactive`)
+      // Marking inactive clears their squad server-side, so drop it here too
+      // rather than leaving the list claiming a squad they're no longer in.
+      setPlayers((rows) => (rows || []).map((r) => ids.includes(r.id) ? { ...r, status: 'inactive', squad_team_id: null } : r))
+      if (ids.includes(selId)) setDraft((d) => d ? { ...d, status: 'inactive', squad_team_id: null } : d)
+      toast.success(`Marked ${ids.length} player${ids.length === 1 ? '' : 's'} inactive and took them out of their squads`)
     } catch (e) { toast.error('Bulk update failed: ' + e.message) }
   }
 
