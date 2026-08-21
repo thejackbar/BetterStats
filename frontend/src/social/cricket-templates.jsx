@@ -275,6 +275,30 @@ export function PlayerImage({ player, team, palette, fit = 'contain', size = 200
   )
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// HERO FOCAL POINT
+// A club's hero photo is whatever they had on the night — a cutout, a phone
+// snap, a wide team shot — and the templates that crop one into a box have to
+// guess where the subject is standing. These let the club say instead.
+//
+// Only the templates that CROP a photo into a fixed box take this (T1, T3,
+// T10). T6 and T7 scale a free-standing cutout to fit, so the element is sized
+// to the image and there is no crop window to move.
+// ─────────────────────────────────────────────────────────────────────────────
+export const DEFAULT_HERO_FOCUS = { x: 50, y: 0, scale: 1 }
+
+// The default reproduces the `center top` every one of those templates used
+// before this existed, so an untouched post is byte-for-byte what it was.
+export function heroFocusStyle(focus) {
+  const f = { ...DEFAULT_HERO_FOCUS, ...(focus || {}) }
+  const pos = `${f.x}% ${f.y}%`
+  // Zoom is anchored on the focal point rather than the centre, so pushing in
+  // moves you INTO the spot that was picked instead of drifting off it.
+  return f.scale && f.scale !== 1
+    ? { objectPosition: pos, transform: `scale(${f.scale})`, transformOrigin: pos }
+    : { objectPosition: pos }
+}
+
 // Picks the player shown in the hero image slot. An explicit `featuredId`
 // (the chosen player's id) wins; otherwise it falls back to the captain, then
 // the first player in the order.
@@ -363,7 +387,7 @@ export function orgToPalette(org) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 1 — Hero cutout + bold name list
 // ─────────────────────────────────────────────────────────────────────────────
-export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+export function T1_HeroList({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
   // Size the name rows down as the squad grows so a full 13 always fits the
   // available space (sized for the worst case: a tall headline + a wrapped vs
@@ -417,7 +441,7 @@ export function T1_HeroList({ team, opponent, match, players, palette, heroImage
               style={{
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'center top',
+                objectFit: 'cover', ...heroFocusStyle(heroFocus),
                 filter: `drop-shadow(0 30px 60px ${palette.primary}cc)`,
               }} />
           )
@@ -628,7 +652,7 @@ export function T2_CardGrid({ team, opponent, match, players, palette }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // TEMPLATE 3 — Side image + numbered XI
 // ─────────────────────────────────────────────────────────────────────────────
-export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+export function T3_SideNumbered({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 11)
   // The vertical spine label echoes the post headline (defaults to STARTING XI).
   // Scale it down for longer headlines so it never runs off the top edge.
@@ -672,7 +696,9 @@ export function T3_SideNumbered({ team, opponent, match, players, palette, heroI
                 position: 'absolute', inset: 0,
                 width: '100%', height: '100%',
                 objectFit: hasHead ? 'cover' : 'contain',
-                objectPosition: hasHead ? 'top center' : 'center',
+                // The crest fallback is a contained logo, not a crop — there is
+                // nothing to reposition, so the focal point stays out of it.
+                ...(hasHead ? heroFocusStyle(heroFocus) : { objectPosition: 'center' }),
                 padding: hasHead ? 0 : 40,
               }} />
           )
@@ -1241,7 +1267,7 @@ function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
   )
 }
 
-export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId, heroFocus }) {
   const P = players.slice(0, 13)
   // Shrink the rows as the squad grows so a full 13 still fits the column.
   const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
@@ -1272,7 +1298,7 @@ export function T10_TeamSheet({ team, opponent, match, players, palette, heroIma
           ? <img src={photo} alt={featured ? `${featured.first} ${featured.last}` : (team.short || 'team')}
               style={{
                 position: 'absolute', inset: 0, width: '100%', height: '100%',
-                objectFit: 'cover', objectPosition: 'center top',
+                objectFit: 'cover', ...heroFocusStyle(heroFocus),
                 filter: 'saturate(0.92) contrast(1.06)',
               }} />
           : team.logo

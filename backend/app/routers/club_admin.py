@@ -841,18 +841,41 @@ _sanitize_theme_config = theme_config_service.sanitize_theme_config
 # state — see AdminSocialPost.jsx). Values are stored as sent bar the
 # allowlist and an overall size cap; the generator is the only consumer, so
 # deep validation would just chase its shape around.
-_SOCIALS_STYLE_KEYS = {"palette", "dark", "font", "bg", "bg_colors", "palettes", "designs"}
-_SOCIALS_STYLE_MAX_BYTES = 32_768
+_SOCIALS_STYLE_KEYS = {
+    "palette", "dark", "font", "bg", "bg_colors", "palettes", "designs",
+    # Saved Templates ride the same blob as palettes and designs. Left off this
+    # allowlist they were stripped on the way in, so a saved template only ever
+    # lived in the one browser that made it and never reached another admin.
+    "templates",
+}
+# Raised from 32KB when Saved Templates joined the blob: a Blank Canvas
+# template carries its whole block layout, so a club with a few of those runs
+# well past what palettes and designs alone ever needed.
+_SOCIALS_STYLE_MAX_BYTES = 131_072
+# Shed in this order when over the cap — newest-and-largest first.
+_SOCIALS_STYLE_SHEDDABLE = ("templates", "designs", "palettes")
+
+
+def _blob_size(blob: dict) -> int:
+    try:
+        return len(_json.dumps(blob))
+    except (TypeError, ValueError):
+        return _SOCIALS_STYLE_MAX_BYTES + 1
 
 
 def _sanitize_socials_style(raw: dict) -> dict | None:
     clean = {k: v for k, v in raw.items() if k in _SOCIALS_STYLE_KEYS}
     if not clean:
         return None
-    try:
-        if len(_json.dumps(clean)) > _SOCIALS_STYLE_MAX_BYTES:
-            return None
-    except (TypeError, ValueError):
+    # Over the cap, drop the big collections one at a time rather than storing
+    # NULL. Returning None here means "wipe the column", which would take the
+    # club's saved palettes and designs down with it — a far worse answer than
+    # losing the newest saved template.
+    for key in _SOCIALS_STYLE_SHEDDABLE:
+        if _blob_size(clean) <= _SOCIALS_STYLE_MAX_BYTES:
+            break
+        clean.pop(key, None)
+    if _blob_size(clean) > _SOCIALS_STYLE_MAX_BYTES:
         return None
     return clean
 
