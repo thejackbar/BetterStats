@@ -170,27 +170,38 @@ async def season_by_season(db: AsyncSession, org_id: uuid.UUID,
         r["comp_bf_votes"] = 0
 
     # Club/competition B&F votes are read SEPARATELY, and deliberately not
-    # through the sync-wins union above. They only ever come from an Import
-    # Stats upload — PlayHQ has no concept of club-internal B&F voting, so
-    # afl_player_season_stats never carries them (see afl_main.py's note on
-    # why the columns live on afl_imported_stats alone). Putting them in the
-    # union would mean a season that was BOTH synced and imported loses its
-    # votes to the NOT EXISTS gate: the imported row is dropped because sync
-    # has better games/goals for that season, and the votes go with it. So
-    # this is a straight sum of every imported row, exactly what the
-    # leaderboard's own vote path and the admin Players list already do.
-    vres = await db.execute(text("""
-        SELECT i.season_id, s.name AS season_name, s.year,
-               i.grade_id, gr.name AS grade_name,
-               COALESCE(SUM(i.club_bf_votes), 0) AS club_bf_votes,
-               COALESCE(SUM(i.comp_bf_votes), 0) AS comp_bf_votes
-        FROM afl_imported_stats i
-        LEFT JOIN seasons s ON s.id = i.season_id
-        LEFT JOIN grades gr ON gr.id = i.grade_id
-        WHERE i.organisation_id = :org AND i.player_id = :pid
-        GROUP BY i.season_id, s.name, s.year, i.grade_id, gr.name
-        HAVING COALESCE(SUM(i.club_bf_votes), 0) > 0
-            OR COALESCE(SUM(i.comp_bf_votes), 0) > 0
+    # through the sync-wins union above. PlayHQ has no concept of
+    # club-internal B&F voting, so afl_player_season_stats never carries them
+    # (see afl_main.py's note on why the columns live off it) — the two
+    # sources that do are an Import Stats upload and a manual adjustment.
+    # Putting them through that union would mean a season that was BOTH
+    # synced and imported loses its votes to the NOT EXISTS gate: the
+    # imported row is dropped because sync has better games/goals for that
+    # season, and the votes go with it. So this is a straight sum of both
+    # sources, no gate on either, exactly what the leaderboard's own vote
+    # path does — the two have to agree about a player's tally.
+    vote_manual = manual_branch(
+        ["season_id", "grade_id", "club_bf_votes", "comp_bf_votes"],
+        where="AND m.player_id = :pid",
+    )
+    vres = await db.execute(text(f"""
+        WITH vote_src AS (
+            SELECT i.season_id, i.grade_id, i.club_bf_votes, i.comp_bf_votes
+            FROM afl_imported_stats i
+            WHERE i.organisation_id = :org AND i.player_id = :pid
+            UNION ALL
+            {vote_manual}
+        )
+        SELECT v.season_id, s.name AS season_name, s.year,
+               v.grade_id, gr.name AS grade_name,
+               COALESCE(SUM(v.club_bf_votes), 0) AS club_bf_votes,
+               COALESCE(SUM(v.comp_bf_votes), 0) AS comp_bf_votes
+        FROM vote_src v
+        LEFT JOIN seasons s ON s.id = v.season_id
+        LEFT JOIN grades gr ON gr.id = v.grade_id
+        GROUP BY v.season_id, s.name, s.year, v.grade_id, gr.name
+        HAVING COALESCE(SUM(v.club_bf_votes), 0) > 0
+            OR COALESCE(SUM(v.comp_bf_votes), 0) > 0
     """), {"org": str(org_id), "pid": str(player_id)})
     vote_rows = [dict(r._mapping) for r in vres]
 
