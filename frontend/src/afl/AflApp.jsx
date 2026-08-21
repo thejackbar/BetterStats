@@ -13,6 +13,8 @@ import Match from './pages/Match'
 import Records from './pages/Records'
 import Leaderboard from './pages/Leaderboard'
 import Compare from './pages/Compare'
+import Premierships from './pages/Premierships'
+import HonourBoard from './pages/HonourBoard'
 import AflLogin from './pages/AflLogin'
 import AflPublicVoting from './pages/AflPublicVoting'
 import TeamLists from './pages/TeamLists'
@@ -84,6 +86,8 @@ export default function AflApp() {
                   <Route path="team-lists" element={<TeamLists />} />
                   <Route path="records" element={<Records />} />
                   <Route path="leaderboard" element={<Leaderboard />} />
+                  <Route path="premierships" element={<Premierships />} />
+                  <Route path="honour-board" element={<HonourBoard />} />
                   <Route path="compare" element={<Compare />} />
                 </Route>
                 <Route path="/" element={<Navigate to="/login" replace />} />

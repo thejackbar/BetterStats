@@ -40,6 +40,8 @@ export const aflApi = {
   comparePlayers: (orgId, ids) => request(`/afl-players/compare${qs({ org_id: orgId, ids: ids.join(',') })}`),
   getRecords: (orgId, params) => request(`/afl-records/${orgId}${qs(params)}`),
   getLeaderboard: (orgId, params) => request(`/afl-leaderboard/${orgId}${qs(params)}`),
+  getPremierships: (orgId) => request(`/afl-honours/${orgId}/premierships`),
+  getOfficeBearers: (orgId) => request(`/afl-honours/${orgId}/office-bearers`),
 
   // Admin
   syncNow: () => request('/club-admin/sync', { method: 'POST' }),

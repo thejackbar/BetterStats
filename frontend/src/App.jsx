@@ -229,6 +229,8 @@ const PlayerProfile = lazy(() => import('./pages/PlayerProfile'))
 const PlayerComparison = lazy(() => import('./pages/PlayerComparison'))
 const Leaderboard = lazy(() => import('./pages/Leaderboard'))
 const Records = lazy(() => import('./pages/Records'))
+const Premierships = lazy(() => import('./pages/Premierships'))
+const HonourBoard = lazy(() => import('./pages/HonourBoard'))
 const Ladders = lazy(() => import('./pages/Ladders'))
 const ShareCard = lazy(() => import('./pages/ShareCard'))
 const StatLab = lazy(() => import('./pages/StatLab'))
@@ -587,6 +589,8 @@ export default function App() {
           <Route path="/:clubSlug/compare" element={<PlayerComparison />} />
           <Route path="/:clubSlug/leaderboard" element={<Leaderboard />} />
           <Route path="/:clubSlug/records" element={<Records />} />
+          <Route path="/:clubSlug/premierships" element={<Premierships />} />
+          <Route path="/:clubSlug/honour-board" element={<HonourBoard />} />
           <Route path="/:clubSlug/ladders" element={<Ladders />} />
           <Route path="/:clubSlug/statlab" element={<StatLab />} />
           <Route path="/:clubSlug/statlab/r/:reportSlug" element={<StatLab />} />
