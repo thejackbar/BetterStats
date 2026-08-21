@@ -689,6 +689,18 @@ async def update_session(
         s.live_state = live
     if body.status is not None and body.status in ("active", "done"):
         s.status = body.status
+        if body.status == "done":
+            # Ending the night stops the clock for everyone, in the same write.
+            # Otherwise a finished session sits there counting down on the iPad
+            # by the fence and on the laptop in the clubroom, and whichever
+            # device notices the deadline pass would rotate a group that has
+            # gone home. Ending is also what closes the QR code: live_sessions
+            # only ever returns active ones, so a self check-in after this
+            # lands nowhere rather than joining a session that is over.
+            live = _clean_live(s.live_state, _clean_settings(s.settings))
+            live["running"] = False
+            live["ends_at"] = None
+            s.live_state = live
     return await _commit_live(db, s)
 
 

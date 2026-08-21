@@ -48,6 +48,7 @@ export default function NetSession() {
   // notice, not a second copy of the queue.
   const [arrivals, setArrivals] = useState([])
   const [audioReady, setAudioReady] = useState(false)
+  const [ending, setEnding] = useState(false)
   const [tick, setTick] = useState(() => Date.now())
   // The row-button key: on until this coach turns it off, per person and per
   // browser, so one coach putting it away doesn't take it from the next.
@@ -255,6 +256,10 @@ export default function NetSession() {
   const waiting = useMemo(() => attendees.filter((a) => !a.batted && a.bats !== false), [attendees])
   const sittingOut = useMemo(() => attendees.filter((a) => !a.batted && a.bats === false), [attendees])
   const done = useMemo(() => attendees.filter((a) => a.batted), [attendees])
+  // The night is over: no clock, no check-in, and the QR code lands nowhere.
+  // Read off the server rather than a local flag, so a coach who ends it on the
+  // phone by the nets sees the laptop in the clubroom follow on its next poll.
+  const ended = !!(live && live.status === 'done')
   const inSession = useMemo(() => {
     const s = new Set()
     attendees.forEach((a) => { if (a.player_id) s.add(a.player_id) })
@@ -294,6 +299,32 @@ export default function NetSession() {
   const rotate = () => { unlockAudio(); act(() => api.nmRotate(id, true, timer && timer.turn_seq)) }
 
   const patchSettings = (partial) => act(() => api.nmUpdateSession(id, { settings: { ...settings, ...partial } }))
+
+  // ── Ending the night ──────────────────────────────────────────────────────
+  // Confirmed, because it closes the QR code as well as stopping the clock —
+  // somebody arriving late would scan in to nothing, and the coach should know
+  // that before tapping it rather than after. Nothing is lost either way: the
+  // attendance stays, and Reopen puts it straight back.
+  const endSession = async () => {
+    const left = waiting.length
+    const msg = left > 0
+      ? `End the session? ${left} ${left === 1 ? 'person is' : 'people are'} still in the queue. The clock stops and nobody can check in, including from the QR code.`
+      : 'End the session? The clock stops and nobody can check in, including from the QR code.'
+    if (!window.confirm(msg)) return
+    setEnding(true)
+    try {
+      await act(() => api.nmUpdateSession(id, { status: 'done' }))
+      toast.success('Session ended')
+    } finally { setEnding(false) }
+  }
+
+  const reopenSession = async () => {
+    setEnding(true)
+    try {
+      await act(() => api.nmUpdateSession(id, { status: 'active' }))
+      toast.success('Session reopened — check-in is back on')
+    } finally { setEnding(false) }
+  }
 
   if (live === null) return <BetterSelectLayout title="Net session"><PbSpinner message="Loading session…" /></BetterSelectLayout>
   if (live === false) {
@@ -376,15 +407,31 @@ export default function NetSession() {
               fourth control and measured 418px against a 390px screen — the
               outer flex-wrap can't save a group that won't wrap itself. */}
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <LiveDot />
+            <LiveDot ended={ended} />
             {/* The second device. Opening it here rather than making a coach
-                find it in Settings is the whole point — it's needed at 6pm. */}
-            {checkinUrl && (
+                find it in Settings is the whole point — it's needed at 6pm.
+                Pointless once the session is over: the link would land on
+                "no nets on right now". */}
+            {checkinUrl && !ended && (
               <Btn variant="ghost" sm icon="teams" href={checkinUrl} target="_blank"
                 title="Open the self check-in screen — put this on a spare phone or iPad by the door">Check-in screen</Btn>
             )}
             <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
-            {canEdit && <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>}
+            {canEdit && !ended && (
+              <>
+                <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>
+                <Btn variant="ghost" sm icon="check" onClick={endSession} disabled={ending}
+                  title="Finish the night — stops the clock and closes check-in">
+                  {ending ? 'Ending…' : 'End session'}
+                </Btn>
+              </>
+            )}
+            {canEdit && ended && (
+              <Btn variant="ghost" sm onClick={reopenSession} disabled={ending}
+                title="Put the session back on if it was ended by mistake">
+                {ending ? 'Reopening…' : 'Reopen'}
+              </Btn>
+            )}
           </div>
         </div>
 
@@ -409,8 +456,14 @@ export default function NetSession() {
             )}
             {turnOver && <div className="mt-3 text-[13px] text-pb-faint">Turn over — hit <b className="text-pb-text">Next group</b> to rotate.</div>}
 
-            {/* Controls */}
-            {canEdit && (
+            {/* Controls. An ended session shows what happened instead of a
+                Start button that would quietly put the night back on. */}
+            {ended ? (
+              <div className="mt-5 text-[13px] text-pb-faint">
+                Session ended · {done.length} batted of {attendees.length} here.
+                {canEdit && <> Use <b className="text-pb-text">Reopen</b> above if that was a mistake.</>}
+              </div>
+            ) : canEdit && (
               <div className="flex flex-wrap items-center justify-center gap-2.5 mt-5">
                 {!running
                   ? <Btn variant="primary" icon="play" onClick={start} disabled={remaining <= 0 && settings.duration_seconds <= 0}>Start</Btn>
@@ -602,7 +655,15 @@ function RowKey() {
 /* ── Live indicator ───────────────────────────────────────────────────────────
  * Says out loud that this screen is one of possibly several on the session, so
  * a coach seeing the queue change under them knows why. */
-function LiveDot() {
+function LiveDot({ ended = false }) {
+  if (ended) {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide2 text-pb-faintest"
+        title="This session is finished. Nobody can check in to it, including from the QR code.">
+        <span className="w-1.5 h-1.5 rounded-full bg-pb-faintest" /> Ended
+      </span>
+    )
+  }
   return (
     <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide2 text-pb-faint"
       title="This session updates live on every device it's open on">

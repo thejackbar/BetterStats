@@ -223,6 +223,34 @@ not a missing button.
   everyone is on the list.
 
 
+### Ending the night (v9.42.3)
+
+Reported from a live session: nets were running and there was no way to say they
+had finished.
+
+- **Ending STOPS THE CLOCK in the same write**, server-side in `update_session`,
+  not as a second call from the browser. A finished session otherwise sits there
+  counting down on every device it is open on, and whichever one notices the
+  deadline pass would rotate a group that has gone home.
+- **Ending is what closes the QR code**, because `live_sessions` only ever
+  returns active sessions. That is the real cost of the button and the confirm
+  names it: a late arrival scans in to nothing rather than joining a session
+  that is over. The confirm also counts who is still in the queue.
+- **Nothing is destroyed.** Attendance stays, the per-session CSV still
+  downloads, and Reopen sets it back to active — which is why ending is a plain
+  confirm rather than a typed one.
+- **`ended` is read off the server payload**, never a local flag, so a coach
+  ending it on the phone by the nets has the laptop in the clubroom follow on
+  its next poll. The timer controls, the check-in button and the check-in-screen
+  shortcut are all withdrawn on an ended session; the shortcut would only land
+  on "no nets on right now".
+- **Verified**: 149 Postgres checks (the 138 above plus the clock stopping and
+  the deadline clearing, the version moving, a scan no longer joining, the
+  attendance untouched, and reopening restoring all three) and 134 in Chromium
+  across five suites, including the confirm's wording, dismissing it changing
+  nothing, and every control that should disappear.
+
+
 
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 

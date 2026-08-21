@@ -762,6 +762,52 @@ async def main():
         check("promoting settles their registration too", st_after[0], "approved")
         check("and records who they became", st_after[1] is not None, True)
 
+    print("\n── Ending the session ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        s = NetSession(id=uuid.uuid4(), organisation_id=ids["club"],
+                       session_date=datetime.now(timezone.utc).date(),
+                       label="Ending tonight", status="active", version=0)
+        db.add(s)
+        await db.commit()
+        # A clock left running, the way it would be when somebody taps End.
+        await nm.timer_action(str(s.id), nm.TimerAction(action="start"), db, club, user)
+        live = await nm.get_session(str(s.id), db, club)
+        check("the clock is running before the end", live["timer"]["running"], True)
+        check("and the session is one a scan would join",
+              str(s.id) in {str(x.id) for x in await nm.live_sessions(db, ids["club"])}, True)
+
+        before = (await db.get(NetSession, s.id)).version
+        out = await nm.update_session(
+            str(s.id), nm.SessionUpdate(status="done"), db, club, user)
+        check("the session reads done", out["status"], "done")
+        check("ending stops the clock in the same write", out["timer"]["running"], False)
+        check("and clears the deadline, so nothing rotates a squad that went home",
+              out["timer"]["ends_at"], None)
+        check("the version moved, so the other devices follow",
+              out["version"] > before, True)
+        check("a scan no longer joins it",
+              str(s.id) in {str(x.id) for x in await nm.live_sessions(db, ids["club"])}, False)
+
+        # The night's record is untouched by ending it.
+        n = (await db.execute(text(
+            "SELECT count(*) FROM net_attendance WHERE session_id = :s"), {"s": s.id})).scalar()
+        check("attendance is left exactly as it was", n, 0)
+
+    print("\n── Reopening puts it back ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        sid = (await db.execute(text(
+            "SELECT id FROM net_sessions WHERE label = 'Ending tonight'"))).scalar()
+        out = await nm.update_session(
+            str(sid), nm.SessionUpdate(status="active"), db, club, user)
+        check("the session is active again", out["status"], "active")
+        check("the clock is back to stopped, not running", out["timer"]["running"], False)
+        check("and a scan joins it once more",
+              str(sid) in {str(x.id) for x in await nm.live_sessions(db, ids["club"])}, True)
+
     print("\n── Migration 272 applies cleanly, three times ──")
     async with engine.begin() as conn:
         # Against a POPULATED pre-272 table: drop what 272 adds, then re-apply.
