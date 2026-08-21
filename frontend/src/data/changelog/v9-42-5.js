@@ -1,7 +1,7 @@
 export default {
   version: 'v9.42.5',
   date: '2026-08-21',
-  sortKey: '2026-08-21T23:30:00Z',
+  sortKey: '2026-08-22T00:30:00Z',
   title: 'B&F votes on a player page',
   items: [
     'A player page now has Club B&F votes and Competition B&F votes beside Games, Goals and BOG, so the season by season table breaks a vote tally down by grade and by year the same way it does everything else.',
