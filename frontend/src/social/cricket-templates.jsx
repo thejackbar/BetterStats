@@ -1219,6 +1219,182 @@ export function T9_Flyer({ team, opponent, match, players, palette }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TEMPLATE 10 — Match-day team sheet (full-bleed photo, torn sponsor strip)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// A fixed profile for the torn-paper edge. Hand-written rather than generated,
+// because a template re-renders on every keystroke and again inside the export
+// clone — a Math.random() tear would move between the preview and the file.
+// Each value is the height the tear reaches at that point, 0 (flat) to 1 (full).
+const TORN_PROFILE = [
+  0.62, 0.28, 0.74, 0.36, 0.90, 0.20, 0.55, 0.82, 0.30, 0.68, 0.42, 0.86,
+  0.24, 0.60, 0.78, 0.34, 0.70, 0.46, 0.88, 0.26, 0.58, 0.80, 0.40, 0.66,
+]
+
+function TornEdge({ color = '#fff', height = 26, width = 1080, style = {} }) {
+  const step = width / (TORN_PROFILE.length - 1)
+  const pts = TORN_PROFILE.map((v, i) => `${(i * step).toFixed(1)},${(height * (1 - v)).toFixed(1)}`)
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} style={{ display: 'block', ...style }}>
+      <path d={`M0,${height} L${pts.join(' L')} L${width},${height} Z`} fill={color} />
+    </svg>
+  )
+}
+
+export function T10_TeamSheet({ team, opponent, match, players, palette, heroImage, headline, featuredId }) {
+  const P = players.slice(0, 13)
+  // Shrink the rows as the squad grows so a full 13 still fits the column.
+  const rowMax = P.length >= 13 ? 32 : P.length >= 12 ? 36 : P.length >= 11 ? 40 : P.length >= 9 ? 46 : 52
+  const featured = featuredOf(players, featuredId)
+  const photo = heroImage || (featured && featured.headshot) || null
+  // The strip is the club's ink colour (off-white on every built-in palette),
+  // so it reads as the reference's cream paper without hardcoding a hue that
+  // would fight a club's own colours.
+  const paper = palette.ink
+  const paperInk = palette.primary
+  const STRIP_H = 104
+  const TEAR_H = 26
+  const meta = [match.date, match.time].filter(Boolean).join('  ·  ')
+  const fixture = [team.short || team.name, opponent.short || opponent.name].filter(Boolean).join(' V ').toUpperCase()
+  const comp = [match.competition, match.round].filter(Boolean).join('  ·  ').toUpperCase()
+  return (
+    <div style={{
+      width: 1080, height: 1080, position: 'relative', overflow: 'hidden',
+      background: `linear-gradient(160deg, ${palette.secondary} 0%, ${palette.primary} 70%)`,
+      color: palette.ink, fontFamily: "'Inter', sans-serif",
+    }}>
+      {/* Photo sits on the right two-thirds and bleeds behind everything, with
+          the left edge faded out so the names always have something to sit on.
+          A club with no hero photo and no headshot gets the gradient and the
+          crest instead of a broken image. */}
+      <div style={{ position: 'absolute', right: 0, top: 0, width: 720, bottom: 0, overflow: 'hidden' }}>
+        {photo
+          ? <img src={photo} alt={featured ? `${featured.first} ${featured.last}` : (team.short || 'team')}
+              style={{
+                position: 'absolute', inset: 0, width: '100%', height: '100%',
+                objectFit: 'cover', objectPosition: 'center top',
+                filter: 'saturate(0.92) contrast(1.06)',
+              }} />
+          : team.logo
+            ? <img src={team.logo} alt={team.short || 'club'}
+                style={{ position: 'absolute', right: 60, top: 180, width: 420, height: 420, objectFit: 'contain', opacity: 0.16 }} />
+            : <div style={{
+                position: 'absolute', left: 0, right: 0, top: 220, textAlign: 'center',
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)", fontSize: 200,
+                lineHeight: 1, letterSpacing: -6, color: palette.ink, opacity: 0.07,
+              }}>{team.monogram || (team.short || team.name || '').slice(0, 3).toUpperCase()}</div>}
+        {/* The fade has to clear the subject: a cutout player's face sits around
+            the middle of this box, and carrying the wash that far across leaves
+            them muddy. It is heavy for the first third, where the names are. */}
+        <div style={{
+          position: 'absolute', inset: 0,
+          background: `linear-gradient(90deg, ${palette.primary} 0%, ${palette.primary}e6 12%, ${palette.primary}99 30%, ${palette.primary}33 46%, transparent 62%)`,
+        }} />
+      </div>
+      <div style={{
+        position: 'absolute', left: 0, right: 0, top: 0, height: 200,
+        background: `linear-gradient(180deg, ${palette.primary}cc 0%, transparent 100%)`,
+      }} />
+      <div style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: 320,
+        background: `linear-gradient(0deg, ${palette.primary}dd 0%, transparent 100%)`,
+      }} />
+      <Halftone color={palette.ink} opacity={0.06} size={10} />
+      <Stripes color={palette.ink} opacity={0.035} gap={26} angle={-24} />
+
+      {/* Top meta rail — dates, the fixture, the ground. */}
+      <div style={{
+        position: 'absolute', left: 44, right: 44, top: 34, zIndex: 4,
+        display: 'flex', alignItems: 'center', gap: 20,
+        fontFamily: "'JetBrains Mono', monospace", letterSpacing: 2.2,
+        color: palette.ink, opacity: 0.88, textTransform: 'uppercase',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AutoFitText text={meta || 'MATCH DAY'} max={13} min={8} lines={1} style={{ letterSpacing: 2.2 }} />
+        </div>
+        <div style={{ flex: 1.3, minWidth: 0, textAlign: 'center' }}>
+          <AutoFitText text={fixture} max={13} min={8} lines={1} style={{ letterSpacing: 2.2, textAlign: 'center' }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0, textAlign: 'right' }}>
+          <AutoFitText text={(match.venue || '').toUpperCase()} max={13} min={8} lines={1} style={{ letterSpacing: 2.2, textAlign: 'right' }} />
+        </div>
+      </div>
+      <div style={{ position: 'absolute', left: 44, right: 44, top: 66, height: 1, background: palette.ink, opacity: 0.22, zIndex: 4 }} />
+
+      {/* The wordmark. Short headlines ("XI") fill the box; a long one wraps
+          rather than shrinking to nothing. The clamp is 3 lines, not 2, because
+          AutoFitText sizes to fit the BOX and the clamp then cuts whatever is
+          left over — at 2 a three-line headline lost its last word to an
+          ellipsis even though it had already been shrunk to fit. */}
+      <div style={{ position: 'absolute', left: 42, top: 96, width: 500, height: 232, zIndex: 4 }}>
+        <AutoFitText
+          text={(headline || 'XI').toUpperCase()} max={230} min={52} lines={3} pad={10}
+          style={{
+            fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+            lineHeight: 0.84, letterSpacing: -4, color: palette.ink,
+            textShadow: `0 18px 50px ${palette.primary}aa`,
+          }} />
+      </div>
+
+      {/* The XI itself. */}
+      <div style={{
+        position: 'absolute', left: 44, top: 348, width: 560, bottom: STRIP_H + TEAR_H + 34,
+        zIndex: 4, display: 'flex', flexDirection: 'column',
+        gap: 2, justifyContent: P.length >= 10 ? 'space-between' : 'flex-start',
+      }}>
+        {P.map((p, i) => {
+          const chip = p.captain ? '(C)' : p.viceCaptain ? '(VC)' : p.keeper ? '(WK)' : null
+          return (
+            <AutoFitText key={i} max={rowMax} min={15} lines={1} pad={8} measureDeps={[chip ? 1 : 0]}
+              style={{
+                fontFamily: "var(--social-display-font, 'Anton', sans-serif)",
+                lineHeight: 1.08, letterSpacing: 0.6, color: palette.ink,
+                textShadow: `0 6px 22px ${palette.primary}99`,
+              }}>
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: '0.3em', whiteSpace: 'nowrap' }}>
+                <span>{`${p.first || ''} ${p.last || ''}`.trim().toUpperCase()}</span>
+                {chip && <span style={{ color: palette.accent, fontSize: '0.62em', letterSpacing: 1 }}>{chip}</span>}
+              </span>
+            </AutoFitText>
+          )
+        })}
+      </div>
+
+      {/* Torn paper strip — crests, competition, credit. */}
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: STRIP_H, zIndex: 5 }}>
+        <TornEdge color={paper} height={TEAR_H} />
+      </div>
+      <div style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0, height: STRIP_H, zIndex: 5,
+        background: paper, color: paperInk,
+        display: 'flex', alignItems: 'center', gap: 22, padding: '0 44px',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          background: `${paperInk}14`, borderRadius: 10, padding: '8px 14px',
+        }}>
+          <ClubLogo src={team.logo} monogram={team.monogram} color={paperInk} size={54} shape="shield" />
+          <ClubLogo src={opponent.logo} monogram={opponent.monogram} color={paperInk} size={54} shape="shield" />
+        </div>
+        {comp && (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <AutoFitText text={comp} max={26} min={11} lines={1}
+              style={{ fontFamily: "var(--social-display-font, 'Anton', sans-serif)", letterSpacing: 2, color: paperInk, lineHeight: 1 }} />
+            {match.season && (
+              <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, letterSpacing: 1.6, opacity: 0.6, marginTop: 4 }}>{match.season}</div>
+            )}
+          </div>
+        )}
+        <div style={{ flexShrink: 0, marginLeft: 'auto' }}>
+          <CreditMark ink={paperInk} h={40} />
+        </div>
+      </div>
+      <GrainSVG opacity={0.4} id="g10" />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPANION 1 — Generic announcement
 // ─────────────────────────────────────────────────────────────────────────────
 export function C1_CaptainAnnounce({ announcement, team, opponent, match, palette, player: legacyPlayer }) {
