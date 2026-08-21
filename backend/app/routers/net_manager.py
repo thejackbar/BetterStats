@@ -54,7 +54,9 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.capabilities import MANAGE_SELECTIONS, require_cap
+from app.auth.capabilities import (
+    MANAGE_PLAYERS, MANAGE_SELECTIONS, require_any_cap, require_cap,
+)
 from app.models.db import (
     NetAttendance, NetCheckInRegistration, NetSession, Organisation, Player, User, get_db,
 )
@@ -1460,3 +1462,241 @@ async def dismiss_registration(
     r.reviewed_at = datetime.now(timezone.utc)
     await db.commit()
     return {"status": "ok"}
+
+
+# ── Guests who are not on the roster ─────────────────────────────────────────
+# A guest row (player_id NULL + guest_name) is written two ways: a manager types
+# a name on the live screen, or somebody scans the QR code and registers. The
+# second kind lands in the Check-in queue above with the details they gave. The
+# FIRST kind had nowhere to go at all — they turned up week after week and could
+# never become a player without an admin retyping them by hand, which stranded
+# every night they had already attended on rows nothing would ever read.
+#
+# This is that missing path, surfaced on the Players screens rather than here:
+# a person who keeps turning up is a roster question, not a net-session one.
+GUEST_WINDOW_DAYS = 90
+
+
+def _guest_key(name: str) -> str:
+    """One guest across several nights, however the name was typed.
+
+    Case and surrounding space only — deliberately NOT a fuzzy match. Two
+    people really can be typed in as the same name, and quietly merging
+    "J Smith" into "Jack Smith" would put one person's attendance on another.
+    """
+    return " ".join((name or "").split()).casefold()
+
+
+@router.get("/guests")
+async def list_unresolved_guests(
+    days: int = Query(GUEST_WINDOW_DAYS, ge=0, le=3650),
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+):
+    """Guests from recent sessions who are not on the roster, grouped by name.
+
+    Grouped because the question is about a PERSON — "this bloke has been to
+    five sessions, should he be on the list" — not about five separate rows.
+
+    Anyone carrying a PENDING registration is deliberately left out and
+    reported as a count instead. They already sit in the Check-in queue WITH
+    the details they typed, and one person offered in two places, with
+    different information behind each, is how the two screens start disagreeing
+    about who they are. The panel links across rather than duplicating them.
+
+    days=0 means all time.
+    """
+    params: dict = {"org": club.id}
+    since_clause = ""
+    if days:
+        params["since"] = datetime.now(timezone.utc).date() - timedelta(days=days)
+        since_clause = "AND s.session_date >= :since"
+
+    rows = (await db.execute(
+        text(
+            f"""
+            SELECT a.id, a.guest_name, s.id AS session_id, s.session_date, s.label,
+                   (r.id IS NOT NULL) AS has_pending
+            FROM net_attendance a
+            JOIN net_sessions s ON s.id = a.session_id
+            LEFT JOIN net_checkin_registrations r
+                   ON r.attendance_id = a.id AND r.status = 'pending'
+            WHERE a.organisation_id = :org
+              AND a.player_id IS NULL
+              AND a.guest_name IS NOT NULL
+              {since_clause}
+            ORDER BY s.session_date DESC, s.created_at DESC
+            """
+        ),
+        params,
+    )).fetchall()
+
+    grouped: dict = {}
+    pending = 0
+    for _aid, name, sid, sdate, label, has_pending in rows:
+        if has_pending:
+            # Theirs is the Check-in queue's decision to make, not this one's.
+            pending += 1
+            continue
+        key = _guest_key(name)
+        if not key:
+            continue
+        g = grouped.setdefault(key, {
+            # The most recent spelling wins: rows come back newest first, so
+            # this is whatever the club typed last.
+            "name": " ".join((name or "").split()),
+            "sessions": [],
+        })
+        g["sessions"].append({
+            "id": str(sid),
+            "session_date": sdate.isoformat() if sdate else None,
+            "label": label,
+        })
+
+    guests = [
+        {
+            "key": k,
+            "name": g["name"],
+            "attended": len(g["sessions"]),
+            "last_attended": g["sessions"][0]["session_date"] if g["sessions"] else None,
+            "sessions": g["sessions"][:12],
+        }
+        for k, g in grouped.items()
+    ]
+    # Most-seen first — the person who keeps turning up is the one to action —
+    # then most recent. Two passes because Python's sort is stable, which is
+    # simpler to read than inverting a date string inside one key.
+    guests.sort(key=lambda x: x["last_attended"] or "", reverse=True)
+    guests.sort(key=lambda x: -x["attended"])
+    return {
+        "guests": guests,
+        "days": days,
+        "pending_registrations": pending,
+    }
+
+
+class GuestPromote(BaseModel):
+    # Which guest, by the same key the list hands back — never a raw name off a
+    # browser, so the server decides for itself which rows that key covers.
+    key: str
+    # Match them to somebody already on the roster. Omitted, a player is created.
+    player_id: Optional[str] = None
+    # Only used when creating: the club may correct the spelling on the way in.
+    name: Optional[str] = None
+
+
+@router.post("/guests/promote")
+async def promote_guest(
+    body: GuestPromote,
+    db: AsyncSession = Depends(get_db),
+    club: Organisation = Depends(get_current_club),
+    user: User = Depends(require_any_cap(MANAGE_SELECTIONS, MANAGE_PLAYERS)),
+):
+    """Turn a guest into a player, and take their attendance history with them.
+
+    Either creates a player from the name, or points the guest at somebody
+    already on the roster who turns out to be the same person.
+
+    **Every one of their guest rows moves, not just the recent ones the list
+    was showing.** The window is a filter for who is worth looking at; a person
+    joining the club should not leave half their nights behind on rows nothing
+    reads. Where they are already checked in properly for a session, the real
+    row is kept and the duplicate guest row is dropped — the unique index would
+    refuse the pair, and two rows for one person is the wrong answer anyway.
+
+    Gated on EITHER capability: a selections manager runs the nets and can
+    already do this from the Check-in tab, and a player manager owns the roster.
+    The panel is on both Players screens for exactly that reason.
+    """
+    club_id = club.id
+    key = _guest_key(body.key)
+    if not key:
+        raise HTTPException(status_code=422, detail="Which guest?")
+
+    # Resolve the key against this club's own rows — never trust a name.
+    rows = (await db.execute(
+        select(NetAttendance).where(
+            NetAttendance.organisation_id == club_id,
+            NetAttendance.player_id.is_(None),
+            NetAttendance.guest_name.isnot(None),
+        )
+    )).scalars().all()
+    mine = [r for r in rows if _guest_key(r.guest_name) == key]
+    if not mine:
+        raise HTTPException(status_code=404, detail="That guest is no longer in any session")
+
+    if body.player_id:
+        try:
+            cand = uuid.UUID(str(body.player_id))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="Unknown player")
+        player = await db.get(Player, cand)
+        if not player or player.organisation_id != club_id:
+            raise HTTPException(status_code=422, detail="Unknown player")
+    else:
+        typed = (body.name or mine[0].guest_name or "").strip()[:80]
+        if len(typed) < 2:
+            raise HTTPException(status_code=422, detail="Give them a name")
+        # "Last, First" like every other player row, so the roster sorts and
+        # reads the same however the person got there. A mononym stays as typed.
+        parts = typed.split()
+        stored = f"{parts[-1]}, {' '.join(parts[:-1])}" if len(parts) > 1 else typed
+        player = Player(
+            id=uuid.uuid4(), organisation_id=club_id, name=stored, status="active",
+        )
+        db.add(player)
+        await db.flush()
+
+    # Which sessions already hold this player properly, so a converted guest
+    # row can't collide with one.
+    held = {
+        sid for (sid,) in (await db.execute(
+            select(NetAttendance.session_id).where(
+                NetAttendance.player_id == player.id,
+                NetAttendance.session_id.in_([r.session_id for r in mine]),
+            )
+        )).fetchall()
+    }
+
+    moved = dropped = 0
+    touched: dict = {}
+    for r in mine:
+        if r.session_id in held:
+            await db.delete(r)
+            dropped += 1
+        else:
+            r.player_id = player.id
+            r.guest_name = None
+            held.add(r.session_id)   # two guest rows for one night collapse to one
+            moved += 1
+        touched[r.session_id] = True
+
+    # Any registration that pointed at those rows is settled by this too, or a
+    # person promoted here would sit in the Check-in queue forever.
+    await db.execute(
+        text(
+            """
+            UPDATE net_checkin_registrations
+               SET status = 'approved', player_id = :pid,
+                   reviewed_by = :uid, reviewed_at = NOW()
+             WHERE organisation_id = :org AND status = 'pending'
+               AND attendance_id = ANY(CAST(:aids AS uuid[]))
+            """
+        ),
+        {"pid": player.id, "uid": user.id, "org": club_id,
+         "aids": [str(r.id) for r in mine]},
+    )
+
+    for sid in touched:
+        s = await db.get(NetSession, sid)
+        if s is not None:
+            _touch(s)
+    await db.commit()
+
+    return {
+        "status": "ok",
+        "player_id": str(player.id),
+        "player_name": player.display_name,
+        "sessions_moved": moved,
+        "duplicates_dropped": dropped,
+    }

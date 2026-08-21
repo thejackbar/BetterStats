@@ -562,6 +562,206 @@ async def main():
         check("a later settings change keeps the same token", out2["token"], minted)
         check("and applies the change", out2["require_pin"], False)
 
+    print("\n── Guests who are not on the roster ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        today = datetime.now(timezone.utc).date()
+
+        # Three nights, one bloke the manager typed in each time, spelled two
+        # ways; plus a one-off; plus somebody from another club entirely.
+        sessions = []
+        for n, lbl in enumerate(["Week 1", "Week 2", "Week 3"]):
+            s = NetSession(id=uuid.uuid4(), organisation_id=ids["club"],
+                           session_date=today - timedelta(days=n * 7),
+                           label=lbl, status="done", version=0)
+            db.add(s)
+            sessions.append(s)
+        old = NetSession(id=uuid.uuid4(), organisation_id=ids["club"],
+                         session_date=today - timedelta(days=200),
+                         label="Last season", status="done", version=0)
+        foreign_s = NetSession(id=uuid.uuid4(), organisation_id=ids["other"],
+                               session_date=today, label="Theirs", status="active", version=0)
+        db.add_all([old, foreign_s])
+        await db.commit()
+
+        for s, nm_ in zip(sessions, ["Dave Trialist", "dave  trialist", "DAVE TRIALIST"]):
+            await nm.check_in_person(db, s, ids["club"], guest_name=nm_, source="admin")
+        await nm.check_in_person(db, sessions[0], ids["club"], guest_name="One Off", source="admin")
+        await nm.check_in_person(db, old, ids["club"], guest_name="Ancient History", source="admin")
+        await nm.check_in_person(db, foreign_s, ids["other"], guest_name="Their Guest", source="admin")
+        await db.commit()
+
+        out = await nm.list_unresolved_guests(90, db, club)
+        names = {g["name"]: g for g in out["guests"]}
+        check("one person, not three rows, however it was spelled",
+              names["Dave Trialist"]["attended"], 3)
+        # Week 1 is the most recent night, so its spelling is the one shown.
+        check("the most recent spelling is the one shown", "Dave Trialist" in names, True)
+        check("a one-off guest is listed too", names["One Off"]["attended"], 1)
+        check("a guest outside the window is left out", "Ancient History" in names, False)
+        check("another club's guest is never listed", "Their Guest" in names, False)
+        check("most-seen first", out["guests"][0]["name"], "Dave Trialist")
+        check("internal row ids are not handed to the browser",
+              "attendance_ids" in out["guests"][0], False)
+
+        allt = await nm.list_unresolved_guests(0, db, club)
+        check("days=0 reaches all time",
+              "Ancient History" in {g["name"] for g in allt["guests"]}, True)
+
+    print("\n── Someone mid-review in Check-in is not offered twice ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        out = await nm.list_unresolved_guests(90, db, club)
+        listed = {g["name"] for g in out["guests"]}
+        # 'Graeme Cole' was approved earlier, 'Someone Else' dismissed — neither
+        # is pending, so both are ordinary guests again if rows remain.
+        pending_rows = (await db.execute(text(
+            "SELECT count(*) FROM net_checkin_registrations WHERE status = 'pending'"))).scalar()
+        check("the pending count is reported rather than the people",
+              out["pending_registrations"], pending_rows)
+
+        # 'Bad Email' registered earlier and nobody has decided about them yet,
+        # so they are the pending case.
+        check("a person waiting in Check-in is not listed here",
+              "Bad Email" in listed, False)
+
+        # The complement: settle their registration and they become an ordinary
+        # guest again, because nothing is waiting on them any more.
+        await db.execute(text(
+            "UPDATE net_checkin_registrations SET status = 'dismissed' WHERE full_name = 'Bad Email'"))
+        await db.commit()
+        out2 = await nm.list_unresolved_guests(90, db, club)
+        check("once nobody is waiting on them, they are listed here",
+              "Bad Email" in {g["name"] for g in out2["guests"]}, True)
+        check("and the pending count drops by exactly one",
+              out2["pending_registrations"], out["pending_registrations"] - 1)
+
+        # Put them back, so the later promote test starts where it expects.
+        await db.execute(text(
+            "UPDATE net_checkin_registrations SET status = 'pending' WHERE full_name = 'Bad Email'"))
+        await db.commit()
+        out3 = await nm.list_unresolved_guests(90, db, club)
+        check("and they drop back out once pending again",
+              "Bad Email" in {g["name"] for g in out3["guests"]}, False)
+
+    print("\n── Promoting a guest takes their history with them ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        before = (await db.execute(text(
+            "SELECT count(*) FROM players WHERE organisation_id = :o"), {"o": ids["club"]})).scalar()
+
+        out = await nm.promote_guest(nm.GuestPromote(key="dave trialist"), db, club, user)
+        check("a player is created", out["status"], "ok")
+        check("named 'Last, First' like the rest of the roster", out["player_name"], "Trialist, Dave")
+        check("all three nights moved, not just the latest", out["sessions_moved"], 3)
+        check("nothing was dropped", out["duplicates_dropped"], 0)
+
+        after = (await db.execute(text(
+            "SELECT count(*) FROM players WHERE organisation_id = :o"), {"o": ids["club"]})).scalar()
+        check("exactly one player was added", after, before + 1)
+
+        pid = uuid.UUID(out["player_id"])
+        n = (await db.execute(text(
+            "SELECT count(*) FROM net_attendance WHERE player_id = :p"), {"p": pid})).scalar()
+        check("their attendance is now theirs, not a guest's", n, 3)
+        left = (await db.execute(text(
+            "SELECT count(*) FROM net_attendance WHERE guest_name ILIKE 'dave%'"))).scalar()
+        check("no guest rows left behind", left, 0)
+
+        out2 = await nm.list_unresolved_guests(90, db, club)
+        check("and they are gone from the list",
+              "Dave Trialist" in {g["name"] for g in out2["guests"]}, False)
+
+    print("\n── Promoting onto someone already on the roster ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        jack = ids["players"][0]
+        s = NetSession(id=uuid.uuid4(), organisation_id=ids["club"],
+                       session_date=datetime.now(timezone.utc).date(),
+                       label="Clash night", status="done", version=0)
+        db.add(s)
+        await db.commit()
+        # Jack is checked in properly AND typed in as a guest on the same night.
+        await nm.check_in_person(db, s, ids["club"], player_id=jack, source="admin")
+        await nm.check_in_person(db, s, ids["club"], guest_name="Jacko", source="admin")
+        await db.commit()
+
+        before = (await db.execute(text(
+            "SELECT count(*) FROM players WHERE organisation_id = :o"), {"o": ids["club"]})).scalar()
+        out = await nm.promote_guest(
+            nm.GuestPromote(key="jacko", player_id=str(jack)), db, club, user)
+        after = (await db.execute(text(
+            "SELECT count(*) FROM players WHERE organisation_id = :o"), {"o": ids["club"]})).scalar()
+        check("no player is minted when matched to an existing one", after, before)
+        check("the duplicate row is dropped, not moved onto a clash",
+              out["duplicates_dropped"], 1)
+        check("and nothing was moved for that night", out["sessions_moved"], 0)
+        n = (await db.execute(text(
+            "SELECT count(*) FROM net_attendance WHERE session_id = :s AND player_id = :p"),
+            {"s": s.id, "p": jack})).scalar()
+        check("they are in that session exactly once", n, 1)
+
+    print("\n── Two guest rows on one night collapse to one ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        s = NetSession(id=uuid.uuid4(), organisation_id=ids["club"],
+                       session_date=datetime.now(timezone.utc).date(),
+                       label="Double entry", status="done", version=0)
+        db.add(s)
+        await db.commit()
+        await nm.check_in_person(db, s, ids["club"], guest_name="Twice Typed", source="admin")
+        await nm.check_in_person(db, s, ids["club"], guest_name="twice typed", source="admin")
+        await db.commit()
+        out = await nm.promote_guest(nm.GuestPromote(key="twice typed"), db, club, user)
+        check("one row moves and the other is dropped",
+              (out["sessions_moved"], out["duplicates_dropped"]), (1, 1))
+        n = (await db.execute(text(
+            "SELECT count(*) FROM net_attendance WHERE session_id = :s AND player_id = :p"),
+            {"s": s.id, "p": uuid.UUID(out["player_id"])})).scalar()
+        check("the unique index is never violated", n, 1)
+
+    print("\n── Promotion refuses what it should ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        other = await db.get(Organisation, ids["other"])
+        user = await db.get(User, ids["user"])
+        for label, body, code in [
+            ("an empty key", nm.GuestPromote(key="   "), 422),
+            ("a guest nobody has heard of", nm.GuestPromote(key="ghost person"), 404),
+            ("another club's player",
+             nm.GuestPromote(key="one off", player_id=str(ids["foreign"])), 422),
+            ("a junk player id", nm.GuestPromote(key="one off", player_id="not-a-uuid"), 422),
+        ]:
+            try:
+                await nm.promote_guest(body, db, club, user)
+                check(f"{label} refused", False)
+            except Exception as e:
+                check(f"{label} → {code}", getattr(e, "status_code", None), code)
+
+        # A key from one club must not reach another club's guest rows.
+        try:
+            await nm.promote_guest(nm.GuestPromote(key="one off"), db, other, user)
+            check("a key used against the wrong club refused", False)
+        except Exception as e:
+            check("a key used against the wrong club → 404", getattr(e, "status_code", None), 404)
+
+    print("\n── A promoted guest stops waiting in the Check-in queue ──")
+    async with Session() as db:
+        club = await db.get(Organisation, ids["club"])
+        user = await db.get(User, ids["user"])
+        st_before = (await db.execute(text(
+            "SELECT status FROM net_checkin_registrations WHERE full_name = 'Bad Email'"))).scalar()
+        check("they start out pending", st_before, "pending")
+        await nm.promote_guest(nm.GuestPromote(key="bad email"), db, club, user)
+        st_after = (await db.execute(text(
+            "SELECT status, player_id FROM net_checkin_registrations WHERE full_name = 'Bad Email'"))).fetchone()
+        check("promoting settles their registration too", st_after[0], "approved")
+        check("and records who they became", st_after[1] is not None, True)
+
     print("\n── Migration 272 applies cleanly, three times ──")
     async with engine.begin() as conn:
         # Against a POPULATED pre-272 table: drop what 272 adds, then re-apply.

@@ -1,13 +1,13 @@
 export default {
   version: 'v9.42.1',
   date: '2026-08-21',
-  sortKey: '2026-08-21T15:00:00Z',
-  title: 'Nets: every player is findable at check-in, and turning up is not the same as batting',
+  sortKey: '2026-08-21T18:00:00Z',
+  title: 'Turn a nets guest into a player',
   items: [
-    'Fixed: a player who reads as active on your Players screen could be missing from net check-in entirely. The list left out anyone who had not played a game recently and said nothing about it, so the only way to record them was as a guest under their own name. Check-in now reaches every player at the club. Your current squad is still what you see first, and searching finds the rest.',
-    'Someone can now turn up and not bat. They count as having been there, they stay off the batting queue so the rotation never lands on an empty net, and you can leave a note about why.',
-    'Up next is only what is still to come. Batted and Not batting are their own lists underneath, so a long queue is a real one.',
-    'The row buttons are cricket bats now rather than a lightning bolt: a green arrow for bat next, a tick for marking someone as batted, and a no-entry mark for taking them out of the rotation. A key above the list says what each does, and you can hide it once you know them.',
-    'The attendance download for a session says who was not batting, any note against them, and whether they checked themselves in or you did.',
+    'Players now has a "Not on the roster" panel listing anyone who has been to nets in the last 90 days without being on the list. Add them as a player, or point them at whoever they already are.',
+    'Every net session they have been to moves onto their new record, so a bloke who has trained six times keeps those six nights instead of starting from nothing.',
+    'One person, however their name was typed. Three nights logged as "Dave Trialist", "dave trialist" and "DAVE TRIALIST" read as one bloke with three sessions.',
+    'The panel is on both Players screens, so it does not matter which one you happen to be on. It stays hidden when everyone at recent nets is already on the list.',
+    'Anyone who scanned the QR code and left their details is pointed at Nets → Check-in instead of being offered in two places, since that screen has their mobile and date of birth to add them with.',
   ],
 }

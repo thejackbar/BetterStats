@@ -2982,6 +2982,17 @@ export const api = {
     }),
   nmDismissRegistration: (id) =>
     request(`/nets/registrations/${id}/dismiss`, { method: 'POST' }),
+  // Guests from recent net sessions who aren't on the roster, grouped by name.
+  // days = 0 means all time.
+  nmUnresolvedGuests: (days = 90) => request(`/nets/guests?days=${days}`),
+  // Turn one into a player. playerId matches them to someone already on the
+  // roster; omitted, a player is created. Their whole attendance history moves
+  // across either way, not just the sessions the list was showing.
+  nmPromoteGuest: (key, { playerId = null, name = null } = {}) =>
+    request('/nets/guests/promote', {
+      method: 'POST',
+      body: JSON.stringify({ key, player_id: playerId, name }),
+    }),
 
   // ─── BetterSelect: Player profile ───────────────────────
   bsGetPlayerProfile: (id) => request(`/players/${id}/profile`),

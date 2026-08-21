@@ -11,6 +11,7 @@ import { bowls, bowlingLabel } from '../../lib/playerAttributes'
 import { Profile, draftFromProfile, patchFromDraft } from '../../components/player/PlayerProfilePanel'
 import { Avatar, RoleChips, Icon, QuickAvailModal } from './betterselect/ui'
 import PlayerMerchPanel from './bettermerch/PlayerMerchPanel'
+import UnrosteredGuests from '../../components/player/UnrosteredGuests'
 import '../../styles/players-list.css'
 
 // ---------------------------------------------------------------------------
@@ -220,11 +221,17 @@ export default function AdminPlayers() {
   const headerRefs = useRef({})
   const pendingJump = useRef(null)
 
-  useEffect(() => {
+  // Extracted so promoting a nets guest can pull the roster again — they are a
+  // player now, and the list they were missing from should say so at once.
+  const loadPlayers = useCallback(() => {
     api.adminListPlayers().then(setPlayers).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    loadPlayers()
     api.adminGetSettings().then(s => setNameFormat(s.player_name_format || 'last_first')).catch(() => {})
     api.bsListTeams().then(t => setTeams(t || [])).catch(() => setTeams([]))
-  }, [])
+  }, [loadPlayers])
 
   const searching = filter.trim().length > 0
   const teamNameById = useMemo(() => Object.fromEntries(teams.map((t) => [t.id, t.name])), [teams])
@@ -417,6 +424,10 @@ export default function AdminPlayers() {
             </div>
           </form>
         )}
+
+        {/* People who have been turning up to nets without being on the list.
+            Renders nothing when there is nobody to sort out. */}
+        <UnrosteredGuests onPromoted={loadPlayers} />
 
         {/* Search */}
         <div className="pl-search">

@@ -1,6 +1,6 @@
 # BetterStats — Claude Session Notes
 
-## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.1, Aug 2026)
+## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.2, Aug 2026)
 
 Reported from a club's Thursday nets, alongside the QR check-in the note below
 describes: "I can't add Amardeep Gill though he is on the active list", and
@@ -66,9 +66,9 @@ people being entered as guests because they weren't there to find.
   what they write, the key showing by default and its hidden state surviving a
   reload, the modal reaching a dormant player and the exact payload on the wire,
   no page errors, no overflow at 390px).
-- **Not built**: promoting a guest to a real player after the fact (the
-  registration queue below covers the newcomer case, not a guest already typed
-  in), and nothing here writes fixture availability.
+- **Not built here**: nothing writes fixture availability — "here, not batting"
+  is about tonight only. Promoting a guest to a real player landed separately in
+  v9.42.1 ("Not on the roster" on the Players screens).
 
 ## A player checks themselves in at the nets (migration 272, v9.42.0, Aug 2026)
 
@@ -164,6 +164,64 @@ the same check-in done by the player on their own phone on the way past.
   rendering and its download, the review queue's three decisions and the roster
   match, the live screen's pop-up firing for a self check-in and staying quiet
   for an admin one, no page errors, no overflow at 390px).
+
+### Turning a nets guest into a player (v9.42.1)
+
+Reported straight after the above: "how do we turn a guest into a player within
+the Players section?" The answer was **you can't** — and it was a real dead end,
+not a missing button.
+
+- **A guest row is written two ways and only one of them had an exit.** Somebody
+  who scans the QR code lands in the Check-in queue with the details they typed.
+  A guest the manager TYPES on the live screen has no `net_checkin_registrations`
+  row, so `approve_registration` — which reaches the attendance row only through
+  `NetCheckInRegistration.attendance_id` — could never see them. They turned up
+  week after week and could only become a player by an admin retyping them,
+  which stranded every night they had already attended on rows nothing reads.
+  **`AttendeePatch` accepts `batted` only**, so nothing else could attach a
+  `player_id` either, and `claim-fill-in` hard-validates a UUID participant id
+  so it cannot serve a guest who has none.
+- **`GET /nets/guests` groups by NAME, not by row**, because the question is
+  about a person: "this bloke has been to five sessions, should he be on the
+  list". `_guest_key` folds case and surrounding space and **nothing else** —
+  deliberately not fuzzy. Two people really can be typed in under one name, and
+  quietly folding "J Smith" into "Jack Smith" would put one person's attendance
+  on another. The most recent spelling is the one shown.
+- **Anyone carrying a PENDING registration is left OUT and counted instead.**
+  They already sit in Check-in *with* their mobile, email and date of birth, and
+  one person offered on two screens with different information behind each is
+  how the two start disagreeing about who they are. The panel links across.
+  Settle their registration and they become an ordinary guest here again.
+- **`POST /nets/guests/promote` moves their WHOLE history, not the window.**
+  The 90 days is a filter for who is worth looking at; somebody joining the club
+  should not leave half their nights behind. Where they are already checked in
+  properly for a session the real row is kept and the guest row dropped — the
+  unique index would refuse the pair — and two guest rows on one night collapse
+  to one for the same reason.
+- **It settles any registration pointing at those rows too**, or a person
+  promoted from Players would sit in the Check-in queue forever.
+- **The key is resolved server-side against the club's own rows**, never a raw
+  name off a browser, so a key cannot reach another club's guests.
+- **Gated on EITHER `MANAGE_SELECTIONS` or `MANAGE_PLAYERS`** (`require_any_cap`):
+  a selections manager runs the nets and can already do this from Check-in, and
+  a player manager owns the roster. That is also why the panel is on BOTH
+  Players screens — an admin should not have to know which one owns it.
+- **`UnrosteredGuests` renders NOTHING when there is nobody to sort out**, and
+  never calls the endpoint for a club without BetterSelect (the router is behind
+  `require_module("select")`, so it would 402). Same rule as `ageFilterOptions`:
+  a control that can only ever answer "everyone is fine" is worse than none.
+- **`AdminPlayers`' roster fetch was inline in an effect** and had to be
+  extracted to `loadPlayers` so promoting can pull the list again — the person
+  is a player now and the screen they were missing from should say so.
+- **Verified**: the Postgres suite is 138 checks (the 103 above plus one person
+  across three spellings, the window at both ends, another club's guest never
+  listed, the pending exclusion both ways, all three nights moving, the clash
+  and double-entry collapses, five refusals, and a promotion settling its
+  registration) and the Chromium run is 108 across four suites, including the
+  panel on both Players screens, the exact payload for create and match, a club
+  without BetterSelect never calling the endpoint, and nothing drawn when
+  everyone is on the list.
+
 
 
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
