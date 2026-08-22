@@ -828,7 +828,13 @@ async def set_interest(
     deal = await _load_deal(db, deal_id)
     _assert_can_touch(actor, deal)
     keys = sorted({k for k in (body.module_keys or []) if k in sw.VALID_MODULE_KEYS})
-    await crm_service.update_deal(db, deal, module_keys=keys, product_interest_source="manual")
+    try:
+        await crm_service.update_deal(db, deal, module_keys=keys, product_interest_source="manual")
+    except ValueError as exc:
+        # At least one module has to stay picked — see crm.update_deal. The
+        # pills refuse to unpick the last one themselves, so this is the
+        # backstop for anything that isn't the screen.
+        raise HTTPException(status_code=422, detail=str(exc))
     await db.commit()
     return await get_club(deal_id, actor, db)
 

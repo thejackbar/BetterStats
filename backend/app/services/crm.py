@@ -806,13 +806,19 @@ async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal
     # price, so the two fields can never silently drift apart. Club-scope
     # deals (sponsors/grants/custom trackers) keep value_cents fully manual.
     if deal.scope == SCOPE_PLATFORM and "module_keys" in fields and fields["module_keys"] is not None:
-        # Including an EMPTY selection, which prices at 0. Clearing every
-        # module used to leave the old dollar figure standing, so a deal could
-        # read "no modules" beside a four-figure value — the same value/modules
-        # drift the merge ratchet produced, reached the other way. Setting the
-        # modules is a deliberate act by a rep or a super admin, and the value
-        # is defined as the price of what they picked.
-        deal.value_cents = value_from_modules(sorted(set(fields["module_keys"] or [])))
+        keys = sorted(set(fields["module_keys"]))
+        # A platform deal always sells SOMETHING, so at least one module must
+        # stay picked. Deliberately not "Stats must be picked": a club already
+        # paying for Stats and trialling Select is a real deal for Select
+        # alone, and forcing Core back on would overstate it. What is refused
+        # is nothing at all — an opportunity to sell no product is not an
+        # opportunity, and the empty state is also what left a stale dollar
+        # figure standing beside "no modules".
+        if not keys:
+            raise ValueError("Pick at least one module — a deal has to be for something.")
+        # The value is the price of what was picked, and follows it in both
+        # directions. Anything else lets value and modules drift apart.
+        deal.value_cents = value_from_modules(keys)
     if (deal.discount_amount_cents or deal.discount_percent) and not (deal.discount_reason or "").strip():
         raise ValueError("A discretionary discount requires a reason")
     deal.updated_at = func.now()

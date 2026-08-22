@@ -240,6 +240,14 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
   const toggleModule = (key) => {
     const cur = deal?.module_keys || []
+    // The last picked module can't be unpicked: a deal has to be for
+    // something, and its value is the price of what is picked. Deliberately
+    // not "Stats must stay on" — a club already paying for Stats and
+    // trialling Select is a real deal for Select alone.
+    if (cur.length === 1 && cur[0] === key) {
+      toast.error('A deal has to be for at least one module. Pick another before removing this one.')
+      return
+    }
     const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]
     // A manual chip click is an explicit override — the analytics-derived
     // set won't silently overwrite it again until "Recalculate" is clicked.
@@ -491,7 +499,8 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                     const expired = days != null && days < 0
                     return (
                       <button key={m.key} type="button" onClick={() => toggleModule(m.key)}
-                        title={expired ? `Trial expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago` : undefined}
+                        title={expired ? `Trial expired ${Math.abs(days)} day${Math.abs(days) === 1 ? '' : 's'} ago`
+                               : (heldKeys.length === 1 && on) ? 'A deal has to be for at least one module' : undefined}
                         className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
                           expired ? 'bg-pb-red/12 border-pb-red/40 text-pb-red'
                           : on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'

@@ -214,7 +214,16 @@ Workspace opened on a different club.
   kept the old figure and the deal read "no modules" beside a four-figure
   value — the same value/modules drift the merge ratchet produced, reached
   from the other end. Setting the modules is a deliberate act and the value is
-  the price of what was picked, including nothing.
+  the price of what was picked.
+- **A DEAL HAS TO BE FOR AT LEAST ONE MODULE (v9.49.8), which settled the
+  empty case for good.** `update_deal` refuses an empty `module_keys` on a
+  platform deal, so the value can never be asked to price nothing. It is
+  deliberately NOT "Stats must stay picked": a club already paying for Stats
+  and trialling Select is a genuine deal for Select alone, and forcing Core
+  back on would overstate it. Both surfaces refuse to unpick the last pill
+  without sending anything, and the server refuses it for everything that is
+  not the screen — `set_interest` needed its own `try/except ValueError`,
+  since only the CRM route went through `_update_deal_or_422`.
 - **The pills endpoint returns `get_club(...)`, so the rep's own pane already
   shows the recomputed figure without a reload**, and the CRM deal card reads
   the same row with no sync step in between — asserted both ways rather than
@@ -222,8 +231,10 @@ Workspace opened on a different club.
 - **Verified**: 12 Chromium checks in
   `frontend/verification/verify_workspace_deeplink_browser.mjs` (the scroll
   into view, the row carrying the selected border, row one NOT selected, the
-  outside-filters note, plus the four from v9.49.3), and the Postgres
-  interest suite is 24.
+  outside-filters note, plus the four from v9.49.3), 6 in
+  `verify_interest_pills_browser.mjs` (the last pill sending NOTHING, a
+  single non-Stats module allowed, the message shown), and the Postgres
+  interest suite is 29.
 
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's

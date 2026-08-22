@@ -1318,6 +1318,13 @@ export default function SalesWorkspace() {
   const toggleInterest = async (key) => {
     if (!drawer?.deal) return
     const cur = drawer.deal.module_keys || []
+    // The last picked module can't be unpicked: a deal has to be for
+    // something. Not "Stats must stay on" — a club already paying for Stats
+    // and trialling Select is a real deal for Select alone.
+    if (cur.length === 1 && cur[0] === key) {
+      toast?.error('A deal has to be for at least one module. Pick another before removing this one.')
+      return
+    }
     const next = cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]
     try {
       const d = await api.salesWorkspaceSetInterest(drawer.deal.id, next)
@@ -2103,12 +2110,17 @@ export default function SalesWorkspace() {
                   <Field label="Interested in" composite>
                     <div className="flex flex-wrap gap-1.5">
                       {MODULE_ORDER.map(key => {
-                        const on = (drawer.deal.module_keys || []).includes(key)
+                        const held = drawer.deal.module_keys || []
+                        const on = held.includes(key)
+                        // The last one standing stays put — see toggleInterest.
+                        const onlyOne = held.length === 1
                         return (
                           <button key={key} type="button" onClick={() => toggleInterest(key)}
+                            title={onlyOne && on ? 'A deal has to be for at least one module' : undefined}
                             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
                               on ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent'
-                                 : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
+                                 : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}${
+                              onlyOne && on ? ' cursor-default' : ''}`}>
                             {moduleLabel(key)}
                           </button>
                         )
