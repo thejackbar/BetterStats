@@ -2035,9 +2035,6 @@ export default function SalesWorkspace() {
                     </div>
                   </Field>
                   <Field label="Notes"><TextArea value={callForm.notes} onChange={e => setCallForm(f => ({ ...f, notes: e.target.value }))} /></Field>
-                  <Field label="Follow up (optional)">
-                    <TextInput type="datetime-local" value={callForm.followUpAt} onChange={e => setCallForm(f => ({ ...f, followUpAt: e.target.value }))} />
-                  </Field>
                   {ASSIGNABLE_EVENT_OUTCOMES.includes(callForm.outcome) && callForm.followUpAt && (
                     <Field label="Hand this follow-up to" hint="Leave as 'Me' to keep it on your own calendar">
                       <Select value={callForm.eventOwnerUserId} onChange={e => setCallForm(f => ({ ...f, eventOwnerUserId: e.target.value }))}>
@@ -2046,6 +2043,9 @@ export default function SalesWorkspace() {
                       </Select>
                     </Field>
                   )}
+                  <Field label="Follow up (optional)">
+                    <TextInput type="datetime-local" value={callForm.followUpAt} onChange={e => setCallForm(f => ({ ...f, followUpAt: e.target.value }))} />
+                  </Field>
                   <Btn type="submit" variant="primary" disabled={savingCall}>{savingCall ? 'Saving…' : 'Save call'}</Btn>
                 </form>
               </div>
