@@ -1464,6 +1464,13 @@ const TREE_ROW = 'w-full text-left flex items-start gap-1.5 rounded px-1.5 py-1 
 // lines up with one that has by construction rather than by two numbers being
 // kept in step.
 const TWISTY_BOX = 'w-7 h-7 shrink-0 flex items-start justify-center text-[22px] leading-[22px]'
+// One level's step in, and it is DERIVED rather than chosen: the control is
+// 28px (`w-7`) and the row's own gap is 6px (`gap-1.5`), so a child indented
+// by 34px puts its caret directly under the first letter of its parent's
+// label. Anything less and a theme's caret sits to the LEFT of the word PLAN
+// above it, which reads as though it belonged to the level above. Change
+// either of those two and this has to move with them.
+const TREE_STEP = 'ml-[34px]'
 
 function Twisty({ open, hidden, onToggle }) {
   if (hidden || !onToggle) return <span className={TWISTY_BOX} aria-hidden="true" />
@@ -1868,7 +1875,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
             {isOpen(pk) && themes.map(th => {
               const tk = `theme:${plan.id}:${th.id}`
               return (
-                <div key={tk} className="ml-3">
+                <div key={tk} className={TREE_STEP}>
                   <div className={`${TREE_ROW} ${isSel('theme', th.id) ? 'bg-pb-surface2' : ''}`}
                     {...dragProps('theme', th.id, `themes:${plan.id}`)}
                     title="Drag to reorder"
@@ -1890,7 +1897,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                     const ok = `obj:${o.id}`
                     const work = workRows(o, workMode)
                     return (
-                      <div key={o.id} className="ml-3">
+                      <div key={o.id} className={TREE_STEP}>
                         <div className={`${TREE_ROW} ${isSel('objective', o.id) ? 'bg-pb-surface2' : ''}`}
                           {...dragProps('objective', o.id, `objs:${plan.id}:${th.id}`)}
                           title="Drag to reorder"
@@ -1905,7 +1912,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                           <DelDot onClick={() => removeObjective(o)} title={`Delete ${o.title}`} />
                         </div>
                         {isOpen(ok) && (
-                          <div className="ml-3">
+                          <div className={TREE_STEP}>
                             {work.map(r => (
                               <button key={`${r._kind}-${r.id}`} onClick={() => select(r._kind, r.id)}
                                 className={`${TREE_ROW} ${isSel(r._kind, r.id) ? 'bg-pb-surface2' : ''}`}
