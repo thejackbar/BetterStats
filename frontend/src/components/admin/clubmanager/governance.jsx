@@ -868,6 +868,329 @@ function Delivery({ row, level = 'objective' }) {
   )
 }
 
+
+/* ── How the plan is actually going ─────────────────────────────────────── */
+
+// The plan read as DELIVERY rather than as a structure: for every action, is it
+// where it should be by now, and is the money keeping pace with the work —
+// rolled up through its objective and its theme to the plan itself.
+//
+// EVERY VERDICT IS A WORD, and the colour is second. Checked rather than
+// assumed: the green and the amber this app uses separate by ΔE 7.2 under
+// protanopia, inside the band that is only legal with a second channel, and in
+// the light theme the red and the amber are ΔE 14 apart for a reader with FULL
+// colour vision. So nothing here is told apart by colour alone — a chip always
+// says which state it is in.
+//
+// SILENCE WHERE THE CLUB'S DATA CANNOT ANSWER. An action with no start date has
+// no elapsed fraction, so it gets no schedule verdict rather than a flattering
+// one; an objective with nothing allocated gets no budget verdict rather than
+// reading as under budget. Same discipline the selection rules keep.
+
+const POSITIVE = 'var(--pb-positive-ink)'
+const RED = 'var(--pb-red-ink)'
+
+// How far behind the clock is worth calling out. A plan is not a project
+// schedule and a committee is not a contractor, so an action a day behind is
+// drift rather than a problem — without a tolerance almost everything reads
+// BEHIND and the colour stops meaning anything. Ten points is a deliberate
+// choice, not a measurement; change it here and every level moves with it.
+const DRIFT_TOLERANCE = 10
+// The same idea for money: spend runs ahead of progress all the time (you buy
+// the materials before you lay them), so only a real gap is worth flagging.
+const SPEND_TOLERANCE = 15
+
+const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime() }
+
+// Where a piece of work should be by now, as a percentage of its own span.
+// Null when it cannot be worked out — no start, no due, or a span that ends
+// before it begins. A missing answer is not a zero.
+function elapsedPercent(startISO, dueISO, today) {
+  if (!startISO || !dueISO) return null
+  const s = Date.parse(startISO), d = Date.parse(dueISO)
+  if (!Number.isFinite(s) || !Number.isFinite(d) || d <= s) return null
+  return Math.max(0, Math.min(100, Math.round(((today - s) / (d - s)) * 100)))
+}
+
+const SCHEDULE = {
+  done: { label: 'DONE', tone: POSITIVE, rank: 0 },
+  on_track: { label: 'ON TRACK', tone: POSITIVE, rank: 1 },
+  unknown: { label: 'NO DATES', tone: null, rank: 2 },
+  behind: { label: 'BEHIND', tone: AMBER, rank: 3 },
+  late: { label: 'LATE', tone: RED, rank: 4 },
+}
+
+// One action's schedule verdict, and the point on its own bar where it should
+// have got to by now.
+function actionSchedule(a, today) {
+  const percent = a.percent_complete || 0
+  if ((a.status || '') === 'done' || percent >= 100) return { key: 'done', target: null }
+  const due = a.due_date ? Date.parse(a.due_date) : null
+  if (due && Number.isFinite(due) && due < today) return { key: 'late', target: 100 }
+  const target = elapsedPercent(a.start_date, a.due_date, today)
+  if (target === null) return { key: 'unknown', target: null }
+  return { key: percent + DRIFT_TOLERANCE < target ? 'behind' : 'on_track', target }
+}
+
+// A group's verdict is the WORST of the things under it, ignoring the ones that
+// could not be judged — an objective is late if any action serving it is late,
+// and done only when every one of them is. Rolling up this way is what makes a
+// theme's figure mean the same thing as an action's.
+function rollUpSchedule(keys) {
+  const judged = keys.filter(k => k !== 'unknown')
+  if (!judged.length) return 'unknown'
+  if (judged.every(k => k === 'done')) return 'done'
+  return judged.reduce((worst, k) => (SCHEDULE[k].rank > SCHEDULE[worst].rank ? k : worst), 'done')
+}
+
+// Spend against what was allocated. Null when nothing is allocated: "0 of 0" is
+// not an answer, and a club that budgets at the plan level rather than per
+// action should not be told its actions are all under budget.
+function budgetState(budget, spent, progress) {
+  const b = Number(budget || 0)
+  if (!b) return null
+  const s = Number(spent || 0)
+  const percentSpent = Math.round((s / b) * 100)
+  if (s > b) return { label: 'OVER BUDGET', tone: RED, percentSpent }
+  if (percentSpent > (progress || 0) + SPEND_TOLERANCE) {
+    return { label: 'SPENDING AHEAD', tone: AMBER, percentSpent }
+  }
+  return { label: 'IN BUDGET', tone: null, percentSpent }
+}
+
+// A meter with a TARGET TICK. The fill is where the work has got to; the tick is
+// where it should be by now. The gap between the two IS the reading — two
+// numbers side by side do not show it, and a second bar would be a second scale
+// for one quantity.
+//
+// Both meters on a row run 0–100, so they share one base and money and time can
+// be read against each other without a second axis inventing a relationship
+// between them.
+function Meter({ percent, target, tone, label, note, title }) {
+  const p = Math.max(0, Math.min(100, Math.round(percent || 0)))
+  const hasTarget = target !== null && target !== undefined
+  return (
+    <div title={title}>
+      <div className="flex items-baseline justify-between gap-2 mb-1">
+        <span className={cap}>{label}</span>
+        <span className="font-mono text-[10px] pb-num" style={{ color: tone || 'var(--pb-dim)' }}>{p}%</span>
+      </div>
+      <div className="relative h-1.5 rounded bg-pb-surface2">
+        <div className="h-full rounded" style={{ width: `${p}%`, background: tone || 'var(--pb-accent)' }} />
+        {hasTarget && (
+          // 2px, with a surface RING rather than a border, so it reads over the
+          // fill and over the empty track alike.
+          <span aria-hidden="true" className="absolute top-[-3px] h-[12px] w-[2px] rounded"
+            style={{
+              left: `calc(${Math.max(0, Math.min(100, target))}% - 1px)`,
+              background: 'var(--pb-text)',
+              boxShadow: '0 0 0 2px var(--pb-surface)',
+            }} />
+        )}
+      </div>
+      {note && <div className="font-mono text-[9.5px] text-pb-faintest mt-1">{note}</div>}
+    </div>
+  )
+}
+
+// The verdict, in a word. Never colour on its own.
+function StateChip({ state }) {
+  if (!state) return null
+  const tone = state.tone || 'var(--pb-faintest)'
+  return (
+    <span className="font-mono text-[8.5px] tracking-wide2 rounded px-1.5 py-px shrink-0 whitespace-nowrap"
+      style={{
+        color: tone,
+        border: `1px solid ${state.tone ? `color-mix(in srgb, ${tone} 45%, transparent)` : 'var(--pb-hairline)'}`,
+      }}>
+      {state.label}
+    </span>
+  )
+}
+
+const shortDate = iso => {
+  if (!iso) return null
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
+
+// One row of the delivery tree — a theme, an objective or an action. The same
+// shape at every level, so a reader compares like with like all the way down.
+function DeliveryRow({ kind, title, schedule, target, percent, budget, spent, span, meta, children }) {
+  const sched = SCHEDULE[schedule] || null
+  const spend = budgetState(budget, spent, percent)
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className={`${cap} mb-0.5`}>{[kind, span].filter(Boolean).join(' · ')}</div>
+          <div className="text-pb-text text-[13px] leading-snug">{title}</div>
+          {meta && <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">{meta}</div>}
+        </div>
+        <StateChip state={sched} />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mt-2.5">
+        <Meter percent={percent} target={target} tone={sched?.tone} label="SCHEDULE"
+          note={schedule === 'unknown' ? 'No start and due date to measure against' : null}
+          title={target === null || target === undefined
+            ? 'No start and due date, so there is nothing to measure progress against'
+            : `${percent || 0}% done, and ${target}% of the time has gone`} />
+        {spend ? (
+          <div>
+            <Meter percent={spend.percentSpent} target={percent} tone={spend.tone} label="BUDGET"
+              note={`${money(spent)} of ${money(budget)}`}
+              title={`${money(spent)} of ${money(budget)} spent, against ${percent || 0}% of the work done`} />
+            <div className="mt-1"><StateChip state={spend} /></div>
+          </div>
+        ) : (
+          <div>
+            <span className={cap}>BUDGET</span>
+            <div className="font-mono text-[9.5px] text-pb-faintest mt-1">Nothing allocated</div>
+          </div>
+        )}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+// A motion carries no schedule and no money — it is a decision, not a piece of
+// work — so the delivery tree lists it through the register's own `MotionLine`
+// (declared further down, and hoisted) rather than giving it empty meters.
+
+// The whole plan, as delivery. Themes hold objectives hold actions, each level
+// answering the same two questions, so "how are we going" can be asked of the
+// plan and then traced to the action that is dragging it.
+export function PlanDelivery({ plan, pillars }) {
+  const [open, setOpen] = useState(() => new Set())
+  const today = startOfToday()
+
+  const themes = useMemo(() => {
+    const objs = plan.objective_list || []
+    return (pillars || [])
+      .filter(p => p.plan_id === plan.id)
+      .map(p => {
+        const rows = objs.filter(o => o.pillar_id === p.id).map(o => {
+          const actions = (o.action_list || []).map(a => ({ ...a, _s: actionSchedule(a, today) }))
+          return { ...o, actions, motions: o.motion_list || [], schedule: rollUpSchedule(actions.map(a => a._s.key)) }
+        })
+        return { ...p, rows, schedule: rollUpSchedule(rows.map(r => r.schedule)) }
+      })
+      .filter(t => t.rows.length)
+  }, [plan, pillars, today])
+
+  // The health of the plan in one line, counted from the actions themselves so
+  // it cannot disagree with the rows underneath it.
+  const tally = useMemo(() => {
+    const all = themes.flatMap(t => t.rows.flatMap(r => r.actions))
+    const count = k => all.filter(a => a._s.key === k).length
+    const overBudget = themes.flatMap(t => t.rows)
+      .filter(r => budgetState(r.budget, r.spent, r.percent_complete)?.label === 'OVER BUDGET').length
+    return { total: all.length, done: count('done'), onTrack: count('on_track'),
+             behind: count('behind'), late: count('late'), unknown: count('unknown'), overBudget }
+  }, [themes])
+
+  const toggle = id => setOpen(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  if (!themes.length) {
+    return (
+      <div className="pb-card p-6 text-center">
+        <div className="text-pb-text text-[13px] mb-1">Nothing to report on yet.</div>
+        <div className="font-mono text-[11px] text-pb-faintest">
+          Point an action at an objective in this plan and its progress appears here.
+        </div>
+      </div>
+    )
+  }
+
+  const chips = [
+    { n: tally.done, label: 'DONE', tone: POSITIVE },
+    { n: tally.onTrack, label: 'ON TRACK', tone: POSITIVE },
+    { n: tally.behind, label: 'BEHIND', tone: AMBER },
+    { n: tally.late, label: 'LATE', tone: RED },
+    { n: tally.overBudget, label: 'OVER BUDGET', tone: RED },
+    { n: tally.unknown, label: 'NO DATES', tone: null },
+  ].filter(c => c.n > 0)
+
+  return (
+    <div className="space-y-3">
+      <div className="pb-card p-4">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <div className={`${cap} mb-1`}>DELIVERY</div>
+            <div className="text-pb-dim text-[12.5px]">
+              {tally.total} action{tally.total === 1 ? '' : 's'} serving this plan
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {chips.map(c => (
+              <StateChip key={c.label} state={{ label: `${c.n} ${c.label}`, tone: c.tone }} />
+            ))}
+          </div>
+        </div>
+        <div className="font-mono text-[9.5px] text-pb-faintest mt-3 leading-relaxed">
+          The bar is where the work has got to. The upright mark is where it should be by
+          now — on SCHEDULE, the share of the time that has passed; on BUDGET, the share of
+          the work that is done. A bar short of its mark is behind.
+        </div>
+      </div>
+
+      {themes.map(t => (
+        <div key={t.id} className="pb-card p-4">
+          <DeliveryRow
+            kind="THEME" title={t.name} schedule={t.schedule}
+            percent={Math.round(t.rows.reduce((n, r) => n + (r.percent_complete || 0), 0) / t.rows.length)}
+            target={null}
+            budget={t.rows.reduce((n, r) => n + Number(r.budget || 0), 0)}
+            spent={t.rows.reduce((n, r) => n + Number(r.spent || 0), 0)}
+            meta={`${t.rows.length} objective${t.rows.length === 1 ? '' : 's'}`}
+          />
+          <Nested level="objective" className="mt-3 space-y-3">
+            {t.rows.map(o => {
+              const isOpen = open.has(o.id)
+              const work = o.actions.length + o.motions.length
+              return (
+                <div key={o.id}>
+                  <DeliveryRow
+                    kind="OBJECTIVE" title={o.title} schedule={o.schedule}
+                    percent={o.percent_complete || 0} target={null}
+                    budget={o.budget} spent={o.spent}
+                    span={o.due_date ? `DUE ${shortDate(o.due_date)}` : null}
+                    meta={work
+                      ? `${o.actions.length} action${o.actions.length === 1 ? '' : 's'}`
+                        + (o.motions.length ? ` · ${o.motions.length} motion${o.motions.length === 1 ? '' : 's'}` : '')
+                      : 'Nothing serving it yet'}
+                  />
+                  {work > 0 && (
+                    <button type="button" onClick={() => toggle(o.id)}
+                      aria-expanded={isOpen}
+                      className="mt-2 font-mono text-[9.5px] text-pb-faint hover:text-pb-text">
+                      {isOpen ? '▾ Hide the work' : `▸ Show the ${work} thing${work === 1 ? '' : 's'} serving it`}
+                    </button>
+                  )}
+                  {isOpen && (
+                    <Nested level="work" className="mt-2 space-y-3">
+                      {o.actions.map(a => (
+                        <DeliveryRow key={a.id}
+                          kind="ACTION" title={a.title} schedule={a._s.key}
+                          percent={a.percent_complete || 0} target={a._s.target}
+                          budget={a.budget_estimate} spent={a.actual_expenditure}
+                          span={[shortDate(a.start_date), shortDate(a.due_date)].filter(Boolean).join(' – ') || null}
+                        />
+                      ))}
+                      {o.motions.map(m => <MotionLine key={m.id} motion={m} />)}
+                    </Nested>
+                  )}
+                </div>
+              )
+            })}
+          </Nested>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 /* ── Pointing something at the plan ─────────────────────────────────────── */
 
 // One picker for "which objective does this serve", used by an action's plan
@@ -2017,6 +2340,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
               style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
           )}
+
+          {/* How the plan is actually going, under the figures that summarise
+              it — the same two questions asked of every theme, objective and
+              action, so a number in the card above can be traced to the piece
+              of work dragging it. */}
+          {plan.id && <PlanDelivery plan={plan} pillars={pillars} />}
         </div>
       )
     }
