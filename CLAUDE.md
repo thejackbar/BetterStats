@@ -896,6 +896,15 @@ as sections with their own buttons rather than three tabs and a manage page.
   internal `"char"`. Cast it in SQL (`confdeltype::text`) or a comparison
   against `'c'` is quietly false however right the constraint is — five checks
   read as failing before that was spotted.
+- **A level's step-in is DERIVED from the caret's width, not chosen
+  (v9.49.6).** `TREE_STEP` is `ml-[34px]` = the 28px control plus the row's own
+  6px gap, which is exactly what puts a child's caret under the first letter of
+  its parent's label. At the old `ml-3` a theme's caret sat 22px LEFT of the
+  word PLAN above it, reading as though it belonged to the level above. Change
+  `TWISTY_BOX`'s width or `TREE_ROW`'s gap and this moves with them. The cost
+  is real and accepted: a name three levels down has ~34px less to sit in and
+  wraps more readily, which is why the row-height check asserts "a one-line row
+  is still 37px" rather than a fixed array of heights.
 - **`Twisty` IS the button, not something inside one (v9.48.2).** The
   expand/collapse control was an 11px glyph in a `w-3.5` span wrapped in a
   button with no width of its own, so the button shrank to the glyph's advance
