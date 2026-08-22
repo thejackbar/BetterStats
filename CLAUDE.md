@@ -855,6 +855,11 @@ as sections with their own buttons rather than three tabs and a manage page.
   `moduleBrand`'s ALIAS map so nothing that still asks for it breaks). The
   marketing site and `billing_pricing.py` already said BetterAdmin, so the app
   has stopped disagreeing with the invoice.
+- **THE HEADER NO LONGER LINKS TO THE MANAGE SCREEN (v9.50.4).** Every one of
+  its editors is mounted here, so `Manage meetings & positions` only ever took
+  a reader to a second copy of what they were already looking at.
+  `/admin/clubhouse/committee/manage` still exists and still renders — it is
+  simply not offered as a destination from this screen any more.
 - **Committee's buttons are Meetings (default), Plans, Documents, Calendar,
   Positions.** Every key lives in `st` (`cteMeetingsView` / `cteActionsView`),
   so a label can be renamed without moving anyone's view. **Positions is kept

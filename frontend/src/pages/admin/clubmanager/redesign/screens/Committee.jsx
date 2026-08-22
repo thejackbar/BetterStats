@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout , ManageLink } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout } from '../ui'
 import { MeetingRoomPanel } from '../../../MeetingRoom'
 import { objectiveLabel } from '../../../../../components/admin/clubmanager/planLabels'
 // The Plans, Actions, Documents and Calendar sections are the manage screen's
@@ -548,7 +548,12 @@ export default function Committee({ st, patch, narrow }) {
       </div>
       <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={TABS} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
-        <ManageLink to="/admin/clubhouse/committee/manage">Manage meetings &amp; positions</ManageLink>
+        {/* No link out to the manage screen: every one of its editors is
+            mounted here now (Meetings, Actions, Motions, Meeting Templates,
+            Plans, Documents, Calendar, Positions), so the link only ever took
+            a reader to a second copy of what they were already looking at.
+            /admin/clubhouse/committee/manage still exists and still works —
+            it is simply no longer offered as a destination. */}
         {/* The primary action belongs to whatever is on screen, so the button
             names the record this view actually makes. */}
         {data && tab === 'meetings' && meetingsView === 'meetings' && (
