@@ -290,30 +290,30 @@ export default function SalesEventsView({ dealOptions, staffOptions, ownerOption
       </div>
 
       <div className="pb-card px-3 py-3 flex flex-wrap gap-3 items-end">
-        <Field label="Search (title, club)" width="220px">
+        <Field label="Search (title, club)" width="200px">
           <TextInput value={q} onChange={e => setQ(e.target.value)} placeholder="Search events…" />
         </Field>
-        <Field label="Club" width="190px">
+        <Field label="Club" width="140px">
           <Select value={clubId} onChange={e => setClubId(e.target.value)}>
             <option value="">All clubs</option>
             {clubOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
         {owners.length > 0 && (
-          <Field label="Responsible" width="170px" composite>
+          <Field label="Responsible" width="130px" composite>
             <MultiSelect value={ownerIds} onChange={setOwnerIds} allLabel="Anyone"
               groups={ownerFilterGroups(owners)} />
           </Field>
         )}
         {view === 'list' && (
           <>
-            <Field label="On date" width="150px">
+            <Field label="On date" width="135px">
               <TextInput type="date" value={date} onChange={e => setDate(e.target.value)} />
             </Field>
-            <Field label="From" width="150px">
+            <Field label="From" width="135px">
               <TextInput type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
             </Field>
-            <Field label="To" width="150px">
+            <Field label="To" width="135px">
               <TextInput type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} />
             </Field>
           </>
