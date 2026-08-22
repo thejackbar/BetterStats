@@ -112,6 +112,51 @@ been paid.
   the drill-down's clubs/modules/stage/commission and its deep link, a zero
   opening nothing, the quarter/financial-year switch, a dismissed delete
   sending nothing, no page errors, no overflow at 390px).
+### What the first look at the real data changed (v9.49.1)
+
+- **A DEAL'S VALUE MUST FOLLOW ITS MODULES DOWN AS WELL AS UP.** Reported off
+  the live screen: a deal listed as `Stats` sitting at **$998**, which is the
+  all-six-modules price. `sync_platform_deal_for_club` merged a new signal's
+  modules in and then kept `max(existing, new)` for the value — a ratchet. So a
+  club valued at the full bundle during a trial held that price forever after a
+  rep narrowed its interest to Stats, and value and modules drifted apart
+  permanently. It now recomputes `value_from_modules(merged)`, which is the
+  only definition that cannot drift. Reproduced against a real Postgres in
+  three steps (trial → rep narrows → later signal) before fixing it.
+- **`python -m app.scripts.repair_deal_values`** re-prices the OPEN deals
+  already carrying the old figure, dry-run by default. **WON and LOST deals are
+  deliberately skipped**: a closed deal's value is the record of what was
+  actually sold, and re-pricing it would rewrite the commission earned on it. A
+  deal with no modules at all is skipped rather than zeroed — an empty
+  selection is "nobody has said yet", not "worth nothing".
+- **The Rate column reading 0% was NOT a bug**, and confirming that took
+  replaying the exact flow rather than reading the code: the rep had an
+  explicit 0 stored (the panel shows RESET rather than a `default` pill, which
+  is the tell), and the platform default was 0 too. The fix was to stop the
+  screen being silent about it — the drill-down now says a rep has no rate
+  where the $0 figures are, and a 0% rate carries an `earns nothing` pill in
+  Commission rates. **A figure that is correctly zero still has to explain
+  itself.**
+- **The drill-down's columns follow the figure that opened it.** An OPEN deal
+  has a likelihood, so it carries Stage, Value, Rate, Pipeline commission and
+  Weighted commission; a WON deal has neither, so it shows Commission earned
+  and no weighted column at all — weighting money that is already owed would
+  be inventing a hedge on it. A total row adds up to the figure clicked, the
+  same cell-and-its-list discipline the Sales Performance drill-downs keep.
+- **One name per figure.** "Forecast commission" and "Pipeline commission" were
+  the same number under two names across the KPI strip, the table and the
+  drill-down; it is `Pipeline commission` everywhere now, and
+  `Weighted commission` for the likelihood-adjusted one.
+- **A club name in the drill-down is a real link** to
+  `/admin/super/crm/workspace?club=<deal_id>`, which the Workspace's own
+  deep-link effect already selects and loads whether or not the club is in the
+  current queue filter. It was already a link and simply did not read as one.
+- **Verified**: the Postgres suite is 139 checks now (the 107 above plus the
+  drift reproduced and fixed both ways, the repair script's dry run / apply /
+  won-deal skip / idempotent re-run, and a 22-check replay of the exact
+  save-a-rate-then-read-the-column flow for three reps), and the Chromium run
+  is 41.
+
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,

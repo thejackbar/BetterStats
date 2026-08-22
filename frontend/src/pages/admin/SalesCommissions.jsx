@@ -78,7 +78,7 @@ function ForecastTable({ rows, totals, onOpen, activeKey }) {
             <th className="text-left py-1.5 pr-2">Salesperson</th>
             <th className={TH} title="Distinct clubs they earned, won or open">Clubs</th>
             <th className={TH}>Pipeline value</th>
-            <th className={TH}>Forecast commission</th>
+            <th className={TH}>Pipeline commission</th>
             <th className={TH} title="Value × the deal's own likelihood">Weighted pipeline</th>
             <th className={TH}>Weighted commission</th>
           </tr>
@@ -159,9 +159,23 @@ function EarnedTable({ rows, totals, onOpen, activeKey }) {
 // The deals behind whichever figure was clicked, drawn under the table it came
 // from rather than in a dialog, so the row stays on screen and a run of reps
 // can be compared without reopening anything.
+//
+// The columns follow the figure that was clicked. An OPEN deal has a
+// likelihood, so it carries both the flat pipeline commission and the weighted
+// one; a WON deal has neither — it is settled, and what it earned is a single
+// figure. Showing a "weighted" column against a won deal would be inventing a
+// hedge on money that is already owed.
 function Drilldown({ open, onClose }) {
   if (!open) return null
-  const { title, loading, error, data } = open
+  const { title, loading, error, data, status } = open
+  const isOpen = status === 'open'
+  const deals = data?.deals || []
+  const sum = (key) => deals.reduce((t, d) => t + (d[key] || 0), 0)
+  // Every rate in the list is the same rep's, so one zero means the rep has no
+  // rate — which is the whole reason the money columns read $0, and worth
+  // saying rather than leaving someone to work out.
+  const noRate = deals.length > 0 && deals.every(d => !d.rate_percent)
+
   return (
     <div className="mt-3 border-t border-pb-hairline pt-3">
       <div className="flex items-start justify-between gap-3 mb-2">
@@ -180,11 +194,17 @@ function Drilldown({ open, onClose }) {
       </div>
       {loading && <p className="text-[12px] text-pb-faintest">Loading…</p>}
       {error && <p className="text-[12px] text-pb-red-ink">{error}</p>}
-      {data && data.deals.length === 0 && (
+      {noRate && (
+        <p className="text-[11px] text-pb-text mb-2">
+          No commission rate is set for this salesperson, so every commission figure here is
+          $0. Set one under Commission rates below.
+        </p>
+      )}
+      {data && deals.length === 0 && (
         <p className="text-[12px] text-pb-faintest">No deals behind this figure.</p>
       )}
-      {data && data.deals.length > 0 && (
-        <div className="max-h-80 overflow-y-auto">
+      {deals.length > 0 && (
+        <div className="max-h-80 overflow-y-auto overflow-x-auto">
           <table className="w-full text-[12px]">
             <thead>
               <tr className="text-pb-faint border-b border-pb-hairline">
@@ -193,15 +213,20 @@ function Drilldown({ open, onClose }) {
                 <th className={TH}>Stage</th>
                 <th className={TH}>Value</th>
                 <th className={TH}>Rate</th>
-                <th className={TH}>Commission</th>
+                <th className={TH}>{isOpen ? 'Pipeline commission' : 'Commission earned'}</th>
+                {isOpen && <th className={TH}>Weighted commission</th>}
               </tr>
             </thead>
             <tbody>
-              {data.deals.map(d => (
+              {deals.map(d => (
                 <tr key={d.deal_id} className="border-b border-pb-hairline/50">
                   <td className="py-1.5 pr-2">
-                    <Link to={`/admin/super/crm/workspace?club=${d.deal_id}`}
-                          className="text-pb-text hover:text-pb-accent-ink">
+                    <Link
+                      to={`/admin/super/crm/workspace?club=${d.deal_id}`}
+                      title="Open this club in the Sales Workspace"
+                      className="text-pb-text underline decoration-dotted decoration-pb-faint
+                                 underline-offset-2 hover:decoration-solid hover:text-pb-accent-ink"
+                    >
                       {d.club_name}
                     </Link>
                     {d.state && <span className="font-mono text-[10px] text-pb-faintest ml-1">{d.state}</span>}
@@ -211,14 +236,28 @@ function Drilldown({ open, onClose }) {
                   </td>
                   <td className={`${TD} text-pb-faint`}>
                     {d.stage_name || '—'}
-                    {d.probability ? <span className="text-pb-faintest"> · {d.probability}%</span> : null}
+                    {isOpen && d.probability
+                      ? <span className="text-pb-faintest"> · {d.probability}%</span>
+                      : null}
                   </td>
                   <td className={TD}>{money(d.value_cents)}</td>
                   <td className={`${TD} text-pb-faint`}>{pct(d.rate_percent)}</td>
-                  <td className={`${TD} font-medium`}>{money(d.commission_cents)}</td>
+                  <td className={TD}>{money(d.commission_cents)}</td>
+                  {isOpen && (
+                    <td className={`${TD} font-medium`}>{money(d.weighted_commission_cents)}</td>
+                  )}
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr className="border-t border-pb-hairline text-pb-text font-medium">
+                <td className="py-1.5 pr-2" colSpan={3}>Total</td>
+                <td className={TD}>{money(sum('value_cents'))}</td>
+                <td className={TD} />
+                <td className={TD}>{money(sum('commission_cents'))}</td>
+                {isOpen && <td className={TD}>{money(sum('weighted_commission_cents'))}</td>}
+              </tr>
+            </tfoot>
           </table>
         </div>
       )}
@@ -232,8 +271,12 @@ function RatesPanel({ reps, defaultRate, onSave, onClear, busy }) {
   const row = (key, label, current, hasOwn) => (
     <div key={key} className="flex items-center gap-2 py-1.5 border-b border-pb-hairline/50 last:border-0">
       <span className="text-[12px] text-pb-text flex-1 truncate">{label}</span>
-      {!hasOwn && key !== 'default' && (
-        <Pill tone="faint">default</Pill>
+      {!hasOwn && key !== 'default' && <Pill tone="faint">default</Pill>}
+      {/* A rep sitting on 0% earns nothing on anything, which is a real
+          setting and not obviously a deliberate one — the commission columns
+          all read $0 and nothing else on the screen says why. */}
+      {key !== 'default' && !Number(value(key, current)) && (
+        <Pill tone="amber">earns nothing</Pill>
       )}
       <input
         type="number" step="0.01" min="0" max="100" className={`${INPUT} w-20 text-right`}
@@ -466,7 +509,7 @@ export default function SalesCommissions() {
   const openDeals = useCallback((row, status) => {
     const key = `${row.rep_user_id}|${status}`
     const what = status === 'open' ? 'forecast pipeline' : 'deals won'
-    setDrill({ key, title: `${row.rep_name} — ${what}`, loading: true })
+    setDrill({ key, status, title: `${row.rep_name} — ${what}`, loading: true })
     api.salesCommissionDeals(row.rep_user_id, status)
       .then(res => setDrill(d => (d && d.key === key ? { ...d, loading: false, data: res } : d)))
       .catch(() => setDrill(d => (d && d.key === key
@@ -545,8 +588,8 @@ export default function SalesCommissions() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
               <Kpi label="Clubs attributed" value={totals.clubs_attributed} />
               <Kpi label="Pipeline value" value={money(totals.pipeline_value_cents)} />
-              <Kpi label="Forecast commission" value={money(totals.forecast_commission_cents)} />
-              <Kpi label="Weighted forecast" value={money(totals.weighted_forecast_commission_cents)}
+              <Kpi label="Pipeline commission" value={money(totals.forecast_commission_cents)} />
+              <Kpi label="Weighted commission" value={money(totals.weighted_forecast_commission_cents)}
                    hint="value × likelihood" />
             </div>
 

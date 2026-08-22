@@ -2185,9 +2185,16 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
         if should_move:
             await move_stage(session, deal, target_stage)
         if not exact_value:
-            deal.module_keys = sorted(set(deal.module_keys or []) | set(keys))
-            if value_cents > (deal.value_cents or 0):
-                deal.value_cents = value_cents
+            # A platform deal's value IS the price of its modules — recomputed
+            # from the merged set, never ratcheted. This used to keep whichever
+            # figure was highest, which meant a deal once valued at the full
+            # bundle held that price after its modules were narrowed: reported
+            # live as a deal reading "Stats" next to $998, the all-six price.
+            # Value and modules are one fact and must not be able to drift.
+            merged = sorted(set(deal.module_keys or []) | set(keys))
+            deal.module_keys = merged
+            if merged:
+                deal.value_cents = value_from_modules(merged)
         deal.updated_at = func.now()
 
     if person_id:
