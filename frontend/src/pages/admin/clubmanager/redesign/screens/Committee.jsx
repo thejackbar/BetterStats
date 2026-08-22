@@ -37,6 +37,18 @@ const MEETING_VIEWS = [
   { key: 'templates', label: 'Meeting Templates' },
 ]
 const ACTION_VIEWS = [{ key: 'list', label: 'List' }, { key: 'board', label: 'Board' }, { key: 'timeline', label: 'Timeline' }]
+// The placeholder says what the box actually reaches, since "search" over a
+// section this deep is otherwise a guess.
+const SEARCH_PLACEHOLDER = {
+  meetings: 'Search meetings, actions, motions and minutes…',
+  plans: 'Search plans, themes, objectives, actions and motions…',
+  documents: 'Search documents…',
+  calendar: 'Search events…',
+}
+const SEARCHABLE = new Set(Object.keys(SEARCH_PLACEHOLDER))
+// Case-folded substring, the same rule everywhere so one section cannot match
+// differently from another.
+const matches = (q, ...vals) => vals.some(v => v != null && String(v).toLowerCase().includes(q))
 // Plans has no button row: it is the Strategic Plans tree and nothing else.
 // Themes and Objectives were two more ways of reading the rows the tree
 // already holds, so a person had to pick between three views of one thing —
@@ -546,7 +558,9 @@ export default function Committee({ st, patch, narrow }) {
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Committee</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>Positions, meetings, motions and actions</Caption>
       </div>
-      <SegTabs value={tab} onChange={k => patch({ cteTab: k })} tabs={TABS} />
+      {/* Moving to another section starts a fresh search: a query typed against
+          meetings means nothing against documents. */}
+      <SegTabs value={tab} onChange={k => patch({ cteTab: k, cteSearch: '' })} tabs={TABS} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
         {/* No link out to the manage screen: every one of its editors is
             mounted here now (Meetings, Actions, Motions, Meeting Templates,
@@ -571,6 +585,8 @@ export default function Committee({ st, patch, narrow }) {
   // three deep (Meetings → Actions → List / Board / Timeline), and nothing at
   // all where a section holds one thing — which is now every other tab, Plans
   // included.
+  const q = (st.cteSearch || '').trim().toLowerCase()
+  const searchable = SEARCHABLE.has(tab)
   const subRows = []
   if (tab === 'meetings') {
     subRows.push({
@@ -582,17 +598,54 @@ export default function Committee({ st, patch, narrow }) {
     })
     if (meetingsView === 'actions') subRows.push({ value: actionsView, tabs: ACTION_VIEWS, onChange: v => patch({ cteActionsView: v }) })
   }
-  const SubBar = () => (subRows.length === 0 ? null : (
+  // ONE SEARCH PER SECTION, and it searches the whole section rather than the
+  // one list on screen: a motion, an action or something minuted is inside a
+  // meeting, and an action or a motion is inside a plan, so a box that only
+  // filtered the visible rows would answer the wrong question. It sits on its
+  // own line, below the section buttons and above any second row of them.
+  const SubBar = () => (searchable ? (
+    <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
+        {/* box-sizing, or the padding is added on top of the cap and the row
+            pushes the page sideways on a phone. */}
+        <input value={st.cteSearch || ''} onChange={e => patch({ cteSearch: e.target.value })}
+          placeholder={SEARCH_PLACEHOLDER[tab] || 'Search…'}
+          aria-label={SEARCH_PLACEHOLDER[tab] || 'Search'}
+          style={{ ...inp, width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' }} />
+        {q && (
+          <button onClick={() => patch({ cteSearch: '' })}
+            style={{ background: 'transparent', border: 'none', color: C.faint, fontFamily: MONO, fontSize: 10, cursor: 'pointer' }}>
+            CLEAR
+          </button>
+        )}
+      </div>
+      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
+    </div>
+  ) : (subRows.length === 0 ? null : (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
       {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
     </div>
-  ))
+  )))
 
   if (!data) {
     return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load committee data.' : 'Loading committee…'}</div></div>
   }
 
   const { positions, meetings, tasks, members, nameById } = data
+
+  // A MEETING MATCHES ON WHAT IS INSIDE IT, not only its title: the agenda, the
+  // minutes, the private notes, every motion moved at it and every action
+  // raised from it. That is what makes one box enough for the whole section.
+  const taskMeetingIds = (m) => new Set([m.id, ...(m.agenda_items || []).map(i => i.id)])
+  const meetingMatches = (m) => {
+    if (!q) return true
+    if (matches(q, m.title, m.meeting_type, m.location, m.minutes, m.private_notes)) return true
+    if ((m.agenda_items || []).some(i => matches(q, i.title, i.description, i.outcome_notes, i.section))) return true
+    if ((m.motions || []).some(mo => matches(q, mo.description, mo.notes, mo.outcome))) return true
+    const ids = taskMeetingIds(m)
+    return (data.tasks || []).some(t => (ids.has(t.meeting_id) || ids.has(t.agenda_item_id))
+      && matches(q, t.title, t.description, t.outcome_notes))
+  }
   const name = (id) => (id && nameById[id]) || 'Unknown'
   const vacancies = positions.filter(p => !p.current_term)
   const openTasks = tasks.filter(t => taskState(t).label !== 'DONE')
@@ -608,6 +661,24 @@ export default function Committee({ st, patch, narrow }) {
   })))
   const editMotion = editMotionId ? allMotions.find(mo => mo.id === editMotionId) : null
 
+  // The register, the actions list and the templates rail each narrow to the
+  // query. A motion is searched by its wording, where it was moved and the
+  // objective it serves; an action by its title, who has it and its objective.
+  const objectiveName = id => {
+    const o = (objectives || []).find(x => x.id === id)
+    return o ? objectiveLabel(o) : ''
+  }
+  const shownMotions = q
+    ? allMotions.filter(mo => matches(q, mo.description, mo.notes, mo.outcome, mo.from, objectiveName(mo.objective_id)))
+    : allMotions
+  const shownTasks = q
+    ? openTasks.filter(t => matches(q, t.title, t.description, t.category, t.outcome_notes,
+        t.assigned_to_member_id ? name(t.assigned_to_member_id) : '', objectiveName(t.objective_id)))
+    : openTasks
+  const shownTemplates = q
+    ? (templates || []).filter(t => matches(q, t.name, ...(t.items || []).map(i => i.title)))
+    : (templates || [])
+
   // Seasons offered are the ones the club actually met in, newest first, plus
   // the season running now — so a club that has just rolled over can pick this
   // season and see that nothing is booked yet, rather than not find it at all.
@@ -617,9 +688,10 @@ export default function Committee({ st, patch, narrow }) {
     ...meetings.map(m => seasonStartYear(m.scheduled_at, diaryStart)),
   ].filter(y => y !== null))].sort((a, b) => b - a)
   const season = st.cteMeetingsSeason ?? ''
-  const shownMeetings = season === ''
+  const shownMeetings = (season === ''
     ? meetings
     : meetings.filter(m => seasonStartYear(m.scheduled_at, diaryStart) === Number(season))
+  ).filter(meetingMatches)
 
   // The pane reads the meeting the LIST is showing, so filtering to a season
   // can never leave a meeting open that the rail no longer holds.
@@ -774,7 +846,7 @@ export default function Committee({ st, patch, narrow }) {
           <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
             <div style={cap}>MEETING TEMPLATES</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {(templates || []).map(t => {
+              {shownTemplates.map(t => {
                 const on = tplEdit?.id === t.id
                 return (
                   <div key={t.id} onClick={() => openTemplate(t)}
@@ -792,6 +864,9 @@ export default function Committee({ st, patch, narrow }) {
                 )
               })}
               {templates === null && <div style={{ fontSize: 13, color: C.faint }}>Loading templates…</div>}
+              {templates !== null && templates.length > 0 && shownTemplates.length === 0 && (
+                <div style={{ fontSize: 13, color: C.faint }}>Nothing matches “{st.cteSearch}”.</div>
+              )}
               {templates !== null && templates.length === 0 && (
                 <div style={{ fontSize: 13, color: C.faint, lineHeight: 1.5 }}>
                   No templates saved yet. Make one and every meeting after this can start from it.
@@ -927,7 +1002,7 @@ export default function Committee({ st, patch, narrow }) {
             <div>
               <div style={cap}>MOTION REGISTER</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {allMotions.map((mo, i) => {
+                {shownMotions.map((mo, i) => {
                   const oc = motionOutcome(mo.outcome)
                   const obj = (objectives || []).find(o => o.id === mo.objective_id)
                   return (
@@ -954,9 +1029,13 @@ export default function Committee({ st, patch, narrow }) {
                     </div>
                   )
                 })}
-                {allMotions.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No motions recorded this season.</div>}
+                {shownMotions.length === 0 && (
+                  <div style={{ fontSize: 13, color: C.faint }}>
+                    {q ? `Nothing matches “${st.cteSearch}”.` : 'No motions recorded this season.'}
+                  </div>
+                )}
               </div>
-              {allMotions.length > 0 && (
+              {shownMotions.length > 0 && (
                 <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
                   CLICK A MOTION TO EDIT IT
                 </div>
@@ -975,7 +1054,7 @@ export default function Committee({ st, patch, narrow }) {
             <div>
               <div style={cap}>OPEN COMMITTEE ACTIONS</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {openTasks.map(t => {
+                {shownTasks.map(t => {
                   const s = taskState(t)
                   const obj = (objectives || []).find(o => o.id === t.objective_id)
                   return (
@@ -1000,9 +1079,13 @@ export default function Committee({ st, patch, narrow }) {
                     </div>
                   )
                 })}
-                {openTasks.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No open committee actions.</div>}
+                {shownTasks.length === 0 && (
+                  <div style={{ fontSize: 13, color: C.faint }}>
+                    {q ? `Nothing matches “${st.cteSearch}”.` : 'No open committee actions.'}
+                  </div>
+                )}
               </div>
-              {openTasks.length > 0 && (
+              {shownTasks.length > 0 && (
                 <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 10 }}>
                   CLICK AN ACTION TO EDIT IT
                 </div>
@@ -1016,7 +1099,7 @@ export default function Committee({ st, patch, narrow }) {
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div className="max-w-5xl">
             <Suspense fallback={<Loading />}>
-              <TasksTab members={members} view={actionsView}
+              <TasksTab members={members} view={actionsView} query={st.cteSearch}
                 onView={v => patch({ cteActionsView: v })} />
             </Suspense>
           </div>
@@ -1025,19 +1108,19 @@ export default function Committee({ st, patch, narrow }) {
 
       {tab === 'plans' && (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-          <Suspense fallback={<Loading />}><PlanTab members={members} section="plans" /></Suspense>
+          <Suspense fallback={<Loading />}><PlanTab members={members} section="plans" query={st.cteSearch} /></Suspense>
         </div>
       )}
 
       {tab === 'documents' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div className="max-w-5xl"><Suspense fallback={<Loading />}><DocumentsTab /></Suspense></div>
+          <div className="max-w-5xl"><Suspense fallback={<Loading />}><DocumentsTab query={st.cteSearch} /></Suspense></div>
         </div>
       )}
 
       {tab === 'calendar' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div className="max-w-5xl"><Suspense fallback={<Loading />}><CalendarTab /></Suspense></div>
+          <div className="max-w-5xl"><Suspense fallback={<Loading />}><CalendarTab query={st.cteSearch} /></Suspense></div>
         </div>
       )}
 

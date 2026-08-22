@@ -865,6 +865,33 @@ as sections with their own buttons rather than three tabs and a manage page.
   so a label can be renamed without moving anyone's view. **Positions is kept
   even though the brief's list did not name it** — dropping a working screen is
   not something a rename asks for.
+- **ONE SEARCH PER SECTION, and it searches the SECTION rather than the list on
+  screen (v9.50.9).** A box on Meetings that only filtered the visible meetings
+  would answer the wrong question: a motion, an action or something minuted sits
+  INSIDE a meeting. `meetingMatches` reads the agenda (title, description,
+  outcome notes), the minutes, the private notes, every motion and every action
+  raised from the meeting; the register, the actions list and the templates rail
+  narrow to the same query. It sits on its own line in `SubBar`, below the
+  section buttons and above any second row of them, and `matches()` is the one
+  case-folded rule so no two sections search differently.
+- **The PLAN TREE narrows and the DASHBOARD BESIDE IT DOES NOT.** A branch is
+  kept when anything under it matches, and `railOpenFor` draws every level open
+  while a query runs, or a match three levels down is found and then hidden
+  behind two carets. The filtering is for DRAWING only — `groups`, `themesIn`
+  and `objectiveOrder` stay whole, or a reorder would renumber against a
+  filtered list. The dashboard is left whole deliberately: its figures are a
+  proportion of the plan, and a filtered "2 of 3 objectives on track" is a
+  different, wrong number.
+- **`query` on `TasksTab` works the way `view` does**: a caller drawing its own
+  box passes it and the tab stops drawing one, rather than two that disagree.
+  Its category / objective / assignee / overdue filters stay either way, since
+  they ask different questions. `DocumentsTab` and `CalendarTab` take `query`
+  defaulting to `''`, so the manage screen — which passes none — is unchanged.
+- **A section change clears the query**, since a query typed against meetings
+  means nothing against documents. Positions is deliberately not searched.
+- **A harness that reaches for "the first input on the page" now gets the search
+  box** — `check2.mjs` had two such selectors and typed a theme name into it.
+  Address a form's own field.
 - **AN ACTION AND A MOTION BOTH COME OUT OF A MEETING, so they live under
   Meetings** — All Meetings | Actions | Motions | Meeting Templates, with
   Actions keeping its own List | Board | Timeline row underneath. The

@@ -2133,7 +2133,7 @@ function ThemeForm({ pillar, onSave, onCancel }) {
   )
 }
 
-function StrategicPlansSection({ report, pillars, positions, members, memberName, onChanged }) {
+function StrategicPlansSection({ report, pillars, positions, members, memberName, onChanged, query = '' }) {
   const toast = useToast()
   const [openIds, setOpenIds] = useState(null)     // null until the first plan seeds it
   const [sel, setSel] = useState(null)
@@ -2207,6 +2207,35 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       .filter(p => p.plan_id === plan.id)
       .map(p => ({ id: p.id, name: p.name, rows: objs.filter(o => o.pillar_id === p.id) }))
   }
+
+  // ── searching the tree ────────────────────────────────────────────────
+  //
+  // A search over a plan has to reach the work: an action or a motion is what
+  // somebody remembers, and it sits two levels below the plan's own name. So a
+  // branch is kept when ANYTHING under it matches, and every level is drawn
+  // open while a query is running — otherwise a match three levels down is
+  // found and then hidden behind two carets.
+  //
+  // The filtering is for DRAWING only. `groups`, `themesIn` and
+  // `objectiveOrder` stay whole, or a reorder would renumber against a
+  // filtered list and a selected row could stop resolving.
+  const q = (query || '').trim().toLowerCase()
+  const qHit = (...vals) => vals.some(v => v != null && String(v).toLowerCase().includes(q))
+  const objMatches = o => qHit(o.title, o.description)
+    || (o.action_list || []).some(a => qHit(a.title, a.description, a.outcome_notes))
+    || (o.motion_list || []).some(m => qHit(m.description, m.notes))
+  const shownThemes = plan => {
+    const themes = themesIn(plan)
+    if (!q) return themes
+    return themes
+      .map(t => (qHit(t.name) ? t : { ...t, rows: t.rows.filter(objMatches) }))
+      .filter(t => qHit(t.name) || t.rows.length > 0)
+  }
+  const shownGroups = q
+    ? groups.filter(p => qHit(p.name, p.description) || shownThemes(p).length > 0)
+    : groups
+  // A running query opens everything it left standing.
+  const railOpenFor = k => (q ? true : isOpen(k))
 
   const objectiveById = id => allObjectives.find(o => o.id === id)
   const workById = (kind, id) => {
@@ -2428,9 +2457,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
 
   const tree = (
     <div className="space-y-1">
-      {groups.map(plan => {
+      {shownGroups.map(plan => {
         const pk = `plan:${plan.id}`
-        const themes = themesIn(plan)
+        const themes = shownThemes(plan)
         return (
           <div key={plan.id || '__none'}>
             <div className={`${TREE_ROW} ${isSel('plan', plan.id) ? 'bg-pb-surface2' : ''}`}
@@ -2440,14 +2469,14 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                 ...(isSel('plan', plan.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                 ...(plan.id ? dragStyle('plan', plan.id) : {}),
               }}>
-              <Twisty open={isOpen(pk)} hidden={themes.length === 0} onToggle={() => toggle(pk)} />
+              <Twisty open={railOpenFor(pk)} hidden={themes.length === 0} onToggle={() => toggle(pk)} />
               <button onClick={() => select('plan', plan.id)} className="min-w-0 flex-1 text-left">
                 <TreeLabel kind={plan.id ? 'PLAN' : ''} active={isSel('plan', plan.id)}>{plan.name}</TreeLabel>
               </button>
               {plan.id && <DelDot onClick={() => removePlan(plan)} title={`Delete ${plan.name}`} />}
             </div>
 
-            {isOpen(pk) && themes.map(th => {
+            {railOpenFor(pk) && themes.map(th => {
               const tk = `theme:${plan.id}:${th.id}`
               return (
                 <div key={tk} className={TREE_STEP}>
@@ -2458,7 +2487,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                       ...(isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                       ...dragStyle('theme', th.id),
                     }}>
-                    <Twisty open={isOpen(tk)} onToggle={() => toggle(tk)} />
+                    <Twisty open={railOpenFor(tk)} onToggle={() => toggle(tk)} />
                     <button onClick={() => select('theme', th.id, { planId: plan.id })}
                       className="min-w-0 flex-1 text-left">
                       <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={th.rows.length === 0}>
@@ -2468,7 +2497,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                     <DelDot onClick={() => removeTheme(th.id, th.name)} title={`Delete ${th.name}`} />
                   </div>
 
-                  {isOpen(tk) && th.rows.map(o => {
+                  {railOpenFor(tk) && th.rows.map(o => {
                     const ok = `obj:${o.id}`
                     const work = workRows(o, workMode)
                     return (
@@ -2480,13 +2509,13 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                             ...(isSel('objective', o.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                             ...dragStyle('objective', o.id),
                           }}>
-                          <Twisty open={isOpen(ok)} hidden={work.length === 0} onToggle={() => toggle(ok)} />
+                          <Twisty open={railOpenFor(ok)} hidden={work.length === 0} onToggle={() => toggle(ok)} />
                           <button onClick={() => select('objective', o.id)} className="min-w-0 flex-1 text-left">
                             <TreeLabel kind="OBJECTIVE" active={isSel('objective', o.id)}>{o.title}</TreeLabel>
                           </button>
                           <DelDot onClick={() => removeObjective(o)} title={`Delete ${o.title}`} />
                         </div>
-                        {isOpen(ok) && (
+                        {railOpenFor(ok) && (
                           <div className={TREE_STEP}>
                             {work.map(r => (
                               <button key={`${r._kind}-${r.id}`} onClick={() => select(r._kind, r.id)}
@@ -2512,6 +2541,11 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       {groups.length === 0 && (
         <div className="text-pb-faint text-[13px] px-1.5 py-3 leading-relaxed">
           No plans written down yet.
+        </div>
+      )}
+      {groups.length > 0 && shownGroups.length === 0 && (
+        <div className="text-pb-faint text-[13px] px-1.5 py-3 leading-relaxed">
+          Nothing in the plans matches “{query}”.
         </div>
       )}
     </div>
@@ -2936,7 +2970,7 @@ function ThemesSection({ pillars, plans, onChanged }) {
 }
 
 
-export function PlanTab({ members, section }) {
+export function PlanTab({ members, section, query = '' }) {
   const toast = useToast()
   const [report, setReport] = useState(null)
   const [positions, setPositions] = useState([])
@@ -3018,7 +3052,7 @@ export function PlanTab({ members, section }) {
   if (section === 'plans') {
     return (
       <StrategicPlansSection report={report} pillars={pillars} positions={positions}
-        members={members} memberName={memberName} onChanged={load} />
+        members={members} memberName={memberName} onChanged={load} query={query} />
     )
   }
 

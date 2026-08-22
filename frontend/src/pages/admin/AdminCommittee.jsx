@@ -326,7 +326,11 @@ function NewTaskForm({ onCreated }) {
   )
 }
 
-export function TasksTab({ members, view: viewProp, onView }) {
+// `query` works the same way `view` does: a caller drawing its own search box
+// passes it, and this stops drawing one rather than showing two that disagree.
+// The category / objective / assignee / overdue filters stay either way, since
+// they ask different questions from the text search.
+export function TasksTab({ members, view: viewProp, onView, query }) {
   const toast = useToast()
   const [tasks, setTasks] = useState(null)
   const [objectives, setObjectives] = useState([])
@@ -340,7 +344,9 @@ export function TasksTab({ members, view: viewProp, onView }) {
   const [ownView, setOwnView] = useState('board')
   const view = viewProp || ownView
   const setView = onView || setOwnView
-  const [q, setQ] = useState('')
+  const [ownQ, setOwnQ] = useState('')
+  const q = query !== undefined ? (query || '') : ownQ
+  const setQ = setOwnQ
   const [cat, setCat] = useState('')
   const [objId, setObjId] = useState('')
   const [who, setWho] = useState('')
@@ -403,8 +409,10 @@ export function TasksTab({ members, view: viewProp, onView }) {
       <NewTaskForm onCreated={load} />
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        <input className={`${inp} flex-1 min-w-[12rem]`} placeholder="Search actions…"
-          value={q} onChange={e => setQ(e.target.value)} />
+        {query === undefined && (
+          <input className={`${inp} flex-1 min-w-[12rem]`} placeholder="Search actions…"
+            value={q} onChange={e => setQ(e.target.value)} />
+        )}
         <select className={selInp} value={cat} onChange={e => setCat(e.target.value)}>
           <option value="">Any category</option>
           {CATEGORIES.map(c => <option key={c} value={c}>{label(c)}</option>)}
@@ -418,7 +426,9 @@ export function TasksTab({ members, view: viewProp, onView }) {
           {members.map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
         </select>
         <FilterPill warn active={overdueOnly} onClick={() => setOverdueOnly(v => !v)}>Overdue</FilterPill>
-        {(q || cat || objId || who || overdueOnly) && (
+        {/* Clear only reaches the filters this row owns — the section's own
+            search box has its own CLEAR beside it. */}
+        {((query === undefined && q) || cat || objId || who || overdueOnly) && (
           <button onClick={() => { setQ(''); setCat(''); setObjId(''); setWho(''); setOverdueOnly(false) }}
             className="pb-btn pb-btn-sm pb-btn-quiet">Clear</button>
         )}
@@ -512,7 +522,9 @@ export function TasksTab({ members, view: viewProp, onView }) {
 }
 
 // ── Documents tab ────────────────────────────────────────────────────────────
-export function DocumentsTab() {
+// `query` is optional and defaults to searching nothing away, so the manage
+// screen — which passes none — renders exactly as it did.
+export function DocumentsTab({ query = '' }) {
   const toast = useToast()
   const [docs, setDocs] = useState(null)
   const [form, setForm] = useState({ title: '', category: 'governance', url: '' })
@@ -538,6 +550,10 @@ export function DocumentsTab() {
   }
 
   if (docs === null) return <PbSpinner message="Loading documents…" />
+  const q = query.trim().toLowerCase()
+  const shown = q
+    ? docs.filter(d => [d.title, d.category, d.url, d.notes].some(v => v && String(v).toLowerCase().includes(q)))
+    : docs
   return (
     <div>
       <div className="pb-card p-4 mb-4">
@@ -556,11 +572,13 @@ export function DocumentsTab() {
           </button>
         </div>
       </div>
-      {docs.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No documents indexed yet.</div>
+      {shown.length === 0 ? (
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">
+          {q ? `Nothing matches “${query}”.` : 'No documents indexed yet.'}
+        </div>
       ) : (
         <div className="space-y-1.5">
-          {docs.map(d => (
+          {shown.map(d => (
             <div key={d.id} className="flex items-center justify-between gap-2 pb-card px-3 py-2.5">
               <div className="min-w-0">
                 <a href={d.url} target="_blank" rel="noreferrer" className="text-pb-text text-sm hover:text-pb-accent truncate block">{d.title}</a>
@@ -576,7 +594,7 @@ export function DocumentsTab() {
 }
 
 // ── Calendar tab ─────────────────────────────────────────────────────────────
-export function CalendarTab() {
+export function CalendarTab({ query = '' }) {
   const toast = useToast()
   const [events, setEvents] = useState(null)
   const [form, setForm] = useState({ title: '', event_type: 'committee_meeting', starts_at: '', location: '' })
@@ -602,6 +620,10 @@ export function CalendarTab() {
   }
 
   if (events === null) return <PbSpinner message="Loading calendar…" />
+  const q = query.trim().toLowerCase()
+  const shown = q
+    ? events.filter(e => [e.title, e.event_type, e.location, e.notes].some(v => v && String(v).toLowerCase().includes(q)))
+    : events
   return (
     <div>
       <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-4 leading-relaxed">
@@ -621,11 +643,13 @@ export function CalendarTab() {
           </button>
         </div>
       </div>
-      {events.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No events on the calendar yet.</div>
+      {shown.length === 0 ? (
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">
+          {q ? `Nothing matches “${query}”.` : 'No events on the calendar yet.'}
+        </div>
       ) : (
         <div className="space-y-1.5">
-          {events.map(e => (
+          {shown.map(e => (
             <div key={e.id} className="flex items-center justify-between gap-2 pb-card px-3 py-2.5">
               <div>
                 <div className="text-pb-text text-sm">{e.title}</div>
