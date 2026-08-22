@@ -941,18 +941,16 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
 
           <div className="pb-card p-4">
             <div className="flex items-center justify-between gap-2 mb-1.5">
-              <span className={cap}>MINUTES</span>
+              <span className={cap}>
+                MINUTES
+                <Hint text="Saves as you type. A draft is written from the agenda, motions, votes and actions above, and replaces what is in the box for you to correct. It is never the record until you say so." />
+              </span>
               <button onClick={draft} disabled={drafting} className="font-mono text-[9px] text-pb-faint hover:text-pb-text disabled:opacity-40">
                 {drafting ? 'drafting…' : 'draft from the meeting'}
               </button>
             </div>
             <textarea ref={minutesRef} className={`${inp} min-h-[120px]`} defaultValue={meeting.minutes || ''}
               placeholder="The record that gets circulated…" onChange={e => saveMinutes(e.target.value)} />
-            <div className="font-mono text-[9px] text-pb-faintest mt-1">
-              Saves as you type. A draft is written from the agenda, motions, votes and
-              actions above, and replaces what is in the box for you to correct. It is
-              never the record until you say so.
-            </div>
           </div>
 
           <div className="pb-card p-4">
