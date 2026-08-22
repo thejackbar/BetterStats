@@ -4096,10 +4096,10 @@ rather than the offer.
   bodies differ by a paragraph: one says the trial finishes shortly and offers
   to extend it, the other says it has finished and offers to put it back on.
 - **A third one, `voicemail_followup_trial_offer`, offers the trial itself**
-  ("Email following voice - trial offer" in the dropdown, `Email following VM.
-  Trial offer` in Comms). It sits UNDER the general follow-up and ABOVE the two
-  extend-trial ones, because offering a trial is the earlier moment than
-  extending one. Copied from `trial_information` per instruction — the same six
+  ("Email following voicemail - trial offer" in the dropdown, `Email following VM.
+  Trial offer` in Comms). It sits IMMEDIATELY after the general follow-up and
+  above the two extend-trial ones, because offering a trial is the earlier
+  moment than extending one. Copied from `trial_information` per instruction — the same six
   steps, the same `/trial` button, the same subject — behind the "I've left a
   voicemail" opener the other three share. **That opener is the only thing
   separating the two templates**, which is exactly the point: without it this
