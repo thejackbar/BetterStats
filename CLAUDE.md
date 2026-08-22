@@ -728,14 +728,27 @@ as sections with their own buttons rather than three tabs and a manage page.
   `moduleBrand`'s ALIAS map so nothing that still asks for it breaks). The
   marketing site and `billing_pricing.py` already said BetterAdmin, so the app
   has stopped disagreeing with the invoice.
-- **Committee's buttons are Meetings (default), Motions & Actions, Plans,
-  Documents, Calendar, Positions**, with a second row where a section holds more
-  than one thing (Meetings → All Meetings | Meeting Templates) and a third under
-  Actions. Every key lives in `st`
-  (`cteMeetingsView` / `cteMaView` / `cteActionsView` / `ctePlansView`), so a
-  label can be renamed without moving anyone's view. **Positions is kept even
-  though the brief's list did not name it** — dropping a working screen is not
-  something a rename asks for.
+- **Committee's buttons are Meetings (default), Plans, Documents, Calendar,
+  Positions.** Every key lives in `st` (`cteMeetingsView` / `cteActionsView`),
+  so a label can be renamed without moving anyone's view. **Positions is kept
+  even though the brief's list did not name it** — dropping a working screen is
+  not something a rename asks for.
+- **AN ACTION AND A MOTION BOTH COME OUT OF A MEETING, so they live under
+  Meetings** — All Meetings | Actions | Motions | Meeting Templates, with
+  Actions keeping its own List | Board | Timeline row underneath. The
+  `Motions & Actions` tab and its `cteMaView` key are gone; `cteMaView` is read
+  in exactly one place, to carry a stored `cteTab === 'motions'` onto the
+  button it became, so somebody sat on that tab when the change landed arrives
+  on Meetings rather than on a tab that no longer exists. Picking any Meetings
+  button rewrites `cteTab`, so the carry-over applies once.
+- **Plans has no button row: it IS the Strategic Plans tree.** Themes and
+  Objectives were two more readings of the rows the tree already holds, and
+  everything they offered (create, edit, delete a theme or an objective) the
+  tree offers too. **`PlanTab`'s `section="themes"` / `"objectives"` branches
+  are therefore mounted nowhere** — the manage screen renders the tab
+  UNCONTROLLED, which is its own By plan / All work view, not either of those.
+  They are kept rather than deleted so the screens can come back without being
+  rewritten; do not assume they are exercised by anything.
 - **Documents, Calendar, Plans and the Actions board/timeline are the MANAGE
   screen's own components, mounted here, not copied.** `TasksTab`,
   `DocumentsTab` and `CalendarTab` are exported from `AdminCommittee.jsx` and

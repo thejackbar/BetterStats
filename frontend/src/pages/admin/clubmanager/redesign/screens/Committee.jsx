@@ -22,16 +22,31 @@ const CalendarTab = lazy(() => import('../../../AdminCommittee').then(m => ({ de
 // label never moves anyone's view.
 const TABS = [
   { key: 'meetings', label: 'Meetings' },
-  { key: 'motions', label: 'Motions & Actions' },
   { key: 'plans', label: 'Plans' },
   { key: 'documents', label: 'Documents' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'positions', label: 'Positions' },
 ]
-const MEETING_VIEWS = [{ key: 'meetings', label: 'All Meetings' }, { key: 'templates', label: 'Meeting Templates' }]
-const MA_VIEWS = [{ key: 'actions', label: 'Actions' }, { key: 'motions', label: 'Motions' }]
+// An action and a motion both come OUT of a meeting, so they sit under
+// Meetings rather than in a section of their own — All Meetings, then the work
+// that came from them, then the templates the next one starts from.
+const MEETING_VIEWS = [
+  { key: 'meetings', label: 'All Meetings' },
+  { key: 'actions', label: 'Actions' },
+  { key: 'motions', label: 'Motions' },
+  { key: 'templates', label: 'Meeting Templates' },
+]
 const ACTION_VIEWS = [{ key: 'list', label: 'List' }, { key: 'board', label: 'Board' }, { key: 'timeline', label: 'Timeline' }]
-const PLAN_VIEWS = [{ key: 'plans', label: 'Strategic Plans' }, { key: 'themes', label: 'Themes' }, { key: 'objectives', label: 'Objectives' }]
+// Plans has no button row: it is the Strategic Plans tree and nothing else.
+// Themes and Objectives were two more ways of reading the rows the tree
+// already holds, so a person had to pick between three views of one thing —
+// and everything they could do (create, edit, delete a theme or an objective)
+// the tree does too.
+//
+// `PlanTab`'s `section="themes"` / `"objectives"` branches are therefore no
+// longer mounted anywhere: the manage screen renders the tab UNCONTROLLED,
+// which is its own By plan / All work view, not either of those. They are kept
+// rather than deleted so the screens can come back without being rewritten.
 
 // Committee — positions, meetings (agenda / attendance / motions) and the
 // club's committee tasks (the closest thing to action items), all on real data.
@@ -183,11 +198,16 @@ function outcomeTone(v) {
 
 
 export default function Committee({ st, patch, narrow }) {
-  const tab = st.cteTab || 'meetings'
-  const meetingsView = st.cteMeetingsView || 'meetings'
-  const maView = st.cteMaView || 'actions'
+  // Actions and Motions moved under Meetings, so a stored 'motions' tab is
+  // carried onto the button it became rather than landing someone on a tab
+  // that no longer exists. `cteMaView` is only read here, for that carry-over.
+  const storedTab = st.cteTab || 'meetings'
+  const movedFromMA = storedTab === 'motions'
+  const tab = movedFromMA ? 'meetings' : storedTab
+  const meetingsView = movedFromMA
+    ? (st.cteMaView === 'motions' ? 'motions' : 'actions')
+    : (st.cteMeetingsView || 'meetings')
   const actionsView = st.cteActionsView || 'list'
-  const plansView = st.ctePlansView || 'plans'
   const [data, setData] = useState(null)
   const [err, setErr] = useState(null)
   const [dragId, setDragId] = useState(null)
@@ -336,10 +356,11 @@ export default function Committee({ st, patch, narrow }) {
   // Objectives are what an action can be pointed at. Only the Actions list on
   // this screen names one, so it is fetched on reaching it.
   useEffect(() => {
-    if (tab === 'motions' && (maView === 'motions' || actionsView === 'list') && objectives === null) {
+    if (tab === 'meetings' && (meetingsView === 'motions'
+        || (meetingsView === 'actions' && actionsView === 'list')) && objectives === null) {
       api.committeeListObjectives().then(d => setObjectives(d.objectives || [])).catch(() => setObjectives([]))
     }
-  }, [tab, maView, actionsView, objectives])
+  }, [tab, meetingsView, actionsView, objectives])
 
   // Deleting a meeting takes its agenda, motions, attendance and minutes with
   // it, so it asks first. A template the meeting was BUILT from is untouched —
@@ -542,16 +563,19 @@ export default function Committee({ st, patch, narrow }) {
   )
 
   // The buttons on the line below the top row. Two rows where a section is
-  // three deep (Motions & Actions → Actions → List / Board / Timeline), and
-  // nothing at all where a section holds one thing.
+  // three deep (Meetings → Actions → List / Board / Timeline), and nothing at
+  // all where a section holds one thing — which is now every other tab, Plans
+  // included.
   const subRows = []
   if (tab === 'meetings') {
-    subRows.push({ value: meetingsView, tabs: MEETING_VIEWS, onChange: v => { patch({ cteMeetingsView: v }); setTplEdit(null); setMsg(null) } })
-  } else if (tab === 'motions') {
-    subRows.push({ value: maView, tabs: MA_VIEWS, onChange: v => patch({ cteMaView: v }) })
-    if (maView === 'actions') subRows.push({ value: actionsView, tabs: ACTION_VIEWS, onChange: v => patch({ cteActionsView: v }) })
-  } else if (tab === 'plans') {
-    subRows.push({ value: plansView, tabs: PLAN_VIEWS, onChange: v => patch({ ctePlansView: v }) })
+    subRows.push({
+      value: meetingsView,
+      tabs: MEETING_VIEWS,
+      // Picking a button clears the stored 'motions' tab too, so the
+      // carry-over above only ever applies once.
+      onChange: v => { patch({ cteTab: 'meetings', cteMeetingsView: v }); setTplEdit(null); setMsg(null) },
+    })
+    if (meetingsView === 'actions') subRows.push({ value: actionsView, tabs: ACTION_VIEWS, onChange: v => patch({ cteActionsView: v }) })
   }
   const SubBar = () => (subRows.length === 0 ? null : (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
@@ -892,7 +916,7 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'motions' && maView === 'motions' && (
+      {tab === 'meetings' && meetingsView === 'motions' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div style={{ maxWidth: '48rem' }}>
             <div>
@@ -940,7 +964,7 @@ export default function Committee({ st, patch, narrow }) {
       {/* Actions → List: the open committee actions, read straight down. Board
           and Timeline are the manage screen's own views of the same rows, with
           their filter row, so all three answer the same question three ways. */}
-      {tab === 'motions' && maView === 'actions' && actionsView === 'list' && (
+      {tab === 'meetings' && meetingsView === 'actions' && actionsView === 'list' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div style={{ maxWidth: '48rem' }}>
             <div>
@@ -983,7 +1007,7 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'motions' && maView === 'actions' && actionsView !== 'list' && (
+      {tab === 'meetings' && meetingsView === 'actions' && actionsView !== 'list' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
           <div className="max-w-5xl">
             <Suspense fallback={<Loading />}>
@@ -994,15 +1018,9 @@ export default function Committee({ st, patch, narrow }) {
         </div>
       )}
 
-      {tab === 'plans' && plansView === 'plans' && (
+      {tab === 'plans' && (
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <Suspense fallback={<Loading />}><PlanTab members={members} section="plans" /></Suspense>
-        </div>
-      )}
-
-      {tab === 'plans' && plansView !== 'plans' && (
-        <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
-          <div className="max-w-5xl"><Suspense fallback={<Loading />}><PlanTab members={members} section={plansView} /></Suspense></div>
         </div>
       )}
 
