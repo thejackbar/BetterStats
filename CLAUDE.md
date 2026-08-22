@@ -881,14 +881,30 @@ as sections with their own buttons rather than three tabs and a manage page.
   ever deletes an ACTION or a MOTION** — `club_objectives` → tasks/motions is
   ON DELETE SET NULL, so they are kept and simply stop being linked. That is
   the one rule not to relax.
-- **The objective PICKER groups rather than repeating.** A flat `<select>` of
-  "Plan › Theme › a whole sentence" was reported as overwhelming, and the
-  repetition really was ~80% of the text while the part that tells two
-  objectives apart was the part being clipped. `ObjectiveSelect` now says the
-  plan and theme ONCE as a group heading, gives each objective its own
-  wrapping line, ticks the current one and offers a search box past six rows.
-  It is not a `<select>` any more, so a test asserting `<option>` text is
-  asserting the old control.
+- **The objective PICKER is a TREE, and only its LEAVES are selectable.** A
+  flat `<select>` of "Plan › Theme › a whole sentence" was reported as
+  overwhelming, and the repetition really was ~80% of the text while the part
+  that tells two objectives apart was the part being clipped. It became one
+  combined `PLAN › THEME` heading, and is now the tree it always was: the plan,
+  its themes indented under it with a rail down each branch, the objectives
+  indented under those. **The plan and theme rows are headings, not buttons,
+  and carry no `role="option"`** — an action or a motion serves an OBJECTIVE
+  and nothing else, so those two levels exist to locate one and there is
+  nothing to pick by mistake; a screen reader is read the objectives it can
+  actually choose from. Each objective gets its own wrapping line, the current
+  one is ticked, and a search box appears past six rows. It is not a `<select>`
+  any more, so a test asserting `<option>` text is asserting the old control.
+- **The branches are keyed on `plan_id`/`pillar_id`, never on their names.**
+  Two plans may legitimately be called the same thing, and grouping by name
+  would draw one branch holding both plans' themes — the exact leak migration
+  275 exists to prevent, reintroduced in a picker.
+- **One component, six mounts.** `ObjectiveSelect` is the only control that
+  links an action or a motion to an objective (the two editors in
+  `governance.jsx`, the register's row and new-motion forms in
+  `AdminCommittee.jsx`, and the two SERVES OBJECTIVE boxes in `MeetingRoom.jsx`),
+  so a change here reaches all of them. The Actions list's "Any objective"
+  dropdown is deliberately NOT this: it FILTERS a list rather than creating a
+  link, and lives in a compact filter row where a tree panel would be wrong.
 - **`planLabels.js` is the one place an objective is NAMED from elsewhere**,
   and it names all three tiers: PLAN › THEME › OBJECTIVE. Skipping the theme
   was the reported bug, and it matters because an objective's own title is
