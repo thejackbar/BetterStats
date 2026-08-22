@@ -871,21 +871,28 @@ function Delivery({ row, level = 'objective' }) {
 
 /* ── How the plan is actually going ─────────────────────────────────────── */
 
-// The plan read as DELIVERY rather than as a structure: for every action, is it
-// where it should be by now, and is the money keeping pace with the work —
-// rolled up through its objective and its theme to the plan itself.
+// A committee dashboard, not a dump of everything filed against the plan. It
+// answers three questions in the order a meeting asks them: are we delivering
+// the plan, are we on time and on budget, and what needs attention. Everything
+// else is one click deeper.
 //
-// EVERY VERDICT IS A WORD, and the colour is second. Checked rather than
-// assumed: the green and the amber this app uses separate by ΔE 7.2 under
+// THE OBJECTIVE IS THE UNIT, NOT THE ACTION. An objective is what the committee
+// committed to; an action is how. The first cut of this screen drew both with
+// the same card, so a reader had to work out which was which — the uniformity
+// was deliberate (compare like with like) and wrong, because a committee scans
+// before it analyses.
+//
+// EVERY STATE IS A GLYPH AND A WORD, and the colour is third. Checked rather
+// than assumed: the green and the amber this app uses separate by ΔE 7.2 under
 // protanopia, inside the band that is only legal with a second channel, and in
 // the light theme the red and the amber are ΔE 14 apart for a reader with FULL
-// colour vision. So nothing here is told apart by colour alone — a chip always
-// says which state it is in.
+// colour vision. So nothing here is told apart by colour alone.
 //
-// SILENCE WHERE THE CLUB'S DATA CANNOT ANSWER. An action with no start date has
-// no elapsed fraction, so it gets no schedule verdict rather than a flattering
-// one; an objective with nothing allocated gets no budget verdict rather than
-// reading as under budget. Same discipline the selection rules keep.
+// SILENCE WHERE THE CLUB'S DATA CANNOT ANSWER — and silence means MUTED, not a
+// badge. An action with no dates has no elapsed fraction, so it gets a quiet
+// "no dates set" under the bar rather than a chip competing with the real
+// verdicts. The first cut rendered that silence as a chip, which is the
+// opposite of silent.
 
 const POSITIVE = 'var(--pb-positive-ink)'
 const RED = 'var(--pb-red-ink)'
@@ -912,35 +919,41 @@ function elapsedPercent(startISO, dueISO, today) {
   return Math.max(0, Math.min(100, Math.round(((today - s) / (d - s)) * 100)))
 }
 
-const SCHEDULE = {
-  done: { label: 'DONE', tone: POSITIVE, rank: 0 },
-  on_track: { label: 'ON TRACK', tone: POSITIVE, rank: 1 },
-  unknown: { label: 'NO DATES', tone: null, rank: 2 },
-  behind: { label: 'BEHIND', tone: AMBER, rank: 3 },
-  late: { label: 'LATE', tone: RED, rank: 4 },
+// The vocabulary. `rank` is what a roll-up sorts on, so the worst thing under a
+// theme is the thing the theme reports. `glyph` is the second channel the
+// colour measurements above make necessary.
+const STATE = {
+  done: { label: 'DONE', glyph: '✓', tone: POSITIVE, rank: 0 },
+  on_track: { label: 'ON TRACK', glyph: '●', tone: POSITIVE, rank: 1 },
+  not_started: { label: 'NOT STARTED', glyph: '○', tone: null, rank: 2 },
+  behind: { label: 'BEHIND', glyph: '●', tone: AMBER, rank: 3 },
+  late: { label: 'LATE', glyph: '●', tone: RED, rank: 4 },
 }
 
-// One action's schedule verdict, and the point on its own bar where it should
-// have got to by now.
-function actionSchedule(a, today) {
+// One action's verdict, and the point on its own bar where it should have got
+// to by now.
+function actionState(a, today) {
   const percent = a.percent_complete || 0
-  if ((a.status || '') === 'done' || percent >= 100) return { key: 'done', target: null }
+  if ((a.status || '') === 'done' || percent >= 100) return { key: 'done', target: null, percent: 100 }
   const due = a.due_date ? Date.parse(a.due_date) : null
-  if (due && Number.isFinite(due) && due < today) return { key: 'late', target: 100 }
+  if (due && Number.isFinite(due) && due < today) return { key: 'late', target: 100, percent }
   const target = elapsedPercent(a.start_date, a.due_date, today)
-  if (target === null) return { key: 'unknown', target: null }
-  return { key: percent + DRIFT_TOLERANCE < target ? 'behind' : 'on_track', target }
+  // No dates is not a status, it is missing metadata. An action nobody has
+  // started and nobody has dated reads NOT STARTED; one with work on it and no
+  // dates reads ON TRACK, because there is nothing to say it is not.
+  if (target === null) return { key: percent > 0 ? 'on_track' : 'not_started', target: null, percent }
+  return { key: percent + DRIFT_TOLERANCE < target ? 'behind' : 'on_track', target, percent }
 }
 
-// A group's verdict is the WORST of the things under it, ignoring the ones that
-// could not be judged — an objective is late if any action serving it is late,
-// and done only when every one of them is. Rolling up this way is what makes a
-// theme's figure mean the same thing as an action's.
-function rollUpSchedule(keys) {
-  const judged = keys.filter(k => k !== 'unknown')
-  if (!judged.length) return 'unknown'
-  if (judged.every(k => k === 'done')) return 'done'
-  return judged.reduce((worst, k) => (SCHEDULE[k].rank > SCHEDULE[worst].rank ? k : worst), 'done')
+// A group's verdict is the WORST of the things under it — a theme is late if
+// any action serving it is late, and done only when every one is. Rolling up
+// this way is what makes a theme's figure mean the same thing as an action's,
+// and lets the headline be traced to the work dragging it.
+function rollUp(keys) {
+  if (!keys.length) return 'not_started'
+  if (keys.every(k => k === 'not_started')) return 'not_started'
+  if (keys.every(k => k === 'done')) return 'done'
+  return keys.reduce((worst, k) => (STATE[k].rank > STATE[worst].rank ? k : worst), 'done')
 }
 
 // Spend against what was allocated. Null when nothing is allocated: "0 of 0" is
@@ -951,242 +964,459 @@ function budgetState(budget, spent, progress) {
   if (!b) return null
   const s = Number(spent || 0)
   const percentSpent = Math.round((s / b) * 100)
-  if (s > b) return { label: 'OVER BUDGET', tone: RED, percentSpent }
+  if (s > b) return { label: 'over budget', tone: RED, percentSpent, over: true }
   if (percentSpent > (progress || 0) + SPEND_TOLERANCE) {
-    return { label: 'SPENDING AHEAD', tone: AMBER, percentSpent }
+    return { label: 'spending ahead', tone: AMBER, percentSpent }
   }
-  return { label: 'IN BUDGET', tone: null, percentSpent }
+  return { label: null, tone: null, percentSpent }
 }
 
-// A meter with a TARGET TICK. The fill is where the work has got to; the tick is
-// where it should be by now. The gap between the two IS the reading — two
-// numbers side by side do not show it, and a second bar would be a second scale
-// for one quantity.
-//
-// Both meters on a row run 0–100, so they share one base and money and time can
-// be read against each other without a second axis inventing a relationship
-// between them.
-function Meter({ percent, target, tone, label, note, title }) {
-  const p = Math.max(0, Math.min(100, Math.round(percent || 0)))
-  const hasTarget = target !== null && target !== undefined
-  return (
-    <div title={title}>
-      <div className="flex items-baseline justify-between gap-2 mb-1">
-        <span className={cap}>{label}</span>
-        <span className="font-mono text-[10px] pb-num" style={{ color: tone || 'var(--pb-dim)' }}>{p}%</span>
-      </div>
-      <div className="relative h-1.5 rounded bg-pb-surface2">
-        <div className="h-full rounded" style={{ width: `${p}%`, background: tone || 'var(--pb-accent)' }} />
-        {hasTarget && (
-          // 2px, with a surface RING rather than a border, so it reads over the
-          // fill and over the empty track alike.
-          <span aria-hidden="true" className="absolute top-[-3px] h-[12px] w-[2px] rounded"
-            style={{
-              left: `calc(${Math.max(0, Math.min(100, target))}% - 1px)`,
-              background: 'var(--pb-text)',
-              boxShadow: '0 0 0 2px var(--pb-surface)',
-            }} />
-        )}
-      </div>
-      {note && <div className="font-mono text-[9.5px] text-pb-faintest mt-1">{note}</div>}
-    </div>
-  )
-}
-
-// The verdict, in a word. Never colour on its own.
-function StateChip({ state }) {
-  if (!state) return null
-  const tone = state.tone || 'var(--pb-faintest)'
-  return (
-    <span className="font-mono text-[8.5px] tracking-wide2 rounded px-1.5 py-px shrink-0 whitespace-nowrap"
-      style={{
-        color: tone,
-        border: `1px solid ${state.tone ? `color-mix(in srgb, ${tone} 45%, transparent)` : 'var(--pb-hairline)'}`,
-      }}>
-      {state.label}
-    </span>
-  )
+// The variance, said out loud. On a scanning surface a sentence beats a mark
+// the reader has to interpret — "18% behind" needs no key, where an upright
+// tick needs a paragraph explaining it (which is what the first cut had to
+// print above the whole screen). The tick survives one level down, on the
+// action detail, where the reader has already chosen to look closely.
+function scheduleVariance(percent, target) {
+  if (target === null || target === undefined) return null
+  const gap = Math.round((percent || 0) - target)
+  if (Math.abs(gap) < DRIFT_TOLERANCE) return null
+  return gap > 0 ? `${gap}% ahead` : `${Math.abs(gap)}% behind`
 }
 
 const shortDate = iso => {
   if (!iso) return null
   const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+  return Number.isNaN(d.getTime()) ? null : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
 }
 
-// One row of the delivery tree — a theme, an objective or an action. The same
-// shape at every level, so a reader compares like with like all the way down.
-function DeliveryRow({ kind, title, schedule, target, percent, budget, spent, span, meta, children }) {
-  const sched = SCHEDULE[schedule] || null
-  const spend = budgetState(budget, spent, percent)
+// The state, as a glyph and a word. Never colour on its own.
+function StateTag({ state, size = 'sm' }) {
+  const st = STATE[state]
+  if (!st) return null
+  const tone = st.tone || 'var(--pb-faintest)'
   return (
-    <div>
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className={`${cap} mb-0.5`}>{[kind, span].filter(Boolean).join(' · ')}</div>
-          <div className="text-pb-text text-[13px] leading-snug">{title}</div>
-          {meta && <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">{meta}</div>}
-        </div>
-        <StateChip state={sched} />
-      </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-3 mt-2.5">
-        <Meter percent={percent} target={target} tone={sched?.tone} label="SCHEDULE"
-          note={schedule === 'unknown' ? 'No start and due date to measure against' : null}
-          title={target === null || target === undefined
-            ? 'No start and due date, so there is nothing to measure progress against'
-            : `${percent || 0}% done, and ${target}% of the time has gone`} />
-        {spend ? (
-          <div>
-            <Meter percent={spend.percentSpent} target={percent} tone={spend.tone} label="BUDGET"
-              note={`${money(spent)} of ${money(budget)}`}
-              title={`${money(spent)} of ${money(budget)} spent, against ${percent || 0}% of the work done`} />
-            <div className="mt-1"><StateChip state={spend} /></div>
-          </div>
-        ) : (
-          <div>
-            <span className={cap}>BUDGET</span>
-            <div className="font-mono text-[9.5px] text-pb-faintest mt-1">Nothing allocated</div>
-          </div>
-        )}
-      </div>
-      {children}
+    <span className={`font-mono tracking-wide2 shrink-0 whitespace-nowrap ${size === 'sm' ? 'text-[8.5px]' : 'text-[9.5px]'}`}
+      style={{ color: tone }}>
+      <span aria-hidden="true">{st.glyph}</span> {st.label}
+    </span>
+  )
+}
+
+// A plain progress track. No target mark: on the scanning surfaces the variance
+// is written out instead, so nothing here needs a key to read.
+function Track({ percent, tone, className = '' }) {
+  const p = Math.max(0, Math.min(100, Math.round(percent || 0)))
+  return (
+    <div className={`h-1.5 rounded bg-pb-surface2 ${className}`}>
+      <div className="h-full rounded" style={{ width: `${p}%`, background: tone || 'var(--pb-accent)' }} />
     </div>
   )
 }
 
-// A motion carries no schedule and no money — it is a decision, not a piece of
-// work — so the delivery tree lists it through the register's own `MotionLine`
-// (declared further down, and hoisted) rather than giving it empty meters.
+// Delivery and budget as one pair, which is how they are read: what has been
+// done, and what it has cost against what was set aside. Both run 0–100 so they
+// share a base — never a second axis relating money to time.
+function Pair({ percent, tone, variance, budget, spent, dense }) {
+  const spend = budgetState(budget, spent, percent)
+  return (
+    <div className={`grid grid-cols-1 sm:grid-cols-2 gap-x-5 gap-y-2 ${dense ? 'mt-1.5' : 'mt-2'}`}>
+      <div>
+        <div className="flex items-baseline gap-2">
+          <span className={cap}>DELIVERY</span>
+          <span className="font-mono text-[10px] pb-num" style={{ color: tone || 'var(--pb-dim)' }}>
+            {Math.round(percent || 0)}%
+          </span>
+          {variance && <span className="font-mono text-[9.5px] text-pb-faintest ml-auto">{variance}</span>}
+        </div>
+        <Track percent={percent} tone={tone} className="mt-1" />
+      </div>
+      <div>
+        <div className="flex items-baseline gap-2">
+          <span className={cap}>BUDGET</span>
+          {spend ? (
+            <>
+              <span className="font-mono text-[10px] pb-num" style={{ color: spend.tone || 'var(--pb-dim)' }}>
+                {spend.percentSpent}%
+              </span>
+              {spend.label && (
+                <span className="font-mono text-[9.5px] ml-auto" style={{ color: spend.tone }}>{spend.label}</span>
+              )}
+            </>
+          ) : (
+            <span className="font-mono text-[9.5px] text-pb-faintest">Not allocated</span>
+          )}
+        </div>
+        {spend ? (
+          <>
+            <Track percent={spend.percentSpent} tone={spend.tone} className="mt-1" />
+            <div className="font-mono text-[9.5px] text-pb-faintest mt-1">
+              {money(spent)} of {money(budget)}
+            </div>
+          </>
+        ) : <div className="h-1.5 mt-1" />}
+      </div>
+    </div>
+  )
+}
 
-// The whole plan, as delivery. Themes hold objectives hold actions, each level
-// answering the same two questions, so "how are we going" can be asked of the
-// plan and then traced to the action that is dragging it.
-export function PlanDelivery({ plan, pillars }) {
-  const [open, setOpen] = useState(() => new Set())
-  const today = startOfToday()
+/* ── The work under an objective, one click in ──────────────────────────── */
 
-  const themes = useMemo(() => {
-    const objs = plan.objective_list || []
-    return (pillars || [])
-      .filter(p => p.plan_id === plan.id)
-      .map(p => {
-        const rows = objs.filter(o => o.pillar_id === p.id).map(o => {
-          const actions = (o.action_list || []).map(a => ({ ...a, _s: actionSchedule(a, today) }))
-          return { ...o, actions, motions: o.motion_list || [], schedule: rollUpSchedule(actions.map(a => a._s.key)) }
-        })
-        return { ...p, rows, schedule: rollUpSchedule(rows.map(r => r.schedule)) }
+// An action, compact. THIS is where the target mark earns its place: the reader
+// has opened this on purpose, so a mark showing where the work should have got
+// to by now is worth more than a sentence — and the tooltip carries the key
+// rather than a paragraph printed over the whole dashboard.
+function WorkAction({ action, state }) {
+  const st = STATE[state.key]
+  const spend = budgetState(action.budget_estimate, action.actual_expenditure, state.percent)
+  const span = [shortDate(action.start_date), shortDate(action.due_date)].filter(Boolean).join(' – ')
+  const hasTarget = state.target !== null && state.target !== undefined
+  return (
+    <div className="flex items-start gap-2.5 py-1.5">
+      <span aria-hidden="true" className="font-mono text-[10px] leading-5 shrink-0"
+        style={{ color: st?.tone || 'var(--pb-faintest)' }}>{st?.glyph}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-pb-text text-[12.5px] leading-snug">{action.title}</span>
+          <span className="font-mono text-[9px] shrink-0" style={{ color: st?.tone || 'var(--pb-faintest)' }}>
+            {st?.label}
+          </span>
+        </div>
+        <div className="relative h-1.5 rounded bg-pb-surface2 mt-1.5"
+          title={hasTarget
+            ? `${state.percent}% done, and ${state.target}% of the time between ${span} has gone`
+            : 'No start and due date, so there is nothing to measure progress against'}>
+          <div className="h-full rounded"
+            style={{ width: `${Math.max(0, Math.min(100, state.percent))}%`, background: st?.tone || 'var(--pb-accent)' }} />
+          {hasTarget && (
+            // 2px, with a surface RING rather than a border, so it reads over
+            // the fill and over the empty track alike.
+            <span aria-hidden="true" className="absolute top-[-3px] h-[12px] w-[2px] rounded"
+              style={{
+                left: `calc(${Math.max(0, Math.min(100, state.target))}% - 1px)`,
+                background: 'var(--pb-text)',
+                boxShadow: '0 0 0 2px var(--pb-surface)',
+              }} />
+          )}
+        </div>
+        <div className="font-mono text-[9.5px] text-pb-faintest mt-1 flex flex-wrap gap-x-3">
+          <span>{state.percent}% done</span>
+          {span ? <span>{span}</span> : <span>No dates set</span>}
+          {spend
+            ? <span style={{ color: spend.tone || undefined }}>
+                {money(action.actual_expenditure)} of {money(action.budget_estimate)}
+                {spend.label ? ` · ${spend.label}` : ''}
+              </span>
+            : <span>No budget</span>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// A motion is evidence, not work: the committee resolved something, and that
+// supports the objective without itself having a schedule or a cost. So it is
+// one compact line rather than the bordered card the register gives it — that
+// card is right where motions ARE the subject, and wrong here.
+function WorkMotion({ motion }) {
+  const carried = /^(carried|passed)$/i.test(motion.outcome || '')
+  const lost = /^(lost|failed|defeated)$/i.test(motion.outcome || '')
+  const tone = carried ? POSITIVE : lost ? RED : null
+  return (
+    <div className="flex items-start gap-2.5 py-1.5">
+      <span aria-hidden="true" className="font-mono text-[10px] leading-5 shrink-0"
+        style={{ color: tone || 'var(--pb-faintest)' }}>{carried ? '✓' : lost ? '✕' : '○'}</span>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="text-pb-dim text-[12.5px] leading-snug">{motion.description}</span>
+          <span className="font-mono text-[9px] shrink-0" style={{ color: tone || 'var(--pb-faintest)' }}>
+            {(motion.outcome || 'pending').toUpperCase()}
+          </span>
+        </div>
+        <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">
+          {[motion.meeting_title, shortDate(motion.meeting_date)].filter(Boolean).join(' · ') || 'Not linked to a meeting'}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── The dashboard ──────────────────────────────────────────────────────── */
+
+// Everything the screen needs, worked out in ONE pass so the overview, the
+// attention strip and the rows underneath cannot disagree about the same plan.
+function readPlan(plan, pillars, today) {
+  const objs = plan.objective_list || []
+  const themes = (pillars || [])
+    .filter(p => p.plan_id === plan.id)
+    .map(p => {
+      const rows = objs.filter(o => o.pillar_id === p.id).map(o => {
+        const actions = (o.action_list || []).map(a => ({ ...a, _s: actionState(a, today) }))
+        const motions = o.motion_list || []
+        // An objective with nothing serving it has not been started, whatever
+        // percentage it happens to carry.
+        const key = actions.length ? rollUp(actions.map(a => a._s.key)) : 'not_started'
+        const targets = actions.map(a => a._s.target).filter(t => t !== null && t !== undefined)
+        const target = targets.length ? Math.round(targets.reduce((n, t) => n + t, 0) / targets.length) : null
+        const percent = o.percent_complete || 0
+        return {
+          ...o, actions, motions, key, target, percent,
+          spend: budgetState(o.budget, o.spent, percent),
+          variance: scheduleVariance(percent, target),
+        }
       })
-      .filter(t => t.rows.length)
-  }, [plan, pillars, today])
+      const percent = rows.length ? Math.round(rows.reduce((n, r) => n + r.percent, 0) / rows.length) : 0
+      const budget = rows.reduce((n, r) => n + Number(r.budget || 0), 0)
+      const spent = rows.reduce((n, r) => n + Number(r.spent || 0), 0)
+      return {
+        ...p, rows, percent, budget, spent,
+        key: rollUp(rows.map(r => r.key)),
+        onTrack: rows.filter(r => r.key === 'on_track' || r.key === 'done').length,
+        spend: budgetState(budget, spent, percent),
+      }
+    })
+    .filter(t => t.rows.length)
 
-  // The health of the plan in one line, counted from the actions themselves so
-  // it cannot disagree with the rows underneath it.
-  const tally = useMemo(() => {
-    const all = themes.flatMap(t => t.rows.flatMap(r => r.actions))
-    const count = k => all.filter(a => a._s.key === k).length
-    const overBudget = themes.flatMap(t => t.rows)
-      .filter(r => budgetState(r.budget, r.spent, r.percent_complete)?.label === 'OVER BUDGET').length
-    return { total: all.length, done: count('done'), onTrack: count('on_track'),
-             behind: count('behind'), late: count('late'), unknown: count('unknown'), overBudget }
-  }, [themes])
+  const all = themes.flatMap(t => t.rows)
+  // What needs attention, worst first. Only objectives — a committee acts on
+  // what it committed to, and the action underneath is the detail of why.
+  const attention = all
+    .filter(r => r.key === 'late' || r.key === 'behind' || r.spend?.over)
+    .map(r => ({
+      row: r,
+      why: r.key === 'late'
+        ? `${r.actions.filter(a => a._s.key === 'late').length || 1} overdue action${(r.actions.filter(a => a._s.key === 'late').length || 1) === 1 ? '' : 's'}`
+        : r.variance ? `${r.variance} on delivery`
+        : r.spend?.over ? 'spending past its budget'
+        : 'behind schedule',
+      rank: STATE[r.key].rank + (r.spend?.over ? 0.5 : 0),
+    }))
+    .sort((a, b) => b.rank - a.rank)
 
-  const toggle = id => setOpen(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  // The plan's own headline figures come from the PLAN ROW, not from summing
+  // these themes again: the backend already rolled them up, the card is built
+  // from them elsewhere, and two ways of computing one number is how a screen
+  // ends up printing 44% and 45% for the same plan an inch apart. Only the
+  // counts — on track, needing attention — are derived here, and they are
+  // things the payload does not carry.
+  return {
+    themes,
+    objectives: all.length,
+    onTrack: all.filter(r => r.key === 'on_track' || r.key === 'done').length,
+    percent: plan.percent_complete || 0,
+    budget: Number(plan.budget || 0),
+    spent: Number(plan.spent || 0),
+    attention,
+  }
+}
 
-  if (!themes.length) {
+// The plan's four figures, rendered by the plan pane INSIDE its own title card
+// rather than by a second card underneath it — the first cut stacked two
+// summaries on each other, saying the same thing twice and disagreeing about
+// the percentage because each computed it its own way.
+//
+// Deliberately NOT one overall verdict. A worst-of rollup at this altitude
+// brands a sixteen-objective plan LATE off a single overdue action and never
+// recovers; a proportion is the honest headline for a whole plan.
+//
+// Delivered, budget and spend come from the PLAN ROW the backend already
+// rolled up — the same numbers the rest of the app reads. Only the counts are
+// derived here, and only because the payload does not carry them.
+export function PlanFigures({ plan, pillars }) {
+  const today = startOfToday()
+  const d = useMemo(() => readPlan(plan, pillars, today), [plan, pillars, today])
+  const spend = budgetState(d.budget, d.spent, d.percent)
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mt-5">
+      <div>
+        <div className="font-display font-bold text-[22px] leading-none pb-num" style={{ color: 'var(--pb-accent-ink)' }}>
+          {d.percent}%
+        </div>
+        <div className={`${cap} mt-1`}>DELIVERED</div>
+        <Track percent={d.percent} className="mt-2" />
+      </div>
+      <div>
+        <div className="font-display font-bold text-[22px] leading-none pb-num"
+          style={{ color: spend?.over ? RED : 'var(--pb-accent-ink)' }}>
+          {spend ? `${spend.percentSpent}%` : '—'}
+        </div>
+        <div className={`${cap} mt-1`}>{spend ? 'OF BUDGET SPENT' : 'NO BUDGET SET'}</div>
+        {spend
+          ? <>
+              <Track percent={spend.percentSpent} tone={spend.tone} className="mt-2" />
+              <div className="font-mono text-[9.5px] text-pb-faintest mt-1">{money(d.spent)} of {money(d.budget)}</div>
+            </>
+          : <div className="h-1.5 mt-2" />}
+      </div>
+      <div>
+        <div className="font-display font-bold text-[22px] leading-none pb-num" style={{ color: 'var(--pb-accent-ink)' }}>
+          {d.onTrack}<span className="text-pb-faint">/{d.objectives}</span>
+        </div>
+        <div className={`${cap} mt-1`}>OBJECTIVES ON TRACK</div>
+      </div>
+      <div>
+        <div className="font-display font-bold text-[22px] leading-none pb-num"
+          style={{ color: d.attention.length ? RED : POSITIVE }}>
+          {d.attention.length}
+        </div>
+        <div className={`${cap} mt-1`}>{d.attention.length === 1 ? 'NEEDS ATTENTION' : 'NEED ATTENTION'}</div>
+      </div>
+    </div>
+  )
+}
+
+export function PlanDelivery({ plan, pillars }) {
+  const today = startOfToday()
+  const d = useMemo(() => readPlan(plan, pillars, today), [plan, pillars, today])
+  // Themes open one at a time by default, so the page opens as a list of
+  // themes rather than the whole plan at once. The work under an objective is
+  // a further click.
+  const [openTheme, setOpenTheme] = useState(null)
+  const [openWork, setOpenWork] = useState(() => new Set())
+  const toggleWork = id => setOpenWork(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+
+  if (!d.themes.length) {
     return (
       <div className="pb-card p-6 text-center">
         <div className="text-pb-text text-[13px] mb-1">Nothing to report on yet.</div>
         <div className="font-mono text-[11px] text-pb-faintest">
-          Point an action at an objective in this plan and its progress appears here.
+          Add a theme and an objective, and the plan's progress appears here.
         </div>
       </div>
     )
   }
 
-  const chips = [
-    { n: tally.done, label: 'DONE', tone: POSITIVE },
-    { n: tally.onTrack, label: 'ON TRACK', tone: POSITIVE },
-    { n: tally.behind, label: 'BEHIND', tone: AMBER },
-    { n: tally.late, label: 'LATE', tone: RED },
-    { n: tally.overBudget, label: 'OVER BUDGET', tone: RED },
-    { n: tally.unknown, label: 'NO DATES', tone: null },
-  ].filter(c => c.n > 0)
+  // Opening a theme from the attention strip: the theme is expanded and the
+  // objective's own work with it, so one click lands on the thing named.
+  const jumpTo = row => {
+    const theme = d.themes.find(t => t.rows.some(r => r.id === row.id))
+    if (theme) setOpenTheme(theme.id)
+    setOpenWork(s => new Set([...s, row.id]))
+    requestAnimationFrame(() => {
+      document.getElementById(`plan-obj-${row.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
+  }
 
   return (
     <div className="space-y-3">
-      <div className="pb-card p-4">
-        <div className="flex items-start justify-between gap-3 flex-wrap">
-          <div>
-            <div className={`${cap} mb-1`}>DELIVERY</div>
-            <div className="text-pb-dim text-[12.5px]">
-              {tally.total} action{tally.total === 1 ? '' : 's'} serving this plan
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {chips.map(c => (
-              <StateChip key={c.label} state={{ label: `${c.n} ${c.label}`, tone: c.tone }} />
+      {/* ── what needs attention, worst first ──────────────────────────── */}
+      {/* Only drawn when there is something to say. An empty box headed
+          "needs attention" is a control that can only ever answer "nothing",
+          which is worse than no control at all. */}
+      {d.attention.length > 0 && (
+        <div className="pb-card p-4">
+          <div className={`${cap} mb-2`}>NEEDS ATTENTION</div>
+          <div className="space-y-1">
+            {d.attention.slice(0, 5).map(({ row, why }) => (
+              <button key={row.id} type="button" onClick={() => jumpTo(row)}
+                className="w-full text-left flex items-start gap-2.5 rounded px-1.5 py-1 -mx-1.5 hover:bg-pb-surface2">
+                <span aria-hidden="true" className="font-mono text-[10px] leading-5 shrink-0"
+                  style={{ color: STATE[row.key].tone || 'var(--pb-faintest)' }}>{STATE[row.key].glyph}</span>
+                <span className="min-w-0 flex-1 text-pb-text text-[12.5px] leading-snug">{row.title}</span>
+                {/* The state is NAMED here too, not just glyphed: BEHIND and
+                    LATE share the ● and are told apart by colour alone
+                    otherwise, which the palette measurements rule out. */}
+                <span className="font-mono text-[9.5px] shrink-0 pt-0.5"
+                  style={{ color: STATE[row.key].tone || 'var(--pb-faintest)' }}>
+                  {STATE[row.key].label} · {why}
+                </span>
+              </button>
             ))}
+            {d.attention.length > 5 && (
+              <div className="font-mono text-[9.5px] text-pb-faintest pt-1">
+                and {d.attention.length - 5} more
+              </div>
+            )}
           </div>
         </div>
-        <div className="font-mono text-[9.5px] text-pb-faintest mt-3 leading-relaxed">
-          The bar is where the work has got to. The upright mark is where it should be by
-          now — on SCHEDULE, the share of the time that has passed; on BUDGET, the share of
-          the work that is done. A bar short of its mark is behind.
-        </div>
-      </div>
+      )}
 
-      {themes.map(t => (
-        <div key={t.id} className="pb-card p-4">
-          <DeliveryRow
-            kind="THEME" title={t.name} schedule={t.schedule}
-            percent={Math.round(t.rows.reduce((n, r) => n + (r.percent_complete || 0), 0) / t.rows.length)}
-            target={null}
-            budget={t.rows.reduce((n, r) => n + Number(r.budget || 0), 0)}
-            spent={t.rows.reduce((n, r) => n + Number(r.spent || 0), 0)}
-            meta={`${t.rows.length} objective${t.rows.length === 1 ? '' : 's'}`}
-          />
-          <Nested level="objective" className="mt-3 space-y-3">
-            {t.rows.map(o => {
-              const isOpen = open.has(o.id)
-              const work = o.actions.length + o.motions.length
-              return (
-                <div key={o.id}>
-                  <DeliveryRow
-                    kind="OBJECTIVE" title={o.title} schedule={o.schedule}
-                    percent={o.percent_complete || 0} target={null}
-                    budget={o.budget} spent={o.spent}
-                    span={o.due_date ? `DUE ${shortDate(o.due_date)}` : null}
-                    meta={work
-                      ? `${o.actions.length} action${o.actions.length === 1 ? '' : 's'}`
-                        + (o.motions.length ? ` · ${o.motions.length} motion${o.motions.length === 1 ? '' : 's'}` : '')
-                      : 'Nothing serving it yet'}
-                  />
-                  {work > 0 && (
-                    <button type="button" onClick={() => toggle(o.id)}
-                      aria-expanded={isOpen}
-                      className="mt-2 font-mono text-[9.5px] text-pb-faint hover:text-pb-text">
-                      {isOpen ? '▾ Hide the work' : `▸ Show the ${work} thing${work === 1 ? '' : 's'} serving it`}
-                    </button>
-                  )}
-                  {isOpen && (
-                    <Nested level="work" className="mt-2 space-y-3">
-                      {o.actions.map(a => (
-                        <DeliveryRow key={a.id}
-                          kind="ACTION" title={a.title} schedule={a._s.key}
-                          percent={a.percent_complete || 0} target={a._s.target}
-                          budget={a.budget_estimate} spent={a.actual_expenditure}
-                          span={[shortDate(a.start_date), shortDate(a.due_date)].filter(Boolean).join(' – ') || null}
-                        />
-                      ))}
-                      {o.motions.map(m => <MotionLine key={m.id} motion={m} />)}
-                    </Nested>
-                  )}
+      {/* ── the themes, one summary row each ───────────────────────────── */}
+      <div className="pb-card divide-y pb-hairline">
+        <div className={`${cap} px-4 pt-4 pb-2`}>THEMES</div>
+        {d.themes.map(t => {
+          const isOpen = openTheme === t.id
+          return (
+            <div key={t.id}>
+              <button type="button" onClick={() => setOpenTheme(isOpen ? null : t.id)}
+                aria-expanded={isOpen}
+                className="w-full text-left px-4 py-3 hover:bg-pb-surface2">
+                <div className="flex items-start gap-2">
+                  <span aria-hidden="true" className="font-mono text-[10px] text-pb-faint leading-5 shrink-0 w-3">
+                    {isOpen ? '▾' : '▸'}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <span className="text-pb-text text-[13.5px] font-semibold leading-snug">{t.name}</span>
+                      <StateTag state={t.key} size="lg" />
+                    </div>
+                    <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">
+                      {t.rows.length} objective{t.rows.length === 1 ? '' : 's'} · {t.onTrack} on track
+                    </div>
+                    <Pair percent={t.percent} tone={STATE[t.key].tone} budget={t.budget} spent={t.spent} />
+                  </div>
                 </div>
-              )
-            })}
-          </Nested>
-        </div>
-      ))}
+              </button>
+
+              {isOpen && (
+                <div className="px-4 pb-4 space-y-2">
+                  {t.rows.map(o => {
+                    const workOpen = openWork.has(o.id)
+                    const work = o.actions.length + o.motions.length
+                    return (
+                      <div key={o.id} id={`plan-obj-${o.id}`}
+                        className="border-l-2 pl-3" style={{ borderColor: LEVEL.objective.rail }}>
+                        <div className="flex items-start gap-2.5">
+                          <span aria-hidden="true" className="font-mono text-[11px] leading-5 shrink-0"
+                            style={{ color: STATE[o.key].tone || 'var(--pb-faintest)' }}>{STATE[o.key].glyph}</span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-start justify-between gap-3">
+                              <span className="text-pb-text text-[13px] leading-snug">{o.title}</span>
+                              <StateTag state={o.key} />
+                            </div>
+                            <Pair percent={o.percent} tone={STATE[o.key].tone} variance={o.variance}
+                              budget={o.budget} spent={o.spent} dense />
+                            <div className="flex items-center justify-between gap-2 mt-1.5">
+                              <span className="font-mono text-[9.5px] text-pb-faintest">
+                                {work
+                                  ? [o.actions.length && `${o.actions.length} action${o.actions.length === 1 ? '' : 's'}`,
+                                     o.motions.length && `${o.motions.length} motion${o.motions.length === 1 ? '' : 's'}`]
+                                      .filter(Boolean).join(' · ')
+                                  : 'No actions or motions yet'}
+                              </span>
+                              {work > 0 && (
+                                <button type="button" onClick={() => toggleWork(o.id)} aria-expanded={workOpen}
+                                  className="font-mono text-[9.5px] text-pb-faint hover:text-pb-text shrink-0">
+                                  {workOpen ? 'Hide details' : 'View details ›'}
+                                </button>
+                              )}
+                            </div>
+                            {workOpen && (
+                              <div className="mt-2 rounded bg-pb-surface2/40 px-3 py-1.5">
+                                {o.actions.length > 0 && (
+                                  <>
+                                    <div className={`${cap} pt-1`}>ACTIONS</div>
+                                    {o.actions.map(a => <WorkAction key={a.id} action={a} state={a._s} />)}
+                                  </>
+                                )}
+                                {o.motions.length > 0 && (
+                                  <>
+                                    <div className={`${cap} pt-2`}>SUPPORTING MOTIONS</div>
+                                    {o.motions.map(m => <WorkMotion key={m.id} motion={m} />)}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -1893,6 +2123,13 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   const [openIds, setOpenIds] = useState(null)     // null until the first plan seeds it
   const [sel, setSel] = useState(null)
   const [workMode, setWorkMode] = useState('grouped')
+  // The rail and the dashboard want the same width, and while a plan is open
+  // the rail is redundant navigation — the dashboard IS a tree. So it folds
+  // away rather than being split onto tabs of its own: the tree is how you
+  // reorder and add, which is a different job from reading the plan, and two
+  // more tabs would recreate the pick-between-three-views-of-one-thing the
+  // Strategic Plans / Themes / Objectives row was removed for.
+  const [railOpen, setRailOpen] = useState(true)
   const [editingPlan, setEditingPlan] = useState(null)
   const [addingPlan, setAddingPlan] = useState(false)
   const [editingObjective, setEditingObjective] = useState(null)
@@ -2312,17 +2549,22 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
-              <StatTile value={`${plan.objectives_done || 0}/${objs.length}`} label="OBJECTIVES DONE" />
-              <StatTile value={`${plan.percent_complete || 0}%`} label="PROGRESS" />
-              <StatTile value={money(plan.budget || 0)} label="BUDGET" />
-              <StatTile value={money(plan.spent || 0)} label="SPENT"
-                tone={plan.over_budget ? 'var(--pb-red-ink)' : undefined} />
-            </div>
-            <div className="mt-4"><Bar percent={plan.percent_complete || 0} /></div>
-            <div className="mt-2 flex justify-end">
-              <span className={cap}>{plan.percent_spent ?? 0}% OF BUDGET SPENT</span>
-            </div>
+            {/* One summary, not two. This used to be four tiles of its own
+                (objectives done / progress / budget / spent) with the delivery
+                dashboard repeating them in a second card directly underneath —
+                the same figures twice, and disagreeing on the percentage
+                because each side worked it out its own way. */}
+            {plan.id
+              ? <PlanFigures plan={plan} pillars={pillars} />
+              : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5">
+                  <StatTile value={`${plan.objectives_done || 0}/${objs.length}`} label="OBJECTIVES DONE" />
+                  <StatTile value={`${plan.percent_complete || 0}%`} label="PROGRESS" />
+                  <StatTile value={money(plan.budget || 0)} label="BUDGET" />
+                  <StatTile value={money(plan.spent || 0)} label="SPENT"
+                    tone={plan.over_budget ? 'var(--pb-red-ink)' : undefined} />
+                </div>
+              )}
           </div>
 
           {plan.description && (
@@ -2335,17 +2577,18 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
           {/* The pane adds the level BELOW what it is showing, because the
               structure is plan → theme → objective. The rail's button adds at
               the level you are standing on. */}
+          {/* How the plan is actually going, under the figures that summarise
+              it: what needs attention first, then a row per theme that opens
+              onto its objectives. Actions and motions are a further click, so
+              the page opens as a plan rather than as everything filed against
+              one. */}
+          {plan.id && <PlanDelivery plan={plan} pillars={pillars} />}
+
           {plan.id && (
             <button onClick={() => { setAddingTheme({ planId: plan.id }); setAddingObjectiveTo(null) }}
-              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
+              className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold self-start"
               style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
           )}
-
-          {/* How the plan is actually going, under the figures that summarise
-              it — the same two questions asked of every theme, objective and
-              action, so a number in the card above can be traced to the piece
-              of work dragging it. */}
-          {plan.id && <PlanDelivery plan={plan} pillars={pillars} />}
         </div>
       )
     }
@@ -2511,9 +2754,19 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     // sits above what it opens, because 320px of rail leaves a detail pane too
     // narrow to read and pushes the page sideways.
     <div className="flex flex-col lg:flex-row flex-1 min-h-0">
-      <div className="pb-scroll w-full lg:w-[320px] lg:shrink-0 max-h-[45vh] lg:max-h-none
-        border-b lg:border-b-0 lg:border-r pb-hairline overflow-y-auto p-3">
+      {!railOpen && (
+        <button type="button" onClick={() => setRailOpen(true)}
+          className="shrink-0 border-b lg:border-b-0 lg:border-r pb-hairline px-2 py-2
+            text-left font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text hover:bg-pb-surface2">
+          <span aria-hidden="true">›</span> PLAN STRUCTURE
+        </button>
+      )}
+      <div className={`pb-scroll w-full lg:w-[320px] lg:shrink-0 max-h-[45vh] lg:max-h-none
+        border-b lg:border-b-0 lg:border-r pb-hairline overflow-y-auto p-3 ${railOpen ? '' : 'hidden'}`}>
         <div className="flex items-center gap-2 mb-2">
+          <button type="button" onClick={() => setRailOpen(false)}
+            title="Hide the plan structure" aria-label="Hide the plan structure"
+            className="font-mono text-[12px] text-pb-faint hover:text-pb-text leading-none">‹</button>
           <span className={cap}>STRATEGIC PLANS</span>
           {/* Adding at the level you are standing on: a plan when a plan is
               selected, a theme under a theme, an objective under an objective.
