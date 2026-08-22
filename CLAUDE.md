@@ -40,10 +40,12 @@ today".
 - **Today and this week are PERTH days** (`report_windows`). The UTC boundary the
   old summary used starts at 8am local, so a rep's whole morning read as
   yesterday's work. Week starts Monday.
-- **`proposal` and `other` are carried but only DRAWN when a deal is there**
-  (`stage_columns` reports which). The eight requested columns don't cover every
-  pipeline stage, and dropping a deal from the table because its stage isn't one
-  of them is worse than an extra column nobody asked for.
+- **EVERY NAMED STAGE IS ALWAYS DRAWN, `proposal` included.** An empty Proposal
+  column is itself the answer to "is anybody at proposal", which a column that
+  comes and goes cannot give. Only `other` — the catch-all for a pipeline stage
+  this list doesn't name — is conditional (`stage_columns` reports what to
+  draw), because dropping a deal from the table for sitting in an unnamed stage
+  is worse than an extra column nobody asked for.
 - **A rep with nothing assigned still gets a row**, seeded from the sales-role
   memberships — an empty book is exactly what this screen should make obvious,
   and they would otherwise be invisible.
@@ -51,14 +53,14 @@ today".
   split; the whole book would be a far bigger read for a split that cannot apply
   to the rest. No trial dates at all reads as CURRENT, matching the queue's own
   `trial_current`/`trial_expired` filter.
-- **Verified against a real Postgres** (56 checks through the shipped service
+- **Verified against a real Postgres** (58 checks through the shipped service
   and route bodies: each contact route counted and a note and a Twenty row not,
   to_contact + contacted reconciling with the total, the archived deal excluded
   from the breakdown while its call still counts as work done, all three trial
-  cases, the pool's stage spread, an idle rep drawn, Proposal appearing only when
-  used and no deal dropped, the distinct-not-summed club count, a sales caller
+  cases, the pool's stage spread, an idle rep drawn, an empty Proposal column
+  still drawn and no deal dropped, the distinct-not-summed club count, a sales caller
   pinned to themselves however they ask, and the Perth boundaries either side of
-  8am) and **driven in Chromium** (17: the column order asked for, a rep row's
+  8am) and **driven in Chromium** (18: the column order asked for, a rep row's
   total-and-brackets, the Unassigned and All-clubs rows, both totals rows
   agreeing with the cards above them, no page errors, no overflow at 390px).
 

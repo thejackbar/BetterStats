@@ -4,7 +4,7 @@ export default {
   sortKey: '2026-08-22T12:00:00Z',
   title: 'Sales Performance says who has been called, and where every club sits',
   items: [
-    'The conversion funnel is now a pipeline breakdown, one column per stage: Manual, Target, Contacted, Engaged, Trial (Current), Trial (Expired), Won and Lost, in place of the old cumulative assigned/attempted/contacted view.',
+    'The conversion funnel is now a pipeline breakdown, one column per stage: Manual, Target, Contacted, Engaged, Trial (Current), Trial (Expired), Proposal, Won and Lost, in place of the old cumulative assigned/attempted/contacted view.',
     'Each stage cell carries both figures: every club sitting there, and in brackets the number the rep has actually made contact with. A stage full of clubs nobody has rung now reads differently from one that has been worked.',
     'The first column is "To contact", meaning assigned to that rep and not yet contacted, so it says what is left before they need more clubs.',
     'An Unassigned row shows the pool nobody owns yet, spread across the same stages, and an "All clubs" row totals the table. A rep with nothing assigned gets a row rather than disappearing.',

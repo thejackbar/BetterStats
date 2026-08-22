@@ -1097,10 +1097,12 @@ def report_windows(now: Optional[datetime] = None) -> dict:
 # trial is a different job from a live one), and 'self_serve_trial' folds in
 # beside it, since a club that signed itself up is on a trial either way.
 #
-# 'proposal' and 'other' are carried but only drawn when a rep actually has
-# deals there (`stage_columns` reports which) — a deal must never be dropped
-# from the table just because its stage isn't one of the eight the screen
-# normally shows.
+# 'other' is the catch-all for a stage this list doesn't name, and is only
+# drawn when a deal is actually sitting in one (`stage_columns` reports which)
+# — a deal must never be dropped from the table just because its stage isn't
+# one of the nine the screen normally shows. Every named stage, Proposal
+# included, is always drawn: an empty Proposal column is itself the answer to
+# "is anyone at proposal", which a column that comes and goes can't give.
 STAGE_COLUMNS = [
     ("manual", "Manual"),
     ("target", "Target"),
@@ -1325,7 +1327,7 @@ async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -
     drawn = [
         {"key": col, "label": label}
         for col, label in STAGE_COLUMNS
-        if col not in ("proposal", "other") or totals["stages"][col]["total"] > 0
+        if col != "other" or totals["stages"][col]["total"] > 0
     ]
     return {"rows": rows, "totals": totals, "stage_columns": drawn}
 
