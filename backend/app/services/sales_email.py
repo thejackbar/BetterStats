@@ -59,7 +59,14 @@ TEMPLATE_DB_NAMES = {
         "Email following voicemail. Trial approaching expiry - offer to extend",
     "voicemail_followup_extend_trial":
         "Email following voicemail. Trial expired - offer to extend",
-    "voicemail_followup_trial_offer": "Email following VM. Trial offer",
+    # voicemail_followup_trial_offer deliberately has NO override here (unlike
+    # its two extend-trial siblings above) — its own dropdown label is short
+    # enough that abbreviating it bought nothing but a name a super admin
+    # could no longer find by searching for what the rep actually sees.
+    # Reported live: it seeded as "Email following VM. Trial offer", so
+    # searching Comms -> Templates for the dropdown's own wording ("Email
+    # following voicemail - trial offer") found nothing. Falling through to
+    # TEMPLATE_LABELS makes the row's name and the dropdown text identical.
 }
 
 
@@ -615,6 +622,12 @@ async def seed_sales_templates(session) -> int:
         # trial approaching expiry rather than one already over.
         ("voicemail_followup_extend_trial", "Email following voicemail - offer to extend trial",
          TEMPLATE_DB_NAMES["voicemail_followup_extend_trial"]),
+        # Reported live: this one seeded under an abbreviated name a super
+        # admin couldn't find by searching for the dropdown's own wording —
+        # renamed to match TEMPLATE_LABELS exactly (see the now-removed
+        # TEMPLATE_DB_NAMES override's own comment).
+        ("voicemail_followup_trial_offer", "Email following VM. Trial offer",
+         TEMPLATE_LABELS["voicemail_followup_trial_offer"]),
     ):
         await session.execute(
             _text("""
@@ -627,6 +640,24 @@ async def seed_sales_templates(session) -> int:
         )
     total = 0
     for key in BUILT_IN_TEMPLATES:
+        name = _db_name(key)
+        # Backfill the key onto a same-named row BEFORE the INSERT below —
+        # comms_templates carries two separate unique constraints, (org, name)
+        # and (org, sales_template_key), and the INSERT's own ON CONFLICT only
+        # names the second. A row already sitting under this exact name with
+        # no key set (seeded before the key column existed, or renamed back
+        # to a stock name by hand) would otherwise make the INSERT hit the
+        # OTHER constraint — a real IntegrityError, not a quiet no-op, since
+        # ON CONFLICT only covers the constraint it names. Verified against a
+        # real Postgres instance: without this, that shape 500s the endpoint
+        # on every call.
+        await session.execute(
+            _text("""
+                UPDATE comms_templates SET sales_template_key = :key
+                WHERE organisation_id = :org_id AND name = :name AND sales_template_key IS NULL
+            """),
+            {"org_id": org.id, "name": name, "key": key},
+        )
         result = await session.execute(
             _text("""
                 INSERT INTO comms_templates (id, organisation_id, name, subject, html, sales_template_key)
@@ -634,7 +665,7 @@ async def seed_sales_templates(session) -> int:
                 ON CONFLICT (organisation_id, sales_template_key) DO NOTHING
             """),
             {
-                "org_id": org.id, "name": _db_name(key), "key": key,
+                "org_id": org.id, "name": name, "key": key,
                 "subject": _SEED_SUBJECT[key],
                 # Plain substring replace, NOT str.format() — the body also
                 # holds {{merge_token}} placeholders for _merge() to resolve
