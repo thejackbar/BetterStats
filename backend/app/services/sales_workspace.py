@@ -20,13 +20,14 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub, MarketingClubContact,
-    SalesList, SalesListClub, User,
+    ClubMembership, CrmActivity, CrmDeal, CrmPerson, CrmStage, MarketingClub,
+    MarketingClubContact, SalesList, SalesListClub, User,
 )
 from app.services import crm as crm_service
 
@@ -1019,119 +1020,314 @@ async def contact_counts_by_club(session: AsyncSession, marketing_club_ids) -> d
 
 # ─── Performance reporting ─────────────────────────────────────────────────────
 # Deliberately NOT "calls per rep" as the headline (see the brief's section 19 —
-# raw volume rewards low-value dialling, not qualified clubs). The funnel below
-# is the real measure; the daily/weekly counts are activity context alongside it.
+# raw volume rewards low-value dialling, not qualified clubs). The stage
+# breakdown below is the real measure; the daily/weekly counts are activity
+# context alongside it.
 
 TRIAL_STARTED_ACTIVITY_PREFIX = "Trial started for"  # matches log line in routers/sales_workspace.py::start_trial
 
-# bucket -> the stage keys that count as "reached this far" (never regresses
-# past lost_dormant into counting as a later bucket — lost_dormant isn't in
-# any of these lists). 'attempted' is handled separately (>=1 call ever).
-_FUNNEL_STAGE_KEYS = {
-    "contacted": ("contacted", "engaged", "trial", "self_serve_trial", "proposal", "won"),
-    "engaged": ("engaged", "trial", "self_serve_trial", "proposal", "won"),
-    "trial": ("trial", "self_serve_trial", "proposal", "won"),
-    "won": ("won",),
+# The one definition of "this rep has made contact", shared by every figure on
+# the Performance screen: a logged call, a follow-up/callback recorded, or an
+# email actually sent. Anything else on the timeline (a note, an automatic
+# stage move, an assignment) is not reaching out to the club.
+#
+# `_IS_CALL_ROW` already excludes the general-purpose outcomes that aren't a
+# call at all. A follow-up is checked on its own rather than nested under a
+# call, matching call_statuses_of's own reasoning — today a callback can only
+# be captured off a call log, but one recorded some other way in future still
+# counts as contact.
+_IS_FOLLOW_UP_ROW = CrmActivity.next_follow_up_at.isnot(None)
+_IS_EMAIL_ROW = CrmActivity.type == "email"
+_IS_CONTACT_ROW = _IS_CALL_ROW | _IS_FOLLOW_UP_ROW | _IS_EMAIL_ROW
+
+
+def _contact_kind(activity: CrmActivity) -> Optional[str]:
+    """'call' | 'email' | None for one timeline row, plus whether it booked a
+    follow-up — read in Python so the SQL predicate above and the per-rep
+    tallies can never disagree about what a contact is.
+
+    A Twenty-imported row never counts, for the reason emailed_deal_ids
+    already gives: it is a backfill of somebody else's pipeline, not work
+    this workspace did."""
+    if _is_twenty_imported(activity):
+        return None
+    if activity.type == "email":
+        return "email"
+    if activity.type == "call" and activity.outcome not in GENERAL_OUTCOMES:
+        return "call"
+    # A follow-up recorded on any other row still counts as contact (see the
+    # predicate above), it just isn't a call or an email.
+    if activity.next_follow_up_at is not None:
+        return "other"
+    return None
+
+
+async def contacted_deal_ids(session: AsyncSession, deal_ids) -> set:
+    """The subset of `deal_ids` a rep has actually made contact with —
+    call, follow-up or email. Batched; one query however many deals."""
+    ids = {d for d in deal_ids if d is not None}
+    if not ids:
+        return set()
+    rows = (await session.execute(
+        select(CrmActivity).where(CrmActivity.deal_id.in_(ids), _IS_CONTACT_ROW)
+    )).scalars().all()
+    return {a.deal_id for a in rows if _contact_kind(a) is not None}
+
+
+# ─── Windows ─────────────────────────────────────────────────────────────────
+# "Today" and "this week" are PERTH days, not UTC ones. A UTC day boundary
+# starts at 8am local, so a rep's morning calls would have read as yesterday's
+# for the whole first half of the working day.
+PERTH = ZoneInfo("Australia/Perth")
+
+
+def report_windows(now: Optional[datetime] = None) -> dict:
+    """{'today': start, 'week': start} as UTC instants, from the Perth
+    calendar day. Week starts Monday, same as the rest of the app."""
+    now = (now or datetime.now(timezone.utc)).astimezone(PERTH)
+    day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week = day - timedelta(days=day.weekday())
+    return {"today": day.astimezone(timezone.utc), "week": week.astimezone(timezone.utc)}
+
+
+# ─── Stage columns ───────────────────────────────────────────────────────────
+# The report's own column vocabulary, which is NOT one column per pipeline
+# stage: the single real 'trial' stage splits into current/expired (the same
+# split the queue's own stage filter makes, and for the same reason — a lapsed
+# trial is a different job from a live one), and 'self_serve_trial' folds in
+# beside it, since a club that signed itself up is on a trial either way.
+#
+# 'proposal' and 'other' are carried but only drawn when a rep actually has
+# deals there (`stage_columns` reports which) — a deal must never be dropped
+# from the table just because its stage isn't one of the eight the screen
+# normally shows.
+STAGE_COLUMNS = [
+    ("manual", "Manual"),
+    ("target", "Target"),
+    ("contacted", "Contacted"),
+    ("engaged", "Engaged"),
+    ("trial_current", "Trial (Current)"),
+    ("trial_expired", "Trial (Expired)"),
+    ("proposal", "Proposal"),
+    ("won", "Won"),
+    ("lost", "Lost"),
+    ("other", "Other"),
+]
+
+_STAGE_KEY_TO_COLUMN = {
+    "manually_added": "manual",
+    "target": "target",
+    "contacted": "contacted",
+    "engaged": "engaged",
+    "proposal": "proposal",
+    "won": "won",
+    "lost_dormant": "lost",
 }
+_TRIAL_STAGE_KEYS = ("trial", "self_serve_trial")
+
+UNASSIGNED_KEY = "unassigned"
 
 
 async def performance_summary(session: AsyncSession, *, owner_user_id=None) -> dict:
-    """Today + this-week activity counts (calls, distinct clubs contacted,
-    positive-outcome conversations, callbacks created, trials started).
-    owner_user_id restricts to one rep; None covers everyone (super admin
-    only — enforced by the caller, not here)."""
-    now = datetime.now(timezone.utc)
-    today_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    week_start = today_start - timedelta(days=today_start.weekday())
+    """Today + this-week activity counts (calls, emails, distinct clubs
+    contacted, positive-outcome conversations, callbacks created, trials
+    started).
 
-    async def _window(start) -> dict:
-        call_stmt = select(CrmActivity).where(CrmActivity.type == "call", CrmActivity.occurred_at >= start)
-        if owner_user_id is not None:
-            call_stmt = call_stmt.join(CrmDeal, CrmDeal.id == CrmActivity.deal_id).where(CrmDeal.owner_user_id == owner_user_id)
-        calls = (await session.execute(call_stmt)).scalars().all()
-        deal_ids = {c.deal_id for c in calls if c.deal_id}
-        positive = sum(1 for c in calls if c.outcome and CALL_OUTCOMES.get(c.outcome, {}).get("category") == "positive")
-        callbacks = sum(1 for c in calls if c.next_follow_up_at is not None)
+    Counted by WHO DID THE WORK (``crm_activities.created_by_user_id``), not
+    by who owns the deal — "how many calls has this rep made today" is a
+    question about the rep, and a call logged on a club that has since been
+    reassigned is still their call. owner_user_id restricts to one rep; None
+    covers everyone (super admin only — enforced by the caller, not here)."""
+    report = await activity_report(session, owner_user_id=owner_user_id)
+    return {"today": report["totals"]["today"], "week": report["totals"]["week"]}
 
-        trial_stmt = select(func.count()).select_from(CrmActivity).where(
-            CrmActivity.type == "system", CrmActivity.occurred_at >= start,
-            CrmActivity.body.like(f"{TRIAL_STARTED_ACTIVITY_PREFIX}%"),
-        )
-        if owner_user_id is not None:
-            trial_stmt = trial_stmt.join(CrmDeal, CrmDeal.id == CrmActivity.deal_id).where(CrmDeal.owner_user_id == owner_user_id)
-        trials_started = (await session.execute(trial_stmt)).scalar() or 0
 
-        return {
-            "calls": len(calls),
-            "clubs_contacted": len(deal_ids),
-            "positive_conversations": positive,
-            "callbacks_created": callbacks,
-            "trials_started": trials_started,
+async def activity_report(session: AsyncSession, *, owner_user_id=None) -> dict:
+    """Per-rep contact activity for today and this week, plus the totals.
+
+    ``{"rows": [...], "totals": {"today": {...}, "week": {...}}}``. The
+    totals are computed over the same activity rows the per-rep numbers come
+    from, so the KPI strip at the top of the screen and the table under it
+    cannot disagree — `clubs_contacted` in particular is a genuine distinct
+    count across everyone, never a sum of per-rep distinct counts."""
+    windows = report_windows()
+    week_start = windows["week"]
+    today_start = windows["today"]
+    # One pull covering the wider of the two windows; both are then counted
+    # in Python. Two queries would double the work for the same rows.
+    start = min(week_start, today_start)
+
+    stmt = select(CrmActivity).where(CrmActivity.occurred_at >= start, _IS_CONTACT_ROW)
+    if owner_user_id is not None:
+        stmt = stmt.where(CrmActivity.created_by_user_id == owner_user_id)
+    activities = (await session.execute(stmt)).scalars().all()
+
+    trial_stmt = select(CrmActivity).where(
+        CrmActivity.occurred_at >= start, CrmActivity.type == "system",
+        CrmActivity.body.like(f"{TRIAL_STARTED_ACTIVITY_PREFIX}%"),
+    )
+    if owner_user_id is not None:
+        trial_stmt = trial_stmt.where(CrmActivity.created_by_user_id == owner_user_id)
+    trials = (await session.execute(trial_stmt)).scalars().all()
+
+    def _blank() -> dict:
+        return {"calls": 0, "emails": 0, "contacts": 0, "positive_conversations": 0,
+                "callbacks_created": 0, "trials_started": 0, "_clubs": set()}
+
+    per_rep: dict = {}
+    totals = {"today": _blank(), "week": _blank()}
+
+    def _buckets(user_id, occurred_at) -> list:
+        """Every bucket this row lands in — a rep's own, plus the totals,
+        for each window it falls inside."""
+        rep = per_rep.setdefault(user_id, {"today": _blank(), "week": _blank()})
+        out = []
+        for name, ws in (("today", today_start), ("week", week_start)):
+            if occurred_at >= ws:
+                out.append(rep[name])
+                out.append(totals[name])
+        return out
+
+    for a in activities:
+        kind = _contact_kind(a)
+        if kind is None:
+            continue
+        for b in _buckets(a.created_by_user_id, a.occurred_at):
+            b["contacts"] += 1
+            if kind == "call":
+                b["calls"] += 1
+                if a.outcome and CALL_OUTCOMES.get(a.outcome, {}).get("category") == "positive":
+                    b["positive_conversations"] += 1
+            elif kind == "email":
+                b["emails"] += 1
+            if a.next_follow_up_at is not None:
+                b["callbacks_created"] += 1
+            if a.deal_id is not None:
+                b["_clubs"].add(a.deal_id)
+
+    for a in trials:
+        for b in _buckets(a.created_by_user_id, a.occurred_at):
+            b["trials_started"] += 1
+
+    names = await user_names_by_ids(session, [uid for uid in per_rep if uid is not None])
+
+    def _finish(bucket: dict) -> dict:
+        out = dict(bucket)
+        out["clubs_contacted"] = len(out.pop("_clubs"))
+        return out
+
+    rows = [
+        {
+            "user_id": str(uid) if uid else None,
+            "name": names.get(uid) or ("Automated" if uid is None else "Unknown"),
+            "today": _finish(w["today"]),
+            "week": _finish(w["week"]),
         }
+        for uid, w in per_rep.items()
+    ]
+    rows.sort(key=lambda r: (-r["week"]["contacts"], -r["today"]["contacts"], r["name"].lower()))
+    return {"rows": rows, "totals": {k: _finish(v) for k, v in totals.items()}}
 
-    return {"today": await _window(today_start), "week": await _window(week_start)}
 
+async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -> dict:
+    """Where every platform deal sits, per rep, plus an Unassigned row.
 
-async def funnel_by_rep(session: AsyncSession, *, owner_user_id=None) -> list[dict]:
-    """Assigned -> Attempted -> Contacted -> Engaged -> Trial -> Won, per
-    rep, from currently-assigned OPEN-OR-CLOSED platform deals (a won/lost
-    deal still counts in its rep's funnel — that's the point of the funnel).
-    Archived deals are excluded. owner_user_id restricts to one rep."""
+    Each stage cell carries BOTH figures: ``total`` (every deal in that
+    stage) and ``contacted`` (the ones the rep has actually reached out to —
+    call, follow-up or email). The two answer different questions and the
+    screen shows them together, so a stage full of clubs nobody has rung
+    reads differently from one that has been worked.
+
+    ``to_contact`` is the rep's backlog: assigned to them and NOT yet
+    contacted — i.e. how many are left before they need more clubs. On the
+    Unassigned row it is the pool waiting to be handed out.
+
+    Won/lost deals still count in their rep's row: that is the point of the
+    breakdown. Archived deals never do."""
     pipeline = await crm_service.ensure_platform_pipeline(session)
     stage_by_id = {s.id: s for s in pipeline.stages}
 
     deals_stmt = select(CrmDeal).where(
-        CrmDeal.pipeline_id == pipeline.id, CrmDeal.archived_at.is_(None), CrmDeal.owner_user_id.isnot(None),
+        CrmDeal.pipeline_id == pipeline.id, CrmDeal.archived_at.is_(None),
     )
     if owner_user_id is not None:
         deals_stmt = deals_stmt.where(CrmDeal.owner_user_id == owner_user_id)
     deals = (await session.execute(deals_stmt)).scalars().all()
 
-    ever_called_deal_ids = set()
-    if deals:
-        rows = (await session.execute(
-            select(CrmActivity.deal_id)
-            .where(CrmActivity.deal_id.in_([d.id for d in deals]), _IS_CALL_ROW)
-            .distinct()
-        )).scalars().all()
-        ever_called_deal_ids = set(rows)
+    contacted = await contacted_deal_ids(session, [d.id for d in deals])
+
+    def _stage_key(d) -> Optional[str]:
+        stage = stage_by_id.get(d.stage_id)
+        return stage.key if stage else None
+
+    # Only the trial-stage deals need their club's trial dates resolved, so
+    # only those clubs are loaded — the whole book would be a far bigger read
+    # for a split that can't apply to any of the rest.
+    trial_deals = [d for d in deals if _stage_key(d) in _TRIAL_STAGE_KEYS]
+    club_by_id = await crm_service.clubs_by_ids(session, (d.marketing_club_id for d in trial_deals))
+    trial_days_by_club = await crm_service.trial_days_remaining_by_club(session, club_by_id)
+    min_trial_by_club = {cid: min(days.values()) for cid, days in trial_days_by_club.items() if days}
+
+    def _column(d) -> str:
+        key = _stage_key(d)
+        if key in _TRIAL_STAGE_KEYS:
+            days = min_trial_by_club.get(d.marketing_club_id)
+            # No trial data at all reads as current, never expired — the same
+            # rule the queue's own trial_current/trial_expired filter applies,
+            # since nothing proves a club with no dates has lapsed.
+            return "trial_expired" if days is not None and days < 0 else "trial_current"
+        return _STAGE_KEY_TO_COLUMN.get(key, "other")
+
+    def _blank_row() -> dict:
+        return {"total": 0, "contacted": 0, "to_contact": 0,
+                "stages": {col: {"total": 0, "contacted": 0} for col, _ in STAGE_COLUMNS}}
 
     by_owner: dict = {}
+    totals = _blank_row()
     for d in deals:
-        b = by_owner.setdefault(d.owner_user_id, {"assigned": 0, "attempted": 0, "contacted": 0, "engaged": 0, "trial": 0, "won": 0})
-        b["assigned"] += 1
-        if d.id in ever_called_deal_ids:
-            b["attempted"] += 1
-        stage = stage_by_id.get(d.stage_id)
-        key = stage.key if stage else None
-        for bucket, keys in _FUNNEL_STAGE_KEYS.items():
-            if key in keys:
-                b[bucket] += 1
+        owner = d.owner_user_id
+        row = by_owner.setdefault(owner, _blank_row())
+        col = _column(d)
+        was_contacted = d.id in contacted
+        for bucket in (row, totals):
+            bucket["total"] += 1
+            bucket["stages"][col]["total"] += 1
+            if was_contacted:
+                bucket["contacted"] += 1
+                bucket["stages"][col]["contacted"] += 1
+            else:
+                bucket["to_contact"] += 1
 
-    owners = {}
-    if by_owner:
-        rows = (await session.execute(select(User).where(User.id.in_(by_owner.keys())))).scalars().all()
-        owners = {u.id: u for u in rows}
+    # Every sales rep gets a row even with nothing assigned — a rep sitting on
+    # an empty book is exactly what this screen should make obvious, and they
+    # would otherwise be invisible here.
+    if owner_user_id is None:
+        rep_ids = (await session.execute(
+            select(User.id).join(ClubMembership, ClubMembership.user_id == User.id)
+            .where(ClubMembership.role == "sales").distinct()
+        )).scalars().all()
+        for rid in rep_ids:
+            by_owner.setdefault(rid, _blank_row())
 
-    def _rate(n: int, d: int) -> int:
-        return round(100 * n / d) if d else 0
+    names = await user_names_by_ids(session, [uid for uid in by_owner if uid is not None])
 
-    out = []
-    for oid, b in by_owner.items():
-        owner = owners.get(oid)
-        out.append({
-            "owner_user_id": str(oid),
-            "owner_name": (owner.display_name or owner.username) if owner else "Unknown",
-            **b,
-            "attempt_rate": _rate(b["attempted"], b["assigned"]),
-            "contact_rate": _rate(b["contacted"], b["assigned"]),
-            "engaged_rate": _rate(b["engaged"], b["assigned"]),
-            "trial_rate": _rate(b["trial"], b["assigned"]),
-            "win_rate": _rate(b["won"], b["assigned"]),
+    rows = []
+    for uid, row in by_owner.items():
+        rows.append({
+            "owner_user_id": str(uid) if uid else UNASSIGNED_KEY,
+            "owner_name": "Unassigned" if uid is None else (names.get(uid) or "Unknown"),
+            "unassigned": uid is None,
+            **row,
         })
-    out.sort(key=lambda r: r["assigned"], reverse=True)
-    return out
+    # Unassigned always last — it is the pool, not a person's performance.
+    rows.sort(key=lambda r: (r["unassigned"], -r["total"], r["owner_name"].lower()))
 
+    drawn = [
+        {"key": col, "label": label}
+        for col, label in STAGE_COLUMNS
+        if col not in ("proposal", "other") or totals["stages"][col]["total"] > 0
+    ]
+    return {"rows": rows, "totals": totals, "stage_columns": drawn}
 
 # ─── Sales Lists (migration 257) ─────────────────────────────────────────────
 # A thin provenance/import layer, not a parallel data model. Assignment still
