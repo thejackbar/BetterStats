@@ -60,7 +60,29 @@ const toneOf = v => TONE[v] || 'var(--pb-faint)'
 // A tinted left edge, so a glance down the agenda reads as a set of outcomes.
 const edge = v => ({ borderLeft: `2px solid ${toneOf(v)}` })
 const VOTES = [['for', 'For'], ['against', 'Against'], ['abstain', 'Abstain']]
-const titleCase = s => (s || '').split('_').map(w => w[0]?.toUpperCase() + w.slice(1)).join(' ')
+// An action's own vocabulary, mapped onto the outcome tones above so a glance
+// down an agenda reads the same way whatever kind of record it is looking at.
+const ACTION_TONE = { done: 'carried', blocked: 'lost', in_progress: 'pending', todo: 'proposed' }
+// A date in the minutes is read, not sorted. "18 Sep 2026" beats "2026-09-18".
+const shortDate = d => {
+  if (!d) return ''
+  const t = Date.parse(d)
+  return Number.isFinite(t)
+    ? new Date(t).toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })
+    : d
+}
+const titleCase = s => (s || '').split('_').filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ')
+
+// A state is a word on a tint, never a colour on its own: this app's green and
+// amber separate by only ~7 ΔE under protanopia, so the word is the channel
+// that always works and the colour is the one that usually helps.
+function Pill({ tone, children }) {
+  const c = toneOf(tone)
+  return (
+    <span className="px-1.5 py-0.5 rounded font-mono text-[9px] whitespace-nowrap shrink-0"
+      style={{ color: c, background: `color-mix(in srgb, ${c} 12%, transparent)` }}>{children}</span>
+  )
+}
 
 // An explanation belongs on hover, not permanently under the control it
 // explains. Non-interactive on purpose: there is nothing to open.
@@ -165,15 +187,22 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
 
 /* ── Actions raised in the meeting ──────────────────────────────────────── */
 
-function ActionForm({ agendaItemId, motionId, present, pool, objectives, defaultObjectiveId, onSave, onCancel }) {
+// The same form creates an action and corrects one. An action typed in a hurry
+// at 8pm is exactly the one that needs fixing later, and until now the room
+// could only mark it done or delete it.
+function ActionForm({ agendaItemId, motionId, present, pool, objectives, defaultObjectiveId,
+                      action, onSave, onCancel, onDelete }) {
+  const editing = !!action
   const [form, setForm] = useState({
-    title: '', due_date: '', budget_estimate: '',
+    title: action?.title || '',
+    due_date: action?.due_date || '',
+    budget_estimate: action?.budget_estimate ?? '',
     // Raised under a motion that already serves an objective? Then it serves
     // the same one unless somebody says otherwise — retyping it is the step
     // that gets skipped, and then the plan reports short.
-    objective_id: defaultObjectiveId || '',
+    objective_id: action?.objective_id || defaultObjectiveId || '',
   })
-  const [owners, setOwners] = useState([])
+  const [owners, setOwners] = useState(action?.assignee_member_ids || [])
   const [busy, setBusy] = useState(false)
   const [who, setWho] = useState('')
 
@@ -200,13 +229,15 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
         motion_id: motionId || null,
         assignee_member_ids: owners,
       })
-      setForm({ title: '', due_date: '', budget_estimate: '', objective_id: defaultObjectiveId || '' })
-      setOwners([])
+      if (!editing) {
+        setForm({ title: '', due_date: '', budget_estimate: '', objective_id: defaultObjectiveId || '' })
+        setOwners([])
+      }
     } finally { setBusy(false) }
   }
 
   return (
-    <div className="border pb-hairline rounded p-2.5 mt-2 bg-pb-surface2/40">
+    <div className="rounded p-2.5 mt-2 bg-pb-surface2/60">
       <input className={`${inp} mb-2`} placeholder="What was agreed?" autoFocus
         value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
       <div className="flex gap-2 mb-2 flex-wrap">
@@ -243,36 +274,59 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
           </button>
         ))}
       </div>
-      <div className="flex gap-2">
+      <div className="flex gap-2 items-center">
         <button onClick={submit} disabled={busy || !form.title.trim()} className={btnAccent}
-          style={{ background: 'var(--pb-accent)' }}>{busy ? 'SAVING…' : '+ ACTION'}</button>
+          style={{ background: 'var(--pb-accent)' }}>
+          {busy ? 'SAVING…' : editing ? 'SAVE' : '+ ACTION'}
+        </button>
         <button onClick={onCancel} className={btn}>Cancel</button>
+        {editing && onDelete && (
+          <button onClick={onDelete}
+            className="font-mono text-[9px] text-pb-faint hover:text-pb-red ml-auto">Delete action</button>
+        )}
       </div>
     </div>
   )
 }
 
-function ActionRow({ action, nameOf, objectiveOf, onChange, onDelete }) {
+// AN ACTION IS A RECORD TOO: who is doing it, by when, for how much, and what
+// it serves, on two lines. Marking it done stays on the row because that is the
+// act a committee repeats; everything else opens in the editor.
+function ActionRow({ action, present, pool, objectives, nameOf, objectiveOf, onChange, onDelete }) {
+  const [editing, setEditing] = useState(false)
   const owners = (action.assignee_member_ids || []).map(nameOf).filter(Boolean)
   const serves = objectiveOf?.(action.objective_id)
+
+  if (editing) {
+    return (
+      <ActionForm action={action} present={present} pool={pool} objectives={objectives}
+        agendaItemId={action.agenda_item_id} motionId={action.motion_id}
+        onSave={async d => { await onChange(d); setEditing(false) }}
+        onCancel={() => setEditing(false)}
+        onDelete={() => { setEditing(false); onDelete() }} />
+    )
+  }
+
   return (
-    <div className="flex items-start justify-between gap-2 border pb-hairline rounded px-2.5 py-2 bg-pb-surface2/30"
-      style={edge(action.status === 'done' ? 'carried' : action.status === 'blocked' ? 'lost' : 'deferred')}>
+    <div className="flex items-start justify-between gap-2 pl-2.5 py-1"
+      style={edge(ACTION_TONE[action.status] || 'deferred')}>
       <div className="min-w-0">
-        <div className="text-[12.5px] text-pb-text">{action.title}</div>
+        <div className="flex items-start gap-2">
+          <span className="text-[12.5px] text-pb-text">{action.title}</span>
+          <Pill tone={ACTION_TONE[action.status]}>{titleCase(action.status)}</Pill>
+        </div>
         <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
-          {owners.length > 0 && <span>{owners.join(', ')}</span>}
-          {action.due_date && <span>due {action.due_date}</span>}
+          {owners.length > 0 && <span>{owners.join(' + ')}</span>}
+          {action.due_date && <span>due {shortDate(action.due_date)}</span>}
           {action.budget_estimate != null && <span>${Number(action.budget_estimate).toLocaleString('en-AU')}</span>}
-          <span>{titleCase(action.status)}</span>
         </div>
         {serves && <div className="font-mono text-[9px] text-pb-faintest mt-0.5">serves {serves}</div>}
       </div>
-      <div className="flex gap-1 shrink-0">
+      <div className="flex gap-2 shrink-0">
         {action.status !== 'done' && (
           <button onClick={() => onChange({ status: 'done' })} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Done</button>
         )}
-        <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">✕</button>
+        <button onClick={() => setEditing(true)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
       </div>
     </div>
   )
@@ -280,6 +334,10 @@ function ActionRow({ action, nameOf, objectiveOf, onChange, onDelete }) {
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
+// NO BOX INSIDE A BOX: the agenda item is the container, and a motion is
+// separated from its neighbours by its own tinted edge and by spacing. That is
+// one rectangle fewer per record on a screen that had five of them nested.
+//
 // A MOTION IS A RECORD FIRST AND A FORM SECOND. During the meeting the only
 // act is setting the outcome, so that is the one live control on the row; the
 // wording, the objective it serves and the per-person votes are detail and open
@@ -307,7 +365,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
   }
 
   return (
-    <div className={`border pb-hairline rounded p-2.5 bg-pb-surface2/30 ${isOver ? 'ring-1 ring-pb-accent/60' : ''}`}
+    <div className={`pl-2.5 py-1 ${isOver ? 'ring-1 ring-pb-accent/60 rounded' : ''}`}
       style={edge(motion.outcome)} {...(dragProps?.zone || {})}>
       <div className="flex items-start justify-between gap-2">
         {/* Drag to reorder within this item, or onto another agenda item's row
@@ -341,7 +399,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       </div>
 
       {open && (
-        <div className="mt-2 border-t pb-hairline pt-2 space-y-2">
+        <div className="mt-2 rounded bg-pb-surface2/60 p-2.5 space-y-2">
           <textarea className={`${inp} min-h-[46px]`} value={wording}
             placeholder="Motion wording…"
             onChange={e => { setWording(e.target.value); saveWording(e.target.value) }} />
@@ -392,7 +450,8 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       {actions.length > 0 && (
         <div className="mt-2 space-y-1">
           {actions.map(a => (
-            <ActionRow key={a.id} action={a} nameOf={nameOf} objectiveOf={objectiveOf}
+            <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives}
+              nameOf={nameOf} objectiveOf={objectiveOf}
               onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
           ))}
         </div>
@@ -411,6 +470,8 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
 
 /* ── One agenda item ────────────────────────────────────────────────────── */
 
+// THE ITEM IS THE PRIMARY CONTAINER, so its ring is the only heavy edge on
+// screen: everything inside it is separated by spacing and tint instead.
 function AgendaItem({
   item, index, isCurrent, onOpen, dragProps, present, pool, nameOf, objectives, objectiveOf,
   sections, motions, actions, onItemChange, onItemDelete,
@@ -431,7 +492,7 @@ function AgendaItem({
   }
 
   return (
-    <div className={`pb-card p-3 ${isCurrent ? 'ring-1' : ''}`}
+    <div className="pb-card p-3"
       style={{ ...edge(item.status), ...(isCurrent ? { boxShadow: '0 0 0 1px var(--pb-accent)' } : {}) }}
       {...dragProps}>
       <div className="flex items-start gap-2">
@@ -541,7 +602,8 @@ function AgendaItem({
             <div className={`${cap} mb-1`}>ACTIONS</div>
             <div className="space-y-1">
               {actions.filter(a => !a.motion_id).map(a => (
-                <ActionRow key={a.id} action={a} nameOf={nameOf} objectiveOf={objectiveOf}
+                <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives}
+                  nameOf={nameOf} objectiveOf={objectiveOf}
                   onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
               ))}
             </div>

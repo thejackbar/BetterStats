@@ -4465,6 +4465,19 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   gone behind `+ Add motion` (Escape closes it). `All present: For` writes a For
   for everyone in the room in one click, because most motions pass unanimously.
   The tallies note moved onto a hover `Hint`.
+- **AN ACTION IS A RECORD TOO, AND IT CAN NOW BE CORRECTED (v9.50.7).** The
+  room could mark an action done or delete it and nothing else, which is a poor
+  set of options for something typed in a hurry mid-meeting. `ActionForm` takes
+  an optional `action` and edits in place; `Done` stays on the row (the repeated
+  act) and the delete moved into the editor. The row reads title + status pill,
+  then owners / due / budget, then what it serves — `shortDate` writes the date
+  for reading rather than sorting.
+- **NO BOX INSIDE A BOX (v9.50.7).** A motion and an action each carried a
+  border, a radius and a tint INSIDE the agenda item's own card, which is what
+  made the screen read as a stack of rectangles. Both are a tinted left edge and
+  spacing now; the agenda item is the only full container. The suite asserts it
+  on the computed style (no element around a record has four borders, and each
+  still has its left one), not on class names.
 - **Motions drag two ways** (v9.7.2). One `drag` ref carries a `kind` of
   `'item' | 'motion'`, because an agenda row is a drop target for both: drop an
   item on it to reorder the agenda, drop a motion on it to move that motion
