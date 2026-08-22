@@ -73,7 +73,8 @@ async def _org_billable_module_keys(session, org_id) -> list:
     return sorted({billing_key_for(m) for m in held})
 
 
-def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[str] = None) -> None:
+def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[str] = None,
+                         won_module_keys: Optional[list] = None) -> None:
     """Fire-and-forget: push one club's Company fields (paid/trial modules, ARR,
     renewal) to Twenty after a subscription change. No-op when Twenty isn't
     configured; never raises into the request.
@@ -95,7 +96,15 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
     'subscription_cancelled' re-checks this org's CURRENTLY held billable
     modules (after the caller's own commit) and only fires if none are left —
     a partial cancel (one module of several) shouldn't demote a deal that's
-    still live for everything else the club holds."""
+    still live for everything else the club holds.
+
+    ``won_module_keys`` is what the club has just PAID for, and is only
+    meaningful alongside 'subscription_won'. Given it, the deal is recorded at
+    exactly those modules' price rather than at the running forecast — so a
+    club that was forecast at the full bundle and bought Stats alone is won at
+    Stats, and an existing club adding one module is won at that module rather
+    than at everything it now holds. That figure is what a rep's commission is
+    calculated from, so it has to be what was actually bought."""
     async def _run():
         try:
             from app.services import twenty_sync
@@ -131,10 +140,13 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
                 pipeline = await crm_service.ensure_platform_pipeline(session)
                 match = await crm_rules.resolve(session, pipeline, crm_trigger)
                 if match is not None:
-                    modules = await _org_billable_module_keys(session, org_id)
+                    exact = bool(won_module_keys) and crm_trigger == "subscription_won"
+                    modules = (sorted(set(won_module_keys)) if exact
+                              else await _org_billable_module_keys(session, org_id))
                     await crm_service.sync_platform_deal_for_club(
                         session, mc, stage_key=match["stage_key"], source="auto_trial",
-                        module_keys=modules, advance_only=not match["force"])
+                        module_keys=modules, advance_only=not match["force"],
+                        exact_value=exact)
                 # Also check the score-based Target/Contacted -> Engaged rule right
                 # now, independent of whether Twenty is configured (the Twenty push
                 # above already no-ops silently when it isn't) — a subscription

@@ -21,6 +21,7 @@ export const SUPER_OVERVIEW = { to: '/admin/super', label: 'Platform Overview', 
 export const SALES_MANAGEMENT_ITEMS = [
   { to: '/admin/super/crm/wizard-clubs', label: 'Clubs Searched or Selected in the Wizard', blurb: 'Warm prospects from the trial signup wizard, and the outreach sent to them.' },
   { to: '/admin/super/crm/automation', label: 'Sales Automation', blurb: 'Automated outreach and follow-up rules.' },
+  { to: '/admin/super/crm/commissions', label: 'Sales Commissions', blurb: "Commission forecast per rep, what they have earned, and what has been paid." },
   { to: '/admin/super/crm/follow-ups', label: 'Sales Follow-ups', blurb: 'Overdue, due today and upcoming callbacks.' },
   { to: '/admin/super/crm/sales-lists', label: 'Sales Lists', blurb: 'Imported batches of clubs, ready to assign.' },
   { to: '/admin/super/crm/performance', label: 'Sales Performance', blurb: 'Call volume, conversion funnel and results by salesperson.' },

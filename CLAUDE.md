@@ -1,5 +1,122 @@
 # BetterStats — Claude Session Notes
 
+## Sales Commissions: forecast on the open book, earned on the won one (migration 277, v9.49.0, Aug 2026)
+
+Asked for as a tile on Sales Management: per rep, clubs attributed, total pipeline
+value, total forecast pipeline commission and total weighted forecast commission,
+plus a record of what has been won, what commission that earned, and what has
+been paid.
+
+- **THE MODULE-INTEREST MIRRORING WAS ALREADY BUILT, and finding that out was
+  half the job.** The Sales Workspace's "Interest in" pills
+  (`PATCH /sales-workspace/clubs/{id}/interest`) and the CRM deal card's own
+  chips write the SAME `crm_deals.module_keys`, both stamp
+  `product_interest_source='manual'`, and `crm.update_deal` recomputes
+  `value_cents` from `billing_pricing.price_for` on either. There is no sync
+  to build because there are not two fields — which is the whole reason it
+  cannot drift. Verified end to end in both directions rather than assumed.
+- **A DEAL'S DOLLAR FIGURE HAS ONE DEFINITION AND THIS FEATURE DOES NOT OWN IT.**
+  `crm.effective_value_cents` / `effective_probability` (public aliases added
+  over the existing private pair) are what the pipeline board's own totals are
+  built from, so a rep's forecast and the board cannot disagree about the same
+  deal. The suite asserts the two totals are equal, not merely close.
+- **THE RATE IS LIVE FOR A FORECAST AND STAMPED FOR A WIN.** An open deal is
+  forecast at the rep's CURRENT rate — a forecast is about what is still to
+  come. The moment a deal is won, `crm_deals.commission_rate_percent` records
+  the rate that applied, so raising a rep's rate tomorrow cannot rewrite what
+  they earned last quarter. Deliberately NOT a snapshot of the deal's VALUE:
+  correcting a mis-recorded won deal SHOULD flow through to the commission on
+  it, which is the opposite of what a rate change should do.
+- **`crm.move_stage` and `crm.close_deal` are the only two places a deal's
+  status becomes 'won'**, plus `create_deal` for one born straight into a Won
+  stage — so the rate is stamped in those three and nowhere else. A win through
+  the board, through the Stripe webhook, or through an automation rule is one
+  behaviour. `_stamp_commission_rate` imports the commission service inside the
+  function, since that service reads crm.py for value and probability and a
+  top-level import either way round is a cycle.
+- **A REP IS A PERSON, NOT AN ACCOUNT.** `crm.list_platform_owners` already
+  folds several login accounts under one display name into one entry (the bug
+  v9.48.2.1 fixed in the pickers), so every figure here aggregates over that
+  entry's whole set of ids. A rate or a payment is WRITTEN against the entry's
+  primary id but READ across all of them — which account counts as primary is
+  partly last-login order and can shift, and a payout must not go missing when
+  it does. Where two accounts each carry a rate, the HIGHER wins: a person
+  should never be paid less because of which account a deal landed on.
+- **`exact_value` is what a real payment uses, and the ordinary merge is what a
+  forecast uses.** `sync_platform_deal_for_club` normally unions module_keys and
+  takes the higher value, which is right for a picture built out of successive
+  signals and wrong the moment money changes hands. A club forecast at the full
+  bundle that buys Stats alone was being recorded as a win at the forecast
+  figure; an add-on was recorded at the club's whole holding. Either way the
+  commission owed was overstated.
+- **The add-on path never fired a win at all.** `routers/billing.py`'s
+  add-modules-to-an-existing-subscription branch never touches Stripe Checkout,
+  so there is no `checkout.session.completed` webhook behind it — it now calls
+  `_push_club_to_twenty(crm_trigger="subscription_won", won_module_keys=addon_keys)`
+  itself. `won_module_keys` threads from both Stripe paths through to
+  `exact_value`.
+- **REPEAT BUSINESS INHERITS THE ATTRIBUTION.** An upsell is a brand-new deal
+  created straight into Won by the payment itself, with nobody having had the
+  chance to earn it — so `sync_platform_deal_for_club` carries
+  `commission_rep_user_id` from the club's most recently attributed deal
+  (`_last_attributed_deal_for_club`, archived deals included: archiving hides a
+  deal, it does not unmake the work). Without it, selling more to a club a rep
+  brought in pays them nothing. It is set BEFORE `create_deal` stamps the rate,
+  or the upsell would be rated as though nobody had earned the club.
+- **Clubs attributed counts DISTINCT CLUBS, not deals.** A club that came back
+  for more modules has a second deal, and counting it twice reads as two clubs
+  won.
+- **THE UNATTRIBUTED POOL IS RATED AT ZERO.** Its pipeline VALUE is worth
+  showing — unclaimed work waiting for a rep — but no commission is owed on a
+  club nobody has earned, and pricing it at the default would inflate the team's
+  forecast with money that will never be paid to anyone. Shown, never dropped,
+  and sorted last, the same rule Sales Performance's own Unassigned row follows.
+- **The default rate seeds at 0, deliberately.** A commission percentage is a
+  commercial decision and a number invented here would be quoted back at us, so
+  the screen says no rate is set and asks for one rather than pretending to
+  know it.
+- **A payment is per REP, not per deal**, and a NEGATIVE amount is allowed: it
+  is how a payout entered wrongly is corrected without deleting the original,
+  which is what an auditable ledger needs. A zero is refused. Commission due is
+  earned minus paid and may go negative — an overpayment is a real state, and
+  clamping it to zero would lose it.
+- **Earned is filed by the deal's `closed_at`, paid by the payment's `paid_on`,
+  and the two legitimately land in different periods.** A quarter's work is
+  routinely paid in the next one, and forcing a payment into the period it
+  settled would be inventing an apportionment nobody made. Periods come straight
+  from `crm_targets.period_bounds`, so a commission quarter and a sales-target
+  quarter are the same thing rather than two conventions.
+- **`services/sales_commission_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule. Two partial unique indexes,
+  not a plain `UNIQUE(user_id)`: the latter would let any number of NULL rows
+  through, and several rows each claiming to be "the default" is the one state
+  this table must not hold.
+- **Found by running the real boot order: `create_all` builds the table WITHOUT
+  the `gen_random_uuid()` server default**, so `CREATE TABLE IF NOT EXISTS` is a
+  no-op and the seed INSERT had no id — it failed outright, on a real boot as
+  well as in the harness. The seed supplies `gen_random_uuid()` explicitly now.
+  Same trap the self-serve-trial note already documents for
+  `org_module_subscriptions.id`.
+- **Verified against a real Postgres** (107 checks through the shipped services
+  and route bodies: the DDL applied three times, a second platform default
+  refused, every rate rule, the forecast reconciling with the pipeline board's
+  own totals, a discount flowing through, the rate stamped at the win and a
+  later rate change not rewriting it, the upsell inheriting its rep and being
+  priced at the added module alone, merge-vs-exact both ways, every payment
+  rule including the negative correction and the overpayment, the period
+  filing, a rep with two accounts reading as one row, every drill-down as long
+  as the figure it opens and adding up to it, and both Stripe paths carrying
+  the modules actually paid for) and **driven in Chromium** (33: the four asked-
+  for figures, every rep row and the pool sorted last, a rep's own rate used
+  over the default, the exact params on the wire for a rate save and a payout,
+  the drill-down's clubs/modules/stage/commission and its deep link, a zero
+  opening nothing, the quarter/financial-year switch, a dismissed delete
+  sending nothing, no page errors, no overflow at 390px).
+- **Deliberately super-admin only.** Commission rates and payouts are management
+  data about staff pay, which is a different thing from the Sales Workspace's
+  per-rep view of their own clubs. The service still takes a `rep_user_id` pin,
+  so opening it to a rep later is a route change rather than a rewrite.
+
 ## Every figure on Sales Performance opens its clubs (v9.48.2, Aug 2026)
 
 Asked for directly: make every number in both tables clickable and list the

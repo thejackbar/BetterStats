@@ -467,6 +467,15 @@ def _effective_value_cents(deal: CrmDeal) -> int:
     return base
 
 
+# Public aliases for the two above. A deal's dollar figure and its likelihood
+# have exactly ONE definition, and anything computing money off a deal — the
+# pipeline board here, the commission forecast in services/sales_commissions.py
+# — reads it rather than keeping a second copy. A rep's forecast disagreeing
+# with the board's own total is precisely what a second copy produces.
+effective_value_cents = _effective_value_cents
+effective_probability = _effective_probability
+
+
 def _engagement_delta_dir(club: Optional[MarketingClub]) -> Optional[str]:
     """'up' / 'down' / None for a club's engagement score vs the last value it
     held on an earlier calendar day (marketing_clubs.engagement_score_prev, set
@@ -721,7 +730,9 @@ async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_i
                       probability: Optional[int] = None, module_keys=None,
                       expected_close_date=None, owner_user_id=None,
                       source: str = "manual", onboarding_method: Optional[str] = None,
-                      lead_source: Optional[str] = None) -> CrmDeal:
+                      lead_source: Optional[str] = None,
+                      commission_rep_user_id=None, commission_attributed_at=None,
+                      commission_attributed_via: Optional[str] = None) -> CrmDeal:
     keys = list(module_keys or [])
     # A platform deal's Value is Product-Interest-driven (see value_from_modules)
     # — a club-scope tracker (sponsors/grants/custom) has no module_keys concept
@@ -752,7 +763,18 @@ async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_i
         closed_at=datetime.now(timezone.utc) if status != "open" else None,
         expected_close_date=expected_close_date, owner_user_id=owner_user_id, source=source,
         onboarding_method=onboarding_method, lead_source=lead_source,
+        # Carried from the club's earlier deal when this is repeat business —
+        # see sync_platform_deal_for_club. Set BEFORE the rate is stamped
+        # below, or an upsell won at payment time would be rated as though
+        # nobody had earned the club.
+        commission_rep_user_id=commission_rep_user_id,
+        commission_attributed_at=commission_attributed_at,
+        commission_attributed_via=commission_attributed_via,
     )
+    # A deal born straight into the Won stage never passes through move_stage,
+    # so this is the one other place the commission rate has to be captured.
+    if status == "won":
+        await _stamp_commission_rate(session, deal)
     session.add(deal)
     await session.flush()
     return deal
@@ -793,6 +815,20 @@ async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal
     return deal
 
 
+async def _stamp_commission_rate(session: AsyncSession, deal: CrmDeal) -> None:
+    """Write the commission rate that applied onto a deal the moment it is
+    won. The two functions below are the ONLY places a deal's status becomes
+    'won' — a win through the pipeline board, through the Stripe webhook, or
+    through an automation rule all land in one of them — so this is the one
+    place the rate is captured rather than three.
+
+    Imported here rather than at module scope: services/sales_commissions.py
+    reads this module for a deal's value and probability, and a top-level
+    import either way round is a cycle."""
+    from app.services import sales_commissions
+    await sales_commissions.stamp_won_rate(session, deal)
+
+
 async def move_stage(session: AsyncSession, deal: CrmDeal, stage: CrmStage, *,
                      probability: Optional[int] = None) -> CrmDeal:
     deal.stage_id = stage.id
@@ -802,6 +838,7 @@ async def move_stage(session: AsyncSession, deal: CrmDeal, stage: CrmStage, *,
     if stage.is_won:
         deal.status = "won"
         deal.closed_at = func.now()
+        await _stamp_commission_rate(session, deal)
     elif stage.is_lost:
         deal.status = "lost"
         deal.closed_at = func.now()
@@ -820,6 +857,8 @@ async def close_deal(session: AsyncSession, deal: CrmDeal, pipeline: CrmPipeline
     deal.lost_reason = lost_reason if status == "lost" else None
     deal.closed_at = func.now()
     deal.updated_at = func.now()
+    if status == "won":
+        await _stamp_commission_rate(session, deal)
     return deal
 
 
@@ -2060,10 +2099,25 @@ async def next_events_by_deal(session: AsyncSession, deal_ids, *, now=None) -> d
 # that used to ONLY push into Twenty — see the call sites in
 # routers/public_contact.py and services/club_directory.py::set_sales_state.
 
+async def _last_attributed_deal_for_club(session: AsyncSession, pipeline_id, club_id) -> Optional[CrmDeal]:
+    """The club's most recently attributed deal, if it has ever had one — the
+    rep repeat business is carried to. Archived deals count: archiving hides a
+    deal from the board, it does not unmake the work that earned the club."""
+    return (await session.execute(
+        select(CrmDeal).where(
+            CrmDeal.pipeline_id == pipeline_id,
+            CrmDeal.marketing_club_id == club_id,
+            CrmDeal.commission_rep_user_id.isnot(None),
+        ).order_by(CrmDeal.commission_attributed_at.desc().nullslast(),
+                   CrmDeal.created_at.desc())
+    )).scalars().first()
+
+
 async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub, *,
                                       stage_key: str, source: str,
                                       module_keys=None, person_id=None,
-                                      advance_only: bool = True) -> CrmDeal:
+                                      advance_only: bool = True,
+                                      exact_value: bool = False) -> CrmDeal:
     """Get-or-create the ONE open platform deal for a prospect club, advancing
     it towards ``stage_key``. ``advance_only`` (the default) never moves a
     deal BACKWARD — a fresh low-signal enquiry can't demote a deal that's
@@ -2073,7 +2127,16 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
 
     A deal with ``stage_auto_locked`` set (a super admin has deliberately
     moved its stage by hand) is never auto-advanced — module_keys/value_cents
-    still merge in, only the stage move is skipped."""
+    still merge in, only the stage move is skipped.
+
+    ``exact_value`` REPLACES the deal's modules and value with ``module_keys``
+    rather than merging them in, and is what a real payment uses: the ordinary
+    merge is right for a forecast built up out of successive signals, and
+    wrong the moment money changes hands, where the answer is simply what was
+    bought. Without it a club forecast at the full bundle and buying Stats
+    alone would be recorded as a win at the forecast figure, and an add-on
+    would be recorded at the club's whole holding rather than the modules just
+    paid for — either way overstating the commission owed on it."""
     pipeline = await ensure_platform_pipeline(session)
     stage_by_key = {s.key: s for s in pipeline.stages}
     target_stage = stage_by_key.get(stage_key)
@@ -2093,10 +2156,19 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     value_cents = int(round(price_for(keys)["total"] * 100)) if keys else 0
 
     if existing is None:
+        # Repeat business: the club's own earlier deal is closed, so this is a
+        # brand-new one — and on an upsell it is created straight into Won by
+        # the payment itself, with nobody having had the chance to earn it.
+        # The rep who earned the club keeps it, which is what stops an upsell
+        # to a club they brought in paying them nothing.
+        prior = await _last_attributed_deal_for_club(session, pipeline.id, club.id)
         deal = await create_deal(
             session, scope=SCOPE_PLATFORM, marketing_club_id=club.id,
             pipeline_id=pipeline.id, stage_id=target_stage.id, title=club.name,
             value_cents=value_cents, module_keys=keys, source=source,
+            commission_rep_user_id=prior.commission_rep_user_id if prior else None,
+            commission_attributed_at=prior.commission_attributed_at if prior else None,
+            commission_attributed_via=prior.commission_attributed_via if prior else None,
         )
     else:
         deal = existing
@@ -2105,11 +2177,17 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
         should_move = (not deal.stage_auto_locked and
                       (not advance_only or current_stage is None
                        or target_stage.position > current_stage.position))
+        if exact_value:
+            # Set before the stage move, so the rate stamped at the win is
+            # captured against the value that was actually paid.
+            deal.module_keys = keys
+            deal.value_cents = value_cents
         if should_move:
             await move_stage(session, deal, target_stage)
-        deal.module_keys = sorted(set(deal.module_keys or []) | set(keys))
-        if value_cents > (deal.value_cents or 0):
-            deal.value_cents = value_cents
+        if not exact_value:
+            deal.module_keys = sorted(set(deal.module_keys or []) | set(keys))
+            if value_cents > (deal.value_cents or 0):
+                deal.value_cents = value_cents
         deal.updated_at = func.now()
 
     if person_id:

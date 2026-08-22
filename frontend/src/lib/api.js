@@ -2179,6 +2179,26 @@ export const api = {
     request(`/club-admin/sales-workspace/clubs/${dealId}/interest`, {
       method: 'PATCH', body: JSON.stringify({ module_keys: moduleKeys }),
     }),
+
+  // ─── Sales Commissions (super admin) ───────────────────────────────────
+  salesCommissions: () => request('/club-admin/sales-commissions'),
+  salesCommissionPeriods: (periodType) =>
+    request(`/club-admin/sales-commissions/periods?period_type=${encodeURIComponent(periodType)}`),
+  salesCommissionDeals: (repUserId, status) =>
+    request(`/club-admin/sales-commissions/deals?rep_user_id=${encodeURIComponent(repUserId)}`
+            + `&status=${encodeURIComponent(status)}`),
+  salesCommissionSetRate: (userId, ratePercent) =>
+    request('/club-admin/sales-commissions/rate', {
+      method: 'PUT', body: JSON.stringify({ user_id: userId, rate_percent: ratePercent }),
+    }),
+  salesCommissionClearRate: (userId) =>
+    request(`/club-admin/sales-commissions/rate/${userId}`, { method: 'DELETE' }),
+  salesCommissionAddPayment: (payload) =>
+    request('/club-admin/sales-commissions/payments', {
+      method: 'POST', body: JSON.stringify(payload),
+    }),
+  salesCommissionDeletePayment: (paymentId) =>
+    request(`/club-admin/sales-commissions/payments/${paymentId}`, { method: 'DELETE' }),
   // confirmReassign answers the server's "this club has been attributed to X"
   // 409 — the club is a sales rep's for commission and this hands it
   // somewhere else. Never send it up front: the point is that a super admin

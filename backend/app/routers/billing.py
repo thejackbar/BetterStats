@@ -340,6 +340,16 @@ async def create_checkout_session(
                 "billing add-on: entitlement for %s already granted concurrently (likely the invoice.paid "
                 "webhook winning the race) — treating as success", addon_keys,
             )
+        # An existing club buying more modules is a win, and this path never
+        # touches Stripe Checkout — so there is no checkout.session.completed
+        # webhook behind it to move the CRM deal for us. Fired here, with the
+        # modules just paid for, so the deal is recorded at what was bought
+        # rather than at everything the club now holds; the rep who earned the
+        # club is carried onto the new deal (see
+        # crm.sync_platform_deal_for_club) so an upsell pays commission.
+        from app.routers.club_admin import _push_club_to_twenty
+        _push_club_to_twenty(club.id, crm_trigger="subscription_won",
+                             won_module_keys=list(addon_keys))
         return {"added": True, "modules": addon_keys}
 
     schedule = await platform_settings.get_bundle_discount_schedule(db)

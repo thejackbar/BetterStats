@@ -110,7 +110,8 @@ def _parse_billing_keys(metadata) -> list[str]:
     return [k for k in raw.split(",") if k in BILLABLE_MODULES]
 
 
-def _push_to_twenty(org_id, crm_trigger: Optional[str] = None) -> None:
+def _push_to_twenty(org_id, crm_trigger: Optional[str] = None,
+                    won_module_keys: Optional[list] = None) -> None:
     # Best-effort, mirrors every other subscription-change call site (see
     # club_admin.py::approve_module_request) — never let a Twenty hiccup fail
     # a webhook Stripe expects a fast 2xx from. ``crm_trigger`` threads
@@ -119,7 +120,7 @@ def _push_to_twenty(org_id, crm_trigger: Optional[str] = None) -> None:
     # (super-admin-configurable) CRM pipeline in lockstep too, not just Twenty.
     try:
         from app.routers.club_admin import _push_club_to_twenty
-        _push_club_to_twenty(org_id, crm_trigger=crm_trigger)
+        _push_club_to_twenty(org_id, crm_trigger=crm_trigger, won_module_keys=won_module_keys)
     except Exception:
         logger.exception("Stripe billing: Twenty push failed")
 
@@ -175,8 +176,11 @@ async def handle_checkout_completed(db: AsyncSession, session: dict) -> None:
     await db.commit()
     # A completed Stripe Checkout is a genuine conversion — the strongest
     # possible "became a customer" signal, so the CRM deal moves to Won
-    # immediately rather than waiting on any periodic refresh.
-    _push_to_twenty(org.id, crm_trigger="subscription_won")
+    # immediately rather than waiting on any periodic refresh. The modules
+    # actually paid for ride along, so the deal is won at what was bought
+    # rather than at whatever the pipeline had been forecasting — that figure
+    # is what a rep's commission is calculated from.
+    _push_to_twenty(org.id, crm_trigger="subscription_won", won_module_keys=billing_keys)
 
 
 async def handle_invoice_paid(db: AsyncSession, invoice: dict) -> None:

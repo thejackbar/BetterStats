@@ -4757,6 +4757,13 @@ class CrmDeal(Base):
     commission_rep_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     commission_attributed_at = Column(TIMESTAMP(timezone=True), nullable=True)
     commission_attributed_via = Column(Text, nullable=True)  # call | email
+    # Migration 277: the commission rate (percent) STAMPED at the moment this
+    # deal was won. Editing a rep's rate afterwards must not rewrite what they
+    # already earned last quarter; the forecast over OPEN deals reads the LIVE
+    # rate instead, because a forecast is about what is still to come. NULL on
+    # every open deal, and on one won before this shipped (which then falls
+    # back to the rep's current rate — see services/sales_commissions.py).
+    commission_rate_percent = Column(Numeric(6, 3), nullable=True)
     source = Column(Text, nullable=True)  # manual | auto_enquiry | auto_trial | self_serve_trial | twenty_import
     # Migration 184: how this club came to be onboarded (independent of `source`,
     # which is about how the DEAL/row was created) — self_serve_trial |
@@ -4924,6 +4931,45 @@ class CrmTarget(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SalesCommissionRate(Base):
+    """Migration 277: what percentage of a won deal's value a sales rep earns.
+
+    One row per rep, plus exactly ONE row with a NULL ``user_id`` — the
+    platform default a rep with no row of their own falls back to (two partial
+    unique indexes enforce both halves of that). Seeded at 0 rather than at a
+    number we invented: a commission percentage is a commercial decision, so
+    the screen asks for one."""
+    __tablename__ = "sales_commission_rates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    rate_percent = Column(Numeric(6, 3), nullable=False, server_default="0", default=0)
+    updated_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SalesCommissionPayment(Base):
+    """Migration 277: one commission payout recorded against a sales rep.
+
+    Commission DUE is what they have earned on won deals minus what is
+    recorded here, so a payment is the only thing that brings it down.
+    Deliberately per-REP and not per-deal: a payout is a payment run covering
+    whatever was owed at the time, not a line-by-line settlement of individual
+    deals, and pretending otherwise would mean apportioning a round number
+    across deals nobody apportioned it across."""
+    __tablename__ = "sales_commission_payments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    rep_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    amount_cents = Column(BigInteger, nullable=False)
+    paid_on = Column(Date, nullable=False)
+    reference = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    created_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ─── KlubPro → BetterStats migration audit + rollback (migration 072) ─────────
