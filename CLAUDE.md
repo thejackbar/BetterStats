@@ -850,6 +850,15 @@ as sections with their own buttons rather than three tabs and a manage page.
   internal `"char"`. Cast it in SQL (`confdeltype::text`) or a comparison
   against `'c'` is quietly false however right the constraint is — five checks
   read as failing before that was spotted.
+- **`Twisty` IS the button, not something inside one (v9.48.2).** The
+  expand/collapse control was an 11px glyph in a `w-3.5` span wrapped in a
+  button with no width of its own, so the button shrank to the glyph's advance
+  width and the hit area measured **5.53 × 24px** — measured with the change
+  stashed, not estimated. It is a 28×28 box now, carrying the click, the
+  `aria-label`/`aria-expanded` and the hover tint, and `TWISTY_BOX` is shared
+  by the control and the spacer so a row with nothing to fold cannot drift out
+  of line with one that has. Row heights are untouched (the two-line label is
+  taller than the control either way — 37px before and after).
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a

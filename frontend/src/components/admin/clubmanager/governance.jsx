@@ -1418,12 +1418,25 @@ function ObjectiveCard({ objective, plans, pillars, positions, members, memberNa
 
 const TREE_ROW = 'w-full text-left flex items-start gap-1.5 rounded px-1.5 py-1 hover:bg-pb-surface2 select-none'
 
-function Twisty({ open, hidden }) {
-  if (hidden) return <span className="w-3.5 shrink-0" />
+// The expand/collapse control. It used to be an 11px glyph in a 14px box
+// wrapped in a button with no padding of its own, so the hit area WAS the
+// glyph — a hard thing to aim at for the one control that folds the tree away.
+// Twice the glyph, twice the box, and the box is the button rather than
+// something inside it.
+//
+// The spacer and the control are the same class, so a row with nothing to fold
+// lines up with one that has by construction rather than by two numbers being
+// kept in step.
+const TWISTY_BOX = 'w-7 h-7 shrink-0 flex items-start justify-center text-[22px] leading-[22px]'
+
+function Twisty({ open, hidden, onToggle }) {
+  if (hidden || !onToggle) return <span className={TWISTY_BOX} aria-hidden="true" />
   return (
-    <span className="w-3.5 shrink-0 text-[11px] leading-[18px] text-pb-faint hover:text-pb-text">
+    <button type="button" aria-label={open ? 'Collapse' : 'Expand'} aria-expanded={open}
+      onClick={e => { e.stopPropagation(); onToggle() }}
+      className={`${TWISTY_BOX} rounded text-pb-faint hover:text-pb-text hover:bg-pb-surface2`}>
       {open ? '▾' : '▸'}
-    </span>
+    </button>
   )
 }
 
@@ -1809,8 +1822,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                 ...(isSel('plan', plan.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                 ...(plan.id ? dragStyle('plan', plan.id) : {}),
               }}>
-              <button onClick={() => toggle(pk)} aria-label={isOpen(pk) ? 'Collapse' : 'Expand'}
-                className="shrink-0"><Twisty open={isOpen(pk)} hidden={themes.length === 0} /></button>
+              <Twisty open={isOpen(pk)} hidden={themes.length === 0} onToggle={() => toggle(pk)} />
               <button onClick={() => select('plan', plan.id)} className="min-w-0 flex-1 text-left">
                 <TreeLabel kind={plan.id ? 'PLAN' : ''} active={isSel('plan', plan.id)}>{plan.name}</TreeLabel>
               </button>
@@ -1828,8 +1840,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                       ...(isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                       ...dragStyle('theme', th.id),
                     }}>
-                    <button onClick={() => toggle(tk)} aria-label={isOpen(tk) ? 'Collapse' : 'Expand'}
-                      className="shrink-0"><Twisty open={isOpen(tk)} /></button>
+                    <Twisty open={isOpen(tk)} onToggle={() => toggle(tk)} />
                     <button onClick={() => select('theme', th.id, { planId: plan.id })}
                       className="min-w-0 flex-1 text-left">
                       <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={th.rows.length === 0}>
@@ -1851,8 +1862,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
                             ...(isSel('objective', o.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
                             ...dragStyle('objective', o.id),
                           }}>
-                          <button onClick={() => toggle(ok)} aria-label={isOpen(ok) ? 'Collapse' : 'Expand'}
-                            className="shrink-0"><Twisty open={isOpen(ok)} hidden={work.length === 0} /></button>
+                          <Twisty open={isOpen(ok)} hidden={work.length === 0} onToggle={() => toggle(ok)} />
                           <button onClick={() => select('objective', o.id)} className="min-w-0 flex-1 text-left">
                             <TreeLabel kind="OBJECTIVE" active={isSel('objective', o.id)}>{o.title}</TreeLabel>
                           </button>
