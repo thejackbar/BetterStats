@@ -5024,11 +5024,12 @@ async def lifespan(app: FastAPI):
         for _stmt in PLAN_TREE_SQL:
             await conn.execute(text(_stmt))
 
-        # Migration 277: sales commissions — a rate per rep (plus the one
-        # platform default row), the rate stamped on a deal at the moment it
-        # was won, and the payments ledger that commission due is measured
-        # against. Mirrored from alembic/versions/277_sales_commissions.py via
-        # the same shared list; every statement is idempotent.
+        # Migrations 277 + 278: sales commissions — a rate per rep (plus the
+        # one platform default row), the payouts ledger commission due is
+        # measured against, and the commissionable columns on billing_invoices
+        # that make a confirmed Stripe payment (not a deal's stage) the thing
+        # that earns. Mirrored from alembic/versions/277 and /278 via the same
+        # shared list; every statement is idempotent.
         from app.services.sales_commission_ddl import SALES_COMMISSION_SQL
         for _stmt in SALES_COMMISSION_SQL:
             await conn.execute(text(_stmt))

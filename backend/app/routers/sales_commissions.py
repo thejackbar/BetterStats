@@ -84,8 +84,14 @@ async def deals(
     _: User = Depends(require_super_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """The deals behind one figure on the table — the forecast pipeline for a
-    rep, or the deals they have won."""
+    """What is behind one figure on the table.
+
+    ``status='open'`` is the rep's forecast pipeline — CRM deals. ``'won'`` is
+    the money that actually arrived — confirmed Stripe payments, each with the
+    rate stamped on it when it was paid. The two are genuinely different kinds
+    of thing, which is why the payload differs."""
+    if status == "won":
+        return await sc.rep_payments(db, rep_user_id=rep_user_id)
     try:
         return await sc.rep_deals(db, rep_user_id=rep_user_id, status=status)
     except ValueError as exc:

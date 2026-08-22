@@ -25,7 +25,7 @@ from sqlalchemy.orm import selectinload
 
 from app.auth.modules import BILLABLE_MODULES, STATUS_ACTIVE, STATUS_PAST_DUE
 from app.models.db import BillingInvoice, ModuleActionRequest, Organisation
-from app.services import discount_coupons, module_subscriptions, stripe_client
+from app.services import discount_coupons, module_subscriptions, sales_commissions, stripe_client
 from app.services.stripe_client import epoch_to_date, epoch_to_datetime
 
 logger = logging.getLogger(__name__)
@@ -363,6 +363,12 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
     row.period_end = epoch_to_datetime(invoice.get("period_end"))
     row.hosted_invoice_url = invoice.get("hosted_invoice_url")
     row.invoice_pdf = invoice.get("invoice_pdf")
+    # Stripe's own reason this invoice exists — what separates NEW BUSINESS
+    # from a renewal for sales commission (migration 278) — plus what was paid
+    # net of GST. Recorded for every invoice, paid or not; whether it earns
+    # anything is decided by record_payment_commission below.
+    row.billing_reason = invoice.get("billing_reason")
+    row.amount_ex_tax_cents = sales_commissions.invoice_ex_tax_cents(invoice)
     lines = (invoice.get("lines") or {}).get("data") or []
     if lines:
         row.line_items = [
@@ -392,5 +398,11 @@ async def _upsert_invoice(db: AsyncSession, org: Organisation, invoice: dict, no
                 row.payment_method_type, row.payment_method_summary = stripe_client.describe_payment_method(pm)
         except Exception:
             logger.exception("Stripe billing: could not fetch payment method for invoice %s", stripe_invoice_id)
+
+    # Sales commission is EARNED on a confirmed payment, not on a CRM deal's
+    # stage — see services/sales_commissions.record_payment_commission. Stamped
+    # here, the one place a payment is recorded, so a first subscribe and an
+    # add-on purchase are the same behaviour. Never raises.
+    await sales_commissions.record_payment_commission(db, row)
 
     row.updated_at = now

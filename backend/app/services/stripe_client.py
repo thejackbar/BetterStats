@@ -387,6 +387,14 @@ async def retrieve_subscription(subscription_id: str):
     return await stripe.Subscription.retrieve_async(subscription_id)
 
 
+async def retrieve_invoice(invoice_id: str):
+    """One invoice, for the sales-commission backfill (app.scripts.
+    backfill_invoice_commission) — the live webhook is handed the invoice by
+    Stripe and never needs this."""
+    _require_configured()
+    return await stripe.Invoice.retrieve_async(invoice_id)
+
+
 async def retrieve_payment_intent(payment_intent_id: str):
     _require_configured()
     return await stripe.PaymentIntent.retrieve_async(payment_intent_id, expand=["payment_method"])

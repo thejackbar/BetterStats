@@ -269,6 +269,54 @@ one club, two with no modules at $0, and a row whose Stage column read Trial.
   open ones, and never showing a Trial row under won), and the empty-win repro
   collapses three deals to the one real win.
 
+### Commission is earned on a PAYMENT, not a stage (migration 278, v9.50.1)
+
+Per direct instruction, after a drill-down showed deals as "won" that nobody
+had paid for: **the criteria for a won deal are Stripe confirmations of actual
+payments.**
+
+- **A STAGE IS A JUDGEMENT, A PAID INVOICE IS A FACT.** Earned commission no
+  longer reads `crm_deals` at all. `billing_invoices` — our own mirror of every
+  Stripe invoice — carries `billing_reason`, `amount_ex_tax_cents`, and the
+  stamped `commission_rep_user_id` / `commission_rate_percent` /
+  `commission_cents` / `commission_kind`. The FORECAST still reads open deals,
+  which is right: a forecast is about what might happen, and only a payment
+  says what did.
+- **ONLY NEW BUSINESS EARNS, and Stripe's own `billing_reason` is what says
+  which** — no inference from line items. `subscription_create` is the club's
+  first payment ('initial'), `subscription_update` is modules added to a live
+  subscription ('expansion'), and `subscription_cycle` is a renewal, which
+  earns nothing: a renewal is the club not cancelling, not a sale.
+- **NET OF GST.** `total_excluding_tax`, falling back to what was paid minus
+  the invoice's own tax amounts. Tax collected on our behalf was never our
+  revenue, and commissioning it would overpay by the GST rate.
+- **The rep and the rate are STAMPED on the payment when it lands** and never
+  recomputed, so a rate change cannot rewrite what a past payment earned. The
+  stamp is idempotent: a replayed webhook re-reads the same row and an already
+  attributed invoice is not re-attributed if the club's attribution later moves.
+- **`record_payment_commission` is called from `_upsert_invoice`**, the ONE
+  place a payment is recorded, so a first subscribe and an add-on purchase are
+  one behaviour. Best-effort: a commission bookkeeping failure must never fail
+  the webhook that recorded the payment.
+- **`crm_deals.commission_rate_percent` (277) is left in place and NOTHING
+  reads it now** — the call migration 267 made for `vote_settings`. A second
+  rate living on the deal could only ever drift from the one actually paid.
+- **`deal_state` still decides open vs won for the FORECAST**, so a deal in Won
+  leaves the pipeline; it just no longer earns anything by itself.
+- **`python -m app.scripts.backfill_invoice_commission`** re-reads invoices
+  recorded before 278 from Stripe and stamps them through the same function the
+  webhook uses. The rate applied is the rep's CURRENT one — the rate on the day
+  of a past payment was never recorded, and inventing one would be worse than
+  saying so.
+- **Verified against a real Postgres** (28 checks through the shipped webhook
+  and report: the DDL applied three times, the first payment stamped with rep /
+  rate / kind, a renewal recorded but earning nothing, an add-on earning as an
+  expansion on the prorated amount, an unpaid invoice earning nothing, a rate
+  change not rewriting a payment, a replayed webhook not paying twice, a deal
+  dragged to Won earning nothing on its own, the drill-down adding up to the
+  figure, an unattributed club's payment recorded but unearned, and the period
+  filing), plus the other four suites re-run to 134.
+
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,

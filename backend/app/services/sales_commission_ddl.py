@@ -24,6 +24,21 @@ not who happens to hold the club now).
 * ``sales_commission_payments`` — what has actually been paid out, per rep.
   Commission due is earned minus paid, so a payment is the only thing that
   brings it down.
+
+Migration 278 moves EARNED commission off the CRM deal and onto the Stripe
+payment, per direct instruction: a deal's stage is a human judgement somebody
+can drag around, and a confirmed Stripe payment is a fact. The commissionable
+columns therefore live on ``billing_invoices``, our own mirror of each Stripe
+invoice, and are stamped at the moment the payment is recorded — the rep who
+earned the club and the rate that applied that day, so changing a rate later
+cannot rewrite what a payment already earned.
+
+Only NEW BUSINESS earns: Stripe's own ``billing_reason`` says which. An
+invoice created by the initial subscribe (``subscription_create``) or by
+adding modules to a live subscription (``subscription_update``) is new
+business; a renewal of what the club already holds (``subscription_cycle``)
+is not, and earns nothing. Commission is calculated on the amount NET OF GST
+— tax collected on our behalf was never revenue.
 """
 
 SALES_COMMISSION_SQL = [
@@ -78,5 +93,32 @@ SALES_COMMISSION_SQL = [
     """
     CREATE INDEX IF NOT EXISTS ix_sales_commission_payments_rep
     ON sales_commission_payments (rep_user_id, paid_on DESC)
+    """,
+    # ── Migration 278: earned commission rides on the Stripe payment ──────
+    # Stripe's own reason the invoice exists: subscription_create (the first
+    # payment), subscription_update (modules added to a live subscription),
+    # subscription_cycle (a renewal). This is what separates new business from
+    # a renewal, rather than us inferring it from line items.
+    """ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS billing_reason TEXT""",
+    # What the club paid NET OF GST — Stripe's total_excluding_tax. amount_paid
+    # includes tax, which was never our revenue and must not be commissioned.
+    # NULL on every invoice recorded before this shipped; app.scripts.
+    # backfill_invoice_commission fills those in from Stripe.
+    """ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS amount_ex_tax_cents INTEGER""",
+    # Stamped when the payment is recorded, never recomputed: who earned the
+    # club, the rate that applied that day, and the resulting commission.
+    # commission_kind is 'initial' | 'expansion', or NULL for a payment that
+    # earns nothing (a renewal, a credit, an unattributed club).
+    """
+    ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS
+    commission_rep_user_id UUID REFERENCES users(id) ON DELETE SET NULL
+    """,
+    """ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS commission_rate_percent NUMERIC(6,3)""",
+    """ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS commission_cents BIGINT""",
+    """ALTER TABLE billing_invoices ADD COLUMN IF NOT EXISTS commission_kind TEXT""",
+    """
+    CREATE INDEX IF NOT EXISTS ix_billing_invoices_commission_rep
+    ON billing_invoices (commission_rep_user_id)
+    WHERE commission_rep_user_id IS NOT NULL
     """,
 ]

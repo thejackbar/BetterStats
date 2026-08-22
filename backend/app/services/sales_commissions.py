@@ -42,7 +42,8 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
-    CrmDeal, MarketingClub, SalesCommissionPayment, SalesCommissionRate, User,
+    BillingInvoice, CrmDeal, MarketingClub, Organisation, SalesCommissionPayment,
+    SalesCommissionRate, User,
 )
 from app.services import crm as crm_service
 from app.services import crm_targets
@@ -131,22 +132,127 @@ async def set_rate(session: AsyncSession, *, user_id, rate_percent, actor_user_i
     return rate
 
 
-async def stamp_won_rate(session: AsyncSession, deal: CrmDeal) -> None:
-    """Write the rate that applied onto a deal at the moment it is won.
+# ``crm_deals.commission_rate_percent`` (migration 277) is left in place and
+# NOTHING reads it since 278 — the same call migration 267 made for
+# ``vote_settings``. It was the deal-based model's stamp; commission is now
+# earned on a payment and stamped on the invoice, so a second rate living on
+# the deal could only ever drift from the one that was actually paid.
 
-    Called from the two places a deal's status becomes 'won'
-    (``crm.move_stage`` and ``crm.close_deal``), so a win through the board,
-    through the Stripe webhook, or through an automation rule is all one
-    behaviour. Best-effort by design: a commission bookkeeping hiccup must
-    never fail the write that recorded the sale itself. A deal with no rep
-    attributed gets the platform default — the only rate knowable for it, and
-    it earns nobody anything until a rep is attributed anyway."""
+
+# ─── Earned: a confirmed Stripe payment ──────────────────────────────────────
+#
+# EARNED COMMISSION COMES FROM MONEY ARRIVING, NOT FROM A DEAL'S STAGE (per
+# direct instruction). A stage is a human judgement someone can drag around;
+# a paid Stripe invoice is a fact, and it is the only thing here that creates
+# an entitlement to be paid.
+#
+# Only NEW BUSINESS earns, and Stripe's own ``billing_reason`` is what says
+# which — no inference from line items:
+#
+#   subscription_create  the club's first paid invoice          -> 'initial'
+#   subscription_update  modules added to a live subscription   -> 'expansion'
+#   subscription_cycle   a renewal of what they already hold    -> earns nothing
+#
+# A renewal is the club not cancelling, which is not a sale. Commission is
+# calculated NET OF GST: tax collected on our behalf was never our revenue.
+
+COMMISSIONABLE_BILLING_REASONS = {
+    "subscription_create": "initial",
+    "subscription_update": "expansion",
+}
+
+
+def invoice_ex_tax_cents(invoice: dict) -> int:
+    """What the club actually paid, net of tax, from a Stripe invoice payload.
+
+    ``total_excluding_tax`` is Stripe's own answer and is preferred. Older API
+    versions omit it, so the fallback subtracts the invoice's own tax amounts
+    from what was paid; a payload with neither falls back to ``amount_paid``,
+    which over-credits by the GST rather than crediting nothing."""
+    ex = invoice.get("total_excluding_tax")
+    if ex is not None:
+        return int(ex)
+    paid = int(invoice.get("amount_paid") or 0)
+    tax = invoice.get("tax")
+    if tax is None:
+        tax = sum(int(t.get("amount") or 0) for t in (invoice.get("total_tax_amounts") or []))
+    return max(0, paid - int(tax or 0))
+
+
+async def _club_and_rep_for_org(session: AsyncSession, org_id):
+    """(MarketingClub, rep_user_id) for a paying club — the rep who EARNED it.
+
+    The club's directory row is what links a paying Organisation back to the
+    pipeline, and the rep is whoever the club's most recently attributed deal
+    names. An unlinked or never-attributed club resolves to no rep, and its
+    payments then earn nobody anything rather than being quietly dropped."""
+    club = (await session.execute(
+        select(MarketingClub).where(MarketingClub.existing_org_id == org_id)
+    )).scalars().first()
+    if club is None:
+        return None, None
+    pipeline = await crm_service.ensure_platform_pipeline(session)
+    deal = await crm_service._last_attributed_deal_for_club(session, pipeline.id, club.id)
+    return club, (deal.commission_rep_user_id if deal else None)
+
+
+async def record_payment_commission(session: AsyncSession, row) -> None:
+    """Stamp a recorded Stripe invoice with what it earned, if anything.
+
+    Called from the invoice webhook once the payment is confirmed. Everything
+    is written onto the invoice row itself and never recomputed, which is what
+    makes the ledger auditable and what stops a later rate change rewriting
+    history. Idempotent: a replayed webhook re-stamps the same figures, and an
+    invoice already stamped for a rep is not re-attributed if the club's
+    attribution later moves.
+
+    Best-effort by design — a commission bookkeeping failure must never fail
+    the webhook that recorded the payment itself."""
     try:
+        if row.status != "paid":
+            return
+        kind = COMMISSIONABLE_BILLING_REASONS.get(row.billing_reason or "")
+        amount = int(row.amount_ex_tax_cents or 0)
+        if kind is None or amount <= 0:
+            # A renewal, a credit note, or an invoice we cannot price. Left
+            # unstamped rather than stamped at zero, so "earns nothing" and
+            # "not yet assessed" stay distinguishable.
+            return
+        if row.commission_rep_user_id is not None and row.commission_cents is not None:
+            return
+        _, rep_id = await _club_and_rep_for_org(session, row.organisation_id)
+        if rep_id is None:
+            return
         rates = await load_rates(session)
-        account_ids = [str(deal.commission_rep_user_id)] if deal.commission_rep_user_id else []
-        deal.commission_rate_percent = rate_for(rates, account_ids)
+        rate = rate_for(rates, [str(rep_id)])
+        row.commission_rep_user_id = rep_id
+        row.commission_rate_percent = rate
+        row.commission_cents = commission_cents(amount, rate)
+        row.commission_kind = kind
     except Exception:  # noqa: BLE001
-        logger.exception("commission: could not stamp the won rate on deal %s", deal.id)
+        logger.exception("commission: could not stamp invoice %s", getattr(row, "id", None))
+
+
+def _paid_at(inv: BillingInvoice):
+    """When a payment landed, for filing it into a period. ``period_start`` is
+    the invoice's own billing period, which for an initial or add-on invoice
+    is the moment it was raised; ``created_at`` is the fallback for a row that
+    somehow carries neither."""
+    when = inv.period_start or inv.created_at
+    if when is not None and when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return when
+
+
+async def earned_rows(session: AsyncSession):
+    """Every payment that has earned somebody something."""
+    return (await session.execute(
+        select(BillingInvoice).where(
+            BillingInvoice.status == "paid",
+            BillingInvoice.commission_kind.isnot(None),
+            BillingInvoice.commission_rep_user_id.isnot(None),
+        )
+    )).scalars().all()
 
 
 # ─── Rep entries ─────────────────────────────────────────────────────────────
@@ -207,7 +313,7 @@ def _blank_row() -> dict:
         "weighted_pipeline_value_cents": 0,
         "forecast_commission_cents": 0,
         "weighted_forecast_commission_cents": 0,
-        "won_deals": 0,
+        "paid_invoices": 0,
         "won_value_cents": 0,
         "commission_earned_cents": 0,
         "commission_paid_cents": 0,
@@ -301,13 +407,25 @@ async def commission_report(session: AsyncSession, *, rep_user_id=None) -> dict:
             row["open_deals"] += 1
             row["pipeline_value_cents"] += value
             row["weighted_pipeline_value_cents"] += round(value * prob / 100)
-        elif state == "won":
-            # The rate stamped at the win, else the rep's current one for a
-            # deal won before that column existed.
-            won_rate = Decimal(d.commission_rate_percent) if d.commission_rate_percent is not None else live_rate
-            row["won_deals"] += 1
-            row["won_value_cents"] += value
-            row["commission_earned_cents"] += commission_cents(value, won_rate)
+        # A WON deal is deliberately NOT counted here. Earned commission comes
+        # from a confirmed Stripe payment (see earned_rows below), not from a
+        # deal's stage — a stage is a human judgement, a payment is a fact.
+
+    # What has actually been PAID BY CLUBS, which is what earns commission.
+    for inv in await earned_rows(session):
+        account = str(inv.commission_rep_user_id)
+        entry = by_account.get(account)
+        if pinned_ids is not None and account not in pinned_ids:
+            continue
+        if entry is not None:
+            key, name = entry["id"], entry["name"]
+        else:
+            key, name = account, "Former rep"
+        row = _bucket(key, name, rates["default"] if entry is None
+                      else rate_for(rates, entry.get("ids") or [entry["id"]]))
+        row["paid_invoices"] += 1
+        row["won_value_cents"] += int(inv.amount_ex_tax_cents or 0)
+        row["commission_earned_cents"] += int(inv.commission_cents or 0)
 
     payments = await _payments_by_account(session)
     for key, row in rows.items():
@@ -400,11 +518,7 @@ async def period_summary(session: AsyncSession, *, period_type: str = "quarter",
     keys = period_keys(period_type)
     entries = await _rep_entries(session)
     by_account = _entry_of_account(entries)
-    rates = await load_rates(session)
-    deals = await _attributed_deals(session)
-    stage_by_id = await _stage_by_id(session)
-    won = [d for d in deals
-           if deal_state(d, stage_by_id.get(d.stage_id)) == "won" and d.closed_at is not None]
+    earned = await earned_rows(session)
 
     pinned_ids = None
     if rep_user_id is not None:
@@ -422,30 +536,17 @@ async def period_summary(session: AsyncSession, *, period_type: str = "quarter",
             return rows.setdefault(rkey, {"rep_user_id": rkey, "rep_name": name,
                                          "earned_cents": 0, "paid_cents": 0})
 
-        for d in won:
-            closed = d.closed_at
-            if closed.tzinfo is None:
-                closed = closed.replace(tzinfo=timezone.utc)
-            if not (start <= closed < end):
+        for inv in earned:
+            when = _paid_at(inv)
+            if when is None or not (start <= when < end):
                 continue
-            account = str(d.commission_rep_user_id) if d.commission_rep_user_id else None
+            account = str(inv.commission_rep_user_id)
             if pinned_ids is not None and account not in pinned_ids:
                 continue
-            entry = by_account.get(account) if account else None
-            if entry is not None:
-                rkey, name = entry["id"], entry["name"]
-                live = rate_for(rates, entry.get("ids") or [entry["id"]])
-            elif account is not None:
-                rkey, name, live = account, "Former rep", rates["default"]
-            else:
-                if pinned_ids is not None:
-                    continue
-                # Zero, for the reason commission_report gives: nobody has
-                # earned the pool, so nobody is owed anything on it.
-                rkey, name, live = UNATTRIBUTED_KEY, "Unattributed", Decimal("0")
-            rate = Decimal(d.commission_rate_percent) if d.commission_rate_percent is not None else live
-            _row(rkey, name)["earned_cents"] += commission_cents(
-                crm_service.effective_value_cents(d), rate)
+            entry = by_account.get(account)
+            rkey = entry["id"] if entry else account
+            name = entry["name"] if entry else "Former rep"
+            _row(rkey, name)["earned_cents"] += int(inv.commission_cents or 0)
 
         for p in payments:
             if not (start.date() <= p.paid_on < end.date()):
@@ -537,15 +638,61 @@ async def _names_by_ids(session: AsyncSession, ids) -> dict:
 
 # ─── Drill-down: the deals behind a rep's figures ────────────────────────────
 
+async def rep_payments(session: AsyncSession, *, rep_user_id: str, pinned_rep_id=None) -> dict:
+    """The PAYMENTS behind one rep's earned figure.
+
+    Each row is a confirmed Stripe invoice with the rate and commission that
+    were stamped on it when it was paid — the ledger, not a recalculation, so
+    what this lists is exactly what the table totals."""
+    entries = await _rep_entries(session)
+    by_account = _entry_of_account(entries)
+    if pinned_rep_id is not None:
+        rep_user_id = str(pinned_rep_id)
+    entry = by_account.get(str(rep_user_id))
+    wanted = set(entry["ids"]) if entry else {str(rep_user_id)}
+
+    rows = [i for i in await earned_rows(session)
+            if str(i.commission_rep_user_id) in wanted]
+    org_ids = {i.organisation_id for i in rows}
+    orgs = {o.id: o for o in (await session.execute(
+        select(Organisation).where(Organisation.id.in_(org_ids))
+    )).scalars().all()} if org_ids else {}
+    clubs = {c.existing_org_id: c for c in (await session.execute(
+        select(MarketingClub).where(MarketingClub.existing_org_id.in_(org_ids))
+    )).scalars().all()} if org_ids else {}
+
+    out = []
+    for i in rows:
+        club = clubs.get(i.organisation_id)
+        org = orgs.get(i.organisation_id)
+        when = _paid_at(i)
+        out.append({
+            "invoice_id": str(i.id),
+            "club_name": (club.name if club else None) or (org.name if org else None) or "Unknown club",
+            "kind": i.commission_kind,
+            "billing_reason": i.billing_reason,
+            "line_items": i.line_items or [],
+            "amount_cents": int(i.amount_ex_tax_cents or 0),
+            "rate_percent": float(i.commission_rate_percent or 0),
+            "commission_cents": int(i.commission_cents or 0),
+            "paid_on": when.date().isoformat() if when else None,
+            "hosted_invoice_url": i.hosted_invoice_url,
+        })
+    out.sort(key=lambda r: (r["paid_on"] or "", r["club_name"].lower()), reverse=True)
+    return {"payments": out, "count": len(out)}
+
+
 async def rep_deals(session: AsyncSession, *, rep_user_id: str, status: str = "open",
                     pinned_rep_id=None) -> dict:
-    """The deals behind one rep's forecast or won figure.
+    """The OPEN deals behind one rep's forecast figure.
 
     Re-runs the very predicates ``commission_report`` used rather than a query
     shaped like them, so a row reading five deals can never open four — the
-    rule the Sales Performance drill-downs already follow.
+    rule the Sales Performance drill-downs already follow. Only 'open' is
+    answerable here: what has been EARNED is a list of payments, not of deals
+    (see rep_payments).
     """
-    if status not in ("open", "won"):
+    if status != "open":
         raise ValueError(f"unknown status {status!r}")
     entries = await _rep_entries(session)
     by_account = _entry_of_account(entries)
@@ -578,8 +725,7 @@ async def rep_deals(session: AsyncSession, *, rep_user_id: str, status: str = "o
         value = crm_service.effective_value_cents(d)
         stage = stage_by_id.get(d.stage_id)
         prob = crm_service.effective_probability(d, stage) or 0
-        rate = (Decimal(d.commission_rate_percent) if (status == "won" and d.commission_rate_percent is not None)
-                else live)
+        rate = live
         out.append({
             "deal_id": str(d.id),
             "club_name": (club.name if club else None) or d.title or "Untitled",

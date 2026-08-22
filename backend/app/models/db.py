@@ -945,6 +945,23 @@ class BillingInvoice(Base):
     bundle_discount_cents = Column(Integer, nullable=False, server_default="0", default=0)
     coupon_code = Column(Text, nullable=True)
     coupon_discount_cents = Column(Integer, nullable=False, server_default="0", default=0)
+    # Migration 278 — sales commission is EARNED on a confirmed payment, not on
+    # a CRM deal's stage. Stripe's own reason the invoice exists is what
+    # separates new business from a renewal: 'subscription_create' (the first
+    # payment) and 'subscription_update' (modules added to a live
+    # subscription) earn; 'subscription_cycle' (a renewal of what the club
+    # already holds) does not. amount_ex_tax_cents is what the club paid NET
+    # OF GST, since tax collected on our behalf was never our revenue. The
+    # rep, the rate and the resulting commission are STAMPED when the payment
+    # is recorded and never recomputed, so changing a rate later cannot
+    # rewrite what a payment already earned. commission_kind is
+    # 'initial' | 'expansion', or NULL for a payment that earns nothing.
+    billing_reason = Column(Text, nullable=True)
+    amount_ex_tax_cents = Column(Integer, nullable=True)
+    commission_rep_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    commission_rate_percent = Column(Numeric(6, 3), nullable=True)
+    commission_cents = Column(BigInteger, nullable=True)
+    commission_kind = Column(Text, nullable=True)
     # Which payment method actually paid this invoice, e.g. "Visa Debit
     # •••• 4242", "PayTo (...0400)" — see stripe_client.describe_payment_method.
     payment_method_type = Column(Text, nullable=True)

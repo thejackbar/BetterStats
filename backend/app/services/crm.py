@@ -771,10 +771,6 @@ async def create_deal(session: AsyncSession, *, scope: str, pipeline_id, stage_i
         commission_attributed_at=commission_attributed_at,
         commission_attributed_via=commission_attributed_via,
     )
-    # A deal born straight into the Won stage never passes through move_stage,
-    # so this is the one other place the commission rate has to be captured.
-    if status == "won":
-        await _stamp_commission_rate(session, deal)
     session.add(deal)
     await session.flush()
     return deal
@@ -825,20 +821,6 @@ async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal
     return deal
 
 
-async def _stamp_commission_rate(session: AsyncSession, deal: CrmDeal) -> None:
-    """Write the commission rate that applied onto a deal the moment it is
-    won. The two functions below are the ONLY places a deal's status becomes
-    'won' — a win through the pipeline board, through the Stripe webhook, or
-    through an automation rule all land in one of them — so this is the one
-    place the rate is captured rather than three.
-
-    Imported here rather than at module scope: services/sales_commissions.py
-    reads this module for a deal's value and probability, and a top-level
-    import either way round is a cycle."""
-    from app.services import sales_commissions
-    await sales_commissions.stamp_won_rate(session, deal)
-
-
 async def move_stage(session: AsyncSession, deal: CrmDeal, stage: CrmStage, *,
                      probability: Optional[int] = None) -> CrmDeal:
     deal.stage_id = stage.id
@@ -848,7 +830,6 @@ async def move_stage(session: AsyncSession, deal: CrmDeal, stage: CrmStage, *,
     if stage.is_won:
         deal.status = "won"
         deal.closed_at = func.now()
-        await _stamp_commission_rate(session, deal)
     elif stage.is_lost:
         deal.status = "lost"
         deal.closed_at = func.now()
@@ -867,8 +848,6 @@ async def close_deal(session: AsyncSession, deal: CrmDeal, pipeline: CrmPipeline
     deal.lost_reason = lost_reason if status == "lost" else None
     deal.closed_at = func.now()
     deal.updated_at = func.now()
-    if status == "won":
-        await _stamp_commission_rate(session, deal)
     return deal
 
 
