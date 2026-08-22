@@ -157,6 +157,39 @@ been paid.
   save-a-rate-then-read-the-column flow for three reps), and the Chromium run
   is 41.
 
+### A `?club=` deep link opened the Workspace on the WRONG club (v9.49.3)
+
+Reported off the commission drill-down: the link built the right URL and the
+Workspace opened on a different club.
+
+- **A club the URL names was never IN the queue, which is not the same as
+  having dropped OUT of it**, and `SalesWorkspace.loadClubs` treated the two
+  alike. Its "the open club has left the filtered list, advance to the next
+  one" rule fired against the deep-linked club and reassigned the selection —
+  and the URL — to row one. Every `?club=` caller is affected: Sales
+  Commissions links each deal a rep is attributed and Sales Performance each
+  deal in a stage, and neither knows or should care what the queue is
+  filtered to.
+- **Fixing that branch alone was NOT enough, and the second half is the one
+  reading the code would have missed.** With the advance skipped, the load
+  fell through to `else if (!initialPositionDoneRef.current && rows[0])` —
+  the first-load landing — which never checked whether anything was selected.
+  Its own comment claimed a deep link "would already have been handled
+  above", which holds only when the linked club is IN the filtered list. It
+  now also requires `!selectedIdRef.current`, which is what it always meant.
+  **Found by instrumenting the running page, after the first fix changed
+  nothing** — the branch that actually fired was three `else if`s away from
+  the one that looked guilty.
+- **`deepLinkedIdRef` is released the moment the rep picks a club from the
+  rail**, so the ordinary advance-past-a-dropped-out-club behaviour comes
+  back straight after. A pin that outlived the link would be a second bug in
+  the other direction.
+- **Verified in Chromium** (`frontend/verification/verify_workspace_deeplink_browser.mjs`,
+  8 checks): the reported case, a deep link to a club that IS in the queue,
+  no deep link at all still landing on row one, and a hand-picked club taking
+  over. Reproduced first with the fix absent — the repro bounced to row one
+  and rewrote the URL, exactly as reported.
+
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,

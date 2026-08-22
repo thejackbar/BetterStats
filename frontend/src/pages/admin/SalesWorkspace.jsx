@@ -876,6 +876,18 @@ export default function SalesWorkspace() {
   // whatever it was when loadClubs was last memoized, not the latest list.
   const clubsRef = useRef([])
   useEffect(() => { clubsRef.current = clubs }, [clubs])
+
+  // The club a ?club= deep link asked for. A deep link routinely names a club
+  // the current filters exclude — Sales Commissions links every deal a rep is
+  // attributed, Sales Performance every deal in a stage, and neither knows or
+  // should care what the queue happens to be filtered to. Such a club was
+  // never IN the queue, which is a different thing from having dropped OUT of
+  // it, and the auto-advance below must not treat the two alike: it used to,
+  // and quietly reassigned the selection (and the URL) to the top of the
+  // queue, so the link opened the Workspace on the wrong club. Cleared the
+  // moment the rep picks a club themselves, after which the ordinary
+  // advance-on-drop-out behaviour resumes.
+  const deepLinkedIdRef = useRef(null)
   // Set true the first time loadClubs' reload handler runs to completion —
   // whether it landed on a ?club= deep link, kept an existing selection, or
   // fell through to the "land on the top of the queue" default below. Once
@@ -1047,7 +1059,8 @@ export default function SalesWorkspace() {
       // next one down in the list as the rep was last looking at it, walking
       // upward instead if it was the last row, so the rep lands next to
       // where they were rather than being bounced to an unrelated club.
-      if (selectedIdRef.current && !rows.some(c => c.id === selectedIdRef.current)) {
+      if (selectedIdRef.current && !rows.some(c => c.id === selectedIdRef.current)
+          && selectedIdRef.current !== deepLinkedIdRef.current) {
         const prevRows = clubsRef.current
         const prevIdx = prevRows.findIndex(c => c.id === selectedIdRef.current)
         let next = null
@@ -1082,12 +1095,17 @@ export default function SalesWorkspace() {
         setTimeout(() => {
           rowRefs.current[id]?.scrollIntoView({ block: 'nearest', behavior: 'instant' })
         }, 60)
-      } else if (!initialPositionDoneRef.current && rows[0]) {
-        // The very first load of this screen, nothing selected yet (no
-        // ?club= deep link either — that branch, above, would already have
-        // set selectedIdRef.current by the time this runs). Land on the top
-        // of the queue exactly as it stands under the current filters/sort
-        // — it's already row one, so no scroll is needed to get there.
+      } else if (!initialPositionDoneRef.current && !selectedIdRef.current && rows[0]) {
+        // The very first load of this screen with nothing selected at all.
+        // The `!selectedIdRef.current` test is load-bearing and used to be
+        // missing: this branch relied on one of the two above having already
+        // handled a ?club= deep link, which they do NOT when the linked club
+        // is outside the current filters and the reload was a plain filter
+        // change (anchor === false). A deep link then fell through to here
+        // and was overwritten with row one — the Workspace opening on the
+        // wrong club, reported against the Sales Commissions links. Land on
+        // the top of the queue exactly as it stands under the current
+        // filters/sort — it's already row one, so no scroll is needed.
         selectClub(rows[0].id)
       }
       initialPositionDoneRef.current = true
@@ -1211,7 +1229,10 @@ export default function SalesWorkspace() {
   // Deep link (e.g. from Sales Follow-ups: /admin/super/crm/workspace?club=<dealId>)
   useEffect(() => {
     const clubParam = searchParams.get('club')
-    if (clubParam && clubParam !== selectedId) selectClub(clubParam, { scroll: true })
+    if (clubParam && clubParam !== selectedId) {
+      deepLinkedIdRef.current = clubParam
+      selectClub(clubParam, { scroll: true })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -1771,7 +1792,7 @@ export default function SalesWorkspace() {
                     />
                   )}
                   <button
-                    onClick={() => selectClub(c.id)}
+                    onClick={() => { deepLinkedIdRef.current = null; selectClub(c.id) }}
                     className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
                       selectedId === c.id ? 'border-pb-accent bg-pb-surface2'
                       : c.callback_due ? 'border-blue-500/60 hover:bg-pb-surface2'
