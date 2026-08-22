@@ -897,31 +897,49 @@ export { objectiveLabel, objectiveTiers }
 // overwhelming, and it was: the repetition was 80% of the text and the part
 // that tells them apart was the part being cut off.
 //
-// So the plan and the theme are said ONCE, as a heading over the objectives
-// filed under them, each objective's own title is given a full line to wrap
-// onto, and a search box narrows a long plan to the one being looked for. The
-// closed control shows the choice as the breadcrumb it is, which is also what
-// the card above the picker spells out in full.
+// So it is drawn as the tree it actually is — plan, then its themes indented
+// under it, then the objectives indented under those — with each objective's
+// title given a full line to wrap onto and a search box to narrow a long plan.
+// The closed control shows the choice as the breadcrumb it is, which is also
+// what the card above the picker spells out in full.
+//
+// ONLY THE OBJECTIVES ARE SELECTABLE, and that is the whole reason it reads as
+// a tree rather than a flat list: an action or a motion serves an objective and
+// nothing else, so a plan and a theme are there to LOCATE one. They are plain
+// headings, not buttons, and carry no role="option" — there is nothing to pick
+// by mistake, and a screen reader is read the objectives it can actually
+// choose from.
 export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIVE' }) {
   const rows = objectives || []
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const chosen = rows.find(o => o.id === value) || null
 
-  // Plan › Theme, in the order the objectives arrive (which is the club's own
-  // sort order), so a heading never jumps around between renders.
-  const groups = useMemo(() => {
+  // Plan → themes → objectives, built in the order the objectives arrive
+  // (which is the club's own sort order), so a branch never jumps around
+  // between renders.
+  //
+  // Keyed on plan_id and pillar_id, NOT on their names: two plans may
+  // legitimately be called the same thing, and grouping by name would draw
+  // one branch holding both plans' themes — the exact leak migration 275
+  // exists to prevent, reintroduced in a picker.
+  const tree = useMemo(() => {
     const needle = q.trim().toLowerCase()
-    const out = []
-    const byKey = {}
+    const plans = []
+    const planBy = {}
     for (const o of rows) {
       if (needle && !`${o.title} ${o.plan_name || ''} ${o.pillar_name || ''}`.toLowerCase().includes(needle)) continue
-      const key = `${o.plan_name || '~'}¦${o.pillar_name || '~'}`
-      if (!byKey[key]) { byKey[key] = { key, plan: o.plan_name, theme: o.pillar_name, rows: [] }; out.push(byKey[key]) }
-      byKey[key].rows.push(o)
+      const pk = String(o.plan_id ?? '~')
+      let plan = planBy[pk]
+      if (!plan) { plan = planBy[pk] = { key: pk, name: o.plan_name, themes: [], themeBy: {} }; plans.push(plan) }
+      const tk = String(o.pillar_id ?? '~')
+      let theme = plan.themeBy[tk]
+      if (!theme) { theme = plan.themeBy[tk] = { key: `${pk}¦${tk}`, name: o.pillar_name, rows: [] }; plan.themes.push(theme) }
+      theme.rows.push(o)
     }
-    return out
+    return plans
   }, [rows, q])
+  const anyMatch = tree.length > 0
 
   const pick = (id) => { onChange(id || null); setOpen(false); setQ('') }
 
@@ -960,25 +978,43 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
               className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface ${value ? 'text-pb-faint' : 'text-pb-text'}`}>
               — not on the plan —
             </button>
-            {groups.map(g => (
-              <div key={g.key}>
-                {/* The plan and the theme, once, over everything filed under
-                    them — instead of on the front of every single row. */}
-                <div className={`${cap} px-2.5 py-1 bg-pb-surface/70 border-y pb-hairline sticky top-0`}>
-                  {[g.plan || 'NOT ON A PLAN', g.theme || 'NO THEME'].join(' › ').toUpperCase()}
+            {/* Plan → theme → objective, indented. Only the OBJECTIVES are
+                buttons: an action or a motion can serve an objective and
+                nothing else, so a plan or a theme is a heading that locates
+                one, never something that can be picked by mistake. They carry
+                no role="option" either, so a screen reader reads the list as
+                the objectives it can actually choose from. */}
+            {tree.map((plan, i) => (
+              <div key={plan.key} role="group" aria-label={plan.name || 'Not on a plan'}
+                className={i > 0 ? 'border-t pb-hairline mt-1' : ''}>
+                <div className={`${cap} px-2.5 pt-2 pb-1 text-pb-dim`}>
+                  {(plan.name || 'NOT ON A PLAN').toUpperCase()}
                 </div>
-                {g.rows.map(o => (
-                  <button key={o.id} type="button" onClick={() => pick(o.id)} role="option"
-                    aria-selected={o.id === value}
-                    className={`w-full text-left px-2.5 py-1.5 text-[12.5px] leading-snug hover:bg-pb-surface ${o.id === value ? 'text-pb-text' : 'text-pb-dim'}`}
-                    style={o.id === value ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
-                    {o.id === value && <span style={{ color: 'var(--pb-accent-ink)' }}>✓ </span>}
-                    {o.title}
-                  </button>
+                {plan.themes.map(theme => (
+                  // A rail down each branch, in the same accent-mix the plan
+                  // screen's own nesting uses, so the indent reads as a tree
+                  // rather than as text that happens to start further in. The
+                  // step is slimmer than `Nested`'s: a long objective title
+                  // needs the reading width more than this panel needs depth.
+                  <div key={theme.key} role="group" aria-label={theme.name || 'No theme'}
+                    className="ml-2.5 pl-2 border-l-2" style={{ borderColor: LEVEL.objective.rail }}>
+                    <div className={`${cap} px-2.5 py-1 text-pb-faintest`}>
+                      {(theme.name || 'NO THEME').toUpperCase()}
+                    </div>
+                    {theme.rows.map(o => (
+                      <button key={o.id} type="button" onClick={() => pick(o.id)} role="option"
+                        aria-selected={o.id === value}
+                        className={`w-full text-left pl-5 pr-2.5 py-1.5 text-[12.5px] leading-snug hover:bg-pb-surface ${o.id === value ? 'text-pb-text' : 'text-pb-dim'}`}
+                        style={o.id === value ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
+                        {o.id === value && <span style={{ color: 'var(--pb-accent-ink)' }}>✓ </span>}
+                        {o.title}
+                      </button>
+                    ))}
+                  </div>
                 ))}
               </div>
             ))}
-            {groups.length === 0 && (
+            {!anyMatch && (
               <div className="px-2.5 py-3 font-mono text-[10px] text-pb-faintest">Nothing matches that.</div>
             )}
           </div>
