@@ -1222,21 +1222,13 @@ async def activity_report(session: AsyncSession, *, owner_user_id=None) -> dict:
     return {"rows": rows, "totals": {k: _finish(v) for k, v in totals.items()}}
 
 
-async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -> dict:
-    """Where every platform deal sits, per rep, plus an Unassigned row.
+async def _classified_deals(session: AsyncSession, *, owner_user_id=None):
+    """Every platform deal in scope, its stage COLUMN, and which are contacted.
 
-    Each stage cell carries BOTH figures: ``total`` (every deal in that
-    stage) and ``contacted`` (the ones the rep has actually reached out to —
-    call, follow-up or email). The two answer different questions and the
-    screen shows them together, so a stage full of clubs nobody has rung
-    reads differently from one that has been worked.
-
-    ``to_contact`` is the rep's backlog: assigned to them and NOT yet
-    contacted — i.e. how many are left before they need more clubs. On the
-    Unassigned row it is the pool waiting to be handed out.
-
-    Won/lost deals still count in their rep's row: that is the point of the
-    breakdown. Archived deals never do."""
+    The one place a deal is placed in a column, shared by the breakdown table
+    and by the drill-down behind each of its cells — a cell showing 14 and a
+    list of 13 clubs is exactly what a second copy of this would produce.
+    Returns ``(deals, {deal_id: column}, contacted_deal_ids)``."""
     pipeline = await crm_service.ensure_platform_pipeline(session)
     stage_by_id = {s.id: s for s in pipeline.stages}
 
@@ -1271,6 +1263,26 @@ async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -
             return "trial_expired" if days is not None and days < 0 else "trial_current"
         return _STAGE_KEY_TO_COLUMN.get(key, "other")
 
+    return deals, {d.id: _column(d) for d in deals}, contacted
+
+
+async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -> dict:
+    """Where every platform deal sits, per rep, plus an Unassigned row.
+
+    Each stage cell carries BOTH figures: ``total`` (every deal in that
+    stage) and ``contacted`` (the ones the rep has actually reached out to —
+    call, follow-up or email). The two answer different questions and the
+    screen shows them together, so a stage full of clubs nobody has rung
+    reads differently from one that has been worked.
+
+    ``to_contact`` is the rep's backlog: assigned to them and NOT yet
+    contacted — i.e. how many are left before they need more clubs. On the
+    Unassigned row it is the pool waiting to be handed out.
+
+    Won/lost deals still count in their rep's row: that is the point of the
+    breakdown. Archived deals never do."""
+    deals, column_of, contacted = await _classified_deals(session, owner_user_id=owner_user_id)
+
     def _blank_row() -> dict:
         return {"total": 0, "contacted": 0, "to_contact": 0,
                 "stages": {col: {"total": 0, "contacted": 0} for col, _ in STAGE_COLUMNS}}
@@ -1280,7 +1292,7 @@ async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -
     for d in deals:
         owner = d.owner_user_id
         row = by_owner.setdefault(owner, _blank_row())
-        col = _column(d)
+        col = column_of[d.id]
         was_contacted = d.id in contacted
         for bucket in (row, totals):
             bucket["total"] += 1
@@ -1321,6 +1333,115 @@ async def stage_breakdown_by_rep(session: AsyncSession, *, owner_user_id=None) -
         if col != "other" or totals["stages"][col]["total"] > 0
     ]
     return {"rows": rows, "totals": totals, "stage_columns": drawn}
+
+
+# ─── Drill-down: the clubs behind one cell ───────────────────────────────────
+# Every figure on the Performance screen is clickable, and each of these
+# answers ONE cell by re-running the very predicates that produced it
+# (_classified_deals for the pipeline table, _contact_kind + report_windows
+# for the activity one) rather than a second query shaped like it. A cell and
+# its list disagreeing is the whole failure mode this shape prevents.
+
+ACTIVITY_METRICS = ("contacts", "calls", "emails", "clubs_contacted")
+EVERYONE_KEY = "everyone"
+ALL_OWNERS_KEY = "all"
+
+
+def _club_row(deal, club, *, count: Optional[int] = None) -> dict:
+    """One line in a drill-down list. `deal_id` is what the Sales Workspace's
+    own ?club= deep link takes, so a row can open the club it names."""
+    row = {
+        "deal_id": str(deal.id),
+        "club_name": (club.name if club else None) or deal.title or "Untitled",
+        "state": club.state if club else None,
+        "engagement_score": club.engagement_score if club else None,
+        "owner_user_id": str(deal.owner_user_id) if deal.owner_user_id else None,
+    }
+    if count is not None:
+        row["count"] = count
+    return row
+
+
+async def activity_cell_clubs(session: AsyncSession, *, user_id, window: str,
+                              metric: str, owner_user_id=None) -> dict:
+    """The clubs behind one Contact activity cell.
+
+    `user_id` is a rep's id, or EVERYONE_KEY for the totals row. `window` is
+    'today' or 'week'; `metric` is one of ACTIVITY_METRICS.
+
+    A count and a club list are NOT the same length for three of the four
+    metrics — 24 contacts can be 10 clubs — so each row carries its own
+    `count` and the payload reports `total` alongside `club_count`. Only
+    `clubs_contacted` has one row per unit."""
+    if metric not in ACTIVITY_METRICS:
+        raise ValueError(f"unknown metric {metric!r}")
+    if window not in ("today", "week"):
+        raise ValueError(f"unknown window {window!r}")
+    start = report_windows()[window]
+
+    stmt = select(CrmActivity).where(CrmActivity.occurred_at >= start, _IS_CONTACT_ROW)
+    if owner_user_id is not None:
+        stmt = stmt.where(CrmActivity.created_by_user_id == owner_user_id)
+    elif user_id != EVERYONE_KEY:
+        stmt = stmt.where(CrmActivity.created_by_user_id == user_id)
+    activities = (await session.execute(stmt)).scalars().all()
+
+    per_deal: dict = {}
+    total = 0
+    for a in activities:
+        kind = _contact_kind(a)
+        if kind is None or a.deal_id is None:
+            continue
+        # 'clubs_contacted' counts each club once however many times it was
+        # rung, which is exactly one row per club here.
+        if metric == "calls" and kind != "call":
+            continue
+        if metric == "emails" and kind != "email":
+            continue
+        per_deal[a.deal_id] = per_deal.get(a.deal_id, 0) + 1
+        total += 1
+    if metric == "clubs_contacted":
+        total = len(per_deal)
+        per_deal = {k: 1 for k in per_deal}
+
+    deals = (await session.execute(
+        select(CrmDeal).where(CrmDeal.id.in_(per_deal.keys()))
+    )).scalars().all() if per_deal else []
+    club_by_id = await crm_service.clubs_by_ids(session, (d.marketing_club_id for d in deals))
+    rows = [_club_row(d, club_by_id.get(d.marketing_club_id), count=per_deal[d.id]) for d in deals]
+    rows.sort(key=lambda r: (-r["count"], r["club_name"].lower()))
+    return {"clubs": rows, "total": total, "club_count": len(rows)}
+
+
+async def pipeline_cell_clubs(session: AsyncSession, *, owner: str, cell: str,
+                              contacted_only: bool = False, owner_user_id=None) -> dict:
+    """The clubs behind one cell of the stage breakdown.
+
+    `owner` is a rep's id, UNASSIGNED_KEY, or ALL_OWNERS_KEY for the totals
+    row. `cell` is 'to_contact' or a stage column key; `contacted_only` picks
+    the bracketed figure rather than the stage total. Every one of these is
+    one row per club, so the list length always equals the number clicked."""
+    deals, column_of, contacted = await _classified_deals(session, owner_user_id=owner_user_id)
+
+    if owner == UNASSIGNED_KEY:
+        deals = [d for d in deals if d.owner_user_id is None]
+    elif owner != ALL_OWNERS_KEY:
+        deals = [d for d in deals if str(d.owner_user_id) == str(owner)]
+
+    if cell == "to_contact":
+        deals = [d for d in deals if d.id not in contacted]
+    else:
+        if cell not in {c for c, _ in STAGE_COLUMNS}:
+            raise ValueError(f"unknown cell {cell!r}")
+        deals = [d for d in deals if column_of[d.id] == cell]
+        if contacted_only:
+            deals = [d for d in deals if d.id in contacted]
+
+    club_by_id = await crm_service.clubs_by_ids(session, (d.marketing_club_id for d in deals))
+    rows = [_club_row(d, club_by_id.get(d.marketing_club_id)) for d in deals]
+    rows.sort(key=lambda r: r["club_name"].lower())
+    return {"clubs": rows, "total": len(rows), "club_count": len(rows)}
+
 
 # ─── Sales Lists (migration 257) ─────────────────────────────────────────────
 # A thin provenance/import layer, not a parallel data model. Assignment still

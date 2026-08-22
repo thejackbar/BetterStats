@@ -1,5 +1,46 @@
 # BetterStats — Claude Session Notes
 
+## Every figure on Sales Performance opens its clubs (v9.48.2, Aug 2026)
+
+Asked for directly: make every number in both tables clickable and list the
+clubs behind it, and rename the pipeline card.
+
+- **A CELL AND ITS LIST ARE COMPUTED BY THE SAME CODE, and that is the whole
+  design.** `_classified_deals` was extracted out of `stage_breakdown_by_rep`
+  and is what both the table and `pipeline_cell_clubs` read, so a deal cannot
+  land in one column for the count and another for the list.
+  `activity_cell_clubs` re-runs `_contact_kind` + `report_windows` for the same
+  reason. A second query shaped like the first is how a cell reading 14 opens
+  13 clubs.
+- **The verification walks EVERY cell of both tables**, not a sample — each
+  rep, the totals row, every stage column, both the total and the bracketed
+  figure, both windows, all four metrics. One disagreeing cell is the bug, so
+  a sample would not have been evidence.
+- **Three of the four activity metrics count ACTIVITY, not clubs**, so 24
+  contacts is legitimately 10 clubs. Those payloads carry `total` AND
+  `club_count`, each row carries its own `count`, and the panel says both.
+  `clubs_contacted` is the one metric where the list length is the number.
+- **The pin is applied SERVER-SIDE from the actor, never read off the params.**
+  The cell's identity (whose row, which column) arrives from a browser, so a
+  'sales' caller asking for `owner=all` still gets only their own — the same
+  rule the queue list already follows.
+- **A zero is not a button.** There is nothing behind it, and a table this
+  wide stays readable when only the live figures are underlined.
+- **One drill-down at a time, rendered under its own card** rather than in a
+  dialog: the cell stays on screen, so a run of cells can be compared without
+  reopening anything, and clicking a pipeline cell closes an activity one.
+- **A row links to `?club=<deal_id>`**, the deep link the Sales Workspace
+  already takes, so the list hands off to the drawer rather than being a
+  dead end.
+- **Verified against a real Postgres** (73 checks, the 58 before plus the
+  every-cell walk both ways, a contacts cell reporting total and club_count
+  separately, the pool drilling down to unowned clubs only, a pinned rep
+  never seeing another rep's, and three refusals) and **driven in Chromium**
+  (34: the exact params on the wire for a stage total, its bracketed twin,
+  the totals row and an activity cell, the panel's heading and rows, only one
+  list open at a time, the deep link, a zero opening nothing, the measured
+  click affordance, no page errors, no overflow at 390px).
+
 ## Sales Performance: where the clubs sit, and who actually rang them (v9.47.1, Aug 2026)
 
 Asked for off `/admin/super/crm/performance`: unassigned deals per stage, an
