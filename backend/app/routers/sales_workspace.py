@@ -801,10 +801,11 @@ class CallLogBody(BaseModel):
     outcome: str
     notes: Optional[str] = None
     next_follow_up_at: Optional[datetime] = None
-    # Only meaningful (and only honoured — see sw.log_call) for the three
-    # outcomes in sw._ASSIGNABLE_EVENT_OUTCOMES: who the resulting follow-up
-    # Event should be owned by, instead of whoever logged the call. Must be
-    # one of the staff GET /staff returns (validated below).
+    # Only meaningful when next_follow_up_at is also set on an event-worthy
+    # outcome (see sw._EVENT_WORTHY_OUTCOMES / sw.log_call): who the resulting
+    # follow-up Event should be owned by, instead of whoever logged the call.
+    # Must be one of the staff GET /staff returns (validated below) — blank
+    # means "me", i.e. whoever is logging the call.
     event_owner_user_id: Optional[str] = None
 
 
@@ -815,11 +816,11 @@ async def call_outcomes(_: SalesActor = Depends(require_sales_or_super)):
 
 @router.get("/staff")
 async def staff(_: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
-    """Super-admin staff a follow-up event can be handed to (the "speak to
-    someone about pricing/info/a demo" outcomes) — open to a 'sales' caller
-    too, unlike /team (the sales-rep bulk-assign picker, super-admin only),
-    since this is who a REP hands a call off to, not who a manager assigns
-    deals to."""
+    """Super-admin staff a follow-up event can be handed to, whenever a rep
+    sets a follow-up date on an event-worthy call outcome — open to a 'sales'
+    caller too, unlike /team (the sales-rep bulk-assign picker, super-admin
+    only), since this is who a REP hands a follow-up off to, not who a
+    manager assigns deals to."""
     rows = (await db.execute(
         select(User, ClubMembership)
         .join(ClubMembership, ClubMembership.user_id == User.id)
@@ -830,6 +831,17 @@ async def staff(_: SalesActor = Depends(require_sales_or_super), db: AsyncSessio
         {"id": str(u.id), "username": u.username, "display_name": u.display_name}
         for u, _m in rows
     ]}
+
+
+@router.get("/event-owners")
+async def event_owners(_: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
+    """Every super admin AND sales rep who can be responsible for a follow-up
+    Event — the roster for the Events tab's "Responsible" filter, open to
+    both roles (unlike /club-admin/super/crm/owners, the same underlying
+    list but gated super-admin-only for the Sales Pipeline screen). Reuses
+    crm_service.list_platform_owners rather than re-deriving the roster, so
+    the two screens' filters can never disagree about who "everyone" is."""
+    return {"owners": await crm_service.list_platform_owners(db)}
 
 
 @router.post("/clubs/{deal_id}/calls")

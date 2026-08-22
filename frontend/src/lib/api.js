@@ -2140,6 +2140,7 @@ export const api = {
   },
   salesWorkspaceTeam: () => request('/club-admin/sales-workspace/team'),
   salesWorkspaceStaff: () => request('/club-admin/sales-workspace/staff'),
+  salesWorkspaceEventOwners: () => request('/club-admin/sales-workspace/event-owners'),
   salesWorkspacePerformance: (ownerUserId) => {
     const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
     return request(`/club-admin/sales-workspace/performance${qs}`)

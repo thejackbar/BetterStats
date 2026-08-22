@@ -112,13 +112,6 @@ _EVENT_WORTHY_OUTCOMES = (
     "referred_to_other", "requested_information",
 )
 
-# Outcomes worth handing to a named staff member instead of the caller
-# themselves — these three specifically ask to speak with "someone" (pricing,
-# more info, a demo), which in practice means a senior staff member picking
-# it up, not necessarily the rep who happened to answer the phone. The other
-# six event-worthy outcomes always stay owned by whoever logged the call.
-_ASSIGNABLE_EVENT_OUTCOMES = ("wants_pricing", "wants_more_info", "wants_demo")
-
 # Default event note per outcome when the call itself carried no free-text
 # notes — {name} is the followed-up contact's name, filled in at creation.
 _FOLLOW_UP_NOTE_TEMPLATES = {
@@ -483,18 +476,16 @@ async def log_call(
     # follow-up date was actually set and the outcome is one worth acting on
     # (see _EVENT_WORTHY_OUTCOMES). Owned by whoever logged the call by
     # default — that's the person who knows the context and should see it on
-    # their own calendar — EXCEPT the three outcomes that specifically ask to
-    # speak with "someone" (_ASSIGNABLE_EVENT_OUTCOMES), where the caller may
-    # hand it to a named staff member instead; event_owner_user_id is only
-    # ever honoured for those three, so a stray value on any other outcome
-    # can't quietly reroute a follow-up away from the rep who owns it.
+    # their own calendar — but the rep may hand it to any named staff member
+    # instead (event_owner_user_id), for any event-worthy outcome, not just a
+    # chosen few: "who's responsible for following this up" is the rep's call
+    # to make every time they set a follow-up date, not something this
+    # function should second-guess based on why the call happened.
     if next_follow_up_at is not None and outcome in _EVENT_WORTHY_OUTCOMES:
         contact_name = person.full_name if person else "the contact"
         template = _FOLLOW_UP_NOTE_TEMPLATES.get(outcome, "Follow up with {name}.")
         event_body = (notes or "").strip() or template.format(name=contact_name)
-        event_owner = created_by_user_id
-        if outcome in _ASSIGNABLE_EVENT_OUTCOMES and event_owner_user_id:
-            event_owner = event_owner_user_id
+        event_owner = event_owner_user_id or created_by_user_id
         await crm_service.create_event(
             session, deal_id=deal.id, marketing_club_id=deal.marketing_club_id,
             contact_person_id=person.id if person else None,

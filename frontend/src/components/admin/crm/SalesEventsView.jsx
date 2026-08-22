@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
-import { Modal, Field, TextInput, TextArea, Select, Btn } from './ui'
+import { Modal, Field, TextInput, TextArea, Select, Btn, MultiSelect, ownerFilterGroups, ownerMatches } from './ui'
 import DateTimePicker from './DateTimePicker'
 import {
   EVENT_TYPE_OPTIONS, ALERT_OPTIONS, isoToLocalInput, localInputToIso,
@@ -188,7 +188,7 @@ function SalesEventModal({ open, onClose, dealOptions, staffOptions, event, seed
   )
 }
 
-export default function SalesEventsView({ dealOptions, staffOptions }) {
+export default function SalesEventsView({ dealOptions, staffOptions, ownerOptions }) {
   const toast = useToast()
   const [allEvents, setAllEvents] = useState([])
   const [loading, setLoading] = useState(true)
@@ -196,8 +196,10 @@ export default function SalesEventsView({ dealOptions, staffOptions }) {
   const [calMode, setCalMode] = useState('month')
   const [cursor, setCursor] = useState(() => new Date())
 
+  const owners = useMemo(() => ownerOptions || [], [ownerOptions])
   const [q, setQ] = useState('')
   const [clubId, setClubId] = useState('')
+  const [ownerIds, setOwnerIds] = useState([])
   const [date, setDate] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -225,13 +227,14 @@ export default function SalesEventsView({ dealOptions, staffOptions }) {
     const needle = q.trim().toLowerCase()
     return allEvents.filter(e => {
       if (clubId && e.marketing_club_id !== clubId) return false
+      if (!ownerMatches(ownerIds, owners, e.owner_user_id)) return false
       if (needle) {
         const hay = [e.title, e.marketing_club_name, e.deal_title, e.contact_name, e.body].filter(Boolean).join(' ').toLowerCase()
         if (!hay.includes(needle)) return false
       }
       return true
     })
-  }, [allEvents, q, clubId])
+  }, [allEvents, q, clubId, ownerIds, owners])
 
   const listEvents = useMemo(() => baseFiltered.filter(e => {
     const d = new Date(e.starts_at)
@@ -296,6 +299,12 @@ export default function SalesEventsView({ dealOptions, staffOptions }) {
             {clubOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
           </Select>
         </Field>
+        {owners.length > 0 && (
+          <Field label="Responsible" width="170px" composite>
+            <MultiSelect value={ownerIds} onChange={setOwnerIds} allLabel="Anyone"
+              groups={ownerFilterGroups(owners)} />
+          </Field>
+        )}
         {view === 'list' && (
           <>
             <Field label="On date" width="150px">
@@ -309,8 +318,8 @@ export default function SalesEventsView({ dealOptions, staffOptions }) {
             </Field>
           </>
         )}
-        {(q || clubId || date || dateFrom || dateTo) && (
-          <Btn variant="ghost" sm onClick={() => { setQ(''); setClubId(''); setDate(''); setDateFrom(''); setDateTo('') }}>
+        {(q || clubId || ownerIds.length > 0 || date || dateFrom || dateTo) && (
+          <Btn variant="ghost" sm onClick={() => { setQ(''); setClubId(''); setOwnerIds([]); setDate(''); setDateFrom(''); setDateTo('') }}>
             Clear filters
           </Btn>
         )}

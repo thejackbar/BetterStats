@@ -13,11 +13,16 @@ import { groupedOutcomes, outcomeLabel, isGeneralOutcome } from '../../lib/sales
 
 const CARD = 'pb-card p-3'
 
-// Mirrors services/sales_workspace.py's _ASSIGNABLE_EVENT_OUTCOMES — these
-// three specifically ask to speak with "someone" about pricing/info/a demo,
-// so the resulting follow-up Event can be handed to a named staff member
-// instead of defaulting to whoever logged the call.
-const ASSIGNABLE_EVENT_OUTCOMES = ['wants_pricing', 'wants_more_info', 'wants_demo']
+// Mirrors services/sales_workspace.py's _EVENT_WORTHY_OUTCOMES — any outcome
+// worth a real calendar reminder can have its follow-up Event handed to a
+// named staff member instead of defaulting to whoever logged the call; the
+// rep picks "who's responsible" every time they set a follow-up date, not
+// just for a chosen few outcomes.
+const ASSIGNABLE_EVENT_OUTCOMES = [
+  'wants_to_subscribe', 'interested', 'wants_more_info', 'wants_trial', 'wants_trial_extension',
+  'wants_demo', 'wants_pricing', 'wants_committee_discussion', 'asked_callback',
+  'referred_to_other', 'requested_information',
+]
 
 // Call status — everything the queue's own filter can ask about a club,
 // mirroring services/sales_workspace.py's CALL_STATUS_KEYS.
@@ -835,6 +840,7 @@ export default function SalesWorkspace() {
   const attributedOptions = useMemo(
     () => [{ key: 'unassigned', name: 'Unattributed' }, ...repOptions], [repOptions])
   const [staff, setStaff] = useState([])
+  const [eventOwners, setEventOwners] = useState([])
   const [loadingList, setLoadingList] = useState(true)
   // Call status is restored from the user's account before the queue is
   // fetched at all; lastSavedCallStatusRef holds what the server already has,
@@ -1136,6 +1142,7 @@ export default function SalesWorkspace() {
   // super-admin-only assignment tool.
   useEffect(() => {
     api.salesWorkspaceStaff().then((d) => setStaff(d.staff || [])).catch(() => {})
+    api.salesWorkspaceEventOwners().then((d) => setEventOwners(d.owners || [])).catch(() => {})
   }, [])
 
   const loadDrawer = useCallback((dealId) => {
@@ -1510,7 +1517,7 @@ export default function SalesWorkspace() {
       </div>
 
       {tab === 'events' ? (
-        <SalesEventsView dealOptions={dealOptions} staffOptions={staff} />
+        <SalesEventsView dealOptions={dealOptions} staffOptions={staff} ownerOptions={eventOwners} />
       ) : (
       <>
       {filters.list_id && (
