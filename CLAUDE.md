@@ -236,6 +236,39 @@ Workspace opened on a different club.
   single non-Stats module allowed, the message shown), and the Postgres
   interest suite is 29.
 
+### Empty $0 wins, and a Trial deal listed as won (v9.49.9)
+
+Both reported off the "Unattributed — deals won" drill-down: three deals for
+one club, two with no modules at $0, and a row whose Stage column read Trial.
+
+- **A WIN HAS TO BE FOR SOMETHING.** `sync_platform_deal_for_club` looks for an
+  OPEN deal and creates one when there is none — so a `subscription_won` firing
+  that resolved NO modules (`_org_billable_module_keys` returns `[]` for a club
+  holding nothing billable at that moment) filed a $0 win, and every later
+  firing found no open deal either and filed another. Reproduced exactly: one
+  real $998 win plus two empty ones. It now hands back the club's most recent
+  deal instead of minting an empty one — callers still get a real deal, so
+  nothing that uses the return value breaks. Only guarded on a WON target
+  stage: a module-less deal at Target is an ordinary prospect nobody has
+  qualified yet, and several callers deliberately create one.
+- **WON-NESS COMES FROM THE STAGE, NOT `status`.** `move_stage`, `close_deal`
+  and `create_deal` all derive `status` FROM the stage, so the two normally
+  agree and no current writer can separate them — but the live data has rows
+  where they disagree, and the drill-down showed a Trial row under "deals won",
+  a contradiction the reader cannot resolve. `sales_commissions.deal_state`
+  reads the stage's own `is_won`/`is_lost`, falling back to `status` only when
+  the stage cannot be resolved at all. A deal not sitting in Won therefore
+  earns no commission, which is the conservative direction — nothing is claimed
+  for a deal the board does not show as won.
+- **Where those rows came from is NOT established**, and the fix deliberately
+  does not paper over it: they are simply no longer counted. Every current path
+  was ruled out by reading it, so they predate something (the Twenty import, or
+  hand-written SQL). A query to inspect them is in the session notes below.
+- **Verified**: the Postgres suite is 91 checks (the 86 before plus the corrupt
+  shape built by hand and asserted absent from the won figures, present in the
+  open ones, and never showing a Trial row under won), and the empty-win repro
+  collapses three deals to the one real win.
+
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,

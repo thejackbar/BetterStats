@@ -2166,6 +2166,23 @@ async def sync_platform_deal_for_club(session: AsyncSession, club: MarketingClub
     value_cents = int(round(price_for(keys)["total"] * 100)) if keys else 0
 
     if existing is None:
+        # A WIN has to be for something. With no modules resolved there is
+        # nothing to record — the club bought nothing we can name and the
+        # price is 0 — so minting a deal here would file a $0 "win" against
+        # the club and, because every later firing finds no OPEN deal either,
+        # another one each time. Reported live as three deals for one club,
+        # two of them empty. The club's own most recent deal is handed back
+        # instead, so callers still get a real deal to work with.
+        if target_stage.is_won and not keys:
+            recent = (await session.execute(
+                select(CrmDeal).where(
+                    CrmDeal.pipeline_id == pipeline.id,
+                    CrmDeal.marketing_club_id == club.id,
+                    CrmDeal.archived_at.is_(None),
+                ).order_by(CrmDeal.created_at.desc())
+            )).scalars().first()
+            if recent is not None:
+                return recent
         # Repeat business: the club's own earlier deal is closed, so this is a
         # brand-new one — and on an upsell it is created straight into Won by
         # the payment itself, with nobody having had the chance to earn it.

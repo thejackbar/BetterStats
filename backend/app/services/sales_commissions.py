@@ -182,6 +182,23 @@ async def _stage_by_id(session: AsyncSession) -> dict:
     return {s.id: s for s in pipeline.stages}
 
 
+def deal_state(deal: CrmDeal, stage) -> str:
+    """'won' | 'lost' | 'open', taken from the STAGE the deal is sitting in.
+
+    ``crm_deals.status`` is derived FROM the stage everywhere it is written
+    (``move_stage``, ``close_deal``, ``create_deal``), so the two normally
+    agree. Where they don't, the stage is the one a reader sees — on the
+    pipeline board and in this very table — and a deal listed under "deals
+    won" has to be one that is actually sitting in Won. Reported live: a deal
+    showing Stage "Trial" appearing in a won list, which is a contradiction
+    the reader cannot resolve. Falling back to ``status`` only when the stage
+    can't be resolved at all keeps a deal on some pipeline other than the
+    platform one from vanishing entirely."""
+    if stage is not None:
+        return "won" if stage.is_won else "lost" if stage.is_lost else "open"
+    return deal.status
+
+
 def _blank_row() -> dict:
     return {
         "clubs_attributed": 0,
@@ -277,12 +294,14 @@ async def commission_report(session: AsyncSession, *, rep_user_id=None) -> dict:
         clubs_seen[key].add(str(d.marketing_club_id or d.id))
 
         value = crm_service.effective_value_cents(d)
-        if d.status == "open":
-            prob = crm_service.effective_probability(d, stage_by_id.get(d.stage_id)) or 0
+        stage = stage_by_id.get(d.stage_id)
+        state = deal_state(d, stage)
+        if state == "open":
+            prob = crm_service.effective_probability(d, stage) or 0
             row["open_deals"] += 1
             row["pipeline_value_cents"] += value
             row["weighted_pipeline_value_cents"] += round(value * prob / 100)
-        elif d.status == "won":
+        elif state == "won":
             # The rate stamped at the win, else the rep's current one for a
             # deal won before that column existed.
             won_rate = Decimal(d.commission_rate_percent) if d.commission_rate_percent is not None else live_rate
@@ -383,7 +402,9 @@ async def period_summary(session: AsyncSession, *, period_type: str = "quarter",
     by_account = _entry_of_account(entries)
     rates = await load_rates(session)
     deals = await _attributed_deals(session)
-    won = [d for d in deals if d.status == "won" and d.closed_at is not None]
+    stage_by_id = await _stage_by_id(session)
+    won = [d for d in deals
+           if deal_state(d, stage_by_id.get(d.stage_id)) == "won" and d.closed_at is not None]
 
     pinned_ids = None
     if rep_user_id is not None:
@@ -548,7 +569,7 @@ async def rep_deals(session: AsyncSession, *, rep_user_id: str, status: str = "o
         return account is None if wanted is None else account in wanted
 
     deals = [d for d in await _attributed_deals(session)
-             if d.status == status and _mine(d)]
+             if deal_state(d, stage_by_id.get(d.stage_id)) == status and _mine(d)]
 
     club_by_id = await crm_service.clubs_by_ids(session, (d.marketing_club_id for d in deals))
     out = []
