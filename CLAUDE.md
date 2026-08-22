@@ -999,6 +999,44 @@ as sections with their own buttons rather than three tabs and a manage page.
   be by now, and is the money keeping pace with it. **No backend change** —
   `plan_report` already carries `start_date`, `due_date`, `percent_complete`,
   `budget_estimate` and `actual_expenditure` on every action.
+- **IT IS A DASHBOARD, NOT A DUMP, AND THE FIRST CUT WAS THE DUMP (v9.50.2).**
+  Reported as unreadable, and the cause is worth keeping: `DeliveryRow` was
+  used at every level SO THAT a reader could compare like with like. That is
+  right for analysis and wrong for scanning, and a committee scans first — the
+  uniformity was the bug. The order is now plan figures → what needs attention
+  → a row per theme, with objectives inside an opened theme and the work inside
+  an opened objective. **Progressive disclosure, not more screens.**
+- **THE OBJECTIVE IS THE UNIT.** An objective is what the committee committed
+  to; an action is how. Actions and motions sit behind `View details`, so the
+  page opens as a plan rather than as everything filed against one.
+- **NO SINGLE VERDICT AT PLAN LEVEL, deliberately.** `rollUp` takes the worst
+  of what is underneath, which is right for a theme and wrong for a plan: one
+  overdue action would brand a sixteen-objective plan LATE forever. The
+  headline is a PROPORTION (`n/m objectives on track`) plus a count of what
+  needs attention.
+- **The plan is summarised ONCE.** `PlanFigures` is rendered by the plan pane
+  INSIDE its title card. The first cut left the card's old four tiles in place
+  and put the delivery figures in a second card directly underneath — the same
+  numbers twice, printing 44% and 45% for one plan an inch apart because each
+  side worked it out its own way. Delivered/budget/spent come from the PLAN ROW
+  the backend already rolled up; only the counts are derived here.
+- **`NO DATES` was a chip and is now muted metadata**, which is what the
+  silence rule always meant — the first cut rendered "we cannot say" as a badge
+  competing with the real verdicts. `not_started` is a real state and covers
+  what the badge was being used for.
+- **Every state is a GLYPH and a WORD** (`✓ DONE`, `● BEHIND`, `○ NOT
+  STARTED`), including in the attention list, where BEHIND and LATE share the ●
+  and would otherwise be told apart by colour alone.
+- **The variance is written out on the scanning surfaces** (`18% behind`,
+  `spending ahead`) and the target TICK survives only on the action detail. A
+  mark needs a key; the first cut had to print a paragraph explaining it over
+  the whole dashboard. One level in, the reader has chosen to look closely and
+  a tooltip carries it.
+- **The rail folds away rather than becoming its own tab.** The tree and the
+  dashboard want the same width, and while a plan is open the tree is redundant
+  navigation. Splitting them onto `Overview | Plan Structure | Timeline |
+  Budget` would recreate exactly the pick-between-three-views-of-one-thing the
+  Strategic Plans / Themes / Objectives row was removed for.
 - **The form is a METER WITH A TARGET TICK, and the gap between them is the
   whole reading.** The fill is where the work got to; the tick is where it
   should be — on SCHEDULE the share of the action's own span that has passed,
