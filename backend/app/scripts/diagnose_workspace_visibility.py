@@ -14,8 +14,13 @@ of gate, reported separately because they need different fixes:
 
 Read-only. Makes no writes.
 
-Usage from the backend container (name match is case-insensitive substring):
-  docker exec -e PYTHONPATH=/app betterstats-backend \\
+Usage on the server (name match is case-insensitive substring). Run it through
+`docker compose` from /srv/docker with the project name set, per the repo's own
+deploy rules — a bare `docker exec` falls outside the pinned project:
+
+  cd /srv/docker
+  export COMPOSE_PROJECT_NAME=bltbox_docker_app
+  docker compose exec -e PYTHONPATH=/app betterstats-backend \\
     python -m app.scripts.diagnose_workspace_visibility "caboolture"
 """
 import asyncio
