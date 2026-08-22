@@ -1082,16 +1082,19 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
   const [busy, setBusy] = useState(false)
 
   async function submit() {
-    if (!form.title.trim()) return
+    // An objective belongs to a theme, and its plan comes from that theme
+    // (migration 276), so both have to be picked before there is anywhere to
+    // put it. The server refuses one without them either way.
+    if (!form.title.trim() || !form.plan_id || !form.pillar_id) return
     setBusy(true)
     try {
       await onSave({
         title: form.title.trim(),
         description: form.description.trim() || null,
-        // Every one of these is nullable and the API reads an explicit null as
-        // "clear it", so anything set here can be taken off again.
-        plan_id: form.plan_id || null,
-        pillar_id: form.pillar_id || null,
+        plan_id: form.plan_id,
+        pillar_id: form.pillar_id,
+        // The rest are nullable and the API reads an explicit null as "clear
+        // it", so anything set here can be taken off again.
         due_date: form.due_date || null,
         // One owner, not two: a seat OR a person, never both half-set.
         owner_position_id: ownerMode === 'position' ? (form.owner_position_id || null) : null,
@@ -1118,7 +1121,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <span className={`${cap} block mb-1`}>STRATEGIC PLAN</span>
           <select className={inp} value={form.plan_id}
             onChange={e => setForm(f => ({ ...f, plan_id: e.target.value, pillar_id: '' }))}>
-            <option value="">— not on a plan —</option>
+            <option value="">— pick a plan —</option>
             {(plans || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
@@ -1130,7 +1133,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <select className={inp} value={form.pillar_id}
             onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}
             disabled={!form.plan_id}>
-            <option value="">{form.plan_id ? '— no theme —' : '— pick a plan first —'}</option>
+            <option value="">{form.plan_id ? '— pick a theme —' : '— pick a plan first —'}</option>
             {(pillars || []).filter(p => p.plan_id === form.plan_id)
               .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -1170,7 +1173,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
         </label>
       </div>
       <div className="flex gap-2">
-        <button onClick={submit} disabled={busy || !form.title.trim()}
+        <button onClick={submit} disabled={busy || !form.title.trim() || !form.plan_id || !form.pillar_id}
           className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40"
           style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>
           {busy ? 'SAVING…' : objective ? 'SAVE OBJECTIVE' : '+ OBJECTIVE'}
@@ -1534,11 +1537,10 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   }, [])
 
   const plans = report.plans || []
-  const unassigned = report.unassigned || { objective_list: [] }
-  // "Not on a plan" is a group in the tree like any other, so an objective that
-  // has lost its plan is still reachable rather than invisible.
-  const groups = [...plans, ...((unassigned.objective_list || []).length
-    ? [{ id: '', name: 'Not on a plan', ...unassigned }] : [])]
+  // Every objective is on a plan and under a theme (migration 276), so there
+  // is no "Not on a plan" group and no "No theme" bucket — neither state can
+  // exist. The tree is exactly plan → theme → objective.
+  const groups = plans
 
   // Open the first plan and select it, once, when the tree first has one.
   useEffect(() => {
@@ -1556,9 +1558,6 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   const select = (kind, id, extra = {}) => setSel({ kind, id, ...extra })
   const isSel = (kind, id) => sel?.kind === kind && sel?.id === id
 
-  // Themes present in one plan, in the club's own pillar order, anything
-  // untagged last. A theme with no objective in this plan is not drawn here —
-  // it belongs to the club, not to this plan.
   const allObjectives = groups.flatMap(g => g.objective_list || [])
 
   // A theme belongs to ONE plan (migration 275), so a plan's themes are simply
@@ -1573,20 +1572,10 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   // between one plan's hierarchy and another's.
   const themesIn = (plan) => {
     const objs = plan.objective_list || []
-    const mine = pillars.filter(p => p.plan_id === plan.id)
-    const out = mine.map(p => ({
-      id: p.id, name: p.name,
-      rows: objs.filter(o => o.pillar_id === p.id),
-    }))
-    const loose = objs.filter(o => !o.pillar_id || !mine.some(p => p.id === o.pillar_id))
-    if (loose.length) out.push({ id: '', name: 'No theme', rows: loose })
-    return out
+    return pillars
+      .filter(p => p.plan_id === plan.id)
+      .map(p => ({ id: p.id, name: p.name, rows: objs.filter(o => o.pillar_id === p.id) }))
   }
-
-  // Themes migration 275 could not attribute — none of their objectives named
-  // a plan when it ran. Drawn once, at the foot of the tree, so they can be
-  // moved onto a plan or deleted rather than being invisible.
-  const orphanThemes = pillars.filter(p => !p.plan_id)
 
   const objectiveById = id => allObjectives.find(o => o.id === id)
   const workById = (kind, id) => {
@@ -1621,7 +1610,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       + `\n\nIts themes go with it too — a theme belongs to one plan.\n\nThis cannot be undone.`
     if (!window.confirm(msg)) return
     try {
-      await api.committeeDeletePlan(plan.id, true)
+      await api.committeeDeletePlan(plan.id)
       setSel(null)
       onChanged()
     } catch (e) { toast.error(e.message) }
@@ -1640,7 +1629,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       + `\n\nThis cannot be undone.`
     if (!window.confirm(msg)) return
     try {
-      await api.committeeDeletePillar(pillarId, true)
+      await api.committeeDeletePillar(pillarId)
       setSel(null)
       onChanged()
     } catch (e) { toast.error(e.message) }
@@ -1833,21 +1822,21 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               return (
                 <div key={tk} className="ml-3">
                   <div className={`${TREE_ROW} ${isSel('theme', th.id) ? 'bg-pb-surface2' : ''}`}
-                    {...(th.id ? dragProps('theme', th.id, `themes:${plan.id}`) : {})}
-                    title={th.id ? 'Drag to reorder' : undefined}
+                    {...dragProps('theme', th.id, `themes:${plan.id}`)}
+                    title="Drag to reorder"
                     style={{
                       ...(isSel('theme', th.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : {}),
-                      ...(th.id ? dragStyle('theme', th.id) : {}),
+                      ...dragStyle('theme', th.id),
                     }}>
                     <button onClick={() => toggle(tk)} aria-label={isOpen(tk) ? 'Collapse' : 'Expand'}
                       className="shrink-0"><Twisty open={isOpen(tk)} /></button>
-                    <button onClick={() => th.id && select('theme', th.id, { planId: plan.id })}
-                      className="min-w-0 flex-1 text-left" disabled={!th.id}>
-                      <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={!th.id || th.rows.length === 0}>
+                    <button onClick={() => select('theme', th.id, { planId: plan.id })}
+                      className="min-w-0 flex-1 text-left">
+                      <TreeLabel kind="THEME" active={isSel('theme', th.id)} dim={th.rows.length === 0}>
                         {th.name}
                       </TreeLabel>
                     </button>
-                    {th.id && <DelDot onClick={() => removeTheme(th.id, th.name)} title={`Delete ${th.name}`} />}
+                    <DelDot onClick={() => removeTheme(th.id, th.name)} title={`Delete ${th.name}`} />
                   </div>
 
                   {isOpen(tk) && th.rows.map(o => {
@@ -1895,24 +1884,6 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       {groups.length === 0 && (
         <div className="text-pb-faint text-[13px] px-1.5 py-3 leading-relaxed">
           No plans written down yet.
-        </div>
-      )}
-
-      {/* Themes migration 275 could not attribute to a plan. Nothing creates
-          one now; they are here so a club can see and clear them. */}
-      {orphanThemes.length > 0 && (
-        <div className="mt-3 pt-2 border-t pb-hairline">
-          <div className={`${cap} px-1.5 mb-1`}>NOT ON A PLAN</div>
-          {orphanThemes.map(p => (
-            <div key={p.id} className={`${TREE_ROW} ${isSel('theme', p.id) ? 'bg-pb-surface2' : ''}`}
-              style={isSel('theme', p.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
-              <Twisty hidden />
-              <button onClick={() => select('theme', p.id, { planId: null })} className="min-w-0 flex-1 text-left">
-                <TreeLabel kind="THEME" active={isSel('theme', p.id)} dim>{p.name}</TreeLabel>
-              </button>
-              <DelDot onClick={() => removeTheme(p.id, p.name)} title={`Delete ${p.name}`} />
-            </div>
-          ))}
         </div>
       )}
     </div>
@@ -2231,19 +2202,19 @@ function PillarBar({ pillars, active, onPick }) {
 // The theme chips above the plans are a FILTER that happens to be editable.
 // This is the same rows read as a catalogue: what the club groups its work
 // under, how much work sits under each, and the rename/delete that goes with
-// owning a list. Deleting a theme never takes its objectives with it — they
-// stay, they just stop being grouped (the rule migration 232 set).
-function ThemesSection({ pillars, plans, unassigned, onChanged }) {
+// owning a list. Since migration 276 a theme belongs to one plan and owns its
+// objectives, so deleting one takes that plan's objectives under it with it —
+// the confirm says so, and the actions and motions serving them are kept.
+function ThemesSection({ pillars, plans, onChanged }) {
   const toast = useToast()
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
 
-  const all = [...plans.flatMap(p => p.objective_list || []), ...(unassigned.objective_list || [])]
+  const all = plans.flatMap(p => p.objective_list || [])
   const count = id => all.filter(o => o.pillar_id === id).length
-  const loose = all.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id)).length
 
-  // A theme belongs to a plan (migration 275), so this screen has to say
-  // which — there is no such thing as a club-wide theme any more.
+  // A theme belongs to a plan, so this screen has to say which — there is no
+  // such thing as a club-wide theme.
   const [planId, setPlanId] = useState('')
   useEffect(() => { setPlanId(id => id || plans[0]?.id || '') }, [plans])
 
@@ -2261,7 +2232,7 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
   }
   async function remove(pl) {
     const n = count(pl.id)
-    if (!confirm(`Delete "${pl.name}"?${n ? ` Its ${n} objective${n === 1 ? '' : 's'} stay, they just stop being grouped under it.` : ''}`)) return
+    if (!confirm(`Delete "${pl.name}"?${n ? ` Its ${n} objective${n === 1 ? '' : 's'} go with it. Any actions and motions serving them are kept, they simply stop being linked.` : ''}`)) return
     try { await api.committeeDeletePillar(pl.id); onChanged() } catch (e) { toast.error(e.message) }
   }
 
@@ -2297,7 +2268,7 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
               <div className="min-w-0">
                 <div className="text-pb-text font-semibold text-[15px]">{pl.name}</div>
                 <div className={`${cap} mt-0.5`}>
-                  {(plans.find(p => p.id === pl.plan_id)?.name || 'Not on a plan').toUpperCase()}
+                  {(plans.find(p => p.id === pl.plan_id)?.name || 'Plan').toUpperCase()}
                   {' · '}
                   {count(pl.id)} {count(pl.id) === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
                 </div>
@@ -2308,11 +2279,6 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
               </div>
             </div>
           ))}
-          {loose > 0 && (
-            <div className="font-mono text-[10px] text-pb-faintest pt-1">
-              {loose} objective{loose === 1 ? '' : 's'} under no theme.
-            </div>
-          )}
         </div>
       )}
     </div>
@@ -2326,7 +2292,7 @@ export function PlanTab({ members, section }) {
   const [positions, setPositions] = useState([])
   const [addingPlan, setAddingPlan] = useState(false)
   const [editingPlan, setEditingPlan] = useState(null)
-  const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)   // plan id, or '' for no plan
+  const [addingObjectiveTo, setAddingObjectiveTo] = useState(null)   // the plan id being added under
   const [openPlan, setOpenPlan] = useState(null)
   const [view, setView] = useState('plan')                            // plan | delivery
   const [pillarFilter, setPillarFilter] = useState(null)
@@ -2335,7 +2301,7 @@ export function PlanTab({ members, section }) {
   const load = useCallback(() => {
     api.committeePlanReport()
       .then(setReport)
-      .catch(e => { toast.error(e.message); setReport({ plans: [], pillars: [], unassigned: { objective_list: [] } }) })
+      .catch(e => { toast.error(e.message); setReport({ plans: [], pillars: [] }) })
   }, [toast])
   useEffect(() => { load() }, [load])
   // Committee seats, for the owner picker. Small list, fetched once.
@@ -2366,7 +2332,7 @@ export function PlanTab({ members, section }) {
     catch (e) { toast.error(e.message) }
   }
   async function removePlan(p) {
-    if (!confirm(`Delete "${p.name}"? Its objectives survive and simply stop belonging to a plan.`)) return
+    if (!confirm(`Delete "${p.name}"? Its themes and objectives go with it. Any actions and motions serving them are kept, they simply stop being linked.`)) return
     try { await api.committeeDeletePlan(p.id); load() } catch (e) { toast.error(e.message) }
   }
   async function createObjective(data) {
@@ -2378,19 +2344,20 @@ export function PlanTab({ members, section }) {
 
   const plans = report.plans || []
   const pillars = report.pillars || []
-  const unassigned = report.unassigned || { objective_list: [] }
   const objectiveProps = { plans, pillars, positions, members, memberName, onChanged: load }
   // The theme filter narrows what is shown; it never changes what is stored.
   const inTheme = o => !pillarFilter || o.pillar_id === pillarFilter
-  // Objectives within a plan, grouped under their theme. Themes come out in the
-  // club's own pillar order, with anything untagged last.
+  // Objectives within a plan, grouped under their theme, in the club's own
+  // pillar order. Every objective is under a theme (migration 276); a row whose
+  // theme this payload doesn't carry is a load ordering problem, not a state
+  // the club can be in, so it is named as one rather than filed under "none".
   const byTheme = list => {
     const shown = list.filter(inTheme)
     const groups = pillars
       .map(p => ({ id: p.id, name: p.name, rows: shown.filter(o => o.pillar_id === p.id) }))
       .filter(g => g.rows.length)
-    const loose = shown.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
-    if (loose.length) groups.push({ id: '', name: pillars.length ? 'No theme' : null, rows: loose })
+    const loose = shown.filter(o => !pillars.some(p => p.id === o.pillar_id))
+    if (loose.length) groups.push({ id: '', name: 'Theme not loaded', rows: loose })
     return groups
   }
 
@@ -2406,17 +2373,15 @@ export function PlanTab({ members, section }) {
   }
 
   if (section === 'themes') {
-    return <ThemesSection pillars={pillars} plans={plans} unassigned={unassigned} onChanged={load} />
+    return <ThemesSection pillars={pillars} plans={plans} onChanged={load} />
   }
 
   if (section === 'objectives') {
     // Every objective the club holds, in one list rather than one plan at a
     // time — the way "what are we actually committed to" gets asked. Each still
     // says which plan it belongs to, so flattening loses nothing.
-    const rows = [
-      ...plans.flatMap(pl => (pl.objective_list || []).map(o => ({ ...o, plan_name: o.plan_name || pl.name }))),
-      ...(unassigned.objective_list || []),
-    ]
+    const rows = plans.flatMap(pl =>
+      (pl.objective_list || []).map(o => ({ ...o, plan_name: o.plan_name || pl.name })))
     return (
       <div>
         <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
@@ -2586,44 +2551,6 @@ export function PlanTab({ members, section }) {
                 )}
               </div>
             ))}
-
-            {/* An objective can sit outside every plan — the club hasn't written
-                one down yet, or the plan it belonged to was deleted. It is still
-                real work, so it is shown rather than quietly dropped. */}
-            {((unassigned.objective_list || []).length > 0 || addingObjectiveTo === '') && (
-              <div className="pb-card p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-pb-text font-medium text-[15px]">Not on a plan</div>
-                    <div className={`${cap} mt-0.5`}>
-                      {(unassigned.objective_list || []).length} {(unassigned.objective_list || []).length === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
-                    </div>
-                  </div>
-                  <button onClick={() => setAddingObjectiveTo('')}
-                    className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-text">+ Objective</button>
-                </div>
-                <Nested level="objective" className="mt-3 space-y-2">
-                  {addingObjectiveTo === '' && (
-                    <ObjectiveForm plans={plans} pillars={pillars} positions={positions}
-                      planId="" pillarId={pillarFilter} members={members}
-                      onSave={createObjective} onCancel={() => setAddingObjectiveTo(null)} />
-                  )}
-                  {byTheme(unassigned.objective_list || []).map(g => (
-                    <div key={g.id || '__none'} className="space-y-2">
-                      {g.name && <div className={`${cap} pt-1`}>{g.name.toUpperCase()}</div>}
-                      {g.rows.map(o => <ObjectiveCard key={o.id} objective={o} {...objectiveProps} />)}
-                    </div>
-                  ))}
-                </Nested>
-              </div>
-            )}
-
-            {plans.length > 0 && (unassigned.objective_list || []).length === 0 && addingObjectiveTo !== '' && (
-              <button onClick={() => setAddingObjectiveTo('')}
-                className="font-mono text-[10px] text-pb-faintest hover:text-pb-faint">
-                + Add an objective that isn't on a plan
-              </button>
-            )}
           </div>
         )}
     </div>
@@ -2641,7 +2568,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
   const [overOnly, setOverOnly] = useState(false)
 
   const today = new Date().toISOString().slice(0, 10)
-  const groups = [...(report.plans || []), { id: '', name: 'Not on a plan', ...(report.unassigned || {}) }]
+  const groups = report.plans || []
 
   const rows = []
   for (const p of groups) {

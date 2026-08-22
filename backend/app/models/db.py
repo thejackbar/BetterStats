@@ -3375,18 +3375,16 @@ class ClubStrategicPillar(Base):
     its objectives, and there is no linkage between one plan's hierarchy and
     another's.
 
-    ``plan_id`` is nullable only for a theme 275 could not attribute — one with
-    no objectives anywhere at the moment it ran. Those show as unclaimed and
-    can be moved onto a plan or deleted; nothing creates one now.
+    NOT NULL since 276: a theme with no plan is not a state the club's plan can
+    be in, so there is no club-wide theme to leak into a second plan's tree.
     """
     __tablename__ = "club_strategic_pillars"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
     # Deleting a plan takes its themes with it — that is what belonging to a
-    # plan means. Whether the OBJECTIVES under them go too is the plan delete's
-    # own `cascade` flag, unchanged.
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="CASCADE"), nullable=True)
+    # plan means, and the objectives under them go too (see ClubObjective).
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="CASCADE"), nullable=False)
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)
@@ -3415,14 +3413,20 @@ class ClubObjective(Base):
     # Migration 230 — what a club plans WITH. These sat on the actions serving
     # an objective and nowhere on the objective itself, so an objective with no
     # actions yet had no owner, no date and no budget.
-    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="SET NULL"), nullable=True)
+    # Migration 276 — an objective belongs to its theme, with its plan. Both
+    # NOT NULL and both CASCADE: SET NULL cannot coexist with NOT NULL, and an
+    # objective with nowhere to sit is exactly the state 276 removes. The
+    # ACTIONS and MOTIONS serving it are NOT deleted by either cascade — those
+    # FKs stay SET NULL, so the work is kept and stops being linked.
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="CASCADE"), nullable=False)
     due_date = Column(Date, nullable=True)
     owner_member_id = Column(UUID(as_uuid=True), ForeignKey("fee_members.id", ondelete="SET NULL"), nullable=True)
     budget = Column(Numeric(12, 2), nullable=True)
-    # Migration 232 — the theme it groups under, and a committee SEAT that owns
-    # it. A position owner transfers at the AGM without anyone editing anything,
-    # which a person owner cannot. Both are optional; a club may use either.
-    pillar_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_pillars.id", ondelete="SET NULL"), nullable=True)
+    # Migration 232 — the theme it groups under (NOT NULL since 276) — and a
+    # committee SEAT that owns it. A position owner transfers at the AGM
+    # without anyone editing anything, which a person owner cannot; the two
+    # owner fields are both optional, and a club may use either.
+    pillar_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_pillars.id", ondelete="CASCADE"), nullable=False)
     owner_position_id = Column(UUID(as_uuid=True), ForeignKey("committee_positions.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)

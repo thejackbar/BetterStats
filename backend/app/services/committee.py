@@ -1170,7 +1170,31 @@ async def list_pillars(session: AsyncSession, org_id, *, include_inactive: bool 
 
 
 async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields) -> dict:
-    from app.models.db import ClubStrategicPillar
+    from app.models.db import ClubStrategicPillar, ClubStrategicPlan
+
+    # The plan is resolved BEFORE anything is built, and that ordering is
+    # load-bearing: the ownership check below is a SELECT, and a SELECT
+    # autoflushes whatever is already in the session. Adding the row first
+    # therefore flushed a theme with no plan and raised a NOT NULL violation
+    # (a 500) where this refusal is meant to be a plain 422.
+    plan_id = None
+    if "plan_id" in fields:
+        plan_id = fields["plan_id"] or None
+        if not plan_id:
+            raise ValueError("A theme needs a plan")
+        # A plan from another club would file this theme under someone else's,
+        # so it is checked rather than trusted — same rule upsert_objective
+        # applies to its own foreign keys.
+        owner = (await session.execute(
+            select(ClubStrategicPlan.id).where(ClubStrategicPlan.id == plan_id,
+                                               ClubStrategicPlan.organisation_id == org_id)
+        )).scalar_one_or_none()
+        if owner is None:
+            raise ValueError("That plan is not this club's")
+    elif pillar_id is None:
+        # A theme belongs to one plan (migration 276), so there is no such
+        # thing as creating one without saying which.
+        raise ValueError("A theme needs a plan")
 
     if pillar_id:
         p = (await session.execute(
@@ -1185,22 +1209,10 @@ async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields)
         name = (fields.get("name") or "").strip()
         if not name:
             raise ValueError("A pillar needs a name")
-        p = ClubStrategicPillar(organisation_id=org_id, name=name[:120])
+        p = ClubStrategicPillar(organisation_id=org_id, name=name[:120], plan_id=plan_id)
         session.add(p)
-    if "plan_id" in fields:
-        # A plan from another club would file this theme under someone else's,
-        # so it is checked rather than trusted — same rule upsert_objective
-        # applies to its own three foreign keys.
-        from app.models.db import ClubStrategicPlan
-        pid = fields["plan_id"]
-        if pid:
-            owner = (await session.execute(
-                select(ClubStrategicPlan.id).where(ClubStrategicPlan.id == pid,
-                                                   ClubStrategicPlan.organisation_id == org_id)
-            )).scalar_one_or_none()
-            if owner is None:
-                raise ValueError("That plan is not this club's")
-        p.plan_id = pid or None
+    if plan_id:
+        p.plan_id = plan_id
     if fields.get("name"):
         p.name = fields["name"].strip()[:120]
     for f in ("sort_order", "is_active"):
@@ -1213,24 +1225,21 @@ async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields)
     return _pillar_dict(p)
 
 
-async def delete_pillar(session: AsyncSession, org_id, pillar_id, *, cascade: bool = False) -> bool:
-    """Delete a pillar.
+async def delete_pillar(session: AsyncSession, org_id, pillar_id) -> bool:
+    """Delete a theme, and the objectives under it.
 
-    By default its objectives survive and simply stop being grouped under it
-    (FK SET NULL) — a theme being dropped from the plan is not a reason to bin
-    the work that was filed under it.
+    Since migration 276 that is structural rather than a choice: an objective
+    belongs to its theme (`pillar_id` NOT NULL, ON DELETE CASCADE), so there is
+    nowhere for one to go when the theme it is under is deleted. A theme
+    belongs to ONE plan, so this can only ever reach that plan's objectives —
+    it cannot take another plan's work with it, which is the failure 275 and
+    276 exist to prevent.
 
-    `cascade` deletes the objectives under it as well, for a caller that has
-    asked the club to confirm exactly that. Since migration 275 a theme belongs
-    to ONE plan, so a cascade reaches that plan's objectives and nothing else —
-    it can no longer take another plan's work with it, which is the failure
-    that made 275 necessary.
-
-    Either way the actions and motions serving those objectives are KEPT and
-    simply stop being linked (`club_objectives` → tasks/motions is SET NULL).
-    Work the club committed to is not deleted because the heading above it was.
+    The ACTIONS and MOTIONS serving those objectives are KEPT and simply stop
+    being linked (`club_objectives` → tasks/motions is still SET NULL). Work
+    the club committed to is not deleted because the heading above it was.
     """
-    from app.models.db import ClubStrategicPillar, ClubObjective
+    from app.models.db import ClubStrategicPillar
 
     p = (await session.execute(
         select(ClubStrategicPillar).where(ClubStrategicPillar.id == pillar_id,
@@ -1238,13 +1247,6 @@ async def delete_pillar(session: AsyncSession, org_id, pillar_id, *, cascade: bo
     )).scalar_one_or_none()
     if not p:
         return False
-    if cascade:
-        for o in (await session.execute(
-            select(ClubObjective).where(ClubObjective.pillar_id == p.id,
-                                        ClubObjective.organisation_id == org_id)
-        )).scalars().all():
-            await session.delete(o)
-        await session.flush()
     await session.delete(p)
     return True
 
@@ -1328,24 +1330,17 @@ async def upsert_plan(session: AsyncSession, org_id, plan_id=None, **fields) -> 
     return _plan_dict(p)
 
 
-async def delete_plan(session: AsyncSession, org_id, plan_id, *, cascade: bool = False) -> bool:
-    """Delete a plan.
+async def delete_plan(session: AsyncSession, org_id, plan_id) -> bool:
+    """Delete a plan, and the themes and objectives under it.
 
-    By default its objectives survive and fall back to belonging to no plan
-    (FK SET NULL). `cascade` deletes them with it, for a caller that has told
-    the club how many go and had that confirmed.
-
-    Its THEMES go with it either way (FK ON DELETE CASCADE, migration 275) —
-    a theme belongs to one plan, so there is nowhere for it to go. Without
-    `cascade` the objectives under those themes survive, ungrouped and off any
-    plan, exactly as they did before 275.
-
-    Neither mode touches the ACTIONS and MOTIONS serving those objectives —
-    they are kept and simply stop being linked. An action is work somebody is
-    doing; the plan it was written under being deleted is not a reason to lose
-    it.
+    A plan owns its themes and a theme owns its objectives (migration 276), so
+    the whole branch goes and there is no half-deleted state to choose. What it
+    does NOT touch is the ACTIONS and MOTIONS serving those objectives — those
+    FKs are still SET NULL, so the work is kept and simply stops being linked.
+    An action is something somebody is doing; the plan it was written under
+    being deleted is not a reason to lose it.
     """
-    from app.models.db import ClubStrategicPlan, ClubObjective
+    from app.models.db import ClubStrategicPlan
 
     p = (await session.execute(
         select(ClubStrategicPlan).where(ClubStrategicPlan.id == plan_id,
@@ -1353,13 +1348,6 @@ async def delete_plan(session: AsyncSession, org_id, plan_id, *, cascade: bool =
     )).scalar_one_or_none()
     if not p:
         return False
-    if cascade:
-        for o in (await session.execute(
-            select(ClubObjective).where(ClubObjective.plan_id == p.id,
-                                        ClubObjective.organisation_id == org_id)
-        )).scalars().all():
-            await session.delete(o)
-        await session.flush()
     await session.delete(p)
     return True
 
@@ -1439,15 +1427,24 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
             raise ValueError("Objective not found")
         if "title" in fields and not (fields["title"] or "").strip():
             raise ValueError("Title is required")
+        new_title = None
     else:
-        title = (fields.get("title") or "").strip()
-        if not title:
+        o = None
+        new_title = (fields.get("title") or "").strip()
+        if not new_title:
             raise ValueError("Title is required")
-        o = ClubObjective(organisation_id=org_id, title=title[:300])
-        session.add(o)
+        # An objective belongs to a theme, with that theme's plan (276), so
+        # there is no such thing as one created without a theme to sit under.
+        if not fields.get("pillar_id"):
+            raise ValueError("An objective needs a theme")
     # A plan, pillar or position from another club would file this objective
     # under someone else's, so each is checked rather than trusted — the ids
     # come from a browser.
+    #
+    # This runs BEFORE the new row is added to the session. Each check is a
+    # SELECT, a SELECT autoflushes, and a half-built objective has no theme
+    # yet — so adding it first turned this refusal into a NOT NULL violation
+    # (a 500) instead of the plain 422 it is meant to be.
     from app.models.db import ClubStrategicPillar
     for field, model, label in (
         ("plan_id", ClubStrategicPlan, "plan"),
@@ -1461,6 +1458,10 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
             )).scalar_one_or_none()
             if not owned:
                 raise ValueError(f"That {label} does not belong to this club")
+    if o is None:
+        o = ClubObjective(organisation_id=org_id, title=new_title[:300],
+                          pillar_id=fields["pillar_id"])
+        session.add(o)
     if "title" in fields and fields["title"]:
         o.title = fields["title"].strip()[:300]
     for f in ("status", "sort_order"):
@@ -1470,19 +1471,20 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
               "pillar_id", "owner_position_id"):
         if f in fields:
             setattr(o, f, fields[f])
-    # The theme and the plan have to agree. A theme belongs to ONE plan
-    # (migration 275), so an objective under theme T must be in T's plan —
-    # otherwise the tree would draw it in one plan while its theme lived in
-    # another, which is the shape that made 275 necessary. The plan is taken
-    # from the theme rather than refused: the theme is the more specific of
-    # the two, and it is what the person picked in the tree.
-    if o.pillar_id:
-        theme_plan = (await session.execute(
-            select(ClubStrategicPillar.plan_id)
-            .where(ClubStrategicPillar.id == o.pillar_id)
-        )).scalar_one_or_none()
-        if theme_plan is not None and o.plan_id != theme_plan:
-            o.plan_id = theme_plan
+    # The plan comes FROM the theme, always. A theme belongs to one plan (275)
+    # and an objective belongs to its theme (276), so the objective's plan is
+    # not an independent choice — the theme is the more specific of the two and
+    # is what the person picked in the tree. An edit that clears the theme is
+    # refused rather than leaving the objective nowhere.
+    if not o.pillar_id:
+        raise ValueError("An objective needs a theme")
+    theme_plan = (await session.execute(
+        select(ClubStrategicPillar.plan_id)
+        .where(ClubStrategicPillar.id == o.pillar_id)
+    )).scalar_one_or_none()
+    if theme_plan is None:
+        raise ValueError("That theme is not on a plan")
+    o.plan_id = theme_plan
     o.updated_at = func.now()
     await session.flush()
     plans, pillars, positions = await _objective_labels(session, org_id)
@@ -1772,9 +1774,9 @@ async def plan_report(session: AsyncSession, org_id, *, include_archived: bool =
         "pillars": await list_pillars(session, org_id),
         "plans": [{**p, "objective_list": by_plan.get(p["id"], []), **roll(by_plan.get(p["id"], []))}
                   for p in plans],
-        # An objective can sit outside every plan — either because the club has
-        # not written one down yet, or because the plan it belonged to was
-        # deleted. It is still real work, so it is reported rather than hidden.
+        # Always empty since migration 276 — an objective cannot exist outside a
+        # plan any more. Kept on the wire so a screen served mid-deploy from an
+        # older bundle still reads the key it expects rather than crashing.
         "unassigned": {"objective_list": by_plan.get("", []), **roll(by_plan.get("", []))},
     }
 

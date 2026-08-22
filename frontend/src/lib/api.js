@@ -489,10 +489,11 @@ export const api = {
     request('/club-admin/committee/pillars', { method: 'POST', body: JSON.stringify(data) }),
   committeeUpdatePillar: (id, data) =>
     request(`/club-admin/committee/pillars/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  // `cascade` takes the theme's objectives with it. The actions and motions
-  // serving those objectives are kept either way — they stop being linked.
-  committeeDeletePillar: (id, cascade) =>
-    request(`/club-admin/committee/pillars/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
+  // Takes the theme's objectives with it — an objective belongs to its theme
+  // (migration 276). The actions and motions serving them are kept and simply
+  // stop being linked.
+  committeeDeletePillar: (id) =>
+    request(`/club-admin/committee/pillars/${id}`, { method: 'DELETE' }),
   // The four pillars, a plan for this year and an example objective under each,
   // so a committee edits rather than starts from nothing.
   // One level of the plan tree, in the order the browser is drawing it. Plans,
@@ -513,10 +514,10 @@ export const api = {
     request('/club-admin/committee/plans', { method: 'POST', body: JSON.stringify(data) }),
   committeeUpdatePlan: (id, data) =>
     request(`/club-admin/committee/plans/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  // `cascade` takes the plan's objectives with it; without it they survive
-  // under "Not on a plan". Actions and motions are never deleted by either.
-  committeeDeletePlan: (id, cascade) =>
-    request(`/club-admin/committee/plans/${id}${cascade ? '?cascade=true' : ''}`, { method: 'DELETE' }),
+  // Takes the plan's themes and their objectives with it — a plan owns its
+  // whole tree. Actions and motions are never deleted by it.
+  committeeDeletePlan: (id) =>
+    request(`/club-admin/committee/plans/${id}`, { method: 'DELETE' }),
   committeeListObjectives: (includeArchived) =>
     request(`/club-admin/committee/objectives${includeArchived ? '?include_archived=true' : ''}`),
   committeeObjectiveProgress: () => request('/club-admin/committee/objectives/progress'),

@@ -26,8 +26,16 @@ async def main():
     eng = create_async_engine(os.environ['DATABASE_URL'])
     async with eng.begin() as c:
         await c.run_sync(Base.metadata.create_all)
-        # The PRE-275 data shape is simply every pillar with a NULL plan_id
-        # and objectives spanning plans — which is what the rows below build.
+        # The models carry migration 276's shape, so the columns come out NOT
+        # NULL. This suite is about 275, whose whole input is rows that have no
+        # plan — so the constraints are relaxed back to the PRE-275 shape and
+        # the rows below build it by hand.
+        for stmt in (
+            "ALTER TABLE club_strategic_pillars ALTER COLUMN plan_id DROP NOT NULL",
+            "ALTER TABLE club_objectives ALTER COLUMN plan_id DROP NOT NULL",
+            "ALTER TABLE club_objectives ALTER COLUMN pillar_id DROP NOT NULL",
+        ):
+            await c.execute(text(stmt))
     S = async_sessionmaker(eng, expire_on_commit=False)
 
     async with S() as db:
@@ -98,7 +106,7 @@ async def main():
            len((await db.execute(select(ClubStrategicPillar.id))).all()) == 4)
 
         # ── the reported disaster can no longer happen ───────────────────
-        assert await svc.delete_pillar(db, org_id, b['Participation'], cascade=True)
+        assert await svc.delete_pillar(db, org_id, b["Participation"])
         await db.commit(); db.expire_all()
         left = {r[0] for r in (await db.execute(select(ClubObjective.id))).all()}
         ok("deleting plan 2's theme takes plan 2's objective", o3_id not in left)
@@ -108,7 +116,7 @@ async def main():
                              .where(CommitteeTask.id == t1_id))).scalar_one() == o1_id)
 
         # ── deleting a plan takes its themes, and only its themes ────────
-        assert await svc.delete_plan(db, org_id, p1_id, cascade=True)
+        assert await svc.delete_plan(db, org_id, p1_id)
         await db.commit(); db.expire_all()
         names = {n for (n,) in (await db.execute(select(ClubStrategicPillar.name))).all()}
         ok("plan 1's themes go with plan 1", names == {'Never used'}, str(names))
