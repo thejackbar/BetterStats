@@ -568,20 +568,18 @@ as sections with their own buttons rather than three tabs and a manage page.
   objectives re-pointed at its own copy, so every plan's tree survives intact.
   The split must run BEFORE the claim, or one plan takes the original and the
   others are left pointing at a theme that now belongs to someone else. A
-  pillar with no objectives anywhere cannot be attributed and keeps a NULL
-  `plan_id` — the tree lists those under "Not on a plan" so they can be seen
-  and cleared. `services/pillar_plan_ddl.py` is the ONE copy both alembic and
-  the lifespan mirror run, per the `vote_medal_ddl` rule; both statements are
-  idempotent.
+  pillar with no objectives anywhere cannot be attributed and comes out of 275
+  with a NULL `plan_id`; migration 276 below is what settles those.
+  `services/pillar_plan_ddl.py` is the ONE copy both alembic and the lifespan
+  mirror run, per the `vote_medal_ddl` rule; both statements are idempotent.
 - **`upsert_objective` takes its plan FROM its theme.** A theme is the more
   specific of the two and is what the person picked in the tree, so an
   objective saved with a mismatched pair follows the theme rather than being
   refused. The objective form offers only the chosen plan's themes, and
   changing the plan clears the theme.
 - **Deleting a PLAN takes its themes** (that is what belonging to a plan
-  means); whether the objectives under them go is still the plan delete's own
-  `cascade` flag. Deleting a THEME can only ever reach its own plan's
-  objectives now.
+  means), and since 276 their objectives too. Deleting a THEME can only ever
+  reach its own plan's objectives.
 - **The PANE adds the level below; the RAIL adds at the level you are on.**
   A plan's pane offers + THEME, a theme's + OBJECTIVE, which is the shape of
   plan → theme → objective. A plan draws the themes whose `plan_id` is that
@@ -591,6 +589,64 @@ as sections with their own buttons rather than three tabs and a manage page.
   The plan an objective is added under is read off the THEME's own `plan_id`
   since 275 — never a positional fallback, since a theme in the wrong plan is
   the failure 275 exists to prevent.
+- **THE TREE IS A DATABASE INVARIANT, NOT A CONVENTION THE SCREENS KEEP
+  (migration 276).** 275 stopped one plan's tree leaking into another and left
+  three states that still contradicted the model: a theme on no plan, an
+  objective on no plan, an objective under no theme. `plan_id` on
+  `club_strategic_pillars` and `plan_id`/`pillar_id` on `club_objectives` are
+  all **NOT NULL** now, and the two objective FKs are **ON DELETE CASCADE** —
+  `SET NULL` cannot coexist with `NOT NULL`, so the cascade IS the tree. There
+  is nowhere for an orphan to go, which is the point: a plan and its themes and
+  objectives are entirely separate from every other plan's.
+- **`committee_tasks` / `meeting_motions` → `club_objectives` stays ON DELETE
+  SET NULL, and that is the one rule not to relax.** Deleting a plan, a theme
+  or an objective never deletes an ACTION or a MOTION — the work is kept and
+  simply stops being linked. The suite asserts the referential action itself,
+  not just that a row survived one delete.
+- **276 CARRIES the unattributable rather than binning it.** A theme with no
+  plan but real objectives under it, and an objective on no plan at all, go
+  into a per-club plan named `Unfiled work`; an objective with no theme is
+  filed under a `General` theme created inside its OWN plan, so carrying it can
+  never move it between plans. The one row deleted is a theme with no plan AND
+  no objectives, which holds nothing but a word. `services/plan_tree_ddl.py` is
+  the ONE copy alembic and the lifespan mirror both run, in order, and every
+  statement is idempotent.
+- **The order of 276's steps is load-bearing.** Inherit-plan-from-theme first,
+  so a theme 275 could attribute drags its objectives onto the same plan; then
+  the carrier plan; then the `General` theme, which reads each objective's plan
+  and so must run AFTER every objective has one; then the FKs; then the NOT
+  NULLs, which would refuse anything the earlier steps had not settled.
+- **`upsert_pillar` / `upsert_objective` validate BEFORE adding the row, and
+  the reason is autoflush.** Each ownership check is a SELECT, a SELECT
+  autoflushes, and a half-built theme or objective has no plan yet — so adding
+  it first turned "that plan is not this club's" into a NOT NULL violation, a
+  500 where a plain 422 was meant. Found by the verification, not by reading
+  the code. Anything added to those two functions goes after the checks.
+- **A theme is created with its plan or refused, and an objective with its
+  theme or refused.** No `cascade` flag on either delete route any more — it
+  described a choice that no longer exists.
+- **`plan_report` still emits an empty `unassigned` key.** Always empty by
+  construction; kept on the wire so a browser served mid-deploy from an older
+  bundle reads the key it expects rather than crashing.
+- **Verified against a real Postgres** (47 checks: the conversion applied three
+  times to a populated pre-276 table, no objective deleted, each of the three
+  bad states settled, a carried theme keeping its own objectives, an objective
+  filed under its own plan's `General` rather than another plan's, the action
+  and motion surviving, all three NOT NULLs and all five referential actions
+  read out of `pg_constraint`, both writers' refusals, an objective following
+  its theme rather than the caller's plan, a theme delete reaching one plan
+  only, a plan delete taking its branch and leaving the rest, and the action
+  and motion outliving the whole plan unlinked) with a **separate check that
+  alembic and the lifespan mirror land on the same schema**, and **driven in
+  Chromium** (23 on the manage screen and the three Plans sections plus the
+  existing 108 and 40: nothing draws "Not on a plan" or a "No theme" bucket
+  anywhere, the objective form refusing to save without both, the two deletes
+  sending no cascade flag and saying what goes, and the register naming all
+  three tiers).
+- **`confdeltype` comes back from asyncpg as BYTES**, since it is Postgres's
+  internal `"char"`. Cast it in SQL (`confdeltype::text`) or a comparison
+  against `'c'` is quietly false however right the constraint is — five checks
+  read as failing before that was spotted.
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a
@@ -2619,11 +2675,13 @@ to edit or delete an objective, and a motion could not point at the plan at all.
   Same for `update_motion`'s `objective_id` and the objective/plan routes, which
   moved from `exclude_none` to `exclude_unset`. Title, category, status and
   percent stay guarded — they are NOT NULL.
-- **Deleting never cascades into the work.** A deleted plan leaves its
-  objectives (FK SET NULL, reported under "Not on a plan"); a deleted objective
-  leaves its actions and motions. An objective is real work the club committed
-  to, and binning it because the document it was written in was deleted would
-  take every action serving it down too.
+- **Deleting never cascades into the work.** A deleted objective leaves its
+  actions and motions. An objective is real work the club committed to, and
+  binning it because the document it was written in was deleted would take
+  every action serving it down too. **SUPERSEDED IN PART BY 276**: a deleted
+  plan no longer leaves its objectives — a plan owns its themes and a theme
+  owns its objectives, so the branch goes. The actions and motions serving
+  them are still kept, which is the half of this rule that holds.
 - **`plan_report` scopes motions through their MEETING's org**, not the
   objective's — `meeting_motions` has no `organisation_id` of its own, so an
   objective id arriving from a browser must not be able to pull another club's

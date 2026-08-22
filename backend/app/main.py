@@ -5015,6 +5015,15 @@ async def lifespan(app: FastAPI):
             "ON club_strategic_pillars(plan_id)"
         ))
 
+        # Migration 276: a plan owns its themes, a theme owns its objectives —
+        # the three-level tree as a database invariant rather than something
+        # every screen has to be careful about. Mirrored from
+        # alembic/versions/276_plan_owns_its_tree.py; every statement in the
+        # list is idempotent, and none of them delete the club's work.
+        from app.services.plan_tree_ddl import PLAN_TREE_SQL
+        for _stmt in PLAN_TREE_SQL:
+            await conn.execute(text(_stmt))
+
         # Migration 223: a member row may only link to a player of the SAME
         # club. NOT VALID, so it guards every new write from the moment it
         # lands without failing on rows an earlier bug already left behind

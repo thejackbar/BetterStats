@@ -1354,14 +1354,13 @@ async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
 
 
 @router.delete("/pillars/{pillar_id}")
-async def delete_pillar(pillar_id: str, cascade: bool = False, _: User = _require,
+async def delete_pillar(pillar_id: str, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    """`cascade=true` takes this theme's objectives with it. Off by default,
-    so the caller has to have counted them and had that confirmed. Since
-    migration 275 a theme belongs to ONE plan, so this can only ever reach that
-    plan's objectives. Actions and motions are never deleted either way; they
-    just stop being linked."""
-    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id), cascade=cascade):
+    """Deletes the theme and the objectives under it — an objective belongs to
+    its theme (migration 276), so there is no half-deleted state to opt into.
+    A theme belongs to one plan, so this can only ever reach that plan's
+    objectives. Actions and motions are never deleted; they stop being linked."""
+    if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id)):
         raise HTTPException(status_code=404, detail="Pillar not found")
     await db.commit()
     return {"deleted": True}
@@ -1426,11 +1425,12 @@ async def update_plan(plan_id: str, data: PlanUpsert, _: User = _require,
 
 
 @router.delete("/plans/{plan_id}")
-async def delete_plan(plan_id: str, cascade: bool = False, _: User = _require,
+async def delete_plan(plan_id: str, _: User = _require,
                       club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    """`cascade=true` takes this plan's objectives with it. Actions and motions
-    serving them are kept either way and simply stop being linked."""
-    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id), cascade=cascade):
+    """Deletes the plan and the themes and objectives under it — a plan owns
+    its whole tree (migration 276). Actions and motions serving those
+    objectives are kept and simply stop being linked."""
+    if not await committee_service.delete_plan(db, club.id, uuid.UUID(plan_id)):
         raise HTTPException(status_code=404, detail="Plan not found")
     await db.commit()
     return {"deleted": True}
