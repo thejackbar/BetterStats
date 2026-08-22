@@ -949,6 +949,47 @@ as sections with their own buttons rather than three tabs and a manage page.
   by the control and the spacer so a row with nothing to fold cannot drift out
   of line with one that has. Row heights are untouched (the two-line label is
   taller than the control either way — 37px before and after).
+- **A PLAN IS ALSO READ AS DELIVERY, NOT ONLY AS A STRUCTURE (v9.50.0).**
+  `PlanDelivery` sits under the plan's summary card and asks the same two
+  questions of every theme, objective and action: is the work where it should
+  be by now, and is the money keeping pace with it. **No backend change** —
+  `plan_report` already carries `start_date`, `due_date`, `percent_complete`,
+  `budget_estimate` and `actual_expenditure` on every action.
+- **The form is a METER WITH A TARGET TICK, and the gap between them is the
+  whole reading.** The fill is where the work got to; the tick is where it
+  should be — on SCHEDULE the share of the action's own span that has passed,
+  on BUDGET the share of the work that is done. Two numbers side by side do not
+  show a gap, and a second bar would be a second scale for one quantity. Both
+  meters run 0–100 so money and time share a base: **never a second axis**.
+- **EVERY VERDICT IS A WORD; the colour is second, and that is measured rather
+  than assumed.** Running the palette validator over this app's own status
+  colours: the green and the amber separate by **ΔE 7.2 under protanopia**
+  (inside the 6–8 band that is legal only with a second channel), and in the
+  LIGHT theme the red and the amber are **ΔE 14** apart for a reader with full
+  colour vision — under the 15 floor. So `StateChip` always spells the state
+  out (DONE / ON TRACK / BEHIND / LATE / NO DATES / OVER BUDGET / SPENDING
+  AHEAD / IN BUDGET). Do not add a state that is distinguished by colour alone.
+- **A group's verdict is the WORST of what is under it**, ignoring what could
+  not be judged: a theme is late if any action serving it is late, and done only
+  when every one is. That is what makes a theme's figure mean the same thing as
+  an action's, and lets the headline be traced to the work dragging it.
+- **`DRIFT_TOLERANCE` (10 points) and `SPEND_TOLERANCE` (15) are deliberate
+  choices, not measurements.** Without them an action a day behind the clock
+  reads BEHIND and nearly everything lights up, so the colour stops meaning
+  anything; spend legitimately runs ahead of progress (you buy the materials
+  before you lay them). Both are named constants with the reasoning attached.
+- **SILENCE WHERE THE CLUB'S DATA CANNOT ANSWER**, the same rule the selection
+  rules keep. No start AND due date means no elapsed fraction, so there is no
+  schedule verdict and no tick — never a flattering one. Nothing allocated
+  means no budget verdict, because "0 of 0" is not under budget. A motion is a
+  decision rather than a piece of work, so it is listed with its outcome and
+  given no meters at all.
+- **Verified in Chromium** (29 checks, dark and light: every state on screen at
+  once from dates relative to today, the strip's counts matching the rows
+  beneath it, a theme rolling up to LATE off one late action, the tick measured
+  as a 2px mark inside its own track and landing at the elapsed 50%, both
+  silences, an empty plan saying so, no verdict rendered colour-only, and no
+  overflow at 390px).
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a
