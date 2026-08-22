@@ -513,14 +513,29 @@ async def performance(
     actor: SalesActor = Depends(require_sales_or_super),
     db: AsyncSession = Depends(get_db),
 ):
-    """Today/this-week activity + the assigned -> attempted -> contacted ->
-    engaged -> trial -> won funnel, per rep. A 'sales'-role caller always
-    sees only their own numbers (owner_user_id is honoured for a super
-    admin only, same restriction pattern as the queue list)."""
+    """Three views of the same book, on one screen.
+
+    * ``summary`` — today/this-week contact activity, the KPI strip.
+    * ``activity`` — the same numbers split per rep, so "who has called whom
+      today" is answerable at a glance. Its totals ARE ``summary``, taken
+      from one pass over the activity rows rather than counted twice, so the
+      strip and the table can never disagree.
+    * ``by_rep`` — where every deal sits, per rep, plus an Unassigned row for
+      the pool nobody owns yet.
+
+    A 'sales'-role caller always sees only their own numbers (owner_user_id
+    is honoured for a super admin only, same restriction pattern as the
+    queue list)."""
     effective_owner = actor.user.id if actor.role == "sales" else (_uuid_or_none(owner_user_id) if owner_user_id else None)
-    summary = await sw.performance_summary(db, owner_user_id=effective_owner)
-    by_rep = await sw.funnel_by_rep(db, owner_user_id=effective_owner)
-    return {"summary": summary, "by_rep": by_rep}
+    activity = await sw.activity_report(db, owner_user_id=effective_owner)
+    breakdown = await sw.stage_breakdown_by_rep(db, owner_user_id=effective_owner)
+    return {
+        "summary": {"today": activity["totals"]["today"], "week": activity["totals"]["week"]},
+        "activity": activity["rows"],
+        "by_rep": breakdown["rows"],
+        "totals": breakdown["totals"],
+        "stage_columns": breakdown["stage_columns"],
+    }
 
 
 # ─── Club drawer ──────────────────────────────────────────────────────────────

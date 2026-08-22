@@ -1,5 +1,69 @@
 # BetterStats — Claude Session Notes
 
+## Sales Performance: where the clubs sit, and who actually rang them (v9.47.1, Aug 2026)
+
+Asked for off `/admin/super/crm/performance`: unassigned deals per stage, an
+Assigned column that means "still to contact", stage columns rather than a
+cumulative funnel, and a section answering "how many calls has each rep made
+today".
+
+- **The funnel was cumulative and the screen now shows a DISTRIBUTION.**
+  `funnel_by_rep`'s assigned → attempted → contacted → engaged → trial → won
+  counted the same deal in every bucket it had passed through, so no column
+  told you where a club actually is. `stage_breakdown_by_rep` puts each deal in
+  exactly one column, which is what makes an Unassigned row and an All-clubs
+  total add up.
+- **EVERY CELL CARRIES TWO FIGURES, and that is the whole compromise.** Total
+  and, in brackets, the ones the rep has really made contact with. Contacted-only
+  would have emptied the Unassigned row (almost nothing in the pool has been
+  rung, so its stage spread — the thing that was asked for — would have vanished
+  into one column); totals-only would have said nothing about whether a rep had
+  worked the clubs. The pair answers both from one table.
+- **`_IS_CONTACT_ROW` / `_contact_kind` are the ONE definition of contact**
+  (a logged call, a follow-up recorded, or an email sent), shared by the stage
+  brackets, the activity table and the KPI strip. A note is not contact, and a
+  Twenty-imported row never counts, for the reason `emailed_deal_ids` already
+  gives: it is a backfill of somebody else's pipeline. The SQL predicate and the
+  Python classifier sit next to each other deliberately — a query that selects
+  more rows than the tally accepts is how the two start disagreeing.
+- **A follow-up is checked on its own rather than nested under a call**, the
+  same call `call_statuses_of` already makes: today a callback can only be
+  captured off a call log, but one recorded some other way still counts.
+- **ACTIVITY IS COUNTED BY WHO DID THE WORK** (`crm_activities.created_by_user_id`),
+  not by who owns the deal, which is what `performance_summary` used to do. "How
+  many calls has this rep made today" is a question about the rep, and a call on
+  a club since reassigned is still theirs.
+- **The KPI strip IS the activity table's totals row**, derived from one pass in
+  `activity_report` rather than counted twice. `clubs_contacted` is a genuine
+  distinct count across everyone, never a sum of per-rep distinct counts — that
+  is the figure a second query would have got wrong.
+- **Today and this week are PERTH days** (`report_windows`). The UTC boundary the
+  old summary used starts at 8am local, so a rep's whole morning read as
+  yesterday's work. Week starts Monday.
+- **EVERY NAMED STAGE IS ALWAYS DRAWN, `proposal` included.** An empty Proposal
+  column is itself the answer to "is anybody at proposal", which a column that
+  comes and goes cannot give. Only `other` — the catch-all for a pipeline stage
+  this list doesn't name — is conditional (`stage_columns` reports what to
+  draw), because dropping a deal from the table for sitting in an unnamed stage
+  is worse than an extra column nobody asked for.
+- **A rep with nothing assigned still gets a row**, seeded from the sales-role
+  memberships — an empty book is exactly what this screen should make obvious,
+  and they would otherwise be invisible.
+- **Only trial-stage deals have their clubs loaded** for the current/expired
+  split; the whole book would be a far bigger read for a split that cannot apply
+  to the rest. No trial dates at all reads as CURRENT, matching the queue's own
+  `trial_current`/`trial_expired` filter.
+- **Verified against a real Postgres** (58 checks through the shipped service
+  and route bodies: each contact route counted and a note and a Twenty row not,
+  to_contact + contacted reconciling with the total, the archived deal excluded
+  from the breakdown while its call still counts as work done, all three trial
+  cases, the pool's stage spread, an idle rep drawn, an empty Proposal column
+  still drawn and no deal dropped, the distinct-not-summed club count, a sales caller
+  pinned to themselves however they ask, and the Perth boundaries either side of
+  8am) and **driven in Chromium** (18: the column order asked for, a rep row's
+  total-and-brackets, the Unassigned and All-clubs rows, both totals rows
+  agreeing with the cards above them, no page errors, no overflow at 390px).
+
 ## The Squads board's unassigned side is three pools (v9.46.0, Aug 2026)
 
 Reported off BetterSelect → Squads: "the hidden people, people who have never
