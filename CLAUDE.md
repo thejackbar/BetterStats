@@ -1114,12 +1114,25 @@ as sections with their own buttons rather than three tabs and a manage page.
   means no budget verdict, because "0 of 0" is not under budget. A motion is a
   decision rather than a piece of work, so it is listed with its outcome and
   given no meters at all.
-- **Verified in Chromium** (29 checks, dark and light: every state on screen at
+- **ANY NUMBER OF THEMES OPEN AT ONCE (v9.50.3).** Every theme starts folded,
+  so the page still opens as a list of themes rather than the whole plan — but
+  a committee comparing two themes must not have the first shut on it when the
+  second is opened, so `openThemes` is a Set and `jumpTo` UNIONS rather than
+  replaces. `openWork` already worked this way.
+- **NOT STARTED IS AN ABSENCE, NOT A SEVERITY, and `rollUp` takes it out of
+  the comparison entirely (v9.50.3).** Reported off a live screen: a theme at
+  43% with two objectives going well read NOT STARTED because a third had not
+  begun. It only wins when nothing under it has begun at all; when everything
+  that HAS begun is finished but something has not, the theme reads ON TRACK —
+  not DONE, because it isn't.
+- **Verified in Chromium** (49 checks, dark and light: every state on screen at
   once from dates relative to today, the strip's counts matching the rows
   beneath it, a theme rolling up to LATE off one late action, the tick measured
   as a 2px mark inside its own track and landing at the elapsed 50%, both
-  silences, an empty plan saying so, no verdict rendered colour-only, and no
-  overflow at 390px).
+  silences, an empty plan saying so, no verdict rendered colour-only, two
+  themes open together with closing one leaving the other alone, the mixed
+  theme reading ON TRACK while its own unstarted objective still says NOT
+  STARTED, and no overflow at 390px).
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a

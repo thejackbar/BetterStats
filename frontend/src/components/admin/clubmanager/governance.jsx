@@ -925,7 +925,10 @@ function elapsedPercent(startISO, dueISO, today) {
 const STATE = {
   done: { label: 'DONE', glyph: '✓', tone: POSITIVE, rank: 0 },
   on_track: { label: 'ON TRACK', glyph: '●', tone: POSITIVE, rank: 1 },
-  not_started: { label: 'NOT STARTED', glyph: '○', tone: null, rank: 2 },
+  // `rank` is the severity a roll-up sorts on. NOT STARTED carries none: it
+  // is an absence, not a problem, and `rollUp` takes it out of the comparison
+  // entirely — see there.
+  not_started: { label: 'NOT STARTED', glyph: '○', tone: null, rank: 0 },
   behind: { label: 'BEHIND', glyph: '●', tone: AMBER, rank: 3 },
   late: { label: 'LATE', glyph: '●', tone: RED, rank: 4 },
 }
@@ -951,9 +954,18 @@ function actionState(a, today) {
 // and lets the headline be traced to the work dragging it.
 function rollUp(keys) {
   if (!keys.length) return 'not_started'
-  if (keys.every(k => k === 'not_started')) return 'not_started'
-  if (keys.every(k => k === 'done')) return 'done'
-  return keys.reduce((worst, k) => (STATE[k].rank > STATE[worst].rank ? k : worst), 'done')
+  // NOT STARTED IS AN ABSENCE, NOT A SEVERITY, and taking it out of the
+  // comparison is the whole point. It used to outrank ON TRACK, so a theme at
+  // 43% with two objectives going well read NOT STARTED because a third had
+  // not begun — reported off a live screen. It only wins when nothing under it
+  // has begun at all.
+  const begun = keys.filter(k => k !== 'not_started')
+  if (!begun.length) return 'not_started'
+  const worst = begun.reduce((w, k) => (STATE[k].rank > STATE[w].rank ? k : w), 'done')
+  // Everything that HAS begun is finished, but something has not begun yet:
+  // the theme is not DONE, it is simply going well so far.
+  if (worst === 'done' && begun.length < keys.length) return 'on_track'
+  return worst
 }
 
 // Spend against what was allocated. Null when nothing is allocated: "0 of 0" is
@@ -1267,10 +1279,12 @@ export function PlanFigures({ plan, pillars }) {
 export function PlanDelivery({ plan, pillars }) {
   const today = startOfToday()
   const d = useMemo(() => readPlan(plan, pillars, today), [plan, pillars, today])
-  // Themes open one at a time by default, so the page opens as a list of
-  // themes rather than the whole plan at once. The work under an objective is
-  // a further click.
-  const [openTheme, setOpenTheme] = useState(null)
+  // Every theme starts folded, so the page opens as a list of themes rather
+  // than the whole plan at once — but a committee comparing two themes should
+  // not have the first one shut on it when the second is opened, so any number
+  // can be open together. The work under an objective is a further click.
+  const [openThemes, setOpenThemes] = useState(() => new Set())
+  const toggleTheme = id => setOpenThemes(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
   const [openWork, setOpenWork] = useState(() => new Set())
   const toggleWork = id => setOpenWork(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
 
@@ -1289,7 +1303,8 @@ export function PlanDelivery({ plan, pillars }) {
   // objective's own work with it, so one click lands on the thing named.
   const jumpTo = row => {
     const theme = d.themes.find(t => t.rows.some(r => r.id === row.id))
-    if (theme) setOpenTheme(theme.id)
+    // Opened alongside whatever the reader already had open, not instead of it.
+    if (theme) setOpenThemes(s => new Set([...s, theme.id]))
     setOpenWork(s => new Set([...s, row.id]))
     requestAnimationFrame(() => {
       document.getElementById(`plan-obj-${row.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -1334,10 +1349,10 @@ export function PlanDelivery({ plan, pillars }) {
       <div className="pb-card divide-y pb-hairline">
         <div className={`${cap} px-4 pt-4 pb-2`}>THEMES</div>
         {d.themes.map(t => {
-          const isOpen = openTheme === t.id
+          const isOpen = openThemes.has(t.id)
           return (
             <div key={t.id}>
-              <button type="button" onClick={() => setOpenTheme(isOpen ? null : t.id)}
+              <button type="button" onClick={() => toggleTheme(t.id)}
                 aria-expanded={isOpen}
                 className="w-full text-left px-4 py-3 hover:bg-pb-surface2">
                 <div className="flex items-start gap-2">
