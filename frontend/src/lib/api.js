@@ -2144,6 +2144,16 @@ export const api = {
     const qs = ownerUserId ? `?owner_user_id=${ownerUserId}` : ''
     return request(`/club-admin/sales-workspace/performance${qs}`)
   },
+  // The clubs behind one clickable figure on the Performance screen. `params`
+  // is the cell's own identity ({panel:'activity', window, metric, user_id} or
+  // {panel:'pipeline', owner, cell, contacted_only}) — the server re-derives
+  // the number from it, so the list always matches what was clicked.
+  salesWorkspaceDrilldown: (params) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== '')
+    ).toString()
+    return request(`/club-admin/sales-workspace/performance/drilldown?${qs}`)
+  },
   salesWorkspaceClub: (dealId) => request(`/club-admin/sales-workspace/clubs/${dealId}`),
   // Fetched separately from the drawer payload on purpose — a club whose
   // suburb polygon has never been cached costs an upstream Nominatim

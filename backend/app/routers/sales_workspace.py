@@ -538,6 +538,46 @@ async def performance(
     }
 
 
+@router.get("/performance/drilldown")
+async def performance_drilldown(
+    panel: str,
+    window: Optional[str] = None,
+    metric: Optional[str] = None,
+    user_id: Optional[str] = None,
+    owner: Optional[str] = None,
+    cell: Optional[str] = None,
+    contacted_only: bool = False,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """The clubs behind ONE figure on the Performance screen.
+
+    ``panel='activity'`` takes window/metric/user_id and answers a Contact
+    activity cell; ``panel='pipeline'`` takes owner/cell/contacted_only and
+    answers a stage-breakdown cell. Both re-run the predicates that produced
+    the number rather than a query shaped like them, so the list can never
+    disagree with what was clicked.
+
+    A 'sales'-role caller is pinned to their own work exactly as the screen
+    itself is — the cell identifiers arrive from a browser, so the pin is
+    applied server-side and not trusted from the params."""
+    pinned = actor.user.id if actor.role == "sales" else None
+    try:
+        if panel == "activity":
+            result = await sw.activity_cell_clubs(
+                db, user_id=user_id or sw.EVERYONE_KEY, window=window or "today",
+                metric=metric or "contacts", owner_user_id=pinned)
+        elif panel == "pipeline":
+            result = await sw.pipeline_cell_clubs(
+                db, owner=owner or sw.ALL_OWNERS_KEY, cell=cell or "to_contact",
+                contacted_only=contacted_only, owner_user_id=pinned)
+        else:
+            raise HTTPException(400, "Unknown panel")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return result
+
+
 # ─── Club drawer ──────────────────────────────────────────────────────────────
 
 @router.get("/clubs/{deal_id}")
