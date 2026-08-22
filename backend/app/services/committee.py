@@ -1150,15 +1150,21 @@ def _pillar_dict(p) -> dict:
     return {
         "id": str(p.id), "name": p.name, "description": p.description,
         "sort_order": p.sort_order, "is_active": p.is_active,
+        # Migration 275 — the plan this theme belongs to. NULL only for a theme
+        # 275 could not attribute (no objectives anywhere when it ran).
+        "plan_id": str(p.plan_id) if p.plan_id else None,
     }
 
 
-async def list_pillars(session: AsyncSession, org_id, *, include_inactive: bool = False) -> list[dict]:
+async def list_pillars(session: AsyncSession, org_id, *, include_inactive: bool = False,
+                       plan_id=None) -> list[dict]:
     from app.models.db import ClubStrategicPillar
 
     stmt = select(ClubStrategicPillar).where(ClubStrategicPillar.organisation_id == org_id)
     if not include_inactive:
         stmt = stmt.where(ClubStrategicPillar.is_active.is_(True))
+    if plan_id is not None:
+        stmt = stmt.where(ClubStrategicPillar.plan_id == plan_id)
     stmt = stmt.order_by(ClubStrategicPillar.sort_order, ClubStrategicPillar.name)
     return [_pillar_dict(p) for p in (await session.execute(stmt)).scalars().all()]
 
@@ -1181,6 +1187,20 @@ async def upsert_pillar(session: AsyncSession, org_id, pillar_id=None, **fields)
             raise ValueError("A pillar needs a name")
         p = ClubStrategicPillar(organisation_id=org_id, name=name[:120])
         session.add(p)
+    if "plan_id" in fields:
+        # A plan from another club would file this theme under someone else's,
+        # so it is checked rather than trusted — same rule upsert_objective
+        # applies to its own three foreign keys.
+        from app.models.db import ClubStrategicPlan
+        pid = fields["plan_id"]
+        if pid:
+            owner = (await session.execute(
+                select(ClubStrategicPlan.id).where(ClubStrategicPlan.id == pid,
+                                                   ClubStrategicPlan.organisation_id == org_id)
+            )).scalar_one_or_none()
+            if owner is None:
+                raise ValueError("That plan is not this club's")
+        p.plan_id = pid or None
     if fields.get("name"):
         p.name = fields["name"].strip()[:120]
     for f in ("sort_order", "is_active"):
@@ -1201,10 +1221,10 @@ async def delete_pillar(session: AsyncSession, org_id, pillar_id, *, cascade: bo
     the work that was filed under it.
 
     `cascade` deletes the objectives under it as well, for a caller that has
-    asked the club to confirm exactly that. **A pillar is CLUB-scoped, not
-    plan-scoped**, so its objectives can belong to several plans and a cascade
-    reaches every one of them — which is why it is never the default and why
-    the screen counts what will go before asking.
+    asked the club to confirm exactly that. Since migration 275 a theme belongs
+    to ONE plan, so a cascade reaches that plan's objectives and nothing else —
+    it can no longer take another plan's work with it, which is the failure
+    that made 275 necessary.
 
     Either way the actions and motions serving those objectives are KEPT and
     simply stop being linked (`club_objectives` → tasks/motions is SET NULL).
@@ -1315,11 +1335,15 @@ async def delete_plan(session: AsyncSession, org_id, plan_id, *, cascade: bool =
     (FK SET NULL). `cascade` deletes them with it, for a caller that has told
     the club how many go and had that confirmed.
 
+    Its THEMES go with it either way (FK ON DELETE CASCADE, migration 275) —
+    a theme belongs to one plan, so there is nowhere for it to go. Without
+    `cascade` the objectives under those themes survive, ungrouped and off any
+    plan, exactly as they did before 275.
+
     Neither mode touches the ACTIONS and MOTIONS serving those objectives —
     they are kept and simply stop being linked. An action is work somebody is
     doing; the plan it was written under being deleted is not a reason to lose
-    it. The club's THEMES are untouched too: a pillar is club-scoped and shared
-    across plans, so it outlives any one of them.
+    it.
     """
     from app.models.db import ClubStrategicPlan, ClubObjective
 
@@ -1446,6 +1470,19 @@ async def upsert_objective(session: AsyncSession, org_id, objective_id=None, **f
               "pillar_id", "owner_position_id"):
         if f in fields:
             setattr(o, f, fields[f])
+    # The theme and the plan have to agree. A theme belongs to ONE plan
+    # (migration 275), so an objective under theme T must be in T's plan —
+    # otherwise the tree would draw it in one plan while its theme lived in
+    # another, which is the shape that made 275 necessary. The plan is taken
+    # from the theme rather than refused: the theme is the more specific of
+    # the two, and it is what the person picked in the tree.
+    if o.pillar_id:
+        theme_plan = (await session.execute(
+            select(ClubStrategicPillar.plan_id)
+            .where(ClubStrategicPillar.id == o.pillar_id)
+        )).scalar_one_or_none()
+        if theme_plan is not None and o.plan_id != theme_plan:
+            o.plan_id = theme_plan
     o.updated_at = func.now()
     await session.flush()
     plans, pillars, positions = await _objective_labels(session, org_id)
@@ -1560,10 +1597,15 @@ def _season_label(start_month: int, today: Optional[date] = None) -> str:
 async def seed_starter_plan(session: AsyncSession, org_id) -> dict:
     """Give a club a plan to edit instead of an empty page.
 
-    Adds the four pillars, a plan for the club's current year, and one example
-    objective per pillar. Skips a pillar the club already has by name, and only
-    creates the plan (and its examples) when there is no plan by that name — so
-    pressing the button twice never duplicates anything or overwrites work.
+    Adds a plan for the club's current year, the four themes UNDER it, and one
+    example objective under each. Only creates anything when there is no plan
+    by that name, so pressing the button twice never duplicates anything or
+    overwrites work.
+
+    The plan is created FIRST since migration 275: a theme belongs to one plan,
+    so there is no such thing as a starter theme with no plan to sit in, and a
+    theme of the same name in last year's plan is a different theme — reusing
+    it would put this year's examples in last year's tree.
     """
     from app.models.db import ClubObjective, ClubStrategicPillar, ClubStrategicPlan, Organisation
 
@@ -1571,27 +1613,12 @@ async def seed_starter_plan(session: AsyncSession, org_id) -> dict:
     label = _season_label(getattr(org, "diary_start_month", 7) or 7)
     plan_name = f"Club Plan {label}"
 
-    have_pillars = {p["name"].strip().lower(): p["id"]
-                    for p in await list_pillars(session, org_id, include_inactive=True)}
-    pillar_ids: dict = {}
-    made_pillars = []
-    for order, (name, desc, _objective) in enumerate(STARTER_PILLARS):
-        existing = have_pillars.get(name.strip().lower())
-        if existing:
-            pillar_ids[name] = uuid.UUID(existing)
-            continue
-        p = ClubStrategicPillar(organisation_id=org_id, name=name, description=desc, sort_order=order)
-        session.add(p)
-        await session.flush()
-        pillar_ids[name] = p.id
-        made_pillars.append(_pillar_dict(p))
-
     existing_plan = (await session.execute(
         select(ClubStrategicPlan).where(ClubStrategicPlan.organisation_id == org_id,
                                         func.lower(ClubStrategicPlan.name) == plan_name.lower())
     )).scalars().first()
     if existing_plan is not None:
-        return {"plan": _plan_dict(existing_plan), "pillars": made_pillars,
+        return {"plan": _plan_dict(existing_plan), "pillars": [],
                 "objectives": [], "created_plan": False}
 
     year = int(label.split("/")[0])
@@ -1602,6 +1629,16 @@ async def seed_starter_plan(session: AsyncSession, org_id) -> dict:
     )
     session.add(plan)
     await session.flush()
+
+    pillar_ids: dict = {}
+    made_pillars = []
+    for order, (name, desc, _objective) in enumerate(STARTER_PILLARS):
+        p = ClubStrategicPillar(organisation_id=org_id, name=name, description=desc,
+                                sort_order=order, plan_id=plan.id)
+        session.add(p)
+        await session.flush()
+        pillar_ids[name] = p.id
+        made_pillars.append(_pillar_dict(p))
 
     objectives = []
     for order, (name, _desc, title) in enumerate(STARTER_PILLARS):

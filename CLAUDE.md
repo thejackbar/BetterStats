@@ -490,20 +490,43 @@ as sections with their own buttons rather than three tabs and a manage page.
   editor the lists open, `inline` — `EditorShell` is a dialog when it is opened
   over a list and plain content when it IS the pane, so there is one editor
   either way rather than a second read-only copy.
-- **A THEME IS CLUB-SCOPED, NOT PLAN-SCOPED** (migration 232), and every delete
-  decision here turns on it. Drawn under a plan because that is how a committee
-  reads its plan, but deleting one reaches every plan it groups objectives in —
-  so the confirm counts across all of them and says how many plans are hit.
-  Deleting a PLAN leaves the club's themes alone for the same reason.
+- **A THEME BELONGS TO ONE PLAN (migration 275), and 232's club-scoped pillar
+  was wrong.** 232 reasoned that a club's themes are stable across plans, so
+  the same few could serve the 12-month plan and the 5-year one. Running it as
+  a tree broke that in the worst way, and it was reported as data loss: a
+  second plan drew the FIRST plan's themes, an objective added under one read
+  as belonging to both, and deleting that theme from the second plan's tree
+  deleted the first plan's objectives. `club_strategic_pillars.plan_id`,
+  `ON DELETE CASCADE`. A plan owns its themes, a theme owns its objectives,
+  and there is no linkage between one plan's hierarchy and another's.
+- **The 275 backfill SPLITS rather than picking a winner.** A pillar whose
+  objectives span several plans is copied once per extra plan and that plan's
+  objectives re-pointed at its own copy, so every plan's tree survives intact.
+  The split must run BEFORE the claim, or one plan takes the original and the
+  others are left pointing at a theme that now belongs to someone else. A
+  pillar with no objectives anywhere cannot be attributed and keeps a NULL
+  `plan_id` — the tree lists those under "Not on a plan" so they can be seen
+  and cleared. `services/pillar_plan_ddl.py` is the ONE copy both alembic and
+  the lifespan mirror run, per the `vote_medal_ddl` rule; both statements are
+  idempotent.
+- **`upsert_objective` takes its plan FROM its theme.** A theme is the more
+  specific of the two and is what the person picked in the tree, so an
+  objective saved with a mismatched pair follows the theme rather than being
+  refused. The objective form offers only the chosen plan's themes, and
+  changing the plan clears the theme.
+- **Deleting a PLAN takes its themes** (that is what belonging to a plan
+  means); whether the objectives under them go is still the plan delete's own
+  `cascade` flag. Deleting a THEME can only ever reach its own plan's
+  objectives now.
 - **The PANE adds the level below; the RAIL adds at the level you are on.**
   A plan's pane offers + THEME, a theme's + OBJECTIVE, which is the shape of
-  plan → theme → objective. A pillar is club-scoped and carries no plan, so
-  three rules decide which themes a plan draws: the ones its objectives use,
-  every club theme when the plan has NO objectives yet (or a new plan opens on
-  an empty tree and its + THEME mints a fifth copy of a theme the club already
-  has), and any theme with no work anywhere (so one just created is reachable).
-  The plan an objective is added under comes from `sel.planId`, stamped when a
-  theme is selected in the tree — the theme itself cannot say.
+  plan → theme → objective. A plan draws the themes whose `plan_id` is that
+  plan, empty ones included — the "draw every club theme when the plan is
+  empty" and "draw an unused theme everywhere" rules are gone with 232's
+  club-scoped pillar, and were how the reported leak got in.
+  The plan an objective is added under is read off the THEME's own `plan_id`
+  since 275 — never a positional fallback, since a theme in the wrong plan is
+  the failure 275 exists to prevent.
 - **`sort_order` is stamped by POSITION over a WHOLE level**
   (`reorder_plan_tree`, one endpoint each for plans, pillars and objectives).
   Objectives are ordered club-wide and only GROUPED by plan and theme, so a

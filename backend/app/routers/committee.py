@@ -1300,24 +1300,41 @@ async def reorder_objectives(data: TreeReorder, _: User = _require,
     return {"ok": True}
 
 
+def _pillar_fields(data: "PillarUpsert") -> dict:
+    """`exclude_unset`, with plan_id parsed to a UUID — the same shape
+    `_objective_fields` builds for an objective's own foreign keys, so a
+    junk id fails here rather than at the database."""
+    fields = data.model_dump(exclude_unset=True)
+    if "plan_id" in fields:
+        fields["plan_id"] = uuid.UUID(fields["plan_id"]) if fields["plan_id"] else None
+    return fields
+
+
 class PillarUpsert(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     sort_order: Optional[int] = None
     is_active: Optional[bool] = None
+    # Migration 275 — the plan this theme belongs to.
+    plan_id: Optional[str] = None
 
 
 @router.get("/pillars")
-async def list_pillars(include_inactive: bool = False, _: User = _require,
+async def list_pillars(include_inactive: bool = False, plan_id: Optional[str] = None,
+                       _: User = _require,
                        club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    return {"pillars": await committee_service.list_pillars(db, club.id, include_inactive=include_inactive)}
+    """`plan_id` narrows to one plan's themes — a theme belongs to one plan
+    since migration 275."""
+    return {"pillars": await committee_service.list_pillars(
+        db, club.id, include_inactive=include_inactive,
+        plan_id=uuid.UUID(plan_id) if plan_id else None)}
 
 
 @router.post("/pillars")
 async def create_pillar(data: PillarUpsert, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
-        p = await committee_service.upsert_pillar(db, club.id, **data.model_dump(exclude_unset=True))
+        p = await committee_service.upsert_pillar(db, club.id, **_pillar_fields(data))
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err))
     await db.commit()
@@ -1329,7 +1346,7 @@ async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
     try:
         p = await committee_service.upsert_pillar(db, club.id, uuid.UUID(pillar_id),
-                                                  **data.model_dump(exclude_unset=True))
+                                                  **_pillar_fields(data))
     except ValueError as err:
         raise HTTPException(status_code=404 if "not found" in str(err) else 422, detail=str(err))
     await db.commit()
@@ -1339,10 +1356,11 @@ async def update_pillar(pillar_id: str, data: PillarUpsert, _: User = _require,
 @router.delete("/pillars/{pillar_id}")
 async def delete_pillar(pillar_id: str, cascade: bool = False, _: User = _require,
                         club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
-    """`cascade=true` takes this theme's objectives with it. Off by default —
-    a pillar is club-scoped, so its objectives can span several plans and the
-    caller has to have counted them and had that confirmed. Actions and motions
-    are never deleted either way; they just stop being linked."""
+    """`cascade=true` takes this theme's objectives with it. Off by default,
+    so the caller has to have counted them and had that confirmed. Since
+    migration 275 a theme belongs to ONE plan, so this can only ever reach that
+    plan's objectives. Actions and motions are never deleted either way; they
+    just stop being linked."""
     if not await committee_service.delete_pillar(db, club.id, uuid.UUID(pillar_id), cascade=cascade):
         raise HTTPException(status_code=404, detail="Pillar not found")
     await db.commit()

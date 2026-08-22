@@ -1117,17 +1117,22 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
         <label className="block">
           <span className={`${cap} block mb-1`}>STRATEGIC PLAN</span>
           <select className={inp} value={form.plan_id}
-            onChange={e => setForm(f => ({ ...f, plan_id: e.target.value }))}>
+            onChange={e => setForm(f => ({ ...f, plan_id: e.target.value, pillar_id: '' }))}>
             <option value="">— not on a plan —</option>
             {(plans || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
         <label className="block">
           <span className={`${cap} block mb-1`}>THEME</span>
+          {/* Only the chosen plan's themes: a theme belongs to one plan, so
+              offering another plan's would file this objective in a tree it
+              is not in. Changing the plan therefore clears the theme. */}
           <select className={inp} value={form.pillar_id}
-            onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}>
-            <option value="">— no theme —</option>
-            {(pillars || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}
+            disabled={!form.plan_id}>
+            <option value="">{form.plan_id ? '— no theme —' : '— pick a plan first —'}</option>
+            {(pillars || []).filter(p => p.plan_id === form.plan_id)
+              .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
         {/* A committee SEAT by default: ownership then transfers at the AGM
@@ -1556,30 +1561,32 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   // it belongs to the club, not to this plan.
   const allObjectives = groups.flatMap(g => g.objective_list || [])
 
-  // Which themes a plan draws, and two of the three cases are about a plan
-  // that has nothing under it yet.
+  // A theme belongs to ONE plan (migration 275), so a plan's themes are simply
+  // the themes whose plan_id is this plan — including the ones with nothing
+  // filed under them yet.
   //
-  // A pillar is CLUB-SCOPED and carries no plan of its own, so a plan's themes
-  // are normally the ones its objectives are filed under. That leaves a plan
-  // with no objectives showing an empty tree, with no way to hang the first
-  // objective off — and a "+ THEME" that would mint a fifth copy of a theme
-  // the club already has. So an EMPTY plan starts from the club's whole set,
-  // and a theme with no work anywhere shows under every plan until it has
-  // some, which is what makes one just created reachable.
+  // This used to derive a plan's themes from its objectives, and fill an empty
+  // plan from the club's whole set. Both were wrong for the same reason: a
+  // theme was shared, so a second plan drew the first plan's themes, an
+  // objective read as belonging to both, and deleting a theme from the second
+  // plan's tree deleted the FIRST plan's objectives. There is no linkage
+  // between one plan's hierarchy and another's.
   const themesIn = (plan) => {
     const objs = plan.objective_list || []
-    const planEmpty = plan.id && objs.length === 0
-    const out = pillars
-      .map(p => ({
-        id: p.id, name: p.name,
-        rows: objs.filter(o => o.pillar_id === p.id),
-        unused: !allObjectives.some(o => o.pillar_id === p.id),
-      }))
-      .filter(g => g.rows.length || planEmpty || (plan.id && g.unused))
-    const loose = objs.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id))
+    const mine = pillars.filter(p => p.plan_id === plan.id)
+    const out = mine.map(p => ({
+      id: p.id, name: p.name,
+      rows: objs.filter(o => o.pillar_id === p.id),
+    }))
+    const loose = objs.filter(o => !o.pillar_id || !mine.some(p => p.id === o.pillar_id))
     if (loose.length) out.push({ id: '', name: 'No theme', rows: loose })
     return out
   }
+
+  // Themes migration 275 could not attribute — none of their objectives named
+  // a plan when it ran. Drawn once, at the foot of the tree, so they can be
+  // moved onto a plan or deleted rather than being invisible.
+  const orphanThemes = pillars.filter(p => !p.plan_id)
 
   const objectiveById = id => allObjectives.find(o => o.id === id)
   const workById = (kind, id) => {
@@ -1611,7 +1618,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       + (objs.length
         ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it.` + keptLine(tally(objs))
         : '')
-      + `\n\nThe club's themes are kept — a theme is shared across plans.\n\nThis cannot be undone.`
+      + `\n\nIts themes go with it too — a theme belongs to one plan.\n\nThis cannot be undone.`
     if (!window.confirm(msg)) return
     try {
       await api.committeeDeletePlan(plan.id, true)
@@ -1621,13 +1628,14 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   }
 
   async function removeTheme(pillarId, name) {
-    // Club-scoped, so this counts every plan's objectives, not this plan's.
+    // A theme belongs to one plan, so this can only ever reach that plan's
+    // objectives — it used to be club-scoped, and deleting a theme from one
+    // plan's tree took another plan's work with it.
     const objs = allObjectives.filter(o => o.pillar_id === pillarId)
-    const plansHit = new Set(objs.map(o => o.plan_name).filter(Boolean))
     const msg = `Delete the theme “${name}”?`
       + (objs.length
-        ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it`
-          + (plansHit.size > 1 ? `, across ${plansHit.size} plans` : '') + '.' + keptLine(tally(objs))
+        ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it.`
+          + keptLine(tally(objs))
         : '')
       + `\n\nThis cannot be undone.`
     if (!window.confirm(msg)) return
@@ -1694,7 +1702,13 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     try {
       if (id) await api.committeeUpdatePillar(id, data)
       else {
-        const made = await api.committeeCreatePillar(data)
+        // The plan the new theme belongs to: the one it was added from, else
+        // the plan of the theme that is selected. Never a positional guess —
+        // a theme in the wrong plan is the failure 275 exists to prevent.
+        const planId = addingTheme?.planId
+          || (sel?.kind === 'theme' ? pillars.find(x => x.id === sel.id)?.plan_id : null)
+          || sel?.planId || null
+        const made = await api.committeeCreatePillar({ ...data, plan_id: planId })
         // A new theme lands directly below the one that was selected, so it
         // appears where the person was looking rather than at the bottom.
         if (made?.id) {
@@ -1702,7 +1716,6 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
             sel?.kind === 'theme' ? sel.id : null, made.id)
           // Selected under the plan it was added from, so the pane can offer
           // "+ OBJECTIVE" against the right plan straight away.
-          const planId = addingTheme?.planId || sel?.planId || plans[0]?.id || ''
           setSel({ kind: 'theme', id: made.id, planId })
           setOpenIds(o => new Set([...(o || []), `plan:${planId}`, `theme:${planId}:${made.id}`]))
         }
@@ -1780,7 +1793,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     setEditingPlan(null); setEditingObjective(null); setEditingTheme(null)
     setAddingPlan(false); setAddingTheme(null); setAddingObjectiveTo(null)
     if (addLevel === 'plan') setAddingPlan(true)
-    else if (addLevel === 'theme') setAddingTheme({ planId: sel?.planId || null })
+    else if (addLevel === 'theme') {
+      setAddingTheme({ planId: pillars.find(x => x.id === sel?.id)?.plan_id || sel?.planId || null })
+    }
     else {
       // Under the objective that is selected, so it lands in the same branch.
       const near = sel?.kind === 'objective' ? objectiveById(sel.id)
@@ -1882,6 +1897,24 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
           No plans written down yet.
         </div>
       )}
+
+      {/* Themes migration 275 could not attribute to a plan. Nothing creates
+          one now; they are here so a club can see and clear them. */}
+      {orphanThemes.length > 0 && (
+        <div className="mt-3 pt-2 border-t pb-hairline">
+          <div className={`${cap} px-1.5 mb-1`}>NOT ON A PLAN</div>
+          {orphanThemes.map(p => (
+            <div key={p.id} className={`${TREE_ROW} ${isSel('theme', p.id) ? 'bg-pb-surface2' : ''}`}
+              style={isSel('theme', p.id) ? { boxShadow: 'inset 2px 0 0 var(--pb-accent)' } : undefined}>
+              <Twisty hidden />
+              <button onClick={() => select('theme', p.id, { planId: null })} className="min-w-0 flex-1 text-left">
+                <TreeLabel kind="THEME" active={isSel('theme', p.id)} dim>{p.name}</TreeLabel>
+              </button>
+              <DelDot onClick={() => removeTheme(p.id, p.name)} title={`Delete ${p.name}`} />
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 
@@ -1968,7 +2001,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
   if (!adding && sel?.kind === 'theme') {
     const p = pillars.find(x => x.id === sel.id)
     const objs = allObjectives.filter(o => o.pillar_id === sel.id)
-    const plansHit = [...new Set(objs.map(o => o.plan_name).filter(Boolean))]
+    const ownPlan = plans.find(pl => pl.id === p?.plan_id)
     const done = objs.filter(o => (o.percent_complete || 0) >= 100).length
     const pct = objs.length ? Math.round(objs.reduce((n, o) => n + (o.percent_complete || 0), 0) / objs.length) : 0
     if (p && editingTheme === p.id) {
@@ -1983,10 +2016,9 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
             <div className="min-w-0">
               <div className={`${cap} mb-1`}>THEME</div>
               <h2 className="text-pb-text text-[21px] font-bold leading-tight">{p.name}</h2>
-              {/* Club-scoped, so this says where else it is used before anyone
-                  reaches for Delete. */}
+              {/* One plan, always — which is the whole point of 275. */}
               <div className={`${cap} mt-1`}>
-                {plansHit.length > 1 ? `USED BY ${plansHit.length} PLANS` : (plansHit[0] || 'NOT USED BY A PLAN YET').toUpperCase()}
+                {(ownPlan?.name || 'NOT ON A PLAN').toUpperCase()}
               </div>
             </div>
             <div className="flex gap-2 shrink-0">
@@ -2006,7 +2038,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
         {/* The level below a theme, added against the plan it is being read
             under — a theme belongs to the club, so the plan has to come from
             where you are rather than from the theme itself. */}
-        <button onClick={() => setAddingObjectiveTo({ planId: sel.planId || plans[0]?.id || '', pillarId: p.id })}
+        <button onClick={() => setAddingObjectiveTo({ planId: p.plan_id || '', pillarId: p.id })}
           className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold"
           style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ OBJECTIVE</button>
         {p.description && (
@@ -2024,7 +2056,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
               {objs.map(o => (
                 <button key={o.id} onClick={() => select('objective', o.id)}
                   className="w-full text-left text-[12.5px] text-pb-dim hover:text-pb-text leading-snug">
-                  {o.plan_name ? <span className={cap}>{o.plan_name.toUpperCase()} · </span> : null}{o.title}
+                  {o.title}
                 </button>
               ))}
             </div>
@@ -2166,35 +2198,12 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
  * shows as a filter above the plans and a heading inside one, and the plan →
  * objective → action indent stays three deep.
  */
-function PillarBar({ pillars, active, onPick, onChanged }) {
-  const toast = useToast()
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState('')
-
-  async function add() {
-    if (!draft.trim()) return
-    try { await api.committeeCreatePillar({ name: draft.trim() }); setDraft(''); onChanged() }
-    catch (e) { toast.error(e.message) }
-  }
-  async function rename(p) {
-    const name = prompt('Rename this theme', p.name)
-    if (!name || !name.trim() || name === p.name) return
-    try { await api.committeeUpdatePillar(p.id, { name: name.trim() }); onChanged() }
-    catch (e) { toast.error(e.message) }
-  }
-  async function remove(p) {
-    if (!confirm(`Delete "${p.name}"? Its objectives stay, they just stop being grouped under it.`)) return
-    try { await api.committeeDeletePillar(p.id); onChanged() } catch (e) { toast.error(e.message) }
-  }
-
-  if (!pillars.length && !editing) {
-    return (
-      <button onClick={() => setEditing(true)}
-        className="font-mono text-[10px] text-pb-faintest hover:text-pb-faint mb-3">
-        + Group objectives by theme
-      </button>
-    )
-  }
+// The theme filter above a list of objectives. It only FILTERS since migration
+// 275 — a theme belongs to a plan, so creating, renaming and deleting one
+// happens in Strategic Plans or on the Themes screen, where the plan it belongs
+// to is on screen. A bar of chips has nowhere to say which plan it means.
+function PillarBar({ pillars, active, onPick }) {
+  if (!pillars.length) return null
   return (
     <div className="mb-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -2209,30 +2218,9 @@ function PillarBar({ pillars, active, onPick, onChanged }) {
               style={active === p.id ? { borderColor: mix(55), background: mix(10) } : undefined}>
               {p.name}
             </button>
-            {editing && (
-              <>
-                <button onClick={() => rename(p)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-text ml-1">edit</button>
-                <button onClick={() => remove(p)} className="font-mono text-[9px] text-pb-faintest hover:text-pb-red ml-1">✕</button>
-              </>
-            )}
           </span>
         ))}
-        <button onClick={() => setEditing(v => !v)}
-          className="font-mono text-[9px] text-pb-faintest hover:text-pb-text ml-1">
-          {editing ? 'Done' : 'Edit themes'}
-        </button>
       </div>
-      {editing && (
-        <div className="flex gap-2 mt-2 max-w-sm">
-          <input className={inp} placeholder="New theme, e.g. Facilities & community"
-            value={draft} onChange={e => setDraft(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') add() }} />
-          <button onClick={add} disabled={!draft.trim()}
-            className="px-3 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap">
-            + Theme
-          </button>
-        </div>
-      )}
     </div>
   )
 }
@@ -2254,10 +2242,15 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
   const count = id => all.filter(o => o.pillar_id === id).length
   const loose = all.filter(o => !o.pillar_id || !pillars.some(p => p.id === o.pillar_id)).length
 
+  // A theme belongs to a plan (migration 275), so this screen has to say
+  // which — there is no such thing as a club-wide theme any more.
+  const [planId, setPlanId] = useState('')
+  useEffect(() => { setPlanId(id => id || plans[0]?.id || '') }, [plans])
+
   async function add() {
-    if (!draft.trim()) return
+    if (!draft.trim() || !planId) return
     setBusy(true)
-    try { await api.committeeCreatePillar({ name: draft.trim() }); setDraft(''); onChanged() }
+    try { await api.committeeCreatePillar({ name: draft.trim(), plan_id: planId }); setDraft(''); onChanged() }
     catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
   async function rename(pl) {
@@ -2275,16 +2268,20 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
   return (
     <div>
       <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
-        The headings the club groups its objectives under — participation, finances, volunteers,
-        facilities, or whatever your own plan is built around. A theme is a grouping, not another
-        level: plan, objective, action stays three deep.
+        The headings a plan groups its objectives under — participation, finances, volunteers,
+        facilities, or whatever your own plan is built around. A theme belongs to one plan, and
+        the objectives under it belong to that plan too.
       </p>
 
-      <div className="flex gap-2 mb-4 max-w-md">
-        <input className={inp} placeholder="New theme, e.g. Facilities &amp; community"
+      <div className="flex flex-wrap gap-2 mb-4 max-w-2xl">
+        <input className={`${inp} flex-1 min-w-[14rem]`} placeholder="New theme, e.g. Facilities &amp; community"
           value={draft} onChange={e => setDraft(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') add() }} />
-        <button onClick={add} disabled={busy || !draft.trim()}
+        <select className={`${inp} sm:w-56`} value={planId} onChange={e => setPlanId(e.target.value)}>
+          {plans.length === 0 && <option value="">No plans yet</option>}
+          {plans.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button onClick={add} disabled={busy || !draft.trim() || !planId}
           className="px-4 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold disabled:opacity-40 whitespace-nowrap"
           style={{ background: 'var(--pb-accent)', color: '#0a0d14' }}>+ THEME</button>
       </div>
@@ -2300,6 +2297,8 @@ function ThemesSection({ pillars, plans, unassigned, onChanged }) {
               <div className="min-w-0">
                 <div className="text-pb-text font-semibold text-[15px]">{pl.name}</div>
                 <div className={`${cap} mt-0.5`}>
+                  {(plans.find(p => p.id === pl.plan_id)?.name || 'Not on a plan').toUpperCase()}
+                  {' · '}
                   {count(pl.id)} {count(pl.id) === 1 ? 'OBJECTIVE' : 'OBJECTIVES'}
                 </div>
               </div>
@@ -2424,7 +2423,7 @@ export function PlanTab({ members, section }) {
           Every objective across every plan. The actions and motions serving each one are folded
           away underneath it, and the figures add up from the register the committee already keeps.
         </p>
-        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} onChanged={load} />
+        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} />
         <div className="flex flex-wrap items-center gap-2 mb-4">
           {!addingObjectiveTo && addingObjectiveTo !== '' && (
             <button onClick={() => setAddingObjectiveTo('')}
@@ -2463,7 +2462,7 @@ export function PlanTab({ members, section }) {
       </p>
 
       {view === 'plan' && (
-        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} onChanged={load} />
+        <PillarBar pillars={pillars} active={pillarFilter} onPick={setPillarFilter} />
       )}
 
       <div className="flex flex-wrap items-center gap-2 mb-4">

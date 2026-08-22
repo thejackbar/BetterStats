@@ -3364,20 +3364,29 @@ class ClubStrategicPlan(Base):
 
 
 class ClubStrategicPillar(Base):
-    """A theme the club's objectives group under (migration 232) — on-field,
+    """A theme in one plan (migration 232, made plan-scoped by 275) — on-field,
     finances, volunteers, facilities.
 
-    Club-scoped rather than plan-scoped on purpose: a club's pillars are stable
-    across plans, so the same few serve the 12-month plan and the 5-year one and
-    the club can ask how a theme is going across both at once.
+    **A theme belongs to ONE plan** (``plan_id``). 232 made it club-scoped on
+    the reasoning that a club's themes are stable across plans; running it as a
+    tree proved that wrong in the worst way, because the second plan drew the
+    first plan's themes and deleting one of them from the second plan's tree
+    deleted the FIRST plan's objectives. A plan owns its themes, a theme owns
+    its objectives, and there is no linkage between one plan's hierarchy and
+    another's.
 
-    A pillar is a GROUPING, not another level of the hierarchy — plan →
-    objective → action stays three deep.
+    ``plan_id`` is nullable only for a theme 275 could not attribute — one with
+    no objectives anywhere at the moment it ran. Those show as unclaimed and
+    can be moved onto a plan or deleted; nothing creates one now.
     """
     __tablename__ = "club_strategic_pillars"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     organisation_id = Column(UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False)
+    # Deleting a plan takes its themes with it — that is what belonging to a
+    # plan means. Whether the OBJECTIVES under them go too is the plan delete's
+    # own `cascade` flag, unchanged.
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("club_strategic_plans.id", ondelete="CASCADE"), nullable=True)
     name = Column(Text, nullable=False)
     description = Column(Text, nullable=True)
     sort_order = Column(Integer, nullable=False, server_default="0", default=0)

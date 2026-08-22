@@ -4997,6 +4997,24 @@ async def lifespan(app: FastAPI):
         ):
             await conn.execute(text(f"ALTER TABLE club_objectives ADD COLUMN IF NOT EXISTS {col} {ddl}"))
 
+        # Migration 275: a theme belongs to ONE plan. Mirrored from
+        # alembic/versions/275_pillar_belongs_to_plan.py, whose docstring
+        # explains why 232's club-scoped pillar had to go and what the split
+        # in the backfill is for. Idempotent: the split and the claim are both
+        # no-ops once every pillar carries a plan.
+        from app.services.pillar_plan_ddl import PILLAR_PLAN_SPLIT_SQL, PILLAR_PLAN_CLAIM_SQL
+        await conn.execute(text("""
+            ALTER TABLE club_strategic_pillars
+                ADD COLUMN IF NOT EXISTS plan_id UUID
+                REFERENCES club_strategic_plans(id) ON DELETE CASCADE
+        """))
+        await conn.execute(text(PILLAR_PLAN_SPLIT_SQL))
+        await conn.execute(text(PILLAR_PLAN_CLAIM_SQL))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_club_strategic_pillars_plan "
+            "ON club_strategic_pillars(plan_id)"
+        ))
+
         # Migration 223: a member row may only link to a player of the SAME
         # club. NOT VALID, so it guards every new write from the moment it
         # lands without failing on rows an earlier bug already left behind
