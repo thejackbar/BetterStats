@@ -806,9 +806,13 @@ async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal
     # price, so the two fields can never silently drift apart. Club-scope
     # deals (sponsors/grants/custom trackers) keep value_cents fully manual.
     if deal.scope == SCOPE_PLATFORM and "module_keys" in fields and fields["module_keys"] is not None:
-        keys = sorted(set(fields["module_keys"] or []))
-        if keys:
-            deal.value_cents = value_from_modules(keys)
+        # Including an EMPTY selection, which prices at 0. Clearing every
+        # module used to leave the old dollar figure standing, so a deal could
+        # read "no modules" beside a four-figure value — the same value/modules
+        # drift the merge ratchet produced, reached the other way. Setting the
+        # modules is a deliberate act by a rep or a super admin, and the value
+        # is defined as the price of what they picked.
+        deal.value_cents = value_from_modules(sorted(set(fields["module_keys"] or [])))
     if (deal.discount_amount_cents or deal.discount_percent) and not (deal.discount_reason or "").strip():
         raise ValueError("A discretionary discount requires a reason")
     deal.updated_at = func.now()

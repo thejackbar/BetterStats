@@ -190,6 +190,41 @@ Workspace opened on a different club.
   over. Reproduced first with the fix absent — the repro bounced to row one
   and rewrote the URL, exactly as reported.
 
+### The deep link landed, but the queue never moved (v9.49.6)
+
+- **`selectClub`'s own scroll fires 60ms after the call, which on a deep link
+  is 60ms into a queue request that has not come back yet** — there is no row
+  to scroll to, so nothing happened and the club sat correctly selected far
+  down a list nobody moved. The queue's OTHER scroll (the re-anchor after an
+  action) is deliberately skipped when `anchor === false`, and the first load
+  is exactly that (`loadClubs({ anchor: false })` off the filters effect), so
+  it never covered this either. `pendingScrollIdRef` is resolved in
+  `loadClubs`'s own `.then`, the first moment the row can exist, and
+  independently of `anchor`: that flag stops a FILTER TWEAK moving the
+  viewport, and arriving on a link is not a filter tweak.
+- **`block: 'center'`, not `'nearest'`** — a row 34 of 40 down should land in
+  the middle of the rail where it can be read in context, not scraped onto
+  the bottom edge.
+- **A linked club the filters exclude has no row at all**, and a rail that
+  silently highlights nothing reads as broken. It now says so and offers to
+  clear the filters, which re-arms the pending scroll so the club is scrolled
+  to once it appears.
+- **Clearing every "Interested in" pill left the value behind.**
+  `update_deal` guarded the recompute with `if keys:`, so an empty selection
+  kept the old figure and the deal read "no modules" beside a four-figure
+  value — the same value/modules drift the merge ratchet produced, reached
+  from the other end. Setting the modules is a deliberate act and the value is
+  the price of what was picked, including nothing.
+- **The pills endpoint returns `get_club(...)`, so the rep's own pane already
+  shows the recomputed figure without a reload**, and the CRM deal card reads
+  the same row with no sync step in between — asserted both ways rather than
+  assumed.
+- **Verified**: 12 Chromium checks in
+  `frontend/verification/verify_workspace_deeplink_browser.mjs` (the scroll
+  into view, the row carrying the selected border, row one NOT selected, the
+  outside-filters note, plus the four from v9.49.3), and the Postgres
+  interest suite is 24.
+
 - **Deliberately super-admin only.** Commission rates and payouts are management
   data about staff pay, which is a different thing from the Sales Workspace's
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,

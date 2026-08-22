@@ -888,6 +888,20 @@ export default function SalesWorkspace() {
   // moment the rep picks a club themselves, after which the ordinary
   // advance-on-drop-out behaviour resumes.
   const deepLinkedIdRef = useRef(null)
+
+  // A club still owed its landing scroll. selectClub's own scroll fires 60ms
+  // after the click, which is fine for a row already on screen and useless on
+  // a deep link: at mount the queue request is still in flight, so there is no
+  // row to scroll to yet, and the club ends up correctly selected somewhere
+  // far down a list nobody moved. The queue's other scroll — the re-anchor
+  // below — is deliberately skipped on a filter-driven load (`anchor: false`),
+  // which is exactly how the first load arrives, so it never covered this
+  // either. Resolved once the rows are actually in hand.
+  const pendingScrollIdRef = useRef(null)
+  // Set when a deep-linked club turns out not to be in the filtered queue at
+  // all — there is no row to select, and the rail saying nothing about it is
+  // what reads as broken.
+  const [linkedOutsideFilters, setLinkedOutsideFilters] = useState(null)
   // Set true the first time loadClubs' reload handler runs to completion —
   // whether it landed on a ?club= deep link, kept an existing selection, or
   // fell through to the "land on the top of the queue" default below. Once
@@ -1050,6 +1064,22 @@ export default function SalesWorkspace() {
       const rows = d.clubs || []
       setClubs(rows)
       setStages(d.stages || [])
+      // A deep-linked club's landing scroll, honoured here rather than in
+      // selectClub because this is the first moment its row can exist. Runs
+      // whatever `anchor` says: that flag stops a FILTER TWEAK moving the
+      // viewport, and arriving on a link is not a filter tweak.
+      const owed = pendingScrollIdRef.current
+      if (owed) {
+        const present = rows.some(c => c.id === owed)
+        setLinkedOutsideFilters(present ? null
+          : (rows.length ? { id: owed } : null))
+        if (present) {
+          pendingScrollIdRef.current = null
+          setTimeout(() => {
+            rowRefs.current[owed]?.scrollIntoView({ block: 'center', behavior: 'instant' })
+          }, 60)
+        }
+      }
       // The currently-open drawer belongs to a club that just dropped out of
       // the filtered queue — most often a call outcome moving it to a stage
       // (or "called"/callback state) the active filters no longer include,
@@ -1231,6 +1261,7 @@ export default function SalesWorkspace() {
     const clubParam = searchParams.get('club')
     if (clubParam && clubParam !== selectedId) {
       deepLinkedIdRef.current = clubParam
+      pendingScrollIdRef.current = clubParam
       selectClub(clubParam, { scroll: true })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1763,6 +1794,30 @@ export default function SalesWorkspace() {
               it lands, keyed on id, with no interim empty state. The
               "Loading…" placeholder is reserved for the one case with
               nothing to show yet: a genuine first load. */}
+          {/* The link named a club the current filters exclude, so it is open
+              in the pane with no row to select. Saying so — and offering the
+              one action that brings it into the rail — beats a rail that
+              silently highlights nothing. */}
+          {linkedOutsideFilters && (
+            <div className="mb-2 px-2 py-1.5 rounded border border-pb-hairline text-[11px] text-pb-faint">
+              The club you opened sits outside these filters, so it is not in the list.{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setFilters(f => ({
+                    ...f, q: '', stage_key: [], owner_user_ids: [], attributed_user_ids: [],
+                    call_status: ALL_CALL_STATUS, list_id: '', min_score: '', max_score: '',
+                    meta_selected: false, meta_searched: false, modules: [], states: [],
+                  }))
+                  pendingScrollIdRef.current = selectedIdRef.current
+                  setLinkedOutsideFilters(null)
+                }}
+                className="text-pb-accent-ink underline decoration-dotted underline-offset-2 hover:decoration-solid"
+              >
+                Clear the filters
+              </button>{' '}to show it.
+            </div>
+          )}
           {loadingList && clubs.length === 0 ? (
             <p className="text-[12px] text-pb-faintest px-1 py-2">Loading…</p>
           ) : clubs.length === 0 ? (
@@ -1792,7 +1847,12 @@ export default function SalesWorkspace() {
                     />
                   )}
                   <button
-                    onClick={() => { deepLinkedIdRef.current = null; selectClub(c.id) }}
+                    onClick={() => {
+                      deepLinkedIdRef.current = null
+                      pendingScrollIdRef.current = null
+                      setLinkedOutsideFilters(null)
+                      selectClub(c.id)
+                    }}
                     className={`flex-1 min-w-0 text-left rounded-lg px-2.5 py-2 border transition-colors ${
                       selectedId === c.id ? 'border-pb-accent bg-pb-surface2'
                       : c.callback_due ? 'border-blue-500/60 hover:bg-pb-surface2'

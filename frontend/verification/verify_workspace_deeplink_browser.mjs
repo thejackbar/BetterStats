@@ -11,7 +11,13 @@ const BASE = process.env.APP_URL || 'http://localhost:5199'
 const OUTSIDE = '267a9c6d-3f79-4529-ba81-3850c4f7a74b'
 const Q1 = 'aaaaaaaa-0000-0000-0000-000000000001'
 const Q2 = 'aaaaaaaa-0000-0000-0000-000000000002'
+// A long queue, so a club near the bottom is genuinely below the fold on
+// landing — which is the whole point of the scroll.
+const LONG = Array.from({ length: 40 }, (_, i) =>
+  `bbbbbbbb-0000-0000-0000-0000000000${String(i).padStart(2, '0')}`)
+const DEEP = LONG[33]
 const NAMES = { [OUTSIDE]: 'Outside Filters CC', [Q1]: 'Aardvark CC', [Q2]: 'Zebra CC' }
+LONG.forEach((id, i) => { NAMES[id] = `Queue Club ${i}` })
 
 const pass = [], fail = []
 const check = (n, c, d = '') => { (c ? pass : fail).push(n); console.log((c ? '  ok   ' : '  FAIL ') + n + (!c && d ? `  [${d}]` : '')) }
@@ -112,6 +118,38 @@ const run = async () => {
     check('picking a club from the queue by hand takes over from the deep link',
           drawerFetches[drawerFetches.length - 1] === Q2, drawerFetches.join(','))
     check('…and the URL follows it', page.url().includes(Q2), page.url())
+    await page.close()
+  }
+
+  // 5. The reported follow-up: the linked club IS in the queue, but far down
+  //    it. It must be scrolled into view and highlighted, not just opened in
+  //    the pane.
+  {
+    const { page } = await mount(ctx, LONG)
+    await page.goto(`${BASE}/admin/super/crm/workspace?club=${DEEP}`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(2500)
+    const row = page.locator(`text=${NAMES[DEEP]}`).first()
+    check('a linked club far down the queue is scrolled into view',
+          await row.isVisible() && await row.evaluate((el) => {
+            const r = el.getBoundingClientRect()
+            return r.top >= 0 && r.bottom <= window.innerHeight
+          }), 'row is off-screen')
+    check('…and its row is the selected one',
+          await row.evaluate((el) => !!el.closest('button')?.className.includes('border-pb-accent')))
+    check('the first row is NOT the selected one',
+          !(await page.locator(`text=${NAMES[LONG[0]]}`).first()
+            .evaluate((el) => !!el.closest('button')?.className.includes('border-pb-accent'))))
+    await page.close()
+  }
+
+  // 6. A linked club the filters exclude has no row, so the rail says so
+  //    rather than silently highlighting nothing.
+  {
+    const { page } = await mount(ctx, LONG)
+    await page.goto(`${BASE}/admin/super/crm/workspace?club=${OUTSIDE}`, { waitUntil: 'networkidle' })
+    await page.waitForTimeout(2500)
+    check('a linked club outside the filters is called out in the rail',
+          (await page.innerText('body')).includes('sits outside these filters'))
     await page.close()
   }
 
