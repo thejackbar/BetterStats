@@ -24,10 +24,10 @@ from app.services import email_service
 TEMPLATE_LABELS = {
     "information": "Send information",
     "voicemail_followup": "Email following voicemail - general",
-    # Offering a trial comes before extending one — this list runs in the order
-    # a rep works through a club, and a club with no trial yet is the earlier
-    # moment. Wording is the one the ask specified.
-    "voicemail_followup_trial_offer": "Email following voice - trial offer",
+    # Immediately after the general one, and before the two extend-trial ones:
+    # this list runs in the order a rep works through a club, and a club with
+    # no trial yet is the earlier moment than one whose trial is running out.
+    "voicemail_followup_trial_offer": "Email following voicemail - trial offer",
     # Approaching expiry comes FIRST: it is the earlier moment in a trial, and
     # a rep works down this list in the order the club's trial is running out.
     "voicemail_followup_extend_trial_soon":

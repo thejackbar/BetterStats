@@ -82,7 +82,7 @@ async def main():
         ok('it carries the short Comms name the ask specified',
            got[K][0] == 'Email following VM. Trial offer', str(got[K][0]))
         ok('its dropdown label is the one the ask specified',
-           se.TEMPLATE_LABELS[K] == 'Email following voice - trial offer',
+           se.TEMPLATE_LABELS[K] == 'Email following voicemail - trial offer',
            se.TEMPLATE_LABELS[K])
         ok('its body is copied from trial information — the same six steps',
            all(x in got[K][2] for x in ('Search for your club', 'Create your admin account',
@@ -155,8 +155,8 @@ async def main():
            keys.index('voicemail_followup') < keys.index('voicemail_followup_extend_trial_soon'), str(keys))
         ok('offering a trial precedes extending one',
            keys.index(K) < keys.index('voicemail_followup_extend_trial_soon'), str(keys))
-        ok('and it sits under the general voicemail follow-up too',
-           keys.index('voicemail_followup') < keys.index(K), str(keys))
+        ok('and it sits IMMEDIATELY after the general voicemail follow-up',
+           keys.index(K) == keys.index('voicemail_followup') + 1, str(keys))
 
         # ── every built-in is complete ───────────────────────────────────
         ok('every built-in template has a label, a seed body and a seed subject',
