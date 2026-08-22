@@ -62,6 +62,15 @@ const edge = v => ({ borderLeft: `2px solid ${toneOf(v)}` })
 const VOTES = [['for', 'For'], ['against', 'Against'], ['abstain', 'Abstain']]
 const titleCase = s => (s || '').split('_').map(w => w[0]?.toUpperCase() + w.slice(1)).join(' ')
 
+// An explanation belongs on hover, not permanently under the control it
+// explains. Non-interactive on purpose: there is nothing to open.
+function Hint({ text }) {
+  return (
+    <span title={text} aria-label={text}
+      className="inline-flex items-center justify-center w-[13px] h-[13px] ml-1 align-middle rounded-full border border-pb-hairline2 text-[8px] leading-none text-pb-faintest cursor-help">?</span>
+  )
+}
+
 // A debounced writer for the free-text fields. Typing minutes should not be one
 // request per keystroke, and it should not need a button either.
 function useAutosave(save, delay = 700) {
@@ -271,10 +280,19 @@ function ActionRow({ action, nameOf, objectiveOf, onChange, onDelete }) {
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
+// A MOTION IS A RECORD FIRST AND A FORM SECOND. During the meeting the only
+// act is setting the outcome, so that is the one live control on the row; the
+// wording, the objective it serves and the per-person votes are detail and open
+// behind Edit. Everything still saves as it is pressed, as the rest of the room
+// does, so the editor closes with Done rather than pretending to be a
+// save-or-cancel transaction it is not: a vote is written the moment it is cast.
 function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChange, onDelete, onVotes,
                  onAddAction, actions, onActionChange, onActionDelete, dragProps, isOver }) {
-  const [showVotes, setShowVotes] = useState(false)
+  const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
+  const [wording, setWording] = useState(motion.description || '')
+  const saveWording = useAutosave(v => onChange({ description: v }))
+  const serves = objectiveOf?.(motion.objective_id)
   const votes = useMemo(() => {
     const m = {}
     ;(motion.votes || []).forEach(v => { m[v.member_id] = v.vote })
@@ -296,71 +314,81 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
             to move the motion there. */}
         <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5 shrink-0"
           title="Drag to reorder, or onto another agenda item" {...(dragProps?.handle || {})}>⠿</span>
-        <div className="text-[12.5px] text-pb-text min-w-0 flex-1">{motion.description}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-[12.5px] text-pb-text">{motion.description}</div>
+          {/* The tally and the plan link read as metadata under the wording,
+              not as controls. Both are the answer to "what happened", which is
+              what a reader coming back to the minutes wants. */}
+          <div className="font-mono text-[9.5px] mt-0.5 flex flex-wrap gap-x-2">
+            <span>
+              <span style={{ color: TONE.carried }}>{motion.votes_for ?? 0} for</span>
+              <span className="text-pb-faintest"> · </span>
+              <span style={{ color: TONE.lost }}>{motion.votes_against ?? 0} against</span>
+              <span className="text-pb-faintest"> · {motion.votes_abstain ?? 0} abstain</span>
+            </span>
+            <span className="text-pb-faintest truncate">{serves ? `serves ${serves}` : 'not on the plan'}</span>
+          </div>
+        </div>
         <div className="flex items-center gap-1 shrink-0">
           <select value={motion.outcome} onChange={e => onChange({ outcome: e.target.value })}
             style={{ color: toneOf(motion.outcome) }}
             className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px]">
             {MOTION_OUTCOMES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
           </select>
-          <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">✕</button>
+          <button onClick={() => setOpen(o => !o)} aria-expanded={open}
+            className="font-mono text-[9px] text-pb-faint hover:text-pb-text">{open ? 'Done' : 'Edit'}</button>
         </div>
       </div>
-      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-        <button onClick={() => setShowVotes(v => !v)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">
-          {showVotes ? 'Hide votes' : 'Record votes'}
-        </button>
-        <span className="font-mono text-[9px]">
-          <span style={{ color: TONE.carried }}>{motion.votes_for ?? 0} for</span>
-          <span className="text-pb-faintest"> · </span>
-          <span style={{ color: TONE.lost }}>{motion.votes_against ?? 0} against</span>
-          <span className="text-pb-faintest"> · {motion.votes_abstain ?? 0} abstain</span>
-        </span>
-        <button onClick={() => setAdding(a => !a)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">+ Action</button>
-      </div>
 
-      {/* Which line of the club's plan this decision serves. An action raised
-          under the motion inherits it, so the decision and the work that
-          follows report against the same objective. */}
-      <div className="mt-1.5 max-w-md">
-        <ObjectiveSelect objectives={objectives} value={motion.objective_id}
-          onChange={v => onChange({ objective_id: v })} label="SERVES OBJECTIVE" />
-      </div>
-
-      {showVotes && (
-        <div className="mt-2 border-t pb-hairline pt-2">
-          {present.length === 0 ? (
-            <div className="font-mono text-[10px] text-pb-faintest">
-              Only people marked present can vote. Set attendance first.
-            </div>
-          ) : (
-            <div className="space-y-1 max-h-[220px] overflow-y-auto pb-scroll">
-              {present.map(p => (
-                <div key={p.member_id} className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] text-pb-dim truncate">{p.full_name}</span>
-                  <div className="flex gap-1 shrink-0">
-                    {VOTES.map(([v, l]) => (
-                      <button key={v} onClick={() => setVote(p.member_id, votes[p.member_id] === v ? null : v)}
-                        className={`px-2 py-0.5 rounded font-mono text-[9px] border ${votes[p.member_id] === v
-                          ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
-                        style={votes[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          <div className="font-mono text-[9px] text-pb-faintest mt-1.5">
-            Recording names re-derives the tallies. Leave it empty and a counted show of hands stands.
+      {open && (
+        <div className="mt-2 border-t pb-hairline pt-2 space-y-2">
+          <textarea className={`${inp} min-h-[46px]`} value={wording}
+            placeholder="Motion wording…"
+            onChange={e => { setWording(e.target.value); saveWording(e.target.value) }} />
+          {/* Which line of the club's plan this decision serves. An action
+              raised under the motion inherits it, so the decision and the work
+              that follows report against the same objective. */}
+          <div className="max-w-md">
+            <ObjectiveSelect objectives={objectives} value={motion.objective_id}
+              onChange={v => onChange({ objective_id: v })} label="SERVES OBJECTIVE" />
           </div>
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <div className={cap}>
+                VOTES
+                <Hint text="Recording names re-derives the tallies. Leave it empty and a counted show of hands stands." />
+              </div>
+              {present.length > 0 && (
+                <button onClick={() => onVotes(present.map(p => ({ member_id: p.member_id, vote: 'for' })))}
+                  className="font-mono text-[9px] text-pb-faint hover:text-pb-text">All present: For</button>
+              )}
+            </div>
+            {present.length === 0 ? (
+              <div className="font-mono text-[10px] text-pb-faintest">
+                Only people marked present can vote. Set attendance first.
+              </div>
+            ) : (
+              <div className="max-h-[220px] overflow-y-auto pb-scroll">
+                {present.map(p => (
+                  <div key={p.member_id} className="flex items-center justify-between gap-2 py-0.5">
+                    <span className="text-[12px] text-pb-dim truncate">{p.full_name}</span>
+                    <div className="flex gap-1 shrink-0">
+                      {VOTES.map(([v, l]) => (
+                        <button key={v} onClick={() => setVote(p.member_id, votes[p.member_id] === v ? null : v)}
+                          className={`px-2 py-0.5 rounded font-mono text-[9px] border ${votes[p.member_id] === v
+                            ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                          style={votes[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">Delete motion</button>
         </div>
       )}
 
-      {adding && (
-        <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present} pool={pool}
-          objectives={objectives} defaultObjectiveId={motion.objective_id}
-          onSave={async d => { await onAddAction(d); setAdding(false) }} onCancel={() => setAdding(false)} />
-      )}
       {actions.length > 0 && (
         <div className="mt-2 space-y-1">
           {actions.map(a => (
@@ -368,6 +396,14 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
               onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
           ))}
         </div>
+      )}
+      {adding ? (
+        <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present} pool={pool}
+          objectives={objectives} defaultObjectiveId={motion.objective_id}
+          onSave={async d => { await onAddAction(d); setAdding(false) }} onCancel={() => setAdding(false)} />
+      ) : (
+        <button onClick={() => setAdding(true)}
+          className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-1.5">+ Add action</button>
       )}
     </div>
   )
@@ -383,6 +419,7 @@ function AgendaItem({
   motionDrag,
 }) {
   const [addingMotion, setAddingMotion] = useState('')
+  const [motionOpen, setMotionOpen] = useState(false)
   const [addingAction, setAddingAction] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.title)
@@ -478,17 +515,26 @@ function AgendaItem({
                   dragProps={motionDrag?.propsFor(mo, mi)} />
               ))}
             </div>
-            <div className="flex gap-2 mt-2">
-              <input className={`${inp} flex-1`} placeholder="Motion wording…" value={addingMotion}
-                onChange={e => setAddingMotion(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && addingMotion.trim()) {
-                    onAddMotion(addingMotion.trim()); setAddingMotion('')
-                  }
-                }} />
-              <button className={btn} disabled={!addingMotion.trim()}
-                onClick={() => { onAddMotion(addingMotion.trim()); setAddingMotion('') }}>+ Motion</button>
-            </div>
+            {/* An empty field is not information. The wording box appears when
+                somebody actually wants to move something. */}
+            {motionOpen ? (
+              <div className="flex gap-2 mt-2">
+                <input className={`${inp} flex-1`} placeholder="Motion wording…" value={addingMotion} autoFocus
+                  onChange={e => setAddingMotion(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Escape') { setAddingMotion(''); setMotionOpen(false) }
+                    if (e.key === 'Enter' && addingMotion.trim()) {
+                      onAddMotion(addingMotion.trim()); setAddingMotion(''); setMotionOpen(false)
+                    }
+                  }} />
+                <button className={btn} disabled={!addingMotion.trim()}
+                  onClick={() => { onAddMotion(addingMotion.trim()); setAddingMotion(''); setMotionOpen(false) }}>+ Motion</button>
+                <button className={btn} onClick={() => { setAddingMotion(''); setMotionOpen(false) }}>Cancel</button>
+              </div>
+            ) : (
+              <button onClick={() => setMotionOpen(true)}
+                className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-2">+ Add motion</button>
+            )}
           </div>
 
           <div>
@@ -504,7 +550,8 @@ function AgendaItem({
                 onSave={async d => { await onAddAction(d); setAddingAction(false) }}
                 onCancel={() => setAddingAction(false)} />
             ) : (
-              <button onClick={() => setAddingAction(true)} className={`${btn} mt-1`}>+ Action</button>
+              <button onClick={() => setAddingAction(true)}
+                className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-1">+ Add action</button>
             )}
           </div>
         </div>

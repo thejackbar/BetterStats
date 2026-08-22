@@ -4452,6 +4452,19 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
 - **A completed meeting opens the same screen**, which is how past minutes,
   motions and actions are read. Nothing is read-only: minutes are usually
   finished after the room empties.
+- **A MOTION IS A RECORD FIRST AND A FORM SECOND (v9.50.5).** Reported off a
+  live meeting: the screen read as an administration form because almost
+  everything was in edit state at once. A motion's row now carries the wording,
+  the tally and the objective it serves as metadata, with the OUTCOME as the one
+  live control — that is the act a chair repeats all night and it must not cost
+  an extra click. The wording, the objective picker, the per-person votes and
+  the delete are behind `Edit`. **It closes with `Done`, not Save/Cancel**: a
+  vote is written the moment it is cast, as everything else in this room is, and
+  a Cancel that could not undo it would be a lie.
+- **An empty field is not information.** The permanent `Motion wording…` box is
+  gone behind `+ Add motion` (Escape closes it). `All present: For` writes a For
+  for everyone in the room in one click, because most motions pass unanimously.
+  The tallies note moved onto a hover `Hint`.
 - **Motions drag two ways** (v9.7.2). One `drag` ref carries a `kind` of
   `'item' | 'motion'`, because an agenda row is a drop target for both: drop an
   item on it to reorder the agenda, drop a motion on it to move that motion
