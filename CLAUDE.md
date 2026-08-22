@@ -4139,7 +4139,7 @@ Billing, Settings, Users) — plus the **Better HQ** section for super admins
   full-page editor with no surrounding sidebar (it always was); the BetterStats
   nav links to it but the page itself doesn't wrap in `BetterStatsLayout`.
 
-## Two voicemail follow-ups, for a trial running down and one already over (v9.46.1, Aug 2026)
+## Three voicemail follow-ups: offer the trial, then extend it (v9.46.1 / v9.48.1, Aug 2026)
 
 `voicemail_followup_extend_trial` gained a sibling,
 `voicemail_followup_extend_trial_soon`, and the pair now name the moment
@@ -4159,12 +4159,27 @@ rather than the offer.
 - **Two templates that read the same are one template with two names**, so the
   bodies differ by a paragraph: one says the trial finishes shortly and offers
   to extend it, the other says it has finished and offers to put it back on.
-- **Verified against a real Postgres** (18 checks through the shipped
+- **A third one, `voicemail_followup_trial_offer`, offers the trial itself**
+  ("Email following voice - trial offer" in the dropdown, `Email following VM.
+  Trial offer` in Comms). It sits UNDER the general follow-up and ABOVE the two
+  extend-trial ones, because offering a trial is the earlier moment than
+  extending one. Copied from `trial_information` per instruction — the same six
+  steps, the same `/trial` button, the same subject — behind the "I've left a
+  voicemail" opener the other three share. **That opener is the only thing
+  separating the two templates**, which is exactly the point: without it this
+  would be `trial_information` under a second name.
+- **Adding a sales template means SIX places**: `TEMPLATE_LABELS` (the dropdown,
+  and its insertion order IS the order shown), `TEMPLATE_DB_NAMES` if the Comms
+  name differs, `BUILT_IN_TEMPLATES`, a branch in `_render_template_hardcoded`,
+  `_SEED_BODY` and `_SEED_SUBJECT`. The suite asserts every built-in has a
+  label, a seed body and a seed subject, so a half-added one fails rather than
+  rendering blank.
+- **Verified against a real Postgres** (37 checks through the shipped
   `seed_sales_templates` against a database already carrying the previous
-  seed: the new key inserted exactly once, the rename landing, a hand-renamed
-  row left alone, a second run doing nothing, the seeded body's `{{merge}}`
-  tokens surviving the `{base}` substitution, and the two built bodies
-  differing).
+  seed: each new key inserted exactly once, the rename landing, a hand-renamed
+  row left alone, a second run doing nothing, the seeded bodies' `{{merge}}`
+  tokens surviving the `{base}` substitution, the dropdown order, and each
+  built body differing from the one it was copied from).
 
 ## Writing Voice — always run prose through the humanizer
 
