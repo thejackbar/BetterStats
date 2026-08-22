@@ -1728,26 +1728,33 @@ def _owner_primary_rank(user: User) -> tuple:
     )
 
 
-async def list_platform_owners(session: AsyncSession) -> list[dict]:
+async def list_platform_owners(session: AsyncSession, roles=OWNER_ROLES) -> list[dict]:
     """The staff pool a platform deal's owner_user_id is picked from (not a
-    club's own users) — super admins and sales reps, ONE entry per person.
+    club's own users) — super admins and sales reps by default, ONE entry
+    per person. ``roles`` narrows the pool (e.g. sales_workspace's /staff
+    endpoint passes ("super_admin",) for its staff-only handoff picker) —
+    the fold below is what every such caller actually needs, not just the
+    unrestricted platform-wide list.
 
     A person can hold more than one account: `users.email` is deliberately
     not unique (migration 145) and nothing stops a second super-admin
-    account being created for someone who already has one. Every picker
-    renders the display name alone, so two accounts under one name read as a
-    duplicate AND make the filter a coin toss — picking one returns only the
-    deals that happened to land on that account. Accounts sharing a display
-    label are therefore folded into ONE entry carrying every id (`ids`),
-    which is what the filter matches on, so no deal can hide behind the
-    account that was not picked. Two genuinely different people under one
-    display name would fold together too: they are already indistinguishable
-    to a reader, and the fix for that is distinct display names, not a
-    second identical row in the list."""
+    account being created for someone who already has one. A single account
+    can also hold more than one ClubMembership row (each JOIN match is a
+    separate row from this query), which duplicates a person the exact same
+    way. Every picker renders the display name alone, so either shape reads
+    as a duplicate AND makes the filter a coin toss — picking one returns
+    only the deals that happened to land on that account. Accounts (and
+    membership rows) sharing a display label are therefore folded into ONE
+    entry carrying every account id (`ids`), which is what the filter
+    matches on, so no deal can hide behind the account that was not picked.
+    Two genuinely different people under one display name would fold
+    together too: they are already indistinguishable to a reader, and the
+    fix for that is distinct display names, not a second identical row in
+    the list."""
     rows = (await session.execute(
         select(User, ClubMembership.role)
         .join(ClubMembership, ClubMembership.user_id == User.id)
-        .where(ClubMembership.role.in_(OWNER_ROLES))
+        .where(ClubMembership.role.in_(roles))
         .order_by(User.display_name, User.username)
     )).all()
 

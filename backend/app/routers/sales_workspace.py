@@ -493,17 +493,17 @@ async def list_clubs(
 @router.get("/team")
 async def team(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
     """Sales reps, for the super admin's owner filter/assignment picker.
-    Provisioning a new one is done from Super Admin -> Users (role 'sales')."""
+    Provisioning a new one is done from Super Admin -> Users (role 'sales').
+
+    Reuses crm_service.list_platform_owners' fold (roles narrowed to just
+    'sales'), same reason /staff below does: a rep holding two accounts
+    under one name, or one account with more than one ClubMembership row,
+    would otherwise list twice."""
     _require_super(actor)
-    rows = (await db.execute(
-        select(User, ClubMembership)
-        .join(ClubMembership, ClubMembership.user_id == User.id)
-        .where(ClubMembership.role == "sales")
-        .order_by(User.display_name, User.username)
-    )).all()
+    owners = await crm_service.list_platform_owners(db, roles=("sales",))
     return {"team": [
-        {"id": str(u.id), "username": u.username, "display_name": u.display_name}
-        for u, _m in rows
+        {"id": o["id"], "username": "", "display_name": o["name"]}
+        for o in owners
     ]}
 
 
@@ -860,16 +860,18 @@ async def staff(_: SalesActor = Depends(require_sales_or_super), db: AsyncSessio
     sets a follow-up date on an event-worthy call outcome — open to a 'sales'
     caller too, unlike /team (the sales-rep bulk-assign picker, super-admin
     only), since this is who a REP hands a follow-up off to, not who a
-    manager assigns deals to."""
-    rows = (await db.execute(
-        select(User, ClubMembership)
-        .join(ClubMembership, ClubMembership.user_id == User.id)
-        .where(ClubMembership.role == "super_admin")
-        .order_by(User.display_name, User.username)
-    )).all()
+    manager assigns deals to.
+
+    Reuses crm_service.list_platform_owners' fold (roles narrowed to just
+    super_admin) rather than a bespoke query — a person holding two accounts
+    under one name, or one account with more than one ClubMembership row,
+    used to list twice (reported live: "Elton" and "Jack" each appearing
+    twice in this exact picker); the fold is what collapses either shape
+    back to one entry per person."""
+    owners = await crm_service.list_platform_owners(db, roles=("super_admin",))
     return {"staff": [
-        {"id": str(u.id), "username": u.username, "display_name": u.display_name}
-        for u, _m in rows
+        {"id": o["id"], "username": "", "display_name": o["name"]}
+        for o in owners
     ]}
 
 
