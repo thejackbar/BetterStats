@@ -24,6 +24,10 @@ from app.services import email_service
 TEMPLATE_LABELS = {
     "information": "Send information",
     "voicemail_followup": "Email following voicemail - general",
+    # Offering a trial comes before extending one — this list runs in the order
+    # a rep works through a club, and a club with no trial yet is the earlier
+    # moment. Wording is the one the ask specified.
+    "voicemail_followup_trial_offer": "Email following voice - trial offer",
     # Approaching expiry comes FIRST: it is the earlier moment in a trial, and
     # a rep works down this list in the order the club's trial is running out.
     "voicemail_followup_extend_trial_soon":
@@ -55,6 +59,7 @@ TEMPLATE_DB_NAMES = {
         "Email following voicemail. Trial approaching expiry - offer to extend",
     "voicemail_followup_extend_trial":
         "Email following voicemail. Trial expired - offer to extend",
+    "voicemail_followup_trial_offer": "Email following VM. Trial offer",
 }
 
 
@@ -67,7 +72,8 @@ def _db_name(key: str) -> Optional[str]:
 # the rest: pre-filled from its own editable template, which the rep edits
 # in Design mode rather than starting from nothing.
 BUILT_IN_TEMPLATES = (
-    "information", "voicemail_followup", "voicemail_followup_extend_trial_soon",
+    "information", "voicemail_followup", "voicemail_followup_trial_offer",
+    "voicemail_followup_extend_trial_soon",
     "voicemail_followup_extend_trial", "trial_information",
     "trial_extension", "demo", "subscribe", "custom",
 )
@@ -142,6 +148,35 @@ def _render_template_hardcoded(
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
             f"voicemail. Wanted to follow up here too — BetterCricket for {club_name}. "
             f"Have a look through what's on offer: {base} "
+            "Happy to answer any questions — just reply to this email, or give me a call back."
+        )
+    elif key == "voicemail_followup_trial_offer":
+        # trial_information's own content — the intro line, the six steps and
+        # the Start your trial button — behind the voicemail opener every
+        # other 'Email following voicemail' template shares. That opener is
+        # the only thing separating the two: without it this would be
+        # trial_information under a second name.
+        subject = f"Start your free BetterCricket trial - {club_name}"
+        steps = (
+            '<ol style="font-size:14px;line-height:1.8;padding-left:20px">'
+            "<li>Go to BetterCricket</li><li>Search for your club</li>"
+            "<li>Select your club</li><li>Create your admin account</li>"
+            "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+            "</ol>"
+        )
+        body = (
+            f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
+            f"but couldn't get through, so I've left a voicemail. Here’s how to get {club_name} "
+            f"started on a free trial:</p>{steps}"
+            + _button("Start your trial", f"{base}/trial")
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+        )
+        text = (
+            f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
+            f"voicemail. Here's how to get {club_name} started on a free trial: "
+            "1) Go to BetterCricket 2) Search for your club 3) Select your club "
+            "4) Create your admin account 5) Choose the modules you want "
+            f"6) Start your 14-day trial — no card required. {base}/trial "
             "Happy to answer any questions — just reply to this email, or give me a call back."
         )
     elif key == "voicemail_followup_extend_trial_soon":
@@ -342,6 +377,25 @@ _SEED_BODY = {
         'font-size:14px">Start your trial</a></p>'
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
+    # Copied from trial_information per direct instruction: the same intro
+    # line, steps and button, opening with the voicemail line the other
+    # 'Email following voicemail' templates share. A super admin editing this
+    # row in Comms -> Templates changes only this email.
+    "voicemail_followup_trial_offer": (
+        "<p>Hi {{first_name}},</p>"
+        "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
+        "Here's how to get {{club}} started on a free trial:</p>"
+        '<ol style="padding-left:20px">'
+        "<li>Go to BetterCricket</li><li>Search for your club</li>"
+        "<li>Select your club</li><li>Create your admin account</li>"
+        "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+        "</ol>"
+        '<p><a href="{base}/trial" style="display:inline-block;background:#16C784;color:#fff;'
+        'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
+        'font-size:14px">Start your trial</a></p>'
+        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
+    ),
     # Seeded from trial_information's own layout (intro line, then a button)
     # per direct instruction, reworded for a club that's ready to move onto a
     # paid subscription rather than start a trial. Subscribing itself happens
@@ -515,6 +569,7 @@ _SEED_BODY = {
 _SEED_SUBJECT = {
     "information": "BetterCricket for {{club}}",
     "voicemail_followup": "BetterCricket for {{club}} - following up",
+    "voicemail_followup_trial_offer": "Start your free BetterCricket trial - {{club}}",
     "voicemail_followup_extend_trial_soon": "BetterCricket for {{club}} - more time on your trial",
     "voicemail_followup_extend_trial": "BetterCricket for {{club}} - more time on your trial",
     "trial_information": "Start your free BetterCricket trial - {{club}}",

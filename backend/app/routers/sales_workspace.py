@@ -921,7 +921,11 @@ async def email_templates(actor: SalesActor = Depends(require_sales_or_super), d
     links = await ps.get_demo_booking_links(db)
     rep_name = actor.user.display_name or actor.user.username
     return {
-        "templates": [{"key": k, "label": v} for k, v in se.TEMPLATE_LABELS.items()],
+        # `built_in` rides along so the screen doesn't have to keep its own
+        # copy of the list — a hand-kept mirror is how a newly-added template
+        # ends up in the dropdown but silently loading no preview.
+        "templates": [{"key": k, "label": v, "built_in": k in se.BUILT_IN_TEMPLATES}
+                      for k, v in se.TEMPLATE_LABELS.items()],
         "demo_link_configured": bool(links.get(rep_name)),
     }
 

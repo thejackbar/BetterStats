@@ -996,12 +996,18 @@ export default function SalesWorkspace() {
   const emailEditorRef = useRef(null)
   const [emailEditorKey, setEmailEditorKey] = useState(0)
   const [loadingEmailPreview, setLoadingEmailPreview] = useState(false)
-  // 'custom' opens the same way as the other three now — pre-filled from its
-  // own editable template ("Custom sales rep email" in Comms -> Templates)
-  // in the Design editor, not a blank plain-text form.
-  const BUILT_IN_EMAIL_TEMPLATES = ['information', 'voicemail_followup',
-    'voicemail_followup_extend_trial_soon', 'voicemail_followup_extend_trial',
-    'trial_information', 'trial_extension', 'demo', 'subscribe', 'custom']
+  // Which templates pre-fill from their own editable copy in Comms ->
+  // Templates rather than opening a blank form ('custom' is one of them now).
+  // Read off the payload, NOT a list kept here: a hand-kept mirror is how a
+  // newly-added template ends up in the dropdown while silently loading no
+  // preview. The literal is the fallback for a server that predates the flag.
+  const BUILT_IN_EMAIL_TEMPLATES = useMemo(() => {
+    const flagged = emailTemplates.templates.filter(t => t.built_in).map(t => t.key)
+    return flagged.length ? flagged : ['information', 'voicemail_followup',
+      'voicemail_followup_trial_offer', 'voicemail_followup_extend_trial_soon',
+      'voicemail_followup_extend_trial', 'trial_information', 'trial_extension',
+      'demo', 'subscribe', 'custom']
+  }, [emailTemplates])
 
   useEffect(() => {
     api.salesWorkspaceEmailTemplates().then(setEmailTemplates).catch(() => {})
