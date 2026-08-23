@@ -353,6 +353,18 @@ told was sent.
 - **Still to do on the server, not in code**: `email_provider` defaults to
   `console`, so a deploy with no provider configured sends nothing at all — and
   `bettersports.com.au` still needs SPF/DKIM/DMARC before mail authenticates.
+- **A CONTACT TYPED INTO THE DRAWER IS NOT THE PROBLEM, and that was worth
+  proving rather than assuming.** 18 checks through the shipped `extend_trial`
+  and `send_email` bodies with a stand-in provider: the address typed into
+  "+ New contact" is byte-for-byte the address the provider is handed (case
+  folded — `_store_contact` lower-cases, since it dedupes on `lower(email)`),
+  the mobile is stored, one `CrmPerson` is bridged rather than two, a later
+  compose to the same contact reaches the same address, and the activity records
+  the provider and message id. A re-test on the live site received the email, so
+  a non-delivery there is the provider's or the recipient's, not the capture.
+- **The timeline now carries the evidence** — the address, the provider and its
+  message id on a send, and `Not sent` with the reason where the extension's
+  email failed. "They say they never got it" is answerable from the record.
 
 ### A club that loaded forever, then failed (v9.51.3)
 

@@ -776,6 +776,22 @@ function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStart
           {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
         </div>
       )}
+      {/* Did that one actually go? A send stamps the provider that took it and
+          the id it was given; a trial extension whose email did NOT go records
+          why. Both are shown here, so "the club says they never got it" can be
+          answered from the timeline instead of guessed at. */}
+      {a.meta?.email_sent === false && (
+        <p className="mt-1 text-[11px] text-pb-amber">
+          Not sent{a.meta.email_error ? ` — ${a.meta.email_error}` : ''}
+        </p>
+      )}
+      {a.meta?.provider && (
+        <p className="mt-1 text-[10.5px] text-pb-faintest">
+          Sent via {a.meta.provider}
+          {a.meta.to_email ? ` to ${a.meta.to_email}` : ''}
+          {a.meta.message_id ? ` · ${a.meta.message_id}` : ''}
+        </p>
+      )}
       {a.meta?.html && (
         <button type="button" onClick={() => onViewEmail?.(a)}
           className="mt-1 text-[11px] text-pb-accent hover:underline">
