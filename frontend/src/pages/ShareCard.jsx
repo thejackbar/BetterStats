@@ -348,7 +348,7 @@ export default function ShareCard() {
 
     if (navigator.share) {
       try {
-        await navigator.share({ title: `${player.name} | BetterCricket`, text, url })
+        await navigator.share({ title: `${player.name} - BetterCricket`, text, url })
       } catch {}
     } else {
       await navigator.clipboard.writeText(`${text}\n${url}`)

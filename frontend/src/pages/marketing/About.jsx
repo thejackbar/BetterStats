@@ -172,7 +172,7 @@ function ContactBlock() {
 
 export default function About() {
   usePageMeta({
-    title: 'About | BetterCricket',
+    title: 'About - BetterCricket',
     description: 'BetterCricket puts everything an Australian cricket club runs on in one place: stats and history, weekend availability and selection, social posts, the back office and match prep.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/about',

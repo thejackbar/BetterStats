@@ -270,7 +270,7 @@ function PricingFAQ() {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Pricing() {
   usePageMeta({
-    title: 'Pricing: modular plans for cricket clubs | BetterCricket',
+    title: 'Pricing - modular plans for cricket clubs | BetterCricket',
     description:
       'Modular, flat-rate pricing for Australian cricket clubs. BetterStats is $399 a year; add BetterSelect, BetterSocials and BetterAdmin for $149 each and BetterIQ for $249, with a set discount when you bundle (up to $146 off the full set, which comes to $949). One annual price per club, whatever the size.',
     image: 'https://betterat.cricket/og-cover.png',

@@ -85,7 +85,7 @@ function CategoryOfOne() {
 
 export default function Compare() {
   usePageMeta({
-    title: 'Compare: BetterCricket vs the tools clubs already use',
+    title: 'Compare - BetterCricket vs the tools clubs already use',
     description:
       'An honest, side-by-side look at how BetterCricket stacks up against the spreadsheets, website builders, design apps and bulk email tools your club is already paying for, surface by surface.',
     image: 'https://betterat.cricket/og-cover.png',

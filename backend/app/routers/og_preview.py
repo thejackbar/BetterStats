@@ -57,13 +57,13 @@ HOME_DESC = (
 MARKETING_PAGES: dict[str, tuple[str, str]] = {
     "/": (HOME_TITLE, HOME_DESC),
     "/features": (
-        "Features: Automated cricket club stats | BetterCricket",
+        "Features - Automated cricket club stats | BetterCricket",
         "Automatic stats sync, player profiles, leaderboards, all-time records "
         "and season yearbooks. The BetterStats Core that every BetterCricket "
         "club starts with.",
     ),
     "/pricing": (
-        "Pricing: modular plans for cricket clubs | BetterCricket",
+        "Pricing - modular plans for cricket clubs | BetterCricket",
         "Flat-rate annual pricing for Australian cricket clubs. BetterStats is "
         "$399 a year, add modules from $149, and bundle for a discount. One "
         "price per club.",
@@ -75,88 +75,88 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "from the Cricket Australia register and you're in.",
     ),
     "/overview": (
-        "Overview: Everything BetterCricket does",
+        "Overview - Everything BetterCricket does",
         "A one-page tour of BetterCricket: automatic stats and a public club "
         "website, plus selection, social posts, club admin and opposition "
         "analytics.",
     ),
     "/modules": (
-        "Modules: BetterSelect, BetterSocials, BetterAdmin & BetterIQ | BetterCricket",
+        "Modules - BetterSelect, BetterSocials, BetterAdmin & BetterIQ | BetterCricket",
         "The four BetterCricket add-ons: BetterSelect for selection, "
         "BetterSocials for your website, BetterAdmin for fees and comms, and "
         "BetterIQ for analytics.",
     ),
     "/modules/betterstats": (
-        "BetterStats: your club's stats and public website | BetterCricket",
+        "BetterStats - your club's stats and public website | BetterCricket",
         "BetterStats turns your club's full history into a public website with "
         "player profiles, leaderboards, all-time records, partnerships and "
         "season yearbooks.",
     ),
     "/modules/betterselect": (
-        "BetterSelect: availability & smart team selection | BetterCricket",
+        "BetterSelect - availability & smart team selection | BetterCricket",
         "BetterSelect collects player availability with no app, then suggests a "
         "balanced XI from form, grade and role for captains and selectors.",
     ),
     "/modules/bettersocials": (
-        "BetterSocials: your club website & match-day posts | BetterCricket",
+        "BetterSocials - your club website & match-day posts | BetterCricket",
         "BetterSocials runs your club's public website and turns match data "
         "into share-ready graphics: lineups, results, player of the match and "
         "scorecards.",
     ),
     "/modules/betteradmin": (
-        "BetterAdmin: fees, comms & merch | BetterCricket",
+        "BetterAdmin - fees, comms & merch | BetterCricket",
         "BetterAdmin runs the club back office: BetterFees auto-allocates match "
         "payments, BetterComms sends bulk member email, and BetterMerch tracks "
         "stock.",
     ),
     "/modules/betteriq": (
-        "BetterIQ: opposition scouting & analytics | BetterCricket",
+        "BetterIQ - opposition scouting & analytics | BetterCricket",
         "BetterIQ turns your own scorecards into an opposition dossier, a "
         "best-available XI, player trends and deep team analysis for captains "
         "and coaches.",
     ),
     "/modules/betterfantasy": (
-        "BetterFantasyCricket: a club fantasy game | BetterCricket",
+        "BetterFantasyCricket - a club fantasy game | BetterCricket",
         "BetterFantasyCricket runs your club's own fantasy comp, scored off your "
         "real games, with salary-cap and draft formats. A fun way to engage the "
         "club all season and an easy pre-season fundraiser.",
     ),
     "/compare": (
-        "Compare: BetterCricket vs the tools clubs already use",
+        "Compare - BetterCricket vs the tools clubs already use",
         "An honest side-by-side of how BetterCricket compares with the "
         "spreadsheets, website builders, design apps and email tools your club "
         "already pays for.",
     ),
     "/about": (
-        "About | BetterCricket",
+        "About - BetterCricket",
         "The story behind BetterCricket and BetterSports: stats and history, "
         "weekend availability and selection, social posts, the back office and "
         "match prep.",
     ),
     "/contact": (
-        "Contact: Request access for your cricket club | BetterCricket",
+        "Contact - Request access for your cricket club | BetterCricket",
         "Request access for your Australian cricket club, ask a question, or "
         "email the BetterCricket team directly.",
     ),
     "/faq": (
-        "FAQ | BetterCricket",
+        "FAQ - BetterCricket",
         "Common questions about BetterCricket: pricing, onboarding, how far the "
         "historical data goes, player profiles, season yearbooks and how it "
         "works.",
     ),
     "/blog": (
-        "Blog: Cricket stats guides & club tips | BetterCricket",
+        "Blog - Cricket stats guides & club tips | BetterCricket",
         "Cricket statistics guides and club management tips from the Better "
         "Cricket team: batting averages, bowling economy, historical data and "
         "more.",
     ),
     "/terms": (
-        "Terms of Service | BetterCricket",
+        "Terms of Service - BetterCricket",
         "Terms of service for BetterCricket, the cricket platform for "
         "Australian clubs, provided by BetterSports.",
     ),
     "/privacy": (
-        "Privacy Policy | BetterCricket",
+        "Privacy Policy - BetterCricket",
         "How BetterCricket, provided by BetterSports, collects, stores and "
         "handles club, player and account information under the Australian "
         "Privacy Act.",
@@ -555,7 +555,7 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
             jsonld["memberOf"]["url"] = f"{base}/{org.slug}"
 
     return _html(
-        f"{name}: Cricket Career Stats | BetterCricket",
+        f"{name} - Cricket Career Stats | BetterCricket",
         description,
         image,
         page_url,
