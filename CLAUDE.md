@@ -322,6 +322,41 @@ payments.**
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,
   so opening it to a rep later is a route change rather than a rewrite.
 
+### A club that loaded forever, then failed (v9.51.3)
+
+Reported off the Sales Workspace: opening Blacktown District Cricket Club sat on
+"Loading…" and eventually said "Could not load this club".
+
+- **A SWALLOWED DATABASE ERROR LEAVES THE TRANSACTION ABORTED, and that is what
+  took the request down.** `get_club`'s two best-effort analytics reads
+  (`club_visit_detail`, `club_engagement_breakdown`) were wrapped in
+  `try/except … the drawer must still render without it` — but neither rolled
+  back, so after the first failure every later statement in that request came
+  back `InFailedSQLTransactionError: current transaction is aborted`. Reproduced
+  against a real Postgres: with the fix stashed the suite dies on a plain
+  `SELECT 1` after the handler returns. **Same class as the `audit_logs` trap
+  this file already documents** — an `except` that hides a database error must
+  `await db.rollback()` before carrying on.
+- **`get_club_signals._safe` had the identical cascade**: three cards in
+  sequence, so the first failure emptied the two after it whatever they were
+  going to do.
+- **THE TWO ANALYTICS READS ARE OUT OF THE DRAWER PAYLOAD** and live at
+  `GET /clubs/{deal_id}/analytics`, fetched after the pane renders. They are the
+  only expensive work in that handler — one walks `usage_events`, the other
+  recomputes the score and scans `email_events` with `lower(email) IN (…)` — and
+  on a club with real history they can outlast nginx's own 60s read timeout,
+  which is what "loading, then an error" actually was. **Exactly the call the
+  boundary already made** in the same file, for the same reason.
+- **`engagement` and `website_visits` stay on the wire as nulls**, so a browser
+  served an older bundle mid-deploy reads the keys it expects rather than
+  crashing — the `plan_report.unassigned` rule.
+- **Verified against a real Postgres** (13 checks through the shipped route
+  bodies with a read deliberately failing: the drawer opening, its timeline and
+  trial countdown, the analytics absent but their keys present, the session
+  still usable afterwards, the analytics endpoint degrading to nulls rather than
+  raising, and one failed signal card leaving the others alone) with a control
+  run that fails on exactly the reported behaviour.
+
 ## Every figure on Sales Performance opens its clubs (v9.48.2, Aug 2026)
 
 Asked for directly: make every number in both tables clickable and list the

@@ -2166,6 +2166,11 @@ export const api = {
   // can't hold up the detail pane.
   salesWorkspaceClubSignals: (dealId) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/signals`),
+  // The engagement breakdown and the website analytics. Its own request for
+  // the same reason as the two above: both walk big tables, and a club with
+  // real history took long enough to hold the whole drawer hostage.
+  salesWorkspaceClubAnalytics: (dealId) =>
+    request(`/club-admin/sales-workspace/clubs/${dealId}/analytics`),
   salesWorkspaceCallOutcomes: () => request('/club-admin/sales-workspace/call-outcomes'),
   salesWorkspaceLogCall: (dealId, data) =>
     request(`/club-admin/sales-workspace/clubs/${dealId}/calls`, { method: 'POST', body: JSON.stringify(data) }),

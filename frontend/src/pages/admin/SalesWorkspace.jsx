@@ -613,9 +613,13 @@ function DealSummaryStrip({ deal }) {
 // `engagement` field, NOT a second fetch — club_engagement_breakdown is
 // super-admin-only server-side, so a 'sales' role must never call it
 // directly; the Workspace's own GET /clubs/{id} already embeds it). ───────────
-function EngagementPanel({ engagement }) {
+function EngagementPanel({ engagement, loading = false }) {
   if (!engagement) {
-    return <p className="text-[12px] text-pb-faintest">No engagement data for this club yet.</p>
+    return (
+      <p className="text-[12px] text-pb-faintest">
+        {loading ? 'Working out the score…' : 'No engagement data for this club yet.'}
+      </p>
+    )
   }
   const contribs = engagement.contributions || []
   return (
@@ -665,9 +669,13 @@ function EngagementPanel({ engagement }) {
 // own fetch (api.mktClubVisits) hits a super-admin-only endpoint a 'sales'
 // caller can't reach, so the Sales Workspace drawer embeds the same data
 // server-side instead (see routers/sales_workspace.py::get_club).
-function WebsiteAnalyticsCard({ data }) {
+function WebsiteAnalyticsCard({ data, loading = false }) {
   if (!data?.views) {
-    return <p className="text-[12px] text-pb-faintest">No tracked site visits for this club yet.</p>
+    return (
+      <p className="text-[12px] text-pb-faintest">
+        {loading ? 'Looking up their visits…' : 'No tracked site visits for this club yet.'}
+      </p>
+    )
   }
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[12px]">
@@ -855,6 +863,10 @@ export default function SalesWorkspace() {
   const [signals, setSignals] = useState(null)
   const [signalsLoading, setSignalsLoading] = useState(false)
   const signalsForRef = useRef(null)
+  // The engagement breakdown and the website analytics, on the same terms:
+  // both walk big tables, so the pane renders first and they arrive after.
+  const [analytics, setAnalytics] = useState(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
   // Kept in sync with selectedId below, but read from inside loadClubs'/
   // refreshBoth's async callbacks — a plain closure over `selectedId` there
   // would see whatever it was when the callback was CREATED, not the latest
@@ -1207,6 +1219,14 @@ export default function SalesWorkspace() {
       .then((d) => { if (signalsForRef.current === dealId) setSignals(d) })
       .catch(() => {})
       .finally(() => { if (signalsForRef.current === dealId) setSignalsLoading(false) })
+    // Same guard, same reason: one club's slow analytics must not land on the
+    // next club's drawer.
+    setAnalytics(null)
+    setAnalyticsLoading(true)
+    api.salesWorkspaceClubAnalytics(dealId)
+      .then((d) => { if (signalsForRef.current === dealId) setAnalytics(d) })
+      .catch(() => {})
+      .finally(() => { if (signalsForRef.current === dealId) setAnalyticsLoading(false) })
     api.salesWorkspaceClub(dealId).then((d) => {
       setDrawer(d)
       setCallForm(emptyCallForm())
@@ -1990,13 +2010,13 @@ export default function SalesWorkspace() {
 
               <div className={CARD}>
                 <h3 className="font-display font-bold text-[13px] mb-2">Engagement</h3>
-                <EngagementPanel engagement={drawer.engagement} />
+                <EngagementPanel engagement={analytics?.engagement} loading={analyticsLoading} />
               </div>
 
               {drawer.deal.marketing_club_id && (
                 <div className={CARD}>
                   <h3 className="font-display font-bold text-[13px] mb-2">Website analytics</h3>
-                  <WebsiteAnalyticsCard data={drawer.website_visits} />
+                  <WebsiteAnalyticsCard data={analytics?.website_visits} loading={analyticsLoading} />
                 </div>
               )}
 

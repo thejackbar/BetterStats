@@ -684,42 +684,24 @@ async def get_club(
     deal_out["ever_called"] = last_call is not None
     deal_out["last_call"] = crm_service._activity_dict(last_call) if last_call else None
 
-    engagement = None
-    website_visits = None
-    if club is not None:
-        club_id_for_reads = club.id  # captured now: club_engagement_breakdown
-                                      # below commits, which expires every ORM
-                                      # object in this session (see its own
-                                      # docstring) — read anything else off
-                                      # `club` before calling it, not after.
-        # Website analytics (page views/days visited/unique IPs/contact-page
-        # hit) — the CRM card's own panel, `components/admin/crm/ui.jsx`'s
-        # `WebsiteAnalyticsPanel`, fetches this itself via a super-admin-only
-        # endpoint a 'sales' caller can't reach directly, so it's embedded in
-        # the drawer payload here instead (same reasoning as `engagement`
-        # below), via the exact service function that endpoint calls. Read
-        # BEFORE the engagement breakdown for the same expiry reason.
-        try:
-            from app.services import club_directory as cd
-            website_visits = await cd.club_visit_detail(db, club_id_for_reads, fast_web=True)
-        except Exception:  # noqa: BLE001 - the drawer must still render without it
-            logger.exception("sales_workspace: website visits failed for club %s", club_id_for_reads)
-            website_visits = None
-        try:
-            from app.routers.marketing import club_engagement_breakdown
-            engagement = await club_engagement_breakdown(str(club_id_for_reads), db)
-        except HTTPException:
-            engagement = None
-        except Exception:  # noqa: BLE001 - the drawer must still render without it
-            logger.exception("sales_workspace: engagement breakdown failed for club %s", club_id_for_reads)
-            engagement = None
-
+    # THE TWO ANALYTICS READS ARE NOT IN THIS PAYLOAD ANY MORE. They are the
+    # only expensive things in this handler — `club_visit_detail` walks
+    # usage_events and `club_engagement_breakdown` recomputes the score and
+    # scans email_events — and a club whose history has grown can take long
+    # enough that nginx gives up on the request before the drawer ever gets
+    # its answer, which reads as "loading… then could not load this club".
+    # Same call the boundary above already made for the same reason: the pane
+    # renders first, and the analytics fill in behind it via
+    # GET /clubs/{deal_id}/analytics.
+    #
+    # The two keys stay on the wire as nulls so a browser served an older
+    # bundle mid-deploy reads the keys it expects instead of crashing.
     return {
         "deal": deal_out,
         "contacts": contacts,
         "activities": activities_out,
-        "engagement": engagement,
-        "website_visits": website_visits,
+        "engagement": None,
+        "website_visits": None,
         # No boundary here on purpose. It is the ONLY thing in this handler
         # that leaves the building — a Nominatim lookup for a club whose
         # polygon has never been cached — so embedding it made a first open
@@ -730,6 +712,55 @@ async def get_club(
         "stage_options": stage_options,
         "can_assign": actor.role == "super_admin",
     }
+
+
+@router.get("/clubs/{deal_id}/analytics")
+async def get_club_analytics(
+    deal_id: str,
+    actor: SalesActor = Depends(require_sales_or_super),
+    db: AsyncSession = Depends(get_db),
+):
+    """The drawer's engagement breakdown and website analytics, fetched on
+    their own so a slow one can never hold up the pane around it.
+
+    These used to be embedded in GET /clubs/{deal_id}. They are the two
+    expensive reads in that handler — one walks usage_events, the other
+    recomputes the score and scans email_events — and on a club with real
+    history they can outlast nginx's own read timeout, which the rep sees as
+    the drawer loading forever and then failing outright. Splitting them out
+    is the same call the boundary already made.
+
+    EVERY FAILURE PATH ROLLS BACK. A swallowed database error leaves the
+    transaction aborted, and then every later statement in the same request
+    fails with "current transaction is aborted" — which is how one
+    best-effort read takes the whole response down with it. Reproduced
+    against a real Postgres before fixing.
+    """
+    deal = await _load_deal(db, deal_id)
+    _assert_can_touch(actor, deal)
+    if not deal.marketing_club_id:
+        return {"engagement": None, "website_visits": None}
+    club_id = deal.marketing_club_id
+
+    website_visits = None
+    try:
+        from app.services import club_directory as cd
+        website_visits = await cd.club_visit_detail(db, club_id, fast_web=True)
+    except Exception:  # noqa: BLE001 - the panel must degrade, never fail the pane
+        logger.exception("sales_workspace: website visits failed for club %s", club_id)
+        await db.rollback()
+
+    engagement = None
+    try:
+        from app.routers.marketing import club_engagement_breakdown
+        engagement = await club_engagement_breakdown(str(club_id), db)
+    except HTTPException:
+        await db.rollback()
+    except Exception:  # noqa: BLE001
+        logger.exception("sales_workspace: engagement breakdown failed for club %s", club_id)
+        await db.rollback()
+
+    return {"engagement": engagement, "website_visits": website_visits}
 
 
 @router.get("/clubs/{deal_id}/boundary")
@@ -759,7 +790,10 @@ async def get_club_boundary(
         from app.services import club_directory as cd
         return {"geojson": await cd.get_or_fetch_boundary(db, deal.marketing_club_id)}
     except Exception:  # noqa: BLE001 - the map must degrade, never 500 the drawer
+        # Rolling back matters even here: a swallowed database error leaves the
+        # transaction aborted for whatever runs next in this request.
         logger.exception("sales_workspace: boundary lookup failed for deal %s", deal_id)
+        await db.rollback()
         return {"geojson": None}
 
 
@@ -797,6 +831,11 @@ async def get_club_signals(
             return await coro
         except Exception:  # noqa: BLE001 - a missing card beats a broken drawer
             logger.exception("sales_workspace: %s failed for deal %s", what, deal_id)
+            # ROLL BACK, or the next card fails too. A swallowed database error
+            # leaves the transaction aborted, so the second and third _safe
+            # calls come back "current transaction is aborted" whatever they
+            # were actually going to do — one bad card would empty the pane.
+            await db.rollback()
             return None
 
     return {
