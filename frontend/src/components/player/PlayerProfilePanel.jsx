@@ -440,7 +440,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         </Field>
         <Field label="Squad (selection pool)" half>
           <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
-            options={[['', '. Unassigned. '], ...teams.map((t) => [t.id, t.name])]} />
+            options={[['', 'Unassigned'], ...teams.map((t) => [t.id, t.name])]} />
         </Field>
         <Field label="Role" half>
           <PSelect value={draft.player_role || ''} onChange={(v) => set('player_role', v || null)} options={ROLE_OPTS} />
@@ -495,7 +495,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
       </div>
 
       {/* BetterSelect selection flags. Both read from another module by
-          default. Leave them on Automatic and the answer comes from
+          default — leave them on Automatic and the answer comes from
           BetterFees' balance and Net Manager attendance. A club running
           neither can still answer by hand, which is what these are for. */}
       <div className="mt-1.5 border-t border-pb-hairline pt-2.5 flex flex-wrap gap-x-3.5 gap-y-2 items-end">

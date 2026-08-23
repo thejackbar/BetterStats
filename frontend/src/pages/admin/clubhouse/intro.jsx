@@ -141,7 +141,7 @@ export const INTROS = {
     ],
     history: 'Stock charges land here now. Kit used to be owed in the merch ledger, which never met the fee ledger, so nobody could answer "what does this person owe us".',
   },
-  // Keyed 'audiences' on purpose. The key is what marks the introduction as
+  // Keyed 'audiences' on purpose — the key is what marks the introduction as
   // seen, per person, so renaming it would show this again to everyone who has
   // already dismissed it. The screen it belongs to is Segments.
   audiences: {

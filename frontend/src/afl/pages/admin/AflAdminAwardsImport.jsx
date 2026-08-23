@@ -484,7 +484,7 @@ export default function AflAdminAwardsImport() {
   }, [])
 
   // Live-reconcile whenever the mapping or an override changes, same as the
-  // other two wizards. The review stays current as you work instead of
+  // other two wizards — the review stays current as you work instead of
   // needing a recalculate press.
   useEffect(() => {
     if (!headers.length || !mapping.player_name?.column || !mapping.award_name?.column) return

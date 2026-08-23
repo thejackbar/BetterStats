@@ -74,7 +74,7 @@ function ActivitiesPanel({ activities, types, onChanged }) {
         <div className="flex flex-wrap gap-2">
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Activity title (e.g. Boundary line marking)" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <select className={`${inp} w-48`} value={form.activity_type_id} onChange={e => setForm(f => ({ ...f, activity_type_id: e.target.value }))}>
-            <option value="">, no type, </option>
+            <option value="">no type</option>
             {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
@@ -92,7 +92,7 @@ function ActivitiesPanel({ activities, types, onChanged }) {
               <div className="flex flex-wrap gap-2">
                 <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Activity title" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} />
                 <select className={`${inp} w-48`} value={editForm.activity_type_id} onChange={e => setEditForm(f => ({ ...f, activity_type_id: e.target.value }))}>
-                  <option value="">, no type, </option>
+                  <option value="">no type</option>
                   {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                 </select>
                 <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Description (optional)" value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} />

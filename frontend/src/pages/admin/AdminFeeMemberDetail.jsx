@@ -414,7 +414,7 @@ export default function AdminFeeMemberDetail() {
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TYPE</label>
             <select className={`${inp} mb-3`} value={membershipForm.membership_type_id}
               onChange={e => setMembershipForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-              <option value="">, None, </option>
+              <option value="">None</option>
               {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">STATUS THIS SEASON</label>
@@ -452,7 +452,7 @@ export default function AdminFeeMemberDetail() {
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
             <select className={`${inp} mb-3`} value={tierForm.fee_schedule_id}
               onChange={e => setTierForm(t => ({ ...t, fee_schedule_id: e.target.value }))}>
-              <option value="">. Needs tier, </option>
+              <option value="">Needs tier</option>
               {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
             </select>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MEMBERSHIP PAYMENT METHOD</label>

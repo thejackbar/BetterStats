@@ -193,7 +193,7 @@ export default function SuperOverview() {
               <Kpi label="On modules" value={allClubs.filter(c => (c.modules || []).length).length} sub={`of ${t.clubs} clubs`} />
             </div>
 
-            {/* HQ tools, module-style tiles */}
+            {/* HQ tools — module-style tiles */}
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Platform Tools</div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-7">
               {HQ_TOOLS.map(tool => <ToolTile key={tool.to} {...tool} />)}

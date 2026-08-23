@@ -412,7 +412,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
   return (
     <div className="iq-fade space-y-6">
       {/* What scope the cards below were actually built from (career vs the
-          filtered season/grade). Stated, not implied by the header. */}
+          filtered season/grade) — stated, not implied by the header. */}
       {(detail?.scope || deep?.scope) && (
         <div className="flex items-center gap-2 -mb-2">
           <Tag>{(deep?.scope?.label || detail?.scope?.label) === 'filtered'
@@ -437,7 +437,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
 }
 
 /* ── Overview (form movers + emerging + picker) ──────────────────────────── */
-/* Squad filter chip. Wraps to multiple rows (a club can field 16+ teams, which
+/* Squad filter chip — wraps to multiple rows (a club can field 16+ teams, which
    a single-row Segmented can't show without squashing the search bar). */
 function SquadChip({ label, active, onClick }) {
   return (
@@ -538,7 +538,7 @@ export default function PlayerTrends() {
   const playerId = searchParams.get('player') || null
 
   // Form movers, emerging and the player list all follow the global Season + Team
-  // filter. Re-fetch whenever it changes.
+  // filter — re-fetch whenever it changes.
   useEffect(() => {
     setOverview(null)
     api.iqTrendsOverview(seasonId, gradeId).then(setOverview).catch(() => setOverview({ batting: {}, bowling: {}, emerging: [] }))

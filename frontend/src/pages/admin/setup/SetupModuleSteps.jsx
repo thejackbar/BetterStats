@@ -344,7 +344,7 @@ export function SquareStep({ step, onOpenTool }) {
     try {
       const res = await api.merchSquareConnectUrl()
       if (res?.url) {
-        // Off to Square's consent page. The OAuth callback lands back in the
+        // Off to Square's consent page — the OAuth callback lands back in the
         // admin, where the floating "back to setup" pill brings them home.
         try { sessionStorage.setItem('bs_setup_return', step.key) } catch { /* private mode */ }
         window.location.assign(res.url)

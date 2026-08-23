@@ -469,7 +469,7 @@ export default function Roster({ st, patch, narrow }) {
   // column narrow; one with three does not.
   const [railMin, setRailMin] = usePref('roster_rail_min', false)
   const [poolOpen, setPoolOpen] = usePref('roster_pool_open', true)
-  // Pool search / role filter / sort. Deliberately NOT a saved preference, 
+  // Pool search / role filter / sort. Deliberately NOT a saved preference —
   // a filter you left on last week hiding half the club is worse than retyping.
   const [poolQuery, setPoolQuery] = useState('')
   const [poolRole, setPoolRole] = useState('')
@@ -477,7 +477,7 @@ export default function Roster({ st, patch, narrow }) {
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
-  // st.rosterWeek is how another screen hands us a week. Events uses it for
+  // st.rosterWeek is how another screen hands us a week — Events uses it for
   // "Roster this event" so you land on the week the event falls in.
   const load = () => api.rosterWeek(st.rosterWeek)
     .then(res => { setData(res); setShifts(res.week.shifts || []) })
@@ -486,7 +486,7 @@ export default function Roster({ st, patch, narrow }) {
 
   const view = st.view
   // The first column carries who or what each row is, so it has to stay put
-  // while the days scroll sideways. Reading a shift you can no longer attach
+  // while the days scroll sideways — reading a shift you can no longer attach
   // to a name is worthless. Minimised it keeps just enough to identify a row.
   const railW = railMin ? 52 : (narrow ? 176 : 216)
   const gridCols = `${railW}px repeat(7, ${narrow ? 'minmax(0, 1fr)' : 'minmax(150px, 1fr)'})`
@@ -495,7 +495,7 @@ export default function Roster({ st, patch, narrow }) {
     borderRight: `1px solid ${C.hair2}`, ...extra,
   })
 
-  // NEVER DECLARE A COMPONENT INSIDE A RENDER, a `const X = () => …` written
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER — a `const X = () => …` written
   // here is a new element type on every render, so React rebuilds its whole
   // subtree and any focused input inside it loses the caret after one
   // character. This is a plain function returning elements, called below.

@@ -115,7 +115,7 @@ const RESTORE_CONFIRM_WORD = 'RESTORE'
 // independent gates, in order: (1) type the confirmation word back exactly,
 // checked entirely client-side/server-side before step 2 ever appears; (2)
 // paste the age PRIVATE key, sent fresh with this one request and never
-// stored anywhere. The backup-agent cryptographically verifies it's the
+// stored anywhere — the backup-agent cryptographically verifies it's the
 // real matching key before the restore is allowed to proceed. Plain SSH
 // restore (ops/backup/restore.sh) remains fully available alongside this.
 function RestoreModal({ task, mode, onClose, onStarted }) {

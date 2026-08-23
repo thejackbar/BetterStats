@@ -26,7 +26,7 @@ const PRICING_JSONLD = {
     offerCount: String(1 + PRICED_MODULES.length),
     offers: [CORE, ...PRICED_MODULES].map((m) => ({
       '@type': 'Offer',
-      name: `${m.name}, annual`,
+      name: `${m.name} - annual`,
       price: String(m.price),
       priceCurrency: 'AUD',
       availability: 'https://schema.org/InStock',
@@ -192,7 +192,7 @@ function ReplacesStack() {
               <p className="text-[11px] text-pb-faint mt-3">Plus the leading cricket stats competitor charges {IMPORT_NOTE} to load your history, a one-off fee BetterCricket doesn't.</p>
             </div>
 
-            {/* BetterCricket, one price + the saving */}
+            {/* BetterCricket — one price + the saving */}
             <div className="surface-strong p-6 lg:p-7 border-accent/40 bg-gradient-to-b from-accent/[0.07] to-transparent flex flex-col">
               <p className="text-[10px] uppercase tracking-wide3 font-mono text-accent mb-4">BetterCricket, all in</p>
               <div className="flex-1 flex flex-col justify-center text-center py-4">

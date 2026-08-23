@@ -676,7 +676,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
       <div>
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
         <select className={INPUT_CLS} value={formatSeason(form.season)} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
-          <option value="">. All Time, </option>
+          <option value="">All Time</option>
           {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
         </select>
       </div>
@@ -684,7 +684,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season End</label>
           <select className={INPUT_CLS} value={formatSeason(form.season_end || '')} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
-            <option value="">, Present, </option>
+            <option value="">Present</option>
             {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
           </select>
         </div>
@@ -699,7 +699,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Subcategory / Grade</label>
         {!customSubcat && subcatOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.subcategory} onChange={e => setSubcat(e.target.value)}>
-            <option value="">. Select, </option>
+            <option value="">Select</option>
             {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             <option value="__other__">Other…</option>
           </select>
@@ -715,7 +715,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Achievement *</label>
         {!customAchievement && achievementOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.achievement} onChange={e => setAchievement(e.target.value)}>
-            <option value="">. Select, </option>
+            <option value="">Select</option>
             {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
             <option value="__other__">Other…</option>
           </select>

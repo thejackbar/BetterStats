@@ -386,7 +386,7 @@ function MergeDuplicateModal({ keepId, keepName, onMerged, onClose }) {
 const OTHER_CLUB_POLL_MS = 2500
 const OTHER_CLUB_MAX_POLLS = 60
 
-// Spencer Green plays for several clubs. This is the whole cross-club
+// Spencer Green plays for several clubs — this is the whole cross-club
 // linking UI: the clubs already confirmed for this player, name-match
 // suggestions from other cached clubs (never auto-linked, always a confirm
 // click), and an on-demand "search a specific club" flow.
@@ -765,7 +765,7 @@ function AttributesPanel({ card, onSaved }) {
         <label className="block">
           <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Origin / region</div>
           <select value={form.region || ''} onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} className={inputCls}>
-            {REGION_OPTS.map((r) => <option key={r} value={r}>{r || ', none, '}</option>)}
+            {REGION_OPTS.map((r) => <option key={r} value={r}>{r || 'none'}</option>)}
           </select>
         </label>
         <label className="block">

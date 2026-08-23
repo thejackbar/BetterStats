@@ -560,7 +560,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
                   ) : (
                     <span className={`text-[12px] truncate ${disabled ? 'text-pb-faintest' : c.differ ? 'text-pb-text' : 'text-pb-faint'}`}
                       style={c.differ && !disabled ? { color: 'var(--pb-accent)' } : {}}>
-                      {disabled ? ', no value, ' : fmt(c.incoming)}
+                      {disabled ? 'no value' : fmt(c.incoming)}
                     </span>
                   )}
                 </div>

@@ -286,7 +286,7 @@ export default function SetupWizard() {
                 )}
 
                 {/* Footer nav. Every non-vital step can be marked done by
-                    hand (auto-detection is a convenience, not a gate, e.g.
+                    hand (auto-detection is a convenience, not a gate — e.g.
                     Net Manager might be "done enough" without saving
                     settings); vital steps (first sync, the merges) only
                     complete when the wizard can actually see the result, so

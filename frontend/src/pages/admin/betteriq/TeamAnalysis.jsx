@@ -692,7 +692,7 @@ export default function TeamAnalysis() {
   const teamId = ctx?.team?.id || null
   const isRange = ctx?.season?.mode === 'range'
   // In Compare mode every card aggregates the whole range, not just the "to"
-  // season. Pass the in-range season-row ids so the backend scopes to all of them.
+  // season — pass the in-range season-row ids so the backend scopes to all of them.
   const rangeIds = useMemo(() => (isRange ? seasonIdsInRange(ctx, seasons) : null), [isRange, ctx, seasons])
   const rangeKey = rangeIds ? rangeIds.join(',') : ''
 
@@ -744,7 +744,7 @@ export default function TeamAnalysis() {
 
           {data && data.record && (
             <div className="iq-fade">
-              {/* A card that failed server-side is reported, not silently blank, 
+              {/* A card that failed server-side is reported, not silently blank —
                   "no data" and "the query failed" are different things. */}
               {data.degraded?.length > 0 && (
                 <div className="flex items-start gap-2 mb-5 px-4 py-3 text-[12.5px]"

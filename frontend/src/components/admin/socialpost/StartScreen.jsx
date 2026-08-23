@@ -63,7 +63,7 @@ export default function StartScreen({
         {types.map((t) => <TypeCard key={t.key} type={t} onClick={() => onPick(t.key)} />)}
       </div>
 
-      {/* Footer, resume where you left off */}
+      {/* Footer — resume where you left off */}
       <div className="w-full max-w-[1120px] pt-5 border-t pb-hairline flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap min-w-0">
           <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faint">Pick up where you left off</span>

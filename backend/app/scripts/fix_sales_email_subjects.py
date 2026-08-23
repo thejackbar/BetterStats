@@ -43,15 +43,15 @@ from app.services.marketing_org import get_outreach_org
 # db_name -> (old subject this script may replace, new subject)
 _FIXES = {
     "Email following voicemail": (
-        "BetterCricket for {{club}}, following up",
+        "BetterCricket for {{club}} — following up",
         "BetterCricket for {{club}} - following up",
     ),
     "Trial information": (
-        "Start your free BetterCricket trial, {{club}}",
+        "Start your free BetterCricket trial — {{club}}",
         "Start your free BetterCricket trial - {{club}}",
     ),
     "Book a demo": (
-        "Book a demo. BetterCricket for {{club}}",
+        "Book a demo — BetterCricket for {{club}}",
         "Book a demo - BetterCricket for {{club}}",
     ),
     "Custom sales rep email": (

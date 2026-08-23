@@ -127,13 +127,13 @@ export default function SuperClubMerge() {
               <>
                 <label className={LABEL_CLS}>Source club (its history moves out, then it's archived)</label>
                 <select value={sourceId} onChange={(e) => setSourceId(e.target.value)} className={`${SELECT_CLS} mb-4`}>
-                  <option value="">. Select the source club, </option>
+                  <option value="">select the source club</option>
                   {clubs.map((c) => <option key={c.id} value={c.id} disabled={c.id === targetId}>{c.name}</option>)}
                 </select>
 
                 <label className={LABEL_CLS}>Target club (keeps its identity, receives the source's history)</label>
                 <select value={targetId} onChange={(e) => setTargetId(e.target.value)} className={`${SELECT_CLS} mb-4`}>
-                  <option value="">. Select the target club, </option>
+                  <option value="">select the target club</option>
                   {clubs.map((c) => <option key={c.id} value={c.id} disabled={c.id === sourceId}>{c.name}</option>)}
                 </select>
 
@@ -182,7 +182,7 @@ export default function SuperClubMerge() {
                 <label className={LABEL_CLS}>Club to repair (the target it was merged INTO)</label>
                 <select value={repairId} onChange={(e) => { setRepairId(e.target.value); setRepairResult(null); setRepairError('') }}
                   className={`${SELECT_CLS} mb-4`}>
-                  <option value="">. Select a club, </option>
+                  <option value="">select a club</option>
                   {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
                 {repairError && <p className="text-[12px] text-pb-red mb-3">{repairError}</p>}

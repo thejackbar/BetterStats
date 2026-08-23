@@ -622,7 +622,7 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     subject = _merge(subject or "", ctx)
     club_name = ctx.get("club") or org.name or ""
     unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
-    text_tail = f"\n\n, \n{footer}\n{unsub_text}" if footer else f"\n\n, \n{unsub_text}"
+    text_tail = f"\n\n--\n{footer}\n{unsub_text}" if footer else f"\n\n--\n{unsub_text}"
     link_code = str(ctx.get("utm_code") or "").strip() if apply_utm else ""
     if _is_full_doc(body_html):
         merged = _merge(body_html or "", ctx)

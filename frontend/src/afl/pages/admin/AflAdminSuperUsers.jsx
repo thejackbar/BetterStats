@@ -116,7 +116,7 @@ export default function AflAdminSuperUsers() {
                    className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm col-span-2" />
             <select value={form.club_id} onChange={e => setForm(f => ({ ...f, club_id: e.target.value }))}
                     className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm">
-              <option value="">. Select club, </option>
+              <option value="">select club</option>
               {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
@@ -153,7 +153,7 @@ export default function AflAdminSuperUsers() {
                     <td className="px-2 py-1.5">
                       <select value={editForm.club_id} onChange={e => setEditForm(f => ({ ...f, club_id: e.target.value }))}
                               className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-xs">
-                        <option value="">. Select club, </option>
+                        <option value="">select club</option>
                         {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </td>

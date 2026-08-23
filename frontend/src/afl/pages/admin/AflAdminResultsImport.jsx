@@ -391,7 +391,7 @@ export default function AflAdminResultsImport() {
 
   const loadHistory = () => { aflApi.resultImportsList().then(setHistory).catch(() => {}) }
   const loadSeasons = () => {
-    // Same club-seasons endpoint Import Stats uses, one list, one create
+    // Same club-seasons endpoint Import Stats uses — one list, one create
     // path, no second copy to keep in step.
     aflApi.importsSeasons().then(ss => setAllSeasons((ss || []).map(s => ({
       id: s.id, name: (s.year && !String(s.name).includes(String(s.year))) ? `${s.name} (${s.year})` : s.name,
@@ -404,7 +404,7 @@ export default function AflAdminResultsImport() {
   }, [])
 
   // Live-reconcile whenever the mapping, an override or an include toggle
-  // changes. The review stays current as you work rather than needing a
+  // changes — the review stays current as you work rather than needing a
   // "recalculate" press.
   useEffect(() => {
     if (!headers.length || !mapping.played_on?.column) return
@@ -428,7 +428,7 @@ export default function AflAdminResultsImport() {
 
   // A results register that goes back decades has no season row to match for
   // most of its life. Rather than block, an unmatched label defaults to
-  // "unassigned", and because a game has to hang off a season, the review
+  // "unassigned" — and because a game has to hang off a season, the review
   // step then reports those rows as blocked with the fix named ("create one
   // on the Seasons step"), which the bulk-create button does in one press.
   useEffect(() => {
@@ -480,7 +480,7 @@ export default function AflAdminResultsImport() {
     if (!targets.length) return
     setBulkCreatingSeasons(true)
     let created = 0, failed = 0
-    // Sequential, not parallel. Two labels that resolve to the same season
+    // Sequential, not parallel — two labels that resolve to the same season
     // name would otherwise race each other into a duplicate-name 409.
     for (const s of targets) {
       try {

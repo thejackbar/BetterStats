@@ -33,7 +33,7 @@ function UnlinkedRow({ team, gradeSeasons, onLinked }) {
       <span className="text-pb-amber/80 text-[12px]">no grade linked</span>
       <select value={gradeId} onChange={(e) => setGradeId(e.target.value)}
         className="ml-auto bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
-        <option value="">. Pick the grade, </option>
+        <option value="">pick the grade</option>
         {gradeSeasons.map((s) => (
           <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
             {s.grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}

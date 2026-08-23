@@ -1324,7 +1324,7 @@ export default function AdminUsage() {
           IPs are stored as a truncated hash, not the raw address.
         </p>
 
-        {/* Current background processes: running jobs, registrations, onboarding */}
+        {/* Current background processes — running jobs, registrations, onboarding */}
         <BackgroundProcessesSection />
 
         {/* Live realtime section (anonymous public traffic, auto-refreshing) */}
@@ -1343,7 +1343,7 @@ export default function AdminUsage() {
 
         {/* Filters */}
         <div className="mb-5 space-y-2">
-          {/* Search, path / route / UTM. Filters the whole Analytics section,
+          {/* Search — path / route / UTM. Filters the whole Analytics section,
               including the Meta ads & campaigns view. */}
           <div>
             <div className="relative">
@@ -1426,7 +1426,7 @@ export default function AdminUsage() {
           <div className="mb-4 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
         )}
 
-        {/* Overview. Counters + return-visitor split, collapsible. */}
+        {/* Overview — counters + return-visitor split, collapsible. */}
         <Panel id="overview" title="Overview" sub="counts for the window">
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
@@ -1445,7 +1445,7 @@ export default function AdminUsage() {
           </div>
         )}
 
-        {/* Visitors. New vs returning, derived from the (hashed) IP. */}
+        {/* Visitors — new vs returning, derived from the (hashed) IP. */}
         {visitors && (
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
@@ -1466,10 +1466,10 @@ export default function AdminUsage() {
         )}
         </Panel>
 
-        {/* Visitor journey. Appears only when the search box is a visitor UUID. */}
+        {/* Visitor journey — appears only when the search box is a visitor UUID. */}
         {VISITOR_ID_RE.test(q) && <VisitorJourney visitorId={q} />}
 
-        {/* Engagement, session duration & time on page */}
+        {/* Engagement — session duration & time on page */}
         <EngagementSection days={days} />
 
         {/* Meta ads & campaigns (marketing attribution) */}
@@ -1700,7 +1700,7 @@ export default function AdminUsage() {
             {!loading && !recent.length && <div className="p-6 text-center font-mono text-[11px] text-pb-faint">No events.</div>}
             {recent.map((r, i) => (
               <div key={r.id} className={`px-3 sm:px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                {/* Primary line: type, status, what was hit, duration */}
+                {/* Primary line — type, status, what was hit, duration */}
                 <div className="flex items-center gap-2 min-w-0">
                   <TypeBadge type={r.event_type} />
                   <StatusBadge status={r.status} />
@@ -1719,7 +1719,7 @@ export default function AdminUsage() {
                     <span className="font-mono text-[9px] text-pb-faintest shrink-0">{r.duration_ms}ms</span>
                   )}
                 </div>
-                {/* Meta line. Wraps under the path on a phone, sits inline on desktop */}
+                {/* Meta line — wraps under the path on a phone, sits inline on desktop */}
                 <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap font-mono text-[9px] text-pb-faintest mt-1">
                   <span className="shrink-0">{fmtTime(r.created_at)}</span>
                   <span className="hidden sm:inline shrink-0">{r.method}</span>

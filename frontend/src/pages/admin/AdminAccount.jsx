@@ -445,7 +445,7 @@ export default function AdminAccount() {
           <p className="font-mono text-[11px] text-pb-faint">Loading…</p>
         ) : (
           // The price summary sits in its own sticky column once a module is
-          // selected, instead of stacking below the module list, with 6
+          // selected, instead of stacking below the module list — with 6
           // possible rows the list alone can push a summary that comes after
           // it below the fold, right when it's most useful (mid-selection).
           // lg:sticky keeps it in view as the list/billing history scroll;

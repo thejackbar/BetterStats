@@ -55,11 +55,11 @@ function MergeBuilder({ seasons, onMerged }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge (will be hidden)</label>
-          <SeasonPicker seasons={seasons} value={alias} onChange={setAlias} placeholder=". Select variant, " exclude={canonical} />
+          <SeasonPicker seasons={seasons} value={alias} onChange={setAlias} placeholder="Select variant" exclude={canonical} />
         </div>
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this season)</label>
-          <SeasonPicker seasons={seasons} value={canonical} onChange={setCanonical} placeholder=". Select canonical, " exclude={alias} />
+          <SeasonPicker seasons={seasons} value={canonical} onChange={setCanonical} placeholder="Select canonical" exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (

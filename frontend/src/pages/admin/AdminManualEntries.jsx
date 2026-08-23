@@ -167,7 +167,7 @@ function NumberField({ label, value, onChange, step = 1, min = 0, allowDecimal =
 // no CA equivalent (e.g. a pre-2000 season) — the sync never creates these, so
 // without this an admin has no way to enter a match from an era that isn't
 // already in the season list.
-function SeasonSelect({ seasons, value, onChange, onCreated, emptyLabel = '. Choose a season, ' }) {
+function SeasonSelect({ seasons, value, onChange, onCreated, emptyLabel = 'Choose a season' }) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [year, setYear] = useState('')
@@ -697,9 +697,9 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
   )
 }
 
-// Fields that map to Optional[str] on the backend. Empty form value must go as null, not 0.
+// Fields that map to Optional[str] on the backend — empty form value must go as null, not 0.
 const STRING_FIELDS = new Set(['notes', 'bowling_best_figures'])
-// Fields that map to Optional[int]. Empty form value must go as null.
+// Fields that map to Optional[int] — empty form value must go as null.
 const OPTIONAL_INT_FIELDS = new Set(['batting_high_score', 'bowling_best_wickets'])
 
 function normalizeAggregatePayload(form) {
@@ -858,7 +858,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending,
               value={form.season_id}
               onChange={id => setForm({ ...form, season_id: id, grade_id: '' })}
               onCreated={onSeasonCreated}
-              emptyLabel=". Career only (no specific season), "
+              emptyLabel="Career only (no specific season)"
             />
             {isCareerMode && (
               <p className="text-[10px] text-pb-faint mt-1">Will save as a career-only adjustment.</p>
@@ -1249,7 +1249,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
               value={form.grade_id || ''}
               onChange={id => setForm({ ...form, grade_id: id })}
               onCreated={onGradeCreated}
-              emptyLabel=", None, "
+              emptyLabel="None"
             />
           </div>
           <div>

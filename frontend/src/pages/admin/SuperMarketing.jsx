@@ -338,7 +338,7 @@ function VisitsPanel({ clubId, summary }) {
         <div className="text-pb-faint">No site visits tracked from this club's UTM yet.</div>
       ) : !data ? (
         // Summary says there's traffic but the detail fetch hasn't landed (or
-        // failed). Show the count without touching the missing detail fields.
+        // failed) — show the count without touching the missing detail fields.
         <div className="text-pb-dim">
           <span className="text-violet-300 font-medium">{views}</span> view(s) tracked.
         </div>
@@ -784,7 +784,7 @@ function UtmMatchPanel() {
 
 export default function SuperMarketing() {
   // A deep link (e.g. a club utm_code/name clicked on the Usage page) seeds
-  // the search box so the linked club is filtered straight to the top, 
+  // the search box so the linked club is filtered straight to the top —
   // ?q=<utm_code or name>. ?org_id=<uuid> is the guaranteed-unique variant,
   // used by All Clubs (SuperClubs.jsx) which links its own Organisation rows
   // through to their matched directory entry via existing_org_id.
@@ -813,9 +813,9 @@ export default function SuperMarketing() {
     emailed: '', exported: '', suppressed: '', excluded: '',
     visited: false,
     // Ranks (rather than paginates) the currently-filtered set by page views
-    // or distinct visitors. See backend club_directory.top_clubs_by_visits.
+    // or distinct visitors — see backend club_directory.top_clubs_by_visits.
     top_n: '', top_n_metric: 'views',
-    // Cached Twenty engagementScore (see marketing_clubs.engagement_score), >=/<=.
+    // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
     engagement_score_gte: '', engagement_score_lte: '',
     existing_org_id: initialOrgId,
   })
@@ -851,7 +851,7 @@ export default function SuperMarketing() {
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
   // Auto-expand the single matching club when the page was opened via a
-  // deep link (?q=... or ?org_id=...). Otherwise a landed-on club is
+  // deep link (?q=... or ?org_id=...) — otherwise a landed-on club is
   // filtered to the top but still needs a click to open, which defeats the
   // point of the link.
   useEffect(() => {

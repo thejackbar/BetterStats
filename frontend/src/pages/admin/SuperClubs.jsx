@@ -1582,7 +1582,7 @@ export default function SuperClubs() {
                           const brand = moduleBrand(key).accent
                           return (
                             <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
-                              {/* Core is the base. It can't be removed; disable it via its
+                              {/* Core is the base — it can't be removed; disable it via its
                                   status (Cancelled / Paused), not by un-granting. Core's button is
                                   permanently disabled, so dim only while busy (not for Core itself). */}
                               <button type="button" disabled={busy || isCore}
@@ -1793,7 +1793,7 @@ export default function SuperClubs() {
                           value={clubAdmins.find(a => a.is_primary_admin)?.user_id || ''}
                           onChange={e => setPrimaryAdmin(club.id, e.target.value)}
                           className={INPUT_CLS}>
-                          <option value="" disabled>, none, </option>
+                          <option value="" disabled>none</option>
                           {clubAdmins.map(a => (
                             <option key={a.user_id} value={a.user_id}>
                               {a.display_name || a.username}{a.is_primary_admin ? ' (primary)' : ''}

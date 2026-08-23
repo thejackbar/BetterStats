@@ -215,7 +215,7 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
     if (expanded && members === null) loadMembers()
   }, [expanded, members, loadMembers])
 
-  // Non-playing candidates (parents/guardians etc, manual, non-player
+  // Non-playing candidates (parents/guardians etc — manual, non-player
   // fee_members rows) for the "add non-player member" picker. Needs a
   // season to read from BetterFees' member list; harmless if none picked yet.
   useEffect(() => {

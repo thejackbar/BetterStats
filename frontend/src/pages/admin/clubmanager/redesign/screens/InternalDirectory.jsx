@@ -97,7 +97,7 @@ export default function InternalDirectory({ st, patch, narrow }) {
   const clubs = useMemo(() => {
     const by = new Map()
     filtered.forEach(c => {
-      const name = c.club || ', No club recorded, '
+      const name = c.club || 'No club recorded'
       let g = by.get(name)
       if (!g) {
         g = { name, association: c.association, state: c.state, country: c.country,

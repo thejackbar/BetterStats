@@ -228,7 +228,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
           <span className="text-[12.5px] text-pb-dim">set squad</span>
           <select value={bulkSquad} onChange={(e) => setBulkSquad(e.target.value)}
             className="bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-1.5 text-[12.5px] cursor-pointer focus:outline-none focus:border-pb-accent">
-            <option value="">. Pick, </option>
+            <option value="">pick</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <Btn variant="soft" sm disabled={!bulkSquad} onClick={async () => { await onBulkSquad([...sel], bulkSquad); clearSel() }}>Apply</Btn>

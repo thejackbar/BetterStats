@@ -2114,7 +2114,7 @@ export default function SalesWorkspace() {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
                         setCallForm(f => ({ ...f, contactKey: e.target.value }))
                       }}>
-                      <option value="">, no specific contact, </option>
+                      <option value="">no specific contact</option>
                       {(drawer.contacts || []).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
                           {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? '. DO NOT CONTACT' : ''}
@@ -2308,7 +2308,7 @@ export default function SalesWorkspace() {
             </p>
             <Field label="Primary admin contact" hint="Only contacts with a valid email address on file are listed">
               <Select value={trialForm.contactKey} onChange={e => pickTrialContact(e.target.value)} required>
-                <option value="" disabled>. Select a contact, </option>
+                <option value="" disabled>select a contact</option>
                 {trialEligibleContacts.map(c => (
                   <option key={contactKey(c)} value={contactKey(c)}>
                     {c.full_name}{c.role ? ` (${c.role})` : ''}
@@ -2358,7 +2358,7 @@ export default function SalesWorkspace() {
                   setShowExtendNewContact(false)
                   setExtendTrialForm(f => ({ ...f, contactKey: e.target.value }))
                 }}>
-                <option value="" disabled>. Select a contact, </option>
+                <option value="" disabled>select a contact</option>
                 {extendTrialEligibleContacts.map(c => (
                   <option key={contactKey(c)} value={contactKey(c)}>
                     {c.full_name}{c.role ? ` (${c.role})` : ''}

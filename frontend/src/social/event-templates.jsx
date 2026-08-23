@@ -341,7 +341,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
         <div style={{ borderBottom: `3px solid ${ink}`, padding: '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
         <div style={{ textAlign: 'center', padding: '46px 0 10px' }}>
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>. Official Notice, </div>
+          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>Official Notice</div>
           <AutoFitText text={event.title} max={128} min={52} lines={2} measureDeps={[event.title]}
             style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
           {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 34, color: a(ink, 0.72), marginTop: 20, maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.34 }}>{event.subtitle}</div> : null}
@@ -386,7 +386,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV6. STICKER POP · playful rounded badges (casual socials)
+// EV6 — STICKER POP · playful rounded badges (casual socials)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Sticker({ team, event = {}, palette, motif }) {
   const P = palette
@@ -448,7 +448,7 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV7. KINETIC · diagonal bands, italic motion type (high-energy sport)
+// EV7 — KINETIC · diagonal bands, italic motion type (high-energy sport)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Kinetic({ team, event = {}, palette, motif }) {
   const P = palette
@@ -511,7 +511,7 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV8. SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
+// EV8 — SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Swiss({ team, event = {}, palette }) {
   const P = palette
@@ -565,7 +565,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV9. CREST · heritage emblem, gold-on-green serif (prestige occasions)
+// EV9 — CREST · heritage emblem, gold-on-green serif (prestige occasions)
 // Uses palette.primary as the deep field, palette.accent as the gold.
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Crest({ team, event = {}, palette, motif }) {
@@ -625,7 +625,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV10. CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
+// EV10 — CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Chalkboard({ team, event = {}, palette }) {
   const P = palette
@@ -682,7 +682,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV11. POLAROID · taped scrapbook photo + marker pen (photo-led socials)
+// EV11 — POLAROID · taped scrapbook photo + marker pen (photo-led socials)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Polaroid({ team, event = {}, palette, motif }) {
   const P = palette
@@ -740,7 +740,7 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REGISTRY: drop these straight into AdminSocialPost's TEMPLATES array.
+// REGISTRY — drop these straight into AdminSocialPost's TEMPLATES array.
 // `kind: 'event'` keeps them on their own "Events" tab.
 // `surface: 'light'` flags the paper-backed directions so the designer can hide
 // the dark-mode toggle for them.

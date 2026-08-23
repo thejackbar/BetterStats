@@ -144,7 +144,7 @@ export default function Premierships() {
                     <Label style={{ color: 'var(--pb-accent)' }}>
                       {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                     </Label>
-                    {/* The competition the flag was won in, the card's own
+                    {/* The competition the flag was won in — the card's own
                         title, which is why it is not repeated under every
                         name below. */}
                     {p.competition && (

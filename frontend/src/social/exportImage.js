@@ -95,7 +95,7 @@ async function buildEmbeddedFontCss() {
 }
 
 // Render an off-screen template node to a high-res PNG and trigger a download
-// (unless `download` is false, e.g. the "Save to Club Room" action wants the
+// (unless `download` is false — e.g. the "Save to Club Room" action wants the
 // blob itself to upload, not a file on the visitor's machine).
 // `node` must already be mounted at full width×height (templates render full-bleed).
 export async function exportNodeToPng(node, {

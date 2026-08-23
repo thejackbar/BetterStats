@@ -203,14 +203,14 @@ export default function MatchReview() {
   const [gameId, setGameId] = useState(searchParams.get('game') || null)
   const [review, setReview] = useState(null)
 
-  // Follow the global Season + Team filter. The review list is the games it scopes.
+  // Follow the global Season + Team filter — the review list is the games it scopes.
   useEffect(() => {
     setGames(null)
     api.iqReviewGames(seasonIds ? undefined : seasonId, gradeId, seasonIds).then(setGames).catch(() => setGames([]))
   }, [seasonId, gradeId, seasonIds ? seasonIds.join(',') : ''])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Default to the most recent game once the list loads (the detail pane is
-  // always populated, mirroring the design), unless the URL already pins one.
+  // always populated, mirroring the design) — unless the URL already pins one.
   useEffect(() => {
     if (games && games.length > 0 && !gameId) {
       setGameId(games[0].game_id)

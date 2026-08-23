@@ -129,7 +129,7 @@ function FieldRow({ field, label, required, hint, value, headers, conf, onMap })
         </span>
         <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
         <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={(e) => onMap(field, e.target.value)}>
-          <option value="">, not in my file, </option>
+          <option value="">not in my file</option>
           {headers.map((h) => <option key={h} value={h}>{h}</option>)}
         </select>
         {conf != null && <Pct score={conf} />}
@@ -191,7 +191,7 @@ function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, ma
 // ── searchable picker (renders a handful of options at a time, scales to
 //    thousands of players without freezing) ───────────────────────────────────
 function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'squad' ? '. Leave unset. ' : '. Skip (unmatched), '
+  if (!value) return kind === 'squad' ? 'Leave unset' : 'Skip (unmatched)'
   if (value === '__new__') return kind === 'squad' ? '+ Create new team' : '+ Create new player'
   if (value === '__skip__') return kind === 'squad' ? 'Leave unset' : 'Skip'
   return idName.get(value) || '(selected)'
@@ -595,7 +595,7 @@ export default function AdminPlayerImport() {
   )
 
   // Keep the change preview fresh as the mapping / matches change (debounced).
-  // Waits for a name column to be mapped, without it /resolve 422s.
+  // Waits for a name column to be mapped — without it /resolve 422s.
   const nameReady = nameMode === 'split' ? !!mapping.player_last_name : !!mapping.player_name
   useEffect(() => {
     if (!parsed || !nameReady) return
@@ -621,7 +621,7 @@ export default function AdminPlayerImport() {
       const p = await api.playerImportPreview(file)
       const m = {}, c = {}
       Object.entries(p.mapping_suggestions || {}).forEach(([f, v]) => { m[f] = v.column; c[f] = v.confidence })
-      // A sheet with separate first-name/surname columns auto-suggests both, 
+      // A sheet with separate first-name/surname columns auto-suggests both —
       // switch straight to split mode so the match isn't sitting one tab over.
       if ((m.player_first_name || m.player_last_name) && !m.player_name) setNameModeRaw('split')
       setParsed(p); setMapping(m); setConfByField(c)

@@ -284,7 +284,7 @@ function Center({ children }) {
 }
 
 // No destination to offer a public TV viewer (they have no admin session to
-// jump into). The button only renders when the caller passed an `onExit`.
+// jump into) — the button only renders when the caller passed an `onExit`.
 function ExitLink({ onExit, label = 'Back to setup' }) {
   if (!onExit) return null
   return (
@@ -304,7 +304,7 @@ function SlideView({ slide, clubLogoUrl }) {
   return null
 }
 
-// A player's own photo, falling back to the club's crest, then initials, 
+// A player's own photo, falling back to the club's crest, then initials —
 // "utilise the player pictures... default to the club's logo if there's no
 // image". Mirrors TeamBadge's onError-cascade, just with one more tier.
 function PlayerAvatar({ playerId, name, clubLogoUrl, size = 44, accent = 'var(--pb-accent)' }) {

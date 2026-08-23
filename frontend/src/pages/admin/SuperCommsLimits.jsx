@@ -112,7 +112,7 @@ export default function SuperCommsLimits() {
           </p>
         </div>
 
-        {/* Account send limits. AWS ceilings + our practical limits */}
+        {/* Account send limits — AWS ceilings + our practical limits */}
         {rates && (() => {
           const aws = Number(rateForm.aws_max_send_rate)
           const send = Number(rateForm.send_rate)

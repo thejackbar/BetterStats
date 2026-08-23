@@ -1052,7 +1052,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
   )
 }
 
-// Import the CRM's current filtered deal set into a Sales Workspace list, 
+// Import the CRM's current filtered deal set into a Sales Workspace list —
 // the CRM-export source alongside Wizard Clubs (SuperWizardClubs.jsx's own
 // "Import to Sales List"). No club-directory matching needed: these are
 // already real crm_deals rows, so this is a pure grouping of their

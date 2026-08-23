@@ -65,7 +65,7 @@ export default function Premierships() {
                 }>
                   {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                 </SectionTitle>
-                {/* The competition the flag was won in, the card's own title,
+                {/* The competition the flag was won in — the card's own title,
                     which is why it is not repeated under every name below. */}
                 {p.competition && (
                   <p className="-mt-1 mb-1.5 truncate text-[13px] text-pb-dim" title={p.competition}>

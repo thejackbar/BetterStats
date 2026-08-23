@@ -110,7 +110,7 @@ function TeamModal({ team, onClose, onSaved }) {
           <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
           <Field label="Grade (for ladder: auto-linked, override here)">
             <Select value={form.grade_id || ''} onChange={set('grade_id')}>
-              <option value="">. Auto-link from match data, </option>
+              <option value="">Auto-link from match data</option>
               {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
               {gradeSeasons.map((s) => (
                 <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
@@ -173,7 +173,7 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
             ) : (
               <select value={targetId} onChange={(e) => setTargetId(e.target.value)}
                 className="mt-1 bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-1.5 text-pb-text text-[15px] font-medium focus:outline-none focus:border-pb-accent">
-                <option value="">. Choose a squad, </option>
+                <option value="">choose a squad</option>
                 {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}

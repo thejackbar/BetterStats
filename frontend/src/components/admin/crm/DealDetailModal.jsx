@@ -362,7 +362,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             </Field>
             {ownerOptions && ownerOptions.length > 0 && (
               <Field label="Owner" width={FIELD_W.owner}>
-                {/* Bound through ownerEntryId. See EventForm: an entry is a
+                {/* Bound through ownerEntryId — see EventForm: an entry is a
                     person, possibly covering several accounts, so a deal
                     owned by one of the folded-away ones still shows its
                     owner rather than reading Unassigned. */}
@@ -396,7 +396,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           </div>
 
           {/* Value / probability / weighted-value / discount are all the same
-              financial-outcome cluster, kept together in one box instead of
+              financial-outcome cluster — kept together in one box instead of
               scattered across the grid and a separate section further down. */}
           <div className="pb-card px-3 py-3 space-y-3">
             <div className="flex flex-wrap gap-3 items-start">
@@ -405,7 +405,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   ? `After discount: ${money(deal.effective_value_cents ?? deal.value_cents)}` : undefined}>
                 {/* key forces the uncontrolled input to remount (and pick up
                     the fresh defaultValue) whenever the server recomputes
-                    value_cents, e.g. toggling a Product Interest chip, 
+                    value_cents — e.g. toggling a Product Interest chip —
                     otherwise the DOM node keeps showing its stale initial
                     value even though `deal` itself has updated. */}
                 <NumberInput key={deal.value_cents} defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
@@ -474,7 +474,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
           {moduleOptions && moduleOptions.length > 0 && (() => {
             // Sentence-Case, fixed order (Stats first, Fantasy last) regardless
-            // of what order module_keys stores them in, a club with no
+            // of what order module_keys stores them in — a club with no
             // Product Interest set at all is always assumed to want at least
             // Stats. Each chip for a module currently on trial shows its days
             // remaining, bolding whichever module is soonest to expire.
@@ -494,7 +494,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   {moduleOptions.map(m => {
                     const on = heldKeys.includes(m.key)
                     const days = trialDays[m.key]
-                    // days is signed. Negative means the trial's end date
+                    // days is signed — negative means the trial's end date
                     // has already passed, not just "due today" (0).
                     const expired = days != null && days < 0
                     return (

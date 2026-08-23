@@ -466,7 +466,7 @@ export default function SelectionAnalysis() {
     <IQLayout actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
       {data === null && !err && <LoadingCard label="Analysing the XI…" expectedMs={6000} />}
       {err && <div className="iq-card p-5"><Empty>Couldn't load this lineup. It may have been removed. Pick another fixture.</Empty></div>}
-      {/* Even with nothing saved we can still help. The eligible pool lets us
+      {/* Even with nothing saved we can still help — the eligible pool lets us
           build a best XI from scratch. Only truly empty pools dead-end. */}
       {data && !(data.pool?.length || data.players?.length || data.promote?.length) && (
         <Card title={`${data.fixture?.team_name || 'Team'} vs ${data.fixture?.opponent_name || 'TBC'}`}>

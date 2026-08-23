@@ -533,7 +533,7 @@ export default function MergeTools({ embeddedOrgId }) {
     setBulkProgress({ done: 0, total })
 
     // Merged one pair at a time (not a single batch call) so the bar below
-    // reflects real progress. Each merge does several sequential DB writes,
+    // reflects real progress — each merge does several sequential DB writes,
     // so a fake "climbing" bar would badly mislead on a big batch.
     let merged = 0
     let failed = 0

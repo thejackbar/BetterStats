@@ -422,7 +422,7 @@ function HoursTab({ volunteers, load, activities, onActivityCreated }) {
               <input type="date" className={`${inp} w-36`} value={hoursForm.logged_date} onChange={e => setHoursForm(f => ({ ...f, logged_date: e.target.value }))} />
               <input type="number" min="0" step="0.5" className={`${inp} w-24`} placeholder="Hours" value={hoursForm.hours} onChange={e => setHoursForm(f => ({ ...f, hours: e.target.value }))} />
               <select className={`${inp} flex-1 min-w-[140px]`} value={hoursForm.activity_id} onChange={e => setHoursForm(f => ({ ...f, activity_id: e.target.value }))}>
-                <option value="">. Choose activity, </option>
+                <option value="">choose activity</option>
                 {activities.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
               </select>
               <button onClick={() => setShowNewActivity(x => !x)} className="px-2 py-1.5 rounded font-mono text-[10px] border pb-hairline text-pb-faint hover:text-pb-text whitespace-nowrap">+ new</button>

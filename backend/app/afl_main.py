@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 # loudly at boot, not run the wrong sport against a production DB.
 if settings.sport != "afl":
     raise RuntimeError(
-        "app.afl_main started with SPORT=%r. The AFL silo requires SPORT=afl "
+        "app.afl_main started with SPORT=%r — the AFL silo requires SPORT=afl "
         "(and its own DATABASE_URL). Refusing to boot." % settings.sport
     )
 

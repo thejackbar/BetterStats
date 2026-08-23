@@ -15,7 +15,7 @@ function NewsBody({ slug }) {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  usePageMeta({ title: `News. ${site.name}`, url: `https://betterat.cricket/${slug}/website/news` })
+  usePageMeta({ title: `News - ${site.name}`, url: `https://betterat.cricket/${slug}/website/news` })
 
   useEffect(() => {
     let cancelled = false

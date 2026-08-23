@@ -251,7 +251,7 @@ export default function AflAdminImport() {
     return s
   }, [hasSeasonCol, hasGradeCol])
 
-  // Live-reconcile whenever the mapping or any override changes, mirrors
+  // Live-reconcile whenever the mapping or any override changes — mirrors
   // BetterStats (Core)'s BetterImport: the preview stays current as you work
   // instead of needing an explicit "Continue" to move the data forward.
   useEffect(() => {

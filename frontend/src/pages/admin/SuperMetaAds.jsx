@@ -1214,7 +1214,7 @@ export default function SuperMetaAds() {
             )}
 
             {/* Ad-driven self-serve signups joined to their Twenty engagement
-                score. Which ads produced clubs that actually use the thing. */}
+                score — which ads produced clubs that actually use the thing. */}
             {adSignups && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">

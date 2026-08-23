@@ -232,7 +232,7 @@ function DismissalDonut({ dismissals }) {
 
 function SeasonChart({ data }) {
   if (!data?.length) return null
-  // Drop the career-level "Prior Seasons & Adjustments" row (no season_id), 
+  // Drop the career-level "Prior Seasons & Adjustments" row (no season_id) —
   // it belongs in the table totals, not as a labelled bar on a season chart.
   const chartData = [...data].filter(s => s.season_id).reverse()
     .map(s => ({ ...s, season_name: formatSeason(s.season_name) }))
@@ -529,7 +529,7 @@ function FieldingTab({ fielding, seasonStats }) {
 
 // ── Career progression charts ────────────────────────────────────────────
 
-// Running career batting average progression. One point per innings, chronological
+// Running career batting average progression — one point per innings, chronological
 function CareerAvgProgressionChart({ innings }) {
   if (!innings?.length) return null
   // innings arrives DESC, reverse to chronological ASC
@@ -1156,7 +1156,7 @@ function FormatsSection({ playerId, seasonId }) {
 
 // ── Teammates: who a player has played alongside, and the with-vs-without split.
 // Self-fetching (public /players/{id}/teammates), so it doesn't touch the
-// parent's data flow, mirrors AchievementsSection.
+// parent's data flow — mirrors AchievementsSection.
 function TeammateSplitPanel({ playerId, teammate }) {
   const [split, setSplit] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1770,7 +1770,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
             </Card>
           )}
 
-          {/* How I take wickets, bowler-method-of-dismissal donut */}
+          {/* How I take wickets — bowler-method-of-dismissal donut */}
           {bowlingDismissals?.length > 0 && (
             <Card title="HOW I TAKE WICKETS">
               <DismissalDonut dismissals={bowlingDismissals} />
@@ -2410,7 +2410,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               {customSubcat
                 ? <input className={inputCls} value={form.subcategory} onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))} placeholder="Subcategory" />
                 : <select className={selectCls} value={form.subcategory} onChange={e => { if (e.target.value === '__other__') { setCustomSubcat(true); setForm(f => ({ ...f, subcategory: '', achievement: '' })) } else { setForm(f => ({ ...f, subcategory: e.target.value, achievement: '' })) } }}>
-                    <option value="">, none, </option>
+                    <option value="">none</option>
                     {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                     {subcatOptions.length > 0 && <option value="__other__">Other…</option>}
                   </select>
@@ -2421,7 +2421,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               {customAchievement
                 ? <input className={inputCls} value={form.achievement} onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))} placeholder="Achievement" />
                 : <select className={selectCls} value={form.achievement} onChange={e => { if (e.target.value === '__other__') { setCustomAchievement(true); setForm(f => ({ ...f, achievement: '' })) } else { setCustomAchievement(false); setForm(f => ({ ...f, achievement: e.target.value })) } }}>
-                    <option value="">. Select, </option>
+                    <option value="">select</option>
                     {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                     <option value="__other__">Other…</option>
                   </select>
@@ -2600,7 +2600,7 @@ export default function PlayerProfile() {
     return ld
   })()
   usePageMeta({
-    title: metaName ? `${metaName} — Cricket Career Stats | BetterCricket` : null,
+    title: metaName ? `${metaName} - Cricket Career Stats | BetterCricket` : null,
     description: metaDesc,
     image: data?.player?.photo_url || org?.logo_url || null,
     jsonLd: playerJsonLd,

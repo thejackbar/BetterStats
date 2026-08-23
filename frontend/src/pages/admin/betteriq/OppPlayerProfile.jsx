@@ -475,7 +475,7 @@ function BattingTab({ entry, bat, deep, career, tag, playerId, onSaveTag, formCo
         )}
       </div>
 
-      {/* Manual batting intel. How to get him out, blended with the held mix. */}
+      {/* Manual batting intel — how to get him out, blended with the held mix. */}
       {showCard && (
         <ScoutingCard only="bat" keyId={playerId}
           batting={tag?.batting_intel} stats={scoutStats}
@@ -551,7 +551,7 @@ function BattingTab({ entry, bat, deep, career, tag, playerId, onSaveTag, formCo
         </div>
       ) : null)}
 
-      {/* Season-by-season batting (CA aggregates, the long view) */}
+      {/* Season-by-season batting (CA aggregates — the long view) */}
       {career?.status === 'building' && <Card eyebrow="career" title="Season by season"><Building>Pulling their season history…</Building></Card>}
       {batSeasons.length > 0 && (
         <Card eyebrow="career · season by season" title="Batting by season">
@@ -660,7 +660,7 @@ function BowlingTab({ entry, bowl, deep, career, tag, playerId, onSaveTag, bowlS
         )}
       </div>
 
-      {/* Manual bowling intel. How to play him, blended with the held mix. */}
+      {/* Manual bowling intel — how to play him, blended with the held mix. */}
       {showCard && (
         <ScoutingCard only="bowl" keyId={playerId}
           bowling={tag?.bowling_intel} stats={scoutStats}
@@ -872,7 +872,7 @@ export function OppPlayerDetail({ entry, enriched, opponentName, playerId, tag, 
         </div>
       </div>
 
-      {/* Plan / key note from enrichment. The actionable headline, always shown */}
+      {/* Plan / key note from enrichment — the actionable headline, always shown */}
       {(enriched?.key_note || enriched?.plan) && (
         <Card accent eyebrow="scouting read" title="The plan">
           {enriched?.key_note && <div className="text-[14px]" style={{ color: 'var(--pb-accent)' }}>{enriched.key_note}</div>}

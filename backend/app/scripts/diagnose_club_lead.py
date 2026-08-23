@@ -93,7 +93,7 @@ async def diagnose(name_query: str) -> None:
                   f"adSignup={eng.get('_adSignup')}) "
                   f"freqPts={eng.get('_freqPts')} (reach capped 24 + depth capped 40 "
                   f"= 64 max; emailDecayPts=0 with real opens/clicks sent means SES open/click "
-                  f"tracking is likely OFF. See app.scripts.email_opens)")
+                  f"tracking is likely OFF — see app.scripts.email_opens)")
             if eng.get('_directEnquiryHot'):
                 hot_days = await platform_settings.get_direct_enquiry_hot_days(session)
                 print(f"    -> score is forced to {twenty_sync.DIRECT_ENQUIRY_SCORE}/HOT: a direct onboarding enquiry within "

@@ -149,7 +149,7 @@ export default function CheatSheet() {
   const [club, setClub] = useState(null)
   const pollRef = useRef(null)
 
-  // The club's own name. This sheet used to hardcode one club's name on every
+  // The club's own name — this sheet used to hardcode one club's name on every
   // club's printout.
   useEffect(() => { api.adminGetSettings().then(setClub).catch(() => setClub(null)) }, [])
 

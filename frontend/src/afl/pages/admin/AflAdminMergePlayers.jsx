@@ -431,7 +431,7 @@ export default function AflAdminMergePlayers() {
   }
   const onIgnored = () => refreshCandidates()
   // A split leaves two records with the same name, which is an exact-name
-  // merge candidate, so the pair list has to be re-read, or the screen would
+  // merge candidate — so the pair list has to be re-read, or the screen would
   // offer to merge back a split it can't see yet.
   const onSplitDone = () => {
     refreshCandidates()

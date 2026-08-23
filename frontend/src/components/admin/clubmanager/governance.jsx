@@ -376,7 +376,7 @@ export function ActionEditor({ task, allTasks, objectives, members, inline, onCl
             <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
             <select className={inp} value={form.assigned_to_member_id}
               onChange={e => set('assigned_to_member_id', e.target.value)}>
-              <option value="">, unassigned, </option>
+              <option value="">unassigned</option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -589,7 +589,7 @@ export function MotionEditor({ meetingId, motion, members, objectives, inline, o
             <span className={`${cap} block mb-1`}>MOVED BY</span>
             <select className={inp} value={form.proposed_by_member_id}
               onChange={e => set('proposed_by_member_id', e.target.value)}>
-              <option value="">. Nobody recorded, </option>
+              <option value="">nobody recorded</option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -597,7 +597,7 @@ export function MotionEditor({ meetingId, motion, members, objectives, inline, o
             <span className={`${cap} block mb-1`}>SECONDED BY</span>
             <select className={inp} value={form.seconded_by_member_id}
               onChange={e => set('seconded_by_member_id', e.target.value)}>
-              <option value="">. Nobody recorded, </option>
+              <option value="">nobody recorded</option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -1528,7 +1528,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
               <span className="block text-pb-text leading-snug">{chosen.title}</span>
             </>
           ) : (
-            <span className="text-pb-faint">, not on the plan, </span>
+            <span className="text-pb-faint">not on the plan</span>
           )}
         </span>
         <span className="text-pb-faint text-[11px] leading-none pt-1">{open ? '▴' : '▾'}</span>
@@ -1725,7 +1725,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <span className={`${cap} block mb-1`}>STRATEGIC PLAN</span>
           <select className={inp} value={form.plan_id}
             onChange={e => setForm(f => ({ ...f, plan_id: e.target.value, pillar_id: '' }))}>
-            <option value="">. Pick a plan, </option>
+            <option value="">pick a plan</option>
             {(plans || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
@@ -1737,7 +1737,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <select className={inp} value={form.pillar_id}
             onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}
             disabled={!form.plan_id}>
-            <option value="">{form.plan_id ? ': pick a theme, ' : ', pick a plan first, '}</option>
+            <option value="">{form.plan_id ? 'pick a theme' : 'pick a plan first'}</option>
             {(pillars || []).filter(p => p.plan_id === form.plan_id)
               .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -1757,7 +1757,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           {ownerMode === 'position' ? (
             <select className={inp} value={form.owner_position_id}
               onChange={e => setForm(f => ({ ...f, owner_position_id: e.target.value }))}>
-              <option value="">, unassigned, </option>
+              <option value="">unassigned</option>
               {(positions || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           ) : (
@@ -3223,7 +3223,7 @@ export function PlanTab({ members, section, query = '' }) {
                         {pillarFilter ? 'Nothing on this plan under that theme.' : 'Nothing on this plan yet.'}
                       </div>
                     )}
-                    {/* A theme is a heading, not another indent, the plan →
+                    {/* A theme is a heading, not another indent — the plan →
                         objective → action depth stays three. */}
                     {byTheme(p.objective_list || []).map(g => (
                       <div key={g.id || '__none'} className="space-y-2">
@@ -3373,7 +3373,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
 
 // A Gantt over the action register. Actions carry a start, a due date, a
 // percentage and what they wait on now, which is everything a bar chart of the
-// plan needs. This derives the critical path the same way ClubDiary does over
+// plan needs — this derives the critical path the same way ClubDiary does over
 // its own dependencies, rather than inventing a second idea of "blocked".
 //
 // An action with no dates can't be placed on a timeline, so it is listed

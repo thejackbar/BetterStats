@@ -104,7 +104,7 @@ export default function WebsitePagesAdmin() {
                 <div className="sm:w-72">
                   <label className="block font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-2">Parent menu (optional)</label>
                   <select value={editing.parent_id || ''} onChange={e => setField('parent_id', e.target.value || null)} className={inputCls}>
-                    <option value="">. Top level, </option>
+                    <option value="">Top level</option>
                     {parents.map(p => <option key={p.id} value={p.id}>{p.nav_label || p.title}{p.is_header ? ' (menu)' : ''}</option>)}
                   </select>
                 </div>

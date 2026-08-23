@@ -57,11 +57,11 @@ function MergeBuilder({ orgId, grades, onMerged }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge</label>
-          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder=". Select grade, " exclude={canonical} />
+          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder="Select grade" exclude={canonical} />
         </div>
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this name)</label>
-          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder=". Select canonical grade, " exclude={alias} />
+          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder="Select canonical grade" exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (
@@ -312,7 +312,7 @@ function GradeList({ grades, onChanged }) {
                   <td className="py-2.5 pl-5">
                     <div className="flex items-center gap-1">
                       <span className="font-mono text-[11px] text-pb-faint w-5">
-                        {/* The position it WILL hold once saved, the server
+                        {/* The position it WILL hold once saved — the server
                             numbers 1..N from this order, so showing the stored
                             number instead would disagree with a pending move. */}
                         {i + 1}

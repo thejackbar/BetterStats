@@ -61,7 +61,7 @@ async def main():
         "Auto-removed from pipeline: engagement score 12 is below the 20 needed to stay on the board.",
         "Reset to Target: the engagement-score auto-promotion rule was retired "
         "(Engaged is now for real conversations only).",
-        "Started the self-serve trial wizard, club_prepared (pat@rovers.test)",
+        "Started the self-serve trial wizard — club_prepared (pat@rovers.test)",
     ]
     for body in survivors:
         check(f"kept: {body[:46]!r}", not sw._is_reassignment(_Fake("system", body)))
@@ -123,7 +123,7 @@ async def main():
 
         all_rows = (await db.execute(select(CrmActivity).where(
             CrmActivity.deal_id == deal.id))).scalars().all()
-        check("all 8 rows are still stored. Nothing was deleted", len(all_rows) == 8, str(len(all_rows)))
+        check("all 8 rows are still stored — nothing was deleted", len(all_rows) == 8, str(len(all_rows)))
 
         shown = await sw.list_activities_for_workspace(db, deal_id=deal.id)
         bodies = [a.body for a in shown]

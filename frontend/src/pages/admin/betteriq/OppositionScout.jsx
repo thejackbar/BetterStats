@@ -120,9 +120,9 @@ function ScoutPicker({ data, onPick, onMatch }) {
   )
 }
 
-/* ── Command strip, the instant report hero ─────────────────────────────── */
+/* ── Command strip — the instant report hero ─────────────────────────────── */
 
-/* The scope toggle on the record card. All-time / Season / Grade. Reflects the
+/* The scope toggle on the record card — All-time / Season / Grade. Reflects the
    top filter bar's season + grade so the user can flip the record (and our
    record / bowler match-ups) between the impressive all-time number and the
    selected slice, without it silently overriding the headline. */
@@ -521,7 +521,7 @@ function WinLose({ win, lose }) {
   )
 }
 
-/* ── Partnerships, where they wobble (dossier) ──────────────────────────── */
+/* ── Partnerships — where they wobble (dossier) ──────────────────────────── */
 
 function Partnerships({ partnerships, insight }) {
   if (!partnerships?.length) return null
@@ -763,7 +763,7 @@ export default function OppositionScout() {
   const pollRef = useRef(null)
 
   // The GLOBAL BetterIQ filter bar (top of the page) is the single source of
-  // truth, no separate "Scout team" control. `ctx.team.id` is one grade NAME or
+  // truth — no separate "Scout team" control. `ctx.team.id` is one grade NAME or
   // several joined with '||' (the IQ-wide multi-select convention); the season
   // can be a single year, a cross-season range, or All seasons.
   const { ctx, setCtx, seasons, ready: filterReady } = useIQFilter()
@@ -775,10 +775,10 @@ export default function OppositionScout() {
   const isAllSeasons = seasons.length > 0 && seasonIds.length === seasons.length
   // What the header shows is what the data gets: any picked season (including
   // the default newest one) is a real filter. Only "All seasons" means all-time
-  //. The old "newest single season counts as no filter" special case made the
+  // — the old "newest single season counts as no filter" special case made the
   // header say 2025/26 over an all-time record.
   // `untouchedDefault`: before the user has touched the filter bar this session,
-  // the season is ABOUT to be corrected to All seasons by the effect below, 
+  // the season is ABOUT to be corrected to All seasons by the effect below —
   // read it as already-all-time here too, so the very first report fetch (which
   // can fire on the same render, e.g. a deep-linked ?opponent=) requests the
   // same scope the correction will settle on, instead of firing once now and
@@ -1069,7 +1069,7 @@ export default function OppositionScout() {
         )}
 
         {/* The live squad scout below follows the top Grade filter. The server
-            resolves the filter itself now and reports whether it matched, the
+            resolves the filter itself now and reports whether it matched — the
             old client-side teamGradeId check false-alarmed on sponsor-suffixed
             names and missed the real mismatch cases. */}
         {ready && dossier?.grade_filter?.length > 0 && dossier.grade_filter_matched === false && (

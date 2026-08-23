@@ -917,7 +917,7 @@ export default function Directory({ st, patch, narrow }) {
                     {canEditPlayers ? (
                       <select value={sel.squad?.id || ''} disabled={busy} onChange={e => setSquad(sel, e.target.value)}
                         style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
-                        <option value="">, No squad, </option>
+                        <option value="">No squad</option>
                         {opts.squads.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     ) : (
@@ -941,7 +941,7 @@ export default function Directory({ st, patch, narrow }) {
                     <select value={sel.tier?.id || ''} disabled={busy || !opts.tiers.length}
                       onChange={e => setFeeTier(sel, e.target.value)}
                       style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
-                      <option value="">{opts.tiers.length ? '. Needs tier. ' : 'No tiers set up'}</option>
+                      <option value="">{opts.tiers.length ? 'Needs tier' : 'No tiers set up'}</option>
                       {opts.tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
@@ -1256,7 +1256,7 @@ export default function Directory({ st, patch, narrow }) {
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MOBILE<input value={modal.form.mobile} onChange={e => setForm('mobile', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
               </div>
               {/* The club's own catalogue, several at once. Only offered when
-                  they keep one, since nothing seeds it automatically, a club
+                  they keep one, since nothing seeds it automatically — a club
                   with none can still add the person and type them after. */}
               {memberTypes.length > 0 && (
                 <div>

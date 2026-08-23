@@ -88,7 +88,7 @@ function Hero({ fx, h2h, onScout, onNavigate }) {
               </div>
               {fx.team_name && <div className="iq-mono text-pb-faint text-[11px] mt-2">{fx.team_name}</div>}
 
-              {/* Head-to-head (optional, only when we have history vs them) */}
+              {/* Head-to-head (optional — only when we have history vs them) */}
               {h2h && (h2h.wins != null || h2h.losses != null) && (
                 <div className="mt-5 pt-5" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
                   <div className="flex items-center justify-between">
@@ -321,7 +321,7 @@ function MoversTeaser({ trends, onNavigate }) {
       ) : (
         <div className="space-y-1">
           {rows.map((p, i) => {
-            // Batting: higher avg is up. Bowling: lower avg is up, flip the sign.
+            // Batting: higher avg is up. Bowling: lower avg is up — flip the sign.
             const raw = Number(p.latest) - Number(p.baseline)
             const value = p.kind === 'bowl' ? -raw : raw
             const up = value >= 0
@@ -422,7 +422,7 @@ export default function BetterIQHome() {
     return () => { alive = false }
   }, [])
 
-  // Filter-dependent reads: re-fetch when the global Season/Team filter changes, 
+  // Filter-dependent reads: re-fetch when the global Season/Team filter changes —
   // MVP, team overview, form movers and recent results all follow the filter.
   useEffect(() => {
     let alive = true

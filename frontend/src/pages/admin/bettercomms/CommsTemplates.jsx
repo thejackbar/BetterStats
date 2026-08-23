@@ -108,7 +108,7 @@ export default function CommsTemplates() {
   useEffect(() => { setSelId(null); setDraft(null); setError(''); setNotice('') }, [location.key])
 
   // The list rows carry no HTML, so open the full record when one is picked.
-  // Like the segment builder this only ever LOADS a draft, never clears one, 
+  // Like the segment builder this only ever LOADS a draft, never clears one —
   // clearing on "nothing selected" is the state "New template" puts the screen
   // in, and would wipe the fresh draft in the same commit.
   useEffect(() => {

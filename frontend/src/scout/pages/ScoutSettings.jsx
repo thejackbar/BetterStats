@@ -6,7 +6,7 @@ import { Btn, Segmented } from '../../pages/admin/betterselect/ui'
 import { initialsOf } from '../components/ScoutUi'
 
 const ORG_TYPES = [
-  { value: '', label: ', none, ' },
+  { value: '', label: 'none' },
   { value: 'agency', label: 'Recruiting agency' },
   { value: 'club', label: 'Club (scouting its own pathway)' },
   { value: 'selector', label: 'Selector' },
@@ -187,7 +187,7 @@ export default function ScoutSettings() {
                 </Field>
                 <Field label="Home region">
                   <select value={settings.home_region} onChange={(e) => set('home_region', e.target.value)} disabled={!isOwner} className={inputCls}>
-                    {REGIONS.map((r) => <option key={r} value={r}>{r || ', none, '}</option>)}
+                    {REGIONS.map((r) => <option key={r} value={r}>{r || 'none'}</option>)}
                   </select>
                 </Field>
               </div>

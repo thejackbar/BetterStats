@@ -800,7 +800,7 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 // The untouched Style defaults, in the exact key order the style snapshot is
-// built with. Used to tell "changed something" from "just visited the page"
+// built with — used to tell "changed something" from "just visited the page"
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
@@ -889,7 +889,7 @@ export default function AdminSocialPost() {
     return { key: 'club_font', name: `Club font: ${label}`, family: d.cssFamily, weight, fontFace: d.fontFace }
   }, [settings])
   // This page renders standalone (no ModuleLayout, so no club-theme style
-  // tag). An UPLOADED club font needs its @font-face injected here or the
+  // tag) — an UPLOADED club font needs its @font-face injected here or the
   // preview falls back to the stack. Presets are Google families already
   // loaded site-wide via index.html.
   useEffect(() => {
@@ -900,7 +900,7 @@ export default function AdminSocialPost() {
     document.head.appendChild(style)
     return () => style.remove()
   }, [clubFont])
-  // Background texture, layered over any template, persisted like the other
+  // Background texture, layered over any template — persisted like the other
   // Style controls so a club's preferred "finish" carries between posts.
   const [bgStyle, setBgStyle] = useState(() =>
     localStorage.getItem('bs_social_bg') || 'none'

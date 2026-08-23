@@ -243,7 +243,7 @@ export default function CommsSettings() {
           )
         })()}
 
-        {/* Bounces & unsubscribes. Last email and all emails */}
+        {/* Bounces & unsubscribes — last email and all emails */}
         {engagement && (
           <div className="pb-card p-4 mb-4">
             <SectionHeading className="mb-3">Bounces &amp; unsubscribes</SectionHeading>
@@ -284,7 +284,7 @@ export default function CommsSettings() {
           </Checkbox>
         </div>
 
-        {/* AWS SES status. Super admins only (the panel is hidden otherwise) */}
+        {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
         {isPlatform && (
           <div className="pb-card p-4 mb-4">
             <div className="flex items-center justify-between mb-2">
@@ -388,7 +388,7 @@ export default function CommsSettings() {
           {!p.live && <div className="text-pb-faintest text-xs mt-2">Preview mode. The test is rendered but not delivered until a provider is connected.</div>}
         </div>
 
-        {/* Deliverability, blocked addresses (Phase 1) */}
+        {/* Deliverability — blocked addresses (Phase 1) */}
         <div className="pb-card p-4 mt-4">
           <SectionHeading className="mb-1.5">Deliverability</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3 leading-relaxed">

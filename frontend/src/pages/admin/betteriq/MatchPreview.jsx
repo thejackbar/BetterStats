@@ -429,9 +429,9 @@ export default function MatchPreview() {
               </Card>
             </div>
 
-            {/* Par callout. Scoped to this season + the fixture's grade (see the
+            {/* Par callout — scoped to this season + the fixture's grade (see the
                 teamGrade fetch above), with the sample it's built from stated.
-                It used to be all-time, all grades, juniors included, the
+                It used to be all-time, all grades, juniors included — the
                 "lowest defended: 21" bug. */}
             {par?.par_score != null && (
               <Card eyebrow="set the target" title="Par at this level"

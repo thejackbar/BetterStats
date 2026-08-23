@@ -327,7 +327,7 @@ export default function AdminFeesXero() {
                                     <td className="py-2 pr-2">
                                       <select className={`${cell} w-full`} value={r.chosen_member_season_id}
                                         onChange={e => patchRow(idx, { chosen_member_season_id: e.target.value, selected: !!e.target.value })}>
-                                        <option value="">, No match (skip), </option>
+                                        <option value="">No match (skip)</option>
                                         {r.candidates && r.candidates.length > 0 && (
                                           <optgroup label="Suggested">
                                             {r.candidates.map(c => (

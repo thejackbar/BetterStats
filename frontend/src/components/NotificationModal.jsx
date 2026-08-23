@@ -224,7 +224,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
             </div>
           )}
 
-          {/* Confirmation after Mark all read. Leaves the panel on the
+          {/* Confirmation after Mark all read — leaves the panel on the
               forward-looking milestones. */}
           {cleared && (
             <div
@@ -238,7 +238,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
             </div>
           )}
 
-          {/* Sync Failures. Top callout when scheduled syncs have errored */}
+          {/* Sync Failures — top callout when scheduled syncs have errored */}
           {failedSyncs.length > 0 && (
             <section>
               <SectionHead title="Sync Failures" color="var(--pb-negative)" />

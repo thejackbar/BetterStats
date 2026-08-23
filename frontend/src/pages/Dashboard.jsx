@@ -114,7 +114,7 @@ export default function Dashboard() {
   } : null
   usePageMeta({
     title: club?.name
-      ? `${club.name}. Cricket Stats, Records & Players | BetterCricket`
+      ? `${club.name} - Cricket Stats, Records & Players | BetterCricket`
       : 'Club Cricket Stats | BetterCricket',
     description: club?.name
       ? `Live cricket statistics, leaderboards, all-time records and player profiles for ${club.name}, updated automatically on BetterCricket.`

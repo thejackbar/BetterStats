@@ -33,7 +33,7 @@ function num(v) {
 // a not out neither. '' is the "unknown / incomplete card" option, where everything
 // stays blank. Values match the backend dismissal parser's method strings.
 const DISMISSAL_MODES = [
-  { value: '', label: ': unknown, ', fielder: false, bowler: false },
+  { value: '', label: 'unknown', fielder: false, bowler: false },
   { value: 'caught', label: 'Caught (c)', fielder: true, bowler: true },
   { value: 'caught & bowled', label: 'Caught & bowled (c & b)', fielder: false, bowler: true },
   { value: 'bowled', label: 'Bowled (b)', fielder: false, bowler: true },
@@ -268,7 +268,7 @@ export function PlayerSelect({ value, roster, cardName, onChange, candidates = [
         <div className="absolute z-30 mt-1 w-full min-w-[190px] bg-pb-surface border pb-hairline rounded shadow-lg max-h-56 overflow-auto">
           {value && (
             <button type="button" className="block w-full text-left px-3 py-1.5 text-xs text-pb-faint hover:bg-pb-surface2"
-              onMouseDown={() => { onChange(''); setOpen(false) }}>, clear, </button>
+              onMouseDown={() => { onChange(''); setOpen(false) }}>clear</button>
           )}
           {cands.length > 0 && (
             <>
@@ -989,7 +989,7 @@ export default function AdminScorecardUpload() {
                     value={form.season_id}
                     onChange={v => setForm(f => ({ ...f, season_id: v, grade_id: '' }))}
                     options={seasons.map(s => ({ id: s.id, label: formatSeason(s.name, s.year) }))}
-                    placeholder=". Choose, "
+                    placeholder="choose"
                     addLabel="New season"
                     addPlaceholder="e.g. Summer 1996/97"
                     withYear
@@ -1002,7 +1002,7 @@ export default function AdminScorecardUpload() {
                     value={form.grade_id}
                     onChange={v => setForm(f => ({ ...f, grade_id: v }))}
                     options={seasonGrades.map(g => ({ id: g.id, label: g.name }))}
-                    placeholder=", none, "
+                    placeholder="none"
                     addLabel="New grade"
                     addPlaceholder="e.g. 3rd Grade"
                     disabled={!form.season_id}

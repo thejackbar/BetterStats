@@ -633,7 +633,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 />
 
                 {showResults && results.length > 0 && !selectedClub && (
-                  // Normal flow, not absolute. An absolutely positioned box is
+                  // Normal flow, not absolute — an absolutely positioned box is
                   // taken out of layout and doesn't expand the scrollable body's
                   // content height, so it silently gets clipped by the modal
                   // card's own height limit regardless of its own max-h. Normal

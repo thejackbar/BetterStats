@@ -74,7 +74,7 @@ export function FieldRow({ field, label, required, value, headers, conf, matched
       </span>
       <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
       <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={e => onMap(field, e.target.value)}>
-        <option value="">, not in my file, </option>
+        <option value="">not in my file</option>
         {headers.map(h => <option key={h} value={h}>{h}</option>)}
       </select>
       {/* A column matched on its VALUES rather than its header (an outcome
@@ -88,7 +88,7 @@ export function FieldRow({ field, label, required, value, headers, conf, matched
 }
 
 export function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'grade' ? '. Unresolved (kept against the whole club). ' : '. Unresolved (will be skipped), '
+  if (!value) return kind === 'grade' ? 'Unresolved (kept against the whole club)' : 'Unresolved (will be skipped)'
   if (value === '__new__') return kind === 'award' ? '+ Add as a new award type' : '+ Add as new player'
   if (value === '__skip__') return kind === 'award' ? "Don't import this award" : 'Skip this row'
   if (value === '__unassigned__') return '↪ Unassigned (no matching season)'

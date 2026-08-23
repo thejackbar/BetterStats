@@ -82,7 +82,7 @@ export default function KlubproMigration() {
           <div className="min-w-[280px]">
             <Label>Mapped club</Label>
             <Select value={cmId} onChange={e => setCmId(e.target.value)} className="mt-1">
-              <option value="">. Select a club, </option>
+              <option value="">select a club</option>
               {mappings.filter(c => c.betterstats_organisation_id).map(c => (
                 <option key={c.id} value={c.id}>
                   {c.betterstats_organisation_name} ← {c.klubpro_club_name}
@@ -183,7 +183,7 @@ function Dashboard({ dash, orgs, onReload }) {
                     onChange={e => { if (e.target.value && e.target.value !== r.betterstats_organisation_id) map(r, e.target.value) }}
                     className={r.betterstats_organisation_id ? '' : 'text-pb-faint'}
                   >
-                    <option value="">. Select BetterStats club, </option>
+                    <option value="">select BetterStats club</option>
                     {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </Select>
                 </td>

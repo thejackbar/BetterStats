@@ -36,7 +36,7 @@ function CommitteeBody({ slug }) {
   const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(true)
 
-  usePageMeta({ title: `Committee: ${site.name}`, url: `https://betterat.cricket/${slug}/website/committee` })
+  usePageMeta({ title: `Committee - ${site.name}`, url: `https://betterat.cricket/${slug}/website/committee` })
 
   useEffect(() => {
     let cancelled = false

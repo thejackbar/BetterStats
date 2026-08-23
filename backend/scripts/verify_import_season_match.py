@@ -50,7 +50,7 @@ check("and is never handed another year",
       [n for _s, n in got.values()], [None] * len(MISSING))
 
 got = one(MISSING, SYNCED_ONLY)
-check("same when only the synced seasons exist. The reported case",
+check("same when only the synced seasons exist — the reported case",
       sorted({s for s, _n in got.values()}), ["none"])
 check("nothing lands on this season", [n for _s, n in got.values()], [None] * len(MISSING))
 

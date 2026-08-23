@@ -111,7 +111,7 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search player�
   )
 }
 
-// A season/grade dropdown with an inline "+ New". A pre-PlayHQ era has
+// A season/grade dropdown with an inline "+ New" — a pre-PlayHQ era has
 // neither, and the sync will never create one, so without this an admin can't
 // enter the history they're here to enter.
 function SeasonSelect({ seasons, value, onChange, onCreated }) {
@@ -153,7 +153,7 @@ function SeasonSelect({ seasons, value, onChange, onCreated }) {
   return (
     <div className="flex items-center gap-2">
       <select className={INPUT} value={value} onChange={e => onChange(e.target.value)}>
-        <option value="">. Career only (no season), </option>
+        <option value="">Career only (no season)</option>
         {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
       </select>
       <button type="button" onClick={() => setAdding(true)} className="text-[11px] text-[var(--pb-accent)] whitespace-nowrap hover:underline">+ New</button>
@@ -288,7 +288,7 @@ const SPREADSHEET_COLS = STAT_FIELDS.map(f => ({
 
 const emptyRow = () => ({ player_id: '', ...Object.fromEntries(SPREADSHEET_COLS.map(c => [c.key, 0])) })
 
-// One season, one row per player. Posts through the CSV import endpoint, 
+// One season, one row per player. Posts through the CSV import endpoint —
 // same upsert rule, same audit entry, so there is one definition of what a
 // bulk write does rather than a second write path to keep in step.
 function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCreated, onGradeCreated }) {
@@ -308,7 +308,7 @@ function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCre
     return next
   })
 
-  // Paste a range straight out of Excel, split on tab/newline and fill from
+  // Paste a range straight out of Excel — split on tab/newline and fill from
   // the targeted cell onwards, adding rows as needed.
   function handlePaste(e, rowIdx, colIdx) {
     const text = e.clipboardData?.getData('text/plain')

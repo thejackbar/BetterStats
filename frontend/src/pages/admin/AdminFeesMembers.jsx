@@ -52,7 +52,7 @@ function FindMemberTab({ seasonId, tiers, onClose, onCreated }) {
       </Field>
       <Field label="Tier">
         <Select value={feeScheduleId} onChange={e => setFeeScheduleId(e.target.value)}>
-          <option value="">. Needs tier, </option>
+          <option value="">Needs tier</option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
@@ -101,13 +101,13 @@ function NewMemberTab({ seasonId, tiers, membershipTypes, onClose, onCreated }) 
       </div>
       <Field label="Tier">
         <Select value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
-          <option value="">. Needs tier, </option>
+          <option value="">Needs tier</option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
       <Field label="Membership type">
         <Select value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-          <option value="">, None, </option>
+          <option value="">None</option>
           {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
@@ -224,7 +224,7 @@ function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
     >
       <Field label="Tier">
         <Select autoFocus value={tierId} onChange={e => setTierId(e.target.value)}>
-          <option value="">. Clear tier (needs review), </option>
+          <option value="">Clear tier (needs review)</option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
         </Select>
       </Field>
@@ -314,7 +314,7 @@ export default function AdminFeesMembers() {
   const [seasons, setSeasons] = useState([])
   // The season lives in the URL so it survives a trip into a member and back.
   // The member page's "← MEMBERS" link carries ?season=, and this screen used
-  // to ignore it and snap to the newest season instead, so an admin working
+  // to ignore it and snap to the newest season instead — so an admin working
   // through 2025/26 was thrown into 2026/27 on every return.
   const [params, setParams] = useSearchParams()
   const [seasonId, setSeasonId] = useState(params.get('season') || '')
@@ -341,7 +341,7 @@ export default function AdminFeesMembers() {
         const sorted = sortSeasons(s)
         setSeasons(sorted)
         // Keep a season named in the URL, and only fall back to the newest
-        // when there is none, or when the one named is no longer a season
+        // when there is none — or when the one named is no longer a season
         // this club holds, which would otherwise leave the screen empty with
         // no obvious way back.
         setSeasonId(cur => (cur && sorted.some(x => x.id === cur) ? cur : (sorted[0]?.id || '')))
@@ -662,7 +662,7 @@ export default function AdminFeesMembers() {
         )}
       </div>
 
-      {/* Sticky bulk-action bar. Appears when any row is checked. */}
+      {/* Sticky bulk-action bar — appears when any row is checked. */}
       {selected.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-pb-surface border pb-hairline rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
           style={{ borderColor: 'var(--pb-accent)' }}>

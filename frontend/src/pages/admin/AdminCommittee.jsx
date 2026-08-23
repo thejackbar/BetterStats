@@ -156,7 +156,7 @@ function PositionCard({ position, members, onChanged }) {
           {history.map(h => (
             <div key={h.id} className="font-mono text-[10px] text-pb-faint flex justify-between">
               <span>{h.holder_name}</span>
-              <span>{h.started_at}, {h.ended_at || (h.is_current ? 'current' : '—')}</span>
+              <span>{h.started_at} - {h.ended_at || (h.is_current ? 'current' : '—')}</span>
             </div>
           ))}
         </div>
@@ -808,7 +808,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion', objective_id: '' })
   const [newNom, setNewNom] = useState({ position_id: '', candidate_member_id: '' })
   const [attendance, setAttendance] = useState({})
-  // Fetched once for the whole meeting rather than per motion. A meeting with
+  // Fetched once for the whole meeting rather than per motion — a meeting with
   // ten motions would otherwise fire ten identical requests.
   const objectives = useObjectives()
 

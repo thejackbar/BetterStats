@@ -163,7 +163,7 @@ function PrimaryAdminCard() {
         to a module; any club admin can request a trial.
       </p>
       <p className="text-sm text-pb-text mb-3">
-        Current: <span className="font-medium">{primary ? (primary.display_name || primary.username) : ', none, '}</span>
+        Current: <span className="font-medium">{primary ? (primary.display_name || primary.username) : 'none'}</span>
         {primary?.is_me && <span className="text-pb-faint"> (you)</span>}
       </p>
       {data.can_transfer ? (
@@ -553,7 +553,7 @@ export default function AdminSettings() {
               ))}
             </div>
 
-            {/* Gradient preview. Shows how the two accents pair up */}
+            {/* Gradient preview — shows how the two accents pair up */}
             <div className="mt-4 rounded-md border pb-hairline overflow-hidden">
               <div className="h-9" style={{ background: gradientCss(theme.accent, theme.accent2) }} />
               <p className="font-mono text-[10px] text-pb-faintest px-2.5 py-1.5">
@@ -701,7 +701,7 @@ export default function AdminSettings() {
           {/* --- BetterSelect settings moved to their own screen ---
                The dormant-player window, default side size and age display now
                live with the association rules they belong to, under
-               BetterSelect → Setup, which is gated on MANAGE_SELECTIONS, 
+               BetterSelect → Setup, which is gated on MANAGE_SELECTIONS —
                the person picking sides, rather than whoever edits the club's
                colours. Nothing else on this page changed. */}
           <div className="pt-5 pb-hairline-t">

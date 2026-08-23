@@ -119,7 +119,7 @@ function FieldRow({ field, label, required, value, headers, conf, onMap, cell })
       </span>
       <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
       <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={e => onMap(field, e.target.value)}>
-        <option value="">, not in my file, </option>
+        <option value="">not in my file</option>
         {headers.map(h => <option key={h} value={h}>{h}</option>)}
       </select>
       {conf != null && <Pct score={conf} />}
@@ -500,7 +500,7 @@ export default function AdminImport() {
                 <span className="font-mono text-[10px] text-pb-faint">{parsed.row_count} rows · {parsed.headers.length} columns</span>
               </div>
 
-              {/* Legend. Each row reads "BetterStats field ← your column". */}
+              {/* Legend — each row reads "BetterStats field ← your column". */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4 pb-3 pb-hairline-b">
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
                   <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-300/80"></span>BetterStats field
@@ -719,7 +719,7 @@ const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
 const PAGE_SIZE = 50
 
 function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'grade' ? '. Unresolved (compared to whole career). ' : '. Unresolved (skipped), '
+  if (!value) return kind === 'grade' ? 'Unresolved (compared to whole career)' : 'Unresolved (skipped)'
   if (value === '__new__') return '+ Create new player'
   if (value === '__skip__') return 'Skip'
   if (value === '__prior__') return '↪ Career summary (no season)'
