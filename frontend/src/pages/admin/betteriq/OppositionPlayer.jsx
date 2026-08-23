@@ -232,7 +232,7 @@ export default function OppositionPlayer() {
       title="Opposition player"
       actions={club ? <Btn variant="ghost" sm icon="back" onClick={changeClub}>Change club</Btn> : null}
     >
-      <PageIntro>Scout any individual at any club — their form, season history, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
+      <PageIntro>Scout any individual at any club: their form, season history, how they get out, their record against us, and your own scouting notes (and scoring zones) that travel with them.</PageIntro>
 
       {/* Club picker */}
       {!club && (
@@ -287,7 +287,7 @@ export default function OppositionPlayer() {
                 style={{ background: 'var(--pb-surface)' }}
               >
                 {pResults.length === 0
-                  ? <div className="px-2.5 py-2 text-pb-faint text-sm">No opposition player found — we index batters our bowlers have dismissed.</div>
+                  ? <div className="px-2.5 py-2 text-pb-faint text-sm">No opposition player found: we index batters our bowlers have dismissed.</div>
                   : pResults.map((r, i) => (
                     <button key={`${r.opp_key}-${r.name}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onClick={() => pickOpponentPlayer(r)}
                       className="w-full flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-lg hover:bg-pb-surface2 text-left">
@@ -322,7 +322,7 @@ export default function OppositionPlayer() {
               </div>
             </>
           )}
-          {opponents.length === 0 && <div className="iq-card p-6"><Empty>No opponents with history yet — play some games or sync history.</Empty></div>}
+          {opponents.length === 0 && <div className="iq-card p-6"><Empty>No opponents with history yet. Play some games or sync history.</Empty></div>}
         </div>
       )}
 
@@ -330,12 +330,12 @@ export default function OppositionPlayer() {
       {club && status === 'building' && (
         <div className="iq-card iq-accent-card p-8 text-center iq-fade">
           <div className="iq-display font-bold text-[16px]">Building {club.name}'s squad…</div>
-          <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live — first time can take up to a minute.</div>
+          <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live. First time can take up to a minute.</div>
           <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
         </div>
       )}
       {club && (status === 'error' || status === 'unavailable') && (
-        <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now — try again shortly.</Empty></div>
+        <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now. Try again shortly.</Empty></div>
       )}
 
       {/* Club selected + ready → searchable squad list + profile */}
@@ -394,7 +394,7 @@ export default function OppositionPlayer() {
                 ? <OppPlayerDetail entry={selected} enriched={enriched.get(sel)} opponentName={club.name} playerId={sel} tag={tags[sel]} onSaveTag={saveTag}
                     dossierBatting={dossier?.batting || []} dossierBowling={dossier?.bowling || []}
                     orgGuid={orgGuid} />
-                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile — radar, scoring zones, form, season history, dismissal patterns and record vs us.</Empty></div>}
+                : <div className="iq-card p-8"><Empty>Pick one of {club.name}'s players for their full profile: radar, scoring zones, form, season history, dismissal patterns and record vs us.</Empty></div>}
             </div>
           </div>
 

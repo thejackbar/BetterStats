@@ -45,7 +45,7 @@ export const GROUPS = [
   {
     key: 'matchday',
     label: 'Match Day',
-    desc: 'The weekly cycle — fixtures, availability and picking the XI.',
+    desc: 'The weekly cycle: fixtures, availability and picking the XI.',
     items: [
       { to: '/admin/betterselect/fixtures', label: 'Fixtures', icon: 'fixtures', cap: CAP.MANAGE_FIXTURES, desc: 'Upcoming games and results.' },
       { to: '/admin/betterselect/availability', label: 'Availability', icon: 'availability', cap: CAP.MANAGE_SELECTIONS, desc: "Who's around each weekend." },

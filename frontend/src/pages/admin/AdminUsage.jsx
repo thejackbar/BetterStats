@@ -96,7 +96,7 @@ function ClubAssocBadge({ club }) {
   return (
     <a href={salesPipelineUrl(club)} target="_blank" rel="noopener noreferrer"
       className="inline-flex items-center gap-1 shrink-0 font-mono text-[9px] px-1.5 py-0.5 rounded border pb-hairline hover:text-pb-accent hover:border-pb-accent max-w-[110px]"
-      title={`${club.is_customer ? 'Customer' : 'Prospect'} club, from a tracked link/email — not necessarily the page they're on. Open in Sales Pipeline.`}
+      title={`${club.is_customer ? 'Customer' : 'Prospect'} club, from a tracked link/email, not necessarily the page they're on. Open in Sales Pipeline.`}
       onClick={e => e.stopPropagation()}>
       <span>{club.is_customer ? '⭐' : '🎯'}</span>
       <span className="truncate">{club.name}</span>
@@ -404,7 +404,7 @@ function BgSettingsModal({ onClose, onSaved }) {
                 <span className="font-mono text-[11px] text-pb-faint">minutes</span>
               </div>
               <p className="font-mono text-[10px] text-pb-faintest mt-1 leading-relaxed">
-                A club idle in the Setup Wizard for longer than this is dropped as abandoned — except a club whose first full rebuild is still running, which is kept while that sync is in progress.
+                A club idle in the Setup Wizard for longer than this is dropped as abandoned. Except a club whose first full rebuild is still running, which is kept while that sync is in progress.
               </p>
             </div>
           </>)}
@@ -505,7 +505,7 @@ function BackgroundProcessesSection() {
         )}
         {data && totalCount === 0 && !error && (
           <div className="font-mono text-[11px] text-pb-faint bg-pb-panel border pb-hairline rounded px-3 py-4 text-center">
-            Nothing running right now — no active syncs, rebuilds, prewarms, registrations or onboarding.
+            Nothing running right now: no active syncs, rebuilds, prewarms, registrations or onboarding.
           </div>
         )}
 
@@ -613,7 +613,7 @@ function BackgroundProcessesSection() {
                     <span className="font-display font-bold text-[12px] text-pb-text truncate">{o.club_name || o.org_id.slice(0, 8)}</span>
                     <Dot on color={o.sync_running ? '#8b5cf6' : '#10b981'} title={o.sync_running ? 'sync running' : 'active'} />
                     {o.sync_running
-                      ? <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border pb-hairline text-pb-accent ml-auto" title="First full rebuild still running — kept while the sync is in progress">sync running</span>
+                      ? <span className="font-mono text-[9px] uppercase px-1.5 py-0.5 rounded border pb-hairline text-pb-accent ml-auto" title="First full rebuild still running. Kept while the sync is in progress">sync running</span>
                       : <span className="font-mono text-[10px] text-pb-faint ml-auto">active {fmtSecs(o.idle_seconds)} ago</span>}
                   </div>
                   <div className="font-mono text-[11px] text-pb-faint mt-0.5 truncate">
@@ -806,7 +806,7 @@ function LiveSection() {
               <VisitorMap points={geo?.points} loading={!geo} />
               <p className="font-mono text-[9px] text-pb-faintest mt-1.5 leading-relaxed">
                 Points are resolved from IP address to the nearest city, the same precision ceiling as
-                the location shown in the feed below — never a street address or exact device location.
+                the location shown in the feed below. Never a street address or exact device location.
               </p>
             </>)}
           </div>
@@ -819,7 +819,7 @@ function LiveSection() {
                 <Dot on={live} />
                 <span className="font-mono text-[9px] text-pb-faintest">anonymous public traffic</span>
                 <span className="font-mono text-[9px] text-pb-faintest hidden lg:inline"
-                  title="A club badge (🎯 prospect / ⭐ customer) means this specific hit carried a tracked link or email's UTM back to that club — never inferred from which page they're viewing.">
+                  title="A club badge (🎯 prospect / ⭐ customer) means this specific hit carried a tracked link or email's UTM back to that club. Never inferred from which page they're viewing.">
                   · 🎯/⭐ = tracked to a club
                 </span>
               </div>
@@ -1324,7 +1324,7 @@ export default function AdminUsage() {
           IPs are stored as a truncated hash, not the raw address.
         </p>
 
-        {/* Current background processes — running jobs, registrations, onboarding */}
+        {/* Current background processes: running jobs, registrations, onboarding */}
         <BackgroundProcessesSection />
 
         {/* Live realtime section (anonymous public traffic, auto-refreshing) */}
@@ -1343,7 +1343,7 @@ export default function AdminUsage() {
 
         {/* Filters */}
         <div className="mb-5 space-y-2">
-          {/* Search — path / route / UTM. Filters the whole Analytics section,
+          {/* Search, path / route / UTM. Filters the whole Analytics section,
               including the Meta ads & campaigns view. */}
           <div>
             <div className="relative">
@@ -1351,7 +1351,7 @@ export default function AdminUsage() {
               <input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
-                placeholder="Search path, UTM or a visitor id — /pricing, utm_campaign=spring, applecross, fbclid…"
+                placeholder="Search path, UTM or a visitor id. /pricing, utm_campaign=spring, applecross, fbclid…"
                 className="w-full bg-pb-surface border pb-hairline rounded pl-8 pr-16 py-2 font-mono text-[12px] text-pb-text placeholder:text-pb-faintest focus:outline-none focus:border-pb-accent"
               />
               {search && (
@@ -1426,7 +1426,7 @@ export default function AdminUsage() {
           <div className="mb-4 font-mono text-[11px] text-pb-red bg-pb-red/10 border border-pb-red/30 rounded px-3 py-2">{error}</div>
         )}
 
-        {/* Overview — counters + return-visitor split, collapsible. */}
+        {/* Overview. Counters + return-visitor split, collapsible. */}
         <Panel id="overview" title="Overview" sub="counts for the window">
         {summary && (
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-3">
@@ -1445,7 +1445,7 @@ export default function AdminUsage() {
           </div>
         )}
 
-        {/* Visitors — new vs returning, derived from the (hashed) IP. */}
+        {/* Visitors. New vs returning, derived from the (hashed) IP. */}
         {visitors && (
           <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
             {[
@@ -1466,10 +1466,10 @@ export default function AdminUsage() {
         )}
         </Panel>
 
-        {/* Visitor journey — appears only when the search box is a visitor UUID. */}
+        {/* Visitor journey. Appears only when the search box is a visitor UUID. */}
         {VISITOR_ID_RE.test(q) && <VisitorJourney visitorId={q} />}
 
-        {/* Engagement — session duration & time on page */}
+        {/* Engagement, session duration & time on page */}
         <EngagementSection days={days} />
 
         {/* Meta ads & campaigns (marketing attribution) */}
@@ -1535,7 +1535,7 @@ export default function AdminUsage() {
 
             <div className="pb-card p-4">
               <h3 className="font-display font-bold text-[13px] text-pb-text uppercase tracking-wide mb-2">By role</h3>
-              <p className="font-mono text-[9px] text-pb-faintest mb-2">Overall split — ignores the role filter above.</p>
+              <p className="font-mono text-[9px] text-pb-faintest mb-2">Overall split: ignores the role filter above.</p>
               <div style={{ width: '100%', height: 240 }}>
                 {roleData.length === 0 ? (
                   <div className="h-full flex items-center justify-center font-mono text-[11px] text-pb-faint">
@@ -1700,7 +1700,7 @@ export default function AdminUsage() {
             {!loading && !recent.length && <div className="p-6 text-center font-mono text-[11px] text-pb-faint">No events.</div>}
             {recent.map((r, i) => (
               <div key={r.id} className={`px-3 sm:px-4 py-2 ${i > 0 ? 'pb-hairline-t' : ''}`}>
-                {/* Primary line — type, status, what was hit, duration */}
+                {/* Primary line: type, status, what was hit, duration */}
                 <div className="flex items-center gap-2 min-w-0">
                   <TypeBadge type={r.event_type} />
                   <StatusBadge status={r.status} />
@@ -1719,7 +1719,7 @@ export default function AdminUsage() {
                     <span className="font-mono text-[9px] text-pb-faintest shrink-0">{r.duration_ms}ms</span>
                   )}
                 </div>
-                {/* Meta line — wraps under the path on a phone, sits inline on desktop */}
+                {/* Meta line. Wraps under the path on a phone, sits inline on desktop */}
                 <div className="flex items-center gap-x-3 gap-y-0.5 flex-wrap font-mono text-[9px] text-pb-faintest mt-1">
                   <span className="shrink-0">{fmtTime(r.created_at)}</span>
                   <span className="hidden sm:inline shrink-0">{r.method}</span>

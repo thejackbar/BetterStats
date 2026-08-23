@@ -175,7 +175,7 @@ function ContactForm() {
           // matched to a real club record or one typed in by hand.
           clubMatch:     fields.clubSource === 'search'
             ? `Matched (${fields.clubOrgId})`
-            : 'Typed in by hand — not in the Cricket Australia list',
+            : 'Typed in by hand, not in the Cricket Australia list',
           email:         fields.email,
           phone:         fields.phone,
           role:          fields.role,
@@ -191,7 +191,7 @@ function ContactForm() {
           clubUrl:       fields.clubUrl || '—',
           heard:         fields.heard || '—',
           message:       fields.message || '—',
-          _subject: `BetterCricket enquiry — ${fields.club} · ${fields.association}`,
+          _subject: `BetterCricket enquiry: ${fields.club} · ${fields.association}`,
         }),
       })
       const data = await res.json()

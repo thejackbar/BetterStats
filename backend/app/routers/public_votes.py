@@ -325,7 +325,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
     ip = _client_ip(request)
     rate_limit.enforce(
         f"vote-verify-ip:{token}:{ip}", VERIFY_IP_LIMIT, VERIFY_IP_WINDOW,
-        detail="Too many attempts — slow down and try again shortly.",
+        detail="Too many attempts, slow down and try again shortly.",
     )
 
     try:

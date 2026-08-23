@@ -78,7 +78,7 @@ async def request_link(slug: str, data: RequestLinkIn, db: AsyncSession = Depend
     if not email:
         raise HTTPException(status_code=422, detail="Email is required")
     rate_limit.enforce(f"portal:link:{org.id}:{email}", REQUEST_LINK_LIMIT, REQUEST_LINK_WINDOW_SECONDS,
-                       detail="Too many requests — try again shortly.")
+                       detail="Too many requests. Try again shortly.")
 
     match = (await db.execute(
         select(FeeMember).where(FeeMember.organisation_id == org.id, func.lower(FeeMember.email) == email)
@@ -101,10 +101,10 @@ async def verify(slug: str, token: str, response: Response, db: AsyncSession = D
     org = await _org_enabled_or_404(db, slug)
     member_id = portal_auth.verify_magic_link(token, org.id)
     if member_id is None:
-        raise HTTPException(status_code=422, detail="This link has expired — request a new one.")
+        raise HTTPException(status_code=422, detail="This link has expired, request a new one.")
     member = await db.get(FeeMember, member_id)
     if member is None or member.organisation_id != org.id:
-        raise HTTPException(status_code=422, detail="This link has expired — request a new one.")
+        raise HTTPException(status_code=422, detail="This link has expired, request a new one.")
     portal_auth.issue_session_cookie(response, org.id, member.id)
     return {"ok": True, "full_name": member.full_name}
 
@@ -180,7 +180,7 @@ async def pay(slug: str, data: PayIn, request: Request, db: AsyncSession = Depen
         session = await stripe_connect_client.create_fee_payment_checkout_session(
             connected_account_id=org.stripe_connect_account_id,
             amount_cents=round(outstanding * 100),
-            description=f"{org.name} — {label}",
+            description=f"{org.name}, {label}",
             org_id=str(org.id), member_id=str(member.id), season_id=snapshot["season_id"], kind=data.kind,
             success_url=success_url, cancel_url=cancel_url,
         )

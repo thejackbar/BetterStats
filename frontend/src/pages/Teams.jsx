@@ -21,7 +21,7 @@ export default function Teams() {
   const [loadingGrades, setLoadingGrades] = useState(false)
 
   useClubTheme(club)
-  usePageMeta({ title: `Teams — ${club?.name || clubSlug}` })
+  usePageMeta({ title: `Teams, ${club?.name || clubSlug}` })
 
   useEffect(() => {
     if (!orgId) return

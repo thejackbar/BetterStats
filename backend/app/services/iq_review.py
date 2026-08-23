@@ -306,7 +306,7 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
     if meta["result"] in rmap:
         line = f"{rmap[meta['result']]} {('against ' if meta['result'] in ('WIN', 'LOSS') else '')}{opp}"
         if game["our_score"] and game["their_score"]:
-            line += f" — {game['our_score']} vs {game['their_score']}"
+            line += f". {game['our_score']} vs {game['their_score']}"
         summary.append(line + (".") if not line.endswith(".") else line)
     if bat:
         b0 = bat[0]
@@ -318,7 +318,7 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
     if best_partnership and best_partnership["runs"] >= 40:
         summary.append(f"Best stand: {best_partnership['runs']} ({best_partnership['batters']}).")
     if collapse:
-        summary.append(f"Wobble — 3 for {collapse['runs']} from the {_ordinal(collapse['start_wicket'])} wicket.")
+        summary.append(f"Wobble: 3 for {collapse['runs']} from the {_ordinal(collapse['start_wicket'])} wicket.")
     if extras >= 15:
         summary.append(f"Gave away {extras} in extras (wides + no-balls).")
 
@@ -332,7 +332,7 @@ async def game_review(session: AsyncSession, org_id: str, game_id: str) -> dict 
         "summary": summary,
         "coverage": {
             "notes": [
-                "Scores are reconstructed from stored per-innings data (our batting / our bowling), so they exclude some extras — close, not exact.",
+                "Scores are reconstructed from stored per-innings data (our batting / our bowling), so they exclude some extras. Close, not exact.",
                 "Biggest-over and win-probability swings need ball-by-ball data we don't hold.",
             ]
         },

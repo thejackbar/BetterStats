@@ -332,7 +332,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
     <div style={{ ...FRAME, background: paper, color: ink, fontFamily: BODY }}>
       <div style={{ position: 'absolute', inset: 56, display: 'flex', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontFamily: MONO, fontSize: 13, letterSpacing: 2, textTransform: 'uppercase', color: faint, paddingBottom: 10 }}>
-          <span>Vol. XCIV — No. 12</span><span>Est. 1921</span>
+          <span>Vol. XCIV, No. 12</span><span>Est. 1921</span>
         </div>
         <div style={{ borderTop: `3px solid ${ink}`, borderBottom: `1px solid ${ink}`, padding: '18px 0 14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 26 }}>
           {team.logo ? <ClubLogo src={team.logo} size={96} /> : <ClubLogo monogram={team.monogram} color={ink} size={88} shape="shield" />}
@@ -341,7 +341,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
         <div style={{ borderBottom: `3px solid ${ink}`, padding: '9px 0', textAlign: 'center', fontFamily: MONO, fontSize: 14, letterSpacing: 5, textTransform: 'uppercase', color: ink }}>{event.kicker}</div>
 
         <div style={{ textAlign: 'center', padding: '46px 0 10px' }}>
-          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>— Official Notice —</div>
+          <div style={{ fontFamily: MONO, fontSize: 15, letterSpacing: 5, textTransform: 'uppercase', color: P.accent, marginBottom: 18 }}>. Official Notice, </div>
           <AutoFitText text={event.title} max={128} min={52} lines={2} measureDeps={[event.title]}
             style={{ fontFamily: SERIF, fontWeight: 900, lineHeight: 0.9, color: ink }} />
           {event.subtitle ? <div style={{ fontFamily: BODY, fontStyle: 'italic', fontSize: 34, color: a(ink, 0.72), marginTop: 20, maxWidth: 840, marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.34 }}>{event.subtitle}</div> : null}
@@ -386,7 +386,7 @@ export function EVT_Gazette({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV6 — STICKER POP · playful rounded badges (casual socials)
+// EV6. STICKER POP · playful rounded badges (casual socials)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Sticker({ team, event = {}, palette, motif }) {
   const P = palette
@@ -448,7 +448,7 @@ export function EVT_Sticker({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV7 — KINETIC · diagonal bands, italic motion type (high-energy sport)
+// EV7. KINETIC · diagonal bands, italic motion type (high-energy sport)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Kinetic({ team, event = {}, palette, motif }) {
   const P = palette
@@ -511,7 +511,7 @@ export function EVT_Kinetic({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV8 — SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
+// EV8. SWISS · ultra-minimal Helvetica, baseline grid (clean & unmistakable)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Swiss({ team, event = {}, palette }) {
   const P = palette
@@ -565,7 +565,7 @@ export function EVT_Swiss({ team, event = {}, palette }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV9 — CREST · heritage emblem, gold-on-green serif (prestige occasions)
+// EV9. CREST · heritage emblem, gold-on-green serif (prestige occasions)
 // Uses palette.primary as the deep field, palette.accent as the gold.
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Crest({ team, event = {}, palette, motif }) {
@@ -625,7 +625,7 @@ export function EVT_Crest({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV10 — CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
+// EV10. CHALKBOARD · clubhouse blackboard, chalk handwriting (casual notices)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Chalkboard({ team, event = {}, palette }) {
   const P = palette
@@ -682,7 +682,7 @@ export function EVT_Chalkboard({ team, event = {}, palette }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EV11 — POLAROID · taped scrapbook photo + marker pen (photo-led socials)
+// EV11. POLAROID · taped scrapbook photo + marker pen (photo-led socials)
 // ─────────────────────────────────────────────────────────────────────────────
 export function EVT_Polaroid({ team, event = {}, palette, motif }) {
   const P = palette
@@ -740,7 +740,7 @@ export function EVT_Polaroid({ team, event = {}, palette, motif }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REGISTRY — drop these straight into AdminSocialPost's TEMPLATES array.
+// REGISTRY: drop these straight into AdminSocialPost's TEMPLATES array.
 // `kind: 'event'` keeps them on their own "Events" tab.
 // `surface: 'light'` flags the paper-backed directions so the designer can hide
 // the dark-mode toggle for them.
@@ -801,7 +801,7 @@ export const EVENT_PRESETS = [
   },
   {
     key: 'presentation', label: 'Presentation Night', template: 'EV9', motif: 'trophy', photoLabel: 'Team photo',
-    event: { kicker: 'Founded 1921', title: 'Presentation Night', subtitle: "Celebrating the season's finest — awards, life memberships & a few tall tales.", date: 'Sat 20 Sep', time: '7:00 PM', venue: 'The Pavilion', price: '$55', cta: 'RSVP by 12 Sep', sponsor: '' },
+    event: { kicker: 'Founded 1921', title: 'Presentation Night', subtitle: "Celebrating the season's finest: awards, life memberships & a few tall tales.", date: 'Sat 20 Sep', time: '7:00 PM', venue: 'The Pavilion', price: '$55', cta: 'RSVP by 12 Sep', sponsor: '' },
   },
   {
     key: 'launch', label: 'Season Launch', template: 'EV7', motif: 'calendar', photoLabel: 'Action / team photo',
@@ -817,7 +817,7 @@ export const EVENT_PRESETS = [
   },
   {
     key: 'generic', label: 'Generic / Blank', template: 'EV8', motif: 'star', photoLabel: 'Add a photo',
-    event: { kicker: 'Save the Date', title: 'Club Notice', subtitle: 'Your headline goes here. One template, any announcement — clean and unmistakable.', date: 'Date', time: 'Time', venue: 'Venue', price: 'Free', cta: 'Details to follow.', sponsor: 'Your sponsor here' },
+    event: { kicker: 'Save the Date', title: 'Club Notice', subtitle: 'Your headline goes here. One template, any announcement: clean and unmistakable.', date: 'Date', time: 'Time', venue: 'Venue', price: 'Free', cta: 'Details to follow.', sponsor: 'Your sponsor here' },
   },
 ]
 

@@ -344,7 +344,7 @@ export default function ShareCard() {
 
   const handleShare = async () => {
     const url = window.location.href
-    const text = `${player.name} — ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
+    const text = `${player.name}, ${fmtCount(cb?.total_runs ?? 0)} runs, ${fmtCount(cbw?.total_wickets ?? 0)} wickets | BetterCricket`
 
     if (navigator.share) {
       try {

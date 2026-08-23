@@ -55,7 +55,7 @@ export default function AflAdminPlayerImport() {
     <div className="space-y-4">
       <SectionTitle>Import Players</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl">
-        Upload a CSV of names, emails and phone numbers — each row is matched by
+        Upload a CSV of names, emails and phone numbers. Each row is matched by
         name to a player already in the system, and only email/phone/gender are
         filled in (never overwriting a value the player already has). PlayHQ sync
         already discovers every player automatically, so this is just for
@@ -74,7 +74,7 @@ export default function AflAdminPlayerImport() {
       {error && <p className="pb-card p-3 text-sm text-[var(--pb-negative)]">{error}</p>}
       {result && (
         <p className="pb-card p-3 text-sm text-[var(--pb-positive)]">
-          Done — {result.updated} player{result.updated === 1 ? '' : 's'} updated, {result.skipped} skipped.
+          Done: {result.updated} player{result.updated === 1 ? '' : 's'} updated, {result.skipped} skipped.
         </p>
       )}
 
@@ -106,7 +106,7 @@ export default function AflAdminPlayerImport() {
                         </select>
                       ) : (
                         <span className={r.chosen_player_id ? 'text-[var(--pb-positive)]' : 'text-pb-faint'}>
-                          {r.chosen_player_id ? `${STATUS_LABEL[r.status]} — ${r.matched_name}` : STATUS_LABEL[r.status] || 'No match'}
+                          {r.chosen_player_id ? `${STATUS_LABEL[r.status]}. ${r.matched_name}` : STATUS_LABEL[r.status] || 'No match'}
                         </span>
                       )}
                     </td>

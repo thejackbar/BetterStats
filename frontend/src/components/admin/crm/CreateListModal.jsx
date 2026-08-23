@@ -162,7 +162,7 @@ export default function CreateListModal({ open, onClose, deals, defaultName = ''
           <div className="rounded-lg border border-pb-hairline px-3 py-2.5">
             <div className="text-[11px] uppercase tracking-wide text-pb-faint mb-1.5">Filters applied</div>
             {filterSummary.length === 0 ? (
-              <div className="text-[12.5px] text-pb-faintest">No filters — every deal in the pipeline.</div>
+              <div className="text-[12.5px] text-pb-faintest">No filters, every deal in the pipeline.</div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {filterSummary.map((f, i) => (
@@ -261,7 +261,7 @@ export default function CreateListModal({ open, onClose, deals, defaultName = ''
                       <Select value={r.mode} onChange={e => setRow(i, { mode: e.target.value })}>
                         {(r.club_contacts || []).map(c => (
                           <option key={c.email} value={`email:${c.email}`}>
-                            {(c.name || c.email)}{c.role ? ` — ${c.role}` : ''}
+                            {(c.name || c.email)}{c.role ? `, ${c.role}` : ''}
                           </option>
                         ))}
                         <option value="manual">Enter manually…</option>

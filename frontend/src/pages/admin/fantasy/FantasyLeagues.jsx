@@ -29,7 +29,7 @@ export default function FantasyLeagues() {
 
   const create = async () => {
     setBusy('create')
-    try { const r = await api.fantasyCreateDraftLeague(season.id, form); flash(`Created — code ${r.league.join_code}`); setForm({ ...form, name: '' }); await load() }
+    try { const r = await api.fantasyCreateDraftLeague(season.id, form); flash(`Created, code ${r.league.join_code}`); setForm({ ...form, name: '' }); await load() }
     catch (e) { fail(e) } finally { setBusy('') }
   }
   const start = async (id) => { setBusy(id); try { await api.fantasyStartDraft(id); flash('Draft started.'); await load() } catch (e) { fail(e) } finally { setBusy('') } }

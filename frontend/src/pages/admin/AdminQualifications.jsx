@@ -117,7 +117,7 @@ function TypesPanel({ types, onChanged }) {
         </div>
       </div>
       {types.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No qualification types yet — add the starter set above.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No qualification types yet. Add the starter set above.</div>
       ) : (
         <div className="space-y-1.5">
           {types.map(t => <TypeRow key={t.id} type={t} onChanged={onChanged} />)}

@@ -54,7 +54,7 @@ export default function ScoutWatchlists() {
     >
       {error && <p className="text-sm text-pb-red mb-4">{error}</p>}
       {watchlists === undefined && !error && <p className="text-sm text-pb-dim">Loading…</p>}
-      {watchlists?.length === 0 && <p className="text-sm text-pb-dim">No watchlists yet — name one above to get started.</p>}
+      {watchlists?.length === 0 && <p className="text-sm text-pb-dim">No watchlists yet. Name one above to get started.</p>}
 
       {watchlists && watchlists.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

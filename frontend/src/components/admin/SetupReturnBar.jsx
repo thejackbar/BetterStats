@@ -91,7 +91,7 @@ export default function SetupReturnBar() {
             <p className="text-sm text-pb-dim leading-relaxed">
               No worries, your progress is saved. Whenever you want to pick it back up,
               open <span className="text-pb-text font-medium">Setup Wizard</span> from the
-              side menu — it's at the top, right under Dashboard.
+              side menu, it's at the top, right under Dashboard.
             </p>
             <div className="flex items-center justify-end gap-2 pt-1">
               <button

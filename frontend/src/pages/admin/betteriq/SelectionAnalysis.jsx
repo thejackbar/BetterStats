@@ -206,12 +206,12 @@ function Analysis({ data, fixtureId, onNavigate }) {
   const fromScratch = savedIds.size === 0
 
   const warnings = []
-  if (xi.length !== size) warnings.push({ tone: xi.length < size ? 'amber' : 'red', text: xi.length < size ? `${size - xi.length} spot${size - xi.length > 1 ? 's' : ''} still open (${xi.length}/${size}).` : `${xi.length}/${size} picked — one too many.` })
-  if (bal.keeper < 1) warnings.push({ tone: 'red', text: 'No specialist keeper in the XI — name one or accept a part-timer behind the stumps.' })
-  if (bal.bowlers < 4) warnings.push({ tone: 'amber', text: `Only ${bal.bowlers} bowling options — a thin attack if a bowler has an off day.` })
+  if (xi.length !== size) warnings.push({ tone: xi.length < size ? 'amber' : 'red', text: xi.length < size ? `${size - xi.length} spot${size - xi.length > 1 ? 's' : ''} still open (${xi.length}/${size}).` : `${xi.length}/${size} picked, one too many.` })
+  if (bal.keeper < 1) warnings.push({ tone: 'red', text: 'No specialist keeper in the XI. Name one or accept a part-timer behind the stumps.' })
+  if (bal.bowlers < 4) warnings.push({ tone: 'amber', text: `Only ${bal.bowlers} bowling options. A thin attack if a bowler has an off day.` })
   if (bal.spin < 1) warnings.push({ tone: 'amber', text: 'No frontline spinner in the XI.' })
   if (bal.openers < 2) warnings.push({ tone: 'red', text: 'Fewer than two recognised top-order openers.' })
-  if (bal.depth < 7) warnings.push({ tone: 'amber', text: 'Batting depth thins below 7 — a top-order collapse would expose the tail.' })
+  if (bal.depth < 7) warnings.push({ tone: 'amber', text: 'Batting depth thins below 7. A top-order collapse would expose the tail.' })
 
   const send = async () => {
     setSending(true); setSendErr('')
@@ -247,7 +247,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
 
   return (
     <div className="iq-fade">
-      <PageIntro>Pick the XI here — start from the saved BetterSelect team or, on an empty fixture, from the suggested best available side. Add or remove anyone, set availability to re-rank, then send the XI back to BetterSelect.</PageIntro>
+      <PageIntro>Pick the XI here: start from the saved BetterSelect team or, on an empty fixture, from the suggested best available side. Add or remove anyone, set availability to re-rank, then send the XI back to BetterSelect.</PageIntro>
 
       {/* Server-side selection intelligence: same-day clashes the suggestions
           skipped, and how fresh the availability answers actually are. */}
@@ -268,7 +268,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
             <div className="flex items-start gap-2 px-4 py-2.5 text-[12.5px]"
               style={{ background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 10, color: 'var(--pb-dim)' }}>
               <Icon name="clock" size={15} className="mt-0.5 shrink-0 text-pb-faint" />
-              <span>{data.stale_answers} availability answer{data.stale_answers === 1 ? ' is' : 's are'} more than two weeks old — worth a nudge before locking the side.</span>
+              <span>{data.stale_answers} availability answer{data.stale_answers === 1 ? ' is' : 's are'} more than two weeks old. Worth a nudge before locking the side.</span>
             </div>
           )}
         </div>
@@ -293,7 +293,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
             ? 'No XI was saved, so we loaded the best available side from your eligible squad. Add or remove players, set availability, then send it to BetterSelect.'
             : (comingIn.length || droppingOut.length)
               ? `${droppingOut.map(p => p.name).join(' & ') || '—'} out; ${comingIn.map(p => p.name).join(' & ') || '—'} in.`
-              : (data.verdict || 'Everyone available is already in the best side — no changes needed.')}
+              : (data.verdict || 'Everyone available is already in the best side, no changes needed.')}
         </div>
       </Card>
 
@@ -411,7 +411,7 @@ function Analysis({ data, fixtureId, onNavigate }) {
           })}
           {poolView.length === 0 && <Empty className="py-2">No players match.</Empty>}
         </div>
-        <Note>Every eligible squad player (incl. promotion / drop-down options); filter by squad to plan across grades. Suggestions only ever include BetterSelect-eligible players (right grade & gender, recent enough) — "also picked" flags a same-day clash. "+XI" adds anyone; availability re-ranks the suggested XI; "Send XI" writes your order back to BetterSelect.</Note>
+        <Note>Every eligible squad player (incl. promotion / drop-down options); filter by squad to plan across grades. Suggestions only ever include BetterSelect-eligible players (right grade & gender, recent enough). "also picked" flags a same-day clash. "+XI" adds anyone; availability re-ranks the suggested XI; "Send XI" writes your order back to BetterSelect.</Note>
       </Card>
     </div>
   )
@@ -456,7 +456,7 @@ export default function SelectionAnalysis() {
   if (!fixtureId) {
     return (
       <IQLayout>
-        <PageIntro>BetterSelect picks the team — BetterIQ checks the balance, rebuilds the best available side as availability changes, and justifies the pick. Choose a fixture with a saved lineup.</PageIntro>
+        <PageIntro>BetterSelect picks the team. BetterIQ checks the balance, rebuilds the best available side as availability changes, and justifies the pick. Choose a fixture with a saved lineup.</PageIntro>
         {rows === null ? <LoadingCard label="Loading lineups…" expectedMs={4500} /> : <LineupPicker rows={visibleRows} onPick={pick} />}
       </IQLayout>
     )
@@ -465,8 +465,8 @@ export default function SelectionAnalysis() {
   return (
     <IQLayout actions={<Btn variant="ghost" sm icon="back" onClick={clear}>Change fixture</Btn>}>
       {data === null && !err && <LoadingCard label="Analysing the XI…" expectedMs={6000} />}
-      {err && <div className="iq-card p-5"><Empty>Couldn't load this lineup. It may have been removed — pick another fixture.</Empty></div>}
-      {/* Even with nothing saved we can still help — the eligible pool lets us
+      {err && <div className="iq-card p-5"><Empty>Couldn't load this lineup. It may have been removed. Pick another fixture.</Empty></div>}
+      {/* Even with nothing saved we can still help. The eligible pool lets us
           build a best XI from scratch. Only truly empty pools dead-end. */}
       {data && !(data.pool?.length || data.players?.length || data.promote?.length) && (
         <Card title={`${data.fixture?.team_name || 'Team'} vs ${data.fixture?.opponent_name || 'TBC'}`}>

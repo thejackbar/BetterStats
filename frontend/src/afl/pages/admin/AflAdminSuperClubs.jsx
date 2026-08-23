@@ -28,7 +28,7 @@ function RegisterPanel({ onRegistered }) {
     <div className="pb-card p-4 space-y-3">
       <SectionTitle>Register a club</SectionTitle>
       <p className="text-sm text-pb-dim">
-        Paste the PlayHQ org code — the hex code in a{' '}
+        Paste the PlayHQ org code, the hex code in a{' '}
         <code className="text-pb-text">playhq.com/afl/org/…/CODE</code> URL. Every
         side at the club is pulled in on the first sync.
       </p>

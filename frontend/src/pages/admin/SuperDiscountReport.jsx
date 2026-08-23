@@ -80,7 +80,7 @@ export default function SuperDiscountReport() {
           <>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
               <SummaryCard label="Bundle discount total" value={fmt(report.bundle.total_cents)} sub={`${report.bundle.total_count} invoice${report.bundle.total_count === 1 ? '' : 's'}`} />
-              <SummaryCard label="Bundle — clubs" value={report.bundle.by_club.length} />
+              <SummaryCard label="Bundle: clubs" value={report.bundle.by_club.length} />
               <SummaryCard label="Coupon discount total" value={fmt(report.coupons.total_cents)} sub={`${report.coupons.total_count} invoice${report.coupons.total_count === 1 ? '' : 's'}`} />
               <SummaryCard label="Coupon codes used" value={report.coupons.by_code.length} />
             </div>

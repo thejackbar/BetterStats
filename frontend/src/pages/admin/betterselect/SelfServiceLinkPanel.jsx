@@ -55,7 +55,7 @@ export default function SelfServiceLinkPanel() {
     setBusy(true)
     try {
       setCfg(await api.bsRegenerateSelfService())
-      toast.success('New link generated — reshare it with your players.')
+      toast.success('New link generated. Reshare it with your players.')
     } catch (e) {
       toast.error(e.message || 'Regenerate failed')
     } finally { setBusy(false) }
@@ -66,7 +66,7 @@ export default function SelfServiceLinkPanel() {
       await navigator.clipboard.writeText(text)
       toast.success(`${what} copied`)
     } catch {
-      toast.error('Copy failed — select and copy manually')
+      toast.error('Copy failed. Select and copy manually')
     }
   }
 
@@ -93,7 +93,7 @@ export default function SelfServiceLinkPanel() {
             </span>
           </div>
           <div className="text-[12.5px] text-pb-faint mt-0.5">
-            Let players set their own availability with a link + PIN — no logins.
+            Let players set their own availability with a link + PIN, no logins.
           </div>
         </div>
         <span className="text-pb-faint shrink-0">{open ? '▲' : '▼'}</span>

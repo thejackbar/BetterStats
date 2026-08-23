@@ -73,14 +73,14 @@ export default function ClubhouseSegments() {
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">
-            A segment is a rule. For people picked by hand, use a list — both can be chosen as the audience
+            A segment is a rule. For people picked by hand, use a list. Both can be chosen as the audience
             when you write an email:{' '}
             <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
             {' · '}
             <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
           </Note>
           <Note title="Club scope only" toneKey="calm">
-            These conditions read your own club's people — the directory, accounts, roster and email activity.
+            These conditions read your own club's people: the directory, accounts, roster and email activity.
             Nothing here reaches outside the club.
           </Note>
         </SegmentListPane>

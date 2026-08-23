@@ -238,7 +238,7 @@ function Snapshot({ snapshot, squad, draft, player, onEditAvail, canEditAvail })
 
       {/* Availability — next 4 weeks */}
       <div className="mb-[18px]">
-        <div className="text-xs text-pb-faint mb-2">Availability — next 4 weeks</div>
+        <div className="text-xs text-pb-faint mb-2">Availability: next 4 weeks</div>
         {avail.length === 0
           ? <div className="text-[11.5px] text-pb-faintest">No upcoming fixtures.</div>
           : (
@@ -375,7 +375,7 @@ function AliasManager({ playerId }) {
         Also known as
       </div>
       <p className="text-[11px] text-pb-faintest mb-2">
-        Former or alternate names — a live feed still using one of these still matches this player.
+        Former or alternate names. A live feed still using one of these still matches this player.
         Renaming this player above adds their old name here automatically.
       </p>
       {aliases === null ? (
@@ -432,7 +432,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             <span>Date of birth</span>
             <span className="font-mono text-[10px] tracking-wide2 shrink-0"
               style={{ color: age == null ? 'var(--pb-faintest)' : 'var(--pb-dim)' }}>
-              {age == null ? 'AGE —' : `${age} YRS`}
+              {age == null ? 'AGE, ' : `${age} YRS`}
             </span>
           </span>
         }>
@@ -440,7 +440,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
         </Field>
         <Field label="Squad (selection pool)" half>
           <PSelect value={draft.squad_team_id || ''} onChange={(v) => set('squad_team_id', v || null)}
-            options={[['', '— Unassigned —'], ...teams.map((t) => [t.id, t.name])]} />
+            options={[['', '. Unassigned. '], ...teams.map((t) => [t.id, t.name])]} />
         </Field>
         <Field label="Role" half>
           <PSelect value={draft.player_role || ''} onChange={(v) => set('player_role', v || null)} options={ROLE_OPTS} />
@@ -477,14 +477,14 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
             left filed in a squad goes on being offered for an XI. Turning it
             back off does NOT re-file them — that's the club's call. */}
         <PToggle on={draft.status === 'inactive'} onChange={(v) => set('status', v ? 'inactive' : 'active')}
-          label="Inactive — out of availability, selection and their squad" />
+          label="Inactive: out of availability, selection and their squad" />
         {/* Public visibility. Separate from Inactive on purpose: inactive is
             about selection, this is about whether the person is findable at
             all on the club's public site. Asked for by juniors who would
             rather not be. Their stats still count towards the club's totals
             and they stay in every admin screen. */}
         <PToggle on={draft.is_public === false} onChange={(v) => set('is_public', !v)}
-          label="Hidden — keep off the public website" />
+          label="Hidden: keep off the public website" />
         {draft.is_public === false && (
           <div className="pl-[47px] pb-1.5 text-[11.5px] text-pb-faint leading-snug">
             Off the public squad list, search, leaderboards and records, and
@@ -495,7 +495,7 @@ function Details({ draft, set, teams, canEdit, playerId, playerName, photoUrl, o
       </div>
 
       {/* BetterSelect selection flags. Both read from another module by
-          default — leave them on Automatic and the answer comes from
+          default. Leave them on Automatic and the answer comes from
           BetterFees' balance and Net Manager attendance. A club running
           neither can still answer by hand, which is what these are for. */}
       <div className="mt-1.5 border-t border-pb-hairline pt-2.5 flex flex-wrap gap-x-3.5 gap-y-2 items-end">

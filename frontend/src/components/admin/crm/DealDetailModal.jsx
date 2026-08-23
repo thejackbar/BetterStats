@@ -262,8 +262,8 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
       setDeal(updated)
       onChanged?.()
       toast.success(updated.recalc_had_data
-        ? `Recalculated from tracked website activity — now ${sortModuleKeys(updated.module_keys).map(moduleLabel).join(', ')}`
-        : 'No tracked website visits for this club yet — defaulted to Stats')
+        ? `Recalculated from tracked website activity, now ${sortModuleKeys(updated.module_keys).map(moduleLabel).join(', ')}`
+        : 'No tracked website visits for this club yet, defaulted to Stats')
     } catch (e) { toast.error(e.message || 'Could not recalculate') } finally { setSaving(false) }
   }
 
@@ -271,7 +271,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     <span className="flex items-center gap-2" title={deal.is_customer ? 'Already a BetterCricket subscriber' : undefined}>
       <span className={`truncate ${deal.is_customer ? 'border-b-2 border-emerald-500/70 pb-0.5' : ''}`}>{deal.title}</span>
       {deal.engagement_score != null && (
-        <span title={`Engagement — ${(deal.engagement_tier || '').replace(/_/g, ' ')}`}>
+        <span title={`Engagement: ${(deal.engagement_tier || '').replace(/_/g, ' ')}`}>
           <Pill tone={TIER_TONE[deal.engagement_tier] || 'faint'}>{deal.engagement_score}</Pill>
         </span>
       )}
@@ -320,13 +320,13 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           {showPurgeBox && (
             <div className="pb-card px-3 py-3 border-pb-red/40 space-y-2">
               <p className="text-[12.5px] text-pb-text">
-                Permanently deletes this {t.itemSingular} — its notes, activity and contact links
+                Permanently deletes this {t.itemSingular}. Its notes, activity and contact links
                 go with it. This can't be undone. Archive instead if you might want it back.
               </p>
               {deal.marketing_club_id && (
                 <label className="flex items-start gap-2 text-[12px] text-pb-faint">
                   <input type="checkbox" checked={resetClub} onChange={e => setResetClub(e.target.checked)} className="mt-0.5" />
-                  <span>This was test activity — also permanently delete the club: remove it from
+                  <span>This was test activity, also permanently delete the club: remove it from
                     All Clubs (seasons, games, players, stats), delete its admin user login and its
                     Stripe customer, and reset its Club Directory record so a real future enquiry
                     starts fresh. The Club Directory entry itself is kept. Cannot be undone.</span>
@@ -341,7 +341,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               {deleting && (
                 <p className="text-[11.5px] text-pb-amber text-right">
                   {resetClub
-                    ? 'Deleting the deal and wiping the club’s data (seasons, games, players, stats, login, Stripe). This can take a moment — please don’t close this window.'
+                    ? 'Deleting the deal and wiping the club’s data (seasons, games, players, stats, login, Stripe). This can take a moment. Please don’t close this window.'
                     : `Deleting this ${t.itemSingular}…`}
                 </p>
               )}
@@ -362,7 +362,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
             </Field>
             {ownerOptions && ownerOptions.length > 0 && (
               <Field label="Owner" width={FIELD_W.owner}>
-                {/* Bound through ownerEntryId — see EventForm: an entry is a
+                {/* Bound through ownerEntryId. See EventForm: an entry is a
                     person, possibly covering several accounts, so a deal
                     owned by one of the folded-away ones still shows its
                     owner rather than reading Unassigned. */}
@@ -396,7 +396,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           </div>
 
           {/* Value / probability / weighted-value / discount are all the same
-              financial-outcome cluster — kept together in one box instead of
+              financial-outcome cluster, kept together in one box instead of
               scattered across the grid and a separate section further down. */}
           <div className="pb-card px-3 py-3 space-y-3">
             <div className="flex flex-wrap gap-3 items-start">
@@ -405,7 +405,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   ? `After discount: ${money(deal.effective_value_cents ?? deal.value_cents)}` : undefined}>
                 {/* key forces the uncontrolled input to remount (and pick up
                     the fresh defaultValue) whenever the server recomputes
-                    value_cents — e.g. toggling a Product Interest chip —
+                    value_cents, e.g. toggling a Product Interest chip, 
                     otherwise the DOM node keeps showing its stale initial
                     value even though `deal` itself has updated. */}
                 <NumberInput key={deal.value_cents} defaultValue={centsToMoneyInput(deal.value_cents)} min={0}
@@ -474,7 +474,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
 
           {moduleOptions && moduleOptions.length > 0 && (() => {
             // Sentence-Case, fixed order (Stats first, Fantasy last) regardless
-            // of what order module_keys stores them in — a club with no
+            // of what order module_keys stores them in, a club with no
             // Product Interest set at all is always assumed to want at least
             // Stats. Each chip for a module currently on trial shows its days
             // remaining, bolding whichever module is soonest to expire.
@@ -494,7 +494,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   {moduleOptions.map(m => {
                     const on = heldKeys.includes(m.key)
                     const days = trialDays[m.key]
-                    // days is signed — negative means the trial's end date
+                    // days is signed. Negative means the trial's end date
                     // has already passed, not just "due today" (0).
                     const expired = days != null && days < 0
                     return (
@@ -614,7 +614,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
               return (
                 <div className="space-y-1.5 mb-2">
                   {poc ? <ContactRow c={poc} isPoc /> : contacts.length > 0 && (
-                    <p className="text-[11px] text-pb-faintest">No point of contact set — pick one below.</p>
+                    <p className="text-[11px] text-pb-faintest">No point of contact set. Pick one below.</p>
                   )}
                   {contacts.length === 0 && <p className="text-[12px] text-pb-faintest">No contacts linked yet.</p>}
                   {others.map(c => <ContactRow key={c.id} c={c} />)}

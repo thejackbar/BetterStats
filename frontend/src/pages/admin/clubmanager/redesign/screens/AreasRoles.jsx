@@ -77,7 +77,7 @@ export default function AreasRoles({ st, patch, narrow }) {
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Roles' }, { key: 'types', label: 'Role types' }]} />
           {sub === 'main' ? (
             <EntityManager key="roles"
-              describe="General club roles a volunteer can hold — these name what people do and gate which operational areas they can be rostered onto. Each role sits under a type (Official, Volunteer, Paid…). Committee-type roles are managed as positions on the Committee screen and don't appear here."
+              describe="General club roles a volunteer can hold. These name what people do and gate which operational areas they can be rostered onto. Each role sits under a type (Official, Volunteer, Paid…). Committee-type roles are managed as positions on the Committee screen and don't appear here."
               load={() => api.raRoles().then(r => (r?.roles || r || []).filter(x => !x.is_committee && x.role_type_category !== 'committee'))}
               fields={[
                 { key: 'title', label: 'Role name', type: 'text', required: true, span: 2 },
@@ -145,7 +145,7 @@ export default function AreasRoles({ st, patch, narrow }) {
       {tab === 'quals' && (
         <div className="pb-scroll" style={scroll('48rem')}>
           <EntityManager
-            describe="Qualification types the club tracks — these ARE the qualifications (there's no separate sub-type). A gating qualification blocks rostering for the operational areas that require it."
+            describe="Qualification types the club tracks. These ARE the qualifications (there's no separate sub-type). A gating qualification blocks rostering for the operational areas that require it."
             load={() => api.qualListTypes().then(r => r?.types || r || [])}
             fields={[{ key: 'name', label: 'Qualification', type: 'text', required: true, span: 2 }, { key: 'validity_months', label: 'Valid for (months)', type: 'number' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
             onCreate={v => api.qualCreateType(v)} onUpdate={(id, v) => api.qualUpdateType(id, v)} onDelete={id => api.qualArchiveType(id)}
@@ -164,7 +164,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               <AreaEditor key={areaKey} focusAreaId={deepLink.area}
                 onFocused={() => setDeepLink(d => ({ ...d, area: null }))} />
               <div style={{ marginTop: 20, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
-                <button disabled={busy} onClick={async () => { if (!window.confirm('Remove all operational areas, their patterns and every roster week for this club? (Testing reset — only this club; players/members/committee are untouched.)')) return; setBusy(true); await api.rosterClearConfig().catch(() => {}); setAreaKey(k => k + 1); setBusy(false) }}
+                <button disabled={busy} onClick={async () => { if (!window.confirm('Remove all operational areas, their patterns and every roster week for this club? (Testing reset, only this club; players/members/committee are untouched.)')) return; setBusy(true); await api.rosterClearConfig().catch(() => {}); setAreaKey(k => k + 1); setBusy(false) }}
                   style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Clear all areas (reset)</button>
               </div>
             </>

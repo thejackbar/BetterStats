@@ -49,17 +49,17 @@ function MergeBuilder({ seasons, onMerged }) {
     <div className="pb-card p-5 mb-6">
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Merge Seasons</p>
       <p className="text-pb-dim text-sm mb-4 leading-relaxed">
-        Use this when one calendar year has been split into multiple seasons by the data source — e.g. "Summer 2025/26" and "Winter 2025/26" are both really 2025/26.
+        Use this when one calendar year has been split into multiple seasons by the data source, e.g. "Summer 2025/26" and "Winter 2025/26" are both really 2025/26.
         Stats from the variant will roll up into the canonical season everywhere (leaderboards, player profiles, records). The variant is hidden from the season dropdown but kept in the database, so this is fully reversible.
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge (will be hidden)</label>
-          <SeasonPicker seasons={seasons} value={alias} onChange={setAlias} placeholder="— Select variant —" exclude={canonical} />
+          <SeasonPicker seasons={seasons} value={alias} onChange={setAlias} placeholder=". Select variant, " exclude={canonical} />
         </div>
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this season)</label>
-          <SeasonPicker seasons={seasons} value={canonical} onChange={setCanonical} placeholder="— Select canonical —" exclude={alias} />
+          <SeasonPicker seasons={seasons} value={canonical} onChange={setCanonical} placeholder=". Select canonical, " exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (
@@ -177,7 +177,7 @@ function SeasonRow({ s, i, count, allSeasons, onMove, onChanged }) {
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Delete season "${s.name}"? Only an empty, manually-created season can be deleted — anything with data recorded against it is refused.`)) return
+    if (!window.confirm(`Delete season "${s.name}"? Only an empty, manually-created season can be deleted. Anything with data recorded against it is refused.`)) return
     setBusy(true)
     setError(null)
     try {

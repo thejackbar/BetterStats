@@ -182,7 +182,7 @@ function ClubActionModal({ club, onSetUp, onClose }) {
 
         {mode === 'done' ? (
           <p className="font-mono text-[12px] text-emerald-300">
-            Thanks — we&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
+            Thanks. We&rsquo;ve got your request and we&rsquo;ll be in touch shortly.
           </p>
         ) : mode === 'request' ? (
           <>
@@ -200,8 +200,8 @@ function ClubActionModal({ club, onSetUp, onClose }) {
         ) : (
           <>
             <p className="text-sm text-pb-dim mb-4">
-              {orgName(club)} isn&rsquo;t on BetterCricket yet. Set it up yourself now — it&rsquo;s
-              free and we never ask for a credit card — or ask us to reach out and we&rsquo;ll help
+              {orgName(club)} isn&rsquo;t on BetterCricket yet. Set it up yourself now, it&rsquo;s
+              free and we never ask for a credit card, or ask us to reach out and we&rsquo;ll help
               get you started.
             </p>
             <div className="space-y-2">

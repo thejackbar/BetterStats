@@ -292,18 +292,18 @@ async def preflight(session: AsyncSession, org: Organisation) -> dict:
 
     blocked = None
     if getattr(org, "ses_tenant_paused", False):
-        blocked = "This club's SES tenant is paused (reputation) — sending is on hold."
+        blocked = "This club's SES tenant is paused (reputation), sending is on hold."
     elif tier == TIER_SUSPENDED:
         blocked = "Sending is suspended for this club pending review."
     elif tripped:
         blocked = f"Sending is paused: {tripped}."
     elif account_remaining <= 0:
-        blocked = "The platform's daily send limit is reached — try again tomorrow."
+        blocked = "The platform's daily send limit is reached. Try again tomorrow."
     elif cap is not None and used >= cap:
-        blocked = (f"This club's daily limit of {cap} is reached — the rest will "
+        blocked = (f"This club's daily limit of {cap} is reached. The rest will "
                    f"send tomorrow, or request a higher limit.")
     elif mcap is not None and used_month >= mcap:
-        blocked = (f"This club's monthly limit of {mcap} is reached — the rest will "
+        blocked = (f"This club's monthly limit of {mcap} is reached. The rest will "
                    f"send once the 30-day window frees up, or request a higher limit.")
 
     return {

@@ -80,7 +80,7 @@ async def update_coupon(db: AsyncSession, coupon_id, **fields) -> DiscountCoupon
     locked = FINANCIAL_FIELDS & set(fields)
     if locked and await redemption_count(db, coupon_id) > 0:
         raise CouponError(
-            f"Can't change {', '.join(sorted(locked))} — this coupon already has a redemption. "
+            f"Can't change {', '.join(sorted(locked))}. This coupon already has a redemption. "
             "Deactivate it and create a new one instead."
         )
     for field, value in fields.items():

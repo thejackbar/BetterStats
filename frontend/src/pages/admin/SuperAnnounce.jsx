@@ -394,7 +394,7 @@ export default function SuperAnnounce() {
                   <select className={INPUT} value={featuredId} onChange={(e) => setFeaturedId(e.target.value)}>
                     {data.players.map((p) => (
                       <option key={p.id} value={p.id}>
-                        {p.name}{p.photo ? ' • photo' : ''} — {fmt(p.matches)} games, {fmt(p.runs)} runs
+                        {p.name}{p.photo ? ' • photo' : ''}. {fmt(p.matches)} games, {fmt(p.runs)} runs
                       </option>
                     ))}
                   </select>

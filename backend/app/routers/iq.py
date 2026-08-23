@@ -37,7 +37,7 @@ async def apply_grade_scope(
     categories: str | None = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. An explicitly picked grade beats this."
         ),
@@ -45,7 +45,7 @@ async def apply_grade_scope(
     formats: str | None = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, not "
             "per grade, so a grade that plays both is split correctly. Omitted "
             "applies no format filter."
@@ -110,8 +110,8 @@ async def opposition_opponents(
 async def opposition_report(
     opponent: str | None = Query(None, description="opp_key from the opponents list (or any CA org GUID)"),
     fixture_id: str | None = Query(None, description="resolve the opponent from an upcoming fixture"),
-    grade: str | None = Query(None, description="scope the record to one grade (by name) — the card's Grade toggle"),
-    season_ids: str | None = Query(None, description="comma-separated season ids to scope the record — the card's Season toggle"),
+    grade: str | None = Query(None, description="scope the record to one grade (by name), the card's Grade toggle"),
+    season_ids: str | None = Query(None, description="comma-separated season ids to scope the record, the card's Season toggle"),
     name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -134,7 +134,7 @@ async def opposition_dossier(
     opponent: str | None = Query(None, description="opp_key from the opponents list (or any CA org GUID)"),
     fixture_id: str | None = Query(None, description="resolve the opponent (and grade) from a fixture"),
     team: str | None = Query(None, description="narrow the scout to one of the opponent's teams (a grade_id); omit for the whole club"),
-    grade: str | None = Query(None, description="the IQ filter bar's grade selection (canonical names, '||'-joined) — narrows which of THEIR grades are scouted"),
+    grade: str | None = Query(None, description="the IQ filter bar's grade selection (canonical names, '||'-joined). Narrows which of THEIR grades are scouted"),
     name: str | None = Query(None, description="display name for a club outside our history (CA-wide search)"),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
@@ -160,7 +160,7 @@ async def opposition_dossier(
             "status": "unavailable",
             "opponent": {"opp_key": None, "name": name},
             "message": (
-                f"No identity to scout for {name} yet — we build a dossier once you've"
+                f"No identity to scout for {name} yet, we build a dossier once you've"
                 " played them, or from the fixture's grade." if name
                 else "Opponent not found."
             ),
@@ -404,7 +404,7 @@ async def ask_iq(
     from app.services.rate_limit import enforce
 
     enforce(f"iq_ask:{club.id}", limit=20, window_sec=3600,
-            detail="That's a lot of questions for now — try again in a bit.")
+            detail="That's a lot of questions for now. Try again in a bit.")
     q = (question or "").strip()
     if len(q) < 3:
         raise HTTPException(status_code=400, detail="Ask a question.")

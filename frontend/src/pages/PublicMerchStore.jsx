@@ -114,7 +114,7 @@ function CartPanel({ cart, setCart, slug, clubName }) {
           style={{ background: 'var(--pb-accent)' }}>
           {busy ? 'REDIRECTING…' : `PAY ${money(total)}`}
         </button>
-        <p className="font-mono text-[9px] text-pb-faintest">Pickup at the club — {clubName} will be in touch to arrange collection.</p>
+        <p className="font-mono text-[9px] text-pb-faintest">Pickup at the club: {clubName} will be in touch to arrange collection.</p>
       </div>
     </div>
   )
@@ -176,13 +176,13 @@ export default function PublicMerchStore() {
         </div>
 
         {orderParam === '1' && <Banner tone="ok">Thanks for your order! The club will be in touch to arrange pickup.</Banner>}
-        {orderParam === '0' && <Banner tone="warn">Checkout cancelled — nothing was charged, your cart is still here.</Banner>}
-        {!status.checkout_ready && <Banner tone="warn">Online payment isn't set up for this club yet — you can browse, but checkout isn't available.</Banner>}
+        {orderParam === '0' && <Banner tone="warn">Checkout cancelled. Nothing was charged, your cart is still here.</Banner>}
+        {!status.checkout_ready && <Banner tone="warn">Online payment isn't set up for this club yet. You can browse, but checkout isn't available.</Banner>}
 
         {products === null ? (
           <div className="text-center font-mono text-[11px] text-pb-faint">Loading products…</div>
         ) : products.length === 0 ? (
-          <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing in the store yet — check back soon.</div>
+          <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing in the store yet. Check back soon.</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-[1fr_320px] gap-4 items-start">
             <div className="space-y-6">

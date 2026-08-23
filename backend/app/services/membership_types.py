@@ -54,10 +54,10 @@ STARTER_TYPES = [
     ("Junior Player", "Registered junior playing member.", True, False, True, True, True, "Junior Players / Parents", "internal"),
     ("Parent", "A junior player's parent or guardian.", False, False, False, True, False, "Junior Players / Parents", "internal"),
     ("Social Member", "Non-playing social membership.", False, True, False, False, False, "Social Members", "internal"),
-    ("Honorary Member", "Honorary membership — for a season, a number of years, or perpetual.", False, True, False, False, False, "Honorary Members", "internal"),
+    ("Honorary Member", "Honorary membership: for a season, a number of years, or perpetual.", False, True, False, False, False, "Honorary Members", "internal"),
     # External: recorded by the club, not counted as members.
     ("Sponsor Contact", "A sponsor's nominated contact.", False, False, False, False, False, "Sponsors", "external"),
-    ("External Contact", "Someone the club deals with who is not a member — a contractor, a consultant, an association officer.", False, False, False, False, False, "External Contacts", "external"),
+    ("External Contact", "Someone the club deals with who is not a member: a contractor, a consultant, an association officer.", False, False, False, False, False, "External Contacts", "external"),
 ]
 
 

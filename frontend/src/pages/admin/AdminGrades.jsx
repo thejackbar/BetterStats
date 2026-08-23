@@ -57,11 +57,11 @@ function MergeBuilder({ orgId, grades, onMerged }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge</label>
-          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder="— Select grade —" exclude={canonical} />
+          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder=". Select grade, " exclude={canonical} />
         </div>
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this name)</label>
-          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder="— Select canonical grade —" exclude={alias} />
+          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder=". Select canonical grade, " exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (
@@ -132,7 +132,7 @@ function TagPicker({ options, value, suggested, confirmed, disabled, onChange, e
       {!confirmed && (
         <span
           className="font-mono text-[9px] text-pb-amber uppercase tracking-wide ml-1"
-          title="Worked out from the grade name and the matches played — click to confirm or change"
+          title="Worked out from the grade name and the matches played. Click to confirm or change"
         >
           suggested
         </span>
@@ -240,13 +240,13 @@ function GradeList({ grades, onChanged }) {
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
         Match type here is a fallback, not the filter itself. Leaderboards and the dashboard read each
-        match's own recorded format, because a grade often plays more than one — a 1st Grade season is
+        match's own recorded format, because a grade often plays more than one. A 1st Grade season is
         usually a mix of one-day and two-day games. What you tick here only fills in for older matches
         synced before we started recording the format, and only when a grade plays a single format, since
         a mixed grade says nothing useful about one unlabelled game.
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
-        The order here is also the order BetterPosts uses for a Fixtures or Results roundup post — move a
+        The order here is also the order BetterPosts uses for a Fixtures or Results roundup post, move a
         grade with the arrows, then save. Anything you haven't ordered sits below the ones you have.
       </p>
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -312,7 +312,7 @@ function GradeList({ grades, onChanged }) {
                   <td className="py-2.5 pl-5">
                     <div className="flex items-center gap-1">
                       <span className="font-mono text-[11px] text-pb-faint w-5">
-                        {/* The position it WILL hold once saved — the server
+                        {/* The position it WILL hold once saved, the server
                             numbers 1..N from this order, so showing the stored
                             number instead would disagree with a pending move. */}
                         {i + 1}

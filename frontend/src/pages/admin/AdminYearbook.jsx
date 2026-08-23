@@ -74,7 +74,7 @@ export default function AdminYearbook() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-pb-text">Yearbooks</h1>
-          <p className="text-sm text-pb-faint mt-0.5">Manage season yearbooks — publish to make them publicly accessible.</p>
+          <p className="text-sm text-pb-faint mt-0.5">Manage season yearbooks, publish to make them publicly accessible.</p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <BookmarkButton pageLabel="Yearbooks" />

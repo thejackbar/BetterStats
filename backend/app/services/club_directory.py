@@ -632,20 +632,20 @@ async def crawl_status(session: AsyncSession) -> dict:
     elif clubs == 0:
         state, detail = "idle", "No clubs collected yet. Click Run crawl batch to start."
     elif recent:
-        state, detail = "running", f"Active — last fetch {int(since)}s ago."
+        state, detail = "running", f"Active: last fetch {int(since)}s ago."
     elif pending == 0:
-        state, detail = "complete", f"Backfill complete — {clubs} clubs, all enriched."
+        state, detail = "complete", f"Backfill complete: {clubs} clubs, all enriched."
     elif continuous and not in_win:
         state = "waiting"
-        detail = (f"Outside the active window — resumes at {window['start']} "
+        detail = (f"Outside the active window: resumes at {window['start']} "
                   f"{window['tz']}. {pending} clubs left to enrich.")
     elif continuous and in_win:
         state = "paused"
-        detail = (f"In window, no fetch in {int(since)}s — likely on a break, or "
+        detail = (f"In window, no fetch in {int(since)}s, likely on a break, or "
                   f"the runner stalled. {pending} clubs left.")
     else:
         state = "idle"
-        detail = (f"Idle — {pending} clubs await association enrichment. Run a batch, "
+        detail = (f"Idle: {pending} clubs await association enrichment. Run a batch, "
                   f"or enable the continuous runner.")
 
     return {

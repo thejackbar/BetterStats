@@ -574,7 +574,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
       )}
 
       {data?.length > 0 && (
-        <SectionCard title="Runs Scored — Top Players">
+        <SectionCard title="Runs Scored, Top Players">
           <div className="px-4 py-4">
             <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
               <BarChart
@@ -759,7 +759,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
       )}
 
       {data?.length > 0 && (
-        <SectionCard title="Wickets Taken — Top Bowlers">
+        <SectionCard title="Wickets Taken, Top Bowlers">
           <div className="px-4 py-4">
             <ResponsiveContainer width="100%" height={Math.min(data.length, 15) * 28 + 20}>
               <BarChart
@@ -1017,7 +1017,7 @@ function AwardsTab({ orgId, seasonId, gradeId, clubSlug, yearbookData, awardDefs
                 <div className="flex-1">
                   <PlayerLink id={m.player_id} name={m.player_name} slug={clubSlug} />
                   <div className="font-mono text-[11px] text-pb-faint mt-0.5">
-                    {m.milestone_type} — {m.milestone_value?.toLocaleString()}
+                    {m.milestone_type}, {m.milestone_value?.toLocaleString()}
                     {m.achieved_at && <span className="ml-2">{fmtDate(m.achieved_at)}</span>}
                   </div>
                 </div>
@@ -1423,7 +1423,7 @@ export default function Yearbook() {
 
   usePageMeta(club && yearbook?.season ? {
     title: `${club.name} — ${formatSeason(yearbook.season)} Yearbook | BetterCricket`,
-    description: `${formatSeason(yearbook.season)} season yearbook for ${club.name} — stats, honours, results and records.`,
+    description: `${formatSeason(yearbook.season)} season yearbook for ${club.name}: stats, honours, results and records.`,
     image: club.logo_url || 'https://betterat.cricket/og-image.png',
     url: `https://betterat.cricket/${clubSlug}/yearbook/${seasonSlug || ''}`,
   } : {})

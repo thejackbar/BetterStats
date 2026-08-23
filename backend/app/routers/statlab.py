@@ -145,7 +145,7 @@ async def statlab_query(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade types to count — senior, junior, womens, "
+            "Comma-separated grade types to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, "
             "which is what every other stats surface does."
         ),
@@ -153,7 +153,7 @@ async def statlab_query(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "so a grade that plays several is split correctly. Omitted applies "
             "no format filter."
@@ -209,7 +209,7 @@ async def statlab_derived(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade types to count — senior, junior, womens, "
+            "Comma-separated grade types to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, "
             "which is what every other stats surface does."
         ),
@@ -217,7 +217,7 @@ async def statlab_derived(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "so a grade that plays several is split correctly. Omitted applies "
             "no format filter."

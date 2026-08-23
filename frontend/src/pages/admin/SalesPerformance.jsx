@@ -276,12 +276,12 @@ export default function SalesPerformance() {
   }, [])
 
   const openActivity = useCallback(({ user_id, window, metric, label, what }) => {
-    openCell('activity', `${user_id}|${window}|${metric}`, `${label} — ${what}`,
+    openCell('activity', `${user_id}|${window}|${metric}`, `${label}, ${what}`,
       { user_id, window, metric })
   }, [openCell])
 
   const openPipeline = useCallback(({ owner, cell, contacted_only, label, what }) => {
-    openCell('pipeline', `${owner}|${cell}${contacted_only ? ':c' : ''}`, `${label} — ${what}`,
+    openCell('pipeline', `${owner}|${cell}${contacted_only ? ':c' : ''}`, `${label}, ${what}`,
       { owner, cell, contacted_only: contacted_only ? 'true' : undefined })
   }, [openCell])
 

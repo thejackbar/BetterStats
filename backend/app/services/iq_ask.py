@@ -40,11 +40,11 @@ _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-", re.I)
 
 _SYSTEM = (
     "You are a cricket analyst for a grassroots Australian cricket club. Answer the "
-    "user's question about THIS club using the tools provided — never invent players, "
+    "user's question about THIS club using the tools provided. Never invent players, "
     "clubs or numbers. Find a player with find_players before asking for their detail; "
     "use grades to learn the exact grade names before filtering by grade. Read the "
     "tool results and answer in a few sentences, plain Australian cricket-club tone "
-    "(no corporate words). Never use the \"—\" (em dash) character anywhere in your "
+    "(no corporate words). Never use the \", \" (em dash) character anywhere in your "
     "answer; use a comma, full stop, or parentheses instead. Numbers in the tool "
     "results are the truth.\n"
     "Scope and samples:\n"
@@ -56,10 +56,10 @@ _SYSTEM = (
     "- Treat any figure built from fewer than about 6 innings or 6 wickets as a "
     "small sample: say so plainly rather than leaning on it.\n"
     "- If a tool comes back with 'ambiguous' and a list of players, don't guess "
-    "which one was meant — ask the user which player they mean, naming the options.\n"
+    "which one was meant. Ask the user which player they mean, naming the options.\n"
     "Selection sense:\n"
     "- For picking/dropping/promoting/relegating between teams, judge by who is "
-    "actually IN that side now — each player's 'squad' (their BetterSelect team like "
+    "actually IN that side now, each player's 'squad' (their BetterSelect team like "
     "'1st XI', '2nd XI') is the selection signal. Don't guess the XI from season "
     "averages alone.\n"
     "- A club's grade and its same-numbered XI are usually the same team, so '2nd XI' "
@@ -80,7 +80,7 @@ _SYSTEM = (
     "with its real style.\n"
     "Combinations:\n"
     "- To judge whether two players combine well in the same side (do they play well "
-    "together / win together), use players_together — it gives the team's record when "
+    "together / win together), use players_together. It gives the team's record when "
     "both play vs when only one does.\n"
     "Upcoming games and the opposition:\n"
     "- For any question about an upcoming match ('who should we pick for the 1st XI "
@@ -138,7 +138,7 @@ TOOLS = [
     },
     {
         "name": "players_together",
-        "description": "Two players' record AS A PAIR (all-time): the team's win/loss/draw record and win% in games BOTH of them played, how that compares to games only one of them played (the selection lift), and each player's batting & bowling output in their shared games. Use to judge whether two players combine well in the same side, or to answer 'how do X and Y go together'. Pass two player ids (or names) — get ids from find_players.",
+        "description": "Two players' record AS A PAIR (all-time): the team's win/loss/draw record and win% in games BOTH of them played, how that compares to games only one of them played (the selection lift), and each player's batting & bowling output in their shared games. Use to judge whether two players combine well in the same side, or to answer 'how do X and Y go together'. Pass two player ids (or names). Get ids from find_players.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -202,7 +202,7 @@ TOOLS = [
     },
     {
         "name": "opponent_danger_players",
-        "description": "The opponent's CURRENT-SEASON danger batters and bowlers from the live scouting dossier: their form, averages, record against us, and a suggested plan for each. Pass a fixture_id or an opponent club name. If the dossier hasn't been built yet it starts building in the background and returns status 'building' — answer from opposition_report in the meantime and say the deeper scout will be ready shortly.",
+        "description": "The opponent's CURRENT-SEASON danger batters and bowlers from the live scouting dossier: their form, averages, record against us, and a suggested plan for each. Pass a fixture_id or an opponent club name. If the dossier hasn't been built yet it starts building in the background and returns status 'building'. Answer from opposition_report in the meantime and say the deeper scout will be ready shortly.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -351,7 +351,7 @@ async def _tool_player_detail(session, org_id, *, player_id):
     if not trend:
         return {"player_id": pid, "role": role, "keeper": keeper,
                 "bowling_style": bstyle, "bowling_class": bclass,
-                "note": "Couldn't load this player's full profile — use find_players / current_squad numbers instead."}
+                "note": "Couldn't load this player's full profile. Use find_players / current_squad numbers instead."}
     deep = None
     try:
         deep = await iq_trends.player_deep_dive(session, org_id, pid)
@@ -414,7 +414,7 @@ async def _tool_players_together(session, org_id, *, player_a, player_b):
     if not a or not b:
         return {"error": "Couldn't find one of those players. Call find_players first."}
     if a == b:
-        return {"error": "Those are the same player — pass two different players."}
+        return {"error": "Those are the same player, pass two different players."}
     out = await iq_team.pair_synergy(session, org_id, a, b)
     if isinstance(out, dict):
         out.setdefault("scope", _scope_echo())
@@ -446,7 +446,7 @@ async def _tool_team_overview(session, org_id, *, grade=None, season=None):
         "typical_opening_stand": {"avg": _round(starts.get("avg")), "best": starts.get("best")} if starts else None,
     }
     if season and not season_id:
-        out["note"] = f"Season '{season}' didn't match a season we hold — these figures are ALL-TIME instead."
+        out["note"] = f"Season '{season}' didn't match a season we hold. These figures are ALL-TIME instead."
     return out
 
 
@@ -469,7 +469,7 @@ async def _tool_form_movers(session, org_id, *, season=None):
         "emerging": [{"name": e["name"], "runs": e.get("runs"), "wickets": e.get("wickets")} for e in (ov.get("emerging") or [])[:6]],
     }
     if season and not season_id:
-        out["note"] = f"Season '{season}' didn't match a season we hold — showing the latest season instead."
+        out["note"] = f"Season '{season}' didn't match a season we hold. Showing the latest season instead."
     return out
 
 
@@ -478,7 +478,7 @@ async def _tool_current_squad(session, org_id, *, grade=None, season=None):
     players = await iq_trends.list_players(session, org_id, season_id=season_id, grade_id=grade) or []
     note = None
     if season and not season_id:
-        note = f"Season '{season}' didn't match a season we hold — showing the latest season instead."
+        note = f"Season '{season}' didn't match a season we hold. Showing the latest season instead."
     if grade and not players:
         # A grade name that matched nothing — fall back to the whole squad for
         # that season so the model can filter by the selection squad itself (the
@@ -486,7 +486,7 @@ async def _tool_current_squad(session, org_id, *, grade=None, season=None):
         players = await iq_trends.list_players(session, org_id, season_id=season_id) or []
         note = ((note + " ") if note else "") + (
             f"No players under grade '{grade}' for that season. Showing the whole squad; "
-            "filter by 'squad' (the selection team, e.g. '2nd XI') yourself — a grade and its "
+            "filter by 'squad' (the selection team, e.g. '2nd XI') yourself, a grade and its "
             "same-numbered XI are usually the same side.")
     players = sorted(players, key=lambda p: (p.get("runs") or 0), reverse=True)[:40]
     squads = sorted({p.get("squad_name") for p in players if p.get("squad_name")})
@@ -658,7 +658,7 @@ async def _tool_opponent_danger_players(session, org_id, *, fixture_id=None, opp
             ),
         }
     if status in ("error", "unavailable"):
-        return {"status": status, "note": d.get("message") or "Couldn't build the live scout just now — use opposition_report instead."}
+        return {"status": status, "note": d.get("message") or "Couldn't build the live scout just now. Use opposition_report instead."}
 
     def _bat(p):
         alert = p.get("alert") if isinstance(p.get("alert"), dict) else None

@@ -86,7 +86,7 @@ function RecipientsPanel({ campaignId, unsubCount, bouncedCount }) {
                 </div>
                 {r.events?.length > 0 && (
                   <div className="text-pb-faintest text-[11px] mt-0.5 truncate"
-                    title={r.events.map(e => `${e.type}${e.subtype ? ` (${e.subtype})` : ''}${e.reason ? ` — ${e.reason}` : ''}`).join(' · ')}>
+                    title={r.events.map(e => `${e.type}${e.subtype ? ` (${e.subtype})` : ''}${e.reason ? `, ${e.reason}` : ''}`).join(' · ')}>
                     {r.events.map(e => `${e.type}${e.at ? ` · ${fmtWhen(e.at)}` : ''}`).join(' · ')}
                   </div>
                 )}
@@ -219,7 +219,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
     let m
     while ((m = re.exec(`${subject || ''} ${body || ''}`)) !== null) used.add(m[1])
     const out = [...used].filter(v => !knownVars.has(v)).sort()
-      .map(v => `Unknown variable {{${v}}} — it won't be replaced.`)
+      .map(v => `Unknown variable {{${v}}}. It won't be replaced.`)
     for (const [key, label] of [['utm_source', 'Source'], ['utm_medium', 'Medium'], ['utm_campaign', 'Campaign']]) {
       if (used.has(key) && !String(utm[key] || '').trim()) {
         out.push(`Template uses {{${key}}} but no ${label} is set in UTM link tracking.`)
@@ -240,7 +240,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
       index: r.index ?? index,
       label: r.contact
         ? `To ${r.contact.name || r.contact.email} · contact ${(r.index ?? index) + 1} of ${r.total}`
-        : 'No audience selected yet — showing a sample recipient.',
+        : 'No audience selected yet, showing a sample recipient.',
     }
   }
 
@@ -272,7 +272,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
     try {
       await save(editorRef.current?.flush())
       const r = await api.commsTestCampaign(id, testEmail.trim())
-      setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()}.` : `Test rendered (preview mode — not delivered).` })
+      setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()}.` : `Test rendered (preview mode, not delivered).` })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setBusy('') }
   }
@@ -304,7 +304,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
     const sent = campaign && campaign.status !== 'draft'
     const label = campaign?.name?.trim() || campaign?.subject?.trim() || 'this email'
     const prompt = sent
-      ? `Delete "${label}"? It has already been sent — this removes the club's record of it and can't be undone.`
+      ? `Delete "${label}"? It has already been sent. This removes the club's record of it and can't be undone.`
       : 'Delete this draft?'
     if (!window.confirm(prompt)) return
     try { await api.commsDeleteCampaign(id); onDeleted?.() }
@@ -330,7 +330,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
             readOnly name={campaign.name || campaign.subject} placeholder="(no subject)"
             blurb={campaign.description || (
               campaign.status === 'sending' ? 'This email is going out now.'
-                : campaign.status === 'error' ? 'This send hit an error — the detail is below.'
+                : campaign.status === 'error' ? 'This send hit an error. The detail is below.'
                 : "This email has gone out. It is the club's record of what was sent, so nothing here can be edited."
             )}
             actions={<Badge toneKey={campaign.status === 'error' ? 'block' : campaign.status === 'sending' ? 'accent' : 'ok'}>
@@ -382,7 +382,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
               records, the subject is what a recipient sees. */}
           <RecordTitleRow
             name={subject} onName={setSubject} inputRef={subjectInputRef}
-            placeholder="e.g. Round 5 — training this Thursday"
+            placeholder="e.g. Round 5: training this Thursday"
             blurb="The subject line recipients see in their inbox."
             actions={<Button variant="primary" onClick={onSend} disabled={!!busy || !canSend}
               title={sendMissing.length ? `Add ${sendMissing.join(', ')} to send` : ''}>
@@ -412,7 +412,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                 {templates.length > 0 ? (
                   <select value={templateId} onChange={e => onPickTemplate(e.target.value)}
                     className={`${INPUT_CLS} cursor-pointer flex-1 min-w-0`}>
-                    <option value="">No template — write from scratch</option>
+                    <option value="">No template: write from scratch</option>
                     {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </select>
                 ) : (
@@ -527,7 +527,7 @@ export default function EmailDetail({ id, onChanged, onDeleted, onSent }) {
                   className={INPUT_CLS} />
                 <Button onClick={onTest} disabled={busy === 'test'}>{busy === 'test' ? 'Sending…' : 'Send test'}</Button>
               </div>
-              {!live && <div className="text-pb-faintest text-xs mt-2">Preview mode — tests are rendered but not delivered until a provider is connected in Settings.</div>}
+              {!live && <div className="text-pb-faintest text-xs mt-2">Preview mode. Tests are rendered but not delivered until a provider is connected in Settings.</div>}
             </div>
           </div>
         </>

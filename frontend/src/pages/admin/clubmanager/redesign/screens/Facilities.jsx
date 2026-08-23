@@ -103,17 +103,17 @@ export default function Facilities({ st, patch, narrow }) {
   const approveReq = async (r) => {
     if (r.clashes && r.clashes.length) {
       const c = r.clashes[0]
-      patch({ toast: { tone: 'block', title: 'That would double-book ' + r.facility_name + '.', body: 'Move it, shorten it, or decline — ' + c.title + ' already holds the space.' } })
+      patch({ toast: { tone: 'block', title: 'That would double-book ' + r.facility_name + '.', body: 'Move it, shorten it, or decline. ' + c.title + ' already holds the space.' } })
       return
     }
     const res = await api.facilityRequestApprove(r.id).catch(() => null)
     if (res && res.ok === false && res.clashes) { patch({ toast: { tone: 'block', title: 'That would double-book ' + r.facility_name + '.', body: 'A confirmed booking already holds the space.' } }); await loadReqs(); return }
     await loadReqs()
     api.assetsListBookings({ upcomingOnly: false }).then(b => setData(d => ({ ...d, bookings: b?.bookings || b || [] }))).catch(() => {})
-    patch({ toast: { tone: 'ok', title: 'Approved — ' + r.title + '.', body: 'On the ' + r.facility_name + ' calendar now.' } })
+    patch({ toast: { tone: 'ok', title: 'Approved, ' + r.title + '.', body: 'On the ' + r.facility_name + ' calendar now.' } })
   }
-  const declineReq = async (r) => { await api.facilityRequestDecline(r.id).catch(() => {}); await loadReqs(); patch({ toast: { tone: 'info', title: 'Declined — ' + r.title + '.', body: 'The requester can be notified with your reason.' } }) }
-  const clearReqs = async () => { if (!window.confirm('Clear all pending requests? (Testing reset — only this club.)')) return; await api.facilityRequestsClear().catch(() => {}); await loadReqs() }
+  const declineReq = async (r) => { await api.facilityRequestDecline(r.id).catch(() => {}); await loadReqs(); patch({ toast: { tone: 'info', title: 'Declined. ' + r.title + '.', body: 'The requester can be notified with your reason.' } }) }
+  const clearReqs = async () => { if (!window.confirm('Clear all pending requests? (Testing reset, only this club.)')) return; await api.facilityRequestsClear().catch(() => {}); await loadReqs() }
   const submitReq = async () => {
     if (!form.facility_id || !form.title || !form.starts_at || !form.ends_at) { patch({ toast: { tone: 'block', title: 'Fill in the request.', body: 'Facility, title, start and end are required.' } }); return }
     await api.facilityRequestCreate({ facility_id: form.facility_id, title: form.title, starts_at: new Date(form.starts_at).toISOString(), ends_at: new Date(form.ends_at).toISOString(), requester_name: form.requester_name || null }).catch(() => {})
@@ -167,7 +167,7 @@ export default function Facilities({ st, patch, narrow }) {
       {tab === 'requests' && (
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '62rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <p style={{ fontSize: 13, color: C.dim, margin: 0, lineHeight: 1.55, flex: 1 }}>Each request is checked against every confirmed booking on that space before you see it — clashes are flagged, not discovered later.</p>
+            <p style={{ fontSize: 13, color: C.dim, margin: 0, lineHeight: 1.55, flex: 1 }}>Each request is checked against every confirmed booking on that space before you see it. Clashes are flagged, not discovered later.</p>
             <button onClick={() => setAdding(a => !a)} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', flexShrink: 0 }}>{adding ? 'Cancel' : '+ New request'}</button>
             {reqs.length > 0 && <button onClick={clearReqs} style={{ padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer', flexShrink: 0 }}>Clear all</button>}
           </div>
@@ -203,7 +203,7 @@ export default function Facilities({ st, patch, narrow }) {
                 {r.clashes.length > 0 && (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 7, marginTop: 9, padding: '8px 10px', borderRadius: 7, background: 'rgba(239,91,91,0.08)', fontSize: 12, color: C.block, lineHeight: 1.4 }}>
                     <span style={{ flexShrink: 0 }}>⚠</span>
-                    <span>Double-booking — {r.clashes.map(c => c.title).join(', ')} already holds this space.</span>
+                    <span>Double-booking. {r.clashes.map(c => c.title).join(', ')} already holds this space.</span>
                   </div>
                 )}
               </div>
@@ -219,7 +219,7 @@ export default function Facilities({ st, patch, narrow }) {
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '56rem' }}>
           <div style={cap}>FACILITIES</div>
           <EntityManager
-            describe="Your grounds, nets and rooms — bookings and the availability grid read from these."
+            describe="Your grounds, nets and rooms. Bookings and the availability grid read from these."
             load={() => api.assetsListFacilities().then(r => (r?.facilities || r || []).filter(f => f.is_active !== false))}
             fields={[{ key: 'name', label: 'Facility name', type: 'text', required: true, span: 2 }, { key: 'facility_type', label: 'Kind', type: 'text' }, { key: 'key_location', label: 'Key location', type: 'text' }, { key: 'description', label: 'Description', type: 'text', span: 2 }]}
             onCreate={v => api.assetsCreateFacility(v)} onUpdate={(id, v) => api.assetsUpdateFacility(id, v)} onDelete={id => api.assetsDeleteFacility(id)}
@@ -229,7 +229,7 @@ export default function Facilities({ st, patch, narrow }) {
 
           <div style={{ ...cap, marginTop: 26 }}>ASSETS</div>
           <EntityManager
-            describe="Club gear — kit bags, machines, markers and the like."
+            describe="Club gear: kit bags, machines, markers and the like."
             load={() => api.assetsListItems({}).then(r => (r?.items || r || []).filter(a => a.is_active !== false))}
             fields={[{ key: 'name', label: 'Asset', type: 'text', required: true, span: 2 }, { key: 'category', label: 'Category', type: 'text' }, { key: 'condition', label: 'Condition', type: 'text' }, { key: 'status', label: 'Status', type: 'text' }, { key: 'notes', label: 'Notes', type: 'text', span: 2 }]}
             onCreate={v => api.assetsCreateItem(v)} onUpdate={(id, v) => api.assetsUpdateItem(id, v)} onDelete={id => api.assetsDeleteItem(id)}

@@ -68,13 +68,13 @@ export function topZonePhrase(cells) {
 
 /* Dismissal type → a one-line tactical tell (batter's weakness). */
 const _DISM_TELL = {
-  bowled: 'gets bowled often — attack the stumps',
-  lbw: 'falls lbw regularly — bowl straight and full',
-  'caught behind': 'nicks off — feed the channel and stack the cordon',
-  caught: 'holes out — push catchers into the deep',
-  'c&b': 'chips it back — follow through ready',
-  stumped: 'can be drawn out — bring the keeper up',
-  'run out': 'suspect between the wickets — pressure the single',
+  bowled: 'gets bowled often, attack the stumps',
+  lbw: 'falls lbw regularly, bowl straight and full',
+  'caught behind': 'nicks off. Feed the channel and stack the cordon',
+  caught: 'holes out. Push catchers into the deep',
+  'c&b': 'chips it back. Follow through ready',
+  stumped: 'can be drawn out. Bring the keeper up',
+  'run out': 'suspect between the wickets, pressure the single',
   'hit wicket': 'gets cramped on the back foot',
 }
 
@@ -92,7 +92,7 @@ export function buildBattingDna(intel, dismissals) {
     const top = ds.slice().sort((a, b) => (b.count ?? b.pct ?? 0) - (a.count ?? a.pct ?? 0))[0]
     const share = total ? (top.count ?? top.pct ?? 0) / total : 0
     const tell = _DISM_TELL[_norm(top.type)]
-    if (tell && share >= 0.33) out.push({ tone: 'data', text: `${top.type[0].toUpperCase()}${top.type.slice(1)} is his most common dismissal (${Math.round(share * 100)}%) — ${tell}.` })
+    if (tell && share >= 0.33) out.push({ tone: 'data', text: `${top.type[0].toUpperCase()}${top.type.slice(1)} is his most common dismissal (${Math.round(share * 100)}%): ${tell}.` })
   }
   const vuln = labelList(i.vuln_bowling, BOWLING_KINDS)
   if (vuln.length) out.push({ tone: 'scout', text: `Vulnerable to ${vuln.join(', ').toLowerCase()}.` })
@@ -107,7 +107,7 @@ export function buildBattingDna(intel, dismissals) {
   const favShots = labelList(i.fav_shots, BAT_SHOTS)
   const legacyShots = (!riskyShots.length && !favShots.length) ? labelList(i.shots, BAT_SHOTS) : []
   const risky = riskyShots.length ? riskyShots : legacyShots
-  if (risky.length) out.push({ tone: 'scout', text: `Goes after the ${risky.join(', ').toLowerCase()} — set the trap.` })
+  if (risky.length) out.push({ tone: 'scout', text: `Goes after the ${risky.join(', ').toLowerCase()}. Set the trap.` })
   if (favShots.length) out.push({ tone: 'scout', text: `Favours the ${favShots.join(', ').toLowerCase()}.` })
   if (i.weaknesses) out.push({ tone: 'scout', text: i.weaknesses })
   return { bullets: out, plan: i.plan || null, strengths: i.strengths || null }

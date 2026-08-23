@@ -121,7 +121,7 @@ export default function MerchReports() {
           <div>
             <h3 className="font-display font-bold text-sm mb-2">Owed by members</h3>
             {(data.owed_by_player || []).length === 0 ? (
-              <div className="pb-card p-6 text-center text-pb-faint text-sm">Nothing outstanding — everyone's square.</div>
+              <div className="pb-card p-6 text-center text-pb-faint text-sm">Nothing outstanding, everyone's square.</div>
             ) : (
               <div className="pb-card divide-y divide-pb-hairline/50">
                 {data.owed_by_player.map((p) => (

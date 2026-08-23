@@ -256,7 +256,7 @@ async def prepare_club(data: PrepareClubRequest, db: AsyncSession = Depends(get_
     onboarding wizard's own step for it."""
     org_id = _parse_uuid(data.org_id)
     if not org_id:
-        raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
+        raise HTTPException(status_code=422, detail="Invalid club id: pick a club from the search results")
 
     name = (data.name or "").strip()
     existing = await find_matching_organisation(db, org_id, name, include_archived=False)
@@ -358,7 +358,7 @@ async def send_verification_code(data: SendCodeRequest, db: AsyncSession = Depen
 
     rate_limit.enforce(
         f"ssvr:send:{email}", SEND_LIMIT, SEND_WINDOW_SECONDS,
-        detail="Too many verification codes requested for this email — try again later.",
+        detail="Too many verification codes requested for this email. Try again later.",
     )
 
     try:
@@ -390,7 +390,7 @@ async def check_verification_code(data: CheckCodeRequest, db: AsyncSession = Dep
     lock_key = f"ssvr:verify:{email}"
     rate_limit.assert_not_locked(
         lock_key, VERIFY_MAX_FAILURES, VERIFY_LOCKOUT_SECONDS,
-        detail="Too many incorrect attempts — try again later or request a new code.",
+        detail="Too many incorrect attempts. Try again later or request a new code.",
     )
 
     outcome = await verification.check_code(db, email, code)
@@ -568,7 +568,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
 
     org_id = _parse_uuid(data.org_id)
     if not org_id:
-        raise HTTPException(status_code=422, detail="Invalid club id — pick a club from the search results")
+        raise HTTPException(status_code=422, detail="Invalid club id: pick a club from the search results")
     dup = await find_matching_organisation(db, org_id, data.name, include_archived=False)
     if dup:
         admin_label = await _primary_admin_label(db, dup.id)
@@ -622,7 +622,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         await db.flush()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="That username or email was just taken — try again.")
+        raise HTTPException(status_code=409, detail="That username or email was just taken. Try again.")
 
     # Club creation + sync kickoff + marketing-directory link: the same
     # underlying logic the existing authenticated-user "onboard" flow uses
@@ -783,7 +783,7 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
             status_code=500,
             detail=(
                 "The club and account were created, but finishing setup failed. "
-                f"Contact support with reference {org.id}/{user.id} — don't "
+                f"Contact support with reference {org.id}/{user.id}. Don't "
                 "retry, this needs manual completion."
             ),
         )

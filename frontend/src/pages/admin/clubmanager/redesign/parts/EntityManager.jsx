@@ -84,7 +84,7 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
       const arr = Array.isArray(rows) ? rows : []
       setItems(arr)
       notify()
-      if (arr.length === 0) setErr('Starter pack ran but nothing was added — these items may already exist (possibly archived). Add one manually below, or check with support.')
+      if (arr.length === 0) setErr('Starter pack ran but nothing was added. These items may already exist (possibly archived). Add one manually below, or check with support.')
     } catch (e) {
       setErr('Could not add the starter pack: ' + String(e?.message || e))
     } finally { setBusy(false) }

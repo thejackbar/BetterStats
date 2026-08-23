@@ -68,7 +68,7 @@ export default function UnrosteredGuests({ onPromoted }) {
     try {
       const r = await api.nmPromoteGuest(key, opts)
       const moved = r.sessions_moved === 1 ? '1 session' : `${r.sessions_moved} sessions`
-      toast.success(`${okMsg(r)} — ${moved} moved across`)
+      toast.success(`${okMsg(r)}, ${moved} moved across`)
       setMatching(null); setQ('')
       load()
       onPromoted?.()
@@ -118,8 +118,8 @@ export default function UnrosteredGuests({ onPromoted }) {
               {pending === 1 ? 'One person' : `${pending} people`} checked in and left their details.{' '}
               <Link to="/admin/betterselect/nets" className="underline text-pb-accent">
                 Review them in Nets → Check-in
-              </Link>{' '}
-              — their mobile, email and date of birth are there, so they’re better added from that screen.
+              </Link>
+              , their mobile, email and date of birth are there, so they’re better added from that screen.
             </div>
           )}
 

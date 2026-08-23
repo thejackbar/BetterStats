@@ -410,7 +410,7 @@ function TeamPicker({ value, grades, onChange, label = 'Team' }) {
             {hasNonSenior && (
               <button onClick={() => { const t = seniorsOnlyTeam(grades); if (t) onChange(t) }}
                 className="iq-display font-semibold text-[11.5px] transition" style={presetBtn(seniorsActive)}
-                title="Every senior grade — excludes junior, women's, masters and mixed/social grades, but keeps games we can't categorise (a grade-less manual entry, an import residual) rather than dropping them">Seniors only</button>
+                title="Every senior grade: excludes junior, women's, masters and mixed/social grades, but keeps games we can't categorise (a grade-less manual entry, an import residual) rather than dropping them">Seniors only</button>
             )}
           </div>
           <div className="space-y-0.5 max-h-72 overflow-y-auto iq-scroll">

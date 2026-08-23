@@ -74,7 +74,7 @@ export function FieldRow({ field, label, required, value, headers, conf, matched
       </span>
       <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
       <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={e => onMap(field, e.target.value)}>
-        <option value="">— not in my file —</option>
+        <option value="">, not in my file, </option>
         {headers.map(h => <option key={h} value={h}>{h}</option>)}
       </select>
       {/* A column matched on its VALUES rather than its header (an outcome
@@ -88,7 +88,7 @@ export function FieldRow({ field, label, required, value, headers, conf, matched
 }
 
 export function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'grade' ? '— Unresolved (kept against the whole club) —' : '— Unresolved (will be skipped) —'
+  if (!value) return kind === 'grade' ? '. Unresolved (kept against the whole club). ' : '. Unresolved (will be skipped), '
   if (value === '__new__') return kind === 'award' ? '+ Add as a new award type' : '+ Add as new player'
   if (value === '__skip__') return kind === 'award' ? "Don't import this award" : 'Skip this row'
   if (value === '__unassigned__') return '↪ Unassigned (no matching season)'
@@ -341,7 +341,7 @@ export function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverr
       <div className="pb-card p-5 mb-4">
         <h2 className="font-display font-semibold text-lg text-pb-text mb-1">Match players</h2>
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
-          {subtitle || 'Three quick passes: confirm the exact matches, review the close ones, then anything with no match defaults to a brand-new player — a name in your history is never silently dropped.'}
+          {subtitle || 'Three quick passes: confirm the exact matches, review the close ones, then anything with no match defaults to a brand-new player. A name in your history is never silently dropped.'}
         </p>
         {loading && rows.length === 0 ? (
           <div className="py-10 text-center"><LoadingSpinner message="Matching players…" /></div>
@@ -358,7 +358,7 @@ export function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverr
 
             {active === 'matched' && (
               <p className="text-[12px] text-green-300 mb-3">
-                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched your players exactly — nothing to do unless one looks wrong.
+                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched your players exactly. Nothing to do unless one looks wrong.
               </p>
             )}
             {active === 'close' && buckets.close.length > 0 && (
@@ -495,7 +495,7 @@ export function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, 
             </button>
             {kind === 'season' && noMatchCount > 0 && (
               <button onClick={onBulkCreateSeasons} disabled={bulkCreating}
-                title="Creates a season named after each unmatched label (parsing out a year where there is one) and assigns it — no retyping needed for sheets that just use bare years."
+                title="Creates a season named after each unmatched label (parsing out a year where there is one) and assigns it, no retyping needed for sheets that just use bare years."
                 className="font-mono text-[10px] tracking-wide2 rounded px-2.5 py-1 font-semibold text-black bg-[var(--pb-accent)] disabled:opacity-50">
                 {bulkCreating ? 'CREATING…' : `CREATE SEASONS FOR ALL UNMATCHED (${noMatchCount})`}
               </button>
@@ -539,7 +539,7 @@ export function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, 
               )}
               {!loading && rows.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-pb-dim text-[12px]">Nothing to match.</td></tr>}
               {!loading && rows.length > 0 && shown.length === 0 && (
-                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'grade' ? 'grades' : 'seasons'} matched — nothing to review.</td></tr>
+                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'grade' ? 'grades' : 'seasons'} matched. Nothing to review.</td></tr>
               )}
             </tbody>
           </table>

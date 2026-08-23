@@ -61,9 +61,9 @@ function RuleFormModal({ open, onClose, trigger, stages, existing, onSaved }) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`${existing ? 'Edit' : 'Add'} rule — ${trigger.label}`}>
+    <Modal open={open} onClose={onClose} title={`${existing ? 'Edit' : 'Add'} rule, ${trigger.label}`}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Label" hint="Shown on the rule row — describe what this specific rule is for.">
+        <Field label="Label" hint="Shown on the rule row. Describe what this specific rule is for.">
           <TextInput value={label} onChange={e => setLabel(e.target.value)} placeholder={trigger.label} />
         </Field>
         {trigger.param_key && (
@@ -103,7 +103,7 @@ function TriggerSection({ trigger, rules, stages, onEdit, onAdd, onDelete }) {
         <Btn variant="ghost" sm onClick={onAdd}>+ Add rule</Btn>
       </div>
       {rules.length === 0 ? (
-        <p className="text-[12px] text-pb-faintest italic">No rules configured — this automation never fires.</p>
+        <p className="text-[12px] text-pb-faintest italic">No rules configured. This automation never fires.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-[12.5px]">
@@ -168,11 +168,11 @@ export default function SuperCrmAutomation() {
         <Link to="/admin/super/crm" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">
           &larr; SALES PIPELINE
         </Link>
-        <h1 className="font-display font-bold text-xl">BetterCRM — Sales Automation</h1>
+        <h1 className="font-display font-bold text-xl">BetterCRM. Sales Automation</h1>
         <p className="text-[12.5px] text-pb-faint mt-1 max-w-3xl">
-          Every criterion that automatically creates or advances a platform-pipeline deal —
+          Every criterion that automatically creates or advances a platform-pipeline deal, 
           a Contact-Us enquiry count, an engagement score threshold, a trial or subscription
-          event — is configured here, not hardcoded. Disabling every rule for a trigger turns
+          event. Is configured here, not hardcoded. Disabling every rule for a trigger turns
           that automation off entirely; nothing is ever deleted just by being switched off.
         </p>
       </div>

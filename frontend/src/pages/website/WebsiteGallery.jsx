@@ -35,7 +35,7 @@ function AlbumView({ slug, albumId }) {
   const [loading, setLoading] = useState(true)
   const [lightbox, setLightbox] = useState(null)  // index
 
-  usePageMeta({ title: album ? `${album.title} — ${site.name}` : `Gallery — ${site.name}` })
+  usePageMeta({ title: album ? `${album.title}, ${site.name}` : `Gallery: ${site.name}` })
 
   useEffect(() => {
     let cancelled = false
@@ -88,7 +88,7 @@ function AlbumsGrid({ slug }) {
   const [albums, setAlbums] = useState([])
   const [loading, setLoading] = useState(true)
 
-  usePageMeta({ title: `Gallery — ${site.name}`, url: `https://betterat.cricket/${slug}/website/gallery` })
+  usePageMeta({ title: `Gallery: ${site.name}`, url: `https://betterat.cricket/${slug}/website/gallery` })
 
   useEffect(() => {
     let cancelled = false

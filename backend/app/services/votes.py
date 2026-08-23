@@ -564,7 +564,7 @@ async def send_nudge(db: AsyncSession, club, medal: VoteMedal, fixture: Fixture,
     # will send several reminders about the same match, and "cast your vote"
     # twice with nothing to tell them apart reads as a duplicate email.
     award = medal.name if medal and medal.name else DEFAULT_MEDAL_NAME
-    subject = f"{round_label_for(fixture)} v {opponent} — {award} votes"
+    subject = f"{round_label_for(fixture)} v {opponent}, {award} votes"
     first = (player.get("name") or "").split(" ")[0] or "there"
     body_html = (
         f"<p>Hi {first},</p>"

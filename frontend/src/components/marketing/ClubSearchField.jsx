@@ -207,7 +207,7 @@ export default function ClubSearchField({
                   }`}
                 >
                   <span className="flex items-start justify-between gap-3">
-                    {/* Wraps rather than truncates — the club name is the one
+                    {/* Wraps rather than truncates. The club name is the one
                         thing being chosen between, and plenty of real ones are
                         longer than this column is wide. */}
                     <span className="text-sm text-white">{orgName(org)}</span>

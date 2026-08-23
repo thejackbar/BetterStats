@@ -65,7 +65,7 @@ function BallotEntryForm({ detail, medalId, onSaved }) {
           <label className="block font-mono text-[10px] uppercase tracking-wide2 text-pb-faint mb-1">Voter</label>
           <select value={voterId} onChange={(e) => setVoterId(e.target.value)}
             className="bg-pb-surface2 border pb-hairline rounded-lg px-3 py-2 text-sm min-w-[180px] focus:outline-none focus:border-pb-accent">
-            <option value="">— who's voting? —</option>
+            <option value="">, who's voting?, </option>
             {voterOptions.map((p) => <option key={p.id} value={p.id}>{p.name}{p.is_captain ? ' (c)' : ''}</option>)}
             <option value="__other__">Someone else (coach, supporter…)</option>
           </select>
@@ -210,7 +210,7 @@ export default function FixtureDetail({ fixtureId, medalId, onBack }) {
       {(fx.state === 'closed' || fx.state === 'locked') && (
         <div className="rounded-lg px-4 py-3 text-sm bg-pb-surface2 border pb-hairline text-pb-dim">
           Voting {fx.state === 'locked' ? 'is locked' : 'has closed'} for this game, but you can still enter
-          ballots below without reopening it — handy for catching up at the end of a season.
+          ballots below without reopening it. Handy for catching up at the end of a season.
         </div>
       )}
 

@@ -48,7 +48,7 @@ export default function AflAdminSync() {
       <div className="pb-card p-4 space-y-3">
         <SectionTitle>Data sync</SectionTitle>
         <p className="text-sm text-pb-dim">
-          <strong className="text-pb-text">Sync Now</strong> pulls the latest games and stats from PlayHQ — safe to run anytime.{' '}
+          <strong className="text-pb-text">Sync Now</strong> pulls the latest games and stats from PlayHQ, safe to run anytime.{' '}
           <strong className="text-pb-text">Full Rebuild</strong> wipes the synced game data and re-pulls everything (slow).
         </p>
         <div className="flex flex-wrap gap-2">
@@ -110,7 +110,7 @@ export default function AflAdminSync() {
                 </tr>
               ))}
               {runs.length === 0 && (
-                <tr><td colSpan={6} className="px-2 py-3 text-pb-faint">No syncs yet — run one above.</td></tr>
+                <tr><td colSpan={6} className="px-2 py-3 text-pb-faint">No syncs yet. Run one above.</td></tr>
               )}
             </tbody>
           </table>

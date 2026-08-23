@@ -274,7 +274,7 @@ export default function AdminSponsors() {
                             </a>
                           )}
                           {!sponsor.logo_url && (
-                            <span className="text-amber-400 text-[10px] font-mono">No logo — sponsor won't appear in footer</span>
+                            <span className="text-amber-400 text-[10px] font-mono">No logo: sponsor won't appear in footer</span>
                           )}
                         </>
                       )}

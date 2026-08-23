@@ -10,6 +10,6 @@ export default {
     "If your sheet carries its own player ID, map it. Two spellings of one name are then treated as one person, and two different people who share a name are kept apart and put in front of you to split rather than having one person's honours land on the other's profile.",
     'A row that names no award is skipped and counted, so a sheet that also records who turned out each year can be uploaded exactly as it is.',
     'Re-uploading a corrected sheet adds what is new and leaves what is already recorded alone, so nothing doubles up.',
-    "Categories are worked out from the award's own name — Life Membership, Hall of Fame, premierships and games and goals milestones each land in the right place — and every one of them can be changed before you import.",
+    "Categories are worked out from the award's own name. Life Membership, Hall of Fame, premierships and games and goals milestones each land in the right place, and every one of them can be changed before you import.",
   ],
 }

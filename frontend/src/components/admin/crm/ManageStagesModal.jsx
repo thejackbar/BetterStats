@@ -81,7 +81,7 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
   const remove = async (stage) => {
     if (!window.confirm(`Delete the "${stage.name}" stage?`)) return
     try { await c.deleteStage(stage.id); onChanged() }
-    catch (e) { toast.error(e.message || 'Could not delete stage — move its records out first') }
+    catch (e) { toast.error(e.message || 'Could not delete stage. Move its records out first') }
   }
 
   return (
@@ -114,7 +114,7 @@ export default function ManageStagesModal({ open, onClose, pipelineId, stages, o
               <Pill tone={s.is_lost ? 'red' : 'faint'}>Lost</Pill>
             </button>
             <button onClick={() => toggleFlag(s, 'hidden_from_board')} className="shrink-0"
-              title="Hide this column from the Kanban board — a deal can still be filed into it via the Stage dropdown">
+              title="Hide this column from the Kanban board. A deal can still be filed into it via the Stage dropdown">
               <Pill tone={s.hidden_from_board ? 'amber' : 'faint'}>{s.hidden_from_board ? 'Hidden' : 'On board'}</Pill>
             </button>
             <button onClick={() => remove(s)} className="text-pb-faintest hover:text-pb-red text-[11px] shrink-0">Delete</button>

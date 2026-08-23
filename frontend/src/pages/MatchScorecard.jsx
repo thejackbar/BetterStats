@@ -241,7 +241,7 @@ function FillInBadge() {
   return (
     <span
       className="ml-1.5 align-middle font-mono text-[9px] tracking-wide2 px-1.5 py-0.5 rounded border border-pb-amber/30 text-pb-amber whitespace-nowrap"
-      title="Not a registered club player — filled in for this game"
+      title="Not a registered club player. Filled in for this game"
     >
       FILL-IN
     </span>
@@ -648,7 +648,7 @@ function ClaimFillInModal({ row, existingPlayers, onClose, onSaved }) {
         )}
 
         <label className="block font-mono text-[10px] text-pb-faintest mb-1">
-          Reference note (optional — e.g. a pasted PlayHQ profile link, for your own records only)
+          Reference note (optional: e.g. a pasted PlayHQ profile link, for your own records only)
         </label>
         <textarea
           value={note}

@@ -73,12 +73,12 @@ export default function PublicEventRegister() {
 
         {paidParam === '1' && (
           <div className="rounded-lg px-3.5 py-2.5 mb-4 text-sm text-center" style={{ background: 'color-mix(in srgb, var(--pb-positive) 12%, transparent)', color: 'var(--pb-positive)', border: '1px solid color-mix(in srgb, var(--pb-positive) 35%, transparent)' }}>
-            Payment received — thanks, see you there!
+            Payment received, thanks, see you there!
           </div>
         )}
         {paidParam === '0' && (
           <div className="rounded-lg px-3.5 py-2.5 mb-4 text-sm text-center" style={{ background: 'color-mix(in srgb, var(--pb-amber) 12%, transparent)', color: 'var(--pb-amber)', border: '1px solid color-mix(in srgb, var(--pb-amber) 35%, transparent)' }}>
-            Checkout cancelled — nothing was charged. You can register again below.
+            Checkout cancelled. Nothing was charged. You can register again below.
           </div>
         )}
 

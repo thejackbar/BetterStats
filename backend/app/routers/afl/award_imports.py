@@ -340,11 +340,11 @@ def _build_identities(rows: list, mapping: dict) -> tuple:
                 others = [s["spellings"].most_common(1)[0][0] for k, s in g["by_name"].items()
                           if k != nkey and s["spellings"]]
                 note = (f"Your sheet has ID {g['ref']} against a different name too "
-                        f"({', '.join(others[:3])}) — kept as separate people, since one ID "
+                        f"({', '.join(others[:3])}). Kept as separate people, since one ID "
                         f"covering two names is an ID that was reused.")
             elif spellings:
                 note = ("Spelled " + ", ".join(f'"{s}"' for s in spellings[:3])
-                        + " in your sheet — treated as one person.")
+                        + " in your sheet, treated as one person.")
             out.append({"key": key, "ref": g["ref"], "raw_name": name,
                         "rows": len(sub["row_indexes"]), "spellings": spellings,
                         "sheet_note": note})
@@ -395,7 +395,7 @@ def _match_identities(identities: list, players: list) -> None:
                 "note": ("Your sheet has this name under "
                          + (f"{len(siblings)} different player IDs ({', '.join(refs[:4])})"
                             if refs else f"{len(siblings)} separate entries")
-                         + " — point each at the right player so one person's honours "
+                         + ". Point each at the right player so one person's honours "
                            "don't land on the other's profile."),
             }
         if ident.get("sheet_note"):
@@ -545,7 +545,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             row["status"], row["status_note"] = "skipped", "Award skipped."
         elif not ident.get("player_id") and ident.get("status") != "new":
             row["status"], row["status_note"] = "blocked", (
-                "Two people share this name — pick the right one on the Players step."
+                "Two people share this name. Pick the right one on the Players step."
                 if ident.get("status") == "clash" else "Match this player on the Players step.")
         else:
             dedupe = (key, (season or "").lower(), akey)
@@ -557,9 +557,9 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             already = (pid, (season or "").lower(), akey) in have_by_id if pid else \
                       (_norm(ident["raw_name"]), (season or "").lower(), akey) in have_by_name
             if dedupe in seen:
-                row["status"], row["status_note"] = "duplicate", "Same award, same season, same player — imported once."
+                row["status"], row["status_note"] = "duplicate", "Same award, same season, same player, imported once."
             elif already:
-                row["status"], row["status_note"] = "exists", "Already on the honour board — left alone."
+                row["status"], row["status_note"] = "exists", "Already on the honour board, left alone."
             else:
                 seen.add(dedupe)
                 row["status"], row["status_note"] = "ready", None
@@ -595,7 +595,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             reasons[r["status_note"]] = reasons.get(r["status_note"], 0) + 1
         top = sorted(reasons.items(), key=lambda kv: -kv[1])[:3]
         warnings.append({"kind": "sheet_error", "text":
-                         f"{len(blocked)} row(s) can't be imported yet — "
+                         f"{len(blocked)} row(s) can't be imported yet, "
                          + "; ".join(f"{n}× {why}" for why, n in top)})
     clashes = [i for i in identities if i.get("status") == "clash"]
     if clashes:
@@ -605,19 +605,19 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
             "kind": "sheet_error" if at_stake else "check",
             "text": (f"{len(names)} name(s) cover more than one person in your sheet: "
                      + ", ".join(names[:5]) + (" …" if len(names) > 5 else "")
-                     + (" — set each one on the Players step, or their awards won't import."
+                     + (". Set each one on the Players step, or their awards won't import."
                         if at_stake else
-                        " — none of them has an award in this sheet, so nothing is waiting on it.")),
+                        ". None of them has an award in this sheet, so nothing is waiting on it.")),
         })
     no_award = sum(1 for r in built if r["status"] == "skipped" and r["status_note"] == "No award named on this row.")
     if no_award:
         warnings.append({"kind": "check", "text":
-                         f"{no_award} row(s) name no award — skipped. Those are usually a record of who "
+                         f"{no_award} row(s) name no award, skipped. Those are usually a record of who "
                          "played that year rather than an honour."})
     exists = sum(1 for r in built if r["status"] == "exists")
     if exists:
         warnings.append({"kind": "check", "text":
-                         f"{exists} row(s) are already on the honour board — left alone, so re-uploading a "
+                         f"{exists} row(s) are already on the honour board. Left alone, so re-uploading a "
                          "corrected sheet never doubles anything up."})
     new_defs = sorted({r["achievement"] for r in importable if r["creates_award"] and r["achievement"]})
     if new_defs:
@@ -627,7 +627,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
     no_season = sum(1 for r in importable if not r["season"])
     if no_season:
         warnings.append({"kind": "check", "text":
-                         f"{no_season} row(s) have no season — they import without a year against them."})
+                         f"{no_season} row(s) have no season, they import without a year against them."})
 
     detail = built[:ROW_DETAIL_LIMIT]
 
@@ -721,7 +721,7 @@ async def commit(
     resolved = await _resolve(db, club.id, req)
     importable = resolved["_importable"]
     if not importable:
-        raise HTTPException(422, "Nothing to import — no rows are ready. Check the player and award "
+        raise HTTPException(422, "Nothing to import, no rows are ready. Check the player and award "
                                  "matches and try again.")
 
     # 1. People the club doesn't have yet. Same identity rule as Import

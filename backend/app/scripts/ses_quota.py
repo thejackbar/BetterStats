@@ -95,7 +95,7 @@ def _get_account() -> dict:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", "replace")[:400]
-        raise RuntimeError(f"SES GetAccount failed: HTTP {e.code} — {body}") from None
+        raise RuntimeError(f"SES GetAccount failed: HTTP {e.code}, {body}") from None
 
 
 async def _db_sent_last_24h() -> "int | None":

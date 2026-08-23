@@ -153,7 +153,7 @@ function ClubHistoryPanel({ settings, onSaved }) {
       <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Club history</p>
       <p className="text-sm text-pb-dim mb-4 leading-relaxed">
         Shown under your club's name on the public dashboard. Leave anything you don't
-        know blank — a former name with no dates against it still shows.
+        know blank. A former name with no dates against it still shows.
       </p>
 
       <div className="mb-5">
@@ -295,7 +295,7 @@ export default function AflAdminSettings() {
           </button>
         </div>
         <p className="text-sm text-pb-dim mb-4 leading-relaxed">
-          Your club's colours across the public site — headings, charts, buttons and the page
+          Your club's colours across the public site: headings, charts, buttons and the page
           background.
         </p>
 
@@ -326,7 +326,7 @@ export default function AflAdminSettings() {
           />
           <ColorField
             label="Secondary colour" fallback={BRAND.accent2} value={theme.accent2}
-            hint="Your second club colour — the games chart and the bar beside your club name."
+            hint="Your second club colour. The games chart and the bar beside your club name."
             onChange={v => setColor('accent2', v)}
           />
           <ColorField
@@ -373,7 +373,7 @@ export default function AflAdminSettings() {
         <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-1">Public leaderboard</p>
         <p className="text-sm text-pb-dim mb-2 leading-relaxed">
           Games and Goals always show. Choose which of the other leaderboard categories your public site
-          also offers — a club with no Best on Ground data recorded, or that would rather keep vote counts
+          also offers. A club with no Best on Ground data recorded, or that would rather keep vote counts
           private, can switch any of these off.
         </p>
         <Toggle
@@ -385,14 +385,14 @@ export default function AflAdminSettings() {
         />
         <Toggle
           label="Club Best & Fairest votes"
-          hint="Lifetime votes in your club's own internal Best & Fairest count — only ever comes from an Import Stats upload."
+          hint="Lifetime votes in your club's own internal Best & Fairest count, only ever comes from an Import Stats upload."
           checked={!!settings.public_show_club_bf_leaderboard}
           disabled={saving}
           onChange={v => toggle('public_show_club_bf_leaderboard', v)}
         />
         <Toggle
           label="Competition Best & Fairest votes"
-          hint="Lifetime votes in the wider association/league's Best & Fairest count — also only from an Import Stats upload."
+          hint="Lifetime votes in the wider association/league's Best & Fairest count. Also only from an Import Stats upload."
           checked={!!settings.public_show_comp_bf_leaderboard}
           disabled={saving}
           onChange={v => toggle('public_show_comp_bf_leaderboard', v)}

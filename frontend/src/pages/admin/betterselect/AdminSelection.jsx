@@ -365,8 +365,8 @@ export default function AdminSelection() {
     // up from a lower one (clash_blocks=false) — then the pick is allowed and
     // they're dropped from the lower XI when we save.
     if (p.clash_blocks) { toast.error(`${p.display_name} is already picked for ${p.clash.join(', ')} that day`); return }
-    if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-    else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+    if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')}. They'll be dropped there when you save`)
+    else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable, adding anyway`)
     setSlots((prev) => {
       const next = [...prev]
       const existing = next.indexOf(p.id)
@@ -374,7 +374,7 @@ export default function AdminSelection() {
       const t = focus != null && next[focus] == null ? focus : next.indexOf(null)
       if (t === -1) {
         if (format === 0) { next.push(p.id); return next }
-        toast.error('All slots are full — increase the side size to add more.')
+        toast.error('All slots are full, increase the side size to add more.')
         return prev
       }
       next[t] = p.id
@@ -414,8 +414,8 @@ export default function AdminSelection() {
         const p = item.player
         if (p.clash_blocks) return
         const displacedId = slots[tgt.idx]   // who held the slot before this drop
-        if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')} — they'll be dropped there when you save`)
-        else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable — adding anyway`)
+        if (p.clash?.length > 0) toast.info(`Calling ${p.display_name} up from ${p.clash.join(', ')}. They'll be dropped there when you save`)
+        else if (p.availability === 'UNAVAILABLE') toast.info(`${p.display_name} is marked unavailable, adding anyway`)
         placeInSlot(tgt.idx, p.id)
         // Cascade: a call-up that bumps a regular sends that regular down to the
         // team below, into the called-up player's vacated slot.
@@ -423,7 +423,7 @@ export default function AdminSelection() {
         if (src && displacedId && displacedId !== p.id) {
           setDemotions((m) => ({ ...m, [displacedId]: { fixture_id: src.fixture_id, batting_order: src.batting_order, callupId: p.id } }))
           const dn = poolById[displacedId]?.display_name || 'Player'
-          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${p.display_name}'s place — saved together`)
+          toast.info(`${dn} drops to ${src.team_name || 'the team below'} in ${p.display_name}'s place, saved together`)
         }
       } else if (item.kind === 'slot') swapSlots(item.idx, tgt.idx)
     } else if (tgt.kind === 'pool' && item.kind === 'slot') {
@@ -495,7 +495,7 @@ export default function AdminSelection() {
   const save = async () => {
     if (offCount) {
       const diff = count > target ? `${count - target} too many` : `${target - count} too few`
-      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match — ${diff}.\n\nSave anyway?`)) return
+      if (!window.confirm(`You have ${count} player${count === 1 ? '' : 's'} for a ${target}-a-side match, ${diff}.\n\nSave anyway?`)) return
     }
     // A warning-level rule is the selector's to weigh, so it asks rather than
     // refuses. A blocking one never gets this far — the server decides, and
@@ -522,7 +522,7 @@ export default function AdminSelection() {
       // A blocking rule comes back as a structured 409 listing exactly what
       // broke, which is more use than "save failed".
       const breaches = e?.detail?.breaches || e?.data?.detail?.breaches
-      if (breaches?.length) toast.error(`Can't save — ${breaches.join('; ')}`)
+      if (breaches?.length) toast.error(`Can't save, ${breaches.join('; ')}`)
       else toast.error(e.message.includes('Already selected') ? e.message : 'Save failed: ' + e.message)
     } finally { setSaving(false) }
   }
@@ -540,7 +540,7 @@ export default function AdminSelection() {
   }
   const copyLineup = async () => {
     try { await navigator.clipboard.writeText(lineupText()); setCopied(true); setTimeout(() => setCopied(false), 1800) }
-    catch { toast.error('Copy failed — select and copy manually') }
+    catch { toast.error('Copy failed. Select and copy manually') }
   }
   const openSocial = () => {
     navigate('/admin/social-post', {
@@ -651,7 +651,7 @@ export default function AdminSelection() {
               {sheetRules.blocking.concat(sheetRules.warnings).map((w, i) => (
                 <div key={i} className="px-4 py-1.5 text-[12px]"
                   style={{ color: sheetRules.blocking.includes(w) ? 'var(--pb-red)' : 'var(--pb-amber)' }}>
-                  {w.player ? `${w.player} — ` : ''}{w.detail}
+                  {w.player ? `${w.player}, ` : ''}{w.detail}
                 </div>
               ))}
             </div>

@@ -948,7 +948,7 @@ def _assemble_deep(
             if top_m["pct"] >= 40:
                 bits.append(f"Most of his wickets are {top_m['type']} ({top_m['pct']}%).")
         if wicket_quality and wicket_quality.get("set_pct", 0) >= 40 and len(runs_at) >= 4:
-            bits.append("Strikes against set batters — a genuine wicket-taker, not just a mop-up bowler.")
+            bits.append("Strikes against set batters, a genuine wicket-taker, not just a mop-up bowler.")
 
     notes = [
         f"Scanned {scanned} scorecards across {len(located)} of their team-seasons; he appeared in {played} of those games.",

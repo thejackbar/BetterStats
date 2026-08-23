@@ -39,8 +39,8 @@ export default function AdminWebsite() {
           )}
         </div>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">
-          Build your club's public website — news, info pages, honour boards, committee and photo
-          galleries — living alongside your stats at <span className="font-mono text-pb-dim">/{user?.club_slug || 'yourclub'}/website</span>.
+          Build your club's public website: news, info pages, honour boards, committee and photo
+          galleries. Living alongside your stats at <span className="font-mono text-pb-dim">/{user?.club_slug || 'yourclub'}/website</span>.
         </p>
 
         {/* Tabs */}

@@ -185,7 +185,7 @@ function PlayerRow({ p, squadName, canEdit, fmt, onOpen }) {
           <span className="pl-row-name">{fmt(p.display_name_override || p.name)}</span>
           <RoleChips roles={p.skill_positions || []} muted />
           {p.is_overseas && (
-            <span className="pl-badge globe" title={p.overseas_country ? `Overseas — ${p.overseas_country}` : 'Overseas'}>
+            <span className="pl-badge globe" title={p.overseas_country ? `Overseas, ${p.overseas_country}` : 'Overseas'}>
               <Icon name="info" size={11} /> Overseas
             </span>
           )}

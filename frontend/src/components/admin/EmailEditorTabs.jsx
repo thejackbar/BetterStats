@@ -252,7 +252,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
   const escapeHtml = (s) =>
     String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
-  // The <a> the caret/selection is currently inside, if any — lets Link edit
+  // The <a> the caret/selection is currently inside, if any, lets Link edit
   // an existing link's href in place (including a Button's) instead of only
   // ever being able to wrap fresh text in a new one.
   const linkAtSelection = () => {
@@ -270,7 +270,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
     frame.contentWindow?.focus()
     const existing = linkAtSelection()
     const url = window.prompt(
-      existing ? 'Edit link URL:' : 'Link URL — select some text first, or click inside an existing link/button to edit it:',
+      existing ? 'Edit link URL:' : 'Link URL: select some text first, or click inside an existing link/button to edit it:',
       existing?.getAttribute('href') || 'https://'
     )
     if (!url) return
@@ -297,7 +297,7 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
   }
 
   // Table helpers operate on the raw DOM (there's no cross-browser execCommand
-  // for row insert/delete) — they mutate directly, then push the result back
+  // for row insert/delete), they mutate directly, then push the result back
   // through the same sync path onFrameLoad's 'input' listener uses, since a
   // script-driven mutation never fires that event on its own.
   const rowAtSelection = () => {
@@ -312,13 +312,13 @@ const EmailEditorTabs = forwardRef(function EmailEditorTabs(
 
   // Our email templates commonly divide table rows with a border-bottom on
   // every row EXCEPT the last (avoids doubling up with the table's own
-  // border/radius) — e.g. the newsletter's Results table. Cloning a row to
+  // border/radius), e.g. the newsletter's Results table. Cloning a row to
   // insert a new one naively copies whichever row it was cloned from
   // verbatim, so inserting after what used to be the last (borderless) row
   // left both it and the new row without a divider between them. This
   // re-derives the convention from whatever border style already appears
   // anywhere in the table, then re-applies it to every row but the true
-  // last one — a no-op on tables that don't use a divider border at all.
+  // last one. A no-op on tables that don't use a divider border at all.
   const reflowRowBorders = (table) => {
     const rows = Array.from(table.rows)
     if (rows.length < 2) return

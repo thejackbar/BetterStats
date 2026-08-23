@@ -161,7 +161,7 @@ export default function AdminFeesXero() {
       {loading ? <PbSpinner message="Loading…" /> : !status ? null : (
         <div className="max-w-6xl space-y-5">
           <p className="text-[13px] text-pb-faint">
-            Bank transactions already sitting in your club's Xero organisation can be pulled in and matched to a member here —
+            Bank transactions already sitting in your club's Xero organisation can be pulled in and matched to a member here, 
             the same idea as the bank-statement CSV import, just live instead of an upload. Read-only: nothing here writes to Xero,
             and every match is confirmed by hand before it's recorded as a payment.
           </p>
@@ -172,7 +172,7 @@ export default function AdminFeesXero() {
               <p className="text-[12.5px] text-pb-faint mb-3">This is a one-off, server-wide setup an administrator does once. After it's done, every club connects its own Xero organisation from this page.</p>
               <ol className="space-y-2.5 text-[12.5px] text-pb-faint list-decimal list-inside">
                 <li>Go to <span className="text-pb-text">developer.xero.com/app/manage</span> and sign in with a Xero account.</li>
-                <li>Click <b className="text-pb-text">New app</b> and choose <b className="text-pb-text">Web app</b> (not "Custom connection" — that's pinned to one Xero organisation, and this needs to work for every club).</li>
+                <li>Click <b className="text-pb-text">New app</b> and choose <b className="text-pb-text">Web app</b> (not "Custom connection". That's pinned to one Xero organisation, and this needs to work for every club).</li>
                 <li>
                   Set the redirect URI to:
                   <div className="mt-1"><code className="text-pb-text bg-pb-hairline/40 px-2 py-1 rounded text-[11.5px] break-all">https://betterat.cricket/api/public/xero/callback</code></div>
@@ -273,7 +273,7 @@ export default function AdminFeesXero() {
                         {status.last_sync_at && (
                           <p className="text-[11px] text-pb-faintest mt-2">
                             Last checked {new Date(status.last_sync_at).toLocaleString()}
-                            {status.last_sync_status === 'error' && status.last_sync_error && <span className="text-pb-red"> — {status.last_sync_error}</span>}
+                            {status.last_sync_status === 'error' && status.last_sync_error && <span className="text-pb-red">, {status.last_sync_error}</span>}
                           </p>
                         )}
                       </div>
@@ -281,7 +281,7 @@ export default function AdminFeesXero() {
                       {previewing && <PbSpinner message="Checking Xero…" />}
 
                       {rows && rows.length === 0 && (
-                        <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing new to review — every incoming transaction is already recorded or dismissed.</div>
+                        <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing new to review. Every incoming transaction is already recorded or dismissed.</div>
                       )}
 
                       {rows && rows.length > 0 && (
@@ -327,7 +327,7 @@ export default function AdminFeesXero() {
                                     <td className="py-2 pr-2">
                                       <select className={`${cell} w-full`} value={r.chosen_member_season_id}
                                         onChange={e => patchRow(idx, { chosen_member_season_id: e.target.value, selected: !!e.target.value })}>
-                                        <option value="">— No match (skip) —</option>
+                                        <option value="">, No match (skip), </option>
                                         {r.candidates && r.candidates.length > 0 && (
                                           <optgroup label="Suggested">
                                             {r.candidates.map(c => (
@@ -360,7 +360,7 @@ export default function AdminFeesXero() {
                             </table>
                           </div>
                           <p className="font-mono text-[10px] text-pb-faintest mt-3">
-                            Confidence ≥ 85% rows are auto-selected; review the rest. SKIP dismisses a row for good (e.g. sponsorship income sitting in the same account) — it won't come back next check.
+                            Confidence ≥ 85% rows are auto-selected; review the rest. SKIP dismisses a row for good (e.g. sponsorship income sitting in the same account), it won't come back next check.
                           </p>
                         </>
                       )}

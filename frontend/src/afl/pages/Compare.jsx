@@ -127,7 +127,7 @@ export default function Compare() {
         <div className="grid md:grid-cols-2 gap-4">
           {result.players.map(p => (
             <div key={p.player_id} className="pb-card p-4">
-              <SectionTitle>{displayName(p)} — season by season</SectionTitle>
+              <SectionTitle>{displayName(p)}, season by season</SectionTitle>
               <table className="w-full text-xs">
                 <thead>
                   <tr>

@@ -61,7 +61,7 @@ export const RULES = [
   { label: 'Volunteer availability (declared days)', tone: 'block' },
   { label: 'No overlapping shifts on the same day', tone: 'block' },
   { label: 'Max shifts per person per week', tone: 'warn' },
-  { label: 'Fair spread — flags over-rostered people', tone: 'warn' },
+  { label: 'Fair spread: flags over-rostered people', tone: 'warn' },
   { label: 'Clash with a match they are selected in (BetterSelect)', tone: 'warn' },
   { label: 'Two people from one family on the same slot', tone: 'warn' },
 ]
@@ -117,7 +117,7 @@ export function checkAssign(person, slot, slots, opts = {}) {
   if (mine.some(s => s.day === slot.day && s.start < slot.end && slot.start < s.end)) blocks.push('Overlaps another shift')
   if (!person.roles.includes(a.role)) warns.push('Not in the ' + a.role + ' role')
   if (mine.length + 1 > cap) warns.push('Over their ' + cap + '-shift weekly cap')
-  if (mine.length + 1 >= 4) warns.push('Heavy week — spread the load')
+  if (mine.length + 1 >= 4) warns.push('Heavy week: spread the load')
   if (person.playsSat && slot.day === 5 && slot.start < 18.5) warns.push('Selected to play Saturday in BetterSelect')
   if (slots.some(s => s.assignee && s.id !== slot.id && s.day === slot.day && s.area === slot.area
     && s.start === slot.start && personById(s.assignee) && personById(s.assignee).family === person.family)) {
@@ -164,15 +164,15 @@ export const DIARY_TASKS = [
   { id: 'fin', title: 'Annual financial report & audit', cadence: 'Annual', role: 'Treasurer', person: 'Marcus Reid', start: '2026-07-06', due: '2026-08-07', budget: 1800, spent: 1800, state: 'done', deps: [] },
   { id: 'ins', title: 'Insurance renewal', cadence: 'Annual', role: 'Treasurer', person: 'Marcus Reid', start: '2026-07-13', due: '2026-07-31', budget: 3800, spent: 3800, state: 'done', deps: [] },
   { id: 'fees', title: 'Set season fee schedule', cadence: 'Annual', role: 'Treasurer', person: 'Marcus Reid', start: '2026-08-03', due: '2026-08-21', budget: 0, spent: 0, state: 'done', deps: ['fin'] },
-  { id: 'agm', title: 'AGM — notice, papers, meeting', cadence: 'Annual', role: 'Secretary', person: 'Jane Halloran', start: '2026-08-03', due: '2026-08-26', budget: 350, spent: 410, state: 'done', deps: ['fin'] },
+  { id: 'agm', title: 'AGM: notice, papers, meeting', cadence: 'Annual', role: 'Secretary', person: 'Jane Halloran', start: '2026-08-03', due: '2026-08-26', budget: 350, spent: 410, state: 'done', deps: ['fin'] },
   { id: 'affil', title: 'Association affiliation fees', cadence: 'Annual', role: 'Treasurer', person: 'Marcus Reid', start: '2026-08-10', due: '2026-08-28', budget: 2400, spent: 2400, state: 'done', deps: ['fin'] },
   { id: 'noms', title: 'Team nominations to association', cadence: 'Annual', role: 'Junior Coordinator', person: 'Cal Doyle', start: '2026-08-10', due: '2026-08-31', budget: 0, spent: 0, state: 'done', deps: ['agm'] },
   { id: 'equip', title: 'Equipment audit & season order', cadence: 'Annual', role: 'Equipment Officer', person: 'Nick Bramley', start: '2026-08-17', due: '2026-09-18', budget: 5200, spent: 4870, state: 'done', deps: ['fees'] },
   { id: 'reg', title: 'Player registrations open', cadence: 'Annual', role: 'Registrar', person: 'Priya Raman', start: '2026-09-07', due: '2026-09-30', budget: 0, spent: 0, state: 'done', deps: ['fees', 'noms'] },
   { id: 'fixt', title: 'Fixture upload & ground allocation', cadence: 'Annual', role: 'Cricket Operations', person: 'Grant Whitcombe', start: '2026-09-14', due: '2026-10-02', budget: 0, spent: 0, state: 'done', deps: ['noms'] },
-  { id: 'bee', title: 'Pre-season working bee — ground prep', cadence: 'Annual', role: 'Ground Manager', person: 'Dev Patel', start: '2026-09-19', due: '2026-10-03', budget: 400, spent: 385, state: 'done', deps: [] },
+  { id: 'bee', title: 'Pre-season working bee: ground prep', cadence: 'Annual', role: 'Ground Manager', person: 'Dev Patel', start: '2026-09-19', due: '2026-10-03', budget: 400, spent: 385, state: 'done', deps: [] },
   { id: 'signon', title: 'Junior sign-on day', cadence: 'One-Time', role: 'Junior Coordinator', person: 'Cal Doyle', start: '2026-09-26', due: '2026-10-04', budget: 600, spent: 540, state: 'done', deps: ['reg'] },
-  { id: 'r1', title: 'Round 1 — first match day', cadence: 'One-Time', role: 'Cricket Operations', person: 'Grant Whitcombe', start: '2026-10-10', due: '2026-10-11', budget: 0, spent: 0, state: 'done', milestone: true, deps: ['fixt', 'reg', 'bee', 'equip'] },
+  { id: 'r1', title: 'Round 1: first match day', cadence: 'One-Time', role: 'Cricket Operations', person: 'Grant Whitcombe', start: '2026-10-10', due: '2026-10-11', budget: 0, spent: 0, state: 'done', milestone: true, deps: ['fixt', 'reg', 'bee', 'equip'] },
   { id: 'cond', title: 'Facilities condition report', cadence: 'Annual', role: 'Ground Manager', person: 'Dev Patel', start: '2026-09-01', due: '2026-09-18', budget: 0, spent: 0, state: 'open', deps: [] },
   { id: 'licence', title: 'Liquor licence renewal', cadence: 'Annual', role: 'Bar Manager', person: 'Andrew Pearce', start: '2026-09-01', due: '2026-09-25', budget: 780, spent: 0, state: 'open', deps: [] },
   { id: 'compl', title: 'WWCC & accreditation compliance sweep', cadence: 'Annual', role: 'Secretary', person: 'Jane Halloran', start: '2026-09-07', due: '2026-10-02', budget: 0, spent: 0, state: 'open', deps: [] },
@@ -194,7 +194,7 @@ export const DIARY_TASKS = [
 export const DIARY_TEMPLATES = [
   { title: 'Annual financial report & audit', cadence: 'Annual', role: 'Treasurer', timing: 'Starts 1 Jul · due 5 weeks later', budget: 1800, deps: 0 },
   { title: 'Insurance renewal', cadence: 'Annual', role: 'Treasurer', timing: 'Due 30 days before season start', budget: 3800, deps: 0 },
-  { title: 'AGM — notice, papers, meeting', cadence: 'Annual', role: 'Secretary', timing: 'Due 8 weeks before Round 1', budget: 350, deps: 1 },
+  { title: 'AGM: notice, papers, meeting', cadence: 'Annual', role: 'Secretary', timing: 'Due 8 weeks before Round 1', budget: 350, deps: 1 },
   { title: 'Set season fee schedule', cadence: 'Annual', role: 'Treasurer', timing: 'Due 7 weeks before Round 1', budget: 0, deps: 1 },
   { title: 'Team nominations to association', cadence: 'Annual', role: 'Junior Coordinator', timing: 'Due 6 weeks before Round 1', budget: 0, deps: 1 },
   { title: 'Equipment audit & season order', cadence: 'Annual', role: 'Equipment Officer', timing: 'Due 3 weeks before Round 1', budget: 5200, deps: 1 },
@@ -407,7 +407,7 @@ export const POSITIONS = [
 export const MEETINGS = [
   { id: 'm6', kind: 'Special meeting', title: 'Grant application sign-off', date: '17 Nov 2026', status: 'scheduled',
     agenda: [
-      { item: 'Facilities grant — scope and costings', who: 'Helen Vaughan', mins: 25, task: 'grant' },
+      { item: 'Facilities grant: scope and costings', who: 'Helen Vaughan', mins: 25, task: 'grant' },
       { item: 'Condition report findings', who: 'Dev Patel', mins: 15, task: 'cond' },
       { item: 'Co-contribution from reserves', who: 'Marcus Reid', mins: 20, task: null },
     ], present: [], apologies: [], motions: [], actions: [] },

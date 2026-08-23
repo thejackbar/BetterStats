@@ -24,7 +24,7 @@ function ArticleBody({ slug, newsSlug }) {
 
   const article = data?.article
   usePageMeta({
-    title: article ? `${article.title} — ${site.name}` : `News — ${site.name}`,
+    title: article ? `${article.title}, ${site.name}` : `News, ${site.name}`,
     description: article?.summary || null,
     image: article?.cover_image_url || null,
     url: `https://betterat.cricket/${slug}/website/news/${newsSlug}`,

@@ -242,7 +242,7 @@ export default function NetSession() {
     if (expiredRef.current === timer.turn_seq) return
     expiredRef.current = timer.turn_seq
     beep('red')
-    setBanner({ label: 'Time — rotate to the next group', tone: 'red' })
+    setBanner({ label: 'Time: rotate to the next group', tone: 'red' })
     setActiveTone('red')
     if (canEdit) act(() => api.nmTimer(id, 'expire'))
   }, [remaining, timer, canEdit, act, id, beep])
@@ -322,7 +322,7 @@ export default function NetSession() {
     setEnding(true)
     try {
       await act(() => api.nmUpdateSession(id, { status: 'active' }))
-      toast.success('Session reopened — check-in is back on')
+      toast.success('Session reopened. Check-in is back on')
     } finally { setEnding(false) }
   }
 
@@ -372,7 +372,7 @@ export default function NetSession() {
             </div>
             {arrivals.some((a) => a.isNew) && (
               <div className="text-[12.5px] text-pb-faint mt-1.5">
-                New to the club — their details are waiting on the Check-in tab.
+                New to the club. Their details are waiting on the Check-in tab.
               </div>
             )}
           </div>
@@ -414,14 +414,14 @@ export default function NetSession() {
                 "no nets on right now". */}
             {checkinUrl && !ended && (
               <Btn variant="ghost" sm icon="teams" href={checkinUrl} target="_blank"
-                title="Open the self check-in screen — put this on a spare phone or iPad by the door">Check-in screen</Btn>
+                title="Open the self check-in screen. Put this on a spare phone or iPad by the door">Check-in screen</Btn>
             )}
             <Btn variant="ghost" sm icon="download" href={api.nmSessionCsvUrl(id)} title="Download the attendance list for this session">List</Btn>
             {canEdit && !ended && (
               <>
                 <Btn variant="primary" icon="plus" onClick={() => { unlockAudio(); setCheckInOpen(true) }}>Check in players</Btn>
                 <Btn variant="ghost" sm icon="check" onClick={endSession} disabled={ending}
-                  title="Finish the night — stops the clock and closes check-in">
+                  title="Finish the night: stops the clock and closes check-in">
                   {ending ? 'Ending…' : 'End session'}
                 </Btn>
               </>
@@ -454,7 +454,7 @@ export default function NetSession() {
                 <Icon name="bolt" size={14} /> {banner.label}
               </div>
             )}
-            {turnOver && <div className="mt-3 text-[13px] text-pb-faint">Turn over — hit <b className="text-pb-text">Next group</b> to rotate.</div>}
+            {turnOver && <div className="mt-3 text-[13px] text-pb-faint">Turn over, hit <b className="text-pb-text">Next group</b> to rotate.</div>}
 
             {/* Controls. An ended session shows what happened instead of a
                 Start button that would quietly put the night back on. */}
@@ -555,7 +555,7 @@ export default function NetSession() {
                         <button onClick={() => move(p.id, -1)} title="Move up" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="-rotate-90" /></button>
                         <button onClick={() => move(p.id, 1)} title="Move down" className="p-1 hover:text-pb-text"><Icon name="chevron" size={15} className="rotate-90" /></button>
                         <button onClick={() => setBatted(p.id, true)} title="Mark as batted" className="p-1 hover:text-pb-accent"><Icon name="batDone" size={16} /></button>
-                        <button onClick={() => setBats(p.id, false)} title="Not batting — here tonight, but out of the rotation" className="p-1 hover:text-pb-amber"><Icon name="batNotOut" size={16} /></button>
+                        <button onClick={() => setBats(p.id, false)} title="Not batting, here tonight, but out of the rotation" className="p-1 hover:text-pb-amber"><Icon name="batNotOut" size={16} /></button>
                         <button onClick={() => removeAttendee(p.id)} title="Remove" className="p-1 hover:text-pb-red"><Icon name="close" size={15} /></button>
                       </div>
                     )}
@@ -720,7 +720,7 @@ function CheckInModal({ roster, inSession, onAdd, onGuest, onClose }) {
         <div className="flex-1 overflow-y-auto px-2 py-1">
           {squad.length === 0 && (!showOthers || others.length === 0) ? (
             <Empty className="px-3 py-6 text-center">
-              {searching ? 'Nobody by that name — add them as a guest below.' : 'No players on the roster yet.'}
+              {searching ? 'Nobody by that name. Add them as a guest below.' : 'No players on the roster yet.'}
             </Empty>
           ) : (
             <>

@@ -95,7 +95,7 @@ export default function AflAdminSuperUsers() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <SectionTitle>Users — platform-wide ({users.length})</SectionTitle>
+        <SectionTitle>Users, platform-wide ({users.length})</SectionTitle>
         <button onClick={() => setShowCreate(s => !s)} className="px-3 py-1.5 rounded text-sm font-semibold bg-[var(--pb-accent)] text-black">
           {showCreate ? 'Cancel' : '+ New user'}
         </button>
@@ -116,7 +116,7 @@ export default function AflAdminSuperUsers() {
                    className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm col-span-2" />
             <select value={form.club_id} onChange={e => setForm(f => ({ ...f, club_id: e.target.value }))}
                     className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1.5 text-sm">
-              <option value="">— select club —</option>
+              <option value="">. Select club, </option>
               {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
             <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
@@ -126,7 +126,7 @@ export default function AflAdminSuperUsers() {
             </select>
           </div>
           <p className="text-xs text-pb-faint">
-            The password is set here directly and handed to the new user — there's no email invite step yet.
+            The password is set here directly and handed to the new user, there's no email invite step yet.
           </p>
           <button disabled={busy || !form.username.trim() || !form.password.trim() || !form.club_id} onClick={createUser}
                   className="px-4 py-2 rounded font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
@@ -153,7 +153,7 @@ export default function AflAdminSuperUsers() {
                     <td className="px-2 py-1.5">
                       <select value={editForm.club_id} onChange={e => setEditForm(f => ({ ...f, club_id: e.target.value }))}
                               className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-xs">
-                        <option value="">— select club —</option>
+                        <option value="">. Select club, </option>
                         {clubs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                       </select>
                     </td>

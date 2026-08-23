@@ -33,7 +33,7 @@ function num(v) {
 // a not out neither. '' is the "unknown / incomplete card" option, where everything
 // stays blank. Values match the backend dismissal parser's method strings.
 const DISMISSAL_MODES = [
-  { value: '', label: '— unknown —', fielder: false, bowler: false },
+  { value: '', label: ': unknown, ', fielder: false, bowler: false },
   { value: 'caught', label: 'Caught (c)', fielder: true, bowler: true },
   { value: 'caught & bowled', label: 'Caught & bowled (c & b)', fielder: false, bowler: true },
   { value: 'bowled', label: 'Bowled (b)', fielder: false, bowler: true },
@@ -268,7 +268,7 @@ export function PlayerSelect({ value, roster, cardName, onChange, candidates = [
         <div className="absolute z-30 mt-1 w-full min-w-[190px] bg-pb-surface border pb-hairline rounded shadow-lg max-h-56 overflow-auto">
           {value && (
             <button type="button" className="block w-full text-left px-3 py-1.5 text-xs text-pb-faint hover:bg-pb-surface2"
-              onMouseDown={() => { onChange(''); setOpen(false) }}>— clear —</button>
+              onMouseDown={() => { onChange(''); setOpen(false) }}>, clear, </button>
           )}
           {cands.length > 0 && (
             <>
@@ -829,7 +829,7 @@ export default function AdminScorecardUpload() {
       winning_team: form.winning_team || null,
       is_final: !!form.is_final,
       match_format: form.match_format || null,
-      notes: 'Imported from scorecard photo' + (extract?.read_notes ? ` — ${extract.read_notes}` : ''),
+      notes: 'Imported from scorecard photo' + (extract?.read_notes ? `, ${extract.read_notes}` : ''),
       extracted_payload: { match, innings, source: 'ai_scorecard_upload' },
       batting_innings: battingRows,
       bowling_spells: bowlingRows,
@@ -866,7 +866,7 @@ export default function AdminScorecardUpload() {
           </p>
           <p className="text-xs text-pb-faint max-w-2xl mt-2">
             Handwritten scorebook, or a stack of them? The photo reader is built for
-            typed/printed cards — for handwritten pages, or digitising a whole season at
+            typed/printed cards, for handwritten pages, or digitising a whole season at
             once, use{' '}
             <Link to="/admin/manual-entries" className="text-pb-accent underline hover:opacity-80">
               Manual Games
@@ -924,14 +924,14 @@ export default function AdminScorecardUpload() {
           <div className="space-y-6">
             {dupes.length > 0 && (
               <div className="px-4 py-3 rounded bg-red-500/10 border border-red-400/40">
-                <div className="text-red-300 text-sm font-semibold mb-1">Possible duplicate — this could double-count</div>
+                <div className="text-red-300 text-sm font-semibold mb-1">Possible duplicate: this could double-count</div>
                 <p className="text-red-200/90 text-xs mb-2">
                   Your club already has {dupes.length === 1 ? 'a game' : `${dupes.length} games`} on {form.played_at}. An uploaded game counts in the stats on top of what's already there, so importing a match that's already in your data double-counts it on profiles and lists.
                 </p>
                 <ul className="list-disc list-inside text-red-200/90 text-xs space-y-0.5">
                   {dupes.map(d => (
                     <li key={d.id}>
-                      {d.grade ? `${d.grade}: ` : ''}vs {d.opponent || 'unknown'} ({d.source === 'manual' ? 'manual upload' : 'synced'}){d.likely ? ' — same opponent' : ''}{' '}
+                      {d.grade ? `${d.grade}: ` : ''}vs {d.opponent || 'unknown'} ({d.source === 'manual' ? 'manual upload' : 'synced'}){d.likely ? ', same opponent' : ''}{' '}
                       <Link to={`/games/${d.id}`} target="_blank" className="underline">view</Link>
                     </li>
                   ))}
@@ -955,7 +955,7 @@ export default function AdminScorecardUpload() {
             )}
             {misreads.length > 0 && (
               <div className="px-4 py-3 rounded bg-red-500/10 border border-red-400/30">
-                <div className="text-red-300 text-sm font-semibold mb-1">Likely misreads — worth fixing above</div>
+                <div className="text-red-300 text-sm font-semibold mb-1">Likely misreads, worth fixing above</div>
                 <p className="text-red-200/90 text-xs mb-2">
                   These look like the reader misread the card rather than the card being wrong.
                   Check them against the scan and correct them before importing.
@@ -989,7 +989,7 @@ export default function AdminScorecardUpload() {
                     value={form.season_id}
                     onChange={v => setForm(f => ({ ...f, season_id: v, grade_id: '' }))}
                     options={seasons.map(s => ({ id: s.id, label: formatSeason(s.name, s.year) }))}
-                    placeholder="— choose —"
+                    placeholder=". Choose, "
                     addLabel="New season"
                     addPlaceholder="e.g. Summer 1996/97"
                     withYear
@@ -1002,7 +1002,7 @@ export default function AdminScorecardUpload() {
                     value={form.grade_id}
                     onChange={v => setForm(f => ({ ...f, grade_id: v }))}
                     options={seasonGrades.map(g => ({ id: g.id, label: g.name }))}
-                    placeholder="— none —"
+                    placeholder=", none, "
                     addLabel="New grade"
                     addPlaceholder="e.g. 3rd Grade"
                     disabled={!form.season_id}
@@ -1032,7 +1032,7 @@ export default function AdminScorecardUpload() {
                   <input className={INPUT_CLS} value={form.result} onChange={e => setForm(f => ({ ...f, result: e.target.value }))} />
                   {match.result_inferred && (
                     <p className="text-[11px] text-amber-300/90 mt-1">
-                      Not written on the card — the reader worked this out from the scores. Check it.
+                      Not written on the card. The reader worked this out from the scores. Check it.
                     </p>
                   )}
                 </div>
@@ -1302,7 +1302,7 @@ export default function AdminScorecardUpload() {
                   <p className="text-amber-300/90 text-xs">
                     The original scorecard has {cardErrors.length === 1 ? 'a spot' : `${cardErrors.length} spots`} where
                     its figures don't add up. If you haven't corrected {cardErrors.length === 1 ? 'it' : 'them'} above,
-                    importing keeps the card's original numbers as written — which is fine for a faithful record.
+                    importing keeps the card's original numbers as written. Which is fine for a faithful record.
                   </p>
                 )}
                 {misreads.length > 0 && (

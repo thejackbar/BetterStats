@@ -207,7 +207,7 @@ async def delete_medal(
     if not medal:
         raise HTTPException(status_code=404, detail="Medal not found")
     if len(await vote_svc.list_medals(db, club.id)) <= 1:
-        raise HTTPException(status_code=409, detail="A club keeps at least one medal — rename this one instead")
+        raise HTTPException(status_code=409, detail="A club keeps at least one medal, rename this one instead")
     res = await db.execute(
         select(func.count()).select_from(AflVoteBallot).where(AflVoteBallot.medal_id == medal.id))
     ballots = int(res.scalar() or 0)
@@ -469,7 +469,7 @@ async def admin_enter_ballot(
     if not eligible:
         raise HTTPException(
             status_code=409,
-            detail="No team list for this game yet — PlayHQ hasn't given us one, or the game isn't synced")
+            detail="No team list for this game yet. PlayHQ hasn't given us one, or the game isn't synced")
     eligible_ids = {p["id"] for p in eligible}
 
     voter_pid: Optional[uuid.UUID] = None

@@ -136,7 +136,7 @@ function CouponModal({ coupon, onClose, onSaved }) {
           <h2 className="font-display font-bold text-lg text-pb-text">{isEdit ? `Edit ${coupon.code}` : 'New coupon'}</h2>
           {locked && (
             <p className="font-mono text-[10px] text-amber-300 mt-1">
-              This coupon has {coupon.redemption_count} redemption{coupon.redemption_count === 1 ? '' : 's'} —
+              This coupon has {coupon.redemption_count} redemption{coupon.redemption_count === 1 ? '' : 's'}, 
               discount amount, type, module coverage and duration are locked. Deactivate and create a
               new coupon instead if these need to change.
             </p>
@@ -263,7 +263,7 @@ function CouponModal({ coupon, onClose, onSaved }) {
             </div>
             <p className="font-mono text-[10px] text-pb-faintest">
               Leave a window's dates blank for no restriction from that rule. Both windows are
-              independent — a coupon can leave either or both unset.
+              independent. A coupon can leave either or both unset.
             </p>
           </div>
 
@@ -316,7 +316,7 @@ function RedemptionsModal({ coupon, onClose }) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="pb-card w-full max-w-md bg-pb-surface mt-16 max-h-[80vh] overflow-hidden flex flex-col">
         <div className="p-5 pb-3 shrink-0">
-          <h2 className="font-display font-bold text-lg text-pb-text">{coupon.code} — redemptions</h2>
+          <h2 className="font-display font-bold text-lg text-pb-text">{coupon.code}, redemptions</h2>
         </div>
         <div className="p-5 pt-0 overflow-y-auto space-y-2">
           {error && <p className="font-mono text-[11px] text-pb-red mb-2">{error}</p>}
@@ -391,7 +391,7 @@ function ForceApplyModal({ coupon, onClose, onApplied }) {
         <div className="p-5">
           <h2 className="font-display font-bold text-lg text-pb-text">Force-apply {coupon.code}</h2>
           <p className="font-mono text-[10px] text-pb-faintest mt-1 mb-3">
-            Applies immediately to a club's already-live subscription, ahead of its next renewal —
+            Applies immediately to a club's already-live subscription, ahead of its next renewal, 
             bypasses the redemption-window and max-redemptions checks (never the "already redeemed"
             or "inactive" ones). The club must already have an active Stripe subscription.
           </p>
@@ -471,7 +471,7 @@ export default function SuperCoupons() {
           <div>
             <h1 className="text-xl font-semibold text-pb-text">Discount coupons</h1>
             <p className="text-sm text-pb-dim mt-1">
-              Managed entirely here — never in the Stripe Dashboard. The corresponding Stripe Coupon
+              Managed entirely here. Never in the Stripe Dashboard. The corresponding Stripe Coupon
               is synced automatically.
             </p>
           </div>

@@ -1872,7 +1872,7 @@ async def _team_overview_impl(session: AsyncSession, org_id: str, season_id: str
         "degraded": degraded,
         "coverage": {
             "notes": [
-                "Team scores are reconstructed from per-innings data (our batting / our bowling), so they exclude some extras — close, not exact.",
+                "Team scores are reconstructed from per-innings data (our batting / our bowling), so they exclude some extras. Close, not exact.",
                 "Bat-first vs chase uses which innings we batted; home/away from the opponent vs the ground.",
             ]
         },
@@ -1888,16 +1888,16 @@ def _how_we_win_lose(record, batting, innings, partnerships):
     bf, ch = innings["bat_first"], innings["chasing"]
     if bf["win_pct"] is not None and ch["win_pct"] is not None and bf["played"] >= 4 and ch["played"] >= 4:
         if bf["win_pct"] - ch["win_pct"] >= 12:
-            win.append(f"Stronger setting a target — {bf['win_pct']}% batting first vs {ch['win_pct']}% chasing.")
-            lose.append("Less convincing in a chase — protect wickets early when batting second.")
+            win.append(f"Stronger setting a target. {bf['win_pct']}% batting first vs {ch['win_pct']}% chasing.")
+            lose.append("Less convincing in a chase. Protect wickets early when batting second.")
         elif ch["win_pct"] - bf["win_pct"] >= 12:
-            win.append(f"Better chasing — {ch['win_pct']}% win rate batting second vs {bf['win_pct']}% first.")
-            lose.append("Less reliable setting a target — a few more runs batting first would help.")
+            win.append(f"Better chasing. {ch['win_pct']}% win rate batting second vs {bf['win_pct']}% first.")
+            lose.append("Less reliable setting a target. A few more runs batting first would help.")
     if batting.get("top_order_pct") and batting["top_order_pct"] >= 55:
-        win.append(f"Top-order driven — {batting['top_order_pct']}% of our runs come from the top three.")
+        win.append(f"Top-order driven: {batting['top_order_pct']}% of our runs come from the top three.")
         lose.append("Over-reliant on the top three; early wickets leave the lower order exposed.")
     if batting.get("lower_pct") is not None and batting["lower_pct"] < 12:
-        lose.append(f"Thin lower-order contribution ({batting['lower_pct']}% of runs) — a collapse runs deep.")
+        lose.append(f"Thin lower-order contribution ({batting['lower_pct']}% of runs). A collapse runs deep.")
     qualified = [p for p in partnerships if p["samples"] >= 3]
     if len(qualified) >= 3:
         strong = max(qualified, key=lambda p: p["avg_partnership"])

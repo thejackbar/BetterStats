@@ -424,7 +424,7 @@ async def create_manual_season(
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"A season named '{name}' already exists — pick it from the list instead.")
+        raise HTTPException(status_code=409, detail=f"A season named '{name}' already exists. Pick it from the list instead.")
 
     season = Season(
         id=uuid.uuid4(),
@@ -511,9 +511,9 @@ async def delete_manual_season(
     if not season or season.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Season not found")
     if season.grassroots_id is not None:
-        raise HTTPException(status_code=400, detail="This season came from the CA sync — it can't be deleted here.")
+        raise HTTPException(status_code=400, detail="This season came from the CA sync. It can't be deleted here.")
     if await _season_in_use(db, sid):
-        raise HTTPException(status_code=400, detail="This season has data recorded against it — remove that first.")
+        raise HTTPException(status_code=400, detail="This season has data recorded against it. Remove that first.")
     await db.delete(season)
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="delete",
@@ -548,7 +548,7 @@ async def create_manual_grade(
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail=f"A grade named '{name}' already exists in this season — pick it from the list instead.")
+        raise HTTPException(status_code=409, detail=f"A grade named '{name}' already exists in this season. Pick it from the list instead.")
 
     grade = Grade(
         id=uuid.uuid4(),
@@ -584,9 +584,9 @@ async def delete_manual_grade(
     if not season or season.organisation_id != club.id:
         raise HTTPException(status_code=404, detail="Grade not found")
     if grade.grassroots_id is not None:
-        raise HTTPException(status_code=400, detail="This grade came from the CA sync — it can't be deleted here.")
+        raise HTTPException(status_code=400, detail="This grade came from the CA sync. It can't be deleted here.")
     if await _grade_in_use(db, gid):
-        raise HTTPException(status_code=400, detail="This grade has data recorded against it — remove that first.")
+        raise HTTPException(status_code=400, detail="This grade has data recorded against it. Remove that first.")
     await db.delete(grade)
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="delete",
@@ -648,7 +648,7 @@ async def create_season_adjustment(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=409,
-            detail="An adjustment already exists for this player/season/grade — edit it instead.",
+            detail="An adjustment already exists for this player/season/grade. Edit it instead.",
         )
 
     payload = data.model_dump()
@@ -796,7 +796,7 @@ async def create_career_adjustment(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=409,
-            detail="A career adjustment already exists for this player — edit it instead.",
+            detail="A career adjustment already exists for this player. Edit it instead.",
         )
 
     payload = data.model_dump()
@@ -1740,7 +1740,7 @@ async def undo_edit(
             row = await db.get(Season, sid)
             if row and row.organisation_id == club.id:
                 if await _season_in_use(db, sid):
-                    raise HTTPException(status_code=400, detail="This season now has data recorded against it — remove that first.")
+                    raise HTTPException(status_code=400, detail="This season now has data recorded against it. Remove that first.")
                 await db.delete(row)
         elif table == "grades":
             gid2 = _to_uuid(target_id, "grade")
@@ -1749,7 +1749,7 @@ async def undo_edit(
                 season = await db.get(Season, row.season_id)
                 if season and season.organisation_id == club.id:
                     if await _grade_in_use(db, gid2):
-                        raise HTTPException(status_code=400, detail="This grade now has data recorded against it — remove that first.")
+                        raise HTTPException(status_code=400, detail="This grade now has data recorded against it. Remove that first.")
                     await db.delete(row)
         else:
             raise HTTPException(status_code=400, detail=f"Cannot undo create on {table}")
@@ -1806,7 +1806,7 @@ async def undo_edit(
                 )
             )
             if existing.scalar_one_or_none():
-                raise HTTPException(status_code=409, detail="A season with this name already exists — nothing to restore.")
+                raise HTTPException(status_code=409, detail="A season with this name already exists, nothing to restore.")
             db.add(Season(
                 id=uuid.UUID(snap["id"]), organisation_id=club.id,
                 grassroots_id=None, name=snap.get("name"), year=snap.get("year"),
@@ -1823,7 +1823,7 @@ async def undo_edit(
                 )
             )
             if existing.scalar_one_or_none():
-                raise HTTPException(status_code=409, detail="A grade with this name already exists in this season — nothing to restore.")
+                raise HTTPException(status_code=409, detail="A grade with this name already exists in this season, nothing to restore.")
             db.add(Grade(
                 id=uuid.UUID(snap["id"]), season_id=season_id, grassroots_id=None,
                 name=snap.get("name"), category=snap.get("category") or suggest_category(snap.get("name") or ""),
@@ -2157,7 +2157,7 @@ async def import_season_adjustments(
             action="import",
             target_table="manual_season_adjustments",
             target_id=f"bulk:{len(created_ids)}created+{len(updated_ids)}updated",
-            summary=f"CSV import — season adjustments: {len(created_ids)} created, {len(updated_ids)} updated, {len(errors)} errors",
+            summary=f"CSV import: season adjustments: {len(created_ids)} created, {len(updated_ids)} updated, {len(errors)} errors",
             before=None,
             after={"created_ids": created_ids, "updated_ids": updated_ids, "errors": errors[:20]},
         )
@@ -2384,7 +2384,7 @@ async def import_manual_games(
             action="import",
             target_table="manual_games",
             target_id=f"bulk:{len(created_game_ids)}games",
-            summary=f"CSV import — manual games: {len(created_game_ids)} games created, {len(errors)} row errors",
+            summary=f"CSV import. Manual games: {len(created_game_ids)} games created, {len(errors)} row errors",
             before=None,
             after={"created_game_ids": created_game_ids, "errors": errors[:20]},
         )

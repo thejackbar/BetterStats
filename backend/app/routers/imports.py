@@ -406,12 +406,12 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                         + ", ".join(unresolved[:8]) + ("…" if len(unresolved) > 8 else ""))
     ambiguous = [n for n, m in pmatch.items() if m.get("status") == "ambiguous"]
     if ambiguous:
-        warnings.append(f"{len(ambiguous)} name(s) match two players — merge those first: "
+        warnings.append(f"{len(ambiguous)} name(s) match two players. Merge those first: "
                         + ", ".join(ambiguous[:5]))
     exceed = [p["player_name"] for p in preview if p["gr_exceeds"]]
     if exceed:
         warnings.append("Online (GR) data already shows more than your sheet for: "
-                        + ", ".join(exceed[:5]) + " — we'll show the higher online figure.")
+                        + ", ".join(exceed[:5]) + ", we'll show the higher online figure.")
     # An unmatched season is not an error — its figures still count towards the
     # career — but they stop being a season, so the season-by-season table goes
     # quiet about years the club can see in its own book. Reported live by a
@@ -422,7 +422,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         warnings.append(
             f"{len(season_unmatched)} season(s) in your sheet don't exist yet: "
             + ", ".join(season_unmatched[:8]) + ("…" if len(season_unmatched) > 8 else "")
-            + " — create them on the Seasons step to keep those years on the season-by-season "
+            + ". Create them on the Seasons step to keep those years on the season-by-season "
               "table. Left as they are, their figures still count towards each player's career "
               "but arrive as one 'Prior Seasons & Adjustments' line instead of their own seasons."
         )
@@ -431,7 +431,7 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
         warnings.append(
             f"{len(grade_unresolved)} grade/team label(s) aren't matched to an online grade: "
             + ", ".join(grade_unresolved[:8]) + ("…" if len(grade_unresolved) > 8 else "")
-            + " — for now that part is compared against the player's whole career instead of just "
+            + ", for now that part is compared against the player's whole career instead of just "
               "that grade (safe, but can under-count). Match them on the Grades step, or confirm "
               "‘no online equivalent’ if the grade genuinely predates online records."
         )
@@ -579,7 +579,7 @@ async def commit(
                  "truth": truth})
 
     if not items_by_player:
-        raise HTTPException(422, "Nothing to import — no rows matched a player. "
+        raise HTTPException(422, "Nothing to import, no rows matched a player. "
                                  "Resolve the player matches and try again.")
 
     # Latest-upload-wins: replace prior imported truth for the exact
@@ -640,7 +640,7 @@ async def commit(
         db, org_id=club.id, user_id=current_user.id, action="import",
         target_table="imported_stats",
         target_id=f"batch:{batch.id}",
-        summary=f"BetterImport — {len(items_by_player)} players, {inserted} rows "
+        summary=f"BetterImport: {len(items_by_player)} players, {inserted} rows "
                 f"({created_players} new players created)",
         before=None,
         after={"batch_id": str(batch.id), "players": len(items_by_player), "rows": inserted},
@@ -704,7 +704,7 @@ async def create_import_grade(
         select(Season).where(Season.organisation_id == club.id)
     )).scalars().all()
     if not seasons:
-        raise HTTPException(422, "This club has no seasons yet — add one on the previous step first.")
+        raise HTTPException(422, "This club has no seasons yet. Add one on the previous step first.")
     if data.season_ids:
         wanted = set()
         for raw in data.season_ids:
@@ -865,7 +865,7 @@ async def undo_import(
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="undo",
         target_table="imported_stats", target_id=f"batch:{bid}",
-        summary=f"Undo BetterImport — removed {len(removed)} imported rows"
+        summary=f"Undo BetterImport: removed {len(removed)} imported rows"
                 + (f", deleted {len(deletable)} players this import created" if deletable else ""),
         before={
             "batch_id": str(bid), "rows": len(removed),
@@ -958,7 +958,7 @@ async def undo_import_for_player(
     await _log_edit(
         db, org_id=club.id, user_id=current_user.id, action="undo",
         target_table="imported_stats", target_id=f"batch:{bid}:player:{pid}",
-        summary=f"Undo BetterImport for {player_name} — removed {len(removed)} imported rows"
+        summary=f"Undo BetterImport for {player_name}. Removed {len(removed)} imported rows"
                 + (", deleted the player record this import created" if player_deleted else "")
                 + (" (batch now fully undone)" if batch_fully_undone else ""),
         before={"batch_id": str(bid), "player_id": str(pid), "rows": len(removed),

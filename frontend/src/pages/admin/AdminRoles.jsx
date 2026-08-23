@@ -14,7 +14,7 @@ function RoleRow({ r, types, editId, edit, setEdit, startEdit, saveEdit, setEdit
         <div className="flex flex-wrap items-center gap-2">
           <input className={`${inp} flex-1 min-w-[140px]`} value={edit.title} onChange={e => setEdit(s => ({ ...s, title: e.target.value }))} />
           <select className={`${inp} w-44`} value={edit.role_type_id} onChange={e => setEdit(s => ({ ...s, role_type_id: e.target.value }))}>
-            <option value="">— no type —</option>
+            <option value="">, no type, </option>
             {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <input className={`${inp} flex-1 min-w-[140px]`} placeholder="Description" value={edit.description} onChange={e => setEdit(s => ({ ...s, description: e.target.value }))} />
@@ -122,7 +122,7 @@ function RolesPanel({ roles, types, onChanged }) {
         <div className="flex flex-wrap gap-2">
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Role title (e.g. Junior Coordinator)" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
           <select className={`${inp} w-48`} value={form.role_type_id} onChange={e => setForm(f => ({ ...f, role_type_id: e.target.value }))}>
-            <option value="">— no type —</option>
+            <option value="">, no type, </option>
             {types.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <input className={`${inp} flex-1 min-w-[160px]`} placeholder="Description (optional)" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
@@ -140,7 +140,7 @@ function RolesPanel({ roles, types, onChanged }) {
       <div className="mb-5">
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">COMMITTEE ROLES</div>
         {committeeRoles.length === 0 ? (
-          <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee starter set above.</div>
+          <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet. Add the committee starter set above.</div>
         ) : (
           <div className="space-y-1.5">
             {committeeRoles.map(r => <RoleRow key={r.id} r={r} {...rowProps} />)}
@@ -151,7 +151,7 @@ function RolesPanel({ roles, types, onChanged }) {
       <div>
         <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">GENERAL ROLES</div>
         {generalRoles.length === 0 ? (
-          <div className="pb-card p-6 text-center text-pb-dim text-sm">No general roles yet — add the general starter set above.</div>
+          <div className="pb-card p-6 text-center text-pb-dim text-sm">No general roles yet. Add the general starter set above.</div>
         ) : (
           <div className="space-y-1.5">
             {generalRoles.map(r => <RoleRow key={r.id} r={r} {...rowProps} />)}
@@ -225,7 +225,7 @@ function TypesPanel({ types, onChanged }) {
         </div>
       </div>
       {types.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No role types yet — add the starter set above.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No role types yet. Add the starter set above.</div>
       ) : (
         <div className="space-y-1.5">
           {types.map(t => (

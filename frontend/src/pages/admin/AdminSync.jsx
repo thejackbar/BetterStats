@@ -124,7 +124,7 @@ export default function AdminSync() {
     setBackfilling(true)
     try {
       const res = await api.adminBackfillAggregates()
-      toast.success(`Backfill complete — inserted ${res.inserted ?? 0} aggregate rows.`)
+      toast.success(`Backfill complete: inserted ${res.inserted ?? 0} aggregate rows.`)
     } catch (e) {
       toast.error(`Backfill failed: ${e.message}`)
     } finally {
@@ -137,7 +137,7 @@ export default function AdminSync() {
     const ok = window.confirm(
       'Remove batting / bowling / fielding rows that belong to players who were on the OPPOSITION team in those games. ' +
       'Inflated match counts (e.g. a current club member who played against us a few times having those games counted as theirs) get corrected. ' +
-      'Cheaper than a Full Rebuild — runs in seconds. Continue?'
+      'Cheaper than a Full Rebuild, runs in seconds. Continue?'
     )
     if (!ok) return
     setCleaningOpp(true)
@@ -146,7 +146,7 @@ export default function AdminSync() {
       const d = res.deleted || {}
       const total = (d.batting_innings || 0) + (d.bowling_spells || 0) + (d.fielding_stats || 0)
       toast.success(
-        `Cleanup complete — removed ${total} opposition stat rows ` +
+        `Cleanup complete: removed ${total} opposition stat rows ` +
         `(${d.batting_innings || 0} batting, ${d.bowling_spells || 0} bowling, ${d.fielding_stats || 0} fielding), ` +
         `dropped ${d.player_season_stats_phantom || 0} phantom season rows, ` +
         `re-backfilled ${d.player_season_stats_backfilled || 0}.`
@@ -231,7 +231,7 @@ export default function AdminSync() {
             <div className="flex-1">
               <p className="text-pb-text text-sm font-medium mb-0.5">Pull latest games &amp; stats</p>
               <p className="text-pb-faint text-xs leading-relaxed">
-                Adds new games and updates existing players automatically. Safe to run anytime —
+                Adds new games and updates existing players automatically. Safe to run anytime: 
                 this is the normal weekly sync.
               </p>
             </div>
@@ -256,7 +256,7 @@ export default function AdminSync() {
               <p className="text-pb-text text-sm font-medium mb-0.5">Repair players showing 0 matches</p>
               <p className="text-pb-faint text-xs leading-relaxed">
                 Recomputes career totals from scorecards already in BetterStats. Use when a player&apos;s
-                headline reads 0 despite having visible innings. No new data pulled —
+                headline reads 0 despite having visible innings. No new data pulled, 
                 runs in seconds.
               </p>
               {backfilling && <LoadingBar expectedMs={12000} className="mt-2" />}
@@ -308,7 +308,7 @@ export default function AdminSync() {
               <p className="text-pb-text text-sm font-medium mb-0.5">Wipe and re-pull everything</p>
               <p className="text-pb-faint text-xs leading-relaxed">
                 Deletes every stored game and re-pulls all match history. Use after a
-                sync-logic change or if data looks broadly wrong. Slow — an hour or more for a club with
+                sync-logic change or if data looks broadly wrong. Slow: an hour or more for a club with
                 a lot of history.
               </p>
             </div>
@@ -322,7 +322,7 @@ export default function AdminSync() {
                 labelClassName="font-mono text-[10px] tracking-wide2 uppercase text-pb-faint"
               />
               <p className="font-mono text-[10px] text-pb-faint mt-2">
-                Running in background — this page will update automatically.
+                Running in background. This page will update automatically.
                 A full rebuild can take an hour or longer.
               </p>
             </div>
@@ -333,7 +333,7 @@ export default function AdminSync() {
                 Club ID:{' '}
                 {settings.playhq_id
                   ? <span style={{ color: 'var(--pb-accent)' }}>{settings.playhq_id}</span>
-                  : <span style={{ color: 'var(--pb-amber)' }}>not set — game-level data requires this</span>
+                  : <span style={{ color: 'var(--pb-amber)' }}>not set. Game-level data requires this</span>
                 }
               </p>
             </div>
@@ -386,7 +386,7 @@ export default function AdminSync() {
                     </div>
                     <p className="font-mono text-[10px] text-pb-faint mt-0.5">
                       {req.created_at ? new Date(req.created_at).toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
-                      {req.requester_note && ` — "${req.requester_note}"`}
+                      {req.requester_note && `: "${req.requester_note}"`}
                     </p>
                     {req.playhq_id && (
                       <p className="font-mono text-[10px] text-pb-faintest mt-0.5">{req.playhq_id}</p>
@@ -396,7 +396,7 @@ export default function AdminSync() {
                         <p className="mb-2">{syncWarnings[req.id]}</p>
                         {syncWarnings[req.id].includes('no PlayHQ ID') && (
                           <button
-                            onClick={() => handleSyncRequestAction(req.id, 'approve', 'admin override — no PHQ ID')}
+                            onClick={() => handleSyncRequestAction(req.id, 'approve', 'admin override, no PHQ ID')}
                             disabled={actionLoading === req.id}
                             className="underline text-pb-amber disabled:opacity-50"
                           >

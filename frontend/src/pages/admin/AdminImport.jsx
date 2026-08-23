@@ -44,8 +44,8 @@ const FIELD_LABEL = {
 // guess needed). Mirrors import_ingest.NAME_FORMAT_LABELS on the backend.
 const NAME_FORMAT_OPTIONS = [
   ['auto', 'Auto-detect (recommended)'],
-  ['first_last', 'First name then Surname — e.g. "Jack Barendse"'],
-  ['last_first', 'Surname then First name — e.g. "Barendse Jack" or "Barendse, Jack"'],
+  ['first_last', 'First name then Surname: e.g. "Jack Barendse"'],
+  ['last_first', 'Surname then First name: e.g. "Barendse Jack" or "Barendse, Jack"'],
 ]
 
 const inp = 'bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
@@ -119,7 +119,7 @@ function FieldRow({ field, label, required, value, headers, conf, onMap, cell })
       </span>
       <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
       <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={e => onMap(field, e.target.value)}>
-        <option value="">— not in my file —</option>
+        <option value="">, not in my file, </option>
         {headers.map(h => <option key={h} value={h}>{h}</option>)}
       </select>
       {conf != null && <Pct score={conf} />}
@@ -170,8 +170,8 @@ function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, ma
       )}
       <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed max-w-2xl">
         {nameMode === 'single'
-          ? 'One name column — pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
-          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works — just leave First name unmapped.'}
+          ? 'One name column. Pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
+          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works, just leave First name unmapped.'}
       </p>
     </div>
   )
@@ -432,7 +432,7 @@ export default function AdminImport() {
         <Link to="/admin" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">← ADMIN</Link>
         <h1 className="font-display font-bold text-2xl text-pb-text mt-2 mb-1">Import historical stats</h1>
         <p className="text-pb-faint text-sm mb-5 leading-relaxed max-w-3xl">
-          Pull your online data first, then upload your club's own spreadsheet — career totals or
+          Pull your online data first, then upload your club's own spreadsheet, career totals or
           season-by-season, any column layout. We smart-match the columns and reconcile against what's already online:
           where the two overlap, the online data wins, and only the part it's missing is added. <span className="text-pb-dim">A
           player can never be double-counted.</span>
@@ -474,7 +474,7 @@ export default function AdminImport() {
               </button>
             </div>
             <p className="font-mono text-[10px] text-pb-faintest mt-3">
-              Headers can be anything — we map them in the next step. <a href="/api/club-admin/imports/template.csv" className="text-pb-accent hover:underline">Download a template</a>.
+              Headers can be anything, we map them in the next step. <a href="/api/club-admin/imports/template.csv" className="text-pb-accent hover:underline">Download a template</a>.
             </p>
           </div>
         )}
@@ -500,7 +500,7 @@ export default function AdminImport() {
                 <span className="font-mono text-[10px] text-pb-faint">{parsed.row_count} rows · {parsed.headers.length} columns</span>
               </div>
 
-              {/* Legend — each row reads "BetterStats field ← your column". */}
+              {/* Legend. Each row reads "BetterStats field ← your column". */}
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-4 pb-3 pb-hairline-b">
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
                   <span className="inline-block w-2.5 h-2.5 rounded-sm bg-green-300/80"></span>BetterStats field
@@ -509,7 +509,7 @@ export default function AdminImport() {
                 <span className="flex items-center gap-1.5 font-mono text-[10px] text-pb-faint">
                   <span className="inline-block w-2.5 h-2.5 rounded-sm bg-pb-text/80 border pb-hairline"></span>your column
                 </span>
-                <span className="text-pb-faintest text-[10px] sm:ml-1">Match each BetterStats field to a column from your file — leave it blank if your sheet doesn't have it.</span>
+                <span className="text-pb-faintest text-[10px] sm:ml-1">Match each BetterStats field to a column from your file. Leave it blank if your sheet doesn't have it.</span>
               </div>
 
               {FIELD_GROUPS.map(([group, fields]) => (
@@ -540,7 +540,7 @@ export default function AdminImport() {
                           <FieldRow field="season_label" label={FIELD_LABEL.season_label} required
                             value={mapping.season_label} headers={parsed.headers} conf={confByField.season_label} onMap={setMap} cell={cell} />
                           <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed">
-                            One row per player per season — we'll match these season labels to your seasons in the next step.
+                            One row per player per season. We'll match these season labels to your seasons in the next step.
                           </p>
                         </div>
                       ) : (
@@ -587,7 +587,7 @@ export default function AdminImport() {
         {/* ── Step: Match seasons ── */}
         {step === 'seasons' && (
           <MatchTable
-            title="Match seasons" subtitle="Match each season label to one of your seasons. Anything we can't match (and catch-all rows like “Prior Seasons & Adjustments”) defaults to Career summary (no season) — a single adjustment bucket that fills in everything online data doesn't already hold."
+            title="Match seasons" subtitle="Match each season label to one of your seasons. Anything we can't match (and catch-all rows like “Prior Seasons & Adjustments”) defaults to Career summary (no season). A single adjustment bucket that fills in everything online data doesn't already hold."
             rows={(resolved?.seasons) || []} kind="season" allOptions={allSeasons.map(s => ({ id: s.id, name: formatSeason(s) }))}
             loading={resolving}
             valueFor={(r) => {
@@ -608,7 +608,7 @@ export default function AdminImport() {
         {step === 'grades' && (
           <MatchTable
             title="Match grades / teams"
-            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club — that's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If the club played a competition nothing online carries, add it as a historical grade: it becomes a real grade you can filter and report by, and its figures are kept as their own historical record."
+            subtitle="Match each grade or team label from your sheet to the exact grade name we already hold online for this club. That's what tells us which of your sheet's figures are already covered, so we don't add them twice. Anything left unresolved is safely compared against the player's whole career instead (never double-counted, but can under-count a bit). If the club played a competition nothing online carries, add it as a historical grade: it becomes a real grade you can filter and report by, and its figures are kept as their own historical record."
             rows={(resolved?.grades) || []} kind="grade"
             allOptions={[...(resolved?.grade_options || []), ...extraGrades.filter(e => !(resolved?.grade_options || []).some(g => g.name === e.name))]
               .map(g => ({ id: g.name, name: g.name, games: g.games, players: g.players, runs: g.runs }))}
@@ -719,7 +719,7 @@ const RESOLVED_STATUSES = ['exact', 'manual', 'matched', 'own']
 const PAGE_SIZE = 50
 
 function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'grade' ? '— Unresolved (compared to whole career) —' : '— Unresolved (skipped) —'
+  if (!value) return kind === 'grade' ? '. Unresolved (compared to whole career). ' : '. Unresolved (skipped), '
   if (value === '__new__') return '+ Create new player'
   if (value === '__skip__') return 'Skip'
   if (value === '__prior__') return '↪ Career summary (no season)'
@@ -957,7 +957,7 @@ function MatchTable({ title, subtitle, rows, kind, allOptions, valueFor, onChang
               )}
               {!loading && rows.length === 0 && <tr><td colSpan={3} className="py-4 text-center text-pb-dim text-[12px]">Nothing to match.</td></tr>}
               {!loading && rows.length > 0 && shown.length === 0 && (
-                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'} matched — nothing to review.</td></tr>
+                <tr><td colSpan={3} className="py-4 text-center text-green-300 text-[12px]">All {kind === 'player' ? 'players' : kind === 'grade' ? 'grades' : 'seasons'} matched. Nothing to review.</td></tr>
               )}
             </tbody>
           </table>
@@ -1058,7 +1058,7 @@ function PlayerMatch({ rows, allPlayers, overrides, setOverride, setOverridesBul
 
             {active === 'matched' && (
               <p className="text-[12px] text-green-300 mb-3">
-                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched your players exactly — nothing to do unless one looks wrong.
+                {buckets.matched.length} name{buckets.matched.length === 1 ? '' : 's'} matched your players exactly. Nothing to do unless one looks wrong.
               </p>
             )}
             {active === 'close' && buckets.close.length > 0 && (
@@ -1184,7 +1184,7 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
         </div>
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
           <span className="text-pb-dim">Final = online (GR) + the residual we add.</span> Where your sheet and online data
-          overlap, online wins; the residual is only the part it's missing — so the final can never exceed your club's own total.
+          overlap, online wins; the residual is only the part it's missing, so the final can never exceed your club's own total.
         </p>
         <div className="overflow-x-auto">
           <table className="w-full text-[12px] min-w-[640px]">
@@ -1209,20 +1209,20 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.gr_games)}</td>
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-accent text-right">+{num(p.residual_games)}</td>
                   <td className="py-2 pr-2 font-mono text-[12px] text-pb-text text-right font-semibold">{num(p.final_games)}</td>
-                  <td className="py-2 pr-2">{p.gr_exceeds && <span className="font-mono text-[9px] text-pb-amber" title="Online data already shows more than your sheet — we show the higher online figure.">GR HIGHER</span>}</td>
+                  <td className="py-2 pr-2">{p.gr_exceeds && <span className="font-mono text-[9px] text-pb-amber" title="Online data already shows more than your sheet, we show the higher online figure.">GR HIGHER</span>}</td>
                 </tr>
               ))}
               {resolving && preview.length === 0 && <tr><td colSpan={6} className="py-8 text-center"><PbSpinner message="Reconciling…" /></td></tr>}
-              {!resolving && preview.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-pb-dim">No matched players yet — go back and resolve the matches.</td></tr>}
+              {!resolving && preview.length === 0 && <tr><td colSpan={6} className="py-4 text-center text-pb-dim">No matched players yet. Go back and resolve the matches.</td></tr>}
             </tbody>
           </table>
         </div>
         {preview.length > shownPreview.length && (
-          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the top {shownPreview.length} of {preview.length} players by games — all will be imported.</p>
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the top {shownPreview.length} of {preview.length} players by games. All will be imported.</p>
         )}
         {(resolved?.rounding_notes || []).length > 0 && (
           <details className="mt-4">
-            <summary className="font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer">{resolved.rounding_notes.length} reconstructed value(s) — derived from averages (±1)</summary>
+            <summary className="font-mono text-[10px] tracking-wide2 text-pb-faint cursor-pointer">{resolved.rounding_notes.length} reconstructed value(s), derived from averages (±1)</summary>
             <ul className="mt-2 text-[11px] text-pb-faint space-y-0.5">
               {resolved.rounding_notes.map((n, i) => <li key={i}>· {n}</li>)}
             </ul>
@@ -1231,7 +1231,7 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
       </div>
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
-        {unresolved > 0 && <span className="font-mono text-[10px] text-pb-amber">{unresolved} player(s) still unresolved — they'll be skipped.</span>}
+        {unresolved > 0 && <span className="font-mono text-[10px] text-pb-amber">{unresolved} player(s) still unresolved, they'll be skipped.</span>}
         <button onClick={onCommit} disabled={committing || preview.length === 0}
           className="ml-auto px-5 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
           {committing ? 'IMPORTING…' : `IMPORT ${preview.length} PLAYER${preview.length === 1 ? '' : 'S'}`}

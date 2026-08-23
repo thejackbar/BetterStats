@@ -55,7 +55,7 @@ export default function MediaLibraryPanel({
             style={{ background: 'var(--pb-surface2)' }}
           >
             Drop images here, or click to upload
-            <span className="block font-mono text-[9px] text-pb-faint mt-1">PNG · JPG · WEBP — kept in the club library</span>
+            <span className="block font-mono text-[9px] text-pb-faint mt-1">PNG · JPG · WEBP: kept in the club library</span>
             <input type="file" accept="image/png,image/jpeg,image/webp" multiple className="sr-only"
               onChange={e => { onUpload(Array.from(e.target.files || [])); e.target.value = '' }} />
           </label>
@@ -86,7 +86,7 @@ export default function MediaLibraryPanel({
       {tab === 'players' && (
         <div>
           <p className="text-[11px] leading-relaxed text-pb-dim mb-2.5">
-            Headshots from player profiles — the block stays linked, so the photo updates when the profile does.
+            Headshots from player profiles. The block stays linked, so the photo updates when the profile does.
           </p>
           <div className="grid grid-cols-3 gap-2">
             {players.map(p => {

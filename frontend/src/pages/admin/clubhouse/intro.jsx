@@ -125,30 +125,30 @@ export const INTROS = {
     title: 'Directory',
     lede: 'One record per person, whatever their relationship to the club.',
     points: [
-      'Find anyone — a player, a volunteer, a committee member, a parent — without guessing which list they are on.',
+      'Find anyone, a player, a volunteer, a committee member, a parent, without guessing which list they are on.',
       'Read a person whole: their balance, club roles, qualifications, hours and kit in one record.',
       'Filter to a group and email it from the same screen, instead of rebuilding the group somewhere else.',
     ],
-    history: 'This replaced three separate people lists — the Fees member list, the Comms contact list and the club directory — which each held part of the same person and none of the whole.',
+    history: 'This replaced three separate people lists, the Fees member list, the Comms contact list and the club directory, which each held part of the same person and none of the whole.',
   },
   accounts: {
     title: 'Accounts',
     lede: 'One balance per person, covering everything they owe the club.',
     points: [
       'Subs and match fees sit beside issued kit, so a member has one balance rather than two.',
-      'A payment settles their games oldest first, and the per-game status is worked out on read — edit a payment and it re-allocates itself.',
+      'A payment settles their games oldest first, and the per-game status is worked out on read. Edit a payment and it re-allocates itself.',
       'Filter to who owes and email exactly those people.',
     ],
     history: 'Stock charges land here now. Kit used to be owed in the merch ledger, which never met the fee ledger, so nobody could answer "what does this person owe us".',
   },
-  // Keyed 'audiences' on purpose — the key is what marks the introduction as
+  // Keyed 'audiences' on purpose. The key is what marks the introduction as
   // seen, per person, so renaming it would show this again to everyone who has
   // already dismissed it. The screen it belongs to is Segments.
   audiences: {
     title: 'Segments',
     lede: 'A group of people described by a rule, worked out again every time you send.',
     points: [
-      'A segment is a set of conditions, not a frozen copy — someone who joins tomorrow is in it tomorrow.',
+      'A segment is a set of conditions, not a frozen copy. Someone who joins tomorrow is in it tomorrow.',
       'For people picked by hand, use a list instead. A segment is the rule; a list is the roll call.',
       'When you write an email you choose its audience, and that audience is one of your segments or one of your lists.',
       'Every segment reports how many people it matches and how many can actually be reached by email.',
@@ -158,7 +158,7 @@ export const INTROS = {
     title: 'Lists',
     lede: 'A fixed set of people you picked by hand, and it stays as picked.',
     points: [
-      'Use a list for a group that will not change on its own — the committee, the sponsors, one team.',
+      'Use a list for a group that will not change on its own: the committee, the sponsors, one team.',
       'For a group better described by a rule, use a segment instead. A list is the roll call; a segment is the rule.',
       'When you write an email you choose its audience, and that audience is one of your lists or one of your segments.',
       'Lists other BetterCricket tools built for you sit in their own section and behave like any other list.',
@@ -190,7 +190,7 @@ export const INTROS = {
       'Xero pulls bank transactions in so they can be matched against what members owe.',
       'The email provider that sends your campaigns is set up here too.',
     ],
-    history: 'Square used to be connected twice — once under fees and once under stock — with no sign on either screen that the other existed.',
+    history: 'Square used to be connected twice, once under fees and once under stock, with no sign on either screen that the other existed.',
   },
   reports: {
     title: 'Reports',

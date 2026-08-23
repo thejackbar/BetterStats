@@ -91,7 +91,7 @@ export default function WebsitePagesAdmin() {
 
           <label className="flex items-center gap-2 text-sm text-pb-dim cursor-pointer">
             <input type="checkbox" checked={editing.is_header} onChange={e => setField('is_header', e.target.checked)} />
-            Menu group (a dropdown with no page of its own — e.g. “Teams”)
+            Menu group (a dropdown with no page of its own, e.g. “Teams”)
           </label>
 
           {editing.is_header ? (
@@ -104,7 +104,7 @@ export default function WebsitePagesAdmin() {
                 <div className="sm:w-72">
                   <label className="block font-mono text-[10px] tracking-wide3 text-pb-faintest uppercase mb-2">Parent menu (optional)</label>
                   <select value={editing.parent_id || ''} onChange={e => setField('parent_id', e.target.value || null)} className={inputCls}>
-                    <option value="">— Top level —</option>
+                    <option value="">. Top level, </option>
                     {parents.map(p => <option key={p.id} value={p.id}>{p.nav_label || p.title}{p.is_header ? ' (menu)' : ''}</option>)}
                   </select>
                 </div>
@@ -138,7 +138,7 @@ export default function WebsitePagesAdmin() {
         <p className="text-pb-faint text-sm">{list.length} item{list.length === 1 ? '' : 's'}</p>
         <button onClick={() => setEditing(blankPage())} className={btnPrimary}>+ New page</button>
       </div>
-      <p className="text-pb-faintest text-[11px] mb-4">Create pages, or a “menu group” (no page) to nest pages under — e.g. Teams → Mens / Womens. Use ↑ ↓ to reorder.</p>
+      <p className="text-pb-faintest text-[11px] mb-4">Create pages, or a “menu group” (no page) to nest pages under, e.g. Teams → Mens / Womens. Use ↑ ↓ to reorder.</p>
 
       {loading ? <p className="text-pb-faint text-sm">Loading…</p> : list.length === 0 ? (
         <div className="pb-card px-4 py-10 text-center text-pb-faint text-sm">No pages yet. Add About, History, Join Us…</div>

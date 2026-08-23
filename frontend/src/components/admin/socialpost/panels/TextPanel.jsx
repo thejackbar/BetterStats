@@ -5,7 +5,7 @@ import { BLANK_FONTS } from '../../../../social/blank-template'
 const PRESETS = [
   { key: 'heading', label: 'Heading', text: 'HEADLINE', fontFamily: "'Anton', sans-serif", fontSize: 130, bold: true, uppercase: true, preview: 26 },
   { key: 'subheading', label: 'Subheading', text: 'SUB HEADLINE', fontFamily: "'Barlow Condensed', sans-serif", fontSize: 66, bold: true, uppercase: true, preview: 18 },
-  { key: 'body', label: 'Body', text: 'Add your body copy here — a sentence or two from the club.', fontFamily: "'Inter', sans-serif", fontSize: 40, bold: false, uppercase: false, lineHeight: 1.25, preview: 12 },
+  { key: 'body', label: 'Body', text: 'Add your body copy here: a sentence or two from the club.', fontFamily: "'Inter', sans-serif", fontSize: 40, bold: false, uppercase: false, lineHeight: 1.25, preview: 12 },
 ]
 
 export default function TextPanel({ onAdd }) {

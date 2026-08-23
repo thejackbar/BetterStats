@@ -5,6 +5,6 @@ export default {
   title: 'BetterAdmin: an Integrations shelf, with Square live and Xero on the way',
   items: [
     'The BetterAdmin home page now has a smaller "Integrations" row below the module cards: Connect Square jumps straight to the Square setup page.',
-    'Connect Xero is shown as a greyed-out "coming soon" placeholder — no functionality yet.',
+    'Connect Xero is shown as a greyed-out "coming soon" placeholder, no functionality yet.',
   ],
 }

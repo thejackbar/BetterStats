@@ -138,7 +138,7 @@ export default function ScoutMilestones() {
   return (
     <ScoutModuleLayout
       title="Milestones"
-      caption="A player three wickets from 150 is a reason to call — and a reason they'll remember it."
+      caption="A player three wickets from 150 is a reason to call, and a reason they'll remember it."
       stats={
         <div className="flex items-center gap-5">
           <StatReadout label="50s this season" value={c.fifties_this_season} />
@@ -179,7 +179,7 @@ export default function ScoutMilestones() {
       }
     >
       <div className="pb-card px-4 py-2.5 mb-5 text-xs text-pb-faint">
-        Only as current as each player's last refresh — a stale card can miss a milestone crossed since. See a player's profile for when their stats were last built.
+        Only as current as each player's last refresh. A stale card can miss a milestone crossed since. See a player's profile for when their stats were last built.
       </div>
 
       <div className="space-y-8">

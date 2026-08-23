@@ -496,7 +496,7 @@ async def send_nudge(db: AsyncSession, club, medal: AflVoteMedal, game: dict, pl
     opponent = game_label(game)
     award = medal.name or DEFAULT_MEDAL_NAME
     first = (player.get("name") or "").split(" ")[0] or "there"
-    subject = f"{round_label_for(game)} v {opponent} — {award} votes"
+    subject = f"{round_label_for(game)} v {opponent}, {award} votes"
     body_html = (
         f"<p>Hi {first},</p>"
         f"<p><strong>{award}</strong> votes are still open for "

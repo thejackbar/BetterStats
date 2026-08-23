@@ -2,7 +2,7 @@ export default {
   "version": "v7.23 Beta",
   "date": "2026-05-28",
   "sortKey": "2026-05-28T14:30:00Z",
-  "title": "Marketing site rewrite — Home, Features, Pricing, Compare, About, FAQ",
+  "title": "Marketing site rewrite. Home, Features, Pricing, Compare, About, FAQ",
   "items": [
     "Home: refreshed hero copy, swapped headline stats to Australia-wide context (4,500+ clubs, 1M+ players, 200+ StatLab reports), trimmed testimonials to a single quote, Trusted-by strip now links straight to the Applecross dashboard",
     "Features: new Player Merge Tool section, new Player Comparison section, Shareable Cards moved into the short-feature list, Coming Soon block added for Social Posting / Smart Selection / Availability Tracking, shorter hero hook",

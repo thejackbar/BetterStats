@@ -82,7 +82,7 @@ function MaintenanceLogPanel({ subjectType, subjectId }) {
           {logs.length === 0 && <div className="font-mono text-[10px] text-pb-faintest">No history yet.</div>}
           {logs.map(l => (
             <div key={l.id} className="flex items-center justify-between font-mono text-[10px] text-pb-dim">
-              <span>{l.performed_at} — {l.description}{l.cost ? ` ($${l.cost})` : ''}{l.performed_by ? ` · ${l.performed_by}` : ''}</span>
+              <span>{l.performed_at}, {l.description}{l.cost ? ` ($${l.cost})` : ''}{l.performed_by ? ` · ${l.performed_by}` : ''}</span>
               <button onClick={() => remove(l.id)} className="text-pb-faintest hover:text-pb-red">✕</button>
             </div>
           ))}

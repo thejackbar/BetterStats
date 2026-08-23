@@ -37,7 +37,7 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
     const fx = fixtures[0]
     const what = fx ? `${fx.round} v ${fx.opponent || 'TBC'}` : 'this weekend'
     const closes = fx?.closes_on ? `\nCloses ${new Date(fx.closes_on + 'T00:00:00').toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}.` : ''
-    return `Votes are open for ${what}. 30 seconds, no login — pick your 3, 2 and 1.\n${url}${closes}`
+    return `Votes are open for ${what}. 30 seconds, no login. Pick your 3, 2 and 1.\n${url}${closes}`
   }, [fixtures, url])
 
   const message = draft ?? defaultMessage
@@ -60,7 +60,7 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
       // post composer with the message ready to paste in, rather than nothing.
       if (onPostToSocials) { onPostToSocials(message, url); return }
       try { await navigator.clipboard.writeText(message) } catch { /* best-effort */ }
-      toast.success('Message copied — paste it into your post')
+      toast.success('Message copied, paste it into your post')
       navigate('/admin/social-post')
       return
     }
@@ -72,7 +72,7 @@ export default function ShareVotePanel({ settings, scope, fixtures = [], onPostT
   if (!settings?.enabled) {
     return (
       <div className="pb-card px-4 py-4 text-[12.5px] text-pb-amber">
-        The voting link is off, so players can't vote yet. Turn it on under Settings — admins can still enter ballots by hand.
+        The voting link is off, so players can't vote yet. Turn it on under Settings. Admins can still enter ballots by hand.
       </div>
     )
   }

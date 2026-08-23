@@ -72,7 +72,7 @@ function FixtureModal({ fixture, onClose, onSaved }) {
           </div>
           <Field label="Our team">
             <Select value={form.team_id || ''} onChange={set('team_id')}>
-              <option value="">— No team assigned —</option>
+              <option value="">, No team assigned, </option>
               {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </Select>
           </Field>

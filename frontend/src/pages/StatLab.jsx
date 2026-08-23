@@ -210,7 +210,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'collapse_8w',                   label: '8-wicket batting collapses', description: '8 wickets fell within 60 runs.' },
       { type: 'derived', key: 'collapse_9w',                   label: '9-wicket batting collapses', description: '9 wickets fell within 70 runs.' },
       // On this day
-      { type: 'preset', label: 'On this day — batting',        target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [], context: { on_this_day: true } },
+      { type: 'preset', label: 'On this day: batting',        target: 'innings_list',  sortBy: 'runs',                sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -221,7 +221,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'partnership_aggregates_pair',     label: 'Top partnership aggregates',  description: 'Total partnership runs per pair of batters.' },
       { type: 'derived', key: 'century_partnerships_pair',       label: 'Most century partnerships by pair', description: 'Count of 100+ partnerships per pair.' },
       { type: 'derived', key: 'best_partnership_pair',           label: 'Best partnership by pair',    description: 'Highest single partnership for each pair.' },
-      { type: 'preset', label: 'On this day — partnerships',     target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: { on_this_day: true } },
+      { type: 'preset', label: 'On this day: partnerships',     target: 'partnership_list', sortBy: 'runs', sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -261,7 +261,7 @@ const PRESET_GROUPS = [
       { type: 'derived', key: 'bowler_fielder_combo',              label: 'Top bowler/fielder combinations', description: 'Most productive bowler+catcher partnerships.' },
       { type: 'derived', key: 'top_opening_bowlers',               label: 'Top opening bowlers by match count', description: 'Players who most often take the new ball.' },
       { type: 'derived', key: 'most_wickets_in_match',             label: 'Most wickets taken in a match', description: 'Most wickets by one bowler across both innings.' },
-      { type: 'preset', label: 'On this day — bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
+      { type: 'preset', label: 'On this day: bowling',            target: 'spell_list',    sortBy: 'wickets',             sortDir: 'desc', filters: [], context: { on_this_day: true } },
     ],
   },
   {
@@ -2186,5 +2186,5 @@ function defaultTitleFor(q, activeDerived, schema) {
   if (activeDerived && schema?.derived?.[activeDerived]) return schema.derived[activeDerived].label
   const t = TARGETS.find(x => x.key === q.target)?.label || 'Query'
   const sb = METRIC_LABELS[q.sortBy]?.label || q.sortBy
-  return `${t} — ${sb}`
+  return `${t}, ${sb}`
 }

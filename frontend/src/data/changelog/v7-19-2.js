@@ -6,6 +6,6 @@ export default {
   "items": [
     "Marketing pages were rendering both the global Navbar and MarketingNav simultaneously, causing doubled logos. Global Navbar is now suppressed on all marketing routes.",
     "Navigating to a new page via the nav now always scrolls to the top of the page. Hash anchor links (e.g. /features#compare) are excluded and continue to scroll to their target section.",
-    "About page hero is now full-width — removed the founder photo placeholder."
+    "About page hero is now full-width. Removed the founder photo placeholder."
   ]
 }

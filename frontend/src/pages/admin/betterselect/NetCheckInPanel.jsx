@@ -59,7 +59,7 @@ export default function NetCheckInPanel({ onChanged }) {
     setBusy(true)
     try {
       setCfg(await api.nmRegenerateCheckInLink())
-      toast.success('New link generated — reprint the QR code and rewrite your tags.')
+      toast.success('New link generated. Reprint the QR code and rewrite your tags.')
     } catch (e) {
       toast.error(e.message || 'Regenerate failed')
     } finally { setBusy(false) }
@@ -70,7 +70,7 @@ export default function NetCheckInPanel({ onChanged }) {
       await navigator.clipboard.writeText(text)
       toast.success(`${what} copied`)
     } catch {
-      toast.error('Copy failed — select and copy manually')
+      toast.error('Copy failed. Select and copy manually')
     }
   }
 
@@ -96,7 +96,7 @@ export default function NetCheckInPanel({ onChanged }) {
             </span>
           </div>
           <div className="text-[12.5px] text-pb-faint mt-0.5">
-            Players scan a code or tap a tag and check themselves in — no logins.
+            Players scan a code or tap a tag and check themselves in, no logins.
           </div>
         </div>
         <span className="text-pb-faint shrink-0">{open ? '▲' : '▼'}</span>
@@ -128,7 +128,7 @@ export default function NetCheckInPanel({ onChanged }) {
 
           {!enabled ? (
             <p className="text-sm text-pb-faint">
-              Turn this on to generate a link. Print it as a QR code or write it to an NFC tag, stick it where players walk in, and they check themselves in on the way past — straight into whatever session is running.
+              Turn this on to generate a link. Print it as a QR code or write it to an NFC tag, stick it where players walk in, and they check themselves in on the way past. Straight into whatever session is running.
             </p>
           ) : (
             <>
@@ -175,7 +175,7 @@ export default function NetCheckInPanel({ onChanged }) {
                     )}
                     {!cfg.require_pin && (
                       <div className="mt-2 text-[12.5px] text-pb-faintest">
-                        With the PIN off, anyone holding the link can check in under any name on the list. That is usually the right trade at a net session — worth knowing before the code goes somewhere public.
+                        With the PIN off, anyone holding the link can check in under any name on the list. That is usually the right trade at a net session. Worth knowing before the code goes somewhere public.
                       </div>
                     )}
                   </div>

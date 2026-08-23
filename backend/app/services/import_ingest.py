@@ -319,8 +319,8 @@ def row_to_truth(values: dict) -> tuple:
 
 NAME_FORMAT_LABELS = {
     "auto": "Auto-detect (recommended)",
-    "first_last": "First name then Surname — e.g. “Jack Barendse”",
-    "last_first": "Surname then First name — e.g. “Barendse Jack” or “Barendse, Jack”",
+    "first_last": "First name then Surname: e.g. “Jack Barendse”",
+    "last_first": "Surname then First name: e.g. “Barendse Jack” or “Barendse, Jack”",
 }
 
 
@@ -498,7 +498,7 @@ def match_players(names: list, players: list, fuzzy_threshold: float = 0.84) -> 
                          "confidence": 1.0, "status": "exact", "auto_status": "exact", "candidates": []}
         elif len(exact) > 1:
             out[name] = {"player_id": None, "confidence": 1.0, "status": "ambiguous", "auto_status": "ambiguous",
-                         "note": "Two players share this name — merge them first, then re-import.",
+                         "note": "Two players share this name. Merge them first, then re-import.",
                          "candidates": [{"player_id": str(pid), "name": pn} for pid, pn in exact]}
         else:
             # Same first + last name, the only difference being an extra middle

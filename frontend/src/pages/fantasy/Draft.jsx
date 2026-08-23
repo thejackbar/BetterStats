@@ -219,7 +219,7 @@ function LotCard({ lot, onBid }) {
 
       {lot.i_can_bid ? (
         <div style={{ marginTop: 12 }}>
-          {lot.my_max != null && <div style={{ font: `600 11px 'Hanken Grotesk'`, color: RED, marginBottom: 6 }}>Outbid — your max was {money(lot.my_max)}. Raise it to lead.</div>}
+          {lot.my_max != null && <div style={{ font: `600 11px 'Hanken Grotesk'`, color: RED, marginBottom: 6 }}>Outbid: your max was {money(lot.my_max)}. Raise it to lead.</div>}
           <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
             <Field value={amount} onChange={e => setAmount(e.target.value)} type="number" inputMode="numeric" style={{ flex: 1, padding: '11px 12px' }} />
             <Btn variant="soft" onClick={() => bump(1)} style={{ padding: '11px 13px' }}>+1</Btn>

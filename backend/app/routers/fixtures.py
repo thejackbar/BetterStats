@@ -381,5 +381,5 @@ async def sync_fixtures(
     if teams_assigned:
         detail += f", auto-assigned {teams_assigned} to a team"
     elif not teams:
-        detail += " — seed teams first to auto-assign them"
+        detail += ". Seed teams first to auto-assign them"
     return {"synced": synced, "teams_assigned": teams_assigned, "detail": detail}

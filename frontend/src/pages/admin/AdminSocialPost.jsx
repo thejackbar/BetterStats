@@ -92,7 +92,7 @@ const TEMPLATES = [
   // come from the event registry.
   ...EVENT_TEMPLATES.map((t) => ({ id: t.id, name: t.name, component: t.component, desc: t.desc, maxPlayers: 0, kind: 'event', surface: t.surface, photo: t.photo })),
   // Freeform WYSIWYG canvas — add/move/resize your own text & images.
-  { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform — add your own text & images', maxPlayers: 0, kind: 'blank' },
+  { id: 'BL1', name: 'Blank Canvas', component: BlankCanvas, desc: 'Freeform: add your own text & images', maxPlayers: 0, kind: 'blank' },
 ]
 
 // The lineup templates that crop the hero photo into a fixed box, and the shape
@@ -141,7 +141,7 @@ const TAB_ICON = {
 // import). These open on the "Get your data" step so the source is collected first.
 const DATA_TABS = ['lineup', 'fixtures', 'results', 'result', 'scorecard', 'motm']
 const SOURCE_HELP = {
-  lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details — or add players yourself in Content.',
+  lineup: 'Pick a saved BetterSelect XI or a Play.Cricket published team list below to pull the players, captain, keeper and match details, or add players yourself in Content.',
   result: 'Paste the match link and we\'ll pull the scores, the top batters and bowlers for both sides, the result and the player of the match.',
   scorecard: 'Paste the match link and we\'ll pull the full scorecard for both teams.',
   fixtures: 'Pull this round\'s fixtures for every grade straight from the fixtures feed.',
@@ -372,7 +372,7 @@ function DesignSwatch({ design, selected, onClick }) {
   return (
     <button
       onClick={onClick}
-      title={`${design.name} — ${SOCIAL_BACKGROUNDS.find(s => s.key === design.bgStyle)?.label || 'Clean'}`}
+      title={`${design.name}. ${SOCIAL_BACKGROUNDS.find(s => s.key === design.bgStyle)?.label || 'Clean'}`}
       style={{
         width: DESIGN_SWATCH_SIZE, height: DESIGN_SWATCH_SIZE, borderRadius: 6, cursor: 'pointer', overflow: 'hidden', position: 'relative',
         background: design.primary, border: `2px solid ${selected ? design.accent : 'transparent'}`, flexShrink: 0,
@@ -800,7 +800,7 @@ function MatchPickList({ picks, onPick, onDismiss }) {
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
 // The untouched Style defaults, in the exact key order the style snapshot is
-// built with — used to tell "changed something" from "just visited the page"
+// built with. Used to tell "changed something" from "just visited the page"
 // before any style has ever been stored server-side.
 const DEFAULT_STYLE_JSON = JSON.stringify({
   palette: 'club', dark: true, font: 'barlow', bg: 'none',
@@ -886,10 +886,10 @@ export default function AdminSocialPost() {
       ? (typeof d.fontFace?.weight === 'number' ? d.fontFace.weight : 400)
       : fontWeightFor(fonts, 'display')
     const label = (d.cssFamily.split(',')[0] || '').replace(/'/g, '').trim()
-    return { key: 'club_font', name: `Club font — ${label}`, family: d.cssFamily, weight, fontFace: d.fontFace }
+    return { key: 'club_font', name: `Club font: ${label}`, family: d.cssFamily, weight, fontFace: d.fontFace }
   }, [settings])
   // This page renders standalone (no ModuleLayout, so no club-theme style
-  // tag) — an UPLOADED club font needs its @font-face injected here or the
+  // tag). An UPLOADED club font needs its @font-face injected here or the
   // preview falls back to the stack. Presets are Google families already
   // loaded site-wide via index.html.
   useEffect(() => {
@@ -900,7 +900,7 @@ export default function AdminSocialPost() {
     document.head.appendChild(style)
     return () => style.remove()
   }, [clubFont])
-  // Background texture, layered over any template — persisted like the other
+  // Background texture, layered over any template, persisted like the other
   // Style controls so a club's preferred "finish" carries between posts.
   const [bgStyle, setBgStyle] = useState(() =>
     localStorage.getItem('bs_social_bg') || 'none'
@@ -2491,7 +2491,7 @@ export default function AdminSocialPost() {
   const headerLeft = (
     <>
       <button onClick={() => navigate('/admin')} title="Exit to admin" className="w-7 h-7 grid place-items-center rounded-md text-pb-faint hover:text-pb-text transition-colors"><Icon name="back" size={16} /></button>
-      <button onClick={() => navigate('/admin/social-post')} title="What are you posting? — start over"
+      <button onClick={() => navigate('/admin/social-post')} title="What are you posting? Start over"
         className="hidden sm:flex items-center gap-1.5 px-2.5 h-8 rounded-md border pb-hairline2 text-pb-dim hover:text-pb-text hover:border-pb-accent transition-colors">
         <Icon name="overview" size={14} /><span className="font-mono text-[9px] tracking-wide2 uppercase">Posts</span>
       </button>
@@ -2695,7 +2695,7 @@ export default function AdminSocialPost() {
                     <Icon name={TAB_ICON[activeTab] || 'bolt'} size={15} className="text-pb-accent" />
                     <h2 className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">{TABS.find((t) => t.key === activeTab)?.label} · data</h2>
                   </div>
-                  <p className="text-[11px] text-pb-dim leading-relaxed">{SOURCE_HELP[activeTab] || "This post type has nothing to import — it's all yours to design."}</p>
+                  <p className="text-[11px] text-pb-dim leading-relaxed">{SOURCE_HELP[activeTab] || "This post type has nothing to import. It's all yours to design."}</p>
                 </div>
 
                 {activeTab === 'lineup' && (
@@ -2754,7 +2754,7 @@ export default function AdminSocialPost() {
                     </>)}
 
                     {lineupLoad === 'loading' && <div className="text-pb-faint text-[10px] font-mono">Loading XI…</div>}
-                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded — head to Content or Design</div>}
+                    {typeof lineupLoad === 'string' && lineupLoad.startsWith('ok:') && <div className="text-green-400 text-[10px] font-mono">✓ {lineupLoad.slice(3)} players loaded, head to Content or Design</div>}
                     {typeof lineupLoad === 'string' && lineupLoad.startsWith('err:') && <div className="text-pb-red text-[10px] font-mono">✗ {lineupLoad.slice(4)}</div>}
                   </div>
                 )}
@@ -3045,7 +3045,7 @@ export default function AdminSocialPost() {
                     <input
                       value={bgBigText}
                       onChange={e => setBgBigText(e.target.value)}
-                      placeholder="Background text — 100, 1ST GRADE, ROUND 1…"
+                      placeholder="Background text: 100, 1ST GRADE, ROUND 1…"
                       className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono"
                     />
                     {bgBigText && (
@@ -3068,7 +3068,7 @@ export default function AdminSocialPost() {
                         {Math.round(bgLogoOpacity * 100)}%
                       </label>
                     )}
-                    {!team.logo && <span className="text-[10px] text-pb-faintest font-mono">— upload a club logo in Settings first</span>}
+                    {!team.logo && <span className="text-[10px] text-pb-faintest font-mono">. Upload a club logo in Settings first</span>}
                   </div>
                 </div>
               )}
@@ -3110,7 +3110,7 @@ export default function AdminSocialPost() {
               </div>
               {showSaveDesign && (
                 <div className="mt-2 flex gap-2 items-center">
-                  <input value={saveDesignName} onChange={e => setSaveDesignName(e.target.value)} placeholder="Design name — e.g. Match Day Grunge"
+                  <input value={saveDesignName} onChange={e => setSaveDesignName(e.target.value)} placeholder="Design name: e.g. Match Day Grunge"
                     className="flex-1 bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-xs text-pb-text placeholder:text-pb-faintest font-mono" />
                   <button
                     onClick={() => {
@@ -3164,10 +3164,10 @@ export default function AdminSocialPost() {
                           ? { borderColor: 'var(--pb-accent)', color: 'var(--pb-accent)' }
                           : { borderColor: 'var(--pb-hairline)' }}>
                         {customEdit
-                          ? '✎ Custom editing (overlay) — click to stop'
+                          ? '✎ Custom editing (overlay). Click to stop'
                           : CUSTOM_EDITABLE.includes(templateId)
-                            ? '✎ Custom Edit — make every element movable'
-                            : '✎ Custom Edit — add blocks on top'}
+                            ? '✎ Custom Edit. Make every element movable'
+                            : '✎ Custom Edit. Add blocks on top'}
                       </button>
                       <span className="text-pb-faintest text-[10px]">
                         {CUSTOM_EDITABLE.includes(templateId)
@@ -3199,7 +3199,7 @@ export default function AdminSocialPost() {
                   <div className="flex flex-col gap-1.5">
                     <div className="font-mono text-[9px] text-pb-faintest uppercase tracking-wide2">Custom</div>
                     {savedTemplates.length === 0 && (
-                      <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet — build a post, then save it below.</div>
+                      <div className="text-pb-faintest text-[10px] font-mono">No saved templates yet, build a post, then save it below.</div>
                     )}
                     {savedTemplates.length > 0 && (
                       <div className="grid grid-cols-2 gap-2">
@@ -3234,7 +3234,7 @@ export default function AdminSocialPost() {
             {isBlankTab && (
               <div className="pb-card p-4">
                 <p className="text-[11px] text-pb-dim leading-relaxed">
-                  A blank canvas — use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
+                  A blank canvas: use the tools on the left (<span className="text-pb-text">Text</span>, <span className="text-pb-text">Shapes</span>, <span className="text-pb-text">Photos</span>, <span className="text-pb-text">Club data</span>) to add blocks, then drag them on the canvas. Or pick a starting layout under <span className="text-pb-text">Design</span>.
                 </p>
               </div>
             )}
@@ -3360,7 +3360,7 @@ export default function AdminSocialPost() {
                       onChange={e => setHeroPlayerId(e.target.value)}
                       className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text"
                     >
-                      <option value="">Auto — captain, else 1st in order</option>
+                      <option value="">Auto: captain, else 1st in order</option>
                       {selectedPlayers.map(sp => (
                         <option key={sp.player.id} value={sp.player.id}>
                           {(sp.player.display_name || sp.player.name)}{sp.player.photo_url ? '' : ' · no photo'}
@@ -3559,7 +3559,7 @@ export default function AdminSocialPost() {
                   <p className="text-pb-faintest text-[10px] mt-1.5 leading-relaxed">{LINK_HELP}</p>
                   {resUrlStatus && resUrlStatus !== 'loading' && (
                     <p className={`font-mono text-[9px] mt-1.5 ${resUrlStatus === 'ok' ? 'text-green-400' : 'text-red-400'}`}>
-                      {resUrlStatus === 'ok' ? '✓ Top performers, scores & MOTM filled — review below' : `✗ ${resUrlStatus}`}
+                      {resUrlStatus === 'ok' ? '✓ Top performers, scores & MOTM filled. Review below' : `✗ ${resUrlStatus}`}
                     </p>
                   )}
                   <MatchPickList picks={resPicks} onPick={loadResultMatch} onDismiss={() => setResPicks(null)} />
@@ -3615,7 +3615,7 @@ export default function AdminSocialPost() {
                     <>
                       <select value={result.motmPlayerId} onChange={e => setResult(r => ({ ...r, motmPlayerId: e.target.value }))}
                         className="w-full bg-pb-surface2 border pb-hairline rounded px-3 py-2 text-sm text-pb-text">
-                        <option value="">No photo — initials</option>
+                        <option value="">No photo: initials</option>
                         {allPlayers.map(p => (
                           <option key={p.id} value={p.id}>
                             {(p.display_name || p.name)}{p.photo_url ? '' : ' · no photo'}
@@ -3630,7 +3630,7 @@ export default function AdminSocialPost() {
                             <span className="text-[11px] text-pb-faint">{mp.display_name || mp.name}</span>
                           </div>
                         )
-                        if (result.motmPlayerId) return <p className="text-[11px] text-pb-faintest mt-1">This player has no profile photo — initials will show.</p>
+                        if (result.motmPlayerId) return <p className="text-[11px] text-pb-faintest mt-1">This player has no profile photo, initials will show.</p>
                         return null
                       })()}
                     </>
@@ -3891,7 +3891,7 @@ export default function AdminSocialPost() {
                     ))}
                   </div>
                   {scSplit && (
-                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">One square per team — the side that batted first, then the side that chased. Downloads as 2 PNGs.</p>
+                    <p className="text-pb-faintest text-[10px] mt-2 leading-relaxed">One square per team. The side that batted first, then the side that chased. Downloads as 2 PNGs.</p>
                   )}
                 </div>
 
@@ -3971,7 +3971,7 @@ export default function AdminSocialPost() {
                   return (
                     <details key={side} className="mb-3 border pb-hairline rounded">
                       <summary className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase px-3 py-2 cursor-pointer hover:bg-pb-surface2">
-                        {side === 'home' ? '1st Innings' : '2nd Innings'} — {t.name || side.toUpperCase()}
+                        {side === 'home' ? '1st Innings' : '2nd Innings'}, {t.name || side.toUpperCase()}
                       </summary>
                       <div className="px-3 pb-3 pt-2 flex flex-col gap-2">
                         <div className="relative">

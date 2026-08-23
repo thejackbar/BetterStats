@@ -96,7 +96,7 @@ function DownloadLink({ taskId, file, label }) {
       a.click()
       URL.revokeObjectURL(url)
     } catch {
-      window.alert('Could not download this file — the backup-agent may be unreachable.')
+      window.alert('Could not download this file. The backup-agent may be unreachable.')
     } finally {
       setBusy(false)
     }
@@ -115,7 +115,7 @@ const RESTORE_CONFIRM_WORD = 'RESTORE'
 // independent gates, in order: (1) type the confirmation word back exactly,
 // checked entirely client-side/server-side before step 2 ever appears; (2)
 // paste the age PRIVATE key, sent fresh with this one request and never
-// stored anywhere — the backup-agent cryptographically verifies it's the
+// stored anywhere. The backup-agent cryptographically verifies it's the
 // real matching key before the restore is allowed to proceed. Plain SSH
 // restore (ops/backup/restore.sh) remains fully available alongside this.
 function RestoreModal({ task, mode, onClose, onStarted }) {
@@ -153,7 +153,7 @@ function RestoreModal({ task, mode, onClose, onStarted }) {
         ? await api.superBackupRestoreFull(task.id, confirmInput, privateKey)
         : await api.superBackupRestoreClub(task.id, orgId, confirmInput, privateKey)
       if (res?.status === 'already_running') {
-        setMsg(`Another operation is already running (${res.operation || 'unknown'}) — try again once it finishes.`)
+        setMsg(`Another operation is already running (${res.operation || 'unknown'}). Try again once it finishes.`)
       } else {
         onStarted()
         return // onStarted closes the modal
@@ -177,7 +177,7 @@ function RestoreModal({ task, mode, onClose, onStarted }) {
       <div className="pb-card w-full max-w-lg bg-pb-surface mt-16" onClick={(e) => e.stopPropagation()}>
         <div className="p-5 pb-0">
           <h2 className="font-display font-bold text-lg text-pb-text">
-            {mode === 'full' ? 'Restore — whole platform' : 'Restore — one club'}
+            {mode === 'full' ? 'Restore, whole platform' : 'Restore, one club'}
           </h2>
           <p className="font-mono text-[10px] text-pb-faintest mt-1">Bundle: {bundle}</p>
         </div>
@@ -226,7 +226,7 @@ function RestoreModal({ task, mode, onClose, onStarted }) {
               )}
               <div>
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">
-                  Private key (age identity — never stored, used once for this restore only)
+                  Private key (age identity: never stored, used once for this restore only)
                 </label>
                 <textarea
                   value={privateKey} onChange={(e) => setPrivateKey(e.target.value)}
@@ -236,7 +236,7 @@ function RestoreModal({ task, mode, onClose, onStarted }) {
                 />
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
                   Rejected outright unless it's the real matching private key for this
-                  server's configured public key — verified cryptographically before anything
+                  server's configured public key, verified cryptographically before anything
                   is restored.
                 </p>
               </div>
@@ -344,7 +344,7 @@ export default function SuperBackups() {
       if (res?.status === 'already_running') {
         setRunMsg('A backup is already running.')
       } else {
-        setRunMsg('Backup started — progress shows below as it runs.')
+        setRunMsg('Backup started. Progress shows below as it runs.')
       }
       // give the new "running" row a moment to land, then refresh the list
       // (the polling effect takes over from there while it's running)
@@ -367,11 +367,11 @@ export default function SuperBackups() {
               are set from General Settings → Backups.
             </p>
             <p className="text-xs text-pb-faint mt-2 max-w-2xl">
-              Backup and restore both run as host-level scripts (see docs/backup-system.md) —
+              Backup and restore both run as host-level scripts (see docs/backup-system.md), 
               this page proxies to them and shows what they logged. Restore is available both
               here and over SSH: from here it needs the private key pasted in fresh each time
               (never stored) plus a typed confirmation, verified cryptographically before
-              anything is touched. Backups are never sent anywhere automatically — every
+              anything is touched. Backups are never sent anywhere automatically, every
               DB/Uploads download below is a manual, on-demand copy of the still-encrypted
               file, nothing more.
             </p>
@@ -413,7 +413,7 @@ export default function SuperBackups() {
               </div>
               <p className="font-mono text-[10px] text-pb-faintest mb-2">
                 Per-club size is an estimate (rows are exact; bytes are each table's on-disk
-                size split proportionally by row share) — see docs/backup-system.md.
+                size split proportionally by row share). See docs/backup-system.md.
               </p>
               <input
                 type="text"
@@ -609,7 +609,7 @@ export default function SuperBackups() {
           onClose={() => setRestoreModal(null)}
           onStarted={() => {
             setRestoreModal(null)
-            setRunMsg(`Restore started — progress shows in the task list below.`)
+            setRunMsg(`Restore started. Progress shows in the task list below.`)
             setTimeout(loadTasks, 1500)
           }}
         />

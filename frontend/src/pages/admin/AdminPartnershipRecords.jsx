@@ -103,7 +103,7 @@ function ImportPanel({ onImported }) {
     }
     const MAX = 5 * 1024 * 1024
     if (file.size > MAX) {
-      setError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — must be 5 MB or smaller.`)
+      setError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB. Must be 5 MB or smaller.`)
       return
     }
     if (file.size === 0) {
@@ -294,7 +294,7 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
       <div className="bg-pb-surface border pb-hairline rounded-xl w-full max-w-3xl mb-8">
         <div className="flex items-center justify-between px-5 py-4 pb-hairline-b">
           <div>
-            <h2 className="text-pb-text font-semibold">Import Complete — Review Results</h2>
+            <h2 className="text-pb-text font-semibold">Import Complete. Review Results</h2>
             <p className="font-mono text-[10px] text-pb-faint mt-0.5">
               {created} record{created !== 1 ? 's' : ''} imported
               {skippedDuplicates > 0 ? `, ${skippedDuplicates} already existed` : ''}
@@ -313,7 +313,7 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
         {duplicates.length > 0 && (
           <div className="px-5 py-3 pb-hairline-b">
             <p className="font-mono text-[10px] text-pb-faint mb-2">
-              {duplicates.length} row{duplicates.length !== 1 ? 's' : ''} skipped — already in your records
+              {duplicates.length} row{duplicates.length !== 1 ? 's' : ''} skipped, already in your records
               {' '}(not re-imported)
             </p>
             <div className="space-y-1 max-h-40 overflow-y-auto pb-scroll">
@@ -330,13 +330,13 @@ function ImportWizard({ result, players, onClose, onRecordDeleted }) {
 
         {needsAttention.length === 0 && created > 0 && (
           <div className="px-5 py-6 text-center font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>
-            All {created} records imported cleanly — no issues to review.
+            All {created} records imported cleanly, no issues to review.
           </div>
         )}
 
         {needsAttention.length === 0 && created === 0 && duplicates.length > 0 && (
           <div className="px-5 py-6 text-center font-mono text-[11px] text-pb-faint">
-            Nothing new to import — every row already exists in your records.
+            Nothing new to import. Every row already exists in your records.
           </div>
         )}
 
@@ -412,7 +412,7 @@ function WizardRow({ record, players, onDeleted }) {
           <p className="text-pb-text text-sm font-medium">
             {record.batter1_name} <span className="text-pb-faintest">&amp;</span> {record.batter2_name}
             <span className="ml-2 font-mono text-[10px] text-pb-faintest font-normal">
-              {record.runs}{record.is_not_out ? '*' : ''} — {ORDINALS[record.wicket_number - 1]} wkt — {record.grade_name} {record.season_year}
+              {record.runs}{record.is_not_out ? '*' : ''}. {ORDINALS[record.wicket_number - 1]} wkt, {record.grade_name} {record.season_year}
             </span>
           </p>
 

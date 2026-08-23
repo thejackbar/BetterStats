@@ -147,7 +147,7 @@ async def run_backup_now(
         raise HTTPException(
             status_code=503,
             detail="The backup agent isn't configured on this server yet "
-                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md. "
+                   "(BACKUP_AGENT_URL unset): see docs/backup-system.md. "
                    "Run a backup manually on the server in the meantime: "
                    "ops/backup/backup.sh",
         )
@@ -204,7 +204,7 @@ def _require_agent_configured():
         raise HTTPException(
             status_code=503,
             detail="The backup agent isn't configured on this server yet "
-                   "(BACKUP_AGENT_URL unset) — see docs/backup-system.md.",
+                   "(BACKUP_AGENT_URL unset): see docs/backup-system.md.",
         )
 
 
@@ -212,7 +212,7 @@ def _require_confirm_word(confirm_word: str):
     if confirm_word != RESTORE_CONFIRM_WORD:
         raise HTTPException(
             status_code=400,
-            detail=f'Confirmation word did not match — type "{RESTORE_CONFIRM_WORD}" exactly.',
+            detail=f'Confirmation word did not match. Type "{RESTORE_CONFIRM_WORD}" exactly.',
         )
 
 

@@ -109,15 +109,15 @@ export default function AdminAccount() {
         // That "success" was the setup-mode session adding a card, not a
         // real charge — finish the add-on purchase it was standing in for.
         sessionStorage.removeItem(ADDON_RETRY_KEY)
-        setMsg('Payment method saved — finishing your purchase…')
+        setMsg('Payment method saved, finishing your purchase…')
         retryAddonPurchase(JSON.parse(retryModules))
       } else {
-        setMsg("Payment received — you're subscribed. It can take a few seconds to show below.")
+        setMsg("Payment received, you're subscribed. It can take a few seconds to show below.")
         setTimeout(load, 3000)
       }
     } else if (checkout === 'cancelled') {
       sessionStorage.removeItem(ADDON_RETRY_KEY)
-      setMsg('Checkout was cancelled — nothing was charged.')
+      setMsg('Checkout was cancelled. Nothing was charged.')
     }
     const next = new URLSearchParams(searchParams)
     next.delete('checkout')
@@ -198,7 +198,7 @@ export default function AdminAccount() {
     setRedeemMsg('')
     try {
       await api.couponRedeem(redeemCode.trim())
-      setRedeemMsg("Code applied — it'll reduce your next renewal.")
+      setRedeemMsg("Code applied, it'll reduce your next renewal.")
       setRedeemCode('')
     } catch (e) {
       setRedeemError(e.message || "That code couldn't be applied")
@@ -374,7 +374,7 @@ export default function AdminAccount() {
       setQuote(null)
       await load()
     } catch (e) {
-      setError(e.message || 'Could not finish adding the module(s) — your card was saved, try again below.')
+      setError(e.message || 'Could not finish adding the module(s). Your card was saved, try again below.')
     } finally {
       setCheckoutBusy(false)
     }
@@ -445,7 +445,7 @@ export default function AdminAccount() {
           <p className="font-mono text-[11px] text-pb-faint">Loading…</p>
         ) : (
           // The price summary sits in its own sticky column once a module is
-          // selected, instead of stacking below the module list — with 6
+          // selected, instead of stacking below the module list, with 6
           // possible rows the list alone can push a summary that comes after
           // it below the fold, right when it's most useful (mid-selection).
           // lg:sticky keeps it in view as the list/billing history scroll;
@@ -562,7 +562,7 @@ export default function AdminAccount() {
                   Redeem a discount code
                 </p>
                 <p className="font-mono text-[11px] text-pb-faint mb-3">
-                  Applies to your account's next renewal, not the current billing period — nothing is
+                  Applies to your account's next renewal, not the current billing period. Nothing is
                   charged today.
                 </p>
                 <div className="flex gap-2">
@@ -798,7 +798,7 @@ export default function AdminAccount() {
                 )}
                 {stripeNotice ? (
                   <p className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2">
-                    Online subscribing isn't connected yet — this is coming in a follow-up build.
+                    Online subscribing isn't connected yet. This is coming in a follow-up build.
                     In the meantime, contact the BetterCricket team directly to subscribe.
                   </p>
                 ) : (

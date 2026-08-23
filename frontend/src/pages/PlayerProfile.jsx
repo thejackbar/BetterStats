@@ -232,7 +232,7 @@ function DismissalDonut({ dismissals }) {
 
 function SeasonChart({ data }) {
   if (!data?.length) return null
-  // Drop the career-level "Prior Seasons & Adjustments" row (no season_id) —
+  // Drop the career-level "Prior Seasons & Adjustments" row (no season_id), 
   // it belongs in the table totals, not as a labelled bar on a season chart.
   const chartData = [...data].filter(s => s.season_id).reverse()
     .map(s => ({ ...s, season_name: formatSeason(s.season_name) }))
@@ -529,7 +529,7 @@ function FieldingTab({ fielding, seasonStats }) {
 
 // ── Career progression charts ────────────────────────────────────────────
 
-// Running career batting average progression — one point per innings, chronological
+// Running career batting average progression. One point per innings, chronological
 function CareerAvgProgressionChart({ innings }) {
   if (!innings?.length) return null
   // innings arrives DESC, reverse to chronological ASC
@@ -554,7 +554,7 @@ function CareerAvgProgressionChart({ innings }) {
         <Tooltip
           contentStyle={{ background: 'var(--pb-surface)', border: '1px solid var(--pb-hairline)', borderRadius: 6, fontSize: 11 }}
           formatter={(v) => [v != null ? v.toFixed(2) : '—', 'Average']}
-          labelFormatter={(i) => points[i - 1] ? `Inn #${i} — ${points[i - 1].label} (${points[i - 1].runs})` : `Inn #${i}`}
+          labelFormatter={(i) => points[i - 1] ? `Inn #${i}. ${points[i - 1].label} (${points[i - 1].runs})` : `Inn #${i}`}
         />
         <Line type="monotone" dataKey="avg" stroke="var(--pb-accent)" dot={false} strokeWidth={2} connectNulls />
       </LineChart>
@@ -1145,7 +1145,7 @@ function FormatsSection({ playerId, seasonId }) {
       {/* Honest about coverage rather than quietly showing a partial career as
           if it were the whole one. */}
       <p className="text-[11px] text-pb-faint leading-relaxed">
-        Worked out from each match's own format, not from the grade — a grade often plays more
+        Worked out from each match's own format, not from the grade. A grade often plays more
         than one. {cov.matches_not_recorded
           ? `${cov.matches_placed} of ${cov.matches_placed + cov.matches_not_recorded} matches (${fmtDec(cov.percent_placed, 1)}%) have a format recorded; the other ${cov.matches_not_recorded} aren't counted in any column above.`
           : 'Every match here has a recorded format.'}
@@ -1156,7 +1156,7 @@ function FormatsSection({ playerId, seasonId }) {
 
 // ── Teammates: who a player has played alongside, and the with-vs-without split.
 // Self-fetching (public /players/{id}/teammates), so it doesn't touch the
-// parent's data flow — mirrors AchievementsSection.
+// parent's data flow, mirrors AchievementsSection.
 function TeammateSplitPanel({ playerId, teammate }) {
   const [split, setSplit] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -1566,7 +1566,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
           {(careerBatting || careerBowling) && (
             <Card title="PLAYER PROFILE">
               <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-4">
-                Six-axis fingerprint of the player. Each axis is scaled against a strong-club-cricket benchmark — a hexagon stretched to the edge is an elite all-rounder.
+                Six-axis fingerprint of the player. Each axis is scaled against a strong-club-cricket benchmark. A hexagon stretched to the edge is an elite all-rounder.
               </p>
               <PlayerRadarChart batting={careerBatting} bowling={careerBowling} fielding={careerFielding} innings={battingInnings} />
             </Card>
@@ -1587,7 +1587,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
           )}
 
           {!careerBatting && !careerBowling && battingInnings.length === 0 && (
-            <p className="text-pb-faint text-sm py-4">No data yet to build a profile — game-level data may still be syncing.</p>
+            <p className="text-pb-faint text-sm py-4">No data yet to build a profile. Game-level data may still be syncing.</p>
           )}
         </div>
       )}
@@ -1770,7 +1770,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
             </Card>
           )}
 
-          {/* How I take wickets — bowler-method-of-dismissal donut */}
+          {/* How I take wickets, bowler-method-of-dismissal donut */}
           {bowlingDismissals?.length > 0 && (
             <Card title="HOW I TAKE WICKETS">
               <DismissalDonut dismissals={bowlingDismissals} />
@@ -1780,7 +1780,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
           {/* Wickets by batter's batting position 1-11 */}
           {bowlingByBatterPosition?.some(p => (p.wickets ?? 0) > 0) && (
             <Card title="WICKETS BY BATTING POSITION DISMISSED">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">The batting position of the batters you've dismissed — are most of your wickets openers or tail-enders?</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">The batting position of the batters you've dismissed. Are most of your wickets openers or tail-enders?</p>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={bowlingByBatterPosition} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--pb-hairline)" />
@@ -1796,7 +1796,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
           {/* Career bowling progression */}
           {bowlingSpells.length > 5 && (
             <Card title="CAREER BOWLING PROGRESSION">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average (left axis, green) and economy (right axis, gold) after each spell, chronological — each on its own scale so economy movement is visible.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Running career bowling average (left axis, green) and economy (right axis, gold) after each spell, chronological. Each on its own scale so economy movement is visible.</p>
               <CareerBowlingProgressionChart spells={bowlingSpells} />
             </Card>
           )}
@@ -1804,7 +1804,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
           {/* Bowling averages over time */}
           {seasonStats?.some(s => s.bowling_average != null) && (
             <Card title="BOWLING AVERAGE & ECONOMY OVER TIME">
-              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average (left axis) and economy rate (right axis) season by season — each scales independently so economy movement is readable.</p>
+              <p className="font-mono text-[10px] text-pb-faint tracking-wide2 mb-3">Bowling average (left axis) and economy rate (right axis) season by season. Each scales independently so economy movement is readable.</p>
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart
                   data={[...seasonStats].filter(s => s.season_id).reverse().filter(s => s.bowling_average != null || s.economy != null).map(s => ({
@@ -1935,7 +1935,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
               </div>
             </Card>
           ) : (
-            <p className="text-pb-faint text-sm py-4 font-mono">No venue data yet — venue tracking requires a Full Rebuild.</p>
+            <p className="text-pb-faint text-sm py-4 font-mono">No venue data yet: venue tracking requires a Full Rebuild.</p>
           )}
         </div>
       )}
@@ -2213,10 +2213,10 @@ function MilestonesTab({ playerId, upcomingMilestones, milestones }) {
             <Card title="MILESTONES IN REACH"><UpcomingCard items={up} /></Card>
           )}
           {matchesClub.length > 0 && (
-            <Card title="ACHIEVED — CLUB TOTAL" pad="p-0"><AchievedList items={matchesClub} /></Card>
+            <Card title="ACHIEVED. CLUB TOTAL" pad="p-0"><AchievedList items={matchesClub} /></Card>
           )}
           {matchesByGrade.length > 0 && (
-            <Card title="ACHIEVED — BY GRADE" pad="p-0"><AchievedList items={matchesByGrade} /></Card>
+            <Card title="ACHIEVED, BY GRADE" pad="p-0"><AchievedList items={matchesByGrade} /></Card>
           )}
         </div>
       )
@@ -2410,7 +2410,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               {customSubcat
                 ? <input className={inputCls} value={form.subcategory} onChange={e => setForm(f => ({ ...f, subcategory: e.target.value }))} placeholder="Subcategory" />
                 : <select className={selectCls} value={form.subcategory} onChange={e => { if (e.target.value === '__other__') { setCustomSubcat(true); setForm(f => ({ ...f, subcategory: '', achievement: '' })) } else { setForm(f => ({ ...f, subcategory: e.target.value, achievement: '' })) } }}>
-                    <option value="">— none —</option>
+                    <option value="">, none, </option>
                     {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
                     {subcatOptions.length > 0 && <option value="__other__">Other…</option>}
                   </select>
@@ -2421,7 +2421,7 @@ function AchievementsSection({ playerId, orgId, playerName }) {
               {customAchievement
                 ? <input className={inputCls} value={form.achievement} onChange={e => setForm(f => ({ ...f, achievement: e.target.value }))} placeholder="Achievement" />
                 : <select className={selectCls} value={form.achievement} onChange={e => { if (e.target.value === '__other__') { setCustomAchievement(true); setForm(f => ({ ...f, achievement: '' })) } else { setCustomAchievement(false); setForm(f => ({ ...f, achievement: e.target.value })) } }}>
-                    <option value="">— select —</option>
+                    <option value="">. Select, </option>
                     {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
                     <option value="__other__">Other…</option>
                   </select>
@@ -2577,7 +2577,7 @@ export default function PlayerProfile() {
     if (bowling?.total_wickets != null) parts.push(`${bowling.total_wickets} wickets`)
     if (batting.games != null) parts.push(`${batting.games} matches`)
     const club = org?.name ? `${org.name} cricket` : 'club cricket'
-    return parts.length ? `${parts.join(' · ')} — ${club} statistics on BetterCricket.` : null
+    return parts.length ? `${parts.join(' · ')}. ${club} statistics on BetterCricket.` : null
   })()
   const playerJsonLd = (() => {
     if (!player || !metaName) return null

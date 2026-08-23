@@ -181,7 +181,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
               <SourceNote
                 source={flags?.financial}
                 from="Read from BetterFees, or set on a player's profile."
-                manual="Set on a player's profile — turn on BetterFees to have it worked out." />
+                manual="Set on a player's profile. Turn on BetterFees to have it worked out." />
             </PanelGroup>
           )}
           {showTraining && (
@@ -190,7 +190,7 @@ export default function SelectionFilters({ filters, sort, setSort, squadOptions,
               <SourceNote
                 source={flags?.training}
                 from={`At nets in the last ${flags?.training_window_days || 21} days, or set on a player's profile.`}
-                manual="Set on a player's profile — run a Net Manager session to have it worked out." />
+                manual="Set on a player's profile. Run a Net Manager session to have it worked out." />
             </PanelGroup>
           )}
         </div>

@@ -1736,19 +1736,19 @@ Leading bowlers:
 Standout performances:
 {f"  - Highest score: {hs.get('name', '?')} {hs.get('runs', '?')}{'*' if hs.get('not_out') else ''}" if hs.get('player_id') else ""}
 {f"  - Best bowling: {bb.get('name', '?')} {bb.get('wickets', '?')}/{bb.get('runs_conceded', '?')}" if bb.get('player_id') else ""}
-{f"  - Best partnership: {bp.get('batter1_name', '?')} & {bp.get('batter2_name', '?')} — {bp.get('runs', '?')} runs" if bp.get('batter1_id') else ""}
+{f"  - Best partnership: {bp.get('batter1_name', '?')} & {bp.get('batter2_name', '?')}. {bp.get('runs', '?')} runs" if bp.get('batter1_id') else ""}
 {milestone_lines}
 
 Write 3–4 paragraphs as a warm, conversational club yearbook narrative. Rules:
 - Open with a punchy one-sentence summary of the season's character (e.g. results, tone, any major storyline)
-- Reference specific players and numbers naturally — don't just list stats, weave them into sentences
+- Reference specific players and numbers naturally. Don't just list stats, weave them into sentences
 - Acknowledge both highlights and honest disappointments if the record warrants it
 - End on a forward-looking or celebratory note
-- Tone: casual and warm, like a club member who cares about the team wrote it — not corporate
+- Tone: casual and warm, like a club member who cares about the team wrote it, not corporate
 - Do NOT use nicknames unless they appear in the data
-- Do NOT use bullet points or headings — flowing prose only
-- Do NOT use the "—" (em dash) character anywhere in your output — use a comma, full stop, or parentheses instead
-- Aim for 450–500 words — enough to fill a full page of the yearbook"""
+- Do NOT use bullet points or headings, flowing prose only
+- Do NOT use the "—" (em dash) character anywhere in your output: use a comma, full stop, or parentheses instead
+- Aim for 450–500 words, enough to fill a full page of the yearbook"""
 
 
 async def _generate_narrative_core(db: AsyncSession, org_id: str, season_id: str) -> dict:

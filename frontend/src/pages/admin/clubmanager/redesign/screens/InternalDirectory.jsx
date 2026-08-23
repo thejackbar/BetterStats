@@ -97,7 +97,7 @@ export default function InternalDirectory({ st, patch, narrow }) {
   const clubs = useMemo(() => {
     const by = new Map()
     filtered.forEach(c => {
-      const name = c.club || '— No club recorded —'
+      const name = c.club || ', No club recorded, '
       let g = by.get(name)
       if (!g) {
         g = { name, association: c.association, state: c.state, country: c.country,
@@ -224,7 +224,7 @@ export default function InternalDirectory({ st, patch, narrow }) {
                 </div>
               ))}
               {filtered.length === 0 && <div style={{ padding: '20px 12px', fontSize: 13, color: C.faint }}>Nobody matches those filters.</div>}
-              {filtered.length > 500 && <div style={{ padding: '10px 12px', fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>SHOWING 500 OF {filtered.length} — SEARCH TO NARROW</div>}
+              {filtered.length > 500 && <div style={{ padding: '10px 12px', fontFamily: MONO, fontSize: 9.5, color: C.faintest }}>SHOWING 500 OF {filtered.length}. SEARCH TO NARROW</div>}
             </div>
           </div>
 

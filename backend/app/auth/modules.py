@@ -98,9 +98,9 @@ MODULE_META: dict[str, dict] = {
     MODULE_SELECT: {"name": "BetterSelect", "blurb": "Availability & smart team selection", "built": True},
     MODULE_SOCIALS: {"name": "BetterSocials", "blurb": "Auto-post lineups, scorecards & milestones", "built": True},
     MODULE_FEES: {"name": "BetterFees", "blurb": "Fee schedules & payment tracking", "built": True},
-    MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive — opposition scouting & selection analysis", "built": True},
+    MODULE_IQ: {"name": "BetterIQ", "blurb": "AI + stats deep-dive, opposition scouting & selection analysis", "built": True},
     MODULE_COMMS: {"name": "BetterComms", "blurb": "Bulk email to your member database", "built": True},
-    MODULE_MERCH: {"name": "BetterMerch", "blurb": "Track club stock — apparel, equipment and canteen", "built": True},
+    MODULE_MERCH: {"name": "BetterMerch", "blurb": "Track club stock: apparel, equipment and canteen", "built": True},
     MODULE_FANTASY: {"name": "BetterFantasyCricket", "blurb": "Run an internal club fantasy cricket league", "built": True},
     MODULE_CRM: {"name": "BetterCRM", "blurb": "Contacts, sponsorship, grants and relationship pipeline", "built": True},
 }

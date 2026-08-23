@@ -325,7 +325,7 @@ async def main():
             "SELECT player_id, guest_name, source FROM net_attendance "
             "WHERE session_id = :s AND guest_name IS NOT NULL"), {"s": ids["session"]})).fetchone()
         check("they are checked in", row is not None, True)
-        check("as a GUEST — no player row was written", row[0], None)
+        check("as a GUEST, no player row was written", row[0], None)
         check("under the name they typed", row[1], "Tom Newcomer")
         check("marked source='self'", row[2], "self")
 
@@ -342,7 +342,7 @@ async def main():
 
         n = (await db.execute(text(
             "SELECT count(*) FROM players WHERE organisation_id = :o"), {"o": ids["club"]})).scalar()
-        check("the roster is untouched — 3 players, not 4", n, 3)
+        check("the roster is untouched, 3 players, not 4", n, 3)
 
     print("\n── What registration refuses ──")
     async with Session() as db:
@@ -472,7 +472,7 @@ async def main():
         check("the registration reads dismissed", st, "dismissed")
         n_after = (await db.execute(text(
             "SELECT count(*) FROM net_attendance WHERE guest_name = 'Someone Else'"))).scalar()
-        check("they still turned up — the guest row is left alone", n_after, n_before)
+        check("they still turned up. The guest row is left alone", n_after, n_before)
 
     print("\n── Cross-club: a registration id from a browser can't reach across ──")
     async with Session() as db:

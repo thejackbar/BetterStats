@@ -204,7 +204,7 @@ function MovementModal({ variant, product, dir, onClose, onSaved }) {
             </Field>
             <label className="flex items-center gap-2 text-[13px] cursor-pointer">
               <input type="checkbox" checked={paid} onChange={(e) => setPaid(e.target.checked)} />
-              Paid now {!paid && <span className="text-pb-amber">— recorded as owing</span>}
+              Paid now {!paid && <span className="text-pb-amber">, recorded as owing</span>}
             </label>
           </>
         )}
@@ -532,7 +532,7 @@ function ProductEditModal({ product, categories, onCategoriesChanged, onClose, o
             </label>
             {isSquareSynced && (
               <p className="text-[10.5px] text-pb-faintest mt-1">
-                Synced from Square — Square's till owns this item's stock count, so it never appears in the online store.
+                Synced from Square. Square's till owns this item's stock count, so it never appears in the online store.
               </p>
             )}
           </Field>

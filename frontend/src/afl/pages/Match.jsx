@@ -185,7 +185,7 @@ export default function Match() {
         <div className="grid md:grid-cols-2 gap-4">
           {['HOME', 'AWAY'].map(side => (
             <div key={side} className="pb-card p-4">
-              <SectionTitle>Best players — {side === 'HOME' ? game.home_team : game.away_team}</SectionTitle>
+              <SectionTitle>Best players, {side === 'HOME' ? game.home_team : game.away_team}</SectionTitle>
               <p className="text-sm">
                 {bestPlayers(side).map((l, i) => (
                   <span key={l.name + i}>

@@ -400,14 +400,14 @@ async def get_org_summary(
     categories: str | None = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omit for the club's own default."
         ),
     ),
     formats: str | None = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per fixture off each game's own match_format. "
             "Omit for no format filter."
         ),
@@ -681,14 +681,14 @@ async def get_org_results(
     categories: str | None = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omit for the club's own default."
         ),
     ),
     formats: str | None = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per fixture off each game's own match_format. "
             "Omit for no format filter."
         ),

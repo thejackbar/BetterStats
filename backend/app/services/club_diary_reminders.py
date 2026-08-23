@@ -67,14 +67,14 @@ async def _send_reminders_for_org(session, org: Organisation, today: date) -> in
         first_name = (member.full_name or "").split(" ")[0] or "there"
         html = (
             f"<p>Hi {first_name},</p>"
-            f"<p><strong>{defn.title}</strong> {status_word} — you're the person responsible for it "
+            f"<p><strong>{defn.title}</strong> {status_word}, you're the person responsible for it "
             f"in the {org.name} Club Diary.</p>"
             + (f"<p>{defn.description}</p>" if defn.description else "")
         )
-        text = f"Hi {first_name},\n\n{defn.title} {status_word} — you're responsible for it in the {org.name} Club Diary."
+        text = f"Hi {first_name},\n\n{defn.title} {status_word}, you're responsible for it in the {org.name} Club Diary."
         msg = email_service.EmailMessage(
             to_email=member.email, to_name=member.full_name,
-            subject=f"{org.name} Club Diary — {defn.title} {status_word}",
+            subject=f"{org.name} Club Diary, {defn.title} {status_word}",
             html=html, text=text,
             from_email=settings.email_from_address, from_name=org.name or settings.email_from_name,
             reply_to=settings.email_reply_to,

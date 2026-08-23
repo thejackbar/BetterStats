@@ -65,7 +65,7 @@ export default function CommsSettings() {
       let text = `Tenants: ${r.provisioned || 0} provisioned, ${r.failed || 0} failed of ${r.total || 0}.`
       if (r.failed && r.errors?.length) {
         const e0 = r.errors[0]
-        text += ` First failure — ${e0.club}: ${e0.reason || 'see logs'}. ${r.failed > 1 ? 'Run again to retry the rest.' : ''}`
+        text += ` First failure: ${e0.club}: ${e0.reason || 'see logs'}. ${r.failed > 1 ? 'Run again to retry the rest.' : ''}`
       }
       setMsg({ kind: r.failed ? 'error' : 'ok', text })
       api.commsSesStatus().then(setSes).catch(() => {})
@@ -90,7 +90,7 @@ export default function CommsSettings() {
     setTestBusy(true); setMsg(null)
     try {
       const r = await api.commsSendTestEmail(testEmail.trim())
-      setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()} via ${r.provider}.` : 'Test rendered (preview mode — not delivered until a provider is connected).' })
+      setMsg({ kind: 'ok', text: r.live ? `Test sent to ${testEmail.trim()} via ${r.provider}.` : 'Test rendered (preview mode, not delivered until a provider is connected).' })
     } catch (e) { setMsg({ kind: 'error', text: e.message }) }
     finally { setTestBusy(false) }
   }
@@ -113,8 +113,8 @@ export default function CommsSettings() {
     try {
       await api.commsSetSettings({ auto_remove_unsubscribed: next })
       setMsg({ kind: 'ok', text: next
-        ? 'On — unsubscribed and bounced contacts will be removed from all lists automatically.'
-        : 'Off — unsubscribed and bounced contacts stay on their lists (they\'re still skipped when sending).' })
+        ? 'On. Unsubscribed and bounced contacts will be removed from all lists automatically.'
+        : 'Off. Unsubscribed and bounced contacts stay on their lists (they\'re still skipped when sending).' })
     } catch (e) {
       setAutoRemove(!next)  // revert on failure
       setMsg({ kind: 'error', text: e.message })
@@ -153,7 +153,7 @@ export default function CommsSettings() {
                   ? (isPlatform
                       ? <>Connected via <span className="text-pb-text capitalize">{p.provider}</span> · sending from <span className="text-pb-text">{s.from_address || p.from_address}</span></>
                       : <>Your club's outbound email is live and being delivered.</>)
-                  : <>Preview mode — emails are rendered and logged but <strong>not delivered</strong>.</>}
+                  : <>Preview mode. Emails are rendered and logged but <strong>not delivered</strong>.</>}
               </div>
             </div>
             <span className={`font-mono text-[10px] uppercase tracking-wide2 border rounded px-2 py-0.5 ${p.live ? 'text-green-500 border-green-500/40' : 'text-amber-500 border-amber-500/40'}`}>
@@ -222,7 +222,7 @@ export default function CommsSettings() {
 
               {limits.open_request ? (
                 <div className="text-xs text-pb-faint border-t pb-hairline-t pt-3">
-                  Request pending review — sent {limits.open_request.requested_at ? new Date(limits.open_request.requested_at).toLocaleDateString() : ''}.
+                  Request pending review, sent {limits.open_request.requested_at ? new Date(limits.open_request.requested_at).toLocaleDateString() : ''}.
                 </div>
               ) : limits.can_request ? (
                 <div className="border-t pb-hairline-t pt-3">
@@ -243,14 +243,14 @@ export default function CommsSettings() {
           )
         })()}
 
-        {/* Bounces & unsubscribes — last email and all emails */}
+        {/* Bounces & unsubscribes. Last email and all emails */}
         {engagement && (
           <div className="pb-card p-4 mb-4">
             <SectionHeading className="mb-3">Bounces &amp; unsubscribes</SectionHeading>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Caption className="mb-1.5 truncate">
-                  Last email{engagement.last?.name ? ` — ${engagement.last.name}` : ''}
+                  Last email{engagement.last?.name ? `, ${engagement.last.name}` : ''}
                 </Caption>
                 {engagement.last ? (
                   <div className="text-sm space-y-1">
@@ -284,7 +284,7 @@ export default function CommsSettings() {
           </Checkbox>
         </div>
 
-        {/* AWS SES status — super admins only (the panel is hidden otherwise) */}
+        {/* AWS SES status. Super admins only (the panel is hidden otherwise) */}
         {isPlatform && (
           <div className="pb-card p-4 mb-4">
             <div className="flex items-center justify-between mb-2">
@@ -361,7 +361,7 @@ export default function CommsSettings() {
           <SectionHeading className="mb-1.5">Email footer</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3 leading-relaxed">
             Australian law (Spam Act 2003) requires every email to identify the sender and offer a one-click
-            unsubscribe. The unsubscribe link is added automatically — put your club's legal name and a
+            unsubscribe. The unsubscribe link is added automatically. Put your club's legal name and a
             contact or postal line here so recipients know who it's from.
           </div>
           <textarea value={footer} onChange={e => setFooter(e.target.value)} rows={3}
@@ -385,10 +385,10 @@ export default function CommsSettings() {
               className={INPUT_CLS} />
             <Button onClick={sendTest} disabled={testBusy}>{testBusy ? 'Sending…' : 'Send test'}</Button>
           </div>
-          {!p.live && <div className="text-pb-faintest text-xs mt-2">Preview mode — the test is rendered but not delivered until a provider is connected.</div>}
+          {!p.live && <div className="text-pb-faintest text-xs mt-2">Preview mode. The test is rendered but not delivered until a provider is connected.</div>}
         </div>
 
-        {/* Deliverability — blocked addresses (Phase 1) */}
+        {/* Deliverability, blocked addresses (Phase 1) */}
         <div className="pb-card p-4 mt-4">
           <SectionHeading className="mb-1.5">Deliverability</SectionHeading>
           <div className="text-pb-faintest text-xs mb-3 leading-relaxed">

@@ -488,7 +488,7 @@ async def _load_payment_methods(club: Organisation) -> dict:
 
 def _require_customer_id(club: Organisation) -> str:
     if not club.stripe_customer_id:
-        raise HTTPException(status_code=422, detail="This club has no billing account yet — subscribe to a module first.")
+        raise HTTPException(status_code=422, detail="This club has no billing account yet, subscribe to a module first.")
     return club.stripe_customer_id
 
 
@@ -522,7 +522,7 @@ async def _remove_payment_method_for(club: Organisation, pm_id: str) -> dict:
     customer_id = _require_customer_id(club)
     current = await _load_payment_methods(club)
     if len(current["payment_methods"]) <= 1:
-        raise HTTPException(status_code=422, detail="Can't remove the only payment method on file — add another one first.")
+        raise HTTPException(status_code=422, detail="Can't remove the only payment method on file. Add another one first.")
     was_default = pm_id == current["default_payment_method_id"]
     try:
         await stripe_client.detach_payment_method(pm_id)

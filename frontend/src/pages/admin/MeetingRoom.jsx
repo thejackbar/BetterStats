@@ -257,7 +257,7 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
           onChange={v => setForm(f => ({ ...f, objective_id: v || '' }))} label="SERVES OBJECTIVE" />
       </div>
       <div className={`${cap} mb-1`}>WHO IS DOING IT</div>
-      <input className={`${inp} mb-1.5`} placeholder="Anyone in the club — type to search…"
+      <input className={`${inp} mb-1.5`} placeholder="Anyone in the club. Type to search…"
         value={who} onChange={e => setWho(e.target.value)} />
       <div className="flex flex-wrap gap-1 mb-2">
         {options.length === 0 && (
@@ -849,7 +849,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
         <div className="space-y-2">
           {isClosed && (
             <div className="pb-card p-3 font-mono text-[10px] text-pb-faint">
-              This meeting is {titleCase(meeting.status).toLowerCase()}. Everything below is still editable —
+              This meeting is {titleCase(meeting.status).toLowerCase()}. Everything below is still editable, 
               minutes are usually finished after the room empties.
             </div>
           )}

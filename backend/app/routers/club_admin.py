@@ -2675,7 +2675,7 @@ async def create_club(
         await db.flush()
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="That username was just taken — try again.")
+        raise HTTPException(status_code=409, detail="That username was just taken. Try again.")
 
     # Club creation + first full sync + Marketing Directory link, through the
     # shared helper rather than a hand-built Organisation row — that's what
@@ -2734,7 +2734,7 @@ async def create_club(
     except Exception:
         _logging.getLogger(__name__).error(
             "super admin club creation: club %s / admin %s were created but "
-            "membership/module-trial linking failed — finish it by hand "
+            "membership/module-trial linking failed, finish it by hand "
             "(assign the primary admin and start the trials from the club's "
             "edit panel); do not re-run New Club for this club",
             org.id, admin.id, exc_info=True,
@@ -2743,7 +2743,7 @@ async def create_club(
             status_code=500,
             detail=(
                 "The club and admin account were created, but finishing setup "
-                f"failed. Reference {org.id}/{admin.id} — don't retry, this "
+                f"failed. Reference {org.id}/{admin.id}. Don't retry, this "
                 "needs finishing by hand."
             ),
         )
@@ -3509,7 +3509,7 @@ async def _cancel_stripe_subscription_if_nothing_held(club) -> None:
         club.stripe_subscription_id = None  # nothing configured, or Stripe already considers it gone
     except stripe_error.StripeError:
         _logging.getLogger(__name__).exception(
-            "Could not cancel Stripe subscription %s for org %s — leaving it in place for manual follow-up",
+            "Could not cancel Stripe subscription %s for org %s. Leaving it in place for manual follow-up",
             club.stripe_subscription_id, club.id,
         )
     else:
@@ -4280,7 +4280,7 @@ async def create_user(
         if outreach is None:
             raise HTTPException(
                 status_code=422,
-                detail="No outreach organisation is configured — designate one from BetterComms first",
+                detail="No outreach organisation is configured. Designate one from BetterComms first",
             )
         club = outreach
     else:
@@ -4415,7 +4415,7 @@ async def patch_user(
         if outreach is None:
             raise HTTPException(
                 status_code=422,
-                detail="No outreach organisation is configured — designate one from BetterComms first",
+                detail="No outreach organisation is configured. Designate one from BetterComms first",
             )
         if membership:
             membership.club_id = outreach.id
@@ -4562,7 +4562,7 @@ async def action_sync_request(
                 "status": "needs_confirmation",
                 "warnings": warnings,
                 "message": (
-                    f"{player.display_name} has no PlayHQ ID linked — sync will rely on name matching only "
+                    f"{player.display_name} has no PlayHQ ID linked. Sync will rely on name matching only "
                     "and may miss historical games. Set their PHQ ID first (Admin → PHQ ID Match or Admin → Players), "
                     "then approve again. To proceed anyway, re-approve with any admin note."
                 ),
@@ -4721,7 +4721,7 @@ async def hard_refresh_org(
                         {"games_wiped_pre_sync": 0},
                         "Aborted before wiping: the Cricket Australia scores API returned no "
                         "match data for any grade, so a rebuild would have left the club with "
-                        "no games. Existing data was left untouched — try again later.",
+                        "no games. Existing data was left untouched. Try again later.",
                     )
                     return
 
@@ -4765,7 +4765,7 @@ async def hard_refresh_org(
                 await finish_sync_run(
                     run_id,
                     stats,
-                    f"Wiped {wiped} games but the game-level re-pull returned 0 matches — the "
+                    f"Wiped {wiped} games but the game-level re-pull returned 0 matches, the "
                     f"Cricket Australia scores API failed mid-rebuild. Re-run Full Rebuild to "
                     f"restore the scorecards once it recovers.",
                 )

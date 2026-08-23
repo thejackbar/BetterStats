@@ -63,7 +63,7 @@ export default function ScoutPlayers() {
       {players === undefined && !error && <p className="text-sm text-pb-dim">Loading…</p>}
       {players?.length === 0 && (
         <p className="text-sm text-pb-dim">
-          Nobody added yet — <Link to="/betterscout/app/discover" className="underline" style={{ color: 'var(--pb-accent)' }}>discover a player</Link> to get started.
+          Nobody added yet. <Link to="/betterscout/app/discover" className="underline" style={{ color: 'var(--pb-accent)' }}>discover a player</Link> to get started.
         </p>
       )}
 

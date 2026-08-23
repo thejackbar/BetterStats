@@ -431,7 +431,7 @@ async def club_delete_stage(stage_id: str, club: Organisation = Depends(get_curr
         # a DB-level FK violation at commit time, not the ValueError above.
         await db.rollback()
         raise HTTPException(status_code=409,
-                           detail="A new record was just added to this stage — move or archive it, then try again")
+                           detail="A new record was just added to this stage, move or archive it, then try again")
     return {"deleted": True}
 
 
@@ -664,7 +664,7 @@ async def super_delete_stage(stage_id: str, db: AsyncSession = Depends(get_db)):
         # a DB-level FK violation at commit time, not the ValueError above.
         await db.rollback()
         raise HTTPException(status_code=409,
-                           detail="A new record was just added to this stage — move or archive it, then try again")
+                           detail="A new record was just added to this stage, move or archive it, then try again")
     return {"deleted": True}
 
 

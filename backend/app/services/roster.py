@@ -307,7 +307,7 @@ def check_assignment(area: dict, shift: dict, cand: dict, week_shifts: list[dict
     if len(mine) + 1 > cap:
         warns.append(f"Over their {cap}-shift weekly cap")
     if len(mine) + 1 >= 4:
-        warns.append("Heavy week — spread the load")
+        warns.append("Heavy week: spread the load")
     if cand.get("player_id"):
         # BetterSelect match clash: a Saturday daytime shift when they may be playing.
         if shift["day_of_week"] == 5 and shift["start_time"] < 18.5:

@@ -292,7 +292,7 @@ def _categorise(route: Optional[str], path: Optional[str], event_type: str) -> s
                  "/faq", "/terms", "/privacy"):
             return "Marketing"
         if s.startswith("/blog"):
-            return "Marketing — Blog"
+            return "Marketing, Blog"
         if s.startswith("/login"):
             return "Auth pages"
         if s.startswith("/admin"):

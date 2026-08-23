@@ -125,7 +125,7 @@ export default function AdminFeesSquare() {
         <div className="max-w-6xl space-y-5">
           <p className="text-[13px] text-pb-faint">
             Match fees or subs paid through Square (POS or a payment link) can be pulled in and matched to a member here.
-            This reads the same Square connection as BetterMerch — nothing here writes back to Square, and every match is
+            This reads the same Square connection as BetterMerch. Nothing here writes back to Square, and every match is
             confirmed by hand before it's recorded as a payment.
           </p>
 
@@ -188,7 +188,7 @@ export default function AdminFeesSquare() {
                     {status.last_sync_at && (
                       <p className="text-[11px] text-pb-faintest mt-2">
                         Last checked {new Date(status.last_sync_at).toLocaleString()}
-                        {status.last_sync_status === 'error' && status.last_sync_error && <span className="text-pb-red"> — {status.last_sync_error}</span>}
+                        {status.last_sync_status === 'error' && status.last_sync_error && <span className="text-pb-red">, {status.last_sync_error}</span>}
                       </p>
                     )}
                   </div>
@@ -196,7 +196,7 @@ export default function AdminFeesSquare() {
                   {previewing && <PbSpinner message="Checking Square…" />}
 
                   {rows && rows.length === 0 && (
-                    <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing new to review — every matching Square sale is already recorded or dismissed.</div>
+                    <div className="pb-card p-6 text-center text-pb-dim text-sm">Nothing new to review. Every matching Square sale is already recorded or dismissed.</div>
                   )}
 
                   {rows && rows.length > 0 && (
@@ -244,7 +244,7 @@ export default function AdminFeesSquare() {
                                 <td className="py-2 pr-2">
                                   <select className={`${cell} w-full`} value={r.chosen_member_season_id}
                                     onChange={e => patchRow(idx, { chosen_member_season_id: e.target.value, selected: !!e.target.value })}>
-                                    <option value="">— No match (skip) —</option>
+                                    <option value="">, No match (skip), </option>
                                     {r.candidates && r.candidates.length > 0 && (
                                       <optgroup label="Suggested">
                                         {r.candidates.map(c => (
@@ -277,7 +277,7 @@ export default function AdminFeesSquare() {
                         </table>
                       </div>
                       <p className="font-mono text-[10px] text-pb-faintest mt-3">
-                        Confidence ≥ 85% rows are auto-selected; review the rest. SKIP dismisses a row for good (e.g. a canteen sale that happened to match a keyword) — it won't come back next check.
+                        Confidence ≥ 85% rows are auto-selected; review the rest. SKIP dismisses a row for good (e.g. a canteen sale that happened to match a keyword), it won't come back next check.
                       </p>
                     </>
                   )}

@@ -131,7 +131,7 @@ function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
             <button type="button" className="text-[11px] text-pb-faint hover:text-pb-accent mb-1"
                     onClick={() => onChange([])}>clear selection</button>
           )}
-          <div className="text-[10px] text-pb-faint px-1 mb-1">Short code is editable — type and press Enter (blank resets to default).</div>
+          <div className="text-[10px] text-pb-faint px-1 mb-1">Short code is editable. Type and press Enter (blank resets to default).</div>
           {!filtered.length && <div className="text-xs text-pb-faint px-1 py-2">No matches.</div>}
           {filtered.map(o => (
             <div key={o.name}
@@ -141,7 +141,7 @@ function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
                 <span className="truncate" title={o.name}>{o.name}</span>
               </label>
               {o.resolved === false
-                ? <span className="text-[10px] text-pb-faint italic shrink-0" title="Roster not fetched yet — select and click Fetch full roster">not fetched</span>
+                ? <span className="text-[10px] text-pb-faint italic shrink-0" title="Roster not fetched yet. Select and click Fetch full roster">not fetched</span>
                 : <span className="text-pb-faint shrink-0">{o.count}</span>}
               <input
                 key={`sc-${o.id}-${o.short || ''}`}
@@ -149,7 +149,7 @@ function AssocMultiSelect({ options, selected, onChange, onSaveShort }) {
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onSaveShort(o.id, e.target.value); e.target.blur() } }}
                 onBlur={(e) => { if ((e.target.value || '') !== (o.short || '')) onSaveShort(o.id, e.target.value) }}
-                title="Short code — edit and press Enter (blank resets to default)"
+                title="Short code: edit and press Enter (blank resets to default)"
                 className="w-16 shrink-0 text-[10px] uppercase bg-pb-surface2 border pb-hairline rounded px-1 py-0.5 focus:outline-none focus:border-pb-accent" />
             </div>
           ))}
@@ -297,7 +297,7 @@ function SalesEditor({ club, onSave }) {
           {DEMO_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </select>
         <label className="flex items-center gap-1.5 cursor-pointer text-pb-dim hover:text-pb-text ml-1"
-          title="Club contacted and explicitly not interested — overrides the engagement tier in the CRM">
+          title="Club contacted and explicitly not interested. Overrides the engagement tier in the CRM">
           <input type="checkbox" className="accent-pb-accent shrink-0" checked={notInt}
             onChange={e => setNotInt(e.target.checked)} />
           <span>Not interested</span>
@@ -338,7 +338,7 @@ function VisitsPanel({ clubId, summary }) {
         <div className="text-pb-faint">No site visits tracked from this club's UTM yet.</div>
       ) : !data ? (
         // Summary says there's traffic but the detail fetch hasn't landed (or
-        // failed) — show the count without touching the missing detail fields.
+        // failed). Show the count without touching the missing detail fields.
         <div className="text-pb-dim">
           <span className="text-violet-300 font-medium">{views}</span> view(s) tracked.
         </div>
@@ -403,7 +403,7 @@ function LoginIntentPanel({ clubId, summary, isCustomer }) {
           </div>
           {!isCustomer && (
             <div className="text-amber-300/90 text-[11px]">
-              Not a customer yet — they have no account to log into. Likely wants to join.
+              Not a customer yet: they have no account to log into. Likely wants to join.
             </div>
           )}
         </div>
@@ -518,7 +518,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                         {!ct.subscribed && <span className="ml-1 text-[10px] text-amber-300 whitespace-nowrap">unsub</span>}
                         {ct.exported && (
                           <span className="ml-1 text-[10px] text-sky-300 border border-sky-500/40 bg-sky-500/10 rounded px-1 whitespace-nowrap"
-                                title="Already in BetterComms — a re-export will skip it (no duplicate)">
+                                title="Already in BetterComms. A re-export will skip it (no duplicate)">
                             exported
                           </span>
                         )}
@@ -553,7 +553,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
             {Array.isArray(assocs) && assocs.length ? (
               <ul className="text-pb-dim">
                 {assocs.map((a, i) => (
-                  <li key={i}>{a.name}{a.competition ? <span className="text-pb-faint"> — {a.competition}</span> : null}</li>
+                  <li key={i}>{a.name}{a.competition ? <span className="text-pb-faint">, {a.competition}</span> : null}</li>
                 ))}
               </ul>
             ) : <div className="text-pb-faint">{assocs === null ? 'Pending the association-enrichment pass.' : 'None found.'}</div>}
@@ -596,7 +596,7 @@ function ClubDetail({ club, onToggleContact, onToggleEmailed, onToggleExcluded, 
                   + (club.excluded ? 'border-red-500/50 text-red-300 bg-red-500/10' : 'pb-hairline text-pb-text')}
                 title="Excluded clubs are never exported, and any contacts already in BetterAdmin Comms are dropped from audiences"
                 onClick={() => onToggleExcluded(club.id, !club.excluded)}>
-                {club.excluded ? 'Excluded ✕ — click to include' : 'Exclude'}
+                {club.excluded ? 'Excluded ✕. Click to include' : 'Exclude'}
               </button>
             </div>
             <ClubLocationMap clubId={club.id} latitude={club.latitude} longitude={club.longitude}
@@ -695,7 +695,7 @@ function UtmMatchPanel() {
       {open && (
         <div className="mt-2">
           <p className="text-[11px] text-pb-faint mb-2">
-            Each value a visit can be matched by — a utm_source / utm_id tag, or a
+            Each value a visit can be matched by, a utm_source / utm_id tag, or a
             club-looking page slug it landed on. Map the ones that belong to a club
             but don't match its code (e.g. a generic "willetton-cricket-club"), and
             ignore the noise.
@@ -784,7 +784,7 @@ function UtmMatchPanel() {
 
 export default function SuperMarketing() {
   // A deep link (e.g. a club utm_code/name clicked on the Usage page) seeds
-  // the search box so the linked club is filtered straight to the top —
+  // the search box so the linked club is filtered straight to the top, 
   // ?q=<utm_code or name>. ?org_id=<uuid> is the guaranteed-unique variant,
   // used by All Clubs (SuperClubs.jsx) which links its own Organisation rows
   // through to their matched directory entry via existing_org_id.
@@ -813,9 +813,9 @@ export default function SuperMarketing() {
     emailed: '', exported: '', suppressed: '', excluded: '',
     visited: false,
     // Ranks (rather than paginates) the currently-filtered set by page views
-    // or distinct visitors — see backend club_directory.top_clubs_by_visits.
+    // or distinct visitors. See backend club_directory.top_clubs_by_visits.
     top_n: '', top_n_metric: 'views',
-    // Cached Twenty engagementScore (see marketing_clubs.engagement_score) — >=/<=.
+    // Cached Twenty engagementScore (see marketing_clubs.engagement_score), >=/<=.
     engagement_score_gte: '', engagement_score_lte: '',
     existing_org_id: initialOrgId,
   })
@@ -851,7 +851,7 @@ export default function SuperMarketing() {
   useEffect(() => { loadStats() }, [loadStats])
   useEffect(() => { loadClubs() }, [loadClubs])
   // Auto-expand the single matching club when the page was opened via a
-  // deep link (?q=... or ?org_id=...) — otherwise a landed-on club is
+  // deep link (?q=... or ?org_id=...). Otherwise a landed-on club is
   // filtered to the top but still needs a click to open, which defeats the
   // point of the link.
   useEffect(() => {
@@ -877,7 +877,7 @@ export default function SuperMarketing() {
     setBusy('crawl'); setMsg('')
     try {
       await api.mktCrawl()
-      setMsg('Crawl batch started in the background. Watch the status above — it is rate-limited, so progress is slow.')
+      setMsg('Crawl batch started in the background. Watch the status above. It is rate-limited, so progress is slow.')
       setTimeout(loadStats, 2000)  // let the first fetch land, then refresh the status pill
     } catch (e) { setError(e.message) } finally { setBusy('') }
   }
@@ -904,7 +904,7 @@ export default function SuperMarketing() {
         m += r.skipped_excluded ? ` (${r.skipped_excluded} excluded).` : '.'
         m += ' Excluded clubs are never exported.'
       } else if (!r.added && r.clubs_eligible > 0) {
-        m += ` ${r.clubs_eligible} club(s) were eligible but had no ticked, emailable contact —`
+        m += ` ${r.clubs_eligible} club(s) were eligible but had no ticked, emailable contact, `
         m += ' open a club and tick who to email.'
       }
       setMsg(m)
@@ -951,7 +951,7 @@ export default function SuperMarketing() {
       if (s.result) { setMsg(formatResult(s.result)); onDone?.(); return }
       return // no result and not running — nothing to report
     }
-    setMsg('Still running — check back shortly, then refresh the list.')
+    setMsg('Still running. Check back shortly, then refresh the list.')
   }
 
   const exportTwenty = async () => {
@@ -1075,7 +1075,7 @@ export default function SuperMarketing() {
         await api.mktResolveAssociation(id, name)
         done += 1
       }
-      setMsg(`Fetching ${done} roster(s) in the background — this takes up to a minute or two each. Click Refresh to see them fill in.`)
+      setMsg(`Fetching ${done} roster(s) in the background. This takes up to a minute or two each. Click Refresh to see them fill in.`)
       // Give the background resolve(s) time, then refresh the view + counts.
       setTimeout(() => { loadStats(); loadClubs(); api.mktAssociations().then(setAssocOptions).catch(() => {}) }, 60000)
     } catch (e) { setError(e.message || 'Could not start the roster fetch.') } finally { setBusy('') }
@@ -1259,7 +1259,7 @@ export default function SuperMarketing() {
             <Field label="Engagement score">
               <div className="flex items-center gap-1">
                 <input className={SELECT_CLS + ' w-full'} placeholder="min" inputMode="numeric"
-                       title="Cached score — can lag the live Twenty value; see the club row's 'scored' timestamp"
+                       title="Cached score. Can lag the live Twenty value; see the club row's 'scored' timestamp"
                        value={filters.engagement_score_gte}
                        onChange={(e) => setFilters(f => ({ ...f, engagement_score_gte: e.target.value }))} />
                 <span className="text-pb-faint">–</span>
@@ -1343,7 +1343,7 @@ export default function SuperMarketing() {
               Only ticked contacts
             </label>
             <button className={BTN} disabled={busy === 'twenty'} onClick={exportTwenty}
-                    title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent — re-running skips unchanged records)">
+                    title="Push the currently-filtered clubs and their officers into the Twenty CRM (idempotent. Re-running skips unchanged records)">
               {busy === 'twenty' ? 'Exporting...' : 'Export to Twenty'}
             </button>
             <button className={BTN} disabled={busy === 'push-crm'} onClick={pushToCrm}
@@ -1482,7 +1482,7 @@ export default function SuperMarketing() {
                                 : 'text-amber-300 border-amber-500/40 bg-amber-500/10')}
                                   title={`${c.login_intent.visitors} visitor(s) browsed this club's pages then hit /login`
                                     + (c.login_intent.last_seen ? ` · last ${fmtWhen(c.login_intent.last_seen)}` : '')
-                                    + (c.is_customer ? '' : ' — not a customer, likely wants to join')}>
+                                    + (c.is_customer ? '' : ', not a customer, likely wants to join')}>
                               {c.is_customer ? 'tried login' : '🔑 wants in'}
                             </span>
                           )}
@@ -1497,7 +1497,7 @@ export default function SuperMarketing() {
                               + (c.engagement_tier === 'HOT' ? 'text-red-300 border-red-500/40 bg-red-500/10'
                                 : c.engagement_tier === 'WARM' ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
                                 : 'text-pb-faint border-pb-hairline')}
-                                  title={`Cached score — as of ${fmtWhen(c.engagement_scored_at) || 'unknown'}`}>
+                                  title={`Cached score, as of ${fmtWhen(c.engagement_scored_at) || 'unknown'}`}>
                               {c.engagement_score} {c.engagement_tier?.toLowerCase()}
                             </span>
                           )}

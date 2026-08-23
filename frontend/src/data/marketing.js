@@ -64,7 +64,7 @@ export const LANDING_FEATURES = [
 // ============================================================
 export const TESTIMONIALS = [
   {
-    quote: "At last we have a complete stats package that lets us view the club's entire history across every statistic imaginable — even ones we never thought possible. It brings together tools to merge player profiles, add honours, fill in missing data and build out individual player profiles. It's made pretty much every spreadsheet we had redundant — and we had a lot.",
+    quote: "At last we have a complete stats package that lets us view the club's entire history across every statistic imaginable, even ones we never thought possible. It brings together tools to merge player profiles, add honours, fill in missing data and build out individual player profiles. It's made pretty much every spreadsheet we had redundant, and we had a lot.",
     name: 'Tristram Fletcher',
     role: 'Secretary · Applecross Cricket Club',
     yrs: '',

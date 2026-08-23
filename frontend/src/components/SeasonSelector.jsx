@@ -136,8 +136,8 @@ export default function SeasonSelector({
                 onClick={() => flip(key)}
                 aria-pressed={counted.includes(key)}
                 title={counted.includes(key)
-                  ? `${CATEGORY_LABELS[key]} grades are counted — click to leave them out`
-                  : `${CATEGORY_LABELS[key]} grades are left out — click to count them`}
+                  ? `${CATEGORY_LABELS[key]} grades are counted. Click to leave them out`
+                  : `${CATEGORY_LABELS[key]} grades are left out. Click to count them`}
                 className={`px-2.5 py-1.5 text-[10px] font-mono font-semibold tracking-wide3 transition-colors border-r pb-hairline-r last:border-r-0 ${
                   counted.includes(key)
                     ? 'bg-pb-accent/15 text-pb-accent'

@@ -26,7 +26,7 @@ function Section({ title, action, children }) {
 function HomeBody({ slug }) {
   const { club, site } = useWebsite()
   usePageMeta({
-    title: `${site.name} — Official Club Website`,
+    title: `${site.name}. Official Club Website`,
     description: site.tagline || `News, history, teams and stats for ${site.name}.`,
     image: site.hero_image_url || club?.logo_url || null,
     url: `https://betterat.cricket/${slug}/website`,

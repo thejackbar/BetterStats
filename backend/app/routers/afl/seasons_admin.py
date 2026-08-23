@@ -130,9 +130,9 @@ async def delete_season(
     if not season or season.organisation_id != club.id:
         raise HTTPException(404, "Season not found")
     if season.grassroots_id is not None:
-        raise HTTPException(400, "This season came from the PlayHQ sync — it can't be deleted here.")
+        raise HTTPException(400, "This season came from the PlayHQ sync. It can't be deleted here.")
     if await _season_in_use(db, season.id):
-        raise HTTPException(400, "This season has data recorded against it — remove that first.")
+        raise HTTPException(400, "This season has data recorded against it. Remove that first.")
 
     await db.delete(season)
     await log_activity(

@@ -89,7 +89,7 @@ GROUPS = [
                 "blurb": (
                     "This pulls every season, game and player from PlayHQ into "
                     "BetterCricket. It can take an hour or more for a club with a "
-                    "long history — you can leave the page and come back. Most of "
+                    "long history. You can leave the page and come back. Most of "
                     "the later steps rely on this data, so run it first."
                 ),
             },
@@ -116,7 +116,7 @@ GROUPS = [
                 "kind": "inline", "vital": False, "modules": None, "minutes": 3,
                 "blurb": (
                     "Sponsors appear on your public pages. Add each one's name, "
-                    "website and logo — you can reorder them later from the "
+                    "website and logo. You can reorder them later from the "
                     "Sponsors page."
                 ),
             },
@@ -125,7 +125,7 @@ GROUPS = [
     {
         "key": "tools", "title": "Tidy your data", "requires_sync": True,
         "blurb": (
-            "PlayHQ history often carries duplicates — the same player under two "
+            "PlayHQ history often carries duplicates, the same player under two "
             "spellings, the same grade under different names. These tools fix "
             "that, and they need your first full sync to finish before they can "
             "see anything."
@@ -138,7 +138,7 @@ GROUPS = [
                     "The same person often exists twice in PlayHQ history (name "
                     "changes, junior and senior records, typos). Merging combines "
                     "their stats into one career. The tool suggests likely "
-                    "duplicates — most clubs find a handful. This one really is "
+                    "duplicates. Most clubs find a handful. This one really is "
                     "worth doing: unmerged players show wrong career totals."
                 ),
             },
@@ -157,7 +157,7 @@ GROUPS = [
                 "blurb": (
                     "Bulk-fill emails, phone numbers, roles and batting/bowling "
                     "styles from a spreadsheet. Download the template, fill in "
-                    "what you have, and upload — blanks never overwrite anything."
+                    "what you have, and upload, blanks never overwrite anything."
                 ),
             },
             {
@@ -174,7 +174,7 @@ GROUPS = [
                 "kind": "link", "route": "/admin/awards", "vital": False, "modules": None, "minutes": 10,
                 "blurb": (
                     "Club champions, fairest and best, premierships, life members. "
-                    "Add them one by one or import a spreadsheet — they power the "
+                    "Add them one by one or import a spreadsheet, they power the "
                     "honour boards and player profiles."
                 ),
             },
@@ -191,14 +191,14 @@ GROUPS = [
     },
     {
         "key": "select", "title": "BetterSelect",
-        "blurb": "Team selection, availability and training — get match day organised.",
+        "blurb": "Team selection, availability and training. Get match day organised.",
         "steps": [
             {
                 "key": "fixtures", "title": "Sync your fixtures",
                 "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 1,
                 "blurb": (
                     "Pull your upcoming fixtures from PlayHQ. If your association "
-                    "hasn't published fixtures yet, nothing will come through — "
+                    "hasn't published fixtures yet, nothing will come through, "
                     "that's normal, just re-run this once they're up."
                 ),
             },
@@ -208,7 +208,7 @@ GROUPS = [
                 "blurb": (
                     "Squads mirror the sides you actually field (1st XI, 2nd XI and "
                     "so on). We suggest them from the teams your players appeared "
-                    "for last season — tick the ones you want."
+                    "for last season. Tick the ones you want."
                 ),
             },
             {
@@ -225,7 +225,7 @@ GROUPS = [
                 "kind": "inline", "vital": False, "modules": {"select"}, "minutes": 1,
                 "blurb": (
                     "One link (or QR code) your players use to set their own "
-                    "availability — no accounts, no app, just their name and the "
+                    "availability: no accounts, no app, just their name and the "
                     "last four digits of their phone number."
                 ),
             },
@@ -242,14 +242,14 @@ GROUPS = [
     },
     {
         "key": "socials", "title": "BetterSocials",
-        "blurb": "Your public face — the club website and match-day social graphics.",
+        "blurb": "Your public face. The club website and match-day social graphics.",
         "steps": [
             {
                 "key": "website", "title": "Turn on your club website",
                 "kind": "inline", "vital": False, "modules": {"socials"}, "minutes": 2,
                 "blurb": (
-                    "A full public club site — news, honour boards, committee, "
-                    "photo galleries — at your club's own page. Switch it on and "
+                    "A full public club site: news, honour boards, committee, "
+                    "photo galleries, at your club's own page. Switch it on and "
                     "add a tagline here; add content whenever you're ready."
                 ),
             },
@@ -258,7 +258,7 @@ GROUPS = [
                 "kind": "link", "route": "/admin/social-post", "vital": False, "modules": {"socials"}, "minutes": 3,
                 "blurb": (
                     "Match-day graphics come out in your club colours from the "
-                    "start — the Club palette is built from your primary colour. "
+                    "start. The Club palette is built from your primary colour. "
                     "Open the post generator to pick a different palette, font or "
                     "background if you want your own look; this step ticks itself "
                     "off once you've saved a style."
@@ -268,7 +268,7 @@ GROUPS = [
     },
     {
         "key": "admin", "title": "BetterAdmin",
-        "blurb": "Fees, emails and the kit room — the club's paperwork, minus the paper.",
+        "blurb": "Fees, emails and the kit room. The club's paperwork, minus the paper.",
         "steps": [
             {
                 "key": "square", "title": "Connect Square",
@@ -293,7 +293,7 @@ GROUPS = [
                 "key": "fee_schedule", "title": "Set your fee schedule",
                 "kind": "link", "route": "/admin/fees/schedule", "vital": False, "modules": {"fees"}, "minutes": 5,
                 "blurb": (
-                    "Your membership categories and match fees for the season — "
+                    "Your membership categories and match fees for the season, "
                     "seniors, juniors, family caps, per-game rates. There's a "
                     "starter set you can adjust rather than starting blank."
                 ),
@@ -320,7 +320,7 @@ GROUPS = [
     },
     {
         "key": "iq", "title": "BetterIQ",
-        "blurb": "Analytics needs no setup — but you can warm up the opposition scouting before round one.",
+        "blurb": "Analytics needs no setup, but you can warm up the opposition scouting before round one.",
         "steps": [
             {
                 "key": "iq_prewarm", "title": "Pre-build opposition analysis",
@@ -336,7 +336,7 @@ GROUPS = [
     },
     {
         "key": "fantasy", "title": "BetterFantasy",
-        "blurb": "A fantasy competition over your club's real games — set up the season once, then it runs itself.",
+        "blurb": "A fantasy competition over your club's real games. Set up the season once, then it runs itself.",
         "steps": [
             {
                 "key": "fantasy_season", "title": "Create this season's competition",
@@ -351,7 +351,7 @@ GROUPS = [
                 "kind": "inline", "vital": False, "modules": {"fantasy"}, "minutes": 1,
                 "blurb": (
                     "Prices every eligible player from their real stats so "
-                    "managers can pick their squads. Re-run it any time — prices "
+                    "managers can pick their squads. Re-run it any time, prices "
                     "only reset if you ask."
                 ),
             },
@@ -360,7 +360,7 @@ GROUPS = [
                 "kind": "link", "route": "/admin/fantasy/settings", "vital": False, "modules": {"fantasy"}, "minutes": 3,
                 "blurb": (
                     "Salary cap, squad size and trade limits start on sensible "
-                    "defaults — look them over and tweak anything that doesn't "
+                    "defaults. Look them over and tweak anything that doesn't "
                     "suit your club."
                 ),
             },
@@ -369,7 +369,7 @@ GROUPS = [
                 "kind": "link", "route": "/admin/fantasy/scoring", "vital": False, "modules": {"fantasy"}, "minutes": 2,
                 "blurb": (
                     "Points per run, wicket, catch and the rest. The defaults are "
-                    "balanced for club cricket — mark this done once you're happy "
+                    "balanced for club cricket. Mark this done once you're happy "
                     "with them."
                 ),
             },

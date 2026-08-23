@@ -50,7 +50,7 @@ function PlayerRow({ p, rules, active, selected, status, squadName, onSelect, on
           <span className="text-sm font-medium truncate">{p.display_name || p.name}</span>
           <RuleTags player={rules} />
           {p.is_overseas && (
-            <span title={`Overseas${p.overseas_country ? ` — ${p.overseas_country}` : ''}`}
+            <span title={`Overseas${p.overseas_country ? `, ${p.overseas_country}` : ''}`}
               className="font-mono text-[8.5px] text-pb-amber bg-pb-amber/10 px-[5px] py-px rounded">OS</span>
           )}
         </div>
@@ -228,7 +228,7 @@ function PlayerList({ players, rulesById, statusOf, squadNameOf, selectedIds, se
           <span className="text-[12.5px] text-pb-dim">set squad</span>
           <select value={bulkSquad} onChange={(e) => setBulkSquad(e.target.value)}
             className="bg-pb-surface2 text-pb-text border border-pb-hairline2 rounded-lg px-2.5 py-1.5 text-[12.5px] cursor-pointer focus:outline-none focus:border-pb-accent">
-            <option value="">— pick —</option>
+            <option value="">. Pick, </option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
           <Btn variant="soft" sm disabled={!bulkSquad} onClick={async () => { await onBulkSquad([...sel], bulkSquad); clearSel() }}>Apply</Btn>

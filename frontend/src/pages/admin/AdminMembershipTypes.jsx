@@ -106,7 +106,7 @@ export default function AdminMembershipTypes() {
   }
 
   const archive = async (t) => {
-    if (!window.confirm(`Remove "${t.name}"? Members already holding it keep the reference — this just hides it from new assignments.`)) return
+    if (!window.confirm(`Remove "${t.name}"? Members already holding it keep the reference. This just hides it from new assignments.`)) return
     try { await api.feeArchiveMembershipType(t.id); load() } catch (e) { toast.error(e.message) }
   }
 
@@ -126,7 +126,7 @@ export default function AdminMembershipTypes() {
           <div>
             <h1 className="font-display font-bold text-2xl text-pb-text mb-1">Membership Types</h1>
             <p className="text-pb-faint text-sm">
-              Optional — only adopt what your club actually uses. Senior/Junior Player, Parent, Life Member, Coach,
+              Optional: only adopt what your club actually uses. Senior/Junior Player, Parent, Life Member, Coach,
               Committee Member and more, or build your own.
             </p>
           </div>

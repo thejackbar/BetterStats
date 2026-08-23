@@ -156,7 +156,7 @@ function PositionCard({ position, members, onChanged }) {
           {history.map(h => (
             <div key={h.id} className="font-mono text-[10px] text-pb-faint flex justify-between">
               <span>{h.holder_name}</span>
-              <span>{h.started_at} — {h.ended_at || (h.is_current ? 'current' : '—')}</span>
+              <span>{h.started_at}, {h.ended_at || (h.is_current ? 'current' : '—')}</span>
             </div>
           ))}
         </div>
@@ -265,7 +265,7 @@ function PositionsTab({ members }) {
       </div>
       <OfficeBearerAwardsPanel onImported={load} />
       {positions.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet — add the committee roles above, or create them under Roles.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No committee roles yet. Add the committee roles above, or create them under Roles.</div>
       ) : (
         <div className="space-y-2">
           <p className="font-mono text-[10px] text-pb-faintest">Drag the ⠿ handle to reorder.</p>
@@ -472,7 +472,7 @@ export function TasksTab({ members, view: viewProp, onView, query }) {
                   onClick={() => setEditId(t.id)}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditId(t.id) } }}
                   role="button" tabIndex={0}
-                  title="Open this action — or drag it to another lane"
+                  title="Open this action, or drag it to another lane"
                   className="pb-card px-3 py-2.5 cursor-pointer hover:border-pb-accent"
                   style={{ opacity: dragId === t.id ? 0.45 : 1 }}>
                   <div className="text-pb-text text-[13px] mb-1">{t.title}</div>
@@ -558,7 +558,7 @@ export function DocumentsTab({ query = '' }) {
     <div>
       <div className="pb-card p-4 mb-4">
         <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
-          Link-based — paste the Drive/Dropbox/etc. link to where the document already lives.
+          Link-based, paste the Drive/Dropbox/etc. link to where the document already lives.
         </p>
         <div className="flex flex-col sm:flex-row gap-2">
           <input className={`${inp} flex-1`} placeholder="Title" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
@@ -808,7 +808,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   const [newMotion, setNewMotion] = useState({ description: '', motion_type: 'motion', objective_id: '' })
   const [newNom, setNewNom] = useState({ position_id: '', candidate_member_id: '' })
   const [attendance, setAttendance] = useState({})
-  // Fetched once for the whole meeting rather than per motion — a meeting with
+  // Fetched once for the whole meeting rather than per motion. A meeting with
   // ten motions would otherwise fire ten identical requests.
   const objectives = useObjectives()
 
@@ -887,7 +887,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
   }
   async function setNominationStatus(nom, nomStatus) {
     if (nomStatus === 'elected' && !confirm('Mark elected? This starts a new committee term for this position, ending whoever currently holds it.')) return
-    try { await api.committeeUpdateNomination(meeting.id, nom.id, { status: nomStatus }); toast.success(nomStatus === 'elected' ? 'Elected — term started' : 'Updated'); load() } catch (e) { toast.error(e.message) }
+    try { await api.committeeUpdateNomination(meeting.id, nom.id, { status: nomStatus }); toast.success(nomStatus === 'elected' ? 'Elected. Term started' : 'Updated'); load() } catch (e) { toast.error(e.message) }
   }
   async function removeNomination(nom) {
     if (!confirm('Remove this nomination?')) return
@@ -1031,7 +1031,7 @@ function MeetingDetail({ meeting, members, positions, onChanged }) {
               {(detail.nominations || []).map(n => (
                 <div key={n.id} className="pb-card px-3 py-2">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-pb-text text-[13px]">{memberName(n.candidate_member_id)} — {positionName(n.position_id)}</div>
+                    <div className="text-pb-text text-[13px]">{memberName(n.candidate_member_id)}, {positionName(n.position_id)}</div>
                     <span className={`font-mono text-[9px] tracking-wide2 rounded px-1.5 py-0.5 border ${n.status === 'elected' ? 'text-pb-accent border-pb-accent/40' : 'text-pb-faint pb-hairline'}`}>{label(n.status)}</span>
                   </div>
                   <div className="flex gap-1 mt-1 no-print">
@@ -1122,13 +1122,13 @@ function MeetingsTab() {
   return (
     <div>
       <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-3 leading-relaxed">
-        Regular committee meetings and the AGM share the same tool — an AGM meeting also gets a Nominations section where
+        Regular committee meetings and the AGM share the same tool. An AGM meeting also gets a Nominations section where
         marking a candidate "elected" starts a real committee term for that position.
       </p>
       <AgendaTemplatesPanel templates={templates} onChanged={loadTemplates} />
       <NewMeetingForm templates={templates} onCreated={load} />
       {meetings.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No meetings yet — create one above.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No meetings yet, create one above.</div>
       ) : (
         <div className="space-y-2">
           {meetings.map(m => <MeetingRow key={m.id} meeting={m} members={members} positions={positions} onChanged={load} />)}

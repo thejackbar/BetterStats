@@ -27,7 +27,7 @@ function AddCustomModal({ open, onClose, onAdded }) {
   return (
     <Modal open={open} onClose={onClose} title="Custom tracker">
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Name" hint="e.g. Facility hire enquiries, Merchandise pre-orders — anything worth tracking stage-by-stage.">
+        <Field label="Name" hint="e.g. Facility hire enquiries, Merchandise pre-orders. Anything worth tracking stage-by-stage.">
           <TextInput autoFocus value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Facility Hire" />
         </Field>
         <div className="flex justify-end pt-2"><Btn type="submit" variant="primary" disabled={saving}>Create tracker</Btn></div>
@@ -62,7 +62,7 @@ export default function BetterCrmHome() {
   }
 
   const removeTracker = async (id) => {
-    if (!window.confirm('Remove this tracker? Its records stay saved — you can add it back any time.')) return
+    if (!window.confirm('Remove this tracker? Its records stay saved. You can add it back any time.')) return
     try { await api.crmRemoveTracker(id); load() } catch (e) { toast.error(e.message || 'Could not remove tracker') }
   }
 
@@ -111,7 +111,7 @@ export default function BetterCrmHome() {
         <section>
           <h2 className="font-display font-bold text-sm text-pb-faint uppercase tracking-wide mb-1">Add a tracker</h2>
           <p className="text-[12.5px] text-pb-faint mb-3">
-            Optional — only turn on what your club actually does. Not every club runs sponsorship, grants or alumni fundraising.
+            Optional: only turn on what your club actually does. Not every club runs sponsorship, grants or alumni fundraising.
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {availablePresets.map(p => (

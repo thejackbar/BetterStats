@@ -167,7 +167,7 @@ function CrmDashboard({ deals, stages }) {
       <div className="pb-card px-4 py-3">
         <h3 className="font-display font-bold text-[13px] mb-2">Trial conversions</h3>
         <p className="text-[12px] text-pb-faint mb-2">
-          Deals onboarded via a trial (Self-Serve or Super Admin) — a current snapshot, not a
+          Deals onboarded via a trial (Self-Serve or Super Admin), a current snapshot, not a
           historical trend (no stage-history table is kept).
         </p>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[12px]">
@@ -583,7 +583,7 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
             )}
           </div>
           {!selectedClub && !searching && searched && candidates.length === 0 && query.trim().length >= 2 && (
-            <p className="text-[11px] text-pb-faintest mt-1">No match in the Club Directory — this creates a deal for a new club/organisation.</p>
+            <p className="text-[11px] text-pb-faintest mt-1">No match in the Club Directory. This creates a deal for a new club/organisation.</p>
           )}
         </Field>
 
@@ -614,7 +614,7 @@ function NewDealModal({ open, onClose, stages, onCreated }) {
                     <input type="radio" name="poc" checked={!customContact && contactId === c.id}
                       onChange={() => { setContactId(c.id); setCustomContact(false) }} />
                     <span>
-                      {c.full_name || 'Unnamed'}{c.role ? ` — ${c.role}` : ''}{c.email ? ` · ${c.email}` : ''}{c.mobile ? ` · ${c.mobile}` : ''}
+                      {c.full_name || 'Unnamed'}{c.role ? `, ${c.role}` : ''}{c.email ? ` · ${c.email}` : ''}{c.mobile ? ` · ${c.mobile}` : ''}
                     </span>
                   </label>
                 ))}
@@ -770,7 +770,7 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
               <NumberInput min={0} placeholder="max" value={filters.maxTrialDays} onChange={set('maxTrialDays')} style={{ width: FBW.num }} />
             </div>
             <button type="button" onClick={() => toggleBool('activeTrials')}
-              title="At least one module currently on a live trial — any stage"
+              title="At least one module currently on a live trial, any stage"
               className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${
                 filters.activeTrials ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint hover:text-pb-text'}`}>
               Active Trials
@@ -791,7 +791,7 @@ function FilterBar({ filters, setFilters, owners, stages, stateOptions, associat
                 ...(patch.to !== undefined ? { newDealsTo: patch.to } : {}),
               }))} />
             <DateWindowFilter label="New Deal Activity"
-              title="Deals with activity in this window — a stage promotion (manual or automatic), page views, trial/subscription changes (start, cancel, pause), or onboarding steps completed"
+              title="Deals with activity in this window: a stage promotion (manual or automatic), page views, trial/subscription changes (start, cancel, pause), or onboarding steps completed"
               mode={filters.activityMode} from={filters.activityFrom} to={filters.activityTo}
               onChange={patch => setFilters(f => ({
                 ...f,
@@ -883,7 +883,7 @@ function SweepStatusLine({ status }) {
   return (
     <p className={`text-[10.5px] mt-1 ${err ? 'text-pb-red' : 'text-pb-faintest'}`}>
       {err ? `Last run ${ago} FAILED: ${err}` : `Last ran ${ago}${
-        status.stats?.processed != null ? ` — ${status.stats.processed} processed` : ''}${
+        status.stats?.processed != null ? `, ${status.stats.processed} processed` : ''}${
         status.stats?.promoted ? `, ${status.stats.promoted} promoted` : ''}`}
     </p>
   )
@@ -958,7 +958,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
           className="block pb-card px-3 py-2.5 hover:border-pb-accent/40 transition">
           <div className="font-medium text-[13px]">Sales Automation</div>
           <div className="text-[11.5px] text-pb-faint mt-0.5">
-            The criteria that automatically create or promote deals — Contact-Us enquiry
+            The criteria that automatically create or promote deals. Contact-Us enquiry
             count, engagement score threshold, trial/subscription events, self-serve signup.
           </div>
         </Link>
@@ -974,7 +974,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
           <div className="font-medium text-[13px]">Auto-recompute cadence</div>
           <div className="text-[11.5px] text-pb-faint mt-0.5 mb-2.5">
             How often the pipeline re-scores itself in the background. A new trial, or a club
-            crossing the threshold, still creates its card instantly — these only control the
+            crossing the threshold, still creates its card instantly, these only control the
             periodic sweeps that keep existing cards' scores fresh.
           </div>
           {cadence?.error ? (
@@ -998,7 +998,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
               <div>
                 <div className="text-[12px] font-medium">Full directory sweep (periodic)</div>
                 <div className="text-[11px] text-pb-faint mb-1">
-                  Recomputes every Club Directory club, to catch anything the frequent sweep missed —
+                  Recomputes every Club Directory club, to catch anything the frequent sweep missed, 
                   including a score that should have DECAYED from a club going quiet, which the
                   frequent sweep above can never catch on its own (it only re-scores a club with new
                   activity).
@@ -1052,7 +1052,7 @@ function SettingsModal({ open, onClose, onManageStages }) {
   )
 }
 
-// Import the CRM's current filtered deal set into a Sales Workspace list —
+// Import the CRM's current filtered deal set into a Sales Workspace list, 
 // the CRM-export source alongside Wizard Clubs (SuperWizardClubs.jsx's own
 // "Import to Sales List"). No club-directory matching needed: these are
 // already real crm_deals rows, so this is a pure grouping of their
@@ -1079,7 +1079,7 @@ function ImportSalesListModal({ open, onClose, deals, filterSummary = [] }) {
         name: name.trim(), deal_ids: (deals || []).map(d => d.id),
       })
       setResult(r)
-      toast.success(`Imported "${r.name}" — ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
+      toast.success(`Imported "${r.name}". ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
     } catch (e) {
       setErr(e.message || 'Could not import the list')
     } finally { setBusy(false) }
@@ -1103,7 +1103,7 @@ function ImportSalesListModal({ open, onClose, deals, filterSummary = [] }) {
       {result ? (
         <div className="space-y-2 text-[13px]">
           <div className="text-pb-text">
-            Imported <span className="font-medium">"{result.name}"</span> — {result.clubs_added} club{result.clubs_added === 1 ? '' : 's'} in the list.
+            Imported <span className="font-medium">"{result.name}"</span>. {result.clubs_added} club{result.clubs_added === 1 ? '' : 's'} in the list.
             {result.clubs_unmatched?.length > 0 && <> {result.clubs_unmatched.length} deal{result.clubs_unmatched.length === 1 ? '' : 's'} had no club linked and couldn't be included.</>}
           </div>
           <div className="text-pb-faintest">
@@ -1116,7 +1116,7 @@ function ImportSalesListModal({ open, onClose, deals, filterSummary = [] }) {
         <div className="space-y-3">
           <div className="text-[13px] text-pb-faint">
             Groups the <span className="text-pb-text font-medium">{withClub.length}</span> deal{withClub.length === 1 ? '' : 's'} currently
-            shown into a Sales List — no new deals are created, this just makes the set easy to find again and assign as a batch.
+            shown into a Sales List, no new deals are created, this just makes the set easy to find again and assign as a batch.
             {noClub.length > 0 && (
               <> {noClub.length} deal{noClub.length === 1 ? '' : 's'} with no Club Directory link can't be included.</>
             )}
@@ -1137,7 +1137,7 @@ function ImportSalesListModal({ open, onClose, deals, filterSummary = [] }) {
           <Field label="List name">
             <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submit() }}
-              placeholder="e.g. Warm leads — August" />
+              placeholder="e.g. Warm leads, August" />
           </Field>
         </div>
       )}
@@ -1300,7 +1300,7 @@ export default function SuperCrm() {
     try {
       const r = await api.superCrmRecalcEngagement()
       toast.info(r.status === 'already_running'
-        ? 'A recalculation is already running — the board updates as it finishes.'
+        ? 'A recalculation is already running. The board updates as it finishes.'
         : 'Recalculating engagement scores in the background. This can take a few minutes; the board updates as it runs.')
       startRecalcPolling()
     } catch (e) {
@@ -1451,7 +1451,7 @@ export default function SuperCrm() {
   return (
     <AdminLayout>
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <h1 className="font-display font-bold text-xl">BetterCRM — Sales Pipeline</h1>
+        <h1 className="font-display font-bold text-xl">BetterCRM. Sales Pipeline</h1>
         <div className="flex items-center gap-2">
           <button onClick={() => setView('board')}
             className={`px-2.5 py-1 rounded-full text-[11.5px] border transition ${view === 'board' ? 'bg-pb-accent/15 border-pb-accent/50 text-pb-accent' : 'border-pb-hairline2 text-pb-faint'}`}>Board</button>
@@ -1467,7 +1467,7 @@ export default function SuperCrm() {
           <span title="Import the deals currently shown into a Sales Workspace list">
             <Btn variant="ghost" sm onClick={() => setShowImportSales(true)} disabled={filteredDeals.length === 0}>Import to Sales List</Btn>
           </span>
-          <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background — takes a few minutes)">
+          <span title="Recompute every club's engagement score now and re-run auto-promotions, then refresh the board (runs in the background, takes a few minutes)">
             <Btn variant="ghost" sm onClick={runRecalc} disabled={recalcRunning}>
               {recalcRunning ? 'Recalculating…' : 'Recalculate'}
             </Btn>

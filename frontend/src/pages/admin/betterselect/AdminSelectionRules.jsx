@@ -216,7 +216,7 @@ function ScopePicker({ scope, setScope, options }) {
             <Chip key={g.name} label={g.name} active={(scope.grade_names || []).includes(g.name)}
               onClick={() => toggle('grade_names', g.name)} />
           ))}
-          {!grades.length && <span className="text-[12px] text-pb-faintest">No grades yet — this rule will cover every fixture.</span>}
+          {!grades.length && <span className="text-[12px] text-pb-faintest">No grades yet. This rule will cover every fixture.</span>}
         </div>
         {older.length > 0 && !q && (
           <button type="button" onClick={() => setShowOld((v) => !v)}
@@ -256,7 +256,7 @@ function ScopePicker({ scope, setScope, options }) {
         <Segmented sm value={scope.finals || 'any'} onChange={(v) => setScope((s) => ({ ...s, finals: v }))}
           options={[{ value: 'any', label: 'Every match' }, { value: 'only', label: 'Finals only' },
                     { value: 'exclude', label: 'Not in finals' }]} />
-        <p className={HINT}>A fixture counts as a final when its round says so — override it on the fixture itself if your association names them differently.</p>
+        <p className={HINT}>A fixture counts as a final when its round says so. Override it on the fixture itself if your association names them differently.</p>
       </div>
     </div>
   )
@@ -373,7 +373,7 @@ function ConfigFields({ kind, config, setConfig, ageBasisLabel }) {
             placeholder="e.g. 20" onChange={(e) => set({ max_share_of_overs: e.target.value ? Number(e.target.value) / 100 : null })} />
           <p className={HINT}>A percentage, if your association also caps a junior at a share of the scheduled overs.</p>
         </div>
-        <p className={HINT}>Shown beside the player as a note. It never stops anyone being picked — the limit is on what you ask of them once they're out there.</p>
+        <p className={HINT}>Shown beside the player as a note. It never stops anyone being picked. The limit is on what you ask of them once they're out there.</p>
       </div>
     )
   }
@@ -470,7 +470,7 @@ function ConfigFields({ kind, config, setConfig, ageBasisLabel }) {
       </div>
     )
   }
-  return <p className={HINT}>Nothing to set — this one reads what the club already holds.</p>
+  return <p className={HINT}>Nothing to set. This one reads what the club already holds.</p>
 }
 
 /* ── Add / edit one rule ─────────────────────────────────────────────────── */
@@ -490,7 +490,7 @@ function RuleEditor({ rule, kinds, options, ageBasisLabel, onCancel, onSave }) {
   }
   return (
     <Card className="border-pb-accent/40">
-      <SectionHead title={rule.id ? `Edit — ${meta.label || kind}` : `New rule — ${meta.label || kind}`}
+      <SectionHead title={rule.id ? `Edit, ${meta.label || kind}` : `New rule: ${meta.label || kind}`}
         sub={meta.blurb} />
       <div className="flex flex-col gap-4">
         <div>
@@ -538,7 +538,7 @@ function ExceptionsPanel({ rule, onClose, toast }) {
     let note = null
     if (state) {
       note = window.prompt(state === 'cleared'
-        ? 'Why are they cleared? (a permit number, a date — optional)'
+        ? 'Why are they cleared? (a permit number, a date, optional)'
         : 'Why are they ineligible? (optional)') ?? null
     }
     try {
@@ -549,7 +549,7 @@ function ExceptionsPanel({ rule, onClose, toast }) {
   const players = (data?.players || []).filter((p) => !q || p.name.toLowerCase().includes(q.toLowerCase()))
   return (
     <Card className="border-pb-accent/40">
-      <SectionHead title={`Exceptions — ${rule.name}`}
+      <SectionHead title={`Exceptions, ${rule.name}`}
         sub="An association permit, a clearance, or someone ruled out for this one rule. Everything else about them is untouched."
         right={<Btn variant="ghost" sm icon="close" onClick={onClose}>Close</Btn>} />
       <div className="mb-3"><Search value={q} onChange={setQ} placeholder="Find a player…" /></div>
@@ -654,7 +654,7 @@ function BoardSettingsCard({ settings, onSave, canEdit }) {
                 <option value="">Every player</option>
                 {[13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23].map((n) => <option key={n} value={n}>Players under {n} only</option>)}
               </select>
-              <p className={HINT}>Anyone at or over that age shows no age at all — their birthday never leaves their profile.</p>
+              <p className={HINT}>Anyone at or over that age shows no age at all. Their birthday never leaves their profile.</p>
             </div>
           )}
         </div>
@@ -754,7 +754,7 @@ export default function AdminSelectionRules() {
     try {
       const r = await api.bsSeedStarterRules()
       load()
-      toast.success(r.added ? 'Added the junior bowling limits — edit them to match your association' : 'You already have a bowling rule')
+      toast.success(r.added ? 'Added the junior bowling limits. Edit them to match your association' : 'You already have a bowling rule')
     } catch (e) { toast.error(e.message) }
   }
 
@@ -784,7 +784,7 @@ export default function AdminSelectionRules() {
         <AgeBasisCard settings={data.settings || {}} onSave={saveSettings} canEdit={canEdit} />
 
         <Card>
-          <SectionHead title="Rules" sub={rules.length ? null : 'Nothing set yet — add the ones your competition actually has.'}
+          <SectionHead title="Rules" sub={rules.length ? null : 'Nothing set yet. Add the ones your competition actually has.'}
             right={canEdit && !adding && !editing ? (
               <div className="flex items-center gap-2">
                 {!rules.length && <Btn variant="ghost" sm icon="bolt" onClick={seed}>Add junior bowling limits</Btn>}
@@ -837,7 +837,7 @@ export default function AdminSelectionRules() {
         <BoardSettingsCard settings={data.settings || {}} onSave={saveSettings} canEdit={canEdit} />
 
         <p className="text-[11.5px] text-pb-faintest">
-          A player's date of birth and overseas status live on their profile —{' '}
+          A player's date of birth and overseas status live on their profile, {' '}
           <Link to="/admin/betterselect/players" className="text-pb-accent hover:underline">BetterSelect → Players</Link>.
         </p>
       </div>

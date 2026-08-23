@@ -89,7 +89,7 @@ function MilestoneAchievedRow({ milestone }) {
       </svg>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-pb-text">
-          {milestone.player_name} — {(milestone.milestone_value || 0).toLocaleString()} {label}
+          {milestone.player_name}, {(milestone.milestone_value || 0).toLocaleString()} {label}
         </p>
         {milestone.achieved_at && (
           <p className="text-xs text-pb-faint mt-0.5">
@@ -111,7 +111,7 @@ function UpcomingMilestoneRow({ milestone }) {
       </svg>
       <div className="flex-1 min-w-0">
         <p className="text-sm text-pb-text">
-          {milestone.name} — {milestone.needed} {label} from {(milestone.target || 0).toLocaleString()}
+          {milestone.name}. {milestone.needed} {label} from {(milestone.target || 0).toLocaleString()}
         </p>
         <div className="mt-1.5 h-1 w-full rounded-full overflow-hidden" style={{ background: 'var(--pb-surface2)' }}>
           <div className="h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--pb-accent)' }} />
@@ -224,7 +224,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
             </div>
           )}
 
-          {/* Confirmation after Mark all read — leaves the panel on the
+          {/* Confirmation after Mark all read. Leaves the panel on the
               forward-looking milestones. */}
           {cleared && (
             <div
@@ -238,7 +238,7 @@ export default function NotificationModal({ isOpen, summary, error, onClose, onC
             </div>
           )}
 
-          {/* Sync Failures — top callout when scheduled syncs have errored */}
+          {/* Sync Failures. Top callout when scheduled syncs have errored */}
           {failedSyncs.length > 0 && (
             <section>
               <SectionHead title="Sync Failures" color="var(--pb-negative)" />

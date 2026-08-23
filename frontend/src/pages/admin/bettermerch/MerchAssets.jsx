@@ -163,7 +163,7 @@ export default function MerchAssets() {
       twoRow
       filters={<SearchInput wide value={q} onChange={setQ} placeholder="Search equipment, location, condition…" />}
       actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New equipment</Btn>}>
-      <p className="text-[12.5px] text-pb-faint mb-4">High-value gear tracked one item at a time — condition plus service and replace dates feed the alerts and your cashflow planning. Bulk gear (a box of balls) lives in <b>Stock</b> instead.</p>
+      <p className="text-[12.5px] text-pb-faint mb-4">High-value gear tracked one item at a time. Condition plus service and replace dates feed the alerts and your cashflow planning. Bulk gear (a box of balls) lives in <b>Stock</b> instead.</p>
       {loading ? <PbSpinner message="Loading equipment…" /> : assets.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
           No equipment yet. <button className="text-pb-accent" onClick={() => setShowNew(true)}>Add a bowling machine, covers, sight screen…</button>

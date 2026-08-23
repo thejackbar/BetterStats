@@ -10,7 +10,7 @@ reliably the model follows the prompt.
 """
 import re
 
-_DASH_RE = re.compile(r"\s*[—–]\s*")  # em dash (U+2014), en dash (U+2013)
+_DASH_RE = re.compile(r"\s*[, –]\s*")  # em dash (U+2014), en dash (U+2013)
 
 
 def strip_em_dashes(text: str) -> str:

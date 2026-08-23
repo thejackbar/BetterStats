@@ -36,7 +36,7 @@ function checkClient(area, shift, cand, shifts, settings) {
   if (mine.some(s => s.day_of_week === shift.day_of_week && s.start_time < shift.end_time && shift.start_time < s.end_time)) blocks.push('Overlaps another shift')
   if (area.required_role_id && !cand.role_ids.includes(area.required_role_id)) warns.push('Not in the ' + (area.required_role_name || 'required') + ' role')
   if (mine.length + 1 > cap) warns.push('Over their ' + cap + '-shift weekly cap')
-  if (mine.length + 1 >= 4) warns.push('Heavy week — spread the load')
+  if (mine.length + 1 >= 4) warns.push('Heavy week: spread the load')
   if (cand.player_id && shift.day_of_week === 5 && shift.start_time < 18.5) warns.push('May be selected to play Saturday')
   return { blocks, warns }
 }
@@ -469,7 +469,7 @@ export default function Roster({ st, patch, narrow }) {
   // column narrow; one with three does not.
   const [railMin, setRailMin] = usePref('roster_rail_min', false)
   const [poolOpen, setPoolOpen] = usePref('roster_pool_open', true)
-  // Pool search / role filter / sort. Deliberately NOT a saved preference —
+  // Pool search / role filter / sort. Deliberately NOT a saved preference, 
   // a filter you left on last week hiding half the club is worse than retyping.
   const [poolQuery, setPoolQuery] = useState('')
   const [poolRole, setPoolRole] = useState('')
@@ -477,7 +477,7 @@ export default function Roster({ st, patch, narrow }) {
 
   // api.js stamps the HTTP status onto the error, which is the difference
   // between "you lack a capability" (403) and "the server threw" (500).
-  // st.rosterWeek is how another screen hands us a week — Events uses it for
+  // st.rosterWeek is how another screen hands us a week. Events uses it for
   // "Roster this event" so you land on the week the event falls in.
   const load = () => api.rosterWeek(st.rosterWeek)
     .then(res => { setData(res); setShifts(res.week.shifts || []) })
@@ -486,7 +486,7 @@ export default function Roster({ st, patch, narrow }) {
 
   const view = st.view
   // The first column carries who or what each row is, so it has to stay put
-  // while the days scroll sideways — reading a shift you can no longer attach
+  // while the days scroll sideways. Reading a shift you can no longer attach
   // to a name is worthless. Minimised it keeps just enough to identify a row.
   const railW = railMin ? 52 : (narrow ? 176 : 216)
   const gridCols = `${railW}px repeat(7, ${narrow ? 'minmax(0, 1fr)' : 'minmax(150px, 1fr)'})`
@@ -495,7 +495,7 @@ export default function Roster({ st, patch, narrow }) {
     borderRight: `1px solid ${C.hair2}`, ...extra,
   })
 
-  // NEVER DECLARE A COMPONENT INSIDE A RENDER — a `const X = () => …` written
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER, a `const X = () => …` written
   // here is a new element type on every render, so React rebuilds its whole
   // subtree and any focused input inside it loses the caret after one
   // character. This is a plain function returning elements, called below.
@@ -560,7 +560,7 @@ export default function Roster({ st, patch, narrow }) {
         {header(null)}
         <div style={{ padding: 24, maxWidth: '46rem' }}>
           <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13.5, color: C.dim, lineHeight: 1.6 }}>
-            No operational areas set up yet. An area is a slice of club work (Bar, Umpires, Groundsman…) with its own weekly shift pattern, the role that covers it and the qualification that gates it. Add a starter set to see the weekly roster generate — you can rename, re-time or remove them afterwards in Areas &amp; Roles.
+            No operational areas set up yet. An area is a slice of club work (Bar, Umpires, Groundsman…) with its own weekly shift pattern, the role that covers it and the qualification that gates it. Add a starter set to see the weekly roster generate. You can rename, re-time or remove them afterwards in Areas &amp; Roles.
             <div style={{ marginTop: 14 }}>
               <button disabled={busy} onClick={async () => { setBusy(true); await api.rosterSeedStarter().catch(() => {}); await load(); setBusy(false) }}
                 style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>{busy ? 'Setting up…' : 'Add Operational Areas Starter Pack'}</button>
@@ -827,7 +827,7 @@ export default function Roster({ st, patch, narrow }) {
                     the rail's own solid background rather than replacing it —
                     otherwise the shifts scrolling underneath show through. */}
                 <div style={rail({ padding: railMin ? '12px 4px' : '12px 14px', display: 'flex', flexDirection: 'column', gap: 3, justifyContent: 'center', alignItems: railMin ? 'center' : 'stretch', backgroundImage: 'linear-gradient(rgba(245,181,66,0.04), rgba(245,181,66,0.04))' })}
-                  title={railMin ? `Open shifts — ${open.length} unfilled` : undefined}>
+                  title={railMin ? `Open shifts, ${open.length} unfilled` : undefined}>
                   {railMin ? (
                     <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 700, color: C.warn }}>{open.length}</span>
                   ) : (
@@ -862,7 +862,7 @@ export default function Roster({ st, patch, narrow }) {
                 <div key={p.member_id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                   <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: railMin ? 'center' : 'stretch', cursor: 'pointer' })}
                     onClick={() => setOpenPerson(p.member_id)}
-                    title={railMin ? `${p.name} — ${mine.length}/${cap} shifts` : 'Open availability and qualifications'}>
+                    title={railMin ? `${p.name}. ${mine.length}/${cap} shifts` : 'Open availability and qualifications'}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                       <span style={{ width: 28, height: 28, borderRadius: '50%', background: C.surface2, border: `1.5px solid ${over ? C.block : C.hair2}`, color: C.dim, fontFamily: MONO, fontSize: 10, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{initials(p.name)}</span>
                       {!railMin && (
@@ -907,7 +907,7 @@ export default function Roster({ st, patch, narrow }) {
                   return (
                     <div key={a.id} style={{ display: 'grid', gridTemplateColumns: gridCols, borderBottom: `1px solid ${C.hair}` }}>
                       <div style={rail({ padding: railMin ? '10px 4px' : '10px 14px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, alignItems: railMin ? 'center' : 'stretch' })}
-                        title={railMin ? `${a.name} — ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
+                        title={railMin ? `${a.name}. ${filledN}/${mine.length} filled · click to edit the area` : undefined}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                           <span onClick={() => openArea(a)} title={railMin ? undefined : `Edit ${a.name} and its shifts`}
                             style={{ width: 9, height: 9, borderRadius: 3, flexShrink: 0, background: a.color || 'var(--pb-accent)', cursor: 'pointer' }} />
@@ -1075,7 +1075,7 @@ export default function Roster({ st, patch, narrow }) {
               )}
               {sorted.length > POOL_CAP && (
                 <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, textAlign: 'center', padding: '4px 0' }}>
-                  SHOWING {POOL_CAP} OF {sorted.length} — SEARCH TO NARROW
+                  SHOWING {POOL_CAP} OF {sorted.length}. SEARCH TO NARROW
                 </div>
               )}
             </div>

@@ -64,7 +64,7 @@ export default function SuperUnpauseRequests() {
           <h1 className="text-xl font-semibold text-pb-text">Unpause requests</h1>
           <p className="text-sm text-pb-dim mt-1">
             Visitors who hit a lapsed-trial club's password-protected page and asked for
-            access — newest first. Reply to their email to open a sales conversation.
+            access, newest first. Reply to their email to open a sales conversation.
           </p>
         </div>
 

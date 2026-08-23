@@ -89,7 +89,7 @@ export default function ScoutGlobalSearch() {
   const pollUntilReady = async (p, res) => {
     if (res.status === 'building') {
       if (++pollCount.current >= MAX_POLLS) {
-        setAddError('That club is taking a while to load — try again shortly.')
+        setAddError('That club is taking a while to load. Try again shortly.')
         setAddingId(null)
         return
       }

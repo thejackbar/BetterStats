@@ -206,7 +206,7 @@ export default function AdminFeeSchedule() {
     setRecomputing(true)
     try {
       const r = await api.feeRecompute(seasonId)
-      toast.success(`Match days rebuilt — ${r.entries_upserted} updated, ${r.members_created} new members`)
+      toast.success(`Match days rebuilt. ${r.entries_upserted} updated, ${r.members_created} new members`)
     } catch (e) { toast.error(e.message) } finally { setRecomputing(false) }
   }
 

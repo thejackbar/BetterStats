@@ -62,11 +62,11 @@ function MergeBuilder({ grades, onMerged }) {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Variant to merge</label>
-          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder="— Select grade —" exclude={canonical} />
+          <GradePicker grades={grades} value={alias} onChange={setAlias} placeholder=". Select grade, " exclude={canonical} />
         </div>
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Merge into (keep this name)</label>
-          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder="— Select canonical grade —" exclude={alias} />
+          <GradePicker grades={grades} value={canonical} onChange={setCanonical} placeholder=". Select canonical grade, " exclude={alias} />
         </div>
       </div>
       {alias && canonical && alias === canonical && (
@@ -183,11 +183,11 @@ function GradeList({ grades, onChanged }) {
         Label each grade so the public site can split them (Seniors / Colts / Women's / Masters
         / Integrated), and choose which ones to share. A hidden grade drops off public grade
         filters and per-grade breakdowns; your admin views and whole-club career totals are unchanged.
-        Hover a grade's name to rename it — useful for keeping merged or sponsor-suffixed names
+        Hover a grade's name to rename it. Useful for keeping merged or sponsor-suffixed names
         uniform (e.g. "A Grade (XYZ Finance)" → "A Grade").
       </p>
       <p className="text-pb-dim text-sm mb-3 leading-relaxed">
-        The order here is the order your teams appear in everywhere on the public site — grade
+        The order here is the order your teams appear in everywhere on the public site, grade
         filters, the results split by team, and a player's by-grade cards. Move a grade with the
         arrows, then save. Anything you haven't ordered sits below the ones you have.
       </p>
@@ -312,7 +312,7 @@ function GradeList({ grades, onChanged }) {
                         {GRADE_CATEGORIES.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                       </select>
                       {!g.category_confirmed && (
-                        <span className="font-mono text-[9px] text-[var(--pb-amber)] uppercase tracking-wide" title="Auto-detected from the grade name — pick to confirm">
+                        <span className="font-mono text-[9px] text-[var(--pb-amber)] uppercase tracking-wide" title="Auto-detected from the grade name. Pick to confirm">
                           suggested
                         </span>
                       )}

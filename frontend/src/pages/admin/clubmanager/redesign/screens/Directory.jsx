@@ -857,7 +857,7 @@ export default function Directory({ st, patch, narrow }) {
                             const primary = sel.membership_type_id === t.id
                             return (
                               <button key={t.id} disabled={busy} onClick={() => toggleType(sel, t.id)}
-                                title={on ? (primary ? 'Held, and the type BetterFees bills' : 'Held — click to remove') : 'Click to add'}
+                                title={on ? (primary ? 'Held, and the type BetterFees bills' : 'Held: click to remove') : 'Click to add'}
                                 style={{ ...pill(on), display: 'inline-flex', alignItems: 'center', gap: 5, opacity: busy ? 0.6 : 1 }}>
                                 {t.name}
                                 {/* aria-hidden, or the glyph joins the button's
@@ -884,7 +884,7 @@ export default function Directory({ st, patch, narrow }) {
                     )}
                     {(sel.membership_types || []).length === 0 && (
                       <div style={{ fontSize: 12.5, color: C.faint, marginTop: 2 }}>
-                        No membership type recorded{sel.player_id ? '. They have a record in Stats, so they play — the club still decides whether that is a Senior or a Junior Player.' : '.'}
+                        No membership type recorded{sel.player_id ? '. They have a record in Stats, so they play. The club still decides whether that is a Senior or a Junior Player.' : '.'}
                       </div>
                     )}
                     {!sel.member_id && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 6 }}>Ticking a type adds this player to the member directory.</div>}
@@ -917,7 +917,7 @@ export default function Directory({ st, patch, narrow }) {
                     {canEditPlayers ? (
                       <select value={sel.squad?.id || ''} disabled={busy} onChange={e => setSquad(sel, e.target.value)}
                         style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
-                        <option value="">— No squad —</option>
+                        <option value="">, No squad, </option>
                         {opts.squads.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                       </select>
                     ) : (
@@ -941,7 +941,7 @@ export default function Directory({ st, patch, narrow }) {
                     <select value={sel.tier?.id || ''} disabled={busy || !opts.tiers.length}
                       onChange={e => setFeeTier(sel, e.target.value)}
                       style={{ ...inp, width: 'auto', maxWidth: 220, opacity: busy ? 0.6 : 1 }}>
-                      <option value="">{opts.tiers.length ? '— Needs tier —' : 'No tiers set up'}</option>
+                      <option value="">{opts.tiers.length ? '. Needs tier. ' : 'No tiers set up'}</option>
                       {opts.tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
                     </select>
                   </div>
@@ -1011,7 +1011,7 @@ export default function Directory({ st, patch, narrow }) {
                   </div>
                 )}
                 <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 8 }}>
-                  An honour, not a membership type — a life member is still whatever kind of member they already were.
+                  An honour, not a membership type. A life member is still whatever kind of member they already were.
                 </div>
               </Card>
 
@@ -1051,7 +1051,7 @@ export default function Directory({ st, patch, narrow }) {
                           {qq.id ? (
                             <>
                               <input type="date" value={qq.expiry ? String(qq.expiry).slice(0, 10) : ''} disabled={busy}
-                                title="Expiry — clear it for a qualification that never expires"
+                                title="Expiry: clear it for a qualification that never expires"
                                 onChange={e => setQualExpiry(qq.id, e.target.value)}
                                 style={{ background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 5, padding: '1px 5px', color: C.dim, fontFamily: MONO, fontSize: 9.5, outline: 'none' }} />
                               {!qq.expiry && <span>never expires</span>}
@@ -1185,7 +1185,7 @@ export default function Directory({ st, patch, narrow }) {
                       onKeyDown={e => { if (e.key === 'Enter') { addInterest(sel, e.currentTarget.value); e.currentTarget.value = '' } }}
                       style={{ ...inp, marginTop: 8 }} />
                     <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.faintest, marginTop: 5 }}>
-                      Free text, and theirs not yours — what this person said they would do, not what the club needs.
+                      Free text, and theirs not yours. What this person said they would do, not what the club needs.
                     </div>
                   </>
                 )}
@@ -1256,7 +1256,7 @@ export default function Directory({ st, patch, narrow }) {
                 <label style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>MOBILE<input value={modal.form.mobile} onChange={e => setForm('mobile', e.target.value)} style={{ ...inp, marginTop: 4 }} /></label>
               </div>
               {/* The club's own catalogue, several at once. Only offered when
-                  they keep one, since nothing seeds it automatically — a club
+                  they keep one, since nothing seeds it automatically, a club
                   with none can still add the person and type them after. */}
               {memberTypes.length > 0 && (
                 <div>
@@ -1351,11 +1351,11 @@ export default function Directory({ st, patch, narrow }) {
                           <span style={{ color: C.text }}>{r.name}</span>
                           {r.category && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint }}>{r.category}</span>}
                           {r.roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.accent }}>{r.roles.join(', ')}</span>}
-                          {r.unknown_roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                          {r.unknown_roles.length > 0 && <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn }} title="Not a known role: skipped">?{r.unknown_roles.join(', ')}</span>}
                         </div>
                       ))}
                     </div>
-                    {imp.preview.rows.some(r => r.unknown_roles.length > 0) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>Role titles marked ? aren’t set up yet and will be skipped — add them in Areas &amp; Roles first.</div>}
+                    {imp.preview.rows.some(r => r.unknown_roles.length > 0) && <div style={{ fontFamily: MONO, fontSize: 9.5, color: C.warn, marginTop: 8 }}>Role titles marked ? aren’t set up yet and will be skipped. Add them in Areas &amp; Roles first.</div>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>

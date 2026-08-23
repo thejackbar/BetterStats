@@ -65,7 +65,7 @@ export default function HonourBoard() {
       {boards.length === 0 ? (
         <div className="pb-card p-6 text-sm text-pb-dim">
           No club roles recorded yet. The boards are built from the Office Bearer
-          awards on each player's profile — record who was President, Secretary or
+          awards on each player's profile. Record who was President, Secretary or
           Club Coach in a season under Admin → Awards and the board fills itself
           in, one line per person with the years they served.
         </div>

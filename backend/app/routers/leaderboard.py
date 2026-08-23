@@ -49,7 +49,7 @@ async def batting_leaderboard(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -57,7 +57,7 @@ async def batting_leaderboard(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."
@@ -88,7 +88,7 @@ async def bowling_leaderboard(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -96,7 +96,7 @@ async def bowling_leaderboard(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."
@@ -125,7 +125,7 @@ async def fielding_leaderboard(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -133,7 +133,7 @@ async def fielding_leaderboard(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."
@@ -160,7 +160,7 @@ async def sirs_batting(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -168,7 +168,7 @@ async def sirs_batting(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."
@@ -194,7 +194,7 @@ async def sirs_bowling_innings(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -202,7 +202,7 @@ async def sirs_bowling_innings(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."
@@ -228,7 +228,7 @@ async def sirs_bowling_match(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out. Ignored when an explicit grade is picked."
         ),
@@ -236,7 +236,7 @@ async def sirs_bowling_match(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."

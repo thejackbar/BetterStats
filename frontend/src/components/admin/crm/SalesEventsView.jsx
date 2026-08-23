@@ -119,7 +119,7 @@ function SalesEventModal({ open, onClose, dealOptions, staffOptions, event, seed
   return (
     <Modal open={open} onClose={onClose} wide title={isEdit ? 'Edit event' : 'New event'}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Club (optional)" hint={isEdit ? "Fixed once created — delete and recreate to move it to a different club." : 'Only clubs already in your queue.'}>
+        <Field label="Club (optional)" hint={isEdit ? "Fixed once created. Delete and recreate to move it to a different club." : 'Only clubs already in your queue.'}>
           {isEdit ? (
             <TextInput value={event.marketing_club_name || 'No club linked'} disabled readOnly />
           ) : (

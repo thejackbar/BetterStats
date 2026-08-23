@@ -274,8 +274,8 @@ export default function TeamDetail() {
 
   usePageMeta({
     title: gradeInfo
-      ? `${gradeInfo.name} — ${formatSeason(gradeInfo.season_name)} — ${club?.name || clubSlug}`
-      : `Team — ${club?.name || clubSlug}`,
+      ? `${gradeInfo.name}, ${formatSeason(gradeInfo.season_name)}, ${club?.name || clubSlug}`
+      : `Team: ${club?.name || clubSlug}`,
   })
 
   if (locked) return <ClubPinGate slug={clubSlug} lockInfo={locked} unlock={unlock} requestAccess={requestAccess} />

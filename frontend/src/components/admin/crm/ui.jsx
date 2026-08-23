@@ -467,8 +467,8 @@ export function EngagementBreakdownPanel({ marketingClubId }) {
             </div>
           ) : (
             <p className="text-[12px] text-pb-faintest">
-              {engagementOnly ? 'No engagement signals — this score is from setup/registration only.'
-                : 'No engagement signals — this club has had no tracked activity.'}
+              {engagementOnly ? 'No engagement signals. This score is from setup/registration only.'
+                : 'No engagement signals. This club has had no tracked activity.'}
             </p>
           )}
           {s && (

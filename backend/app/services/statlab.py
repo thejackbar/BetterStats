@@ -4656,7 +4656,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Duck variants
     "golden_ducks": {
         "label": "Most golden ducks",
-        "description": "Out for 0 off exactly 1 ball — count per player.",
+        "description": "Out for 0 off exactly 1 ball, count per player.",
         "fn": derived_golden_ducks,
         "columns": [
             {"key": "golden_ducks", "label": "GOLDEN", "decimal": False},
@@ -4992,7 +4992,7 @@ DERIVED_QUERIES: dict[str, dict] = {
     # Bowler+fielder combos
     "bowler_fielder_combo": {
         "label": "Top bowler/fielder combinations",
-        "description": "Bowler+catcher pairs ranked by caught dismissals taken together (WK and outfield catches; stumpings excluded). Count is limited to matches where the dismissal text names the catcher — historical matches without structured scorecard text will be under-counted.",
+        "description": "Bowler+catcher pairs ranked by caught dismissals taken together (WK and outfield catches; stumpings excluded). Count is limited to matches where the dismissal text names the catcher. Historical matches without structured scorecard text will be under-counted.",
         "fn": derived_bowler_fielder_combo,
         "columns": [
             {"key": "player_a_id", "label": "BOWLER", "kind": "player_a"},

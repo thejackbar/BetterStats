@@ -408,34 +408,34 @@ def compute_recommendation(campaign: dict) -> tuple[str, str]:
     if cost_per_lpv is None:
         return "watch", (
             "No landing page views recorded yet, so cost per LPV can't be judged. "
-            "Too early to tell — let it run and check back after it starts delivering."
+            "Too early to tell. Let it run and check back after it starts delivering."
         )
 
     if ctr >= 1.2 and cost_per_lpv <= 1.50:
         if ctr >= 2.0 or cost_per_lpv <= 1.00:
             return "keep_going", (
-                f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f} — performing well, "
+                f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f}, performing well, "
                 "great territory. Keep going, nothing to change."
             )
         return "keep_going", (
-            f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f} — both healthy. "
+            f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f}, both healthy. "
             "Keep going, nothing to change."
         )
 
     if spend < 60:
         return "watch", (
-            f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f} — middling, but only "
-            f"A${spend:.2f} has been spent so far. Too early to judge — let it run."
+            f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f}, middling, but only "
+            f"A${spend:.2f} has been spent so far. Too early to judge: let it run."
         )
 
     if ctr < 0.7 or cost_per_lpv > 1.50:
         return "action_needed", (
-            f"After A${spend:.2f} spent, link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f} — "
+            f"After A${spend:.2f} spent, link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f}, "
             "underperforming. Review the creative and targeting."
         )
 
     return "watch", (
-        f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f} — middling. Keep watching "
+        f"Link CTR is {ctr:.2f}% and cost per LPV is A${cost_per_lpv:.2f}, middling. Keep watching "
         "as spend builds before making a call."
     )
 
@@ -483,7 +483,7 @@ def ad_note(ad: dict, all_ads: list[dict]) -> str:
             "ARCHIVED": "Archived",
             "DELETED": "Deleted",
         }.get(ad.get("delivery_status"), "No longer active")
-        return f"{label} — not spending any more. Figures shown are its lifetime-to-date totals."
+        return f"{label}, not spending any more. Figures shown are its lifetime-to-date totals."
 
     if spend < 3:
         return "Too little spend yet to judge. Give it more time before acting on it."

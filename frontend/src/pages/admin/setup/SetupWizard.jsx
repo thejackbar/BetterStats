@@ -286,7 +286,7 @@ export default function SetupWizard() {
                 )}
 
                 {/* Footer nav. Every non-vital step can be marked done by
-                    hand (auto-detection is a convenience, not a gate — e.g.
+                    hand (auto-detection is a convenience, not a gate, e.g.
                     Net Manager might be "done enough" without saving
                     settings); vital steps (first sync, the merges) only
                     complete when the wizard can actually see the result, so
@@ -334,7 +334,7 @@ export default function SetupWizard() {
                 </div>
                 {step.vital && step.auto && !step.done && !step.group.locked && (
                   <p className="font-mono text-[10px] text-pb-faintest text-right -mt-2">
-                    This step ticks itself off once the work's done — no need to mark anything.
+                    This step ticks itself off once the work's done, no need to mark anything.
                   </p>
                 )}
               </div>
@@ -418,7 +418,7 @@ function LockedSyncNotice({ onRefresh, goToSync }) {
             label={run?.stats?.progress_phase || 'Your first full sync is running…'}
           />
           <p className="font-mono text-[10px] text-pb-faintest">
-            These steps unlock on their own the moment it finishes — feel free to keep
+            These steps unlock on their own the moment it finishes, feel free to keep
             moving through the others.
           </p>
         </div>
@@ -438,7 +438,7 @@ function StepBody({ step, onRefresh, onOpenTool }) {
       </WizardButton>
       <p className="font-mono text-[11px] text-pb-faintest">
         {step.auto
-          ? 'Opens in a new tab so you keep your place here. The step ticks itself off once it can see the result — just come back to this tab.'
+          ? 'Opens in a new tab so you keep your place here. The step ticks itself off once it can see the result, just come back to this tab.'
           : 'Opens in a new tab so you keep your place here. Mark the step done once you\'re happy with it.'}
       </p>
     </div>
@@ -457,7 +457,7 @@ function FinishScreen({ flow, onExit, goTo, steps }) {
   const copySummary = async () => {
     const line = (s) => `- ${s.title}`
     const sections = [
-      [`${flow?.club?.name || 'Club'} — BetterCricket setup (${flow?.progress?.done ?? 0}/${flow?.progress?.total ?? steps.length} steps done)`],
+      [`${flow?.club?.name || 'Club'}. BetterCricket setup (${flow?.progress?.done ?? 0}/${flow?.progress?.total ?? steps.length} steps done)`],
       ...(openSteps.length ? [['Still to do:', ...openSteps.map(line)]] : []),
       ...(skippedSteps.length ? [['Skipped for now:', ...skippedSteps.map(line)]] : []),
       [(allDone ? 'Everything else is done.' : 'Everything else is done or marked not applicable.')],

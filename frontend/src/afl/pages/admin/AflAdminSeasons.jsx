@@ -122,7 +122,7 @@ function LinkGradePanel({ seasons, onLinked }) {
     setBusy(true)
     try {
       const result = await aflApi.linkGrade(seasonId, ref.trim())
-      toast.success(`Linked "${result.grade_name}" — ${result.games_discovered} game(s) found, ${result.games_stats_synced} synced`)
+      toast.success(`Linked "${result.grade_name}". ${result.games_discovered} game(s) found, ${result.games_stats_synced} synced`)
       setRef('')
       setPreview(null)
       onLinked()
@@ -138,9 +138,9 @@ function LinkGradePanel({ seasons, onLinked }) {
         <h3 className="text-sm font-semibold text-pb-text">Missing a grade?</h3>
         <p className="text-[12px] text-pb-dim mt-0.5 max-w-2xl">
           If your team changed divisions partway through a season (a round-robin split,
-          promotion/relegation), PlayHQ stops showing us the old division — its rounds
+          promotion/relegation), PlayHQ stops showing us the old division. Its rounds
           never get discovered. Paste a match link from any round of the missing grade
-          (from PlayHQ's website — a club's own page or the ladder) and we'll pull the
+          (from PlayHQ's website, a club's own page or the ladder) and we'll pull the
           whole grade in.
         </p>
       </div>
@@ -168,9 +168,9 @@ function LinkGradePanel({ seasons, onLinked }) {
           </div>
           <div className="text-pb-dim">{preview.home_team} <span className="text-pb-faint">({preview.home_club})</span> vs {preview.away_team} <span className="text-pb-faint">({preview.away_club})</span></div>
           {ourSide ? (
-            <div className="text-green-300">✓ Matches this club — {ourTeamName}</div>
+            <div className="text-green-300">✓ Matches this club, {ourTeamName}</div>
           ) : (
-            <div className="text-amber-400">Couldn't confirm this club is playing in that match — double-check the link before linking.</div>
+            <div className="text-amber-400">Couldn't confirm this club is playing in that match. Double-check the link before linking.</div>
           )}
           <button onClick={linkIt} disabled={busy}
             className="font-mono text-[10px] tracking-wide2 font-semibold rounded px-2.5 py-1.5 text-black bg-[var(--pb-accent)] disabled:opacity-50 mt-1">
@@ -193,7 +193,7 @@ export default function AflAdminSeasons() {
     <div className="space-y-4 max-w-4xl">
       <SectionTitle>Seasons</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl -mt-2">
-        Every season your club holds — synced from PlayHQ or created by hand (via Import
+        Every season your club holds. Synced from PlayHQ or created by hand (via Import
         Stats, or here). Rename any of them; a season with no grades or games recorded
         against it yet can also be deleted.
       </p>

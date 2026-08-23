@@ -149,12 +149,12 @@ function FamilyFinancials({ familyId, orgId, seasonId, seasons }) {
 
   return (
     <div className="pt-3 border-t pb-hairline-t">
-      <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">FAMILY FINANCIALS — {seasonName.toUpperCase()}</div>
+      <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-2">FAMILY FINANCIALS, {seasonName.toUpperCase()}</div>
       {loading && <div className="font-mono text-[10px] text-pb-faint">Loading…</div>}
       {data && (
         <>
           <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-2 leading-relaxed">
-            One view for one payment conversation with the family — each member's own BetterFees record, summed. Billing itself
+            One view for one payment conversation with the family. Each member's own BetterFees record, summed. Billing itself
             still happens per member.
           </p>
           {data.members.length === 0 ? (
@@ -215,7 +215,7 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
     if (expanded && members === null) loadMembers()
   }, [expanded, members, loadMembers])
 
-  // Non-playing candidates (parents/guardians etc — manual, non-player
+  // Non-playing candidates (parents/guardians etc, manual, non-player
   // fee_members rows) for the "add non-player member" picker. Needs a
   // season to read from BetterFees' member list; harmless if none picked yet.
   useEffect(() => {
@@ -520,7 +520,7 @@ function FamilyCard({ family, players, orgId, seasonId, seasons, onChanged, onDe
               </div>
             )}
             <p className="text-[12.5px] leading-[1.6] text-pb-faint mt-1.5">
-              Candidates come from BetterFees' non-playing members for the selected season — add the parent there first (Members → + Member) if they're not listed.
+              Candidates come from BetterFees' non-playing members for the selected season. Add the parent there first (Members → + Member) if they're not listed.
             </p>
           </div>
 
@@ -667,7 +667,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
         </button>
         {selectedCount > 0 && leftBehind > 0 && (
           <span className="font-mono text-[10px] text-pb-accent ml-auto">
-            {leftBehind} not selected — {leftBehind === 1 ? 'stays' : 'stay'} suggested
+            {leftBehind} not selected, {leftBehind === 1 ? 'stays' : 'stay'} suggested
           </span>
         )}
       </div>
@@ -687,7 +687,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
             className="w-full py-1.5 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-40"
             style={{ background: 'var(--pb-accent)' }}
           >
-            {creating ? 'Creating…' : selectedCount === 0 ? 'Select players above' : `Confirm — create with ${selectedCount}`}
+            {creating ? 'Creating…' : selectedCount === 0 ? 'Select players above' : `Confirm, create with ${selectedCount}`}
           </button>
         </div>
 
@@ -706,7 +706,7 @@ function SuggestionCard({ suggestion, families, orgId, onActioned }) {
             disabled={adding || !chosenFamilyId || selectedCount === 0}
             className="w-full py-1.5 rounded text-[12.5px] font-semibold border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40"
           >
-            {adding ? 'Adding…' : selectedCount === 0 ? 'Select players above' : `Confirm — add ${selectedCount}`}
+            {adding ? 'Adding…' : selectedCount === 0 ? 'Select players above' : `Confirm. Add ${selectedCount}`}
           </button>
         </div>
       </div>
@@ -808,7 +808,7 @@ export default function AdminFamilies() {
           )}
         </div>
         <p className="text-[12.5px] leading-[1.6] text-pb-faint mb-5">
-          Group related players and non-playing members — parents/guardians included. Once created, families can be used
+          Group related players and non-playing members, parents/guardians included. Once created, families can be used
           as a filter in StatLab; the season picker drives the non-player picker and family financials below.
         </p>
 
@@ -889,12 +889,12 @@ export default function AdminFamilies() {
           <div className="space-y-3">
             {suggestions.length === 0 ? (
               <div className="font-mono text-[11px] text-pb-faint">
-                No new suggestions. We group players who share an exact surname and aren't already in a family — once you've actioned or ignored everything, this tab will be empty.
+                No new suggestions. We group players who share an exact surname and aren't already in a family, once you've actioned or ignored everything, this tab will be empty.
               </div>
             ) : (
               <>
                 <div className="font-mono text-[10px] text-pb-faint mb-2">
-                  Players grouped by shared surname. They aren't guaranteed to be related — select the ones who are, then confirm.
+                  Players grouped by shared surname. They aren't guaranteed to be related. Select the ones who are, then confirm.
                 </div>
                 {suggestions.map(s => (
                   <SuggestionCard

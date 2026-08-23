@@ -83,7 +83,7 @@ export default function CommsContacts() {
     const r = await api.commsImportContacts(importText)
     setImportText(''); setShowImport(false)
     return r
-  }, r => `Imported — ${r.added} added, ${r.updated} updated${r.invalid ? `, ${r.invalid} invalid` : ''}.`)
+  }, r => `Imported. ${r.added} added, ${r.updated} updated${r.invalid ? `, ${r.invalid} invalid` : ''}.`)
 
   const addContact = () => {
     if (!newEmail.trim()) return
@@ -176,7 +176,7 @@ export default function CommsContacts() {
         </div>
         {showImport && (
           <div className="mt-3">
-            <label className="block text-xs text-pb-faint mb-1">Paste emails — one per line (<code>email</code>, <code>Name &lt;email&gt;</code> or <code>name,email</code>)</label>
+            <label className="block text-xs text-pb-faint mb-1">Paste emails: one per line (<code>email</code>, <code>Name &lt;email&gt;</code> or <code>name,email</code>)</label>
             <textarea value={importText} onChange={e => setImportText(e.target.value)} rows={6}
               className="w-full px-3 py-2 rounded bg-pb-surface2 text-pb-text border pb-hairline text-sm font-mono" />
             <div className="flex gap-2 mt-2">
@@ -429,7 +429,7 @@ export function ContactDetailModal({ id, onClose, onSaved }) {
               )}
 
               <div className="text-pb-faintest text-xs uppercase tracking-wide2 mb-2">
-                Merge variables {editing ? '— edit each value' : '— click to copy'}
+                Merge variables {editing ? ', edit each value' : ', click to copy'}
               </div>
               <div className="text-pb-faintest text-xs mb-2">
                 {editing

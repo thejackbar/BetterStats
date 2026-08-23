@@ -95,7 +95,7 @@ function AwardMatch({ rows, options, categories, overrides, meta, setOverride, s
         <p className="text-pb-faint text-[12px] mb-4 leading-relaxed max-w-3xl">
           Every trophy your sheet names, and where it goes. Ones your club already has an award type for
           are matched and keep their existing category. Anything else is added to your Award Types as part
-          of this import — check the category it's filed under, or point it at an award you already have.
+          of this import. Check the category it's filed under, or point it at an award you already have.
         </p>
 
         {loading && rows.length === 0 ? (
@@ -375,7 +375,7 @@ function ReviewStep({ resolved, resolving, committing, committed, onCommit, onBa
         <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
         {t.blocked > 0 && (
           <span className="font-mono text-[10px] text-pb-red/70">
-            {num(t.blocked)} row(s) still need a player match — they won't import.
+            {num(t.blocked)} row(s) still need a player match, they won't import.
           </span>
         )}
         <button onClick={onCommit} disabled={committing || !(t.importable > 0)}
@@ -441,7 +441,7 @@ function PastImports({ history, expanded, awards, loadingAwards, onToggle, onUnd
         </tbody>
       </table>
       <p className="font-mono text-[10px] text-pb-faintest mt-3">
-        Undo removes the awards this upload added. Players and award types it created are left in place —
+        Undo removes the awards this upload added. Players and award types it created are left in place, 
         deleting a person, or a catalogue entry the club may already be using, does more harm than leaving
         a row that's easy to remove by hand.
       </p>
@@ -484,7 +484,7 @@ export default function AflAdminAwardsImport() {
   }, [])
 
   // Live-reconcile whenever the mapping or an override changes, same as the
-  // other two wizards — the review stays current as you work instead of
+  // other two wizards. The review stays current as you work instead of
   // needing a recalculate press.
   useEffect(() => {
     if (!headers.length || !mapping.player_name?.column || !mapping.award_name?.column) return
@@ -606,7 +606,7 @@ export default function AflAdminAwardsImport() {
         )}
       </div>
       <p className="text-sm text-pb-dim max-w-3xl -mt-4">
-        Bring in your club's honour board — one row per award won, going back as far as your records do.
+        Bring in your club's honour board. One row per award won, going back as far as your records do.
         Upload it, match the columns and the names, then review what we read before anything is saved.
         An award your club doesn't have an award type for yet is added as part of the import, a name we
         can't find on your roster becomes a new player, and the whole upload can be undone in one click.
@@ -636,7 +636,7 @@ export default function AflAdminAwardsImport() {
           <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm" onChange={onFile} disabled={parsing}
             className="block text-pb-dim text-sm file:bg-pb-surface2 file:border file:pb-hairline file:rounded file:px-3 file:py-1.5 file:mr-3 file:font-mono file:text-[10px] file:text-pb-text file:cursor-pointer" />
           <p className="font-mono text-[10px] text-pb-faintest mt-3">
-            One row per award. Headers can be anything — we map them in the next step. A row that names no
+            One row per award. Headers can be anything, we map them in the next step. A row that names no
             award is skipped, so a sheet that also lists the seasons someone played is fine as it is.{' '}
             <a href={aflApi.awardImportsTemplateUrl()} className="text-[var(--pb-accent)] hover:underline">Download a template</a>.
           </p>
@@ -666,7 +666,7 @@ export default function AflAdminAwardsImport() {
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">WHO WON IT</div>
             <p className="text-[11px] text-pb-faintest mb-2 max-w-2xl">
               If your sheet carries its own player ID, map it. It's what tells two spellings of one name
-              apart from two different people who share one — and a register kept for decades has both.
+              apart from two different people who share one, and a register kept for decades has both.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 mb-5">
               {WHO_FIELDS.map(f => (
@@ -679,7 +679,7 @@ export default function AflAdminAwardsImport() {
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">THE AWARD</div>
             <p className="text-[11px] text-pb-faintest mb-2 max-w-2xl">
               The trophy name is all we need. Category and subcategory are worked out from it where your
-              sheet doesn't say — and you can change any of them on the next step but one.
+              sheet doesn't say, and you can change any of them on the next step but one.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
               {WHAT_FIELDS.map(f => (
@@ -705,7 +705,7 @@ export default function AflAdminAwardsImport() {
           rows={resolved?.players || []} allPlayers={allPlayers} sheetLine={sheetLine}
           overrides={playerOverrides} setOverride={setPOverride} setOverridesBulk={setPlayerOverrides}
           loading={resolving}
-          subtitle="Three quick passes: confirm the exact matches, review the close ones, then anything with no match defaults to a brand-new player. A name your sheet uses for two different people is never matched for you — those come up under Review close for you to split."
+          subtitle="Three quick passes: confirm the exact matches, review the close ones, then anything with no match defaults to a brand-new player. A name your sheet uses for two different people is never matched for you, those come up under Review close for you to split."
           nextLabel="NEXT: AWARDS →"
           onNext={() => setStep('awards')}
           onBack={() => setStep('columns')}
@@ -732,7 +732,7 @@ export default function AflAdminAwardsImport() {
         <>
           {unresolved > 0 && (
             <WarningBox kind="sheet_error">
-              {unresolved} name(s) still need a match — their awards won't import until you set them on the
+              {unresolved} name(s) still need a match. Their awards won't import until you set them on the
               Players step.
             </WarningBox>
           )}

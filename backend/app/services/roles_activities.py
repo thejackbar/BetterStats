@@ -23,10 +23,10 @@ from app.models.db import (
 
 # ─── Starter sets ────────────────────────────────────────────────────────────
 STARTER_ROLE_TYPES = [
-    ("Office Bearer", "Executive committee — President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
+    ("Office Bearer", "Executive committee. President, Vice President, Treasurer, Secretary; legal/fiduciary duties."),
     ("Committee Member", "General elected/appointed committee positions."),
     ("Captain", "On-field leadership of a team."),
-    ("Official", "Formal match roles on the scorecard — umpires and scorers."),
+    ("Official", "Formal match roles on the scorecard, umpires and scorers."),
     ("Ground Staff", "Ground, nets and facility upkeep."),
     ("Coach", "Coaching and player development."),
     ("Food & Beverage", "Canteen, bar and catering."),
@@ -77,8 +77,8 @@ STARTER_COMMITTEE_ROLES = [
     ("Treasurer", "Club finances, budgets, membership fee oversight, financial reporting."),
     ("Secretary", "Meeting minutes, correspondence, statutory/association paperwork."),
     ("Operations", "Day-to-day running of the club across portfolios."),
-    ("Junior Coordinator", "Junior program — registrations, coaching, grading."),
-    ("Senior Coordinator", "Senior teams — registrations, grading, team management."),
+    ("Junior Coordinator", "Junior program: registrations, coaching, grading."),
+    ("Senior Coordinator", "Senior teams: registrations, grading, team management."),
     ("Selection Chair", "Chairs the selection panel across grades."),
     ("Coach Coordinator", "Coaching appointments, accreditation, development."),
     ("Grounds Manager", "Ground/wicket preparation and maintenance liaison."),
@@ -94,7 +94,7 @@ STARTER_ACTIVITY_TYPES = [
     ("Ground & Equipment", "Ground prep and gear upkeep."),
     ("Coaching & Training", "Coaching sessions and training setup."),
     ("Food & Beverage", "Canteen and bar shifts."),
-    ("Match Day", "Match-day duties — scoring, umpiring, setup."),
+    ("Match Day", "Match-day duties: scoring, umpiring, setup."),
     ("Fundraising & Events", "Fundraisers and social events."),
     ("Other", "Anything else."),
 ]

@@ -142,7 +142,7 @@ export default function ScoutCompare() {
   return (
     <ScoutModuleLayout
       title="Compare players"
-      caption={`Up to ${MAX_PLAYERS} players · window presets are season-based only — BetterScout has season rollups, not ball-by-ball`}
+      caption={`Up to ${MAX_PLAYERS} players · window presets are season-based only. BetterScout has season rollups, not ball-by-ball`}
       actions={hasEnough ? (
         <>
           <Btn onClick={() => window.print()}>Export as one-page PDF</Btn>
@@ -179,7 +179,7 @@ export default function ScoutCompare() {
           })}
           {allPlayers && allPlayers.length === 0 && (
             <p className="text-sm text-pb-faint">
-              Nobody tracked yet — <Link to="/betterscout/app/discover" className="underline" style={{ color: 'var(--pb-accent)' }}>discover a player</Link> to get started.
+              Nobody tracked yet. <Link to="/betterscout/app/discover" className="underline" style={{ color: 'var(--pb-accent)' }}>discover a player</Link> to get started.
             </p>
           )}
         </div>
@@ -281,7 +281,7 @@ export default function ScoutCompare() {
                     <>
                       <tr className="scout-no-print">
                         <td colSpan={players.length + 1} className="px-4 py-2 text-xs text-pb-faint bg-pb-surface2">
-                          Internal only — never leaves the org on a share link.
+                          Internal only: never leaves the org on a share link.
                         </td>
                       </tr>
                       {RECRUITING_FIELDS.map(([key, label], rowIdx) => (

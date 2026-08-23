@@ -46,7 +46,7 @@ export default function Premierships() {
       {all.length === 0 ? (
         <div className="pb-card p-6 text-sm text-pb-dim">
           No premierships recorded yet. They come from the Premiership awards on
-          each player's profile — add them under Admin → Awards, or bring a whole
+          each player's profile. Add them under Admin → Awards, or bring a whole
           honour roll in at once with Import Awards, and the squads build
           themselves from there.
         </div>
@@ -65,7 +65,7 @@ export default function Premierships() {
                 }>
                   {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                 </SectionTitle>
-                {/* The competition the flag was won in — the card's own title,
+                {/* The competition the flag was won in, the card's own title,
                     which is why it is not repeated under every name below. */}
                 {p.competition && (
                   <p className="-mt-1 mb-1.5 truncate text-[13px] text-pb-dim" title={p.competition}>

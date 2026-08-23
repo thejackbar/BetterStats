@@ -80,7 +80,7 @@ export default function QuickEnquiryModal({ onClose }) {
           club: fields.club,
           email: fields.email,
           message: fields.message || '—',
-          _subject: `BetterCricket quick enquiry — ${fields.club}`,
+          _subject: `BetterCricket quick enquiry: ${fields.club}`,
         }),
       })
       const data = await res.json()

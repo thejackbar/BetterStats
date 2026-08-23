@@ -111,7 +111,7 @@ function PlayerPicker({ players, value, onChange, placeholder = 'Search player�
   )
 }
 
-// A season/grade dropdown with an inline "+ New" — a pre-PlayHQ era has
+// A season/grade dropdown with an inline "+ New". A pre-PlayHQ era has
 // neither, and the sync will never create one, so without this an admin can't
 // enter the history they're here to enter.
 function SeasonSelect({ seasons, value, onChange, onCreated }) {
@@ -153,7 +153,7 @@ function SeasonSelect({ seasons, value, onChange, onCreated }) {
   return (
     <div className="flex items-center gap-2">
       <select className={INPUT} value={value} onChange={e => onChange(e.target.value)}>
-        <option value="">— Career only (no season) —</option>
+        <option value="">. Career only (no season), </option>
         {seasons.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
       </select>
       <button type="button" onClick={() => setAdding(true)} className="text-[11px] text-[var(--pb-accent)] whitespace-nowrap hover:underline">+ New</button>
@@ -288,7 +288,7 @@ const SPREADSHEET_COLS = STAT_FIELDS.map(f => ({
 
 const emptyRow = () => ({ player_id: '', ...Object.fromEntries(SPREADSHEET_COLS.map(c => [c.key, 0])) })
 
-// One season, one row per player. Posts through the CSV import endpoint —
+// One season, one row per player. Posts through the CSV import endpoint, 
 // same upsert rule, same audit entry, so there is one definition of what a
 // bulk write does rather than a second write path to keep in step.
 function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCreated, onGradeCreated }) {
@@ -308,7 +308,7 @@ function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCre
     return next
   })
 
-  // Paste a range straight out of Excel — split on tab/newline and fill from
+  // Paste a range straight out of Excel, split on tab/newline and fill from
   // the targeted cell onwards, adding rows as needed.
   function handlePaste(e, rowIdx, colIdx) {
     const text = e.clipboardData?.getData('text/plain')
@@ -360,7 +360,7 @@ function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCre
           if (res.errors > 0) {
             toast.error(`${res.errors} row(s) couldn't be saved: ${res.errors_detail?.[0]?.error || ''}`)
           } else {
-            toast.success(`Saved — ${res.created} added, ${res.updated} updated`)
+            toast.success(`Saved, ${res.created} added, ${res.updated} updated`)
             setRows([emptyRow(), emptyRow(), emptyRow()])
           }
           onSaved()
@@ -372,7 +372,7 @@ function Spreadsheet({ players, seasons, grades, onSaved, onPending, onSeasonCre
   return (
     <div className="pb-card p-4 space-y-3">
       <div>
-        <h3 className="text-sm font-semibold text-pb-text">Spreadsheet mode — one season at a time</h3>
+        <h3 className="text-sm font-semibold text-pb-text">Spreadsheet mode: one season at a time</h3>
         <p className="text-[12px] text-pb-dim mt-0.5 max-w-2xl">
           Pick the season and grade once, then a row per player. Paste a range from Excel
           into any cell to fill several rows at once.
@@ -475,7 +475,7 @@ function AdjustmentsTab({ players, seasons, grades, onPending, onSeasonCreated, 
     onPending({
       title: editingId ? 'Update this adjustment?' : isCareer ? 'Save a career-only adjustment?' : 'Save this adjustment?',
       body: isCareer
-        ? 'This lands in the player\'s career totals only — it has no season, so it can never appear on a season leaderboard or a season record. Reversible from Audit & undo.'
+        ? 'This lands in the player\'s career totals only. It has no season, so it can never appear on a season leaderboard or a season record. Reversible from Audit & undo.'
         : 'These figures are ADDED to whatever the sync and any import already hold for this player and season. To correct a figure, enter the shortfall, not the final total. Reversible from Audit & undo.',
       confirmLabel: editingId ? 'Update' : 'Save',
       action: async () => {
@@ -546,7 +546,7 @@ function AdjustmentsTab({ players, seasons, grades, onPending, onSeasonCreated, 
               onCreated={onSeasonCreated} />
             {isCareer && (
               <p className="text-[11px] text-pb-faintest mt-1">
-                Saves as career-only — career totals see it, season boards never do.
+                Saves as career-only. Career totals see it, season boards never do.
               </p>
             )}
           </div>
@@ -571,7 +571,7 @@ function AdjustmentsTab({ players, seasons, grades, onPending, onSeasonCreated, 
           <label className={LABEL}>Notes (admins only)</label>
           <input type="text" value={form.notes}
             onChange={e => setForm({ ...form, notes: e.target.value })}
-            placeholder="Where the figures came from — a club record book, a premiership program"
+            placeholder="Where the figures came from, a club record book, a premiership program"
             className={INPUT} />
         </div>
 
@@ -733,7 +733,7 @@ export default function AflAdminManualEntries() {
     <div className="space-y-4 max-w-5xl">
       <SectionTitle>Manual stat entries</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl -mt-2">
-        Add or correct a player's totals where PlayHQ and your imports fall short — an
+        Add or correct a player's totals where PlayHQ and your imports fall short, an
         old premiership season, a goal tally the feed got wrong, a career that predates
         anything online. What you enter is ADDED to what's already held, every change is
         logged, and the sync never touches it.

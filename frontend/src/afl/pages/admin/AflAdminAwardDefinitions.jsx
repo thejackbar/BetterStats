@@ -81,7 +81,7 @@ export default function AflAdminAwardDefinitions() {
         </button>
       </div>
       <p className="text-sm text-pb-dim max-w-2xl">
-        The award types your club hands out — these fill the dropdowns on the
+        The award types your club hands out. These fill the dropdowns on the
         Awards page. Add your own teams and trophies, or start from a lean
         template.
       </p>
@@ -134,7 +134,7 @@ export default function AflAdminAwardDefinitions() {
         </div>
       ))}
       {defs.length === 0 && (
-        <p className="pb-card p-4 text-pb-faint text-sm">No award types yet — seed the starter template or add one above.</p>
+        <p className="pb-card p-4 text-pb-faint text-sm">No award types yet. Seed the starter template or add one above.</p>
       )}
     </div>
   )

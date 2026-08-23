@@ -210,7 +210,7 @@ def campaign_warnings(subject: str, body_html: str, utm: dict) -> list[str]:
     """
     known = {v["name"] for v in MERGE_VARIABLES} | {"club_name"}
     used = set(_VAR_TOKEN_RE.findall(f"{subject or ''} {body_html or ''}"))
-    warnings = [f"Unknown variable {{{{{v}}}}} — it won't be replaced." for v in sorted(used - known)]
+    warnings = [f"Unknown variable {{{{{v}}}}}. It won't be replaced." for v in sorted(used - known)]
     u = utm or {}
     for key, label in _UTM_LABELS.items():
         if key in used and not str(u.get(key) or "").strip():
@@ -622,7 +622,7 @@ def _render_parts(org: Organisation, *, subject: str, body_html: str, utm: dict,
     subject = _merge(subject or "", ctx)
     club_name = ctx.get("club") or org.name or ""
     unsub_text = _unsub_sentence_text(club_name, unsub_url, apply_utm)
-    text_tail = f"\n\n—\n{footer}\n{unsub_text}" if footer else f"\n\n—\n{unsub_text}"
+    text_tail = f"\n\n, \n{footer}\n{unsub_text}" if footer else f"\n\n, \n{unsub_text}"
     link_code = str(ctx.get("utm_code") or "").strip() if apply_utm else ""
     if _is_full_doc(body_html):
         merged = _merge(body_html or "", ctx)
@@ -1537,7 +1537,7 @@ async def send_campaign(
     pf = await comms_limits.preflight(db, club)
     if getattr(club, "ses_tenant_paused", False):
         raise HTTPException(status_code=403, detail=pf["blocked"] or
-                            "This club's SES tenant is paused — sending is on hold.")
+                            "This club's SES tenant is paused, sending is on hold.")
     if pf["tier"] == comms_limits.TIER_SUSPENDED:
         raise HTTPException(status_code=403, detail=pf["blocked"] or
                             "Sending is suspended for this club pending review.")
@@ -1547,7 +1547,7 @@ async def send_campaign(
                                    "Contact BetterCricket to review.")
     if pf["account_remaining"] <= 0:
         raise HTTPException(status_code=429,
-                            detail="The platform's daily send limit is reached — try again tomorrow.")
+                            detail="The platform's daily send limit is reached. Try again tomorrow.")
 
     for ct in contacts:
         db.add(CommsRecipient(
@@ -1711,7 +1711,7 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
                     camp.sent_at = now
                     if total_failed and not total_sent:
                         camp.status = "error"
-                        camp.error = "All sends failed — check the email provider configuration."
+                        camp.error = "All sends failed. Check the email provider configuration."
             # Reflect a marketing-outreach send back onto the directory: any club
             # whose exported contact was just sent to is flagged emailed_via=
             # 'campaign' so it isn't re-exported. No-op for ordinary club sends
@@ -1856,7 +1856,7 @@ async def request_limit_increase(
             status_code=402,
             detail=(
                 "Production sending limits are only available to subscribers. "
-                "BetterAdmin is currently on trial for this club — subscribe to "
+                "BetterAdmin is currently on trial for this club, subscribe to "
                 "BetterAdmin to request production sending."
             ),
         )
@@ -1866,7 +1866,7 @@ async def request_limit_increase(
         raise HTTPException(status_code=409, detail="This club is already on the production tier.")
     if tier == comms_limits.TIER_SUSPENDED:
         raise HTTPException(status_code=409,
-                            detail="Sending is suspended pending review — contact BetterCricket directly.")
+                            detail="Sending is suspended pending review. Contact BetterCricket directly.")
     existing = (await db.execute(select(CommsLimitRequest).where(
         CommsLimitRequest.organisation_id == club.id,
         CommsLimitRequest.status == "pending",

@@ -26,7 +26,7 @@ export const MODULE_INFO = [
   {
     key: MODULE.SELECT,
     name: 'BetterSelect',
-    blurb: 'Availability and smart team selection — plan your weekends.',
+    blurb: 'Availability and smart team selection, plan your weekends.',
     to: '/admin/betterselect',
     built: true,
     caps: [CAP.MANAGE_FIXTURES, CAP.MANAGE_SELECTIONS],
@@ -52,7 +52,7 @@ export const MODULE_INFO = [
   {
     key: MODULE.COMMS,
     name: 'BetterComms',
-    blurb: 'Bulk email to your member database — newsletters and announcements.',
+    blurb: 'Bulk email to your member database, newsletters and announcements.',
     to: '/admin/comms',
     built: true,
     caps: [CAP.MANAGE_COMMS],
@@ -61,7 +61,7 @@ export const MODULE_INFO = [
   {
     key: MODULE.MERCH,
     name: 'BetterMerch',
-    blurb: 'Track club stock — apparel, equipment and canteen, with low-stock alerts.',
+    blurb: 'Track club stock: apparel, equipment and canteen, with low-stock alerts.',
     to: '/admin/merch',
     built: true,
     caps: [CAP.MANAGE_MERCH],
@@ -87,7 +87,7 @@ export const MODULE_INFO = [
   {
     key: MODULE.FANTASY,
     name: 'BetterFantasyCricket',
-    blurb: 'Run an internal club fantasy league off your own games — salary cap and draft.',
+    blurb: 'Run an internal club fantasy league off your own games, salary cap and draft.',
     to: '/admin/fantasy',
     built: true,
     caps: [CAP.MANAGE_FANTASY],
@@ -117,7 +117,7 @@ export const MODULE_GROUPS = {
     key: 'admin',
     billingKey: 'admin',
     name: 'BetterAdmin',
-    blurb: 'Run the whole back office from one place — people, money, stock, comms and the club.',
+    blurb: 'Run the whole back office from one place: people, money, stock, comms and the club.',
     to: '/admin/clubhouse',
   },
 }
@@ -138,7 +138,7 @@ export const CORE_TILES = [
     // resolves its plan row + pending request under 'core', not 'stats'.
     billingKey: 'core',
     name: 'BetterStats',
-    blurb: 'Your matches, players, seasons and records — the data engine every club runs on.',
+    blurb: 'Your matches, players, seasons and records. The data engine every club runs on.',
     to: '/admin/betterstats',
     built: true,
     alwaysOpen: true,

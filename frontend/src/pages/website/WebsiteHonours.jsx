@@ -16,7 +16,7 @@ function EntryRow({ entry, slug }) {
       )}
       <div className="flex-1 min-w-0">
         <span className="font-medium">{name}</span>
-        {entry.detail && <span className="text-pb-faint text-sm"> — {entry.detail}</span>}
+        {entry.detail && <span className="text-pb-faint text-sm">, {entry.detail}</span>}
       </div>
     </div>
   )
@@ -51,7 +51,7 @@ function HonoursBody({ slug }) {
   const [layout, setLayout] = useState(1)
   const [loading, setLoading] = useState(true)
 
-  usePageMeta({ title: `Honours — ${site.name}`, url: `https://betterat.cricket/${slug}/website/honours` })
+  usePageMeta({ title: `Honours. ${site.name}`, url: `https://betterat.cricket/${slug}/website/honours` })
 
   useEffect(() => {
     let cancelled = false

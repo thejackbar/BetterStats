@@ -115,7 +115,7 @@ export default function VotesSettings({
         <Row label="Grades it counts" hint="Leave every grade unticked to count the whole club. Ticking a grade counts it in every season, so you don't have to redo this each year.">
           {gradeOptions.length === 0 ? (
             <div className="text-[12.5px] text-pb-faint">
-              No grades yet — this medal counts every game the club plays.
+              No grades yet. This medal counts every game the club plays.
             </div>
           ) : (
             <>

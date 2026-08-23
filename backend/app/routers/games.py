@@ -63,7 +63,7 @@ async def list_games(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default. "
             "Ignored when an explicit grade is picked."
         ),
@@ -71,7 +71,7 @@ async def list_games(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, "
             "not per grade, so a grade that plays both is split correctly. "
             "Omitted applies no format filter."

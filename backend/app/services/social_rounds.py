@@ -793,7 +793,7 @@ async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
     they bat) — the same semantics sync.py's per-game inserts follow."""
     raw = await gr.get_match_scorecard(match_id)
     if raw is None:
-        raise HTTPException(404, "Scorecard not found — the match may not be completed yet")
+        raise HTTPException(404, "Scorecard not found: the match may not be completed yet")
 
     ms = raw.get("matchSummary") or {}
     teams_raw = raw.get("teams") or []
@@ -811,7 +811,7 @@ async def social_potm(db: AsyncSession, org, match_id: str) -> dict:
 
     our_team = next((t for t in teams_raw if is_ours(t)), None)
     if not our_team:
-        raise HTTPException(404, "That match doesn't look like one of your club's — no team matched your club name")
+        raise HTTPException(404, "That match doesn't look like one of your club's, no team matched your club name")
     our_id = (our_team.get("id") or "").lower()
     opp_team = next((t for t in teams_raw if (t.get("id") or "").lower() != our_id), None)
     opp_id = (opp_team.get("id") or "").lower() if opp_team else None

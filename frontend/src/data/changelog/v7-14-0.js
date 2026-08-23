@@ -9,7 +9,7 @@ export default {
     "Metric picker is single-column for readability with hover tooltips for truncated labels",
     "New \"Player Attributes\" section in the Context panel: filter by Gender, Player Role, Award category/name, Office Bearer",
     "Award / role / office bearer fields use searchable autocomplete (debounced 180ms) so long lists don't clutter dropdowns",
-    "Backend now reads all context filters from the URL via a whitelist — fixes silent ignoring of `first_n_matches`, `milestone_runs`, `on_this_day` that we introduced earlier",
+    "Backend now reads all context filters from the URL via a whitelist: fixes silent ignoring of `first_n_matches`, `milestone_runs`, `on_this_day` that we introduced earlier",
     "New /statlab/picker-values endpoint returns distinct values from players + player_achievements for autocomplete"
   ]
 }

@@ -97,7 +97,7 @@ async def send_password_reset_email(*, email: str, display_name: str, club_name:
         Or paste this link into your browser: {link}
       </p>
       <p style="font-size:12px;color:#888;margin-top:24px">
-        If you weren't expecting this, you can safely ignore this email — your
+        If you weren't expecting this, you can safely ignore this email, your
         password won't change unless you click the link above.
       </p>
     </div>
@@ -105,7 +105,7 @@ async def send_password_reset_email(*, email: str, display_name: str, club_name:
     text = (
         f"{greeting} an admin at {club_name} asked BetterCricket to send you a link to reset "
         f"your password: {link} "
-        "If you weren't expecting this, you can safely ignore this email — your password won't "
+        "If you weren't expecting this, you can safely ignore this email, your password won't "
         "change unless you follow the link."
     )
     msg = email_service.EmailMessage(

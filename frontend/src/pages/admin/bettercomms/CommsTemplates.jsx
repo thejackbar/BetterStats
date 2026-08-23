@@ -108,7 +108,7 @@ export default function CommsTemplates() {
   useEffect(() => { setSelId(null); setDraft(null); setError(''); setNotice('') }, [location.key])
 
   // The list rows carry no HTML, so open the full record when one is picked.
-  // Like the segment builder this only ever LOADS a draft, never clears one —
+  // Like the segment builder this only ever LOADS a draft, never clears one, 
   // clearing on "nothing selected" is the state "New template" puts the screen
   // in, and would wipe the fresh draft in the same commit.
   useEffect(() => {
@@ -140,7 +140,7 @@ export default function CommsTemplates() {
         const recovered = rtfToText(content)
         if (/<html|<!doctype|<body|<table|<div/i.test(recovered)) {
           content = recovered
-          setNotice('That file was Rich Text (RTF), not HTML — TextEdit does this even when the file ends in .html. I recovered the HTML; check the preview. To avoid it, in TextEdit pick Format → Make Plain Text before saving, or save from a code editor.')
+          setNotice('That file was Rich Text (RTF), not HTML. TextEdit does this even when the file ends in .html. I recovered the HTML; check the preview. To avoid it, in TextEdit pick Format → Make Plain Text before saving, or save from a code editor.')
         } else {
           setError('That file is Rich Text (RTF), not HTML, and I could not recover usable HTML from it. In TextEdit choose Format → Make Plain Text and save again, or use a plain-text / code editor.')
           return
@@ -236,7 +236,7 @@ export default function CommsTemplates() {
         >
           <Note toneKey="calm">
             A template is a layout, not a message. Pick one while writing an email and it fills in the
-            message for you to edit — the email keeps its own copy, so changing a template later never
+            message for you to edit. The email keeps its own copy, so changing a template later never
             rewrites something already sent.
           </Note>
         </RecordListPane>
@@ -267,12 +267,12 @@ export default function CommsTemplates() {
               {isSuper && draft.salesTemplateLabel && (
                 <Note toneKey="calm" className="mb-3">
                   Linked to the Sales Workspace's <strong>{draft.salesTemplateLabel}</strong> dropdown entry.
-                  Renaming this template above is safe — the link is by id, not by name.
+                  Renaming this template above is safe. The link is by id, not by name.
                 </Note>
               )}
 
               {isSuper && (
-                <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email) — a BetterComms campaign started from this template sets its own subject.">
+                <Field label="Subject" hint="Only needed for a template that's sent as-is (e.g. a Sales Workspace email). A BetterComms campaign started from this template sets its own subject.">
                   <TextInput value={draft.subject}
                     onChange={e => setDraft(d => ({ ...d, subject: e.target.value }))} placeholder="(no subject)" />
                 </Field>

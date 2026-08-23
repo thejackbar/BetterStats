@@ -187,7 +187,7 @@ function GalleryPanel({ orgId, seasonId, images, onRefresh }) {
       </div>
       {!collapsed && (
         <>
-          <p className="text-[11px] text-pb-faint mt-0.5 mb-3">Team photos, match shots, presentations — shown on the public yearbook.</p>
+          <p className="text-[11px] text-pb-faint mt-0.5 mb-3">Team photos, match shots, presentations, shown on the public yearbook.</p>
           {galleryImages.length > 0 ? (
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mb-2">
               {galleryImages.map(img => (
@@ -308,7 +308,7 @@ function ClubAwardsPanel({ orgId, seasonId, awards, pulledAwards, featuredIds, p
       </div>
       {!collapsed && (
         <p className="text-[11px] text-pb-faint mt-0.5 mb-4">
-          {totalCount === 0 ? 'Season award winners — shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
+          {totalCount === 0 ? 'Season award winners. Shown on the Awards tab.' : `${totalCount} award${totalCount !== 1 ? 's' : ''} for this season`}
           {pulled.length > 0 && (
             <span className="ml-1 text-pb-faintest">
               · {pulled.length} from <Link to="/admin/awards" className="text-pb-accent/70 hover:text-pb-accent underline-offset-2 hover:underline">Awards admin</Link>
@@ -580,7 +580,7 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
 
       {!collapsed && (
         <p className="text-[11px] text-pb-faint mt-0.5 mb-4">
-          Optional club reports shown on the public yearbook — toggle each one on/off.
+          Optional club reports shown on the public yearbook, toggle each one on/off.
         </p>
       )}
 
@@ -605,7 +605,7 @@ function CustomSectionsPanel({ orgId, seasonId, sections, onRefresh }) {
                 {/* Toggle */}
                 <button
                   onClick={() => handleToggle(s)}
-                  title={s.is_enabled ? 'Visible on public page' : 'Hidden — toggle to show'}
+                  title={s.is_enabled ? 'Visible on public page' : 'Hidden: toggle to show'}
                   className={`shrink-0 px-2.5 py-1 rounded border text-[10px] font-mono transition-colors ${
                     s.is_enabled
                       ? 'border-green-500/30 text-green-400 bg-green-500/10'
@@ -738,7 +738,7 @@ export default function AdminYearbookDetail() {
       const res = await api.generateYearbookNarrative(org.id, seasonId)
       setNarrativeText(res.narrative)
       setNarrativeDirty(true)
-      setMsg('AI draft generated — review and save to publish.')
+      setMsg('AI draft generated. Review and save to publish.')
       load()
     } catch (e) {
       setMsg(`Error generating narrative: ${e.message}`)
@@ -878,8 +878,8 @@ export default function AdminYearbookDetail() {
         {!narrativeCollapsed && (
           <>
             <p className="text-[11px] text-pb-faint mt-0.5 mb-3">
-              {hasSaved ? 'Saved — shown publicly when yearbook is published.'
-                : hasAiDraft ? 'AI draft ready — edit and save to publish.'
+              {hasSaved ? 'Saved. Shown publicly when yearbook is published.'
+                : hasAiDraft ? 'AI draft ready: edit and save to publish.'
                 : 'Generate an AI draft then edit before saving.'}
             </p>
             <textarea

@@ -22,7 +22,7 @@ function PageBody({ slug, pageSlug }) {
   }, [slug, pageSlug])
 
   usePageMeta({
-    title: page ? `${page.title} — ${site.name}` : site.name,
+    title: page ? `${page.title}, ${site.name}` : site.name,
     url: `https://betterat.cricket/${slug}/website/page/${pageSlug}`,
   })
 

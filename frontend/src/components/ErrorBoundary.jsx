@@ -48,7 +48,7 @@ export default class ErrorBoundary extends Component {
             </h1>
             <p className="text-pb-faint mb-6 text-sm">
               {isChunk
-                ? 'This page failed to load — a new version may have just been deployed. Reload to get the latest.'
+                ? 'This page failed to load. A new version may have just been deployed. Reload to get the latest.'
                 : error?.message || 'An unexpected error occurred.'}
             </p>
             <button

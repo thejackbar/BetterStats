@@ -228,7 +228,7 @@ def _clean_token(text: str) -> str:
     """
     t = (text or "").replace("|", " ")
     t = re.sub(r"\s+", " ", t).strip()
-    t = t.strip("_│─—–•· ")  # box-draw, underscores, bullets, em/en dashes
+    t = t.strip("_│─, –•· ")  # box-draw, underscores, bullets, em/en dashes
     if not re.search(r"[A-Za-z0-9]", t):
         return ""
     return t

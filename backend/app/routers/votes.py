@@ -226,7 +226,7 @@ async def delete_medal(
         raise HTTPException(status_code=404, detail="Medal not found")
     medals = await vote_svc.list_medals(db, club.id)
     if len(medals) <= 1:
-        raise HTTPException(status_code=409, detail="A club keeps at least one medal — rename this one instead")
+        raise HTTPException(status_code=409, detail="A club keeps at least one medal, rename this one instead")
     res = await db.execute(
         select(func.count()).select_from(VoteBallot).where(VoteBallot.medal_id == medal.id)
     )
@@ -679,7 +679,7 @@ async def admin_enter_ballot(
     if not eligible:
         raise HTTPException(
             status_code=409,
-            detail="No team list for this game yet — save a BetterSelect XI, publish the side on Play.Cricket, or wait for the scorecard to sync",
+            detail="No team list for this game yet: save a BetterSelect XI, publish the side on Play.Cricket, or wait for the scorecard to sync",
         )
     eligible_ids = {p["id"] for p in eligible}
 

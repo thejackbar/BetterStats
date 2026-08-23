@@ -495,7 +495,7 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     if captains == 0:
         warnings.append({"level": "info", "text": "No captain marked on the lineup."})
     if bowl_opts < THIN_ATTACK:
-        warnings.append({"level": "warn", "text": f"Thin attack — only {bowl_opts} front-line bowling options."})
+        warnings.append({"level": "warn", "text": f"Thin attack: only {bowl_opts} front-line bowling options."})
     if bowl_opts and spin == 0:
         warnings.append({"level": "info", "text": "No spin option in the attack."})
     if bowl_opts and pace == 0:
@@ -667,7 +667,7 @@ async def selection_analysis(db: AsyncSession, club, fixture_id: str) -> dict | 
     # ── Verdict (one-liner) ──
     warn_count = sum(1 for w in warnings if w["level"] == "warn")
     if warn_count == 0:
-        verdict = "Well-balanced XI — no selection flags."
+        verdict = "Well-balanced XI, no selection flags."
     else:
         verdict = f"{warn_count} thing{'s' if warn_count != 1 else ''} to look at before locking it in."
 

@@ -423,7 +423,7 @@ async def delete_stage(session: AsyncSession, stage: CrmStage) -> None:
         select(func.count()).select_from(CrmDeal).where(CrmDeal.stage_id == stage.id)
     )).scalar_one()
     if in_use:
-        raise ValueError("This stage still has records in it — move or archive them first")
+        raise ValueError("This stage still has records in it, move or archive them first")
     # If this is one of the platform pipeline's own PLATFORM_DEFAULT_STAGES,
     # record its key so _reconcile_platform_stages doesn't silently recreate
     # it on the very next read (a super admin deleting "Self-Serve Trial"
@@ -811,7 +811,7 @@ async def update_deal(session: AsyncSession, deal: CrmDeal, **fields) -> CrmDeal
         # opportunity, and the empty state is also what left a stale dollar
         # figure standing beside "no modules".
         if not keys:
-            raise ValueError("Pick at least one module — a deal has to be for something.")
+            raise ValueError("Pick at least one module. A deal has to be for something.")
         # The value is the price of what was picked, and follows it in both
         # directions. Anything else lets value and modules drift apart.
         deal.value_cents = value_from_modules(keys)
@@ -2626,7 +2626,7 @@ async def sync_deal_for_wizard_lead(*, club_name: str, email: str = "",
                 module_keys=_DEFAULT_DEAL_MODULES, person_id=person.id, advance_only=True)
             await log_activity(
                 session, deal_id=deal.id, person_id=person.id, type="system",
-                body=f"Started the self-serve trial wizard — {furthest_step}"
+                body=f"Started the self-serve trial wizard, {furthest_step}"
                      + (f" ({email})" if email else ""))
             # This touch may be enough to promote the freshly-recomputed score;
             # check now in the same session/commit (harmless no-op otherwise).

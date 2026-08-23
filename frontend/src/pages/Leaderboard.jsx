@@ -607,7 +607,7 @@ export default function Leaderboard() {
               : (
                 <>
                   {threshold && (
-                    <p className="text-pb-faint font-mono text-[10px] tracking-wide3 uppercase mb-3">{threshold} — click a row to expand</p>
+                    <p className="text-pb-faint font-mono text-[10px] tracking-wide3 uppercase mb-3">{threshold}. Click a row to expand</p>
                   )}
                   <SirsTable rows={sirsRows} sirsType={sirsTab} fmt={fmt} />
                 </>

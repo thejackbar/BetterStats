@@ -384,7 +384,7 @@ export default function Committee({ st, patch, narrow }) {
       await api.committeeDeleteMeeting(m.id)
       setData(d => (d ? { ...d, meetings: d.meetings.filter(x => x.id !== m.id) } : d))
       if (st.cteMeeting === m.id) patch({ cteMeeting: null, cteRoom: null })
-    } catch (e) { setMsg(`Could not delete that meeting — ${String(e?.message || e)}`) }
+    } catch (e) { setMsg(`Could not delete that meeting, ${String(e?.message || e)}`) }
   }
 
   // Deleting an action takes its notes and attachments with it, so it names
@@ -396,7 +396,7 @@ export default function Committee({ st, patch, narrow }) {
       await api.committeeDeleteTask(t.id)
       setData(d => (d ? { ...d, tasks: d.tasks.filter(x => x.id !== t.id) } : d))
       if (editId === t.id) setEditId(null)
-    } catch (e) { setMsg(`Could not delete that action — ${String(e?.message || e)}`) }
+    } catch (e) { setMsg(`Could not delete that action, ${String(e?.message || e)}`) }
   }
 
   // A motion is the record of a decision the committee took, so this quotes it
@@ -412,7 +412,7 @@ export default function Committee({ st, patch, narrow }) {
           ? { ...m, motions: (m.motions || []).filter(x => x.id !== mo.id) } : m)),
       } : d))
       if (editMotionId === mo.id) setEditMotionId(null)
-    } catch (e) { setMsg(`Could not delete that motion — ${String(e?.message || e)}`) }
+    } catch (e) { setMsg(`Could not delete that motion, ${String(e?.message || e)}`) }
   }
 
   const openNewTemplate = () => {
@@ -454,14 +454,14 @@ export default function Committee({ st, patch, narrow }) {
   // meeting's back-reference is ON DELETE SET NULL — so every past meeting keeps
   // its agenda word for word, it just stops naming the template it came from.
   async function deleteTemplate(t) {
-    if (!window.confirm(`Delete the “${t.name}” template?\n\nMeetings already built from it keep their agendas — they simply stop naming it.`)) return
+    if (!window.confirm(`Delete the “${t.name}” template?\n\nMeetings already built from it keep their agendas. They simply stop naming it.`)) return
     setMsg(null)
     try {
       await api.committeeDeleteAgendaTemplate(t.id)
       setTemplates(ts => (ts || []).filter(x => x.id !== t.id))
       if (tplEdit?.id === t.id) setTplEdit(null)
       if (st.cteTemplate === t.id) patch({ cteTemplate: null })
-    } catch (e) { setMsg(`Could not delete that template — ${String(e?.message || e)}`) }
+    } catch (e) { setMsg(`Could not delete that template, ${String(e?.message || e)}`) }
   }
 
   const openNew = () => {
@@ -968,7 +968,7 @@ export default function Committee({ st, patch, narrow }) {
           {vacancies.length > 0 && (
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '10px 12px', borderRadius: 8, background: 'rgba(245,181,66,0.07)', border: '1px solid rgba(245,181,66,0.25)', fontSize: 12.5, color: C.warn, lineHeight: 1.45, marginBottom: 14 }}>
               <span style={{ flexShrink: 0 }}>⚠</span>
-              <span>{vacancies.length} position{vacancies.length === 1 ? '' : 's'} unfilled — {vacancies.map(v => v.name).join(', ')}.</span>
+              <span>{vacancies.length} position{vacancies.length === 1 ? '' : 's'} unfilled. {vacancies.map(v => v.name).join(', ')}.</span>
             </div>
           )}
           <div style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, marginBottom: 8 }}>DRAG THE GRIP TO REORDER</div>

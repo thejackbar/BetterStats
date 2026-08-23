@@ -829,7 +829,7 @@ async def create_movement(
     if delta < 0 and not body.allow_negative and (v.quantity or 0) + delta < 0:
         raise HTTPException(
             status_code=422,
-            detail=f"Only {v.quantity or 0} on hand — can't remove {abs(delta)}.",
+            detail=f"Only {v.quantity or 0} on hand. Can't remove {abs(delta)}.",
         )
 
     # Player link + money: only meaningful on a sale or issue.

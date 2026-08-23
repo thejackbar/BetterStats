@@ -179,7 +179,7 @@ function GameReviewDetail({ review }) {
               <div className="text-pb-dim text-[12.5px] mt-1 leading-snug">from the {ord(collapse.start_wicket)} wicket</div>
             </>
           ) : (
-            <div className="text-pb-faint text-[13px] leading-snug">No collapse — wickets fell steadily.</div>
+            <div className="text-pb-faint text-[13px] leading-snug">No collapse: wickets fell steadily.</div>
           )}
         </Card>
       </div>
@@ -187,7 +187,7 @@ function GameReviewDetail({ review }) {
       <Note>
         {notes.length > 0
           ? notes.join(' ')
-          : 'Read generated from the scorecard — no ball-by-ball, so phase/pressure detail isn’t available.'}
+          : 'Read generated from the scorecard, no ball-by-ball, so phase/pressure detail isn’t available.'}
       </Note>
     </div>
   )
@@ -203,14 +203,14 @@ export default function MatchReview() {
   const [gameId, setGameId] = useState(searchParams.get('game') || null)
   const [review, setReview] = useState(null)
 
-  // Follow the global Season + Team filter — the review list is the games it scopes.
+  // Follow the global Season + Team filter. The review list is the games it scopes.
   useEffect(() => {
     setGames(null)
     api.iqReviewGames(seasonIds ? undefined : seasonId, gradeId, seasonIds).then(setGames).catch(() => setGames([]))
   }, [seasonId, gradeId, seasonIds ? seasonIds.join(',') : ''])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // Default to the most recent game once the list loads (the detail pane is
-  // always populated, mirroring the design) — unless the URL already pins one.
+  // always populated, mirroring the design), unless the URL already pins one.
   useEffect(() => {
     if (games && games.length > 0 && !gameId) {
       setGameId(games[0].game_id)
@@ -234,7 +234,7 @@ export default function MatchReview() {
       title="Match review"
       actions={gameId && <Btn variant="ghost" sm icon="refresh" onClick={() => pick(gameId)}>Re-read</Btn>}
     >
-      <PageIntro>An automatic read of every completed game — the scoreline, what swung it, and who delivered.</PageIntro>
+      <PageIntro>An automatic read of every completed game: the scoreline, what swung it, and who delivered.</PageIntro>
 
       {games === null ? (
         <LoadingCard label="Loading games…" expectedMs={4500} />

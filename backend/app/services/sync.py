@@ -672,7 +672,7 @@ async def sync_organisation(
     action leaves it None and gets exactly the sync it always did."""
     if run_id is not None and _SYNC_GOVERNOR.locked():
         await update_sync_run(run_id, {
-            "progress_phase": "Queued — waiting for another club's sync to finish",
+            "progress_phase": "Queued. Waiting for another club's sync to finish",
             "progress_pct": 0, "progress_done": None, "progress_total": None,
         })
     async with _SYNC_GOVERNOR:

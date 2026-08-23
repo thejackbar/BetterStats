@@ -40,7 +40,7 @@ def _build_starter_template():
         for a in ['Best & Fairest', 'Leading Goalkicker']:
             r.append(('Club Award', team, a))
 
-    for a in ['Premiership', 'Captain', 'Best on Ground — Grand Final']:
+    for a in ['Premiership', 'Captain', 'Best on Ground, Grand Final']:
         r.append(('Premiership', 'Team', a))
 
     for a in ['50 Games', '100 Games', '150 Games', '200 Games', '250 Games', '300 Games']:

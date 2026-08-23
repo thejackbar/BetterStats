@@ -346,7 +346,7 @@ async def get_invite(token: str, db: AsyncSession = Depends(get_db)):
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(
                 status_code=410,
-                detail="This invite link has expired — ask an admin at your club to invite you again",
+                detail="This invite link has expired. Ask an admin at your club to invite you again",
             )
 
     membership_res = await db.execute(select(ClubMembership).where(ClubMembership.user_id == user.id))
@@ -379,7 +379,7 @@ async def accept_invite(token: str, data: InviteAcceptRequest, response: Respons
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(
                 status_code=410,
-                detail="This invite link has expired — ask an admin at your club to invite you again",
+                detail="This invite link has expired. Ask an admin at your club to invite you again",
             )
 
     errors = password_policy.password_errors(data.password, data.confirm_password)
@@ -432,7 +432,7 @@ async def forgot_password(
     rate_limit.enforce(f"forgot-password-ip:{ip}", limit=10, window_sec=3600)
     rate_limit.enforce(
         f"forgot-password-email:{email}", limit=3, window_sec=3600,
-        detail="Too many reset requests for this address — try again later",
+        detail="Too many reset requests for this address. Try again later",
     )
 
     result = await db.execute(
@@ -486,7 +486,7 @@ async def get_password_reset(token: str, db: AsyncSession = Depends(get_db)):
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(
                 status_code=410,
-                detail="This reset link has expired — ask an admin at your club to send a new one",
+                detail="This reset link has expired. Ask an admin at your club to send a new one",
             )
 
     membership_res = await db.execute(select(ClubMembership).where(ClubMembership.user_id == user.id))
@@ -518,7 +518,7 @@ async def accept_password_reset(token: str, data: ResetPasswordAcceptRequest, re
         if datetime.now(timezone.utc) > expires:
             raise HTTPException(
                 status_code=410,
-                detail="This reset link has expired — ask an admin at your club to send a new one",
+                detail="This reset link has expired. Ask an admin at your club to send a new one",
             )
 
     errors = password_policy.password_errors(data.password, data.confirm_password)

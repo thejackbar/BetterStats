@@ -129,33 +129,33 @@ def _render_template_hardcoded(
         subject = f"BetterCricket for {club_name}"
         body = (
             f'<p style="font-size:14px;line-height:1.5">{greeting} thanks for your interest in '
-            f"BetterCricket — stats, team selection, availability, social posts and more, "
+            f"BetterCricket: stats, team selection, availability, social posts and more, "
             f"all in one place for {club_name}.</p>"
             f'<p style="font-size:14px;line-height:1.5">Have a look through what’s on offer:</p>'
             + _button("See BetterCricket", base)
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email.</p>'
         )
         text = (
             f"{greeting} thanks for your interest in BetterCricket for {club_name}. "
             f"Have a look through what's on offer: {base} "
-            "Happy to answer any questions — just reply to this email."
+            "Happy to answer any questions, just reply to this email."
         )
     elif key == "voicemail_followup":
         subject = f"BetterCricket for {club_name} - following up"
         body = (
             f'<p style="font-size:14px;line-height:1.5">{greeting} I tried calling you just now '
-            f"but couldn't get through, so I've left a voicemail. Wanted to follow up here too — "
+            f"but couldn't get through, so I've left a voicemail. Wanted to follow up here too, "
             f"BetterCricket is stats, team selection, availability, social posts and more, "
             f"all in one place for {club_name}.</p>"
             f'<p style="font-size:14px;line-height:1.5">Have a look through what’s on offer:</p>'
             + _button("See BetterCricket", base)
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email, or give me a call back.</p>'
         )
         text = (
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
-            f"voicemail. Wanted to follow up here too — BetterCricket for {club_name}. "
+            f"voicemail. Wanted to follow up here too. BetterCricket for {club_name}. "
             f"Have a look through what's on offer: {base} "
-            "Happy to answer any questions — just reply to this email, or give me a call back."
+            "Happy to answer any questions, just reply to this email, or give me a call back."
         )
     elif key == "voicemail_followup_trial_offer":
         # trial_information's own content — the intro line, the six steps and
@@ -168,7 +168,7 @@ def _render_template_hardcoded(
             '<ol style="font-size:14px;line-height:1.8;padding-left:20px">'
             "<li>Go to BetterCricket</li><li>Search for your club</li>"
             "<li>Select your club</li><li>Create your admin account</li>"
-            "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+            "<li>Choose the modules you want</li><li>Start your 14-day trial, no card required</li>"
             "</ol>"
         )
         body = (
@@ -176,15 +176,15 @@ def _render_template_hardcoded(
             f"but couldn't get through, so I've left a voicemail. Here’s how to get {club_name} "
             f"started on a free trial:</p>{steps}"
             + _button("Start your trial", f"{base}/trial")
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email, or give me a call back.</p>'
         )
         text = (
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
             f"voicemail. Here's how to get {club_name} started on a free trial: "
             "1) Go to BetterCricket 2) Search for your club 3) Select your club "
             "4) Create your admin account 5) Choose the modules you want "
-            f"6) Start your 14-day trial — no card required. {base}/trial "
-            "Happy to answer any questions — just reply to this email, or give me a call back."
+            f"6) Start your 14-day trial, no card required. {base}/trial "
+            "Happy to answer any questions, just reply to this email, or give me a call back."
         )
     elif key == "voicemail_followup_extend_trial_soon":
         subject = f"BetterCricket for {club_name} - more time on your trial"
@@ -195,14 +195,14 @@ def _render_template_hardcoded(
             "Just reply and let me know.</p>"
             '<p style="font-size:14px;line-height:1.5">In the meantime you can pick up where you left off:</p>'
             + _button("Log in to BetterCricket", f"{base}/login")
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email, or give me a call back.</p>'
         )
         text = (
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
             f"voicemail. {club_name}'s BetterCricket trial finishes shortly, and if you need "
             "longer with it I'm happy to extend it. Just reply and let me know. In the meantime "
             f"you can pick up where you left off: {base}/login "
-            "Happy to answer any questions — just reply to this email, or give me a call back."
+            "Happy to answer any questions, just reply to this email, or give me a call back."
         )
     elif key == "voicemail_followup_extend_trial":
         subject = f"BetterCricket for {club_name} - more time on your trial"
@@ -213,14 +213,14 @@ def _render_template_hardcoded(
             "back on for a bit longer. Just reply and let me know.</p>"
             '<p style="font-size:14px;line-height:1.5">Everything you set up is still there:</p>'
             + _button("Log in to BetterCricket", f"{base}/login")
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email, or give me a call back.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email, or give me a call back.</p>'
         )
         text = (
             f"{greeting} I tried calling you just now but couldn't get through, so I've left a "
             f"voicemail. {club_name}'s BetterCricket trial has finished, and if you did not get a "
             "proper run at it I'm happy to put it back on for a bit longer. Just reply and let me "
             f"know. Everything you set up is still there: {base}/login "
-            "Happy to answer any questions — just reply to this email, or give me a call back."
+            "Happy to answer any questions, just reply to this email, or give me a call back."
         )
     elif key == "trial_information":
         subject = f"Start your free BetterCricket trial - {club_name}"
@@ -228,7 +228,7 @@ def _render_template_hardcoded(
             '<ol style="font-size:14px;line-height:1.8;padding-left:20px">'
             "<li>Go to BetterCricket</li><li>Search for your club</li>"
             "<li>Select your club</li><li>Create your admin account</li>"
-            "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+            "<li>Choose the modules you want</li><li>Start your 14-day trial, no card required</li>"
             "</ol>"
         )
         body = (
@@ -240,18 +240,18 @@ def _render_template_hardcoded(
             f"{greeting} here's how to get {club_name} started on a free trial: "
             "1) Go to BetterCricket 2) Search for your club 3) Select your club "
             "4) Create your admin account 5) Choose the modules you want "
-            f"6) Start your 14-day trial — no card required. {base}/trial"
+            f"6) Start your 14-day trial, no card required. {base}/trial"
         )
     elif key == "trial_extension":
         subject = f"Your BetterCricket trial extension for {club_name}"
         body = (
-            f'<p style="font-size:14px;line-height:1.5">{greeting} no problem — I\'ve extended '
+            f'<p style="font-size:14px;line-height:1.5">{greeting} no problem. I\'ve extended '
             f"{club_name}'s BetterCricket trial so you've got more time to get everything set up.</p>"
             + _button("Log in to BetterCricket", f"{base}/login")
             + '<p style="font-size:14px;line-height:1.5">Let me know if there\'s anything I can help with in the meantime.</p>'
         )
         text = (
-            f"{greeting} no problem — I've extended {club_name}'s BetterCricket trial so you've "
+            f"{greeting} no problem. I've extended {club_name}'s BetterCricket trial so you've "
             f"got more time to get everything set up. {base}/login "
             "Let me know if there's anything I can help with in the meantime."
         )
@@ -260,35 +260,35 @@ def _render_template_hardcoded(
         if calendly_url:
             body = (
                 f'<p style="font-size:14px;line-height:1.5">{greeting} happy to walk you through '
-                f"BetterCricket for {club_name} — pick a time that suits:</p>"
+                f"BetterCricket for {club_name}. Pick a time that suits:</p>"
                 + _button("Book a time", calendly_url)
             )
             text = f"{greeting} happy to walk you through BetterCricket for {club_name}. Book a time: {calendly_url}"
         else:
             body = (
                 f'<p style="font-size:14px;line-height:1.5">{greeting} happy to walk you through '
-                f"BetterCricket for {club_name} — reply to this email with a couple of times that "
+                f"BetterCricket for {club_name}. Reply to this email with a couple of times that "
                 "suit and I'll lock one in.</p>"
             )
             text = (
-                f"{greeting} happy to walk you through BetterCricket for {club_name} — reply to "
+                f"{greeting} happy to walk you through BetterCricket for {club_name}. Reply to "
                 "this email with a couple of times that suit and I'll lock one in."
             )
     elif key == "subscribe":
         subject = f"Get {club_name} set up on BetterCricket"
         body = (
-            f'<p style="font-size:14px;line-height:1.5">{greeting} great news — let\'s get '
+            f'<p style="font-size:14px;line-height:1.5">{greeting} great news. Let\'s get '
             f"{club_name} set up on a paid BetterCricket subscription.</p>"
             '<p style="font-size:14px;line-height:1.5">Log in to your account and head to Account '
             "to choose your modules and subscribe:</p>"
             + _button("Log in to subscribe", f"{base}/login")
-            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions — just reply to this email.</p>'
+            + '<p style="font-size:14px;line-height:1.5">Happy to answer any questions, just reply to this email.</p>'
         )
         text = (
-            f"{greeting} great news — let's get {club_name} set up on a paid BetterCricket "
+            f"{greeting} great news, let's get {club_name} set up on a paid BetterCricket "
             f"subscription. Log in to your account and head to Account to choose your modules and "
             f"subscribe: {base}/login "
-            "Happy to answer any questions — just reply to this email."
+            "Happy to answer any questions, just reply to this email."
         )
     else:  # custom — no fixed pitch, just a blank canvas to write into
         subject = f"BetterCricket for {club_name}"
@@ -312,13 +312,13 @@ def _render_template_hardcoded(
 _SEED_BODY = {
     "information": (
         "<p>Hi {{first_name}},</p>"
-        "<p>Thanks for your interest in BetterCricket — stats, team selection, availability, "
+        "<p>Thanks for your interest in BetterCricket: stats, team selection, availability, "
         "social posts and more, all in one place for {{club}}.</p>"
         "<p>Have a look through what's on offer:</p>"
         '<p><a href="{base}" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">See BetterCricket</a></p>'
-        "<p>Happy to answer any questions — just reply to this email.</p>"
+        "<p>Happy to answer any questions, just reply to this email.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     # Seeded from information's own layout (intro line, then a button) per
@@ -327,13 +327,13 @@ _SEED_BODY = {
     "voicemail_followup": (
         "<p>Hi {{first_name}},</p>"
         "<p>I tried calling you just now but couldn't get through, so I've left a voicemail. "
-        "Wanted to follow up here too — BetterCricket is stats, team selection, availability, "
+        "Wanted to follow up here too. BetterCricket is stats, team selection, availability, "
         "social posts and more, all in one place for {{club}}.</p>"
         "<p>Have a look through what's on offer:</p>"
         '<p><a href="{base}" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">See BetterCricket</a></p>'
-        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Happy to answer any questions, just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     # Cloned from "Send information" (_SEED_BODY["information"]) per direct
@@ -356,7 +356,7 @@ _SEED_BODY = {
         '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">Log in to BetterCricket</a></p>'
-        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Happy to answer any questions, just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     "voicemail_followup_extend_trial": (
@@ -368,7 +368,7 @@ _SEED_BODY = {
         '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">Log in to BetterCricket</a></p>'
-        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Happy to answer any questions, just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     "trial_information": (
@@ -377,7 +377,7 @@ _SEED_BODY = {
         '<ol style="padding-left:20px">'
         "<li>Go to BetterCricket</li><li>Search for your club</li>"
         "<li>Select your club</li><li>Create your admin account</li>"
-        "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+        "<li>Choose the modules you want</li><li>Start your 14-day trial, no card required</li>"
         "</ol>"
         '<p><a href="{base}/trial" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
@@ -395,12 +395,12 @@ _SEED_BODY = {
         '<ol style="padding-left:20px">'
         "<li>Go to BetterCricket</li><li>Search for your club</li>"
         "<li>Select your club</li><li>Create your admin account</li>"
-        "<li>Choose the modules you want</li><li>Start your 14-day trial — no card required</li>"
+        "<li>Choose the modules you want</li><li>Start your 14-day trial, no card required</li>"
         "</ol>"
         '<p><a href="{base}/trial" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">Start your trial</a></p>'
-        "<p>Happy to answer any questions — just reply to this email, or give me a call back.</p>"
+        "<p>Happy to answer any questions, just reply to this email, or give me a call back.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     # Seeded from trial_information's own layout (intro line, then a button)
@@ -411,7 +411,7 @@ _SEED_BODY = {
     # exist.
     "trial_extension": (
         "<p>Hi {{first_name}},</p>"
-        "<p>No problem — I've extended {{club}}'s BetterCricket trial so you've got more time "
+        "<p>No problem. I've extended {{club}}'s BetterCricket trial so you've got more time "
         "to get everything set up.</p>"
         '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
@@ -429,12 +429,12 @@ _SEED_BODY = {
     # direct instruction, reworded for a club ready to subscribe now.
     "subscribe": (
         "<p>Hi {{first_name}},</p>"
-        "<p>Great news — let's get {{club}} set up on a paid BetterCricket subscription.</p>"
+        "<p>Great news, let's get {{club}} set up on a paid BetterCricket subscription.</p>"
         "<p>Log in to your account and head to Account to choose your modules and subscribe:</p>"
         '<p><a href="{base}/login" style="display:inline-block;background:#16C784;color:#fff;'
         'text-decoration:none;padding:12px 24px;border-radius:6px;font-weight:bold;'
         'font-size:14px">Log in to subscribe</a></p>'
-        "<p>Happy to answer any questions — just reply to this email.</p>"
+        "<p>Happy to answer any questions, just reply to this email.</p>"
         "<p>Regards,<br>{{rep_name}}<br>BetterCricket</p>"
     ),
     # A full standalone document (dark theme, its own <head>/<body>), unlike

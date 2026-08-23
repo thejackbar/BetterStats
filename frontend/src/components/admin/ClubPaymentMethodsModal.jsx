@@ -59,7 +59,7 @@ export default function ClubPaymentMethodsModal({ club, onClose }) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-4 overflow-y-auto" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} className="pb-card w-full max-w-md bg-pb-surface mt-16 max-h-[80vh] overflow-hidden flex flex-col">
         <div className="p-5 pb-3 shrink-0 flex items-center justify-between">
-          <h2 className="font-display font-bold text-lg text-pb-text">{club.name} — payment methods</h2>
+          <h2 className="font-display font-bold text-lg text-pb-text">{club.name}, payment methods</h2>
           <button onClick={load} className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">Refresh</button>
         </div>
         <div className="p-5 pt-0 overflow-y-auto space-y-2">

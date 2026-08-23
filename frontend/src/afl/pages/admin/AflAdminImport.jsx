@@ -123,21 +123,21 @@ function ReviewStep({ resolved, resolving, committing, committed, unresolved, on
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.behinds)}</td>
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.club_bf_votes)}</td>
                   <td className="py-2 pr-2 font-mono text-[11px] text-pb-dim text-right">{num(p.comp_bf_votes)}</td>
-                  <td className="py-2 pr-2">{p.already_synced_overlap && <span className="font-mono text-[9px] text-pb-faint" title="Some season(s) shown here are already synced from PlayHQ — those rows still import but the synced figures win.">already synced</span>}</td>
+                  <td className="py-2 pr-2">{p.already_synced_overlap && <span className="font-mono text-[9px] text-pb-faint" title="Some season(s) shown here are already synced from PlayHQ. Those rows still import but the synced figures win.">already synced</span>}</td>
                 </tr>
               ))}
               {resolving && preview.length === 0 && <tr><td colSpan={8} className="py-8 text-center"><LoadingSpinner message="Reconciling…" /></td></tr>}
-              {!resolving && preview.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-pb-dim">No matched players yet — go back and resolve the matches.</td></tr>}
+              {!resolving && preview.length === 0 && <tr><td colSpan={8} className="py-4 text-center text-pb-dim">No matched players yet. Go back and resolve the matches.</td></tr>}
             </tbody>
           </table>
         </div>
         {preview.length > shownPreview.length && (
-          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the top {shownPreview.length} of {preview.length} players by games — all will be imported.</p>
+          <p className="font-mono text-[10px] text-pb-faintest mt-2">Showing the top {shownPreview.length} of {preview.length} players by games. All will be imported.</p>
         )}
       </div>
       <div className="flex items-center gap-3">
         <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
-        {unresolved > 0 && <span className="font-mono text-[10px] text-pb-amber">{unresolved} player(s) still unresolved — they'll be skipped.</span>}
+        {unresolved > 0 && <span className="font-mono text-[10px] text-pb-amber">{unresolved} player(s) still unresolved, they'll be skipped.</span>}
         <button onClick={onCommit} disabled={committing || preview.length === 0}
           className="ml-auto px-5 py-2 rounded font-mono text-[10px] tracking-wide2 font-semibold text-black bg-[var(--pb-accent)] disabled:opacity-50">
           {committing ? 'IMPORTING…' : `IMPORT ${preview.length} PLAYER${preview.length === 1 ? '' : 'S'}`}
@@ -182,7 +182,7 @@ function PastImports({ history, expandedBatch, batchPlayers, loadingBatchPlayers
                       <div className="rounded border pb-hairline divide-y pb-hairline-t">
                         {(batchPlayers[b.id] || []).map((p, i) => (
                           <div key={i} className="flex items-center justify-between px-2 py-1.5">
-                            <span className="text-pb-dim">{p.player_name} {p.season_label ? `— ${p.season_label}` : ''} {p.grade_label ? `(${p.grade_label})` : ''}</span>
+                            <span className="text-pb-dim">{p.player_name} {p.season_label ? `, ${p.season_label}` : ''} {p.grade_label ? `(${p.grade_label})` : ''}</span>
                             <span className="font-mono text-[10px] text-pb-faintest">
                               {p.games_played}g {p.goals}gl {p.behinds}b
                               {(p.club_bf_votes || p.comp_bf_votes) ? ` · ${p.club_bf_votes || 0} club/${p.comp_bf_votes || 0} comp votes` : ''}
@@ -251,7 +251,7 @@ export default function AflAdminImport() {
     return s
   }, [hasSeasonCol, hasGradeCol])
 
-  // Live-reconcile whenever the mapping or any override changes — mirrors
+  // Live-reconcile whenever the mapping or any override changes, mirrors
   // BetterStats (Core)'s BetterImport: the preview stays current as you work
   // instead of needing an explicit "Continue" to move the data forward.
   useEffect(() => {
@@ -345,7 +345,7 @@ export default function AflAdminImport() {
     }
     setBulkCreatingSeasons(false)
     toast[failed ? 'error' : 'success'](
-      `Created ${created} season${created === 1 ? '' : 's'}` + (failed ? ` — ${failed} couldn't be created (name already exists; pick it from the list instead)` : '')
+      `Created ${created} season${created === 1 ? '' : 's'}` + (failed ? `. ${failed} couldn't be created (name already exists; pick it from the list instead)` : '')
     )
   }
 
@@ -401,7 +401,7 @@ export default function AflAdminImport() {
         )}
       </div>
       <p className="text-sm text-pb-dim max-w-2xl -mt-4">
-        Bring in historical season stats from a spreadsheet — for seasons PlayHQ's own data doesn't
+        Bring in historical season stats from a spreadsheet, for seasons PlayHQ's own data doesn't
         cover. Upload, match the columns and players, confirm the season and grade, then import. Where
         your sheet and the synced data overlap for a season, the synced figures win.
       </p>
@@ -436,7 +436,7 @@ export default function AflAdminImport() {
             </div>
           </div>
           <p className="font-mono text-[10px] text-pb-faintest mt-3">
-            Headers can be anything — we map them in the next step.{' '}
+            Headers can be anything, we map them in the next step.{' '}
             <a href={aflApi.importsTemplateUrl()} className="text-[var(--pb-accent)] hover:underline">Download a template</a>.
           </p>
         </div>
@@ -504,7 +504,7 @@ export default function AflAdminImport() {
       {step === 'seasons' && (
         <MatchTable
           title="Confirm season data" kind="season"
-          subtitle="Match each season label to one of your club's seasons. Anything we can't match defaults to unassigned — those rows still import, just without a season link."
+          subtitle="Match each season label to one of your club's seasons. Anything we can't match defaults to unassigned. Those rows still import, just without a season link."
           rows={resolved?.seasons || []}
           allOptions={allSeasons}
           loading={resolving}
@@ -523,7 +523,7 @@ export default function AflAdminImport() {
       {step === 'grades' && (
         <MatchTable
           title="Confirm grade data" kind="grade"
-          subtitle="Match each grade or team label from your sheet to a grade name we already hold for this club. Leave it as-is if it genuinely predates online records — it's kept as its own historical label rather than matched to the wrong grade."
+          subtitle="Match each grade or team label from your sheet to a grade name we already hold for this club. Leave it as-is if it genuinely predates online records. It's kept as its own historical label rather than matched to the wrong grade."
           rows={resolved?.grades || []}
           allOptions={(resolved?.grade_options || []).map(name => ({ id: name, name }))}
           loading={resolving}

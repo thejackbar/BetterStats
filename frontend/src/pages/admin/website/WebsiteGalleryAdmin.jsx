@@ -48,7 +48,7 @@ function ImageManager({ album, onBack, onChange }) {
       </div>
 
       {album.images.length === 0 ? (
-        <div className="pb-card px-4 py-10 text-center text-pb-faint text-sm">No photos yet — add some.</div>
+        <div className="pb-card px-4 py-10 text-center text-pb-faint text-sm">No photos yet. Add some.</div>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {album.images.map(img => (

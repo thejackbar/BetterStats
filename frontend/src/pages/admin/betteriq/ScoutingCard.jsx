@@ -142,7 +142,7 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
       right={<Btn variant={open ? 'ghost' : 'soft'} sm icon={open ? undefined : 'edit'} onClick={() => setOpen(o => !o)}>{open ? 'Close' : (present ? 'Edit' : 'Add intel')}</Btn>}>
       {!open && (
         <div className="space-y-4">
-          <DnaRead dna={dna} emptyHint={`No ${isBat ? 'batting' : 'bowling'} intel yet — tap Add intel to record ${isBat ? 'how this batter gets out' : 'how this bowler operates'} (CA gives us no ball-level data, so this is your own scouting).`} />
+          <DnaRead dna={dna} emptyHint={`No ${isBat ? 'batting' : 'bowling'} intel yet. Tap Add intel to record ${isBat ? 'how this batter gets out' : 'how this bowler operates'} (CA gives us no ball-level data, so this is your own scouting).`} />
           {Array.isArray(intel?.zones) && intel.zones.some(v => v > 0) && (
             <div className="flex justify-center pt-1"><ZoneGrid cells={intel.zones} size="sm" color={isBat ? 'var(--pb-red)' : 'var(--pb-accent)'} /></div>
           )}
@@ -179,14 +179,14 @@ function IntelSide({ side, keyId, intel, stats, onSave }) {
             <Field label={isBat ? 'Weaknesses' : 'Weaknesses (how to attack him)'}><TextArea value={f.weaknesses} onChange={v => set('weaknesses', v)} placeholder={isBat ? 'e.g. impatient early, chases width…' : 'e.g. leaks runs when driven, short of a length…'} /></Field>
             <Field label={isBat ? 'Strengths (watch for)' : 'Strengths'}><TextArea value={f.strengths} onChange={v => set('strengths', v)} placeholder={isBat ? 'e.g. strong square of the wicket…' : 'e.g. nagging line, great yorker…'} /></Field>
           </div>
-          <Field label={isBat ? 'Plan — how to get him out' : 'Plan — how to play him'}><TextArea value={f.plan} onChange={v => set('plan', v)} placeholder={isBat ? 'e.g. bowl full and straight, save the short ball' : 'e.g. take him down early before he settles'} rows={1} /></Field>
+          <Field label={isBat ? 'Plan, how to get him out' : 'Plan, how to play him'}><TextArea value={f.plan} onChange={v => set('plan', v)} placeholder={isBat ? 'e.g. bowl full and straight, save the short ball' : 'e.g. take him down early before he settles'} rows={1} /></Field>
           <div className="flex items-center gap-3">
             <Btn variant="primary" sm icon="check" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</Btn>
             <Btn variant="ghost" sm onClick={() => { setF(seed()); setOpen(false) }}>Cancel</Btn>
           </div>
         </div>
       )}
-      <Note>Scout-entered — CA has no ball-by-ball line/length or shot data, so this is your own intel. It travels with the player.</Note>
+      <Note>Scout-entered. CA has no ball-by-ball line/length or shot data, so this is your own intel. It travels with the player.</Note>
     </Card>
   )
 }

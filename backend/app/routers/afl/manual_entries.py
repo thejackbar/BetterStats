@@ -288,7 +288,7 @@ async def create_adjustment(
     if clash.scalar_one_or_none():
         raise HTTPException(
             409,
-            "An adjustment already exists for this player and season — edit that one instead, "
+            "An adjustment already exists for this player and season. Edit that one instead, "
             "or its figures will be counted twice.",
         )
 
@@ -490,7 +490,7 @@ async def import_adjustments(
                     if not grade:
                         raise ValueError(f"Grade '{gname}' not found in season '{sname}'")
             elif gname:
-                raise ValueError("A grade needs a season — fill season_name in, or clear grade_name")
+                raise ValueError("A grade needs a season, fill season_name in, or clear grade_name")
 
             fields = {f: _parse_int(raw.get(f)) for f in STAT_FIELDS}
             fields["notes"] = (raw.get("notes") or "").strip() or None
@@ -534,7 +534,7 @@ async def import_adjustments(
         await _log_edit(
             db, org_id=club.id, user_id=current_user.id, action="import",
             target_id=f"bulk:{created}created+{updated}updated",
-            summary=f"CSV import — adjustments: {created} created, {updated} updated, {len(errors)} errors",
+            summary=f"CSV import: adjustments: {created} created, {updated} updated, {len(errors)} errors",
             before={"rows": snapshots}, after=None,
         )
         await db.commit()

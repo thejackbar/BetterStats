@@ -80,7 +80,7 @@ export default function WebsiteNewsAdmin() {
           <input value={editing.title || ''} onChange={e => setField('title', e.target.value)} placeholder="Headline" className={`${inputCls} text-lg font-semibold`} />
           <div className="grid sm:grid-cols-2 gap-3">
             <input value={editing.author || ''} onChange={e => setField('author', e.target.value)} placeholder="Author (optional)" className={inputCls} />
-            <input value={editing.summary || ''} onChange={e => setField('summary', e.target.value)} placeholder="Summary (optional — auto-generated if blank)" className={inputCls} />
+            <input value={editing.summary || ''} onChange={e => setField('summary', e.target.value)} placeholder="Summary (optional: auto-generated if blank)" className={inputCls} />
           </div>
 
           {/* Cover */}

@@ -327,7 +327,7 @@ function SettingsTab({ canEdit }) {
       {canEdit && (
         <div className="flex items-center gap-3">
           <Btn variant="primary" icon="check" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save settings'}</Btn>
-          <span className="text-[12px] text-pb-faint">New sessions start from these defaults — you can tweak any session live.</span>
+          <span className="text-[12px] text-pb-faint">New sessions start from these defaults. You can tweak any session live.</span>
         </div>
       )}
     </div>

@@ -221,7 +221,7 @@ async def resolve_overdue(session: AsyncSession, draft: FantasyDraft, fs) -> Non
 async def make_pick(session: AsyncSession, draft: FantasyDraft, fs, manager_id: str, player_id: str) -> None:
     await resolve_overdue(session, draft, fs)
     if draft.type == "auction":
-        raise ValueError("This is an auction draft — nominate a player and bid instead.")
+        raise ValueError("This is an auction draft, nominate a player and bid instead.")
     if draft.status != "in_progress":
         raise ValueError("The draft isn't running.")
     rules = fs.rules or DEFAULT_RULES

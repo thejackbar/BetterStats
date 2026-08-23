@@ -112,7 +112,7 @@ export default function SuperCommsLimits() {
           </p>
         </div>
 
-        {/* Account send limits — AWS ceilings + our practical limits */}
+        {/* Account send limits. AWS ceilings + our practical limits */}
         {rates && (() => {
           const aws = Number(rateForm.aws_max_send_rate)
           const send = Number(rateForm.send_rate)
@@ -128,7 +128,7 @@ export default function SuperCommsLimits() {
               <p className="text-xs text-pb-dim mb-3 leading-relaxed">
                 AWS grants this account a maximum send rate per second and a maximum per day, shared across every
                 club. Update the AWS values here when AWS changes your account's grant. Our send rate must stay
-                below the AWS rate, and our daily limit at or below the AWS daily limit — anything over the daily
+                below the AWS rate, and our daily limit at or below the AWS daily limit, anything over the daily
                 limit sends the next day.
               </p>
               <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
@@ -246,7 +246,7 @@ export default function SuperCommsLimits() {
                     <span className="text-pb-faint">Sent ({m.window_days || 30}d): <span className="text-pb-text">{m.sent ?? 0}</span></span>
                     <span className="text-pb-faint">Bounce: <span className={m.bounce_rate >= 0.05 ? 'text-red-300' : 'text-pb-text'}>{m.sufficient_sample ? pct(m.bounce_rate) : '—'}</span></span>
                     <span className="text-pb-faint">Spam: <span className={m.complaint_rate >= 0.001 ? 'text-red-300' : 'text-pb-text'}>{m.sufficient_sample ? pct(m.complaint_rate) : '—'}</span></span>
-                    {!m.sufficient_sample && <span className="text-pb-faintest">(under {m.min_sample} sends — rates not yet meaningful)</span>}
+                    {!m.sufficient_sample && <span className="text-pb-faintest">(under {m.min_sample} sends. Rates not yet meaningful)</span>}
                   </div>
                   {r.breaker_reason && <p className="text-xs text-red-300 mt-1">⚠ {r.breaker_reason}</p>}
                   {r.reason && <p className="text-xs text-pb-faint mt-1.5">“{r.reason}”</p>}

@@ -32,7 +32,7 @@ export function validateImageFile(file, { maxBytes = IMAGE_MAX_BYTES } = {}) {
     return `Unsupported MIME type: ${file.type}. Use JPG, PNG, WEBP or GIF.`
   }
   if (file.size > maxBytes) {
-    return `File is ${fmtBytes(file.size)} — must be ${fmtBytes(maxBytes)} or smaller.`
+    return `File is ${fmtBytes(file.size)}. Must be ${fmtBytes(maxBytes)} or smaller.`
   }
   if (file.size === 0) return 'File is empty.'
   return null

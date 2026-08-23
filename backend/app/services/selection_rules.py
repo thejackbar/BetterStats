@@ -103,7 +103,7 @@ RULE_KINDS: dict[str, dict] = {
         "label": "Finals qualification",
         "blurb": "Games that have to be played before a player is eligible for "
                  "a final.",
-        "needs": "Nothing — counted from matches played and sides named.",
+        "needs": "Nothing. Counted from matches played and sides named.",
     },
     "grade_cap": {
         "label": "Playing down after a higher grade",
@@ -130,7 +130,7 @@ RULE_KINDS: dict[str, dict] = {
         "label": "Rest between matches",
         "blurb": "A cap on how many matches one player is named in across a "
                  "few days.",
-        "needs": "Nothing — read from the sides you have named.",
+        "needs": "Nothing. Read from the sides you have named.",
     },
     "custom": {
         "label": "Your own rule",
@@ -431,7 +431,7 @@ def rule_summary(kind: str, config: dict, basis: dict | None = None) -> str:
             f"under {r['under_age']}: {r['max_overs']} overs" if r.get("max_overs") else f"under {r['under_age']}"
             for r in (c.get("ladder") or [])
         )
-        return f"{who.capitalize()} — {rungs}"
+        return f"{who.capitalize()}, {rungs}"
     if kind == "finals_qualification":
         where = {"club": "for the club", "this_or_higher": "in this grade or higher",
                  "same_grade": "in this grade"}.get(c.get("counts", "club"), "for the club")
@@ -908,11 +908,11 @@ def _judge(kind, config, p, pid, *, age_at, played, sessions, session_count,
         if lo is not None:
             ok = age > lo if config.get("min_op") == "gt" else age >= lo
             if not ok:
-                return (f"{age} — the grade is {_min_phrase(lo, config.get('min_op'))}", False)
+                return (f"{age}. The grade is {_min_phrase(lo, config.get('min_op'))}", False)
         if hi is not None:
             ok = age <= hi if config.get("max_op") == "lte" else age < hi
             if not ok:
-                return (f"{age} — the grade is {_max_phrase(hi, config.get('max_op'))}", False)
+                return (f"{age}. The grade is {_max_phrase(hi, config.get('max_op'))}", False)
         return None
 
     if kind == "bowling_workload":
@@ -937,7 +937,7 @@ def _judge(kind, config, p, pid, *, age_at, played, sessions, session_count,
         if config.get("max_share_of_overs"):
             share = int(round(config["max_share_of_overs"] * 100))
             bits.append(f"max {share}% of the innings")
-        return (f"Under {rung['under_age']} — {', '.join(bits)}" if bits else
+        return (f"Under {rung['under_age']}, {', '.join(bits)}" if bits else
                 f"Under {rung['under_age']}", True)
 
     if kind == "finals_qualification":

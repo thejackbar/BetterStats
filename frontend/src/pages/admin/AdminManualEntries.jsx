@@ -75,7 +75,7 @@ function ComboInput({ value, onChange, suggestions = [], placeholder, allowNew =
       </Dropdown>
       {isNew && allowNew && (
         <p className="text-[10px] text-amber-300 mt-0.5">
-          ⚠ New value — not in existing data. Double-check the spelling before saving.
+          ⚠ New value, not in existing data. Double-check the spelling before saving.
         </p>
       )}
     </div>
@@ -167,7 +167,7 @@ function NumberField({ label, value, onChange, step = 1, min = 0, allowDecimal =
 // no CA equivalent (e.g. a pre-2000 season) — the sync never creates these, so
 // without this an admin has no way to enter a match from an era that isn't
 // already in the season list.
-function SeasonSelect({ seasons, value, onChange, onCreated, emptyLabel = '— Choose a season —' }) {
+function SeasonSelect({ seasons, value, onChange, onCreated, emptyLabel = '. Choose a season, ' }) {
   const [adding, setAdding] = useState(false)
   const [name, setName] = useState('')
   const [year, setYear] = useState('')
@@ -311,7 +311,7 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
           <NumberField label="Runs conceded" value={form.bowling_runs} onChange={set('bowling_runs')} />
           <NumberField label="Wickets" value={form.bowling_wickets} onChange={set('bowling_wickets')} />
           <NumberField label="5-wicket innings" value={form.bowling_five_wicket_innings} onChange={set('bowling_five_wicket_innings')} />
-          <NumberField label="Best — wickets" value={form.bowling_best_wickets} onChange={set('bowling_best_wickets')} />
+          <NumberField label="Best. Wickets" value={form.bowling_best_wickets} onChange={set('bowling_best_wickets')} />
           <div>
             <label className={LABEL_CLS}>Best figures (e.g. 4-13)</label>
             <input type="text" value={form.bowling_best_figures || ''} onChange={e => setForm({ ...form, bowling_best_figures: e.target.value })} className={INPUT_CLS} />
@@ -334,7 +334,7 @@ function AggregateFieldGrid({ form, setForm, includeWidesNoBalls = false }) {
       </div>
 
       <div className="mt-3">
-        <label className={LABEL_CLS}>Notes (optional — visible only to club admins)</label>
+        <label className={LABEL_CLS}>Notes (optional. Visible only to club admins)</label>
         <textarea
           rows={2}
           value={form.notes || ''}
@@ -485,7 +485,7 @@ function InlineSpreadsheet({ players, seasons, grades, onImported, onPending, on
     <div className="bg-pb-surface border pb-hairline rounded-lg p-4 mb-4">
       <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
         <div>
-          <h4 className="text-sm font-semibold text-pb-text">Spreadsheet mode — bulk add for one season</h4>
+          <h4 className="text-sm font-semibold text-pb-text">Spreadsheet mode: bulk add for one season</h4>
           <p className="text-[11px] text-pb-faintest">Choose a season + grade once, then one row per player. Paste a range from Excel into any cell to fill multiple rows at once.</p>
         </div>
       </div>
@@ -634,7 +634,7 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
       return
     }
     if (file.size > 5 * 1024 * 1024) {
-      setErr(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — must be 5 MB or smaller.`)
+      setErr(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB. Must be 5 MB or smaller.`)
       return
     }
     setBusy(true); setErr(null); setResult(null)
@@ -697,9 +697,9 @@ function ImportPanel({ kind, downloadFn, importFn, onImported }) {
   )
 }
 
-// Fields that map to Optional[str] on the backend — empty form value must go as null, not 0.
+// Fields that map to Optional[str] on the backend. Empty form value must go as null, not 0.
 const STRING_FIELDS = new Set(['notes', 'bowling_best_figures'])
-// Fields that map to Optional[int] — empty form value must go as null.
+// Fields that map to Optional[int]. Empty form value must go as null.
 const OPTIONAL_INT_FIELDS = new Set(['batting_high_score', 'bowling_best_wickets'])
 
 function normalizeAggregatePayload(form) {
@@ -858,7 +858,7 @@ function SeasonAdjustmentsTab({ players, seasons, grades, refreshAll, onPending,
               value={form.season_id}
               onChange={id => setForm({ ...form, season_id: id, grade_id: '' })}
               onCreated={onSeasonCreated}
-              emptyLabel="— Career only (no specific season) —"
+              emptyLabel=". Career only (no specific season), "
             />
             {isCareerMode && (
               <p className="text-[10px] text-pb-faint mt-1">Will save as a career-only adjustment.</p>
@@ -1249,7 +1249,7 @@ function ManualGamesTab({ players, seasons, grades, knownValues, refreshAll, onP
               value={form.grade_id || ''}
               onChange={id => setForm({ ...form, grade_id: id })}
               onCreated={onGradeCreated}
-              emptyLabel="— None —"
+              emptyLabel=", None, "
             />
           </div>
           <div>
@@ -1571,7 +1571,7 @@ export default function AdminManualEntries() {
           <h1 className="text-2xl font-bold text-pb-text mb-1">Manual stat entries</h1>
           <p className="text-sm text-pb-faint max-w-2xl">
             Add historical games and stats that aren't in the upstream feed.
-            Every change is logged and reversible — sync never touches this data.
+            Every change is logged and reversible. Sync never touches this data.
           </p>
         </div>
 

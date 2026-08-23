@@ -1078,14 +1078,14 @@ def _partnership_insight(partnerships: list[dict]) -> str | None:
         avg_rest = sum(p["avg_partnership"] for p in rest) / len(rest)
         if best_open["avg_partnership"] >= 30 and best_open["avg_partnership"] >= avg_rest * 1.8:
             bits.append(
-                f"They lean on their openers — the {_ordinal(best_open['wicket'])}-wicket stand averages "
+                f"They lean on their openers. The {_ordinal(best_open['wicket'])}-wicket stand averages "
                 f"{best_open['avg_partnership']:.2f} but the middle order is far thinner; break it early and the scoring stalls."
             )
     # A real soft spot in the top/middle order (never the tail).
     soft = min((p for p in top_mid if p["wicket"] >= 2), key=lambda p: p["avg_partnership"], default=None)
     if soft and soft["avg_partnership"] < strongest["avg_partnership"] * 0.5:
         bits.append(
-            f"There's a soft spot at the {_ordinal(soft['wicket'])} wicket (just {soft['avg_partnership']}) — "
+            f"There's a soft spot at the {_ordinal(soft['wicket'])} wicket (just {soft['avg_partnership']}), "
             "a strike there tends to trigger a slide."
         )
     if not bits:
@@ -1111,14 +1111,14 @@ def _confidence(samples: int) -> str:
 # "holes out" (caught) is mishitting to fielders, so the plan pushes catchers OUT
 # into the deep (NOT "keep catchers in", which was the old, wrong wording).
 _DISMISSAL_NOTE = {
-    "bowled": "Gets bowled more than most — beaten through the gate.",
-    "lbw": "Falls lbw regularly — vulnerable playing across the line.",
-    "caught": "Tends to hole out — he finds the fielder with the big shot.",
-    "caught behind": "Nicks off more often than most — feels for the ball outside off.",
+    "bowled": "Gets bowled more than most, beaten through the gate.",
+    "lbw": "Falls lbw regularly. Vulnerable playing across the line.",
+    "caught": "Tends to hole out. He finds the fielder with the big shot.",
+    "caught behind": "Nicks off more often than most. Feels for the ball outside off.",
     "c&b": "Has a habit of driving it straight back to the bowler.",
     "stumped": "Can be drawn out of his crease and stumped.",
-    "run out": "Has been run out a few times — suspect between the wickets.",
-    "hit wicket": "Has been hit-wicket — gets cramped on the back foot.",
+    "run out": "Has been run out a few times, suspect between the wickets.",
+    "hit wicket": "Has been hit-wicket. Gets cramped on the back foot.",
 }
 
 
@@ -1229,7 +1229,7 @@ def _enrich_bowler(b: dict, rank: int) -> None:
     if b.get("confidence") == "low":
         caution_reasons.append("small sample")
     if econ is not None and econ >= 6.0 and (b.get("wickets") or 0) < 5:
-        caution_reasons.append("leaks runs — one to target")
+        caution_reasons.append("leaks runs, one to target")
     level = "danger" if danger_reasons else ("caution" if caution_reasons else None)
     b["alert"] = {"level": level, "danger": danger_reasons, "caution": caution_reasons} if level else None
     b["risk"] = "high" if level == "danger" else ("low" if level == "caution" else "medium")
@@ -1244,22 +1244,22 @@ def _how_they_win_lose(batters, bowlers, danger_bowlers, partnerships, mixed_gra
     # different XIs, and a thin pool makes any share look concentrated.
     if not mixed_grades and total_runs >= 300 and len(batters) >= 6 and top3 / total_runs >= 0.5:
         pct = round(100 * top3 / total_runs)
-        win.append(f"Top-order driven — {pct}% of their runs come from their top three.")
-        lose.append(f"Early wickets choke them — {pct}% of their scoring rides on the top three.")
+        win.append(f"Top-order driven: {pct}% of their runs come from their top three.")
+        lose.append(f"Early wickets choke them. {pct}% of their scoring rides on the top three.")
     qualified = [p for p in partnerships if p["samples"] >= 3 and p["avg_partnership"] is not None]
     if qualified:
         strong = max(qualified, key=lambda p: p["avg_partnership"])
-        win.append(f"Build through the {_ordinal(strong['wicket'])} wicket — their strongest stand (avg {strong['avg_partnership']}).")
+        win.append(f"Build through the {_ordinal(strong['wicket'])} wicket, their strongest stand (avg {strong['avg_partnership']}).")
         # Only a TOP/MIDDLE-order soft spot counts — a cheap tail is obvious, not
         # a usable insight, so the 8th wicket on is never flagged here.
         top_mid = [p for p in qualified if 2 <= p["wicket"] < _TAIL_WICKET]
         if top_mid:
             weak = min(top_mid, key=lambda p: p["avg_partnership"])
             if weak["avg_partnership"] < strong["avg_partnership"] * 0.5:
-                lose.append(f"Fragile at the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}) — get in there and the innings can unravel.")
+                lose.append(f"Fragile at the {_ordinal(weak['wicket'])} wicket (avg {weak['avg_partnership']}). Get in there and the innings can unravel.")
     real_threats = [b for b in bowlers if (b.get("wickets") or 0) >= 4]
     if len(real_threats) <= 1 and danger_bowlers:
-        lose.append(f"Thin attack — {danger_bowlers[0]['name']} is their one real threat; see him off and cash in on the rest.")
+        lose.append(f"Thin attack: {danger_bowlers[0]['name']} is their one real threat; see him off and cash in on the rest.")
     elif len(real_threats) >= 3:
         win.append("Multiple wicket-taking options through the innings.")
     return win, lose
@@ -1546,14 +1546,14 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
     notes = []
     if db_built and season_matches:
         notes.append(
-            f"Built from our own database — {opp_name or 'this opponent'} is a synced "
+            f"Built from our own database. {opp_name or 'this opponent'} is a synced "
             f"BetterStats club ({season_matches} of their matches this season)."
         )
     elif team_grade_id and season_matches:
-        notes.append(f"Focused on {selected_team_name or 'one team'} — {season_matches} recent matches in this grade.")
+        notes.append(f"Focused on {selected_team_name or 'one team'}. {season_matches} recent matches in this grade.")
     elif external_discovery and season_matches:
         notes.append(
-            f"{opp_name or 'This club'} plays outside our competitions — squad & form "
+            f"{opp_name or 'This club'} plays outside our competitions, squad & form "
             f"scouted from Cricket Australia's public data ({season_matches} matches "
             f"across {teams_scouted} of their teams)."
         )
@@ -1563,14 +1563,14 @@ async def _assemble(session: AsyncSession, org_id: str, opp_key: str, opp_name: 
             f"{teams_scouted} of {opp_name or 'their'} team(s) this season."
         )
     else:
-        notes.append("No current-season matches found — showing head-to-head history only.")
+        notes.append("No current-season matches found. Showing head-to-head history only.")
     if grade_filter and grade_filter_matched:
         gf_names = ", ".join(grade_filter.split("||"))
         notes.append(f"Scoped to {gf_names} per your filter.")
     elif grade_filter and not grade_filter_matched:
         gf_names = ", ".join(grade_filter.split("||"))
         notes.append(
-            f"Your grade filter ({gf_names}) matched none of their sides — showing the whole club instead."
+            f"Your grade filter ({gf_names}) matched none of their sides. Showing the whole club instead."
         )
     if season_name:
         notes.append(f"Season scouted: {season_name}.")

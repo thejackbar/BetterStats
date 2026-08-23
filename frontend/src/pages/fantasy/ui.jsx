@@ -148,7 +148,7 @@ export function Avatar({ name, photoUrl, size = 38, accentRing = true, dim = fal
       ...common, display: 'flex', alignItems: 'center', justifyContent: 'center',
       font: `800 ${Math.round(size * 0.24)}px ${DISP}`, color: 'var(--faint)',
       background: 'var(--surface2)', boxShadow: dim ? undefined : 'inset 0 0 0 1px var(--hairline2)',
-    }} title="No photo — club crest">{crest}</div>
+    }} title="No photo: club crest">{crest}</div>
   )
 }
 

@@ -155,8 +155,8 @@ export default function ClubhouseSettings() {
           <Caption>Screen introductions</Caption>
           <SectionHeading className="mt-2">Show an introduction when a screen opens</SectionHeading>
           <p className="text-[13.5px] text-pb-dim mt-2 leading-[1.65]" style={{ maxWidth: '56ch', textWrap: 'pretty' }}>
-            A one-page explanation of what a screen is for and what it replaced. Today never shows one — it
-            is the front door — and following an action from Today goes straight to the work.
+            A one-page explanation of what a screen is for and what it replaced. Today never shows one, it
+            is the front door, and following an action from Today goes straight to the work.
           </p>
 
           <div className="flex items-center gap-2 mt-5 flex-wrap">

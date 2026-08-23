@@ -26,9 +26,9 @@ function ladderContext(ladder, oppName) {
   }
   if (us.rank > them.rank) {
     const gap = (us.points != null && them.points != null) ? Math.abs(them.points - us.points) : null
-    return `${who} are above you — ${ord(them.rank)} to your ${ord(us.rank)}${gap != null ? `, a ${gap} pt swing` : ''}. A win closes the gap.`
+    return `${who} are above you. ${ord(them.rank)} to your ${ord(us.rank)}${gap != null ? `, a ${gap} pt swing` : ''}. A win closes the gap.`
   }
-  return `Level with ${who} on the ladder — this one's for the table.`
+  return `Level with ${who} on the ladder. This one's for the table.`
 }
 
 /* Clean two-line perf cell: value + unit, then "avg X.XX". */
@@ -49,13 +49,13 @@ function synthesise({ report, ladder, team }) {
   const inn = team?.innings
   if (inn?.bat_first?.win_pct != null && inn?.chasing?.win_pct != null) {
     const bf = inn.bat_first.win_pct, ch = inn.chasing.win_pct
-    if (Math.abs(bf - ch) >= 8) bits.push(bf > ch ? `Lean to batting first — we win ${fmtPct(bf)} setting vs ${fmtPct(ch)} chasing.` : `We chase well — ${fmtPct(ch)} vs ${fmtPct(bf)} batting first.`)
+    if (Math.abs(bf - ch) >= 8) bits.push(bf > ch ? `Lean to batting first. We win ${fmtPct(bf)} setting vs ${fmtPct(ch)} chasing.` : `We chase well. ${fmtPct(ch)} vs ${fmtPct(bf)} batting first.`)
   }
   if (inn?.par?.par_score != null) bits.push(`A winning first-innings total is usually around ${inn.par.par_score}.`)
   const db = report?.their_danger_batters?.[0]
-  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${runsPhrase(db.runs, db.average)})` : ''} — their main threat.`)
+  if (db?.name) bits.push(`Watch ${db.name}${db.runs ? ` (${runsPhrase(db.runs, db.average)})` : ''}, their main threat.`)
   const dom = report?.matchups?.bowler_dominance?.[0]
-  if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter} — he's dismissed him ${dom.dismissals}×.`)
+  if (dom?.bowler && dom?.batter) bits.push(`Save ${dom.bowler} for ${dom.batter}. He's dismissed him ${dom.dismissals}×.`)
   const ob = report?.our_performers?.batting?.[0]
   if (ob?.name) bits.push(`${ob.name} is our man with the bat against them (${runsPhrase(ob.runs, ob.average)}).`)
   if (ladder?.available && ladder.our_row?.rank && ladder.opponent_row?.rank) {
@@ -92,20 +92,20 @@ function buildTeamTalk({ report, ladder, team, oppName, meta }) {
       const bits = []
       if (d.runs) bits.push(`${d.runs} runs${d.average != null ? ` @ ${d.average}` : ''} vs us`)
       if (d.times_out) bits.push(`out to us ${d.times_out}×`)
-      L.push(`• ${d.name}${bits.length ? ` — ${bits.join(', ')}` : ''}`)
+      L.push(`• ${d.name}${bits.length ? `, ${bits.join(', ')}` : ''}`)
     })
   }
   const dom = (report?.matchups?.bowler_dominance || []).slice(0, 2).filter(m => m.bowler && m.batter)
   if (dom.length) {
     L.push('\n🎯 Match-ups in our favour:')
-    dom.forEach(m => L.push(`• Save ${m.bowler} for ${m.batter} — ${m.dismissals}× dismissed`))
+    dom.forEach(m => L.push(`• Save ${m.bowler} for ${m.batter}, ${m.dismissals}× dismissed`))
   }
   const eb = (report?.our_performers?.batting || []).slice(0, 2)
   const ew = (report?.our_performers?.bowling || []).slice(0, 1)
   if (eb.length || ew.length) {
     L.push('\n💪 Our edge against them:')
-    eb.forEach(e => L.push(`• ${e.name} — ${e.runs} runs${e.average != null ? ` @ ${e.average}` : ''}`))
-    ew.forEach(e => L.push(`• ${e.name} — ${e.wickets} wkts${e.average != null ? ` @ ${e.average}` : ''}`))
+    eb.forEach(e => L.push(`• ${e.name}, ${e.runs} runs${e.average != null ? ` @ ${e.average}` : ''}`))
+    ew.forEach(e => L.push(`• ${e.name}, ${e.wickets} wkts${e.average != null ? ` @ ${e.average}` : ''}`))
   }
 
   const inn = team?.innings
@@ -268,7 +268,7 @@ export default function MatchPreview() {
     return (
       <IQLayout title="Match preview" actions={<Btn variant="ghost" sm icon="back" onClick={clear}>All fixtures</Btn>}>
         <div className="iq-fade">
-          <PageIntro>A 60-second read before the game — the essentials, fast. For the full dossier (danger men, match-ups, game plan) open the scout.</PageIntro>
+          <PageIntro>A 60-second read before the game. The essentials, fast. For the full dossier (danger men, match-ups, game plan) open the scout.</PageIntro>
 
           {/* Fixture bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
@@ -314,7 +314,7 @@ export default function MatchPreview() {
               <Card eyebrow="for the group chat" title="Team talk"
                 right={<Btn variant="soft" sm icon={copied ? 'check' : 'share'} onClick={copyTeamTalk}>{copied ? 'Copied' : 'Copy'}</Btn>}>
                 <pre className="whitespace-pre-wrap text-[13px] leading-relaxed" style={{ fontFamily: 'inherit', margin: 0 }}>{teamTalk}</pre>
-                <Note>Built from the record and form we already hold — paste it into the team chat, or open the full scout for the detail.</Note>
+                <Note>Built from the record and form we already hold, paste it into the team chat, or open the full scout for the detail.</Note>
               </Card>
             )}
 
@@ -331,7 +331,7 @@ export default function MatchPreview() {
                     </>
                   ) : <Empty>{ladder?.note || 'No ladder for this fixture.'}</Empty>}
                 {ladder?.available && (ladder.our_row || ladder.opponent_row) && (
-                  <Note>Current standings for this grade — historical splits aren't kept.</Note>
+                  <Note>Current standings for this grade. Historical splits aren't kept.</Note>
                 )}
               </Card>
 
@@ -429,9 +429,9 @@ export default function MatchPreview() {
               </Card>
             </div>
 
-            {/* Par callout — scoped to this season + the fixture's grade (see the
+            {/* Par callout. Scoped to this season + the fixture's grade (see the
                 teamGrade fetch above), with the sample it's built from stated.
-                It used to be all-time, all grades, juniors included — the
+                It used to be all-time, all grades, juniors included, the
                 "lowest defended: 21" bug. */}
             {par?.par_score != null && (
               <Card eyebrow="set the target" title="Par at this level"
@@ -439,7 +439,7 @@ export default function MatchPreview() {
                 <div className="flex items-center gap-5 flex-wrap">
                   <div className="iq-headline iq-num" style={{ fontSize: 'clamp(40px,5vw,60px)', color: 'var(--pb-accent)' }}><CountUp value={par.par_score} /></div>
                   <div className="text-pb-dim text-[13.5px] max-w-sm leading-relaxed">
-                    Median winning bat-first score{par.samples ? ` across ${par.samples} win${par.samples === 1 ? '' : 's'}` : ''} at this level — post that batting first and you're in the box seat.
+                    Median winning bat-first score{par.samples ? ` across ${par.samples} win${par.samples === 1 ? '' : 's'}` : ''} at this level. Post that batting first and you're in the box seat.
                     {par.typical_low != null && par.typical_high != null && (
                       <> Typical winning range <span className="iq-num font-semibold text-pb-text">{fmtCount(par.typical_low)}–{fmtCount(par.typical_high)}</span>.</>
                     )}
@@ -454,7 +454,7 @@ export default function MatchPreview() {
                   </div>
                 </div>
                 {par.format_mixed && (
-                  <Note>Mixed formats in this scope — par is computed from the most common one ({par.format || 'unknown'}).</Note>
+                  <Note>Mixed formats in this scope. Par is computed from the most common one ({par.format || 'unknown'}).</Note>
                 )}
               </Card>
             )}
@@ -477,7 +477,7 @@ export default function MatchPreview() {
   return (
     <IQLayout title="Match preview">
       <div className="iq-fade">
-        <PageIntro>A pre-game one-pager for your next match — the lean, the ladder, your head-to-head, their danger players and where your edge is. Pick an upcoming fixture, or search an opponent.</PageIntro>
+        <PageIntro>A pre-game one-pager for your next match: the lean, the ladder, your head-to-head, their danger players and where your edge is. Pick an upcoming fixture, or search an opponent.</PageIntro>
 
         {opp === null ? (
           <Card><LoadingBar label="Loading fixtures…" expectedMs={4500} /></Card>
@@ -525,8 +525,8 @@ export default function MatchPreview() {
 
             {upcoming.length === 0 && !q && (
               <Card><Empty>{gradeLabel
-                ? `No upcoming fixtures in ${gradeLabel} — clear the grade filter, or search a club above.`
-                : 'No upcoming fixtures with an opponent — search a club above to preview them.'}</Empty></Card>
+                ? `No upcoming fixtures in ${gradeLabel}, clear the grade filter, or search a club above.`
+                : 'No upcoming fixtures with an opponent, search a club above to preview them.'}</Empty></Card>
             )}
           </div>
         )}

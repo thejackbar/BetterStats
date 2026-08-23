@@ -332,7 +332,7 @@ export default function ScoutDiscover() {
         `${allPlayers.length} player${allPlayers.length === 1 ? '' : 's'}`,
         grades.length ? `${grades.length} grade${grades.length === 1 ? '' : 's'}` : null,
         roster.source === 'internal'
-          ? 'from BetterCricket’s own synced records — always current'
+          ? 'from BetterCricket’s own synced records. Always current'
           : `built from Cricket Australia records${roster.built_at ? `, ${timeAgo(roster.built_at)}` : ''}`,
       ].filter(Boolean).join(' · ') : undefined}
       filters={
@@ -398,7 +398,7 @@ export default function ScoutDiscover() {
                       disabled={!gradeFilterAvailable}
                       title={gradeFilterAvailable
                         ? `${active ? 'Showing' : 'Click to show'} only ${name} (${(g.years || []).join(', ')})`
-                        : `Per-season grade isn't available for this club — ${(g.years || []).join(', ')}`}
+                        : `Per-season grade isn't available for this club, ${(g.years || []).join(', ')}`}
                       className={`px-2 py-0.5 rounded-full text-[11.5px] transition-colors ${
                         gradeFilterAvailable ? 'cursor-pointer' : 'cursor-default'
                       } ${active ? 'bg-[var(--pb-accent)] text-[var(--pb-on-accent)]' : 'bg-pb-surface2 text-pb-dim hover:text-pb-text'}`}
@@ -413,13 +413,13 @@ export default function ScoutDiscover() {
                   </button>
                 )}
                 {!gradeFilterAvailable && (
-                  <span className="text-[11px] text-pb-faintest">— not filterable for this club (no per-season grade in the public data)</span>
+                  <span className="text-[11px] text-pb-faintest">, not filterable for this club (no per-season grade in the public data)</span>
                 )}
               </div>
             )}
 
             {roster?.status === 'building' && (
-              <p className="text-sm text-pb-dim">Building this club's roster from Cricket Australia's records — first load can take up to a minute…</p>
+              <p className="text-sm text-pb-dim">Building this club's roster from Cricket Australia's records. First load can take up to a minute…</p>
             )}
             {roster?.status === 'error' && (
               <p className="text-sm text-pb-red">{roster.message || 'Could not load this club’s roster.'}</p>

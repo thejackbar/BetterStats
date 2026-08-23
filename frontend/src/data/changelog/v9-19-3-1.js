@@ -6,7 +6,7 @@ export default {
   sortKey: '2026-08-15T17:00:00Z',
   title: 'Room for camera-quality photos',
   items: [
-    'Player photos straight off a DSLR or mirrorless camera no longer bounce for being too big. You can now pick a file up to 15 MB, on BetterCricket and BetterFootball alike — the crop tool shrinks it before anything is stored, so your pages stay fast.',
+    'Player photos straight off a DSLR or mirrorless camera no longer bounce for being too big. You can now pick a file up to 15 MB, on BetterCricket and BetterFootball alike: the crop tool shrinks it before anything is stored, so your pages stay fast.',
     'Club, sponsor and website image uploads got the same headroom.',
   ],
 }

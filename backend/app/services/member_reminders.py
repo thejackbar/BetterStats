@@ -71,7 +71,7 @@ async def _remind_qualifications(session, org: Organisation) -> int:
         )
         text = f"Hi {member.full_name},\n\nYour {qtype.name} {status_word}.\n\n{link}"
         result = await _send(member.email, member.full_name, org.name,
-                             f"{qtype.name} — {status_word}", html, text)
+                             f"{qtype.name}, {status_word}", html, text)
         if result.ok:
             q.last_reminder_sent_at = datetime.now(timezone.utc)
             sent += 1
@@ -103,7 +103,7 @@ async def _remind_fees(session, org: Organisation) -> int:
         )
         text = f"Hi {member.full_name},\n\nYou have ${owing:.2f} outstanding in club fees.\n\n{link}"
         result = await _send(member.email, member.full_name, org.name,
-                             f"{org.name} — ${owing:.2f} outstanding", html, text)
+                             f"{org.name}, ${owing:.2f} outstanding", html, text)
         if result.ok:
             ms.last_fee_reminder_sent_at = datetime.now(timezone.utc)
             sent += 1

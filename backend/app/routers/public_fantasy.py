@@ -365,7 +365,7 @@ async def register(token: str, body: RegisterBody, request: Request, response: R
     if season is None or not season.registration_open:
         raise HTTPException(status_code=403, detail="Registration isn't open for this club.")
     rate_limit.enforce(f"fantasy-auth-ip:{token}:{_client_ip(request)}", AUTH_IP_LIMIT, AUTH_IP_WINDOW,
-                       detail="Too many attempts — slow down and try again shortly.")
+                       detail="Too many attempts, slow down and try again shortly.")
 
     name = (body.display_name or "").strip()
     email = (body.email or "").strip().lower()
@@ -379,7 +379,7 @@ async def register(token: str, body: RegisterBody, request: Request, response: R
         )
     )).scalar_one_or_none()
     if existing is not None:
-        raise HTTPException(status_code=409, detail="That email is already registered — sign in instead.")
+        raise HTTPException(status_code=409, detail="That email is already registered, sign in instead.")
 
     mgr = FantasyManager(
         organisation_id=club.id, display_name=name, email=email,
@@ -398,7 +398,7 @@ async def login(token: str, body: LoginBody, request: Request, response: Respons
     club = await _club_for_token(db, token)
     ip = _client_ip(request)
     rate_limit.enforce(f"fantasy-auth-ip:{token}:{ip}", AUTH_IP_LIMIT, AUTH_IP_WINDOW,
-                       detail="Too many attempts — slow down and try again shortly.")
+                       detail="Too many attempts, slow down and try again shortly.")
     email = (body.email or "").strip().lower()
     lock_key = f"fantasy-login:{token}:{email}:{ip}"
     rate_limit.assert_not_locked(lock_key, LOGIN_MAX_FAILURES, LOGIN_LOCKOUT_SECONDS,
@@ -632,7 +632,7 @@ async def build_squad(token: str, body: SquadBody, request: Request, db: AsyncSe
     if season is None or not season.registration_open:
         raise HTTPException(status_code=403, detail="The squad window is closed for this club.")
     if season.status == "active":
-        raise HTTPException(status_code=409, detail="The season has started — squad changes go through transfers.")
+        raise HTTPException(status_code=409, detail="The season has started. Squad changes go through transfers.")
     await _assert_unlocked(db, season)
     league = await _global_league(db, season)
     if league is None:

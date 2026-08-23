@@ -23,7 +23,7 @@ export default function Home() {
             </h1>
             <p className="text-pb-dim text-lg md:text-xl leading-relaxed mb-8 max-w-xl">
               The cricket statistics platform built for players. Career averages, innings history,
-              and live match data — all updated automatically. No manual exports.
+              and live match data. All updated automatically. No manual exports.
             </p>
             <div className="flex flex-wrap gap-4">
               <Link
@@ -60,12 +60,12 @@ export default function Home() {
             {
               icon: thiings.barChart,
               title: 'Complete Career Stats',
-              desc: 'Every innings, every bowling spell, tracked automatically. Batting average, strike rate, economy — all computed for you.',
+              desc: 'Every innings, every bowling spell, tracked automatically. Batting average, strike rate, economy. All computed for you.',
             },
             {
               icon: thiings.lightningBolt,
               title: 'Live Match Updates',
-              desc: 'Game updates flow in automatically in real time. Stats refresh automatically after every match — zero manual input.',
+              desc: 'Game updates flow in automatically in real time. Stats refresh automatically after every match, zero manual input.',
             },
             {
               icon: thiings.cricketBat,
@@ -117,7 +117,7 @@ export default function Home() {
             className="inline-block px-8 py-3 rounded font-mono text-[11px] tracking-wide3 font-semibold transition text-pb-bg"
             style={{ background: 'var(--pb-accent)' }}
           >
-            GET STARTED — IT'S FREE
+            GET STARTED, IT'S FREE
           </Link>
         </div>
       </section>

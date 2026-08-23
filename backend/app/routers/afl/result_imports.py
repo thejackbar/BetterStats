@@ -378,7 +378,7 @@ def _build_row(idx: int, raw: dict, mapping: dict) -> dict:
         if result:
             result_inferred = True
             warnings.append({"kind": "check", "text": (
-                f"No result recorded — worked out from the scores as a "
+                f"No result recorded. Worked out from the scores as a "
                 f"{'win' if result == 'W' else 'loss' if result == 'L' else 'draw'}.")})
         if category == "unknown" and result:
             category = "result"
@@ -401,7 +401,7 @@ def _build_row(idx: int, raw: dict, mapping: dict) -> dict:
         warnings.append({"kind": "sheet_error", "text": (
             f"Margin says {margin}, the scores give {our_score - opp_score}.")})
     if category == "result" and not our_score and not opp_score:
-        warnings.append({"kind": "check", "text": "No score recorded — imports as 0-0."})
+        warnings.append({"kind": "check", "text": "No score recorded, imports as 0-0."})
 
     return {
         "index": idx,
@@ -563,19 +563,19 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
         counts[cat] = counts.get(cat, 0) + 1
 
         if cat in ("cancelled", "no_score"):
-            r["status"], r["status_note"] = "skipped", f"{CATEGORY_LABELS[cat]} — nothing to import."
+            r["status"], r["status_note"] = "skipped", f"{CATEGORY_LABELS[cat]}, nothing to import."
         elif cat == "bye" and not req.include_byes:
-            r["status"], r["status_note"] = "skipped", "Bye — not included."
+            r["status"], r["status_note"] = "skipped", "Bye: not included."
         elif cat == "forfeit" and not req.include_forfeits:
-            r["status"], r["status_note"] = "skipped", "Forfeit — not included."
+            r["status"], r["status_note"] = "skipped", "Forfeit: not included."
         elif cat == "unknown":
             r["status"], r["status_note"] = "blocked", (
                 f"Can't tell what '{r['outcome_raw']}' means, and there are no scores to work it out from."
-                if r["outcome_raw"] else "No result and no scores — nothing to import.")
+                if r["outcome_raw"] else "No result and no scores, nothing to import.")
         elif not r["played_on"]:
             r["status"], r["status_note"] = "blocked", "No readable match date."
         elif not r["season_id"]:
-            r["status"], r["status_note"] = "blocked", "No season — match or create one on the Seasons step."
+            r["status"], r["status_note"] = "blocked", "No season: match or create one on the Seasons step."
         elif not r["grade_name"]:
             r["status"], r["status_note"] = "blocked", "No team or grade on this row."
         elif cat != "bye" and not r["opponent"]:
@@ -584,7 +584,7 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
             key = _identity_key(r)
             if key in seen_keys:
                 r["status"] = "duplicate"
-                r["status_note"] = f"Same game as row {seen_keys[key] + 1} — imported once."
+                r["status_note"] = f"Same game as row {seen_keys[key] + 1}, imported once."
             else:
                 seen_keys[key] = r["index"]
                 prior = existing.get((r["played_on"], _opp_key(r["opponent"] or ""))) or []
@@ -592,9 +592,9 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
                 others = [p for p in prior if p["grade"] != _norm(r["grade_name"])]
                 if any(p["source"] == "synced" for p in mine):
                     r["status"] = "synced"
-                    r["status_note"] = "Already synced from PlayHQ — left alone."
+                    r["status_note"] = "Already synced from PlayHQ, left alone."
                 elif mine:
-                    r["status"], r["status_note"] = "update", "Already imported — will be updated."
+                    r["status"], r["status_note"] = "update", "Already imported, will be updated."
                 else:
                     r["status"], r["status_note"] = "ready", None
                     if any(p["source"] == "synced" for p in others):
@@ -605,7 +605,7 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
                         r["warnings"].append({"kind": "check", "text": (
                             "Already have a game against this club on this date under "
                             + ", ".join(sorted({p["grade_name"] for p in others if p["source"] == "synced"}))
-                            + " — a different team's game, unless your sheet names this one differently.")})
+                            + ". A different team's game, unless your sheet names this one differently.")})
 
     importable = [r for r in built if r["status"] in ("ready", "update")]
 
@@ -617,7 +617,7 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
             reasons[r["status_note"]] = reasons.get(r["status_note"], 0) + 1
         top = sorted(reasons.items(), key=lambda kv: -kv[1])[:3]
         warnings.append({"kind": "check", "text":
-                         f"{len(blocked)} row(s) can't be imported yet — "
+                         f"{len(blocked)} row(s) can't be imported yet, "
                          + "; ".join(f"{n}× {why}" for why, n in top)})
     sheet_errors = sum(1 for r in importable for w in r["warnings"] if w["kind"] == "sheet_error")
     if sheet_errors:
@@ -627,16 +627,16 @@ async def _resolve(db: AsyncSession, org_id, club_name: str, req: ResolveRequest
     inferred = sum(1 for r in importable if r["result_inferred"])
     if inferred:
         warnings.append({"kind": "check", "text":
-                         f"{inferred} row(s) had no recorded result — worked out from the scores."})
+                         f"{inferred} row(s) had no recorded result. Worked out from the scores."})
     no_side = sum(1 for r in importable if r["our_side"] is None and r["category"] != "bye")
     if no_side:
         warnings.append({"kind": "check", "text":
-                         f"{no_side} row(s) don't say home or away (finals at a neutral ground, usually) — "
+                         f"{no_side} row(s) don't say home or away (finals at a neutral ground, usually), "
                          f"{club_name} is stored as the home side on those."})
     synced = sum(1 for r in built if r["status"] == "synced")
     if synced:
         warnings.append({"kind": "check", "text":
-                         f"{synced} row(s) match a game already synced from PlayHQ — those are left alone, "
+                         f"{synced} row(s) match a game already synced from PlayHQ. Those are left alone, "
                          "the synced game wins."})
 
     by_season: dict = {}
@@ -747,7 +747,7 @@ async def commit(
     resolved = await _resolve(db, club.id, club.name or "Our club", req)
     importable = resolved["_importable"]
     if not importable:
-        raise HTTPException(422, "Nothing to import — no rows are ready. "
+        raise HTTPException(422, "Nothing to import, no rows are ready. "
                                  "Check the season and team matches and try again.")
 
     batch = ImportBatch(

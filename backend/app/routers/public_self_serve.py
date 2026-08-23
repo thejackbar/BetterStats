@@ -219,7 +219,7 @@ async def prepare_club(
 ):
     rate_limit.enforce(
         f"pubss:prepare:{client_ip(request)}", PREPARE_LIMIT, PREPARE_WINDOW,
-        detail="Too many attempts — try again later.",
+        detail="Too many attempts. Try again later.",
     )
     if (data.website or "").strip():
         # Bot caught by the honeypot: return a plausible fake success so the
@@ -255,7 +255,7 @@ async def prepare_club(
 async def send_verification_code(data: sst.SendCodeRequest, request: Request, db: AsyncSession = Depends(get_db)):
     rate_limit.enforce(
         f"pubss:send:{client_ip(request)}", SEND_LIMIT, SEND_WINDOW,
-        detail="Too many verification codes requested — try again later.",
+        detail="Too many verification codes requested. Try again later.",
     )
     try:
         return await sst.send_verification_code(data=data, db=db)
@@ -280,7 +280,7 @@ async def check_verification_code(data: sst.CheckCodeRequest, request: Request, 
     # unlimited guesses from one IP).
     rate_limit.enforce(
         f"pubss:check:{client_ip(request)}", CHECK_LIMIT, CHECK_WINDOW,
-        detail="Too many attempts — try again later.",
+        detail="Too many attempts. Try again later.",
     )
     return await sst.check_verification_code(data=data, db=db)
 
@@ -337,7 +337,7 @@ async def submit(
 ):
     rate_limit.enforce(
         f"pubss:submit:{client_ip(request)}", SUBMIT_LIMIT, SUBMIT_WINDOW,
-        detail="Too many attempts — try again later.",
+        detail="Too many attempts. Try again later.",
     )
 
     if (data.website or "").strip():

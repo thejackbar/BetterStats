@@ -6,7 +6,7 @@ import { Btn, Segmented } from '../../pages/admin/betterselect/ui'
 import { initialsOf } from '../components/ScoutUi'
 
 const ORG_TYPES = [
-  { value: '', label: '— none —' },
+  { value: '', label: ', none, ' },
   { value: 'agency', label: 'Recruiting agency' },
   { value: 'club', label: 'Club (scouting its own pathway)' },
   { value: 'selector', label: 'Selector' },
@@ -133,8 +133,8 @@ export default function ScoutSettings() {
   }
 
   const closeOrg = async () => {
-    if (!window.confirm('Close this Scout Org? This deletes every watchlist, note and share link — it cannot be undone. Cached club rosters stay, they aren’t yours.')) return
-    if (!window.confirm('Really sure? Type nothing further needed — this is the final confirmation.')) return
+    if (!window.confirm('Close this Scout Org? This deletes every watchlist, note and share link. It cannot be undone. Cached club rosters stay, they aren’t yours.')) return
+    if (!window.confirm('Really sure? Type nothing further needed. This is the final confirmation.')) return
     await scoutApi.closeOrg()
     window.location.href = '/betterscout/login'
   }
@@ -158,7 +158,7 @@ export default function ScoutSettings() {
     >
       <div className="space-y-5 max-w-[1200px]">
         {error && <p className="text-sm text-pb-red">{error}</p>}
-        {!isOwner && <p className="text-sm text-pb-amber bg-pb-amber/5 border border-pb-amber/30 rounded-lg px-3 py-2">You're signed in as a viewer — you can see these settings but only an owner can change them.</p>}
+        {!isOwner && <p className="text-sm text-pb-amber bg-pb-amber/5 border border-pb-amber/30 rounded-lg px-3 py-2">You're signed in as a viewer. You can see these settings but only an owner can change them.</p>}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
           {/* Left column */}
@@ -187,11 +187,11 @@ export default function ScoutSettings() {
                 </Field>
                 <Field label="Home region">
                   <select value={settings.home_region} onChange={(e) => set('home_region', e.target.value)} disabled={!isOwner} className={inputCls}>
-                    {REGIONS.map((r) => <option key={r} value={r}>{r || '— none —'}</option>)}
+                    {REGIONS.map((r) => <option key={r} value={r}>{r || ', none, '}</option>)}
                   </select>
                 </Field>
               </div>
-              <p className="text-[11.5px] text-pb-faint">Org type only sets sensible defaults elsewhere — scout orgs never see club-admin data, whatever type this is set to.</p>
+              <p className="text-[11.5px] text-pb-faint">Org type only sets sensible defaults elsewhere. Scout orgs never see club-admin data, whatever type this is set to.</p>
             </Card>
 
             <Card title="Plan & usage">
@@ -199,7 +199,7 @@ export default function ScoutSettings() {
               {billing && (
                 <>
                   <div className="flex items-center justify-between text-sm">
-                    <span>{billing.tier_label} — {billing.player_cap ? `up to ${billing.player_cap} players` : 'no cap'}</span>
+                    <span>{billing.tier_label}, {billing.player_cap ? `up to ${billing.player_cap} players` : 'no cap'}</span>
                     <span className="font-mono text-pb-dim">{billing.player_count} / {billing.player_cap ?? '∞'}</span>
                   </div>
                   {billing.player_cap != null && (
@@ -223,7 +223,7 @@ export default function ScoutSettings() {
                   </div>
                 </>
               )}
-              <p className="text-[11.5px] text-pb-faint">Caps are enforced today — a player past your limit is blocked from being added.</p>
+              <p className="text-[11.5px] text-pb-faint">Caps are enforced today. A player past your limit is blocked from being added.</p>
               <div className="flex gap-2">
                 <Btn variant="soft" sm>Request an upgrade</Btn>
                 <Btn variant="ghost" sm>Archive players to free slots</Btn>
@@ -323,14 +323,14 @@ export default function ScoutSettings() {
                 <select disabled className={inputCls} style={{ width: 200 }}><option>House default</option></select>
               </Field>
               <ToggleRow label="Only players on a watchlist" on={settings.alert_scope === 'watchlisted_only'} onChange={(v) => set('alert_scope', v ? 'watchlisted_only' : 'all_tracked')} disabled={!isOwner} />
-              <p className="text-[11.5px] text-pb-faint">Real-time alerts wait on scheduled crawling — see Milestones for the full note.</p>
+              <p className="text-[11.5px] text-pb-faint">Real-time alerts wait on scheduled crawling. See Milestones for the full note.</p>
             </Card>
 
             {isOwner && (
               <div className="pb-card p-4 space-y-3 border-pb-red/40" style={{ background: 'color-mix(in srgb, var(--pb-red) 4%, transparent)' }}>
                 <div className="font-mono text-[10px] uppercase tracking-wide2 text-pb-red">Danger zone</div>
                 <div className="text-sm font-medium">Close this Scout Org</div>
-                <p className="text-[11.5px] text-pb-faint">Deletes watchlists, notes and share links. Cached club rosters stay — they aren't yours.</p>
+                <p className="text-[11.5px] text-pb-faint">Deletes watchlists, notes and share links. Cached club rosters stay. They aren't yours.</p>
                 <Btn variant="danger" sm onClick={closeOrg}>Close org</Btn>
               </div>
             )}

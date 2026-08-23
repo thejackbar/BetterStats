@@ -197,7 +197,7 @@ function ManualMerge({ orgId, onMerged }) {
       >
         <div>
           <span className="text-pb-text font-semibold">Manual Merge</span>
-          <span className="text-pb-faint text-sm ml-3">Merge any two players by name — e.g. name changes after marriage</span>
+          <span className="text-pb-faint text-sm ml-3">Merge any two players by name, e.g. name changes after marriage</span>
         </div>
         <span className="text-pb-faint text-lg">{expanded ? '▲' : '▼'}</span>
       </button>
@@ -319,7 +319,7 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
           <span
             className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
             style={{ borderColor: 'var(--pb-amber)' }}
-            title="A CA-redacted name (********) — this pair is excluded from Bulk Approve"
+            title="A CA-redacted name (********). This pair is excluded from Bulk Approve"
           >
             Manual review only
           </span>
@@ -329,8 +329,8 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
             className="font-mono text-[10px] px-2 py-0.5 rounded border text-pb-amber"
             style={{ borderColor: 'var(--pb-amber)' }}
             title={pair.kind === 'name_variant'
-              ? "The names could be one person or two — brothers, or a father and son, look exactly like this. Excluded from Bulk Approve."
-              : "Names are close but not identical — could be two different people (e.g. Steve vs Steven). Excluded from Bulk Approve."}
+              ? "The names could be one person or two: brothers, or a father and son, look exactly like this. Excluded from Bulk Approve."
+              : "Names are close but not identical. Could be two different people (e.g. Steve vs Steven). Excluded from Bulk Approve."}
           >
             Check it's the same person
           </span>
@@ -346,7 +346,7 @@ function MergePair({ pair, orgId, onMerged, onSkipped, onIgnored, disabled }) {
       <div className="bg-pb-surface2/30 border pb-hairline rounded px-4 py-3 mb-4 text-sm text-pb-dim">
         <span className="text-pb-faint">Will keep: </span>
         <span className="text-pb-text font-semibold">{keepId === pair.player_a.id ? pair.player_a.name : pair.player_b.name}</span>
-        <span className="text-pb-faint"> — merge all records from </span>
+        <span className="text-pb-faint">. Merge all records from </span>
         <span className="text-pb-amber font-semibold">{removePlayer.name}</span>
         <span className="text-pb-faint"> into it, then delete </span>
         <span className="text-pb-amber font-semibold">{removePlayer.name}</span>.
@@ -533,7 +533,7 @@ export default function MergeTools({ embeddedOrgId }) {
     setBulkProgress({ done: 0, total })
 
     // Merged one pair at a time (not a single batch call) so the bar below
-    // reflects real progress — each merge does several sequential DB writes,
+    // reflects real progress. Each merge does several sequential DB writes,
     // so a fake "climbing" bar would badly mislead on a big batch.
     let merged = 0
     let failed = 0
@@ -567,7 +567,7 @@ export default function MergeTools({ embeddedOrgId }) {
         <h1 className="font-display font-bold text-3xl text-pb-text tracking-tight mb-2">Merge Duplicates</h1>
         <p className="text-pb-faint text-sm leading-relaxed">
           Players with the same name from different data sources are shown below, along with names that are close
-          but not identical for you to check by hand — a likely typo ("Malcolm" vs "Malcom"), or one record using a
+          but not identical for you to check by hand. A likely typo ("Malcolm" vs "Malcom"), or one record using a
           shorter first name or an initial ("Brad K Mant" vs "Mant, Bradley"). Use Manual Merge for name changes
           (e.g. after marriage).
         </p>

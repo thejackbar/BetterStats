@@ -128,19 +128,19 @@ function AcceptInvite({ token, mode = 'invite' }) {
       <p className="text-pb-text text-sm">
         {isReset ? (
           <>
-            Hi{invite.display_name ? ` ${invite.display_name}` : ''} — choose a new password
+            Hi{invite.display_name ? ` ${invite.display_name}` : ''}. Choose a new password
             for your admin account{invite.club_name ? ` at ${invite.club_name}` : ''}.
           </>
         ) : (
           <>
-            Welcome{invite.display_name ? `, ${invite.display_name}` : ''} — set a password to
+            Welcome{invite.display_name ? `, ${invite.display_name}` : ''}. Set a password to
             activate your admin account{invite.club_name ? ` for ${invite.club_name}` : ''}.
           </>
         )}
       </p>
       {invite.username && (
         <p className="font-mono text-[11px] text-pb-faint">
-          Your username is <strong className="text-pb-text">{invite.username}</strong> — use it to log in from now on.
+          Your username is <strong className="text-pb-text">{invite.username}</strong>. Use it to log in from now on.
         </p>
       )}
 
@@ -198,7 +198,7 @@ function ForgotPassword({ onBack }) {
       await api.forgotPassword(email.trim())
       setSent(true)
     } catch (err) {
-      setError(err.message || 'Could not send a reset link — try again shortly.')
+      setError(err.message || 'Could not send a reset link. Try again shortly.')
     } finally {
       setSending(false)
     }

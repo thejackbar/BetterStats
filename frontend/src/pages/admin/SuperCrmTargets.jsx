@@ -117,7 +117,7 @@ function TargetFormModal({ open, onClose, periodType, periodKey, existing, onSav
   }
 
   return (
-    <Modal open={open} onClose={onClose} title={`Target — ${periodKey}`}>
+    <Modal open={open} onClose={onClose} title={`Target: ${periodKey}`}>
       <form onSubmit={submit} className="space-y-3">
         <Field label="Clubs won"><NumberInput min={0} value={clubsWon} onChange={e => setClubsWon(e.target.value)} /></Field>
         <Field label="New ARR ($)"><NumberInput min={0} value={arr} onChange={e => setArr(e.target.value)} /></Field>
@@ -202,7 +202,7 @@ export default function SuperCrmTargets() {
           <Link to="/admin/super/crm" className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text">
             &larr; SALES PIPELINE
           </Link>
-          <h1 className="font-display font-bold text-xl">BetterCRM — Sales Targets</h1>
+          <h1 className="font-display font-bold text-xl">BetterCRM. Sales Targets</h1>
         </div>
         <div className="flex items-center gap-2">
           <NumberInput value={fyYear} onChange={e => setFyYear(Number(e.target.value) || fyYear)} className="w-24" />
@@ -250,7 +250,7 @@ export default function SuperCrmTargets() {
             <div className="pb-card px-3 py-2.5">
               <div className="font-mono text-[10px] tracking-wide text-pb-faint uppercase mb-1">Trials started</div>
               <ProgressBar actual={actuals.trials_started} target={currentTarget?.target_trials} format={v => v} />
-              <div className="text-[10.5px] text-pb-faintest mt-1">Approximate — see note below</div>
+              <div className="text-[10.5px] text-pb-faintest mt-1">Approximate: see note below</div>
             </div>
             <div className="pb-card px-3 py-2.5">
               <div className="font-mono text-[10px] tracking-wide text-pb-faint uppercase mb-1">Trial conversions</div>
@@ -265,12 +265,12 @@ export default function SuperCrmTargets() {
             <p className="text-[12px] text-pb-faint pb-card px-3 py-2 border-pb-accent/30">
               At the current run rate, the New ARR target for {periodKey} would be reached around{' '}
               <span className="text-pb-text font-medium">{arrProjection.toLocaleString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
-              {' '}— a simple linear projection, not a sophisticated forecast.
+              {' '}. A simple linear projection, not a sophisticated forecast.
             </p>
           )}
 
           <div className="pb-card px-4 py-3">
-            <h3 className="font-display font-bold text-[13px] mb-2">Monthly target vs actual — New ARR (FY{fyYear})</h3>
+            <h3 className="font-display font-bold text-[13px] mb-2">Monthly target vs actual. New ARR (FY{fyYear})</h3>
             {yearSeries ? (
               <ResponsiveContainer width="100%" height={220}>
                 <LineChart data={yearSeries} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}>

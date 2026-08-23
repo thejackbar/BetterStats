@@ -82,7 +82,7 @@ export default function KlubproMigration() {
           <div className="min-w-[280px]">
             <Label>Mapped club</Label>
             <Select value={cmId} onChange={e => setCmId(e.target.value)} className="mt-1">
-              <option value="">— select a club —</option>
+              <option value="">. Select a club, </option>
               {mappings.filter(c => c.betterstats_organisation_id).map(c => (
                 <option key={c.id} value={c.id}>
                   {c.betterstats_organisation_name} ← {c.klubpro_club_name}
@@ -157,7 +157,7 @@ function Dashboard({ dash, orgs, onReload }) {
   }
 
   return (
-    <Card title="Staging summary — all target clubs">
+    <Card title="Staging summary. All target clubs">
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
@@ -183,7 +183,7 @@ function Dashboard({ dash, orgs, onReload }) {
                     onChange={e => { if (e.target.value && e.target.value !== r.betterstats_organisation_id) map(r, e.target.value) }}
                     className={r.betterstats_organisation_id ? '' : 'text-pb-faint'}
                   >
-                    <option value="">— select BetterStats club —</option>
+                    <option value="">. Select BetterStats club, </option>
                     {orgs.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                   </Select>
                 </td>
@@ -231,7 +231,7 @@ function History({ orgId, selected, onChanged }) {
   if (!batches.length) return <Card><p className="text-pb-faint text-sm">No imports yet{selected ? ` for ${selected.betterstats_organisation_name}` : ''}.</p></Card>
 
   return (
-    <Card title={`Import history${selected ? ` — ${selected.betterstats_organisation_name}` : ' — all clubs'}`}>
+    <Card title={`Import history${selected ? `. ${selected.betterstats_organisation_name}` : '. All clubs'}`}>
       <div className="space-y-2">
         {batches.map(b => (
           <div key={b.id} className="flex items-center justify-between gap-3 pb-hairline-t pt-2 first:pt-0 first:border-0">

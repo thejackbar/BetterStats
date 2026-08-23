@@ -97,7 +97,7 @@ def enforce(key: str, limit: int, window_sec: int, detail: str | None = None) ->
         retry_int = int(retry_after) + 1
         raise HTTPException(
             status_code=429,
-            detail=detail or f"Too many requests — try again in {retry_int}s",
+            detail=detail or f"Too many requests. Try again in {retry_int}s",
             headers={"Retry-After": str(retry_int)},
         )
 
@@ -113,7 +113,7 @@ def assert_not_locked(key: str, max_failures: int, window_sec: int, detail: str 
         retry_int = int(_failures.retry_after(key, window_sec)) + 1
         raise HTTPException(
             status_code=429,
-            detail=detail or f"Too many attempts — try again in {retry_int}s",
+            detail=detail or f"Too many attempts. Try again in {retry_int}s",
             headers={"Retry-After": str(retry_int)},
         )
 

@@ -418,7 +418,7 @@ function PartnershipsTab({ data, fmt = n => n }) {
           {wicketBuckets.map(({ ordinal, wicket, records }) => (
             <div key={wicket} className="pb-card overflow-hidden">
               <div className="px-5 py-3 pb-hairline-b bg-pb-surface2/40">
-                <Label style={{ color: 'var(--pb-accent)' }}>{ordinal} WICKET — TOP 10 PARTNERSHIPS</Label>
+                <Label style={{ color: 'var(--pb-accent)' }}>{ordinal} WICKET. TOP 10 PARTNERSHIPS</Label>
               </div>
               <div className="overflow-x-auto pb-scroll">
                 <table className="w-full text-[13px]">
@@ -599,7 +599,7 @@ function MilestonesTab({ data, loading, gradeName, fmt = n => n }) {
     <div>
       <p className="text-pb-faintest text-sm mb-4">
         {gradeName
-          ? <>Milestones within <span className="text-pb-text">{gradeName}</span> — runs, wickets, catches and games played in that grade specifically.</>
+          ? <>Milestones within <span className="text-pb-text">{gradeName}</span>: runs, wickets, catches and games played in that grade specifically.</>
           : <>Career milestones across the whole club. Pick a grade above to see milestones within that grade instead.</>}
       </p>
       <div className="flex flex-wrap items-center gap-3 mb-5">

@@ -70,7 +70,7 @@ async def run(days: int, batch: int) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="Backfill usage_events.resolved_marketing_club_id.")
     ap.add_argument("--days", type=int, default=90,
-                    help="how far back to backfill (default 90 — the scoring window)")
+                    help="how far back to backfill (default 90. The scoring window)")
     ap.add_argument("--batch", type=int, default=10000,
                     help="rows (by id range) per committed batch (default 10000)")
     args = ap.parse_args()

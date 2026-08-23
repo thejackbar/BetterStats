@@ -15,7 +15,7 @@ function NewsBody({ slug }) {
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
 
-  usePageMeta({ title: `News — ${site.name}`, url: `https://betterat.cricket/${slug}/website/news` })
+  usePageMeta({ title: `News. ${site.name}`, url: `https://betterat.cricket/${slug}/website/news` })
 
   useEffect(() => {
     let cancelled = false
@@ -45,7 +45,7 @@ function NewsBody({ slug }) {
       {loading ? (
         <PbSpinner message="Loading news…" />
       ) : items.length === 0 ? (
-        <p className="text-pb-faint py-12 text-center">No news yet — check back soon.</p>
+        <p className="text-pb-faint py-12 text-center">No news yet. Check back soon.</p>
       ) : (
         <>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">

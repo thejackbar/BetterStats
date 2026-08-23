@@ -361,7 +361,7 @@ function SeasonPlanTab({ plan, planLoading, members, roles, categories, year, se
       {planLoading ? <PbSpinner message="Loading season plan…" /> : tasks.length === 0 ? (
         <div className="pb-card p-6 text-center text-pb-dim text-sm">
           {plan.length === 0
-            ? 'No tasks for this season yet — click "Generate this season" to create occurrences from your templates.'
+            ? 'No tasks for this season yet. Click "Generate this season" to create occurrences from your templates.'
             : 'No tasks match the filters.'}
         </div>
       ) : (
@@ -705,7 +705,7 @@ function CategoryManager({ categories, onChanged }) {
     if (!confirm(`Delete category "${c.name}"? Tasks keep working; they just lose this label.`)) return
     try { await api.diaryDeleteCategory(c.id); toast.success('Deleted'); onChanged() } catch (e) { toast.error(e.message) }
   }
-  if (categories.length === 0) return <div className="font-mono text-[10px] text-pb-faintest">No categories yet — add the starter set or create one on a template above.</div>
+  if (categories.length === 0) return <div className="font-mono text-[10px] text-pb-faintest">No categories yet. Add the starter set or create one on a template above.</div>
   return (
     <div className="space-y-1.5">
       {categories.map(c => {
@@ -762,7 +762,7 @@ function TemplatesTab({ definitions, categories, roles, onReload, onCreateCatego
       <NewDefinitionForm categories={categories} roles={roles} onCreated={onReload} onCreateCategory={onCreateCategory} />
 
       {definitions.length === 0 ? (
-        <div className="pb-card p-6 text-center text-pb-dim text-sm">No templates yet — add the starter set above, or create your own.</div>
+        <div className="pb-card p-6 text-center text-pb-dim text-sm">No templates yet. Add the starter set above, or create your own.</div>
       ) : (
         <div className="space-y-1.5">
           {definitions.map(d => (

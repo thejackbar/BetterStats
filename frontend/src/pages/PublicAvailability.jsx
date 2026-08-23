@@ -173,7 +173,7 @@ export default function PublicAvailability() {
       setTimeout(() => setSavedDate((cur) => (cur === d ? null : cur)), 1600)
     } catch (e) {
       setMe(prev) // roll back
-      setError(e.message || 'Couldn’t save — please try again.')
+      setError(e.message || 'Couldn’t save: please try again.')
     } finally {
       setSavingDate((cur) => (cur === d ? null : cur))
     }

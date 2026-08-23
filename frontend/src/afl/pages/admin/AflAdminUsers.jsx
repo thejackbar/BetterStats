@@ -65,7 +65,7 @@ export default function AflAdminUsers() {
       <p className="text-sm text-pb-dim max-w-2xl">Everyone who can log in and manage this club.</p>
 
       {error && <p className="pb-card p-3 text-sm text-[var(--pb-negative)]">{error}</p>}
-      {invited && <p className="pb-card p-3 text-sm text-[var(--pb-positive)]">Invited — a set-your-password link was emailed to {invited}.</p>}
+      {invited && <p className="pb-card p-3 text-sm text-[var(--pb-positive)]">Invited. A set-your-password link was emailed to {invited}.</p>}
 
       <div className="pb-card p-4 space-y-3 max-w-lg">
         <SectionTitle>Invite an admin</SectionTitle>

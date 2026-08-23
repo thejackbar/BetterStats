@@ -1574,7 +1574,7 @@ async def start_trial(
     if not club.grassroots_guid:
         raise HTTPException(
             status_code=422,
-            detail="This club has no Cricket Australia id on file — start it from All Clubs instead",
+            detail="This club has no Cricket Australia id on file. Start it from All Clubs instead",
         )
 
     from app.routers.self_serve_trial import _slugify, _unique_slug
@@ -1839,9 +1839,9 @@ async def extend_trial(
 
     note = f"Extended trial by {body.days} day(s) to {new_trial_end.date().isoformat()} for {to_email}"
     if nominated_invited is True:
-        note += f" — invited {person.full_name} as Primary Admin"
+        note += f". Invited {person.full_name} as Primary Admin"
     elif nominated_invited is False:
-        note += f" — made {person.full_name} Primary Admin"
+        note += f", made {person.full_name} Primary Admin"
     # meta carries the rendered email (when it got that far — a render
     # failure leaves these None) alongside the trial facts, so the SAME
     # "click to view the email" affordance the drawer's other email sends

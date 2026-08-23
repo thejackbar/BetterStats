@@ -206,7 +206,7 @@ function SplitPlayer({ players, onSplit }) {
           {error && <p className="text-sm text-[var(--pb-negative)]">{error}</p>}
           {result && (
             <p className="text-sm text-[var(--pb-positive)]">
-              Split done — {result.seasons_moved} season{result.seasons_moved === 1 ? '' : 's'} moved
+              Split done: {result.seasons_moved} season{result.seasons_moved === 1 ? '' : 's'} moved
               to a new record for {result.new_player_name}.
             </p>
           )}
@@ -245,8 +245,8 @@ function SplitPlayer({ players, onSplit }) {
                   {preview.unattributed_imported_rows > 0 && (
                     <p className="text-[11px] text-pb-faintest">
                       {preview.unattributed_imported_rows} row
-                      {preview.unattributed_imported_rows === 1 ? '' : 's'} aren't tied to a season
-                      — an import that never resolved one, or a career-only adjustment — so
+                      {preview.unattributed_imported_rows === 1 ? '' : 's'} aren't tied to a season,
+                      an import that never resolved one, or a career-only adjustment, so
                       {preview.unattributed_imported_rows === 1 ? ' it stays' : ' they stay'} with
                       the original record.
                     </p>
@@ -316,7 +316,7 @@ function MergePair({ pair, onMerged, onIgnored, onSkip, busyGlobal }) {
     <div className="pb-card p-4 space-y-3">
       <div className="flex items-center gap-2 flex-wrap text-xs">
         <span className="font-mono uppercase text-pb-faint">
-          {pair.kind === 'exact' ? 'Possible duplicate' : `Possible spelling mistake — ${Math.round((pair.confidence || 0) * 100)}% similar name`}
+          {pair.kind === 'exact' ? 'Possible duplicate' : `Possible spelling mistake, ${Math.round((pair.confidence || 0) * 100)}% similar name`}
         </span>
         {pair.redacted && <span className="px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faint">Manual review only</span>}
         {pair.kind === 'fuzzy' && <span className="px-1.5 py-0.5 rounded bg-pb-surface2 text-pb-faint">Check it's the same person</span>}
@@ -326,7 +326,7 @@ function MergePair({ pair, onMerged, onIgnored, onSkip, busyGlobal }) {
         <PlayerCard info={pair.player_a} selected={keepId === pair.player_a.id} onSelect={() => setKeepId(pair.player_a.id)} />
         <PlayerCard info={pair.player_b} selected={keepId === pair.player_b.id} onSelect={() => setKeepId(pair.player_b.id)} />
       </div>
-      <p className="text-xs text-pb-dim">Will keep <strong className="text-pb-text">{keepName}</strong> — merge all records from <strong className="text-pb-text">{removeName}</strong> into it, then delete it.</p>
+      <p className="text-xs text-pb-dim">Will keep <strong className="text-pb-text">{keepName}</strong>. Merge all records from <strong className="text-pb-text">{removeName}</strong> into it, then delete it.</p>
       <div className="flex gap-2">
         <button disabled={busy || busyGlobal} onClick={merge} className="px-3 py-1.5 rounded text-sm font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
           Confirm merge
@@ -431,7 +431,7 @@ export default function AflAdminMergePlayers() {
   }
   const onIgnored = () => refreshCandidates()
   // A split leaves two records with the same name, which is an exact-name
-  // merge candidate — so the pair list has to be re-read, or the screen would
+  // merge candidate, so the pair list has to be re-read, or the screen would
   // offer to merge back a split it can't see yet.
   const onSplitDone = () => {
     refreshCandidates()
@@ -484,7 +484,7 @@ export default function AflAdminMergePlayers() {
     <div className="space-y-6">
       <SectionTitle>Merge Players</SectionTitle>
       <p className="text-sm text-pb-dim max-w-2xl">
-        Combine duplicate player records into one — everything the removed
+        Combine duplicate player records into one. Everything the removed
         player was credited with (games, goals, behinds, best-on-grounds,
         imported seasons and honours) moves onto the kept player. If the
         opposite has happened and one record is really two people, split it
@@ -506,7 +506,7 @@ export default function AflAdminMergePlayers() {
         <div className="pb-card p-4 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="font-semibold text-sm">{bulkEligible.length} exact-name duplicate{bulkEligible.length === 1 ? '' : 's'} found</div>
-            <div className="text-xs text-pb-faint">Safe to bulk-merge — fuzzy/spelling matches always need manual confirmation.</div>
+            <div className="text-xs text-pb-faint">Safe to bulk-merge: fuzzy/spelling matches always need manual confirmation.</div>
           </div>
           <button disabled={bulkBusy} onClick={bulkApprove} className="px-4 py-2 rounded font-semibold bg-[var(--pb-accent)] text-black disabled:opacity-50">
             {bulkBusy ? (bulkProgress ? `Merging ${bulkProgress.done}/${bulkProgress.total}…` : 'Merging…') : `Bulk approve ${bulkEligible.length}`}
@@ -518,7 +518,7 @@ export default function AflAdminMergePlayers() {
         <div className="pb-card p-4 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <div className="font-semibold text-sm">{redactedCount} pair{redactedCount === 1 ? '' : 's'} involving a private/redacted player</div>
-            <div className="text-xs text-pb-faint">CA hides a junior's name as "********" — two redacted players can never be confirmed as the same person, so there's nothing to review here.</div>
+            <div className="text-xs text-pb-faint">CA hides a junior's name as "********". Two redacted players can never be confirmed as the same person, so there's nothing to review here.</div>
           </div>
           <button disabled={bulkIgnoreBusy} onClick={bulkIgnoreRedacted} className="px-4 py-2 rounded font-semibold border border-pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-50">
             {bulkIgnoreBusy ? 'Ignoring…' : `Ignore all ${redactedCount}`}

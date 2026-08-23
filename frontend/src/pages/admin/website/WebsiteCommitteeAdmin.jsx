@@ -161,7 +161,7 @@ export default function WebsiteCommitteeAdmin() {
   return (
     <div>
       <Flash msg={flash} />
-      <p className="text-pb-faint text-sm mb-4">The people who run the club — shown on your Committee page.</p>
+      <p className="text-pb-faint text-sm mb-4">The people who run the club, shown on your Committee page.</p>
 
       <CommitteeAutoConfig />
 

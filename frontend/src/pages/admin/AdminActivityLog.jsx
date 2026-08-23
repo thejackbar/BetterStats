@@ -108,7 +108,7 @@ export default function AdminActivityLog() {
       <div className="max-w-3xl">
         <h1 className="font-display font-bold text-2xl text-pb-text mb-2">Activity Log</h1>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
-          Append-only record of sensitive admin actions — merges, settings changes, destructive ops.
+          Append-only record of sensitive admin actions: merges, settings changes, destructive ops.
           Useful for figuring out who did what when something looks off.
         </p>
 

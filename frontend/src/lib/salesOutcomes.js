@@ -11,7 +11,7 @@ export const CALL_OUTCOMES = {
   number_disconnected: { label: 'Number disconnected', category: 'unsuccessful' },
   no_longer_at_club: { label: 'Person no longer at club', category: 'unsuccessful' },
   // Neutral
-  spoke_no_decision: { label: 'Spoke — no decision', category: 'neutral' },
+  spoke_no_decision: { label: 'Spoke: no decision', category: 'neutral' },
   asked_callback: { label: 'Asked to call back', category: 'neutral' },
   referred_to_other: { label: 'Referred to another person', category: 'neutral' },
   requested_information: { label: 'Requested information', category: 'neutral' },

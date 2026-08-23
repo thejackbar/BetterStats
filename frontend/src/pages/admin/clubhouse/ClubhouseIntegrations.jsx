@@ -125,7 +125,7 @@ export default function ClubhouseIntegrations() {
 
         <SectionHeading className="mt-8 mb-2">One connection, not one per screen</SectionHeading>
         <Note toneKey="calm" className="max-w-[56ch]">
-          Square authorises the club, not a module — connecting it here is what both the till mirror and
+          Square authorises the club, not a module. Connecting it here is what both the till mirror and
           member payments use. Connecting it twice was never possible; it only ever looked that way because
           two screens each asked for it.
         </Note>

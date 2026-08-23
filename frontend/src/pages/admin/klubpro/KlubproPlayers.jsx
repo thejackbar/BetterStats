@@ -347,7 +347,7 @@ export default function KlubproPlayers({ clubMapping }) {
     try {
       const r = await api.kpPlayerDryRun(cm)
       setDry(r)
-      if (!r.players_changing) toast.info('Nothing to change — approved matches already match the selected data.')
+      if (!r.players_changing) toast.info('Nothing to change. Approved matches already match the selected data.')
     } catch (e) { toast.error(e.message) }
   }
   const runImport = async () => {
@@ -357,7 +357,7 @@ export default function KlubproPlayers({ clubMapping }) {
     setBusy(true)
     try {
       const r = await api.kpPlayerImport(cm)
-      toast.success(`Imported — ${r.updated} updated, ${r.skipped} skipped`)
+      toast.success(`Imported, ${r.updated} updated, ${r.skipped} skipped`)
       await load()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
@@ -386,7 +386,7 @@ export default function KlubproPlayers({ clubMapping }) {
         </div>
         {counts.toImport > 0 && (
           <div className="mt-2 text-[12px] text-pb-amber">
-            {counts.toImport} approved player{counts.toImport === 1 ? ' is' : 's are'} not written to BetterStats yet —
+            {counts.toImport} approved player{counts.toImport === 1 ? ' is' : 's are'} not written to BetterStats yet, 
             approving only records your choices. Click <span className="font-semibold">Import</span> to apply them
             (run <span className="font-semibold">Dry run</span> first to preview).
           </div>
@@ -414,9 +414,9 @@ export default function KlubproPlayers({ clubMapping }) {
       </Card>
 
       {dry && (
-        <Card title={`Dry-run — ${dry.players_changing} players changing · ${dry.field_writes} field writes · ${dry.images_replacing || 0} image replacements`}>
+        <Card title={`Dry-run: ${dry.players_changing} players changing · ${dry.field_writes} field writes · ${dry.images_replacing || 0} image replacements`}>
           {dry.players_changing === 0 ? (
-            <p className="text-pb-faint text-sm">No changes — approved matches already match the selected data.</p>
+            <p className="text-pb-faint text-sm">No changes. Approved matches already match the selected data.</p>
           ) : (
             <div className="space-y-3">
               {dry.previews.filter(p => p.error || p.row_changes > 0).map(p => (
@@ -560,7 +560,7 @@ function PlayerRow({ bs, row, cand, expanded, onToggle, onField, onCheckAll, onU
                   ) : (
                     <span className={`text-[12px] truncate ${disabled ? 'text-pb-faintest' : c.differ ? 'text-pb-text' : 'text-pb-faint'}`}
                       style={c.differ && !disabled ? { color: 'var(--pb-accent)' } : {}}>
-                      {disabled ? '— no value —' : fmt(c.incoming)}
+                      {disabled ? ', no value, ' : fmt(c.incoming)}
                     </span>
                   )}
                 </div>

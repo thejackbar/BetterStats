@@ -102,7 +102,7 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
       <div className="text-pb-faint text-sm mt-1">{mod.blurb}</div>
       <div className="text-pb-faintest text-xs mt-2">
         {mod.core ? (
-          <>Your BetterStats access has ended — subscribe to restore your stats tools and public site.</>
+          <>Your BetterStats access has ended. Subscribe to restore your stats tools and public site.</>
         ) : (
           <>Available as an add-on. <Link to="/pricing" className="underline hover:text-pb-faint">See pricing</Link>.</>
         )}
@@ -110,7 +110,7 @@ function ModuleTile({ mod, entitled, planRow, pendingKind, coreLive, canSubscrib
       <div className="mt-3 flex flex-wrap items-center gap-2">
         {pendingKind ? (
           <span className="font-mono text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
-            {pendingKind === 'subscribe' ? 'Subscription requested' : 'Trial requested'} — pending review
+            {pendingKind === 'subscribe' ? 'Subscription requested' : 'Trial requested'}, pending review
           </span>
         ) : (
           <>
@@ -168,7 +168,7 @@ function SetupCard({ flow }) {
         </span>
       </div>
       <div className="text-pb-faint text-sm mt-1 mb-3">
-        A few setup steps are still waiting — knock them over and your club is fully set up.
+        A few setup steps are still waiting. Knock them over and your club is fully set up.
       </div>
       <div className="space-y-1">
         {shown.map((s) => (
@@ -342,7 +342,7 @@ export default function AdminDashboard() {
         )}
         <p className="text-pb-faintest text-xs mb-6">
           {isSuper ? (
-            'Super admin — all modules available'
+            'Super admin: all modules available'
           ) : billingModules.length ? (
             <>
               Plan:{' '}
@@ -376,7 +376,7 @@ export default function AdminDashboard() {
                 <p className="text-pb-faint text-xs mt-1">
                   Every module’s trial has finished, so BetterStats and your club’s public
                   page are paused for now. Subscribe whenever you’re ready to pick up where
-                  you left off — your data is safe.
+                  you left off. Your data is safe.
                 </p>
                 <div className="mt-2.5 flex flex-wrap items-center gap-2">
                   <Link

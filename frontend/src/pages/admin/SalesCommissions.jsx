@@ -62,7 +62,7 @@ function ForecastTable({ rows, totals, onOpen, activeKey }) {
       <td className={TD}>{r.clubs_attributed || <span className="text-pb-faintest">0</span>}</td>
       <td className={TD}>
         <Figure cents={r.pipeline_value_cents} active={activeKey === `${key}|open`}
-                title="Their open deals — click for the clubs behind it"
+                title="Their open deals. Click for the clubs behind it"
                 onOpen={() => onOpen(r, 'open')} />
       </td>
       <td className={TD}>{money(r.forecast_commission_cents)}</td>
@@ -130,7 +130,7 @@ function EarnedTable({ rows, totals, onOpen, activeKey }) {
               <td className={TD}>{r.paid_invoices || <span className="text-pb-faintest">0</span>}</td>
               <td className={TD}>
                 <Figure cents={r.won_value_cents} active={activeKey === `${r.rep_user_id}|won`}
-                        title="What their clubs have actually paid — click for the payments"
+                        title="What their clubs have actually paid. Click for the payments"
                         onOpen={() => onOpen(r, 'won')} />
               </td>
               <td className={TD}>{money(r.commission_earned_cents)}</td>
@@ -306,7 +306,7 @@ function Drilldown({ open, onClose }) {
       {data && items.length === 0 && (
         <p className="text-[12px] text-pb-faintest">
           {isOpen ? 'No deals behind this figure.'
-            : 'No payments behind this figure yet — commission is earned when Stripe confirms one.'}
+            : 'No payments behind this figure yet. Commission is earned when Stripe confirms one.'}
         </p>
       )}
       {items.length > 0 && (isOpen ? <DealsTable deals={items} /> : <PaymentsTable payments={items} />)}
@@ -360,7 +360,7 @@ function RatesPanel({ reps, defaultRate, onSave, onClear, busy }) {
       {reps.map(r => row(r.id, r.name, r.rate_percent, r.has_own_rate))}
       <p className="text-[11px] text-pb-faintest mt-2">
         A rep with no rate of their own is paid at the default. Changing a rate moves every
-        forecast, and never rewrites commission already earned — each payment keeps the rate
+        forecast, and never rewrites commission already earned. Each payment keeps the rate
         that applied on the day it landed.
       </p>
     </div>
@@ -522,7 +522,7 @@ function PeriodsPanel({ periodType, onType, data, loading }) {
       )}
       <p className="text-[11px] text-pb-faintest mt-2">
         Commission is earned in the period the club's payment landed and paid in the period the
-        payout was made, so the two legitimately land in different columns — a quarter's work is
+        payout was made, so the two legitimately land in different columns, a quarter's work is
         routinely paid in the next one.
       </p>
     </div>
@@ -558,7 +558,7 @@ export default function SalesCommissions() {
   const openDeals = useCallback((row, status) => {
     const key = `${row.rep_user_id}|${status}`
     const what = status === 'open' ? 'forecast pipeline' : 'payments received'
-    setDrill({ key, status, title: `${row.rep_name} — ${what}`, loading: true })
+    setDrill({ key, status, title: `${row.rep_name}. ${what}`, loading: true })
     api.salesCommissionDeals(row.rep_user_id, status)
       .then(res => setDrill(d => (d && d.key === key ? { ...d, loading: false, data: res } : d)))
       .catch(() => setDrill(d => (d && d.key === key
@@ -629,7 +629,7 @@ export default function SalesCommissions() {
               <div className={`${CARD} mb-4 border-pb-accent/40`}>
                 <p className="text-[12px] text-pb-text">
                   No commission rate is set yet, so every figure below reads $0. Set the default
-                  rate — or a rate per rep — in Commission rates.
+                  rate, or a rate per rep, in Commission rates.
                 </p>
               </div>
             )}
@@ -650,8 +650,8 @@ export default function SalesCommissions() {
               <ForecastTable rows={data.rows} totals={totals} onOpen={openDeals}
                              activeKey={drill?.key} />
               <p className="text-[11px] text-pb-faintest mt-2">
-                A club counts for the rep who EARNED it — the first to log a call outcome or send
-                it an email — not whoever holds it now. A deal's value is the price of the modules
+                A club counts for the rep who EARNED it, the first to log a call outcome or send
+                it an email, not whoever holds it now. A deal's value is the price of the modules
                 it is expected to buy, less any discount; weighted multiplies that by the deal's
                 own likelihood. Click any pipeline figure for the deals behind it.
               </p>
@@ -669,7 +669,7 @@ export default function SalesCommissions() {
                            activeKey={drill?.key} />
               <p className="text-[11px] text-pb-faintest mt-2">
                 Commission is earned on a confirmed Stripe payment, never on a deal's stage. Only
-                new business counts — a club's first payment, and later ones that add modules; an
+                new business counts. A club's first payment, and later ones that add modules; an
                 annual renewal of what they already hold earns nothing. Figures are net of GST, at
                 the rate that applied on the day the payment landed. Due is earned minus paid.
               </p>

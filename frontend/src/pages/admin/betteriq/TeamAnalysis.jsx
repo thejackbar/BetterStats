@@ -56,7 +56,7 @@ function SeasonCompare({ rows, loading }) {
     <Card accent eyebrow={`comparing ${usable.length} seasons`} title="Win rate over time"
       right={<Delta value={last - first} suffix=" pts" />}>
       <AreaChart points={usable.map(r => r.win_pct)} labels={usable.map(r => r.label)} format={v => `${v}%`} />
-      <Note>Win % per season across the selected range — record shown is over all games that season.</Note>
+      <Note>Win % per season across the selected range. Record shown is over all games that season.</Note>
     </Card>
   )
 }
@@ -297,7 +297,7 @@ function Batting({ d, seasonId, teamId }) {
           {be?.dismissal_scores?.length > 0 && (
             <Card eyebrow="when we fall" title="Score we're dismissed on">
               <MiniBars data={be.dismissal_scores} color="var(--pb-red)" fmt={x => `${x.pct}%`} />
-              <Note>What score our batters are usually on when out — too many cheap dismissals shows in the low bands.</Note>
+              <Note>What score our batters are usually on when out. Too many cheap dismissals shows in the low bands.</Note>
             </Card>
           )}
         </div>
@@ -335,7 +335,7 @@ function Batting({ d, seasonId, teamId }) {
       {be?.dismissals?.length > 0 && (
         <Card eyebrow="how we get out" title="Our dismissal types">
           <StackedBar data={be.dismissals.map(x => ({ type: x.type, count: x.pct, pct: x.pct }))} />
-          <Note>How our batters are dismissed across the period — a high caught share with cheap scores points to shot selection.</Note>
+          <Note>How our batters are dismissed across the period. A high caught share with cheap scores points to shot selection.</Note>
         </Card>
       )}
     </div>
@@ -357,7 +357,7 @@ function TeamPhases({ seasonId, teamId, side = 'bat' }) {
     return () => { alive = false }
   }, [seasonId, teamId, side])
   if (!ph?.available) return null
-  const title = side === 'bowl' ? 'Innings phases — what we concede' : 'Innings phases — how we bat'
+  const title = side === 'bowl' ? 'Innings phases, what we concede' : 'Innings phases, how we bat'
   return (
     <Card eyebrow="Estimated · ball-by-ball" title={title}
       right={ph.innings ? <Tag tone="faint">{ph.innings}{ph.total != null ? ` · ${ph.total}` : ''}</Tag> : null}>
@@ -447,7 +447,7 @@ function Bowling({ d, seasonId, teamId }) {
               </div>
             ))}
           </div>
-          <Note>A "burst" is {cb.burst_threshold}+ wickets in one innings — the spells that trigger collapses. Economy pairs the strike rate with how containing they are.</Note>
+          <Note>A "burst" is {cb.burst_threshold}+ wickets in one innings. The spells that trigger collapses. Economy pairs the strike rate with how containing they are.</Note>
         </Card>
       )}
 
@@ -499,7 +499,7 @@ function Bowling({ d, seasonId, teamId }) {
             <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--pb-hairline)' }}>
               <div className="iq-eyebrow mb-2.5">What score we remove them on</div>
               <MiniBars data={wq.score_bands} fmt={x => `${x.pct}%`} />
-              <Note>The score the opposition batter was on when our bowlers dismissed them (10-run bands) — lots in the low bands means we strike early.</Note>
+              <Note>The score the opposition batter was on when our bowlers dismissed them (10-run bands). Lots in the low bands means we strike early.</Note>
             </div>
           )}
           {wq.dismissals?.length > 0 && (
@@ -632,7 +632,7 @@ function Players({ d }) {
                 </div>
               ))}
             </div>
-            <Note>Each batter's average in their main position vs the club average for that slot — so an opener and a No. 8 aren't judged alike.</Note>
+            <Note>Each batter's average in their main position vs the club average for that slot, so an opener and a No. 8 aren't judged alike.</Note>
           </Card>
         )}
       </div>
@@ -692,7 +692,7 @@ export default function TeamAnalysis() {
   const teamId = ctx?.team?.id || null
   const isRange = ctx?.season?.mode === 'range'
   // In Compare mode every card aggregates the whole range, not just the "to"
-  // season — pass the in-range season-row ids so the backend scopes to all of them.
+  // season. Pass the in-range season-row ids so the backend scopes to all of them.
   const rangeIds = useMemo(() => (isRange ? seasonIdsInRange(ctx, seasons) : null), [isRange, ctx, seasons])
   const rangeKey = rangeIds ? rangeIds.join(',') : ''
 
@@ -731,7 +731,7 @@ export default function TeamAnalysis() {
 
   return (
     <IQLayout title="Team analysis">
-      <PageIntro>The opposition lens, pointed at us — how we win and lose, our batting & bowling shape, and where we're strong or fragile. Use the filter above to focus a season or compare across years.</PageIntro>
+      <PageIntro>The opposition lens, pointed at us: how we win and lose, our batting & bowling shape, and where we're strong or fragile. Use the filter above to focus a season or compare across years.</PageIntro>
 
       {!ready && <LoadingCard label="Loading…" expectedMs={2500} />}
 
@@ -744,13 +744,13 @@ export default function TeamAnalysis() {
 
           {data && data.record && (
             <div className="iq-fade">
-              {/* A card that failed server-side is reported, not silently blank —
+              {/* A card that failed server-side is reported, not silently blank, 
                   "no data" and "the query failed" are different things. */}
               {data.degraded?.length > 0 && (
                 <div className="flex items-start gap-2 mb-5 px-4 py-3 text-[12.5px]"
                   style={{ background: 'color-mix(in srgb, var(--pb-amber) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--pb-amber) 30%, transparent)', borderRadius: 10, color: 'var(--pb-dim)' }}>
                   <Icon name="info" size={15} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-amber)' }} />
-                  <span>Some cards couldn't be computed this time ({data.degraded.join(', ')}) — the rest of the page is unaffected. Reload to retry.</span>
+                  <span>Some cards couldn't be computed this time ({data.degraded.join(', ')}). The rest of the page is unaffected. Reload to retry.</span>
                 </div>
               )}
               {tab === 'overview' && <Overview d={data} isRange={isRange} compareRows={compareRows} compareLoading={compareLoading} />}

@@ -69,7 +69,7 @@ _SQUAD_ROLE_PRIORITY = {
     "vice captain": 1,
     "player of the grand final": 2,
     "player of the final": 2,
-    "best on ground — grand final": 2,
+    "best on ground, grand final": 2,
     "best on ground - grand final": 2,
     "coach": 3,
 }
@@ -93,7 +93,7 @@ def _competition_title(label: str) -> Optional[str]:
     is the page's own subject, and printing it as the card's title would say
     the same thing twice. It still keys the group; it just isn't shown.
     """
-    stripped = _PREMIERSHIP_AWARD_RE.sub("", label).strip(" -–—:")
+    stripped = _PREMIERSHIP_AWARD_RE.sub("", label).strip(" -–, :")
     return label if stripped else None
 
 

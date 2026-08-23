@@ -177,7 +177,7 @@ export default function SuperWizardAnalytics() {
               <p className="font-mono text-[10px] text-pb-faintest mt-1.5">
                 "Reached" excludes clubs that haven't unlocked the step yet (still waiting on their
                 first sync) and steps marked not applicable. "Stuck here" is the first step still
-                open for that club, in wizard order — i.e. where they'd land if they opened the
+                open for that club, in wizard order, i.e. where they'd land if they opened the
                 wizard right now.
               </p>
             </div>

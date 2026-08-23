@@ -376,7 +376,7 @@ export function ActionEditor({ task, allTasks, objectives, members, inline, onCl
             <span className={`${cap} block mb-1`}>RESPONSIBLE</span>
             <select className={inp} value={form.assigned_to_member_id}
               onChange={e => set('assigned_to_member_id', e.target.value)}>
-              <option value="">— unassigned —</option>
+              <option value="">, unassigned, </option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -448,7 +448,7 @@ export function ActionEditor({ task, allTasks, objectives, members, inline, onCl
           )}
           {blockers.length > 0 && (
             <div className="font-mono text-[10px] text-pb-amber mt-1">
-              Blocked — {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
+              Blocked, {blockers.length} {blockers.length === 1 ? 'action it waits on is' : 'actions it waits on are'} still open.
             </div>
           )}
         </div>
@@ -589,7 +589,7 @@ export function MotionEditor({ meetingId, motion, members, objectives, inline, o
             <span className={`${cap} block mb-1`}>MOVED BY</span>
             <select className={inp} value={form.proposed_by_member_id}
               onChange={e => set('proposed_by_member_id', e.target.value)}>
-              <option value="">— nobody recorded —</option>
+              <option value="">. Nobody recorded, </option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -597,7 +597,7 @@ export function MotionEditor({ meetingId, motion, members, objectives, inline, o
             <span className={`${cap} block mb-1`}>SECONDED BY</span>
             <select className={inp} value={form.seconded_by_member_id}
               onChange={e => set('seconded_by_member_id', e.target.value)}>
-              <option value="">— nobody recorded —</option>
+              <option value="">. Nobody recorded, </option>
               {(members || []).map(m => <option key={m.member_id} value={m.member_id}>{m.full_name}</option>)}
             </select>
           </label>
@@ -1528,7 +1528,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
               <span className="block text-pb-text leading-snug">{chosen.title}</span>
             </>
           ) : (
-            <span className="text-pb-faint">— not on the plan —</span>
+            <span className="text-pb-faint">, not on the plan, </span>
           )}
         </span>
         <span className="text-pb-faint text-[11px] leading-none pt-1">{open ? '▴' : '▾'}</span>
@@ -1544,7 +1544,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
           <div className="max-h-64 overflow-y-auto pb-scroll" role="listbox">
             <button type="button" onClick={() => pick('')}
               className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface ${value ? 'text-pb-faint' : 'text-pb-text'}`}>
-              — not on the plan —
+              Not on the plan
             </button>
             {/* Plan → theme → objective, indented. Only the OBJECTIVES are
                 buttons: an action or a motion can serve an objective and
@@ -1725,7 +1725,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <span className={`${cap} block mb-1`}>STRATEGIC PLAN</span>
           <select className={inp} value={form.plan_id}
             onChange={e => setForm(f => ({ ...f, plan_id: e.target.value, pillar_id: '' }))}>
-            <option value="">— pick a plan —</option>
+            <option value="">. Pick a plan, </option>
             {(plans || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
@@ -1737,7 +1737,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           <select className={inp} value={form.pillar_id}
             onChange={e => setForm(f => ({ ...f, pillar_id: e.target.value }))}
             disabled={!form.plan_id}>
-            <option value="">{form.plan_id ? '— pick a theme —' : '— pick a plan first —'}</option>
+            <option value="">{form.plan_id ? ': pick a theme, ' : ', pick a plan first, '}</option>
             {(pillars || []).filter(p => p.plan_id === form.plan_id)
               .map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -1757,7 +1757,7 @@ function ObjectiveForm({ objective, plans, pillars, positions, planId, pillarId,
           {ownerMode === 'position' ? (
             <select className={inp} value={form.owner_position_id}
               onChange={e => setForm(f => ({ ...f, owner_position_id: e.target.value }))}>
-              <option value="">— unassigned —</option>
+              <option value="">, unassigned, </option>
               {(positions || []).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           ) : (
@@ -2258,7 +2258,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
     const bits = []
     if (a) bits.push(`${a} action${a === 1 ? '' : 's'}`)
     if (m) bits.push(`${m} motion${m === 1 ? '' : 's'}`)
-    return `\n\n${bits.join(' and ')} serving ${a + m === 1 ? 'it' : 'them'} will be KEPT — they simply stop being linked to an objective.`
+    return `\n\n${bits.join(' and ')} serving ${a + m === 1 ? 'it' : 'them'} will be KEPT. They simply stop being linked to an objective.`
   }
 
   async function removePlan(plan) {
@@ -2267,7 +2267,7 @@ function StrategicPlansSection({ report, pillars, positions, members, memberName
       + (objs.length
         ? `\n\nIts ${objs.length} objective${objs.length === 1 ? '' : 's'} go with it.` + keptLine(tally(objs))
         : '')
-      + `\n\nIts themes go with it too — a theme belongs to one plan.\n\nThis cannot be undone.`
+      + `\n\nIts themes go with it too. A theme belongs to one plan.\n\nThis cannot be undone.`
     if (!window.confirm(msg)) return
     try {
       await api.committeeDeletePlan(plan.id)
@@ -2923,7 +2923,7 @@ function ThemesSection({ pillars, plans, onChanged }) {
   return (
     <div>
       <p className="text-pb-faint text-[13px] mb-4 max-w-2xl leading-relaxed">
-        The headings a plan groups its objectives under — participation, finances, volunteers,
+        The headings a plan groups its objectives under: participation, finances, volunteers,
         facilities, or whatever your own plan is built around. A theme belongs to one plan, and
         the objectives under it belong to that plan too.
       </p>
@@ -3223,7 +3223,7 @@ export function PlanTab({ members, section, query = '' }) {
                         {pillarFilter ? 'Nothing on this plan under that theme.' : 'Nothing on this plan yet.'}
                       </div>
                     )}
-                    {/* A theme is a heading, not another indent — the plan →
+                    {/* A theme is a heading, not another indent, the plan →
                         objective → action depth stays three. */}
                     {byTheme(p.objective_list || []).map(g => (
                       <div key={g.id || '__none'} className="space-y-2">
@@ -3373,7 +3373,7 @@ function DeliveryRegister({ report, memberName, onChanged }) {
 
 // A Gantt over the action register. Actions carry a start, a due date, a
 // percentage and what they wait on now, which is everything a bar chart of the
-// plan needs — this derives the critical path the same way ClubDiary does over
+// plan needs. This derives the critical path the same way ClubDiary does over
 // its own dependencies, rather than inventing a second idea of "blocked".
 //
 // An action with no dates can't be placed on a timeline, so it is listed

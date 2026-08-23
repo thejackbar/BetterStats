@@ -220,7 +220,7 @@ function EventForm({ event, seedDate, types, members, onSaved, onClose }) {
           <div className="flex-1 min-w-[180px]">
             <label className={lbl}>EVENT TYPE</label>
             <select className={inp} value={form.event_type_id} onChange={e => set({ event_type_id: e.target.value })}>
-              <option value="">— none —</option>
+              <option value="">, none, </option>
               {types.map(t => <option key={t.id} value={t.id}>{t.name}{t.is_committee_only ? ' (committee)' : ''}</option>)}
             </select>
           </div>

@@ -43,7 +43,7 @@ STARTER_DIARY_CATEGORIES = [
 # (title, category name, frequency, default_month, description)
 STARTER_DIARY_TASKS = [
     ("Annual General Meeting", "Governance", "annual", 9,
-     "Hold the AGM — committee elections, annual reports, motions."),
+     "Hold the AGM: committee elections, annual reports, motions."),
     ("Annual return / incorporation renewal", "Compliance", "annual", 10,
      "Lodge the club's annual return with the incorporating body (state associations register)."),
     ("Public liability insurance renewal", "Compliance", "annual", 6,
@@ -54,7 +54,7 @@ STARTER_DIARY_TASKS = [
      "Lodge the quarter's Business Activity Statement."),
     ("Annual tax return / financial statements", "Tax & Finance", "annual", 9,
      "Prepare and lodge the club's annual income tax return (if applicable) and annual financial statements for member approval."),
-    ("Affiliation fees — league/association", "Tax & Finance", "annual", 8,
+    ("Affiliation fees, league/association", "Tax & Finance", "annual", 8,
      "Pay the club's annual affiliation fees to the league/association and Cricket Australia."),
     ("Pre-season ground preparation", "Ground & Equipment", "annual", 8,
      "Wicket/outfield renovation, top-dressing, line marking ahead of the new season."),

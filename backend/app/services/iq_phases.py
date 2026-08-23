@@ -117,14 +117,14 @@ def _insight(phases, who, verb="score"):
     bits = [f"{who} {verb} fastest in the {top['label'].lower()} ({top['rr']} rpo) and slowest in the {low['label'].lower()} ({low['rr']} rpo)."]
     if death and pp and death["rr"] < pp["rr"] - 0.6:
         if verb == "concede":
-            bits.append(f"{who} tighten up at the death rather than getting taken apart — the back end is a strength.")
+            bits.append(f"{who} tighten up at the death rather than getting taken apart. The back end is a strength.")
         else:
-            bits.append(f"{who} tend to stall at the death rather than accelerate — squeeze the back end.")
+            bits.append(f"{who} tend to stall at the death rather than accelerate, squeeze the back end.")
     elif death and pp and death["rr"] > pp["rr"] + 0.6:
         if verb == "concede":
-            bits.append(f"{who} get away from us at the death — hold something back for the last 10.")
+            bits.append(f"{who} get away from us at the death. Hold something back for the last 10.")
         else:
-            bits.append(f"{who} accelerate hard at the death — hold something back for the last 10.")
+            bits.append(f"{who} accelerate hard at the death. Hold something back for the last 10.")
     return " ".join(bits)
 
 

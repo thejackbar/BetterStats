@@ -27,7 +27,7 @@ const FIELDS = [
   ['overseas_country', 'Overseas country', false, 'Filling this in marks them overseas.'],
   ['status', 'Active / inactive', false, 'Inactive hides them from availability and selection.'],
   ['is_public', 'Show on public website', false, 'Show / Hide.'],
-  ['financial', 'Fees status', false, 'Financial / Not financial. Only sets it — clear it on the profile.'],
+  ['financial', 'Fees status', false, 'Financial / Not financial. Only sets it, clear it on the profile.'],
   ['training', 'Training', false, 'At training / Not at training.'],
 ]
 const FIELD_LABEL = {
@@ -38,8 +38,8 @@ const FIELD_LABEL = {
 // Mirrors import_ingest.NAME_FORMAT_LABELS on the backend.
 const NAME_FORMAT_OPTIONS = [
   ['auto', 'Auto-detect (recommended)'],
-  ['first_last', 'First name then Surname — e.g. "Jack Barendse"'],
-  ['last_first', 'Surname then First name — e.g. "Barendse Jack" or "Barendse, Jack"'],
+  ['first_last', 'First name then Surname: e.g. "Jack Barendse"'],
+  ['last_first', 'Surname then First name: e.g. "Barendse Jack" or "Barendse, Jack"'],
 ]
 
 const cell = 'bg-pb-surface2 border pb-hairline rounded px-2 py-1 text-pb-text text-[12px] focus:outline-none focus:border-pb-accent'
@@ -129,7 +129,7 @@ function FieldRow({ field, label, required, hint, value, headers, conf, onMap })
         </span>
         <span className="text-pb-faintest text-[11px] shrink-0" aria-hidden>←</span>
         <select className={`${cell} flex-1 min-w-0 text-pb-text`} value={value || ''} onChange={(e) => onMap(field, e.target.value)}>
-          <option value="">— not in my file —</option>
+          <option value="">, not in my file, </option>
           {headers.map((h) => <option key={h} value={h}>{h}</option>)}
         </select>
         {conf != null && <Pct score={conf} />}
@@ -181,8 +181,8 @@ function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, ma
       )}
       <p className="text-[11px] text-pb-faint mt-1.5 leading-relaxed max-w-2xl">
         {nameMode === 'single'
-          ? 'One name column — pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
-          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works — just leave First name unmapped.'}
+          ? 'One name column. Pick the word order it\'s written in so "Surname Firstname" isn\'t misread as first-name-first.'
+          : 'Two separate columns match unambiguously, no format guess needed. A surname-only sheet also works, just leave First name unmapped.'}
       </p>
     </div>
   )
@@ -191,7 +191,7 @@ function NameColumnFields({ nameMode, setNameMode, nameFormat, setNameFormat, ma
 // ── searchable picker (renders a handful of options at a time, scales to
 //    thousands of players without freezing) ───────────────────────────────────
 function valueLabel(value, idName, kind) {
-  if (!value) return kind === 'squad' ? '— Leave unset —' : '— Skip (unmatched) —'
+  if (!value) return kind === 'squad' ? '. Leave unset. ' : '. Skip (unmatched), '
   if (value === '__new__') return kind === 'squad' ? '+ Create new team' : '+ Create new player'
   if (value === '__skip__') return kind === 'squad' ? 'Leave unset' : 'Skip'
   return idName.get(value) || '(selected)'
@@ -595,7 +595,7 @@ export default function AdminPlayerImport() {
   )
 
   // Keep the change preview fresh as the mapping / matches change (debounced).
-  // Waits for a name column to be mapped — without it /resolve 422s.
+  // Waits for a name column to be mapped, without it /resolve 422s.
   const nameReady = nameMode === 'split' ? !!mapping.player_last_name : !!mapping.player_name
   useEffect(() => {
     if (!parsed || !nameReady) return
@@ -621,7 +621,7 @@ export default function AdminPlayerImport() {
       const p = await api.playerImportPreview(file)
       const m = {}, c = {}
       Object.entries(p.mapping_suggestions || {}).forEach(([f, v]) => { m[f] = v.column; c[f] = v.confidence })
-      // A sheet with separate first-name/surname columns auto-suggests both —
+      // A sheet with separate first-name/surname columns auto-suggests both, 
       // switch straight to split mode so the match isn't sitting one tab over.
       if ((m.player_first_name || m.player_last_name) && !m.player_name) setNameModeRaw('split')
       setParsed(p); setMapping(m); setConfByField(c)

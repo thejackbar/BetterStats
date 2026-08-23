@@ -189,7 +189,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
     ip = _client_ip(request)
     rate_limit.enforce(
         f"avail-verify-ip:{token}:{ip}", VERIFY_IP_LIMIT, VERIFY_IP_WINDOW,
-        detail="Too many attempts — slow down and try again shortly.",
+        detail="Too many attempts, slow down and try again shortly.",
     )
 
     try:
@@ -215,7 +215,7 @@ async def verify(token: str, body: VerifyBody, request: Request, response: Respo
         if want is None:
             raise HTTPException(
                 status_code=409,
-                detail="No mobile number is on file for you yet — ask your club admin to add it or set your availability for you.",
+                detail="No mobile number is on file for you yet. Ask your club admin to add it or set your availability for you.",
             )
         given = phone_last4(body.pin)
         if given is None or given != want:

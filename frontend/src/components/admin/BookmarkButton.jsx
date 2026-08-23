@@ -138,7 +138,7 @@ export default function BookmarkButton({ pageLabel, drop = 'down', variant = 'ic
           onClick={() => setOpen(o => !o)}
           className={`inline-flex items-center gap-1.5 font-mono text-[10px] tracking-wide2 transition-colors border pb-hairline rounded ${dense ? 'px-2.5 py-1' : 'px-3 py-1.5'} ${bookmarked ? '' : 'text-pb-faint hover:text-pb-text'}`}
           style={bookmarked ? { color: 'var(--pb-accent)', borderColor: 'var(--pb-accent)' } : undefined}
-          title="Bookmarks — save and jump back to admin pages"
+          title="Bookmarks. Save and jump back to admin pages"
           aria-label="Bookmarks"
           aria-haspopup="menu"
           aria-expanded={open}

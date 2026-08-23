@@ -537,7 +537,7 @@ async def draft_minutes(meeting_id: str, _: User = _require, club: Organisation 
         votes = ""
         if mo.get("votes_for") is not None or mo.get("votes_against") is not None:
             votes = f" (for {mo.get('votes_for') or 0}, against {mo.get('votes_against') or 0}, abstain {mo.get('votes_abstain') or 0})"
-        motion_lines.append(f"- \"{mo['description']}\" — {mo['outcome']}{votes}")
+        motion_lines.append(f"- \"{mo['description']}\", {mo['outcome']}{votes}")
 
     action_lines = []
     for t in room["actions"]:

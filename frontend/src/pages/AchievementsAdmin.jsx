@@ -183,7 +183,7 @@ function ImportPanel({ orgId, onImported, players }) {
     }
     const MAX = 5 * 1024 * 1024
     if (file.size > MAX) {
-      setError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB — must be 5 MB or smaller.`)
+      setError(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB. Must be 5 MB or smaller.`)
       return
     }
     if (file.size === 0) {
@@ -504,7 +504,7 @@ function ImportPanel({ orgId, onImported, players }) {
 
       {result && (
         <div className="mt-4 p-4 bg-pb-surface2 rounded border pb-hairline text-sm space-y-1">
-          <p className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>✓ Import complete — {result.created} achievements added</p>
+          <p className="font-mono text-[11px]" style={{ color: 'var(--pb-accent)' }}>✓ Import complete, {result.created} achievements added</p>
           {result.skipped > 0 && <p className="text-pb-faint font-mono text-[10px]">Skipped: {result.skipped} rows (empty or invalid)</p>}
           {result.errors?.length > 0 && (
             <div className="text-pb-red font-mono text-[10px]">{result.errors.map((e, i) => <p key={i}>{e}</p>)}</div>
@@ -563,7 +563,7 @@ function ImportPanel({ orgId, onImported, players }) {
             <div className="mt-3 pt-3 border-t pb-hairline">
               <div className="flex items-center justify-between mb-2">
                 <p className="font-mono text-[10px] text-pb-amber">
-                  ⚠ {dupes.length} duplicate{dupes.length !== 1 ? 's' : ''} skipped — already exist in the database
+                  ⚠ {dupes.length} duplicate{dupes.length !== 1 ? 's' : ''} skipped, already exist in the database
                 </p>
                 <button
                   onClick={toggleAll}
@@ -676,7 +676,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
       <div>
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season {form.category === 'Office Bearer' ? 'Start' : ''}</label>
         <select className={INPUT_CLS} value={formatSeason(form.season)} onChange={e => setForm(f => ({ ...f, season: e.target.value }))}>
-          <option value="">— All Time —</option>
+          <option value="">. All Time, </option>
           {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
         </select>
       </div>
@@ -684,7 +684,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <div>
           <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Season End</label>
           <select className={INPUT_CLS} value={formatSeason(form.season_end || '')} onChange={e => setForm(f => ({ ...f, season_end: e.target.value }))}>
-            <option value="">— Present —</option>
+            <option value="">, Present, </option>
             {seasonOpts.map(label => <option key={label} value={label}>{label}</option>)}
           </select>
         </div>
@@ -699,7 +699,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Subcategory / Grade</label>
         {!customSubcat && subcatOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.subcategory} onChange={e => setSubcat(e.target.value)}>
-            <option value="">— Select —</option>
+            <option value="">. Select, </option>
             {subcatOptions.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             <option value="__other__">Other…</option>
           </select>
@@ -715,7 +715,7 @@ function AchievementFields({ form, setForm, seasons, awardDefs }) {
         <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1.5 block">Achievement *</label>
         {!customAchievement && achievementOptions.length > 0 ? (
           <select className={INPUT_CLS} value={form.achievement} onChange={e => setAchievement(e.target.value)}>
-            <option value="">— Select —</option>
+            <option value="">. Select, </option>
             {achievementOptions.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
             <option value="__other__">Other…</option>
           </select>
@@ -838,7 +838,7 @@ function BulkAddPanel({ orgId, players, seasons, awardDefs, onSave, onCancel }) 
 
   return (
     <div className="pb-card p-5 mb-4" style={{ borderColor: 'var(--pb-accent)', borderWidth: '1px' }}>
-      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">BULK ADD — MULTIPLE PLAYERS, ONE ACHIEVEMENT</p>
+      <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1">BULK ADD. MULTIPLE PLAYERS, ONE ACHIEVEMENT</p>
       <p className="font-mono text-[10px] text-pb-faintest mb-4">Select an achievement, then add all players who received it. One record is created per player.</p>
 
       <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
@@ -1081,7 +1081,7 @@ export default function AchievementsAdmin({ embeddedOrgId }) {
                         {a.subcategory && <span className="font-mono text-[10px] text-pb-faint">{a.subcategory}</span>}
                         {a.season_end && (
                           <span className="font-mono text-[10px] text-pb-faint">
-                            {seasonDisplay(a.season)} — {seasonDisplay(a.season_end)}
+                            {seasonDisplay(a.season)}, {seasonDisplay(a.season_end)}
                           </span>
                         )}
                         {a.detail && <span className="font-mono text-[10px] text-pb-faint italic">{a.detail}</span>}

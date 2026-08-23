@@ -116,7 +116,7 @@ async def start(session: AsyncSession, org_id: str, grade_ids: list[str]) -> dic
     )).mappings().all()
     opponents = [{"opp_key": r["opp_key"], "name": r["name"]} for r in rows][:MAX_OPPONENTS]
     if not opponents:
-        return {"status": "idle", "detail": "No opponents found in those grades yet — run this after your first sync."}
+        return {"status": "idle", "detail": "No opponents found in those grades yet. Run this after your first sync."}
 
     _STATE[org_id] = {
         "status": "running", "total": len(opponents), "done": 0,

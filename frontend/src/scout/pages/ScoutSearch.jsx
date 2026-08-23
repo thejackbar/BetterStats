@@ -65,14 +65,14 @@ export default function ScoutSearch() {
 
       {query.length === 0 && (
         <p className="text-sm text-pb-dim">
-          This searches every club roster BetterScout has already fetched — not a live nationwide crawl of Cricket Australia.
+          This searches every club roster BetterScout has already fetched, not a live nationwide crawl of Cricket Australia.
           Can't find a club's players here yet? Look the club up on{' '}
           <Link to="/betterscout/app/discover" className="underline" style={{ color: 'var(--pb-accent)' }}>Discover</Link>{' '}
-          first — this search grows to cover it from then on.
+          first. This search grows to cover it from then on.
         </p>
       )}
       {query.length > 0 && query.length < 2 && (
-        <p className="text-sm text-pb-faint">Keep typing — at least 2 characters.</p>
+        <p className="text-sm text-pb-faint">Keep typing, at least 2 characters.</p>
       )}
       {query.length >= 2 && (
         <p className="font-mono text-[10.5px] uppercase tracking-wide2 text-pb-faint mb-3">

@@ -873,7 +873,7 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
 
     if eng.get("_directEnquiryHot"):
         explanation = (f"A recent 'onboard my club' enquiry pins the score to "
-                       f"{eng.get('engagementScore')} for a set window — it overrides the tally.")
+                       f"{eng.get('engagementScore')} for a set window. It overrides the tally.")
     elif floor > activity_total + 0.5:
         # The registration/setup floor beat the activity tally — it's the driver.
         explanation = (f"This club is registered/onboarded, which sets a floor of {round(floor)}. "
@@ -886,7 +886,7 @@ async def club_engagement_breakdown(club_id: str, db: AsyncSession = Depends(get
         add("Set up paid-module features", td.get("_modulePts"), "setup")
         add("Admin polish (branding/sponsors)", td.get("_polishPts"), "setup")
     else:
-        explanation = f"The activity signals above total about {round(activity_total)} — that's the score."
+        explanation = f"The activity signals above total about {round(activity_total)}, that's the score."
         if floor:
             explanation += (f" (A registration floor of {round(floor)} also applies, but the club's "
                             f"activity is already at or above it.)")

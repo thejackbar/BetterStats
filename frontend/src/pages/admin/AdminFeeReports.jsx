@@ -194,7 +194,7 @@ export default function AdminFeeReports() {
 
             {/* Cashflow */}
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2 uppercase">
-              Monthly Cashflow <span className="text-pb-faintest">— total received {money(totalCash)}</span>
+              Monthly Cashflow <span className="text-pb-faintest">. Total received {money(totalCash)}</span>
             </p>
             <p className="text-pb-dim text-sm mb-3 leading-relaxed">
               Payments by month. Membership and match-day kept separate so you can see when each cash stream lands.

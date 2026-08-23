@@ -22,7 +22,7 @@ const CAT_COLORS = {
 function milestoneLabel(item, isUpcoming) {
   const { type, milestone_value, target, current, detail } = item
   const value = isUpcoming ? target : milestone_value
-  if (type === 'grade_matches') return `${value} games — ${detail || ''}`
+  if (type === 'grade_matches') return `${value} games, ${detail || ''}`
   if (type === 'runs') return `${value.toLocaleString()} runs`
   if (type === 'wickets') return `${value} wickets`
   if (type === 'catches') return `${value} catches`

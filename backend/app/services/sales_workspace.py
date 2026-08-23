@@ -45,7 +45,7 @@ CALL_OUTCOMES: dict[str, dict] = {
     "number_disconnected": {"label": "Number disconnected", "category": "unsuccessful"},
     "no_longer_at_club": {"label": "Person no longer at club", "category": "unsuccessful"},
     # Neutral
-    "spoke_no_decision": {"label": "Spoke — no decision", "category": "neutral"},
+    "spoke_no_decision": {"label": "Spoke: no decision", "category": "neutral"},
     "asked_callback": {"label": "Asked to call back", "category": "neutral"},
     "referred_to_other": {"label": "Referred to another person", "category": "neutral"},
     "requested_information": {"label": "Requested information", "category": "neutral"},
@@ -115,17 +115,17 @@ _EVENT_WORTHY_OUTCOMES = (
 # Default event note per outcome when the call itself carried no free-text
 # notes — {name} is the followed-up contact's name, filled in at creation.
 _FOLLOW_UP_NOTE_TEMPLATES = {
-    "wants_to_subscribe": "Follow up with {name} — ready to buy/subscribe now.",
-    "interested": "Follow up with {name} — interested in BetterCricket.",
-    "wants_more_info": "Follow up with {name} — wants more information.",
-    "wants_trial": "Follow up with {name} — wants to start a trial.",
-    "wants_trial_extension": "Follow up with {name} — wants a trial extension.",
-    "wants_demo": "Follow up with {name} — wants a demo.",
-    "wants_pricing": "Follow up with {name} — wants to discuss pricing.",
+    "wants_to_subscribe": "Follow up with {name}, ready to buy/subscribe now.",
+    "interested": "Follow up with {name}, interested in BetterCricket.",
+    "wants_more_info": "Follow up with {name}, wants more information.",
+    "wants_trial": "Follow up with {name}. Wants to start a trial.",
+    "wants_trial_extension": "Follow up with {name}, wants a trial extension.",
+    "wants_demo": "Follow up with {name}, wants a demo.",
+    "wants_pricing": "Follow up with {name}, wants to discuss pricing.",
     "wants_committee_discussion": "Follow up with {name} following his committee meeting.",
     "asked_callback": "Callback requested by {name}.",
-    "referred_to_other": "Follow up with {name} — referred to another contact.",
-    "requested_information": "Follow up with {name} — requested more information.",
+    "referred_to_other": "Follow up with {name}, referred to another contact.",
+    "requested_information": "Follow up with {name}, requested more information.",
 }
 
 

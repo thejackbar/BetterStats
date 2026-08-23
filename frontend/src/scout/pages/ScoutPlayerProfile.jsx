@@ -210,7 +210,7 @@ export default function ScoutPlayerProfile() {
 
         {!totals.matches && !totals.wickets ? (
           <p className="text-sm text-pb-dim">
-            {player.source === 'manual' ? 'No automated stats — manually added.' : 'No stats available yet.'}
+            {player.source === 'manual' ? 'No automated stats. Manually added.' : 'No stats available yet.'}
           </p>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_356px] gap-5">
@@ -386,7 +386,7 @@ function MergeDuplicateModal({ keepId, keepName, onMerged, onClose }) {
 const OTHER_CLUB_POLL_MS = 2500
 const OTHER_CLUB_MAX_POLLS = 60
 
-// Spencer Green plays for several clubs — this is the whole cross-club
+// Spencer Green plays for several clubs. This is the whole cross-club
 // linking UI: the clubs already confirmed for this player, name-match
 // suggestions from other cached clubs (never auto-linked, always a confirm
 // click), and an on-demand "search a specific club" flow.
@@ -568,7 +568,7 @@ function ClubsSection({ player, onChanged, setError }) {
                   </span>
                   <div className="flex items-center gap-1.5 shrink-0">
                     <Btn sm variant="primary" onClick={() => confirmCandidate(c)} disabled={linkingKey === key}>
-                      {linkingKey === key ? 'Linking…' : 'Confirm — same person'}
+                      {linkingKey === key ? 'Linking…' : 'Confirm, same person'}
                     </Btn>
                     <Btn sm variant="ghost" onClick={() => dismissCandidate(c)}>Dismiss</Btn>
                   </div>
@@ -765,7 +765,7 @@ function AttributesPanel({ card, onSaved }) {
         <label className="block">
           <div className="font-mono text-[9.5px] uppercase tracking-wide2 text-pb-faint mb-1">Origin / region</div>
           <select value={form.region || ''} onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))} className={inputCls}>
-            {REGION_OPTS.map((r) => <option key={r} value={r}>{r || '— none —'}</option>)}
+            {REGION_OPTS.map((r) => <option key={r} value={r}>{r || ', none, '}</option>)}
           </select>
         </label>
         <label className="block">
@@ -833,7 +833,7 @@ function RecruitingPanel({ card, onSaved }) {
           {saving ? 'Saving…' : 'Save'}
         </Btn>
       )}
-      <p className="text-[11px] text-pb-faint">These five fields stay internal — a shared profile carries stats, tags and notes only.</p>
+      <p className="text-[11px] text-pb-faint">These five fields stay internal. A shared profile carries stats, tags and notes only.</p>
     </div>
   )
 }

@@ -219,7 +219,7 @@ async def main():
         # returns (proves it's genuinely reading the editable row, not a
         # cached/hardcoded string).
         info_row.subject = "A totally different subject for {{club}}"
-        info_row.html = "<p>Hi {{first_name}} — edited copy.</p><p>{{rep_name}}</p>"
+        info_row.html = "<p>Hi {{first_name}}. Edited copy.</p><p>{{rep_name}}</p>"
         await db.commit()
         subject2, html2, _ = await se.render_template(
             db, "information", contact_name="Pat Smith", club_name="Test Rovers CC", rep_name="Sam",

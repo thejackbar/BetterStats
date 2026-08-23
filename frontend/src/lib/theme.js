@@ -43,19 +43,19 @@ export const BRAND = {
 
 /** Brand + chart colour fields shown in the admin form. */
 export const COLOR_FIELDS = [
-  { key: 'accent', label: 'Accent', hint: 'Primary brand colour — buttons, links, highlights' },
+  { key: 'accent', label: 'Accent', hint: 'Primary brand colour: buttons, links, highlights' },
   { key: 'accent2', label: 'Secondary accent', hint: 'Your second club colour, used in gradients and the wickets chart line' },
   { key: 'positive', label: 'Top indicator', hint: 'Good / leading values' },
   { key: 'negative', label: 'Bottom indicator', hint: 'Poor / trailing values' },
-  { key: 'chart_runs', label: 'Chart — runs', hint: 'Runs series in graphs' },
-  { key: 'chart_wickets', label: 'Chart — wickets', hint: 'Wickets series in graphs' },
-  { key: 'chart_milestone', label: 'Chart — milestone', hint: 'Centuries & high-score highlights' },
+  { key: 'chart_runs', label: 'Chart: runs', hint: 'Runs series in graphs' },
+  { key: 'chart_wickets', label: 'Chart: wickets', hint: 'Wickets series in graphs' },
+  { key: 'chart_milestone', label: 'Chart: milestone', hint: 'Centuries & high-score highlights' },
 ]
 
 /** Honour / achievement category colours — drive badges and header pills. */
 export const HONOUR_FIELDS = [
   { key: 'cat_honour', label: 'Honours', hint: 'Hall of Fame, life membership, premierships' },
-  { key: 'cat_role', label: 'Club roles', hint: 'Office bearers — president, committee' },
+  { key: 'cat_role', label: 'Club roles', hint: 'Office bearers: president, committee' },
   { key: 'cat_award', label: 'Awards', hint: 'Club & association awards' },
   { key: 'cat_milestone', label: 'Milestones', hint: 'Games played & cap milestones' },
 ]
@@ -182,7 +182,7 @@ export function resolveClubFonts(club) {
         const family = String(entry.family || 'Club Font').replace(/['"\\]/g, '').slice(0, 60)
         // metrics is written by the upload endpoint from the file itself
         // (services/fonts.describe_font). Missing for a file uploaded before
-        // that shipped — treat it as the single weight it almost certainly is.
+        // that shipped. Treat it as the single weight it almost certainly is.
         const m = entry.metrics || {}
         const variable = !!m.variable
         out[role] = {
@@ -205,7 +205,7 @@ export function resolveClubFonts(club) {
   return out
 }
 
-/** The role's effective weight — the club's choice, else the app default. */
+/** The role's effective weight, the club's choice, else the app default. */
 export function fontWeightFor(fonts, role) {
   return (fonts && fonts[role] && fonts[role].weight) || FONT_WEIGHT_DEFAULTS[role]
 }
@@ -233,7 +233,7 @@ function mixWhite(hex, f) {
  * Derive the full dark surface ramp from a single base background colour, so a
  * club can pick one dark base (navy, maroon…) and get cohesive cards + borders
  * instead of the base sitting under default near-black surfaces. Text levels are
- * kept from the supplied base palette — light greys read on any dark base.
+ * kept from the supplied base palette. Light greys read on any dark base.
  */
 export function deriveDarkPalette(bg, base = BRAND.dark) {
   if (!normHex(bg)) return { ...base }
@@ -266,7 +266,7 @@ function relLuminance(hex) {
 /**
  * The secondary accent, made safe to paint on the given theme's surfaces.
  * Plenty of clubs' second colour is black or white (Applecross, the classic
- * navy/white kits) — used raw, that disappears against the matching theme
+ * navy/white kits). Used raw, that disappears against the matching theme
  * background. Near-black falls back to the primary accent on the dark theme,
  * near-white falls back on the light theme; everything else passes through
  * untouched. Fall back to the PRIMARY accent (a solid, on-brand read) rather

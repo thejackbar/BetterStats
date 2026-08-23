@@ -73,7 +73,7 @@ export default function Ladders() {
         <PageHeader
           eyebrow={`LADDERS · ${club?.name?.toUpperCase() || ''}`}
           title="Where we stand."
-          meta={[<span key="x">Live standings — pick a season and grade to dig into the history.</span>]}
+          meta={[<span key="x">Live standings. Pick a season and grade to dig into the history.</span>]}
         />
 
         <div className="mb-5">

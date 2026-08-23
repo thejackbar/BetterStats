@@ -164,7 +164,7 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
           <div className="text-[13px] text-pb-faint">
             This creates a new list in BetterComms → Lists (under "Auto-generated lists") holding every Club Directory
             contact for the <span className="text-pb-text font-medium">{sendable.length}</span> club
-            {sendable.length === 1 ? '' : 's'} below that has one — <span className="text-pb-text font-medium">{contactTotal}</span> contact
+            {sendable.length === 1 ? '' : 's'} below that has one, <span className="text-pb-text font-medium">{contactTotal}</span> contact
             {contactTotal === 1 ? '' : 's'} in all. A contact with no name on file is addressed as "Committee Members".
           </div>
 
@@ -208,7 +208,7 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
 
           {(unmatched.length > 0 || excludedClubs.length > 0 || noContacts.length > 0) && (
             <div className="text-[11.5px] text-pb-faint space-y-0.5">
-              {unresolvedRows.length > 0 && <div>{unresolvedRows.length} search{unresolvedRows.length === 1 ? '' : 'es'} could not be pinned to a club, so there is nobody to email — left out.</div>}
+              {unresolvedRows.length > 0 && <div>{unresolvedRows.length} search{unresolvedRows.length === 1 ? '' : 'es'} could not be pinned to a club, so there is nobody to email, left out.</div>}
               {plainUnmatched.length > 0 && <div>{plainUnmatched.length} club{plainUnmatched.length === 1 ? '' : 's'} could not be matched to the Club Directory and will be left out.</div>}
               {excludedClubs.length > 0 && <div>{excludedClubs.length} club{excludedClubs.length === 1 ? '' : 's'} excluded from outreach in the Club Directory will be left out.</div>}
               {noContacts.length > 0 && <div>{noContacts.length} matched club{noContacts.length === 1 ? '' : 's'} has no contact with an email address on file.</div>}
@@ -218,7 +218,7 @@ function CreateListModal({ open, onClose, clubs, onCreated }) {
           <Field label="List name">
             <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submit() }}
-              placeholder="e.g. Wizard drop-offs — August" />
+              placeholder="e.g. Wizard drop-offs, August" />
           </Field>
           <div className="text-[11.5px] text-pb-faintest">
             If a list with that name already exists, a number is added to keep it unique.
@@ -251,7 +251,7 @@ function ImportSalesListModal({ open, onClose, clubs, onCreated }) {
         name: name.trim(), club_keys: clubs.map(c => c.key),
       })
       setResult(r)
-      toast.success(`Imported "${r.name}" — ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
+      toast.success(`Imported "${r.name}". ${r.clubs_added} club${r.clubs_added === 1 ? '' : 's'} in the queue.`)
       onCreated?.()
     } catch (e) {
       setErr(e.message || 'Could not import the list')
@@ -276,7 +276,7 @@ function ImportSalesListModal({ open, onClose, clubs, onCreated }) {
       {result ? (
         <div className="space-y-2 text-[13px]">
           <div className="text-pb-text">
-            Imported <span className="font-medium">"{result.name}"</span> — {result.clubs_matched} matched club
+            Imported <span className="font-medium">"{result.name}"</span>, {result.clubs_matched} matched club
             {result.clubs_matched === 1 ? '' : 's'}, each given an open deal in the queue.
             {result.clubs_unmatched?.length > 0 && <> {result.clubs_unmatched.length} couldn't be matched to the Club Directory.</>}
           </div>
@@ -299,7 +299,7 @@ function ImportSalesListModal({ open, onClose, clubs, onCreated }) {
           <Field label="List name">
             <TextInput autoFocus value={name} onChange={e => setName(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') submit() }}
-              placeholder="e.g. Wizard drop-offs — August" />
+              placeholder="e.g. Wizard drop-offs, August" />
           </Field>
         </div>
       )}
@@ -462,7 +462,7 @@ export default function SuperWizardClubs() {
               <Chip active={progress === 'completed'} onClick={() => setProgress('completed')}
                 title="Clubs that finished the wizard and registered">Registration completed</Chip>
               <Chip active={progress === 'not_completed'} onClick={() => setProgress('not_completed')}
-                title="Everyone who dropped off before registering — the ones worth chasing">Not completed</Chip>
+                title="Everyone who dropped off before registering. The ones worth chasing">Not completed</Chip>
               <Chip active={progress === 'terms'} onClick={() => setProgress('terms')}
                 title="Got as far as Terms &amp; privacy, then stopped">Reached terms</Chip>
               <span className="text-pb-faintest text-[11px] uppercase font-mono ml-1">Match</span>
@@ -470,7 +470,7 @@ export default function SuperWizardClubs() {
               <Chip active={resolved === 'yes'} onClick={() => setResolved('yes')}
                 title="Searches we could pin to a specific club">Resolved</Chip>
               <Chip active={resolved === 'no'} onClick={() => setResolved('no')}
-                title="Half-typed searches whose match can't be trusted — the club is a guess">Unresolved</Chip>
+                title="Half-typed searches whose match can't be trusted. The club is a guess">Unresolved</Chip>
               <span className="text-pb-faintest text-[11px] uppercase font-mono ml-1">Contact</span>
               <Chip active={emailed === ''} onClick={() => setEmailed('')}>All</Chip>
               <Chip active={emailed === 'yes'} onClick={() => setEmailed('yes')}>Emailed</Chip>

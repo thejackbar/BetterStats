@@ -49,7 +49,7 @@ function ScoutPicker({ data, onPick, onMatch }) {
 
   return (
     <div className="iq-fade">
-      <PageIntro>Pick an upcoming fixture, a club you've met, or search any club in the country — we'll pull a broadcast-grade scouting report from your scorecards and their live form.</PageIntro>
+      <PageIntro>Pick an upcoming fixture, a club you've met, or search any club in the country. We'll pull a broadcast-grade scouting report from your scorecards and their live form.</PageIntro>
 
       {upcoming.length > 0 && (
         <>
@@ -86,7 +86,7 @@ function ScoutPicker({ data, onPick, onMatch }) {
       <div className="iq-eyebrow mb-3">Scout any club</div>
       <div className="iq-card p-4 mb-9">
         <div className="text-pb-faint text-[12.5px] mb-3 leading-relaxed">
-          Never played them? Search every club on PlayHQ — new opposition after relegation or promotion,
+          Never played them? Search every club on PlayHQ, new opposition after relegation or promotion,
           a side from another association, anyone. We'll build their squad and form live, with a
           season history for any of their players.
         </div>
@@ -98,7 +98,7 @@ function ScoutPicker({ data, onPick, onMatch }) {
         <Search value={q} onChange={setQ} placeholder="Search opponents…" className="w-full max-w-xs" />
       </div>
       {filtered.length === 0 ? (
-        <Empty>No opponents found{q ? ` for “${q}”` : ' yet — play some games or sync history'}.</Empty>
+        <Empty>No opponents found{q ? ` for “${q}”` : ' yet. Play some games or sync history'}.</Empty>
       ) : (
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((o, i) => (
@@ -120,9 +120,9 @@ function ScoutPicker({ data, onPick, onMatch }) {
   )
 }
 
-/* ── Command strip — the instant report hero ─────────────────────────────── */
+/* ── Command strip, the instant report hero ─────────────────────────────── */
 
-/* The scope toggle on the record card — All-time / Season / Grade. Reflects the
+/* The scope toggle on the record card. All-time / Season / Grade. Reflects the
    top filter bar's season + grade so the user can flip the record (and our
    record / bowler match-ups) between the impressive all-time number and the
    selected slice, without it silently overriding the headline. */
@@ -145,7 +145,7 @@ function CommandStrip({ h2h, lm, scope, onScope, scopeOptions, filterLabel }) {
         <div className="iq-eyebrow mb-3 flex flex-wrap items-center justify-between gap-2">
           <span>{eyebrow}</span><ScopeToggle scope={scope} onScope={onScope} options={scopeOptions} />
         </div>
-        <Empty>No meetings for {filterLabel} — switch to All-time.</Empty>
+        <Empty>No meetings for {filterLabel}, switch to All-time.</Empty>
       </div>
     )
   }
@@ -284,7 +284,7 @@ function GamePlan({ plan, report, dossier }) {
       {dossier?.grade_filter?.length > 0 && dossier.grade_filter_matched === false && (
         <div className="flex gap-2 mb-4 text-[12.5px]" style={{ color: 'var(--pb-amber)' }}>
           <Icon name="info" size={15} className="mt-0.5 shrink-0" />
-          <span>Your grade filter matched none of their sides — this plan covers their whole club.</span>
+          <span>Your grade filter matched none of their sides. This plan covers their whole club.</span>
         </div>
       )}
       {plan.one_liner && (
@@ -307,10 +307,10 @@ function GamePlan({ plan, report, dossier }) {
         ) : null}
         {(ourBat || ourBowl) && (
           <div className="flex gap-2.5"><Icon name="check" size={16} className="mt-0.5 shrink-0" style={{ color: 'var(--pb-brand)' }} />
-            <span><span className="text-pb-faint">Our edge:</span> {ourBat ? `${ourBat.name} (${runsPhrase(ourBat.runs, ourBat.average)})` : ''}{ourBat && ourBowl ? ', ' : ''}{ourBowl ? `${ourBowl.name} (${wktsPhrase(ourBowl.wickets, ourBowl.average)})` : ''} — own this match-up.</span></div>
+            <span><span className="text-pb-faint">Our edge:</span> {ourBat ? `${ourBat.name} (${runsPhrase(ourBat.runs, ourBat.average)})` : ''}{ourBat && ourBowl ? ', ' : ''}{ourBowl ? `${ourBowl.name} (${wktsPhrase(ourBowl.wickets, ourBowl.average)})` : ''}. Own this match-up.</span></div>
         )}
       </div>
-      <Note>Synthesised from scorecards — a starting plan, not gospel.</Note>
+      <Note>Synthesised from scorecards. A starting plan, not gospel.</Note>
     </Card>
   )
 }
@@ -335,7 +335,7 @@ function InningsPhases({ selected }) {
     <Card eyebrow="per-innings averages · estimated" title="How they pace an innings"
       right={ph.innings ? <Tag tone="faint">{ph.innings} inns{ph.total != null ? ` · ${ph.total} games` : ''}</Tag> : null}>
       <div className="text-pb-faint text-[12px] mb-4 leading-relaxed">
-        Average <span className="text-pb-dim">run rate</span> in each third of their innings, from recent ball-by-ball games — where they accelerate and where they can be squeezed.
+        Average <span className="text-pb-dim">run rate</span> in each third of their innings, from recent ball-by-ball games, where they accelerate and where they can be squeezed.
       </div>
       <PhaseStrip phases={ph.phases} />
       {ph.insight && (
@@ -396,7 +396,7 @@ function ThreatRadars({ dossier, oppKey, oppName }) {
           </div>
         ))}
       </div>
-      <Note>Each axis normalised 0–100 against this squad's average (dashed ring at 50). The further the shape reaches, the bigger the threat — hover a point for the real number behind it.</Note>
+      <Note>Each axis normalised 0–100 against this squad's average (dashed ring at 50). The further the shape reaches, the bigger the threat, hover a point for the real number behind it.</Note>
     </Card>
   )
 }
@@ -476,7 +476,7 @@ function Matchups({ matchups, oppKey, oppName }) {
       right={canMatrix
         ? <Segmented sm value={view} onChange={setView} options={[{ value: 'matrix', label: 'Matrix' }, { value: 'list', label: 'List' }]} />
         : null}>
-      <div className="text-pb-faint text-[12px] mb-3">Times our bowlers have dismissed their batters — a selection edge. Darker = stronger hold.</div>
+      <div className="text-pb-faint text-[12px] mb-3">Times our bowlers have dismissed their batters, a selection edge. Darker = stronger hold.</div>
       {showMatrix ? <Heatmap rows={rows} /> : (
         <div className="overflow-x-auto iq-scroll -mx-1">
           <table className="w-full text-[13px]">
@@ -521,7 +521,7 @@ function WinLose({ win, lose }) {
   )
 }
 
-/* ── Partnerships — where they wobble (dossier) ──────────────────────────── */
+/* ── Partnerships, where they wobble (dossier) ──────────────────────────── */
 
 function Partnerships({ partnerships, insight }) {
   if (!partnerships?.length) return null
@@ -547,7 +547,7 @@ function Partnerships({ partnerships, insight }) {
         })}
       </div>
       {insight && <div className="text-pb-dim text-[12.5px] mt-4 leading-relaxed">{insight}</div>}
-      {anyWeak && <Note>Red marks a genuine top/middle-order soft spot. The tail (8th wicket on) is greyed — a low last-wicket stand is normal, not a weakness.</Note>}
+      {anyWeak && <Note>Red marks a genuine top/middle-order soft spot. The tail (8th wicket on) is greyed. A low last-wicket stand is normal, not a weakness.</Note>}
     </Card>
   )
 }
@@ -741,7 +741,7 @@ function BuildingCard({ oppName }) {
   return (
     <div className="iq-card iq-accent-card p-8 text-center iq-fade">
       <div className="iq-display font-bold text-[16px]">Building their dossier…</div>
-      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling {oppName}'s recent scorecards and their record against us. The head-to-head above is ready now — this can take up to a minute the first time.</div>
+      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling {oppName}'s recent scorecards and their record against us. The head-to-head above is ready now. This can take up to a minute the first time.</div>
       <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
     </div>
   )
@@ -763,7 +763,7 @@ export default function OppositionScout() {
   const pollRef = useRef(null)
 
   // The GLOBAL BetterIQ filter bar (top of the page) is the single source of
-  // truth — no separate "Scout team" control. `ctx.team.id` is one grade NAME or
+  // truth, no separate "Scout team" control. `ctx.team.id` is one grade NAME or
   // several joined with '||' (the IQ-wide multi-select convention); the season
   // can be a single year, a cross-season range, or All seasons.
   const { ctx, setCtx, seasons, ready: filterReady } = useIQFilter()
@@ -775,10 +775,10 @@ export default function OppositionScout() {
   const isAllSeasons = seasons.length > 0 && seasonIds.length === seasons.length
   // What the header shows is what the data gets: any picked season (including
   // the default newest one) is a real filter. Only "All seasons" means all-time
-  // — the old "newest single season counts as no filter" special case made the
+  //. The old "newest single season counts as no filter" special case made the
   // header say 2025/26 over an all-time record.
   // `untouchedDefault`: before the user has touched the filter bar this session,
-  // the season is ABOUT to be corrected to All seasons by the effect below —
+  // the season is ABOUT to be corrected to All seasons by the effect below, 
   // read it as already-all-time here too, so the very first report fetch (which
   // can fire on the same render, e.g. a deep-linked ?opponent=) requests the
   // same scope the correction will settle on, instead of firing once now and
@@ -1069,23 +1069,23 @@ export default function OppositionScout() {
         )}
 
         {/* The live squad scout below follows the top Grade filter. The server
-            resolves the filter itself now and reports whether it matched — the
+            resolves the filter itself now and reports whether it matched, the
             old client-side teamGradeId check false-alarmed on sponsor-suffixed
             names and missed the real mismatch cases. */}
         {ready && dossier?.grade_filter?.length > 0 && dossier.grade_filter_matched === false && (
-          <Note>They don't field a side in “{ctx?.team?.name}” — showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
+          <Note>They don't field a side in “{ctx?.team?.name}”. Showing their whole club below. Pick a different grade in the top bar to narrow it.</Note>
         )}
 
         {/* Live dossier — phase 2 */}
         {building && <BuildingCard oppName={oppName} />}
 
         {dossier?.status === 'unavailable' && (
-          <Note>{dossier.message || 'No live data available for this opponent yet — the head-to-head above still applies.'}</Note>
+          <Note>{dossier.message || 'No live data available for this opponent yet. The head-to-head above still applies.'}</Note>
         )}
         {dossier?.status === 'error' && (
           <Note>{dossier.timeout
-            ? "The dossier build is taking longer than usual — the head-to-head above still applies. Try Refresh in a minute."
-            : "Couldn't build the live dossier just now. The head-to-head above still applies — try Refresh in a moment."}</Note>
+            ? "The dossier build is taking longer than usual. The head-to-head above still applies. Try Refresh in a minute."
+            : "Couldn't build the live dossier just now. The head-to-head above still applies. Try Refresh in a moment."}</Note>
         )}
 
         {ready && (

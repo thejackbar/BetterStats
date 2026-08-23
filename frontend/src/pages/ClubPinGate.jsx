@@ -53,7 +53,7 @@ export default function ClubPinGate({ slug, lockInfo, unlock, requestAccess }) {
       await requestAccess(email.trim(), message.trim())
       setRequestSent(true)
     } catch (err) {
-      setRequestError(err.message || 'Could not send your request — try again shortly.')
+      setRequestError(err.message || 'Could not send your request. Try again shortly.')
     } finally {
       setSending(false)
     }
@@ -108,7 +108,7 @@ export default function ClubPinGate({ slug, lockInfo, unlock, requestAccess }) {
             <div className="pb-card p-6 text-left">
               {requestSent ? (
                 <p className="text-sm text-pb-text">
-                  Thanks — someone from {BRAND} will be in touch shortly.
+                  Thanks. Someone from {BRAND} will be in touch shortly.
                 </p>
               ) : showRequest ? (
                 <form onSubmit={submitRequest}>

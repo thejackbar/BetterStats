@@ -860,7 +860,7 @@ async def undo_merge_players(
     remove_id = log_row["removed_player_id"]
     keep = await db.get(Player, keep_id)
     if not keep:
-        raise HTTPException(status_code=404, detail="The kept player no longer exists — can't undo")
+        raise HTTPException(status_code=404, detail="The kept player no longer exists, can't undo")
 
     if log_row["keep_original_playhq_id"] is None and log_row["removed_player_playhq_id"]:
         keep.playhq_id = None

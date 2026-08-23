@@ -106,7 +106,7 @@ async def accept_invite(
     if invite.accepted_at is not None:
         raise ValueError("This invite has already been used.")
     if _aware(invite.expires_at) < datetime.now(timezone.utc):
-        raise ValueError("This invite has expired — ask for a new one.")
+        raise ValueError("This invite has expired. Ask for a new one.")
     username = (username or "").strip().lower()
     if not username:
         raise ValueError("Username is required.")

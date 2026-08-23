@@ -149,7 +149,7 @@ export default function CheatSheet() {
   const [club, setClub] = useState(null)
   const pollRef = useRef(null)
 
-  // The club's own name — this sheet used to hardcode one club's name on every
+  // The club's own name. This sheet used to hardcode one club's name on every
   // club's printout.
   useEffect(() => { api.adminGetSettings().then(setClub).catch(() => setClub(null)) }, [])
 
@@ -197,7 +197,7 @@ export default function CheatSheet() {
     }
     if (!rows.length) return null
     const best = [...rows].sort((a, b) => b.dismissals - a.dismissals)[0]
-    return `${surname(best.bowler)} has him ${best.dismissals}× — save him for this match-up`
+    return `${surname(best.bowler)} has him ${best.dismissals}×. Save him for this match-up`
   }
 
   const wins = h?.wins ?? 0
@@ -222,7 +222,7 @@ export default function CheatSheet() {
       <div className="iq-no-print flex flex-wrap items-center justify-between" style={{ maxWidth: 1040, margin: '0 auto 14px', gap: 12 }}>
         <div className="text-white">
           <div className="iq-display font-bold" style={{ fontSize: 16 }}>Match cheat sheet</div>
-          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>One page for the toss — prints clean on paper.</div>
+          <div style={{ fontSize: 12.5, color: 'rgba(255,255,255,0.6)' }}>One page for the toss. Prints clean on paper.</div>
         </div>
         <div className="flex flex-wrap" style={{ gap: 10 }}>
           {hasSelection && (
@@ -326,7 +326,7 @@ export default function CheatSheet() {
               <span className="text-pb-dim" style={{ fontSize: 12.5 }}>
                 {building
                   ? 'Building their live dossier… the game plan and danger players will fill in shortly.'
-                  : 'Live dossier unavailable — the head-to-head below is from data we already hold.'}
+                  : 'Live dossier unavailable. The head-to-head below is from data we already hold.'}
               </span>
             </div>
           )}
@@ -372,7 +372,7 @@ export default function CheatSheet() {
                   ))}
                   {ourBowl.slice(0, 2).map((p, i) => (
                     <PlayerRow key={p.player_id || `w${i}`} name={surname(p.name)}
-                      line={wktsPhrase(p.wickets ?? 0, p.average)} note="Has their number — bowl him long" />
+                      line={wktsPhrase(p.wickets ?? 0, p.average)} note="Has their number, bowl him long" />
                   ))}
                 </>
                 : <Empty className="text-pb-faint text-[11.5px]">No prior record against them.</Empty>}

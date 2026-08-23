@@ -37,7 +37,7 @@ export default function ClubDataPanel({ onAdd }) {
         </div>
       ))}
       <p className="text-pb-faintest text-[10px] leading-relaxed">
-        Live data — fixtures, results and scorecards come from those tabs; pick the player for a player block on the canvas.
+        Live data. Fixtures, results and scorecards come from those tabs; pick the player for a player block on the canvas.
       </p>
     </div>
   )

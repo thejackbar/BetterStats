@@ -69,7 +69,7 @@ export default function MerchOrders() {
       {orders === null ? <PbSpinner message="Loading orders…" /> : (
         <div>
           <p className="font-mono text-[10px] text-pb-faintest mb-3 leading-relaxed">
-            Orders placed through the public online store. "Awaiting payment" clears itself once Stripe confirms —
+            Orders placed through the public online store. "Awaiting payment" clears itself once Stripe confirms, 
             if one sits there for a while, the customer likely abandoned checkout.
           </p>
           <div className="mb-3">

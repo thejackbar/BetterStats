@@ -50,14 +50,14 @@ export default function InternalSegments() {
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">
-            A segment is a rule over the Clubs Directory. For clubs picked by hand, use a list — both can be
+            A segment is a rule over the Clubs Directory. For clubs picked by hand, use a list. Both can be
             chosen as the audience when you write an email:{' '}
             <Link to="/admin/clubhouse/internal/directory" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Directory</Link>
             {' · '}
             <Link to="/admin/comms/lists" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Lists</Link>
           </Note>
           <Note title="BetterCricket's own contacts" toneKey="calm">
-            These conditions read the Clubs Directory — what a prospect club has done, its status and its
+            These conditions read the Clubs Directory. What a prospect club has done, its status and its
             engagement score. A club never sees these fields; their own Segments screen reads their members
             and nothing else.
           </Note>

@@ -67,7 +67,7 @@ function CategorySelect({ categories, srcCat, srcSub, onChange }) {
       <option value="">Manual entries (add by hand)</option>
       {categories.map((c, i) => (
         <option key={i} value={i}>
-          Auto: {(c.subcategory ? `${c.category} — ${c.subcategory}` : c.category)} ({c.count})
+          Auto: {(c.subcategory ? `${c.category}, ${c.subcategory}` : c.category)} ({c.count})
         </option>
       ))}
     </select>
@@ -113,7 +113,7 @@ function EntryRow({ entry, players, onSaved, onDeleted }) {
       {entry.year != null && <span className="font-mono text-[12px] text-pb-faint w-12 tabular-nums">{entry.year}</span>}
       <span className="flex-1 text-pb-text text-sm">
         {entry.name}{entry.player_id && <span title="Linked to player" className="ml-1 text-[10px]" style={{ color: 'var(--pb-accent)' }}>🔗</span>}
-        {entry.detail && <span className="text-pb-faint"> — {entry.detail}</span>}
+        {entry.detail && <span className="text-pb-faint">, {entry.detail}</span>}
       </span>
       <button onClick={() => setEditing(true)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text opacity-0 group-hover:opacity-100">EDIT</button>
       <button onClick={del} className="font-mono text-[10px] text-red-400 hover:text-red-300 opacity-0 group-hover:opacity-100">DEL</button>
@@ -185,7 +185,7 @@ function Board({ board, players, categories, onChange, onDelete }) {
             {isAuto && (
               <p className="text-[11px] text-pb-faint mt-0.5">
                 Auto-listing <span className="text-pb-dim font-medium">{board.auto_count ?? 0}</span> from
-                {' '}<span className="text-pb-dim">{board.source_subcategory ? `${board.source_category} — ${board.source_subcategory}` : board.source_category}</span>
+                {' '}<span className="text-pb-dim">{board.source_subcategory ? `${board.source_category}, ${board.source_subcategory}` : board.source_category}</span>
               </p>
             )}
           </div>
@@ -258,7 +258,7 @@ export default function WebsiteHonoursAdmin() {
   }
 
   async function addBoard() {
-    const title = newTitle.trim() || (newCat ? (newSub ? `${newCat} — ${newSub}` : newCat) : '')
+    const title = newTitle.trim() || (newCat ? (newSub ? `${newCat}, ${newSub}` : newCat) : '')
     if (!title) { toast.error('Give the board a title (or pick a category)'); return }
     try {
       const b = await api.webAdminCreateBoard({ title, source_category: newCat, source_subcategory: newSub, columns: newCols })
@@ -276,23 +276,23 @@ export default function WebsiteHonoursAdmin() {
     <div>
       <Flash msg={flash} />
       <p className="text-pb-faint text-sm mb-3">
-        Honour boards — Life Members, Hall of Fame, Past Presidents, Club Champions and more. Link a board to an
+        Honour boards: Life Members, Hall of Fame, Past Presidents, Club Champions and more. Link a board to an
         achievements category to auto-list everyone in it, or add entries by hand (type a name to link a player).
       </p>
       <div className="mb-5 px-4 py-3 rounded-lg border pb-hairline bg-pb-surface2/40 text-[12px] text-pb-faint">
         💡 <span className="text-pb-dim">Office bearers</span> (President, Secretary, Captain…) are pulled automatically
         from the <span className="text-pb-dim">current season's yearbook honour board</span> and shown at the top of your
-        public Honours page — maintain those under <span className="font-mono">Yearbooks → Honour board</span>.
+        public Honours page. Maintain those under <span className="font-mono">Yearbooks → Honour board</span>.
       </div>
 
       {/* Page layout: how many boards sit side by side */}
       <div className="pb-card p-4 mb-5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <div className="font-medium text-pb-text">Boards side by side</div>
-          <p className="text-pb-faint text-sm mt-0.5">Lay whole boards out in columns — e.g. Life Members next to Hall of Fame. Stacks to one column on mobile.</p>
+          <p className="text-pb-faint text-sm mt-0.5">Lay whole boards out in columns, e.g. Life Members next to Hall of Fame. Stacks to one column on mobile.</p>
         </div>
         <select value={layout} onChange={e => saveLayout(Number(e.target.value))} className={`${inputCls} sm:w-44`}>
-          <option value={1}>1 — stacked</option>
+          <option value={1}>1, stacked</option>
           <option value={2}>2 columns</option>
           <option value={3}>3 columns</option>
         </select>

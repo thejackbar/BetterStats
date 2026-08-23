@@ -40,7 +40,7 @@ export default function ScoutAcceptInvite() {
       <div className="min-h-screen bg-pb-bg text-pb-text flex items-center justify-center px-4">
         <div className="pb-card p-6 w-full max-w-sm text-center space-y-2">
           <h1 className="text-lg font-bold">Invite not found</h1>
-          <p className="text-sm text-pb-dim">This invite link isn't valid — it may have already been used or expired. Ask whoever invited you for a fresh one.</p>
+          <p className="text-sm text-pb-dim">This invite link isn't valid. It may have already been used or expired. Ask whoever invited you for a fresh one.</p>
         </div>
       </div>
     )

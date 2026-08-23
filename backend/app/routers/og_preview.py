@@ -525,7 +525,7 @@ async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSessio
     name = player.display_name
     club_name = org.name if org else ""
     description = (
-        f"Explore {name}'s full career batting, bowling and fielding records at {club_name} — "
+        f"Explore {name}'s full career batting, bowling and fielding records at {club_name}, "
         f"innings by innings, season by season, on BetterCricket."
         if club_name
         else f"Explore {name}'s complete career cricket statistics — innings, wickets and more on BetterCricket."

@@ -412,7 +412,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
   return (
     <div className="iq-fade space-y-6">
       {/* What scope the cards below were actually built from (career vs the
-          filtered season/grade) — stated, not implied by the header. */}
+          filtered season/grade). Stated, not implied by the header. */}
       {(detail?.scope || deep?.scope) && (
         <div className="flex items-center gap-2 -mb-2">
           <Tag>{(deep?.scope?.label || detail?.scope?.label) === 'filtered'
@@ -437,7 +437,7 @@ function PlayerDetail({ playerId, players, ctx, seasons, onClear }) {
 }
 
 /* ── Overview (form movers + emerging + picker) ──────────────────────────── */
-/* Squad filter chip — wraps to multiple rows (a club can field 16+ teams, which
+/* Squad filter chip. Wraps to multiple rows (a club can field 16+ teams, which
    a single-row Segmented can't show without squashing the search bar). */
 function SquadChip({ label, active, onClick }) {
   return (
@@ -496,10 +496,10 @@ function Overview({ overview, players, squads, squad, setSquad, pickerPlayers, o
             : noMovers ? <Empty>Not enough multi-season history among current players to spot movers yet.</Empty>
               : (
                 <div className="grid sm:grid-cols-2 gap-x-8 gap-y-5">
-                  <MoverList title="Batting — rising" tone="up" items={m.batting?.risers} kind="bat" onPick={onPick} />
-                  <MoverList title="Batting — sliding" tone="down" items={m.batting?.fallers} kind="bat" onPick={onPick} />
-                  <MoverList title="Bowling — improving" tone="up" items={m.bowling?.risers} kind="bowl" onPick={onPick} />
-                  <MoverList title="Bowling — slipping" tone="down" items={m.bowling?.fallers} kind="bowl" onPick={onPick} />
+                  <MoverList title="Batting. Rising" tone="up" items={m.batting?.risers} kind="bat" onPick={onPick} />
+                  <MoverList title="Batting. Sliding" tone="down" items={m.batting?.fallers} kind="bat" onPick={onPick} />
+                  <MoverList title="Bowling. Improving" tone="up" items={m.bowling?.risers} kind="bowl" onPick={onPick} />
+                  <MoverList title="Bowling. Slipping" tone="down" items={m.bowling?.fallers} kind="bowl" onPick={onPick} />
                 </div>
               )}
           <Note>Deltas compare this season to each player's career average before it (min sample applies). Lower bowling average = improving.</Note>
@@ -538,7 +538,7 @@ export default function PlayerTrends() {
   const playerId = searchParams.get('player') || null
 
   // Form movers, emerging and the player list all follow the global Season + Team
-  // filter — re-fetch whenever it changes.
+  // filter. Re-fetch whenever it changes.
   useEffect(() => {
     setOverview(null)
     api.iqTrendsOverview(seasonId, gradeId).then(setOverview).catch(() => setOverview({ batting: {}, bowling: {}, emerging: [] }))
@@ -561,7 +561,7 @@ export default function PlayerTrends() {
         <PlayerDetail playerId={playerId} players={players} ctx={ctx} seasons={seasons} onClear={clear} />
       ) : (
         <>
-          <PageIntro>Who's rising, who's sliding, and the full statistical picture on any player — surfaced up front, not buried.</PageIntro>
+          <PageIntro>Who's rising, who's sliding, and the full statistical picture on any player. Surfaced up front, not buried.</PageIntro>
           <Overview overview={overview} players={players} squads={squads} squad={squad} setSquad={setSquad} pickerPlayers={pickerPlayers} onPick={pick} />
         </>
       )}

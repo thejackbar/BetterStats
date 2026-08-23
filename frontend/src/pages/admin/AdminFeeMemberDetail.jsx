@@ -30,7 +30,7 @@ function CreditChip({ amount }) {
   if (!amount || amount <= 0) return null
   return (
     <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5"
-      title="Paid more than owed — credit toward future games">
+      title="Paid more than owed, credit toward future games">
       +{money(amount)} CREDIT
     </span>
   )
@@ -45,7 +45,7 @@ function BalanceCard({ label, payable, paid, owed, credit = 0, waived = 0, foote
         <div className={rowCss}><span className="text-pb-faint">Payable</span><span className="text-pb-dim">{money(payable)}</span></div>
         <div className={rowCss}><span className="text-pb-faint">Paid</span><span className="text-pb-dim">{money(paid)}</span></div>
         {waived > 0 && (
-          <div className={rowCss} title="Fees forgiven — not counted as money received">
+          <div className={rowCss} title="Fees forgiven, not counted as money received">
             <span className="text-sky-300/80">Waived</span><span className="text-sky-300/80">{money(waived)}</span>
           </div>
         )}
@@ -149,7 +149,7 @@ function RecordMatchFeeForm({ memberSeasonId, defaultMethod = 'EFT', onCreated }
         amount: Number(amount), kind: 'match_day',
         paid_at: paidAt || null, method: method || null,
       })
-      toast.success('Match-fee payment recorded — allocated oldest-first')
+      toast.success('Match-fee payment recorded, allocated oldest-first')
       setAmount('')
       onCreated()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
@@ -214,12 +214,12 @@ function PaymentRow({ payment, onDeleted }) {
 function MatchDayStatus({ row }) {
   if (row.status === 'waived')
     return <span className="font-mono text-[9px] tracking-wide2 text-sky-300 bg-sky-900/30 border border-sky-600/30 rounded px-1.5 py-0.5"
-      title={row.waive_reason ? `Waived — ${row.waive_reason}` : 'Fee waived — settled, not counted as money received'}>✓ WAIVED</span>
+      title={row.waive_reason ? `Waived. ${row.waive_reason}` : 'Fee waived. Settled, not counted as money received'}>✓ WAIVED</span>
   if (row.status === 'paid')
     return <span className="font-mono text-[9px] tracking-wide2 text-green-300 bg-green-900/40 border border-green-600/30 rounded px-1.5 py-0.5">● PAID</span>
   if (row.status === 'partial')
     return <span className="font-mono text-[9px] tracking-wide2 text-pb-amber border border-pb-amber/40 rounded px-1.5 py-0.5"
-      title="Part-paid — the next payment finishes it">◐ {money(row.amount_covered)} / {money(row.charge)}</span>
+      title="Part-paid. The next payment finishes it">◐ {money(row.amount_covered)} / {money(row.charge)}</span>
   if (row.status === 'unpaid')
     return <span className="font-mono text-[9px] tracking-wide2 text-pb-faintest border pb-hairline rounded px-1.5 py-0.5">○ UNPAID</span>
   return <span className="font-mono text-[10px] text-pb-faintest">—</span>
@@ -256,7 +256,7 @@ function MatchDayRow({ row, onSaved }) {
     setBusy(true)
     try {
       await api.feeUnwaiveMatchDay(row.id)
-      toast.success('Waive removed — game is charged again'); onSaved()
+      toast.success('Waive removed. Game is charged again'); onSaved()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
 
@@ -414,7 +414,7 @@ export default function AdminFeeMemberDetail() {
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TYPE</label>
             <select className={`${inp} mb-3`} value={membershipForm.membership_type_id}
               onChange={e => setMembershipForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-              <option value="">— None —</option>
+              <option value="">, None, </option>
               {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">STATUS THIS SEASON</label>
@@ -448,11 +448,11 @@ export default function AdminFeeMemberDetail() {
           {/* Tier panel */}
           <div className="pb-card p-5">
             <p className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-3 uppercase">Membership Tier</p>
-            {f.needs_tier && <p className="font-mono text-[11px] text-pb-amber mb-3">⚠ No tier assigned — fees won’t calculate.</p>}
+            {f.needs_tier && <p className="font-mono text-[11px] text-pb-amber mb-3">⚠ No tier assigned, fees won’t calculate.</p>}
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">TIER</label>
             <select className={`${inp} mb-3`} value={tierForm.fee_schedule_id}
               onChange={e => setTierForm(t => ({ ...t, fee_schedule_id: e.target.value }))}>
-              <option value="">— Needs tier —</option>
+              <option value="">. Needs tier, </option>
               {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
             </select>
             <label className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-1 block">MEMBERSHIP PAYMENT METHOD</label>
@@ -466,7 +466,7 @@ export default function AdminFeeMemberDetail() {
               New registration this season
             </label>
             <label className="flex items-center gap-2 font-mono text-[11px] text-pb-dim cursor-pointer select-none mb-4"
-              title="A playing requirement — nothing here reads it from PlayHQ automatically, tick it once you've sighted it">
+              title="A playing requirement. Nothing here reads it from PlayHQ automatically, tick it once you've sighted it">
               <input type="checkbox" checked={tierForm.playhq_registered}
                 onChange={e => setTierForm(t => ({ ...t, playhq_registered: e.target.checked }))} />
               Registered with PlayHQ this season
@@ -543,10 +543,10 @@ export default function AdminFeeMemberDetail() {
           Match Days <span className="text-pb-faintest">({data.match_days.length})</span>
         </p>
         <p className="text-pb-dim text-sm mb-3 leading-relaxed">
-          Auto-derived from appearances. Two-day games default to 2 days — drop to 1 if they only played one day.
+          Auto-derived from appearances. Two-day games default to 2 days. Drop to 1 if they only played one day.
           Record a match-fee payment below and it settles games <span className="text-pb-text">oldest-first</span>;
           anything left over becomes <span className="text-green-300">credit</span> toward their next games.
-          Use <span className="text-sky-300">Waive</span> to forgive a single game (a fill-in, injury or comp) — it settles
+          Use <span className="text-sky-300">Waive</span> to forgive a single game (a fill-in, injury or comp). It settles
           the game without counting as money received.
         </p>
         {data.match_days.length === 0 ? (

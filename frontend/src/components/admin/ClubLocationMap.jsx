@@ -133,7 +133,7 @@ export default function ClubLocationMap({ clubId, latitude, longitude, postcode,
           ? <>Suburb boundary for postcode {postcode || '—'}{state ? `, ${state}` : ''} · via OpenStreetMap</>
           : boundaryLoaded
             ? hasPoint
-              ? <>No suburb boundary found — approximate area for postcode {postcode || '—'}{state ? `, ${state}` : ''}</>
+              ? <>No suburb boundary found: approximate area for postcode {postcode || '—'}{state ? `, ${state}` : ''}</>
               : <>Loading boundary…</>
             : <>Loading boundary…</>}
       </div>

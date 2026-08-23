@@ -111,7 +111,7 @@ function ContactRow({ c, action, onDetails, last, checked, onCheck }) {
         <span className="shrink-0" title={unsubscribedTitle(c) || 'Unsubscribed'}><Badge>Unsubscribed</Badge></span>
       )}
       {c.suppressed && (
-        <span className="shrink-0" title="Suppressed — bounced, complained, unsubscribed or excluded"><Badge toneKey="block">Supp</Badge></span>
+        <span className="shrink-0" title="Suppressed: bounced, complained, unsubscribed or excluded"><Badge toneKey="block">Supp</Badge></span>
       )}
       {action}
     </div>
@@ -384,7 +384,7 @@ export default function CommsLists() {
         : await api.commsCreateList(name)
       setToast({
         title: draft.id ? 'List saved' : 'List created',
-        body: draft.id ? `Renamed to ${name}.` : `${name} is ready — pick who belongs in it below.`,
+        body: draft.id ? `Renamed to ${name}.` : `${name} is ready. Pick who belongs in it below.`,
       })
       await load()
       setSelId(saved.id)
@@ -452,7 +452,7 @@ export default function CommsLists() {
           <Note toneKey="calm">
             A list is people picked by hand. For a group better described by a rule, use a{' '}
             <Link to="/admin/comms/segments" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>segment</Link>
-            {' '}— both can be chosen as the audience when you write an email:{' '}
+            {' '}. Both can be chosen as the audience when you write an email:{' '}
             <Link to="/admin/comms/contacts" className="underline" style={{ color: 'var(--pb-accent-ink)' }}>Contacts</Link>
           </Note>
           {showSections && (

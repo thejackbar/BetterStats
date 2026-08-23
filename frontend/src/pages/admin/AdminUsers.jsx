@@ -214,7 +214,7 @@ function UserEditor({ user, currentUserId, onSaved, onClose }) {
       </div>
 
       {isSuperAdmin && (
-        <p className="font-mono text-[10px] text-pb-faintest">Super admin — manage role from the Super Admin console.</p>
+        <p className="font-mono text-[10px] text-pb-faintest">Super admin: manage role from the Super Admin console.</p>
       )}
 
       <label className="block">

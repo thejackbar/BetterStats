@@ -302,11 +302,11 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                         + ", ".join(unresolved[:8]) + ("…" if len(unresolved) > 8 else ""))
     ambiguous = [n for n, m in pmatch.items() if m.get("status") == "ambiguous"]
     if ambiguous:
-        warnings.append(f"{len(ambiguous)} name(s) match two players — merge those first: " + ", ".join(ambiguous[:5]))
+        warnings.append(f"{len(ambiguous)} name(s) match two players. Merge those first: " + ", ".join(ambiguous[:5]))
     overlap_names = [p["player_name"] for p in preview if p["already_synced_overlap"]]
     if overlap_names:
         warnings.append("Already synced from PlayHQ for some season(s) shown for: "
-                        + ", ".join(overlap_names[:5]) + " — those rows still import but won't be "
+                        + ", ".join(overlap_names[:5]) + ". Those rows still import but won't be "
                           "double-counted in totals; the synced figures win.")
 
     return {
@@ -362,7 +362,7 @@ async def create_season(
         Season.organisation_id == club.id, func.lower(Season.name) == name.lower(),
     ))
     if existing.scalar_one_or_none():
-        raise HTTPException(409, f"A season named '{name}' already exists — pick it from the list instead.")
+        raise HTTPException(409, f"A season named '{name}' already exists. Pick it from the list instead.")
 
     season = Season(id=uuid.uuid4(), organisation_id=club.id, grassroots_id=None, name=name, year=data.year)
     db.add(season)
@@ -467,7 +467,7 @@ async def commit(
             })
 
     if not items_by_player:
-        raise HTTPException(422, "Nothing to import — no rows matched a player. Resolve the player matches and try again.")
+        raise HTTPException(422, "Nothing to import, no rows matched a player. Resolve the player matches and try again.")
 
     pids = [uuid.UUID(p) for p in items_by_player.keys()]
     # Latest-upload-wins: replace this batch's players' prior imported rows.

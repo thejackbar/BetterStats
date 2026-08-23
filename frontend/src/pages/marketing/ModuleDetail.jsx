@@ -81,7 +81,7 @@ export default function ModuleDetail() {
     ...(priced ? [{
       '@context': 'https://schema.org',
       '@type': 'Product',
-      name: `${m.name} — BetterCricket`,
+      name: `${m.name}, BetterCricket`,
       description: m.summary,
       brand: { '@type': 'Brand', name: 'BetterCricket' },
       url: `https://betterat.cricket/modules/${m.slug}`,

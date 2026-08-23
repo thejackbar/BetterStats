@@ -5,7 +5,7 @@ export default {
   title: 'A club a super admin creates is set up like one that signs itself up',
   items: [
     'Super Admin → All Clubs → New Club now does everything the self-serve trial signup does. Before this it created a bare club row and stopped there, so a staff-created club had no trial, no admin account, no data and nothing in the pipeline until somebody remembered each step.',
-    'A Primary Club Admin is now required, not optional. The form takes their name, username, email and (optionally) mobile. No password is set by staff — that person is emailed a link to set their own, the same way Club Users → Invite admin already works.',
+    'A Primary Club Admin is now required, not optional. The form takes their name, username, email and (optionally) mobile. No password is set by staff: that person is emailed a link to set their own, the same way Club Users → Invite admin already works.',
     'The club starts a free trial of every module, on the same trial length a self-serve signup gets, BetterStats included.',
     'The club’s first full historical sync starts the moment it is created, and its past-season yearbooks are built and published when that sync finishes.',
     'The setup wizard now opens for the primary admin on their first login, even when they accept their invite days after the club was created and its sync has long since finished.',

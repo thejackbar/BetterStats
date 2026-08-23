@@ -47,11 +47,11 @@ const CALL_STATUS = [
   { key: 'not_called', label: 'Not Contacted', swatch: 'bg-pb-hairline2',
     title: 'Clubs with no call logged against them yet' },
   { key: 'called', label: 'Contacted', swatch: 'bg-orange-500',
-    title: 'Every club that has ever been called — voicemails and follow-ups included' },
+    title: 'Every club that has ever been called. Voicemails and follow-ups included' },
   { key: 'followup', label: 'Followup', swatch: 'bg-blue-500',
     title: 'Clubs with a follow-up now due or overdue' },
   { key: 'voicemail', label: 'VM', swatch: 'bg-purple-500',
-    title: 'Clubs whose most recent call went to voicemail — i.e. nobody has picked up since' },
+    title: 'Clubs whose most recent call went to voicemail, i.e. nobody has picked up since' },
   { key: 'sent_email', label: 'Sent Email', swatch: 'bg-teal-400',
     title: 'Clubs a rep has sent an email to from this screen' },
 ]
@@ -310,7 +310,7 @@ function InlineNewContact({ dealId, onCreated, onCancel, toast }) {
         full_name, email: form.email.trim() || null, mobile: form.mobile.trim() || null,
       })
       if (res.contact) onCreated(res.contact)
-      else toast?.error('Contact saved, but could not be added to this list yet — reopen the club to see it')
+      else toast?.error('Contact saved, but could not be added to this list yet, reopen the club to see it')
     } catch (err) {
       toast?.error(err.message || 'Could not add contact')
     } finally {
@@ -396,7 +396,7 @@ function SetupProgress({ stats }) {
         <span className="font-mono text-[9px] tracking-wide2 uppercase text-pb-faintest">Setup wizard</span>
         <span className={`text-[12px] font-medium ${complete ? 'text-pb-positive' : done ? 'text-pb-text' : 'text-pb-amber'}`}>
           {done} of {total} step{total === 1 ? '' : 's'}
-          {complete ? ' — done' : done === 0 ? ' — not started' : ''}
+          {complete ? ', done' : done === 0 ? ', not started' : ''}
         </span>
       </div>
       <div className="h-1.5 rounded-sm mt-1 overflow-hidden" style={{ background: 'var(--pb-hairline2)' }}>
@@ -504,7 +504,7 @@ function OriginCard({ signals, loading }) {
             ) : (
               <>
                 <span className="text-pb-amber font-medium">Gave up at {reg.furthest.label.toLowerCase()}</span>
-                <span className="text-pb-faint"> — step {reg.furthest.position} of {reg.total_steps}</span>
+                <span className="text-pb-faint">. Step {reg.furthest.position} of {reg.total_steps}</span>
               </>
             )}
           </p>
@@ -576,7 +576,7 @@ function MetaAdsCard({ meta }) {
 // buried in its own card further down.
 function DealSummaryStrip({ deal }) {
   const called = deal.ever_called
-    ? `Yes — ${timeAgo(deal.last_call?.occurred_at) || 'logged'}`
+    ? `Yes. ${timeAgo(deal.last_call?.occurred_at) || 'logged'}`
     : 'Never called'
   return (
     <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
@@ -782,7 +782,7 @@ function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStart
           answered from the timeline instead of guessed at. */}
       {a.meta?.email_sent === false && (
         <p className="mt-1 text-[11px] text-pb-amber">
-          Not sent{a.meta.email_error ? ` — ${a.meta.email_error}` : ''}
+          Not sent{a.meta.email_error ? `, ${a.meta.email_error}` : ''}
         </p>
       )}
       {a.meta?.provider && (
@@ -1025,7 +1025,7 @@ export default function SalesWorkspace() {
       let msg = `Trial extended by ${result.days} day${result.days === 1 ? '' : 's'} to ${newEnd}. `
       msg += result.email_sent
         ? `A confirmation email was sent to ${result.contact_email}.`
-        : `The confirmation email was NOT sent${result.email_error ? ` — ${result.email_error}` : ''} `
+        : `The confirmation email was NOT sent${result.email_error ? `, ${result.email_error}` : ''} `
           + `Let them know another way.`
       if (result.nominated_primary_admin) {
         msg += result.primary_admin_invited
@@ -1329,7 +1329,7 @@ export default function SalesWorkspace() {
     const next = !contact.do_not_contact
     let reason = null
     if (next) {
-      reason = window.prompt('Reason (optional) — e.g. "Asked not to be called again"') || null
+      reason = window.prompt('Reason (optional): e.g. "Asked not to be called again"') || null
     }
     try {
       await api.salesWorkspaceSetDoNotContact(drawer.deal.id, contact.directory_contact_id, next, reason)
@@ -1512,7 +1512,7 @@ export default function SalesWorkspace() {
       if (result === null) return   // cancelled — the selection stays as it was
       const summary = Object.entries(result.by_rep).map(([name, n]) => `${name}: ${n}`).join(', ')
       const verb = bulkUnassign ? 'Unassigned' : 'Assigned'
-      toast?.success(`${verb} ${result.assigned} club${result.assigned === 1 ? '' : 's'}${summary ? ` — ${summary}` : ''}`)
+      toast?.success(`${verb} ${result.assigned} club${result.assigned === 1 ? '' : 's'}${summary ? `, ${summary}` : ''}`)
       setCheckedIds(new Set())
       setBulkReps(new Set())
       setBulkUnassign(false)
@@ -1723,7 +1723,7 @@ export default function SalesWorkspace() {
           </FilterGroup>
 
           <FilterGroup label="Meta ad" className="lg:col-span-2">
-            <div className="flex flex-wrap items-center gap-x-3" title="From the trial signup wizard — tick both to match either">
+            <div className="flex flex-wrap items-center gap-x-3" title="From the trial signup wizard, tick both to match either">
               <label className="flex items-center gap-1.5 text-[12px] text-pb-faint cursor-pointer select-none py-2">
                 <input type="checkbox" checked={filters.meta_selected}
                   onChange={e => setFilters(f => ({ ...f, meta_selected: e.target.checked }))} />
@@ -1814,7 +1814,7 @@ export default function SalesWorkspace() {
                   ...f, sort_dir: f.sort_dir === 'asc' ? 'desc' : f.sort_dir === 'desc' ? 'asc'
                     : (_SORT_DEFAULT_DIR_FE[f.sort] === 'asc' ? 'desc' : 'asc'),
                 }))}
-                title={`Sorted ${((filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc') ? 'ascending' : 'descending'} — click to reverse`}
+                title={`Sorted ${((filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc') ? 'ascending' : 'descending'}. Click to reverse`}
                 className="px-1.5 py-1 rounded border border-pb-hairline2 text-pb-faint hover:text-pb-text text-[11px] leading-none">
                 {(filters.sort_dir || _SORT_DEFAULT_DIR_FE[filters.sort]) === 'asc' ? '▲' : '▼'}
               </button>
@@ -2015,7 +2015,7 @@ export default function SalesWorkspace() {
                 </div>
                 {drawer.deal.not_interested && (
                   <p className="mt-3 text-[11.5px] text-pb-red">
-                    Marked not interested — flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
+                    Marked not interested. Flagged from Sales, or from the Club Directory. Clear it from the Club Directory if this club should be worked again.
                   </p>
                 )}
                 <ClubSummaryCard deal={drawer.deal} />
@@ -2083,7 +2083,7 @@ export default function SalesWorkspace() {
                           <span className="text-pb-text">{c.full_name}</span>
                           {c.role && <span className="text-pb-faint ml-1.5">{c.role}</span>}
                           {c.do_not_email && <Pill tone="red">opted out</Pill>}
-                          {c.do_not_contact && <Pill tone="red">do not contact{c.do_not_contact_reason ? ` — ${c.do_not_contact_reason}` : ''}</Pill>}
+                          {c.do_not_contact && <Pill tone="red">do not contact{c.do_not_contact_reason ? `, ${c.do_not_contact_reason}` : ''}</Pill>}
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <div className="text-right">
@@ -2114,10 +2114,10 @@ export default function SalesWorkspace() {
                         if (e.target.value === NEW_CONTACT_VALUE) { setShowNewCallContact(true); return }
                         setCallForm(f => ({ ...f, contactKey: e.target.value }))
                       }}>
-                      <option value="">— no specific contact —</option>
+                      <option value="">, no specific contact, </option>
                       {(drawer.contacts || []).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
-                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? '. DO NOT CONTACT' : ''}
                         </option>
                       ))}
                       <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
@@ -2232,7 +2232,7 @@ export default function SalesWorkspace() {
                       <option value="">Pick a contact…</option>
                       {(drawer.contacts || []).filter(c => c.email).map(c => (
                         <option key={contactKey(c)} value={contactKey(c)}>
-                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? ' — DO NOT CONTACT' : ''}
+                          {c.full_name}{c.role ? ` (${c.role})` : ''}{c.do_not_contact ? '. DO NOT CONTACT' : ''}
                         </option>
                       ))}
                       <option value={NEW_CONTACT_VALUE}>+ New contact…</option>
@@ -2242,7 +2242,7 @@ export default function SalesWorkspace() {
                         <InlineNewContact dealId={drawer.deal.id} toast={toast}
                           onCancel={() => setShowNewEmailContact(false)}
                           onCreated={(contact) => {
-                            if (!contact.email) { toast?.error('That contact has no email address — add one to email them'); return }
+                            if (!contact.email) { toast?.error('That contact has no email address. Add one to email them'); return }
                             const key = mergeNewContact(contact)
                             setEmailForm(f => ({ ...f, contactKey: key }))
                             setShowNewEmailContact(false)
@@ -2302,13 +2302,13 @@ export default function SalesWorkspace() {
         <Modal open={showStartTrial} onClose={() => setShowStartTrial(false)} title={`Start a trial for ${drawer.deal.marketing_club_name}`}>
           <form onSubmit={submitStartTrial} className="space-y-2">
             <p className="text-[11.5px] text-pb-faint">
-              Sets this club up exactly like Super Admin's New Club — a trial of every module starts immediately,
+              Sets this club up exactly like Super Admin's New Club. A trial of every module starts immediately,
               and the contact picked below is emailed an invite link to set their own password as this club's
               Primary Admin.
             </p>
             <Field label="Primary admin contact" hint="Only contacts with a valid email address on file are listed">
               <Select value={trialForm.contactKey} onChange={e => pickTrialContact(e.target.value)} required>
-                <option value="" disabled>— select a contact —</option>
+                <option value="" disabled>. Select a contact, </option>
                 {trialEligibleContacts.map(c => (
                   <option key={contactKey(c)} value={contactKey(c)}>
                     {c.full_name}{c.role ? ` (${c.role})` : ''}
@@ -2318,7 +2318,7 @@ export default function SalesWorkspace() {
             </Field>
             {trialEligibleContacts.length === 0 && (
               <p className="text-[11.5px] text-pb-red">
-                No contact with a valid email address is on file for this club yet — add one under Contacts above
+                No contact with a valid email address is on file for this club yet. Add one under Contacts above
                 before starting a trial.
               </p>
             )}
@@ -2358,7 +2358,7 @@ export default function SalesWorkspace() {
                   setShowExtendNewContact(false)
                   setExtendTrialForm(f => ({ ...f, contactKey: e.target.value }))
                 }}>
-                <option value="" disabled>— select a contact —</option>
+                <option value="" disabled>. Select a contact, </option>
                 {extendTrialEligibleContacts.map(c => (
                   <option key={contactKey(c)} value={contactKey(c)}>
                     {c.full_name}{c.role ? ` (${c.role})` : ''}

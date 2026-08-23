@@ -84,7 +84,7 @@ async def main():
         ok('its dropdown label is the one the ask specified',
            se.TEMPLATE_LABELS[K] == 'Email following voicemail - trial offer',
            se.TEMPLATE_LABELS[K])
-        ok('its body is copied from trial information — the same six steps',
+        ok('its body is copied from trial information, the same six steps',
            all(x in got[K][2] for x in ('Search for your club', 'Create your admin account',
                                         '14-day trial')),
            got[K][2][:200])

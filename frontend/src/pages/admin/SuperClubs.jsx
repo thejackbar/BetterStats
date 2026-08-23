@@ -612,7 +612,7 @@ export default function SuperClubs() {
     setMsg('')
     try {
       await api.superArchiveClub(club.id)
-      setMsg(`Archived ${club.name} — restore it any time from All Clubs.`)
+      setMsg(`Archived ${club.name}. Restore it any time from All Clubs.`)
       setConfirmDelete(null)
       setArchiveConfirmText('')
       load()
@@ -664,8 +664,8 @@ export default function SuperClubs() {
     const when = club.engagement_scored_at
       ? new Date(club.engagement_scored_at).toLocaleDateString('en-AU') : 'unknown'
     return `Engagement score (cached ${when})` + (acts.length
-      ? ` — actions recorded: ${acts.map((a) => `${a.label} ×${a.n}`).join(', ')}`
-      : ' — no actions recorded')
+      ? `. Actions recorded: ${acts.map((a) => `${a.label} ×${a.n}`).join(', ')}`
+      : ', no actions recorded')
   }
 
   const trialStats = clubs.reduce((acc, c) => {
@@ -815,7 +815,7 @@ export default function SuperClubs() {
                   The "Get your club set up" checklist shown to Club Admins. When on, it opens
                   automatically the first time an admin logs in (and again once a club's first
                   sync finishes) until every step is done or dismissed. Turn off to stop it
-                  popping up for every club platform-wide — this doesn't touch a club's own
+                  popping up for every club platform-wide. This doesn't touch a club's own
                   saved progress, so re-enabling it later picks up right where it left off.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
@@ -865,7 +865,7 @@ export default function SuperClubs() {
                 <p className="font-mono text-[10px] text-pb-faintest">
                   Off keeps the member self-service portal (fees, qualifications, online payment
                   via Stripe Connect, reminder emails) completely invisible to every club admin and
-                  unusable by any real member — a club can be switched on individually first via its
+                  unusable by any real member. A club can be switched on individually first via its
                   own "Member Portal" override below, before flipping this on for everyone.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
@@ -881,7 +881,7 @@ export default function SuperClubs() {
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
                   Off keeps the public online store (BetterMerch catalogue + Stripe Connect checkout)
-                  invisible to every club admin and unreachable by any real customer — switch a club on
+                  invisible to every club admin and unreachable by any real customer, switch a club on
                   individually first via its own "Merch storefront" override below.
                 </p>
                 <label className="flex items-center gap-2 font-mono text-[10px] text-pb-faint">
@@ -897,10 +897,10 @@ export default function SuperClubs() {
                 </p>
                 <p className="font-mono text-[10px] text-pb-faintest">
                   Whole-dollar discount off the annual total, by how many priced modules a club
-                  selects in ONE initial subscribe (BetterSelect/BetterSocials/BetterAdmin/BetterIQ —
+                  selects in ONE initial subscribe (BetterSelect/BetterSocials/BetterAdmin/BetterIQ, 
                   BetterFantasyCricket is priced separately and never discounted). Never applies to a
                   module added later to an already-live subscription. Rows 5-6 are here for a future
-                  5th/6th priced module — harmless to leave at $0 until then.
+                  5th/6th priced module. Harmless to leave at $0 until then.
                 </p>
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                   {BUNDLE_DISCOUNT_ROWS.map((n) => (
@@ -928,7 +928,7 @@ export default function SuperClubs() {
                 <p className="font-mono text-[10px] text-pb-faintest">
                   Rep display name (must match exactly) -&gt; their Calendly/booking URL, used by the
                   Sales Workspace's "Book a demo" email template. A rep with no link here still sends
-                  the template — it just asks the contact to reply and arrange a time instead.
+                  the template. It just asks the contact to reply and arrange a time instead.
                 </p>
                 <div className="space-y-2">
                   {settingsForm.demo_booking_links.map((row, i) => (
@@ -975,7 +975,7 @@ export default function SuperClubs() {
                 <p className="font-mono text-[10px] text-pb-faintest">
                   When the daily automated backup runs (Perth, WA time) and how many days
                   of daily backups are kept before the oldest is deleted. Stored as UTC on the
-                  server and converted for display here — no redeploy needed to change either.
+                  server and converted for display here, no redeploy needed to change either.
                   See the Backups page for run history and current database size.
                 </p>
                 <div className="flex items-end gap-3">
@@ -1110,7 +1110,7 @@ export default function SuperClubs() {
               <div>
                 <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">Primary Club Admin</p>
                 <p className="font-mono text-[10px] text-pb-faintest mt-1">
-                  Required. The account is created without a password — this person is emailed a
+                  Required. The account is created without a password. This person is emailed a
                   link to set their own, the same way Club Users → Invite admin works.
                 </p>
               </div>
@@ -1273,7 +1273,7 @@ export default function SuperClubs() {
           </div>
           <div className="mt-3">
             <label className="font-mono text-[10px] text-pb-faint block mb-1"
-              title="Only show clubs with the ticked action types recorded — the signals that feed the engagement score">
+              title="Only show clubs with the ticked action types recorded. The signals that feed the engagement score">
               Engagement actions recorded
             </label>
             <div className="flex flex-wrap gap-1.5">
@@ -1564,7 +1564,7 @@ export default function SuperClubs() {
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Modules (entitlements)</label>
                       <p className="font-mono text-[10px] text-pb-faintest mb-2">
                         Add a module to grant it, then set its status. Every choice applies immediately,
-                        including Trial — it starts a trial prefilled from now and the default trial length,
+                        including Trial. It starts a trial prefilled from now and the default trial length,
                         which you can then adjust with the Start/End fields and Update.
                       </p>
                       <div className="space-y-1.5">
@@ -1582,7 +1582,7 @@ export default function SuperClubs() {
                           const brand = moduleBrand(key).accent
                           return (
                             <div key={key} className="flex flex-wrap items-center gap-2 bg-pb-surface2/40 border pb-hairline rounded px-2.5 py-1.5">
-                              {/* Core is the base — it can't be removed; disable it via its
+                              {/* Core is the base. It can't be removed; disable it via its
                                   status (Cancelled / Paused), not by un-granting. Core's button is
                                   permanently disabled, so dim only while busy (not for Core itself). */}
                               <button type="button" disabled={busy || isCore}
@@ -1658,7 +1658,7 @@ export default function SuperClubs() {
                     <div className="col-span-2 pt-2 pb-hairline-t">
                       <label className="font-mono text-[10px] text-pb-faint block mb-1">Public access</label>
                       <p className="font-mono text-[10px] text-pb-faintest mb-2">
-                        Independent of the Active/Inactive pill above — Password Protected gates the
+                        Independent of the Active/Inactive pill above. Password Protected gates the
                         public page behind a 4-digit PIN instead of taking it fully offline.
                       </p>
                       <label className="flex items-start gap-2.5 cursor-pointer mb-2">
@@ -1722,11 +1722,11 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, billing_checkout_override: e.target.value }))}
                         className={INPUT_CLS}>
                         <option value="">Platform default</option>
-                        <option value="true">Force ON — let this club through (testing)</option>
-                        <option value="false">Force OFF — block even if the platform default is on</option>
+                        <option value="true">Force ON: let this club through (testing)</option>
+                        <option value="false">Force OFF. Block even if the platform default is on</option>
                       </select>
                       <p className="font-mono text-[10px] text-pb-faintest mt-1">
-                        Overrides General Settings → Billing for this one club — lets you test the
+                        Overrides General Settings → Billing for this one club, lets you test the
                         real Stripe flow on a single club before switching it on for everyone.
                       </p>
                     </div>
@@ -1736,11 +1736,11 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, member_portal_override: e.target.value }))}
                         className={INPUT_CLS}>
                         <option value="">Platform default</option>
-                        <option value="true">Force ON — let this club through (testing)</option>
-                        <option value="false">Force OFF — block even if the platform default is on</option>
+                        <option value="true">Force ON: let this club through (testing)</option>
+                        <option value="false">Force OFF. Block even if the platform default is on</option>
                       </select>
                       <p className="font-mono text-[10px] text-pb-faintest mt-1">
-                        Overrides General Settings → Member portal for this one club — test the member
+                        Overrides General Settings → Member portal for this one club, test the member
                         self-service portal + Stripe Connect fee payments on a single club first.
                       </p>
                     </div>
@@ -1750,11 +1750,11 @@ export default function SuperClubs() {
                         onChange={e => setEditForm(f => ({ ...f, merch_storefront_override: e.target.value }))}
                         className={INPUT_CLS}>
                         <option value="">Platform default</option>
-                        <option value="true">Force ON — let this club through (testing)</option>
-                        <option value="false">Force OFF — block even if the platform default is on</option>
+                        <option value="true">Force ON: let this club through (testing)</option>
+                        <option value="false">Force OFF. Block even if the platform default is on</option>
                       </select>
                       <p className="font-mono text-[10px] text-pb-faintest mt-1">
-                        Overrides General Settings → Merch storefront for this one club — test the public
+                        Overrides General Settings → Merch storefront for this one club, test the public
                         online store on a single club first (needs BetterMerch + Stripe Connect too).
                       </p>
                     </div>
@@ -1793,7 +1793,7 @@ export default function SuperClubs() {
                           value={clubAdmins.find(a => a.is_primary_admin)?.user_id || ''}
                           onChange={e => setPrimaryAdmin(club.id, e.target.value)}
                           className={INPUT_CLS}>
-                          <option value="" disabled>— none —</option>
+                          <option value="" disabled>, none, </option>
                           {clubAdmins.map(a => (
                             <option key={a.user_id} value={a.user_id}>
                               {a.display_name || a.username}{a.is_primary_admin ? ' (primary)' : ''}
@@ -1809,7 +1809,7 @@ export default function SuperClubs() {
                   <p className="font-mono text-[10px] text-pb-faintest">
                     Core (BetterStats) is always on. Tick a module to grant it (or remove it). Each held module
                     carries its own status, renewal date and trial above. Subscription status is the whole-account
-                    master switch — Paused / Cancelled fall back to Core only regardless of modules. A trial ends on
+                    master switch. Paused / Cancelled fall back to Core only regardless of modules. A trial ends on
                     its end date automatically; its length comes from General Settings (top of this page).
                   </p>
                   <div className="flex gap-2">

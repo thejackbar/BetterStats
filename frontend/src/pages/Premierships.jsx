@@ -115,7 +115,7 @@ export default function Premierships() {
         {loading && !data ? <PbSpinner message="Loading premierships…" /> : all.length === 0 ? (
           <div className="pb-card p-6 text-sm text-pb-dim">
             No premierships recorded yet. They come from the Premiership awards on
-            each player's profile — add them under Admin → Awards, or bring a whole
+            each player's profile. Add them under Admin → Awards, or bring a whole
             honour roll in at once with the awards import, and the squads build
             themselves from there.
           </div>
@@ -144,7 +144,7 @@ export default function Premierships() {
                     <Label style={{ color: 'var(--pb-accent)' }}>
                       {[p.season || 'Season not recorded', p.team].filter(Boolean).join(' · ')}
                     </Label>
-                    {/* The competition the flag was won in — the card's own
+                    {/* The competition the flag was won in, the card's own
                         title, which is why it is not repeated under every
                         name below. */}
                     {p.competition && (

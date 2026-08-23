@@ -273,7 +273,7 @@ export function RoleMultiSelect({ roles = [], value = [], onChange, onCreateRole
       </div>
       {open && (
         <div className="absolute z-30 mt-1 w-full pb-card bg-pb-surface max-h-64 overflow-y-auto shadow-xl">
-          {roles.length === 0 && <div className="px-3 py-2 text-[11.5px] text-pb-faintest">No roles yet — create one below.</div>}
+          {roles.length === 0 && <div className="px-3 py-2 text-[11.5px] text-pb-faintest">No roles yet, create one below.</div>}
           {roles.map(r => (
             <button type="button" key={r.id} onClick={choose(() => toggle(r.id))}
               className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-[12.5px] hover:bg-pb-surface2">

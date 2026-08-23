@@ -212,7 +212,7 @@ export default function ClubDiary({ st, patch, narrow }) {
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.hair}`, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
             <div>
-              <div style={cap}>CRITICAL PATH — {cp.len} days of chained work</div>
+              <div style={cap}>CRITICAL PATH: {cp.len} days of chained work</div>
               <div style={{ fontSize: 13, color: C.text, lineHeight: 1.5, background: 'rgba(239,91,91,0.07)', border: '1px solid rgba(239,91,91,0.25)', borderRadius: 8, padding: '10px 12px' }}>{cp.path.length ? cp.path.map(id => byId[id].title).join('  →  ') : 'No remaining dependency chain.'}</div>
             </div>
             <div>
@@ -304,7 +304,7 @@ export default function ClubDiary({ st, patch, narrow }) {
           <div className="pb-scroll" style={{ padding: '18px 20px', overflowY: 'auto' }}>
             <div style={{ ...cap, marginBottom: 4 }}>TEMPLATE LIBRARY</div>
             <EntityManager
-              describe="The club's standing obligations — what has to happen every season and who owns it by role. Edit here and every future season you generate inherits it."
+              describe="The club's standing obligations. What has to happen every season and who owns it by role. Edit here and every future season you generate inherits it."
               load={() => api.diaryListDefinitions().then(r => r?.definitions || r || [])}
               fields={[
                 { key: 'title', label: 'Task', type: 'text', required: true, span: 2 },
@@ -322,7 +322,7 @@ export default function ClubDiary({ st, patch, narrow }) {
           </div>
           <div className="pb-scroll" style={{ borderLeft: `1px solid ${C.hair}`, background: C.surface, padding: '18px 16px', overflowY: 'auto', alignSelf: 'stretch' }}>
             <div style={cap}>GENERATE A SEASON</div>
-            <p style={{ fontSize: 12.5, color: C.dim, margin: '0 0 12px', lineHeight: 1.5 }}>Materialises every active definition into dated tasks for the season you pick. Nothing is locked — edit the generated plan freely afterwards.</p>
+            <p style={{ fontSize: 12.5, color: C.dim, margin: '0 0 12px', lineHeight: 1.5 }}>Materialises every active definition into dated tasks for the season you pick. Nothing is locked. Edit the generated plan freely afterwards.</p>
             <select value={genYear} onChange={e => setGenYear(Number(e.target.value))}
               style={{ width: '100%', marginBottom: 8, padding: '8px 10px', borderRadius: 8, fontSize: 13, background: C.surface2, border: `1px solid ${C.hair2}`, color: C.text }}>
               {[currentSeasonYear - 1, currentSeasonYear, currentSeasonYear + 1, currentSeasonYear + 2].map(y => (
@@ -383,7 +383,7 @@ export default function ClubDiary({ st, patch, narrow }) {
                 <div style={dcap}>DEPENDS ON</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                   {up.map(u => <div key={u.id} onClick={() => patch({ task: u.id })} style={{ display: 'flex', alignItems: 'center', gap: 8, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 6, padding: '7px 10px', cursor: 'pointer' }}><span style={{ fontSize: 12.5, flex: 1, minWidth: 0 }}>{u.title}</span><span style={chip(u)}>{(TONE[u.status] || TONE.upcoming).label}</span></div>)}
-                  {up.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>Nothing — this one can start any time.</div>}
+                  {up.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>Nothing. This one can start any time.</div>}
                 </div>
               </div>
               <div>

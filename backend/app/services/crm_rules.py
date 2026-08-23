@@ -78,7 +78,7 @@ TRIGGERS: dict = {
     "subscription_cancelled": {
         "label": "Subscription cancelled",
         "description": "Every billable module the club held has now been cancelled/lost "
-                       "(a partial cancel — some modules still held — never fires this).",
+                       "(a partial cancel, some modules still held, never fires this).",
         "param_key": None,
         "param_label": None,
     },

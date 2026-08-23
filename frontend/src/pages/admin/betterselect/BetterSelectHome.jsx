@@ -178,7 +178,7 @@ function BetterSelectOverview() {
       <ModuleHero
         name="BetterSelect"
         logo={BRAND.logo}
-        blurb="Everything for match day — your squads, availability, selection, nets and votes."
+        blurb="Everything for match day: your squads, availability, selection, nets and votes."
       />
       {!hero ? (
         <div className="pb-card px-5 py-12 text-center">

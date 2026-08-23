@@ -109,11 +109,11 @@ function FeesCard({ slug, fees, canPay, onPaid }) {
               {paying === 'match_day' ? 'REDIRECTING…' : `PAY MATCH FEES ${money(fin.match_fee_outstanding)}`}
             </button>
           )}
-          {fin.total_outstanding <= 0 && <div className="font-mono text-[11px] text-pb-accent">All square — nothing owing.</div>}
+          {fin.total_outstanding <= 0 && <div className="font-mono text-[11px] text-pb-accent">All square. Nothing owing.</div>}
         </div>
       ) : (
         fin.total_outstanding > 0 && (
-          <div className="font-mono text-[10px] text-pb-faintest">Online payment isn't set up yet — pay the usual way, or ask the club.</div>
+          <div className="font-mono text-[10px] text-pb-faintest">Online payment isn't set up yet, pay the usual way, or ask the club.</div>
         )
       )}
     </div>
@@ -252,8 +252,8 @@ export default function PublicMemberPortal() {
           <div className="font-display font-bold text-2xl text-pb-text">Member Portal</div>
         </div>
 
-        {paidParam === '1' && <Banner tone="ok">Payment received — thanks! It may take a minute to show below.</Banner>}
-        {paidParam === '0' && <Banner tone="warn">Payment cancelled — nothing was charged.</Banner>}
+        {paidParam === '1' && <Banner tone="ok">Payment received, thanks! It may take a minute to show below.</Banner>}
+        {paidParam === '0' && <Banner tone="warn">Payment cancelled. Nothing was charged.</Banner>}
         {error && <Banner>{error}</Banner>}
 
         {!me ? (

@@ -101,7 +101,7 @@ export default function ScoutCardEditor({ card, onClose, onSave, onRemove, onSha
           {!shareToken && (
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs text-pb-dim">
-                Create a read-only link with this player's stats, tags and notes — never the recruiting fields below.
+                Create a read-only link with this player's stats, tags and notes. Never the recruiting fields below.
               </p>
               <button onClick={doShare} disabled={shareBusy}
                       className="shrink-0 text-sm px-3 py-1.5 rounded border border-pb-hairline hover:bg-pb-surface2 disabled:opacity-50">

@@ -69,18 +69,18 @@ export default function AdminMemberPortal() {
               </button>
             </div>
             <p className="text-[12.5px] leading-[1.6] text-pb-faint mt-1.5">
-              Share this with members — they'll enter their registered email to request a sign-in link.
+              Share this with members. They'll enter their registered email to request a sign-in link.
             </p>
           </div>
         )}
 
         <div className="pb-card p-4">
-          <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-3">STRIPE CONNECT — ONLINE FEE PAYMENTS</div>
+          <div className="font-mono text-[10px] tracking-wide3 text-pb-faintest mb-3">STRIPE CONNECT. ONLINE FEE PAYMENTS</div>
           {!status.connected ? (
             <>
               <p className="text-pb-dim text-sm mb-3">
                 Connect the club's own Stripe account so member fee payments land directly in the club's bank
-                account — BetterCricket never holds or sees the money.
+                account. BetterCricket never holds or sees the money.
               </p>
               <button onClick={connect} disabled={busy}
                 className="px-4 py-2 rounded text-[12.5px] font-semibold text-pb-bg disabled:opacity-50" style={{ background: 'var(--pb-accent)' }}>
@@ -103,7 +103,7 @@ export default function AdminMemberPortal() {
               </div>
               {!status.charges_enabled && (
                 <p className="text-[12.5px] leading-[1.6] text-pb-amber mb-3">
-                  Onboarding isn't finished yet — members can't pay online until charges are enabled.
+                  Onboarding isn't finished yet. Members can't pay online until charges are enabled.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">

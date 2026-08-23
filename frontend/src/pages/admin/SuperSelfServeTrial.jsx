@@ -31,7 +31,7 @@ export default function SuperSelfServeTrial() {
           <p className="font-mono text-[11px] text-pb-faintest mt-1">
             Registers a real club and admin account through the same flow /trial and
             the "Get your club on BetterCricket" CTAs use. Always available here,
-            regardless of whether the public flow is switched on — see
+            regardless of whether the public flow is switched on. See
             docs/self-serve-trial-onboarding-plan.md.
           </p>
         </div>

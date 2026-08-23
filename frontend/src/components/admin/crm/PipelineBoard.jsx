@@ -264,7 +264,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                     </div>
                   )}
                   {!deal.stage_auto_locked && deal.status === 'open' && (
-                    <div title="Stage still moves itself — a repeat Contact-Us enquiry or an engagement score over 70 can advance it. Move it by hand to stop that.">
+                    <div title="Stage still moves itself. A repeat Contact-Us enquiry or an engagement score over 70 can advance it. Move it by hand to stop that.">
                       <Pill>auto</Pill>
                     </div>
                   )}
@@ -321,7 +321,7 @@ export default function PipelineBoard({ board, onOpenDeal, onMoved, client, term
                       whole point of showing it. Last line on the card. */}
                   {deal.commission_rep_name && (
                     <div className="text-[10.5px] truncate mt-1.5" style={{ color: TOWN_STATE_COLOR }}
-                      title="First sales rep to contact this club — commission attribution, which reassigning the deal never changes">
+                      title="First sales rep to contact this club. Commission attribution, which reassigning the deal never changes">
                       Contacted by {deal.commission_rep_name}
                     </div>
                   )}

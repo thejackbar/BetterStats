@@ -29,7 +29,7 @@ export const CORE_MARKETING = {
   key: 'core',
   audience: 'The foundation · every club',
   compareKey: 'betterstats',
-  tagline: 'Your club’s memory — every player, every season, kept forever.',
+  tagline: 'Your club’s memory: every player, every season, kept forever.',
   // The standard module page; its deeper feature tour lives on /features.
   to: '/modules/betterstats',
   deepTour: '/features',
@@ -230,7 +230,7 @@ export const MODULES_MARKETING = [
     compareKey: 'bettersocials',
     tagline: 'Your public website plus match-day posts your community actually reposts.',
     summary:
-      'BetterSocials runs your club’s public website and a post designer that turns your match data into share-ready graphics — lineups, announcements, player-of-the-match, scorecards and more. Pick a layout, and your scorecard fills itself from your own data. Download a crisp PNG.',
+      'BetterSocials runs your club’s public website and a post designer that turns your match data into share-ready graphics: lineups, announcements, player-of-the-match, scorecards and more. Pick a layout, and your scorecard fills itself from your own data. Download a crisp PNG.',
     highlights: [
       'Your public, club-branded website',
       'Lineups, announcements, scorecards & POTM',
@@ -238,10 +238,10 @@ export const MODULES_MARKETING = [
       'Your club colours, crest & display fonts',
     ],
     features: [
-      { title: 'Your club website', desc: 'A fast, modern, club-branded public site — news, galleries, sponsors, honour boards and your live stats, all in one place.' },
-      { title: 'Six post types', desc: 'Lineup, announcement, toss, player of the match, final score and a full match scorecard — one designer for the whole match day.' },
-      { title: 'A layout for every post', desc: 'Multiple designs per type — hero lineups, trading-card grids, side-numbered XIs, broadcast or app-style scorecards, festival posters and more.' },
-      { title: 'Auto-fill from the match', desc: 'Your scorecard fills itself from your own synced match data — no retyping names and figures.' },
+      { title: 'Your club website', desc: 'A fast, modern, club-branded public site: news, galleries, sponsors, honour boards and your live stats, all in one place.' },
+      { title: 'Six post types', desc: 'Lineup, announcement, toss, player of the match, final score and a full match scorecard, one designer for the whole match day.' },
+      { title: 'A layout for every post', desc: 'Multiple designs per type: hero lineups, trading-card grids, side-numbered XIs, broadcast or app-style scorecards, festival posters and more.' },
+      { title: 'Auto-fill from the match', desc: 'Your scorecard fills itself from your own synced match data, no retyping names and figures.' },
       { title: 'On-brand by default', desc: 'Your crest and club colours, a choice of display fonts, and a dark or light finish.' },
       { title: 'One-tap export', desc: 'Download a crisp PNG, ready to post to Instagram, Facebook or X.' },
     ],
@@ -324,7 +324,7 @@ export const MODULES_MARKETING = [
     features: [
       { title: 'One member directory', desc: 'Every player, parent, life member, volunteer and sponsor contact in one list, built from your stats data rather than typed in again. Filter by membership type, by who is still playing, or by who you are missing an email address for.' },
       { title: 'Automatic fee allocation', desc: 'A recorded payment settles games oldest-first, in full while the money lasts; the boundary game shows part-paid. Edit days played and it re-allocates itself.' },
-      { title: 'Always-correct status', desc: 'Per-game Paid / Part-paid / Unpaid is derived on read — there’s no stale flag to keep in sync.' },
+      { title: 'Always-correct status', desc: 'Per-game Paid / Part-paid / Unpaid is derived on read, there’s no stale flag to keep in sync.' },
       { title: 'Credit & waivers', desc: 'Overpay and the balance rolls forward as credit; waive a match-day fee with a note. Membership and match-fee buckets stay separate.' },
       { title: 'Volunteer roster', desc: 'Roster the canteen, the bar and the gate week by week, track who is available, and confirm the week once it is done. Confirmed shifts post straight to the club’s hours ledger, with paid work kept apart from volunteer work for your grant applications.' },
       { title: 'Committee & meetings', desc: 'Run the meeting from the agenda itself: mark attendance, put motions and votes against the item being discussed, hand out actions with owners, and type the minutes as you go. Agendas group into sections and there are starter templates for an AGM or an ordinary committee meeting.' },
@@ -332,7 +332,7 @@ export const MODULES_MARKETING = [
       { title: 'Committee roles that hand over', desc: 'Positions, terms and who holds what, so the roles carry over at the AGM rather than living in one person’s head. A job can be owned by the seat instead of the person, and it moves with the seat.' },
       { title: 'A strategic plan you can track', desc: 'Group your objectives under the club’s own pillars, give each one an owner, a budget and a due date, and watch the actions serving it report back. A starter plan is one button, so nobody faces a blank page.' },
       { title: 'Committee documents', desc: 'Keep quotes, policies and reports against the meeting or the action that called for them, either as a link or an uploaded file, with uploads readable by your office bearers only if you want it that way.' },
-      { title: 'Bulk email (BetterComms)', desc: 'Newsletters and announcements to your member database — contacts come straight from your players, with Spam-Act-compliant unsubscribes.' },
+      { title: 'Bulk email (BetterComms)', desc: 'Newsletters and announcements to your member database: contacts come straight from your players, with Spam-Act-compliant unsubscribes.' },
       { title: 'Stock and merch', desc: 'Track playing kit, equipment and canteen stock, what has been issued to who, and what is still owed.' },
     ],
     screenshot: '/marketing/modules/betteradmin-overview.jpg',
@@ -405,7 +405,7 @@ export const MODULES_MARKETING = [
     compareKey: 'betteriq',
     tagline: 'Broadcast-grade analytics and an opposition scout for your club.',
     summary:
-      'BetterIQ reads your own scorecards — no extra data entry — and turns them into an opposition dossier, a live selection brain and deep player and team analysis. The kind of match prep most pro teams pay for.',
+      'BetterIQ reads your own scorecards, no extra data entry, and turns them into an opposition dossier, a live selection brain and deep player and team analysis. The kind of match prep most pro teams pay for.',
     highlights: [
       'Opposition scouting & cheat sheet',
       'Live best-available XI',
@@ -416,13 +416,13 @@ export const MODULES_MARKETING = [
       { title: 'Scout the opposition', desc: 'Danger batters and bowlers, recent form, head-to-head history and a rule-based game plan for any upcoming opponent.' },
       { title: 'Opposition players', desc: 'Per-player profiles with wagon wheels, radars, editable scouting tags and their record against you.' },
       { title: 'Match preview & cheat sheet', desc: 'A lean match preview, plus a print-ready captain’s cheat sheet for the car park.' },
-      { title: 'Live selection', desc: 'A best-available XI that updates as availability changes, with balance warnings — and it syncs with BetterSelect.' },
+      { title: 'Live selection', desc: 'A best-available XI that updates as availability changes, with balance warnings, and it syncs with BetterSelect.' },
       { title: 'Player trends', desc: 'Season-by-season trajectories, breakout and decline detection, milestone forecasts and per-player deep dives.' },
-      { title: 'Team analysis', desc: 'Batting, bowling and fielding profiles, partnerships, collapses, par scores and how-you-win/lose — filterable by season and grade.' },
+      { title: 'Team analysis', desc: 'Batting, bowling and fielding profiles, partnerships, collapses, par scores and how-you-win/lose, filterable by season and grade.' },
       { title: 'Match review', desc: 'A post-match breakdown of what actually changed the game.' },
-      { title: 'Innings phases', desc: 'Powerplay / Middle / Death splits, radars, gauges and wagon wheels — a full broadcast-style viz kit.' },
+      { title: 'Innings phases', desc: 'Powerplay / Middle / Death splits, radars, gauges and wagon wheels, a full broadcast-style viz kit.' },
     ],
-    note: 'Built entirely from your synced scorecards — no manual entry and no ball-by-ball scoring required.',
+    note: 'Built entirely from your synced scorecards, no manual entry and no ball-by-ball scoring required.',
     screenshot: '/marketing/modules/betteriq-overview.jpg',
     showcase: [
       {

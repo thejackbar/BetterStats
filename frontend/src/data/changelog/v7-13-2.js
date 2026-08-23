@@ -17,7 +17,7 @@ export default {
     "New season reports: Most 4s/6s/Ducks/Hundreds/Fifties in a Season; Catches/Stumpings/Run-Outs in a Season",
     "Fixed: redundant UUID column showing alongside PLAYER in derived results (filtered out client-side)",
     "Fixed: results card header padding (was flush to the edge)",
-    "Save report is now a primary button on the results card — much more discoverable",
+    "Save report is now a primary button on the results card, much more discoverable",
     "Deferred (data not tracked): Hat Tricks, On This Day, Mins Batted, Most Boundaries Inflicted, Batting/Bowling Rankings, Howout Frequency Chart"
   ]
 }

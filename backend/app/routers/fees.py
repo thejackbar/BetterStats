@@ -1032,7 +1032,7 @@ async def patch_member_season(
         ms.playhq_registered_at = datetime.now(timezone.utc) if data.playhq_registered else None
     if data.status is not None:
         if data.status not in MEMBERSHIP_STATUSES:
-            raise HTTPException(status_code=422, detail=f"Invalid status — must be one of {MEMBERSHIP_STATUSES}")
+            raise HTTPException(status_code=422, detail=f"Invalid status. Must be one of {MEMBERSHIP_STATUSES}")
         ms.status = data.status
     await db.commit()
     return {"ok": True}
@@ -1072,7 +1072,7 @@ async def remove_member_season(
     if payment_count:
         raise HTTPException(
             status_code=409,
-            detail=f"{member.full_name} has {payment_count} payment{'s' if payment_count != 1 else ''} recorded this season — remove the payment(s) first",
+            detail=f"{member.full_name} has {payment_count} payment{'s' if payment_count != 1 else ''} recorded this season. Remove the payment(s) first",
         )
     await db.delete(ms)
     await db.commit()
@@ -1140,12 +1140,12 @@ async def mark_match_day_paid(
     if e.paid_payment_id:
         return {"id": str(e.id), "paid_payment_id": str(e.paid_payment_id), "amount": None, "already_paid": True}
     if not ms.fee_schedule_id:
-        raise HTTPException(status_code=422, detail="Member has no tier — assign one before marking paid")
+        raise HTTPException(status_code=422, detail="Member has no tier. Assign one before marking paid")
     schedule = await db.get(FeeSchedule, ms.fee_schedule_id)
     rate = _f(schedule.match_day_rate) if schedule else 0.0
     amount = round(_f(e.days_played) * rate, 2)
     if amount <= 0:
-        raise HTTPException(status_code=422, detail="Match-day rate is $0 for this tier — no payment needed")
+        raise HTTPException(status_code=422, detail="Match-day rate is $0 for this tier, no payment needed")
 
     payment = FeePayment(
         id=uuid.uuid4(),

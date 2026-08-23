@@ -21,7 +21,7 @@ const fmtDay = (d) => {
 const STATE_LABEL = { open: null, awaiting_team: 'Team list not in yet', closed: 'Voting closed', locked: 'Voting closed' }
 const NOT_OPEN = {
   upcoming: 'This game hasn’t been played yet.',
-  awaiting_team: 'The team list for this game isn’t in yet — check back soon.',
+  awaiting_team: 'The team list for this game isn’t in yet. Check back soon.',
   closed: 'Voting has closed for this game.',
   locked: 'Voting is closed for this game.',
 }

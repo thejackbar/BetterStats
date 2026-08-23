@@ -393,7 +393,7 @@ async def add_player(
     subsequent add."""
     club_row = await _load_club_row(session, org_guid)
     if not club_row or club_row.status != "ready":
-        raise ValueError("Club roster isn't ready yet — fetch the roster before adding a player.")
+        raise ValueError("Club roster isn't ready yet. Fetch the roster before adding a player.")
     sliced = _slice_player(club_row.payload or {}, player_id)
     if not sliced:
         raise ValueError("That player wasn't found in this club's roster.")

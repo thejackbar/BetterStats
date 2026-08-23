@@ -178,7 +178,7 @@ export const BLANK_STARTERS = [
     key: 'players', name: 'Players wanted', build: () => [
       starterBrand({ x: 60, y: 56, size: 184 }),
       starterText('PLAYERS WANTED', { x: 70, y: 470, w: 940, fontSize: 150, color: 'ink' }),
-      starterText('Join the club this season — all grades, all ages welcome.', { x: 72, y: 720, w: 780, fontSize: 40, bold: false, fontFamily: "'Inter', sans-serif", uppercase: false, color: 'ink', lineHeight: 1.2 }),
+      starterText('Join the club this season: all grades, all ages welcome.', { x: 72, y: 720, w: 780, fontSize: 40, bold: false, fontFamily: "'Inter', sans-serif", uppercase: false, color: 'ink', lineHeight: 1.2 }),
     ],
   },
   {
@@ -194,8 +194,8 @@ export const BLANK_STARTERS = [
     key: 'quote', name: 'Big quote', build: () => [
       starterBrand({ x: 60, y: 56, size: 150 }),
       starterText('“', { x: 60, y: 300, w: 300, fontSize: 340, color: 'accent', lineHeight: 0.7 }),
-      starterText('Add your quote here — a message from the club.', { x: 90, y: 470, w: 900, fontSize: 90, color: 'ink', uppercase: false, lineHeight: 1.05 }),
-      starterText('— Name, Role', { x: 92, y: 880, w: 700, fontSize: 44, bold: false, fontFamily: "'Inter', sans-serif", uppercase: false, color: 'accent' }),
+      starterText('Add your quote here: a message from the club.', { x: 90, y: 470, w: 900, fontSize: 90, color: 'ink', uppercase: false, lineHeight: 1.05 }),
+      starterText('. Name, Role', { x: 92, y: 880, w: 700, fontSize: 44, bold: false, fontFamily: "'Inter', sans-serif", uppercase: false, color: 'accent' }),
     ],
   },
   {
@@ -298,7 +298,7 @@ function DataBlock({ item, palette, data = {} }) {
     <div style={{ fontFamily: DISPLAY_FONT, fontSize: 30, letterSpacing: 2, color: accent, marginBottom: 12 }}>{children}</div>
   )
   const empty = (label) => (
-    <div style={wrap}><Head>{label}</Head><div style={{ fontFamily: MONO_FONT, fontSize: 15, color: `${ink}99` }}>No {label.toLowerCase()} loaded yet — add them on the {label} tab.</div></div>
+    <div style={wrap}><Head>{label}</Head><div style={{ fontFamily: MONO_FONT, fontSize: 15, color: `${ink}99` }}>No {label.toLowerCase()} loaded yet. Add them on the {label} tab.</div></div>
   )
 
   if (item.kind === 'fixtures') {

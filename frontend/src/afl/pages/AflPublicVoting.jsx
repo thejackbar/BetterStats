@@ -173,7 +173,7 @@ export default function AflPublicVoting() {
           <p className="text-[12.5px] text-pb-faint mb-3">
             {pinFor.has_phone
               ? 'Enter the last 4 digits of your mobile number.'
-              : "We don't have a mobile number for you — ask your club to add one."}
+              : "We don't have a mobile number for you. Ask your club to add one."}
           </p>
           <div className="flex gap-2">
             <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
@@ -269,7 +269,7 @@ export default function AflPublicVoting() {
 
       {step === 'done' && (
         <div className="text-center py-8">
-          <div className="font-display font-bold text-xl mb-2">Thanks — votes in.</div>
+          <div className="font-display font-bold text-xl mb-2">Thanks, votes in.</div>
           <p className="text-sm text-pb-faint mb-5">
             Your ballot is with the club. You can come back and change it while voting stays open.
           </p>

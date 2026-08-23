@@ -287,7 +287,7 @@ function ReviewStep({ resolved, resolving, committing, committed, clubSlug,
         <button onClick={onBack} className="font-mono text-[10px] tracking-wide2 border pb-hairline rounded px-3 py-2 text-pb-faint hover:text-pb-text">← BACK</button>
         {t.sheet_errors > 0 && (
           <span className="font-mono text-[10px] text-pb-amber">
-            {num(t.sheet_errors)} row(s) don't add up — importing keeps them exactly as the sheet has them.
+            {num(t.sheet_errors)} row(s) don't add up. Importing keeps them exactly as the sheet has them.
           </span>
         )}
         <button onClick={onCommit} disabled={committing || !(t.importable > 0)}
@@ -338,7 +338,7 @@ function PastImports({ history, expanded, games, loadingGames, onToggle, onUndo 
                           <div key={g.id} className="flex items-center justify-between gap-3 px-2 py-1.5">
                             <span className="text-pb-dim truncate">
                               <span className="font-mono text-[10px] text-pb-faintest mr-2">{g.played_at || ''}</span>
-                              {g.is_bye ? `Bye — ${g.grade_name}` : `${g.home_team} v ${g.away_team}`}
+                              {g.is_bye ? `Bye: ${g.grade_name}` : `${g.home_team} v ${g.away_team}`}
                               <span className="text-pb-faintest"> · {g.grade_name}</span>
                             </span>
                             <span className="font-mono text-[10px] text-pb-faintest shrink-0">
@@ -391,7 +391,7 @@ export default function AflAdminResultsImport() {
 
   const loadHistory = () => { aflApi.resultImportsList().then(setHistory).catch(() => {}) }
   const loadSeasons = () => {
-    // Same club-seasons endpoint Import Stats uses — one list, one create
+    // Same club-seasons endpoint Import Stats uses, one list, one create
     // path, no second copy to keep in step.
     aflApi.importsSeasons().then(ss => setAllSeasons((ss || []).map(s => ({
       id: s.id, name: (s.year && !String(s.name).includes(String(s.year))) ? `${s.name} (${s.year})` : s.name,
@@ -404,7 +404,7 @@ export default function AflAdminResultsImport() {
   }, [])
 
   // Live-reconcile whenever the mapping, an override or an include toggle
-  // changes — the review stays current as you work rather than needing a
+  // changes. The review stays current as you work rather than needing a
   // "recalculate" press.
   useEffect(() => {
     if (!headers.length || !mapping.played_on?.column) return
@@ -428,7 +428,7 @@ export default function AflAdminResultsImport() {
 
   // A results register that goes back decades has no season row to match for
   // most of its life. Rather than block, an unmatched label defaults to
-  // "unassigned" — and because a game has to hang off a season, the review
+  // "unassigned", and because a game has to hang off a season, the review
   // step then reports those rows as blocked with the fix named ("create one
   // on the Seasons step"), which the bulk-create button does in one press.
   useEffect(() => {
@@ -480,7 +480,7 @@ export default function AflAdminResultsImport() {
     if (!targets.length) return
     setBulkCreatingSeasons(true)
     let created = 0, failed = 0
-    // Sequential, not parallel — two labels that resolve to the same season
+    // Sequential, not parallel. Two labels that resolve to the same season
     // name would otherwise race each other into a duplicate-name 409.
     for (const s of targets) {
       try {
@@ -492,7 +492,7 @@ export default function AflAdminResultsImport() {
     setBulkCreatingSeasons(false)
     toast[failed ? 'error' : 'success'](
       `Created ${created} season${created === 1 ? '' : 's'}`
-      + (failed ? ` — ${failed} couldn't be created (that name already exists; pick it from the list instead)` : '')
+      + (failed ? `. ${failed} couldn't be created (that name already exists; pick it from the list instead)` : '')
     )
   }
 
@@ -547,7 +547,7 @@ export default function AflAdminResultsImport() {
         )}
       </div>
       <p className="text-sm text-pb-dim max-w-3xl -mt-4">
-        Bring in your club's own results register — one row per match, going back as far as your records
+        Bring in your club's own results register. One row per match, going back as far as your records
         do. Upload it, match the columns and the season and team names, then review what we read before
         anything is saved. Imported results sit alongside your synced games on the results page and in
         the club record. A game PlayHQ has already synced is never overwritten, and the whole upload can
@@ -580,7 +580,7 @@ export default function AflAdminResultsImport() {
           <input ref={fileRef} type="file" accept=".csv,.xlsx,.xlsm" onChange={onFile} disabled={parsing}
             className="block text-pb-dim text-sm file:bg-pb-surface2 file:border file:pb-hairline file:rounded file:px-3 file:py-1.5 file:mr-3 file:font-mono file:text-[10px] file:text-pb-text file:cursor-pointer" />
           <p className="font-mono text-[10px] text-pb-faintest mt-3">
-            One row per match. Headers can be anything — we map them in the next step.{' '}
+            One row per match. Headers can be anything, we map them in the next step.{' '}
             <a href={aflApi.resultImportsTemplateUrl()} className="text-[var(--pb-accent)] hover:underline">Download a template</a>.
           </p>
         </div>
@@ -617,7 +617,7 @@ export default function AflAdminResultsImport() {
 
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">SCORES</div>
             <p className="text-[11px] text-pb-faintest mb-2 max-w-2xl">
-              Goals and behinds are enough — we work the total out at six points a goal where your sheet
+              Goals and behinds are enough. We work the total out at six points a goal where your sheet
               doesn't carry one, and say so if the two disagree.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 mb-5">
@@ -630,7 +630,7 @@ export default function AflAdminResultsImport() {
 
             <div className="font-mono text-[10px] tracking-wide3 text-pb-faint mb-2">RESULT</div>
             <p className="text-[11px] text-pb-faintest mb-2 max-w-2xl">
-              Whatever your sheet writes in its result column — "Won", "Loss", "Drawn Game", "Bye",
+              Whatever your sheet writes in its result column. "Won", "Loss", "Drawn Game", "Bye",
               "Cancel", "Won on Forfeit". Where it's blank we work the result out from the scores and
               flag the row so you can check it.
             </p>
@@ -656,7 +656,7 @@ export default function AflAdminResultsImport() {
       {step === 'seasons' && (
         <MatchTable
           title="Confirm the seasons" kind="season"
-          subtitle="Every result needs a season to sit in. Match each label from your sheet to one of your club's seasons, or create the ones that predate anything synced — the button below does the whole unmatched list in one go."
+          subtitle="Every result needs a season to sit in. Match each label from your sheet to one of your club's seasons, or create the ones that predate anything synced. The button below does the whole unmatched list in one go."
           rows={resolved?.seasons || []}
           allOptions={allSeasons}
           loading={resolving}

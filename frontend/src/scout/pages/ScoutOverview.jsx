@@ -117,7 +117,7 @@ export default function ScoutOverview() {
                 </button>
               )}
             </div>
-            {stale.length === 0 && <p className="text-sm text-pb-faint py-4">Nothing stale — everyone you track has recent stats or notes.</p>}
+            {stale.length === 0 && <p className="text-sm text-pb-faint py-4">Nothing stale. Everyone you track has recent stats or notes.</p>}
             <div className="divide-y divide-pb-hairline -mx-4 mt-1">
               {stale.map((s) => (
                 <div key={s.id} className="flex items-center gap-3 px-4 py-3">
@@ -148,7 +148,7 @@ export default function ScoutOverview() {
               </div>
             )}
             <p className="text-xs text-pb-faint">
-              Priced by players actively tracked.{usage.player_cap != null && ` ${Math.max(0, usage.player_cap - usage.player_count)} slots left — archive someone to free one up.`}
+              Priced by players actively tracked.{usage.player_cap != null && ` ${Math.max(0, usage.player_cap - usage.player_count)} slots left, archive someone to free one up.`}
             </p>
           </div>
 

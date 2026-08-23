@@ -1087,9 +1087,9 @@ async def player_deep_dive(
     bits = [f"Bats mostly as {('an ' if role[0] in 'aeiou' else 'a ')}{role} option."]
     if starts >= 4:
         if (conversion["convert_25_to_50"] or 0) >= 45:
-            bits.append(f"Converts starts well — {fifties_plus} fifty-plus from {starts} starts.")
+            bits.append(f"Converts starts well. {fifties_plus} fifty-plus from {starts} starts.")
         else:
-            bits.append(f"Gets in but gets out — only {fifties_plus} of {starts} starts went past 50.")
+            bits.append(f"Gets in but gets out, only {fifties_plus} of {starts} starts went past 50.")
     if dismissals:
         bits.append(f"Most often out {dismissals[0]['type']} ({dismissals[0]['pct']}%).")
     if best_opp:
@@ -1256,14 +1256,14 @@ async def bowler_deep_dive(
     bits = []
     if tot_pos >= 5:
         if top / tot_pos >= 0.5:
-            bits.append(f"Top-order threat — {round(100 * top / tot_pos)}% of wickets are the top 3.")
+            bits.append(f"Top-order threat: {round(100 * top / tot_pos)}% of wickets are the top 3.")
         elif tail / tot_pos >= 0.5:
-            bits.append(f"Mops up the lower order — {round(100 * tail / tot_pos)}% of wickets bat 8 or below.")
+            bits.append(f"Mops up the lower order. {round(100 * tail / tot_pos)}% of wickets bat 8 or below.")
     if quality and kr >= 5:
         if (quality["set_pct"] or 0) >= 45:
             bits.append(f"Removes set batters (their scalps average {quality['scalp_value']:.2f}).")
         elif (quality["new_pct"] or 0) >= 50:
-            bits.append("Strikes early — usually gets batters before they're in.")
+            bits.append("Strikes early, usually gets batters before they're in.")
     if dism:
         topd = max(dism.items(), key=lambda x: x[1])
         if topd[1] / n >= 0.4:
@@ -1276,9 +1276,9 @@ async def bowler_deep_dive(
             bits.append(f"Mostly {how} ({round(100 * topd[1] / n)}%).")
     if discipline and discipline["extras_per_over"] is not None:
         if discipline["extras_per_over"] <= 0.3:
-            bits.append(f"Tidy — {discipline['extras_per_over']} extras/over.")
+            bits.append(f"Tidy: {discipline['extras_per_over']} extras/over.")
         elif discipline["extras_per_over"] >= 0.8:
-            bits.append(f"Can leak extras — {discipline['extras_per_over']}/over.")
+            bits.append(f"Can leak extras, {discipline['extras_per_over']}/over.")
     scouting_note = " ".join(bits) if bits else None
 
     return {

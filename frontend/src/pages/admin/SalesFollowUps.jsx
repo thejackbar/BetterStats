@@ -23,7 +23,7 @@ function FollowUpRow({ f, onDone }) {
         </Link>
         {f.contact_name && <span className="text-pb-faint ml-1.5">{f.contact_name}</span>}
         {f.owner_name && <span className="text-pb-faintest ml-1.5">· {f.owner_name}</span>}
-        {f.outcome && <div className="text-pb-faintest text-[10.5px] mt-0.5">{outcomeLabel(f.outcome)}{f.notes ? ` — ${f.notes}` : ''}</div>}
+        {f.outcome && <div className="text-pb-faintest text-[10.5px] mt-0.5">{outcomeLabel(f.outcome)}{f.notes ? `, ${f.notes}` : ''}</div>}
       </div>
       <div className="flex items-center gap-2 shrink-0">
         <span className="text-pb-faintest text-[10.5px] whitespace-nowrap">
@@ -77,7 +77,7 @@ export default function SalesFollowUps() {
       {loading ? (
         <p className="text-[12px] text-pb-faintest">Loading…</p>
       ) : followUps.length === 0 ? (
-        <div className={CARD}><p className="text-[12px] text-pb-faintest">Nothing due — every follow-up is caught up.</p></div>
+        <div className={CARD}><p className="text-[12px] text-pb-faintest">Nothing due. Every follow-up is caught up.</p></div>
       ) : (
         <div className="space-y-3">
           {BUCKETS.map(b => grouped[b.key].length > 0 && (

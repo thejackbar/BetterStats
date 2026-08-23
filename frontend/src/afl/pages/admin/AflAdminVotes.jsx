@@ -349,7 +349,7 @@ function MedalTab({ medalId, grades, medalCount, onChanged, onDeleted }) {
           season, so you set this up once rather than redoing it each year.
         </p>
         {grades.length === 0 ? (
-          <div className="text-[12.5px] text-pb-faint">No grades yet — this medal counts every game.</div>
+          <div className="text-[12.5px] text-pb-faint">No grades yet. This medal counts every game.</div>
         ) : (
           <>
             <div className="flex flex-wrap gap-1.5">

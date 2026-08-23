@@ -32,7 +32,7 @@ export function PlayerRadarCard({ radar }) {
         <Radar key={side} axes={r.axes} values={r.values} baseline={r.baseline || [50, 50, 50, 50, 50, 50]} size={250}
           legend={{ series: 'this player', baseline: 'squad average' }} />
       </div>
-      <Note>Each axis normalised 0–100 against the squad average (the dashed ring at 50). Higher is better — bowling axes are inverted so the outer edge is always stronger.</Note>
+      <Note>Each axis normalised 0–100 against the squad average (the dashed ring at 50). Higher is better. Bowling axes are inverted so the outer edge is always stronger.</Note>
     </Card>
   )
 }

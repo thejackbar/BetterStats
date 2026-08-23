@@ -464,7 +464,7 @@ export function QuickAvailModal({ player, dateLabel, current, onPick, onClose })
           })}
         </div>
         <div className="px-4 pb-4 flex items-center gap-1.5 text-[11.5px] text-pb-faint">
-          <Icon name="info" size={13} /> Tap a status — saves instantly.
+          <Icon name="info" size={13} /> Tap a status, saves instantly.
         </div>
       </div>
     </div>

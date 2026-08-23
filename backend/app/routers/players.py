@@ -176,7 +176,7 @@ async def get_player_stats(
     categories: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated grade categories to count — senior, junior, womens, "
+            "Comma-separated grade categories to count: senior, junior, womens, "
             "masters, mixed, or 'all'. Omitted uses the club's own default, which "
             "leaves junior out."
         ),
@@ -184,7 +184,7 @@ async def get_player_stats(
     formats: Optional[str] = Query(
         None,
         description=(
-            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "Comma-separated match formats to count: two_day, one_day, t20, or "
             "'all'. Matched per FIXTURE against each game's own match_format, so "
             "a grade that plays more than one is split correctly. Omitted applies "
             "no format filter."
@@ -558,7 +558,7 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
             "current": matches_in_grade,
             "target": target,
             "needed": needed,
-            "label": f"MATCHES — {grade_name}",
+            "label": f"MATCHES, {grade_name}",
             "grade_name": grade_name,
         })
 
@@ -1262,7 +1262,7 @@ async def claim_fill_in(
             )
             player = existing_res.scalar_one_or_none()
             if player is None:
-                raise HTTPException(status_code=409, detail="Could not claim this fill-in — try again")
+                raise HTTPException(status_code=409, detail="Could not claim this fill-in. Try again")
             player.name = name
     else:
         player.name = name

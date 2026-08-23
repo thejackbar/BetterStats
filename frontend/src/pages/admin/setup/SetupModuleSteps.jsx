@@ -344,7 +344,7 @@ export function SquareStep({ step, onOpenTool }) {
     try {
       const res = await api.merchSquareConnectUrl()
       if (res?.url) {
-        // Off to Square's consent page — the OAuth callback lands back in the
+        // Off to Square's consent page. The OAuth callback lands back in the
         // admin, where the floating "back to setup" pill brings them home.
         try { sessionStorage.setItem('bs_setup_return', step.key) } catch { /* private mode */ }
         window.location.assign(res.url)
@@ -368,7 +368,7 @@ export function SquareStep({ step, onOpenTool }) {
         </DoneStrip>
       )}
       {status && !status.connected && !status.configured && (
-        <Notice tone="warn">Square isn't configured on the server yet — get in touch and we'll switch it on.</Notice>
+        <Notice tone="warn">Square isn't configured on the server yet. Get in touch and we'll switch it on.</Notice>
       )}
       {status && !status.connected && status.configured && (
         canConnect ? (
@@ -383,7 +383,7 @@ export function SquareStep({ step, onOpenTool }) {
         )
       )}
       {status?.connected && status.needs_location && (
-        <Notice tone="warn">Connected, but Square needs a location picked — finish that on the Square page.</Notice>
+        <Notice tone="warn">Connected, but Square needs a location picked, finish that on the Square page.</Notice>
       )}
       {status?.connected && (
         <WizardButton variant="secondary" onClick={() => onOpenTool(step)}>OPEN SQUARE SETTINGS →</WizardButton>
@@ -436,7 +436,7 @@ export function XeroStep({ step, onOpenTool }) {
         </DoneStrip>
       )}
       {status && !status.connected && !status.configured && (
-        <Notice tone="warn">Xero isn't configured on the server yet — get in touch and we'll switch it on.</Notice>
+        <Notice tone="warn">Xero isn't configured on the server yet. Get in touch and we'll switch it on.</Notice>
       )}
       {status && !status.connected && status.configured && (
         <WizardButton onClick={connect} disabled={busy}>
@@ -445,7 +445,7 @@ export function XeroStep({ step, onOpenTool }) {
       )}
       {needsFinishing && (
         <Notice tone="warn">
-          Connected, but Xero still needs {status.needs_tenant ? 'an organisation' : 'a bank account'} picked —
+          Connected, but Xero still needs {status.needs_tenant ? 'an organisation' : 'a bank account'} picked, 
           finish that on the Xero page.
         </Notice>
       )}

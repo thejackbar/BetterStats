@@ -456,7 +456,7 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
   return (
     <div className="space-y-6">
       <div className="max-w-2xl">
-        <Search value={q} onChange={setQ} placeholder="Search any player — yours or an opponent…" autoFocus className="w-full" />
+        <Search value={q} onChange={setQ} placeholder="Search any player: yours or an opponent…" autoFocus className="w-full" />
       </div>
 
       {/* Any club in Australia */}
@@ -492,7 +492,7 @@ function SearchLanes({ ourPlayers, onPickOurs, onPickExternal }) {
 
           <Card eyebrow="opponents" title="Opposition players">
             {extLoading && ext.length === 0 ? <Empty>Searching…</Empty>
-              : ext.length === 0 ? <Empty>No opponent found — we index batters our bowlers have dismissed.</Empty>
+              : ext.length === 0 ? <Empty>No opponent found: we index batters our bowlers have dismissed.</Empty>
               : (
                 <div className="space-y-1">
                   {ext.slice(0, 12).map((r, i) => (
@@ -609,12 +609,12 @@ function ExternalClubView({ club, initialPlayerName }) {
   if (status === 'building') return (
     <div className="iq-card iq-accent-card p-8 text-center iq-fade">
       <div className="iq-display font-bold text-[16px]">Building {club.name}'s squad…</div>
-      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live — the first time can take up to a minute.</div>
+      <div className="text-pb-faint text-[13px] mt-1.5 max-w-md mx-auto">Pulling their recent scorecards live. The first time can take up to a minute.</div>
       <div className="max-w-md mx-auto mt-5"><LoadingBar expectedMs={35000} /></div>
     </div>
   )
   if (status === 'error' || status === 'unavailable') return (
-    <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now — try again shortly.</Empty></div>
+    <div className="iq-card p-6"><Empty>Couldn't build a live dossier for {club.name} right now. Try again shortly.</Empty></div>
   )
 
   return (

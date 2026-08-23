@@ -108,9 +108,9 @@ function TeamModal({ team, onClose, onSaved }) {
             <Field label="Order (1 = top)"><Input type="number" value={form.sequence} onChange={set('sequence')} /></Field>
           </div>
           <Field label="Default formation (optional)"><Input value={form.default_formation || ''} onChange={set('default_formation')} placeholder="e.g. Traditional" /></Field>
-          <Field label="Grade (for ladder — auto-linked, override here)">
+          <Field label="Grade (for ladder: auto-linked, override here)">
             <Select value={form.grade_id || ''} onChange={set('grade_id')}>
-              <option value="">— Auto-link from match data —</option>
+              <option value="">. Auto-link from match data, </option>
               {currentGradeMissing && <option value={form.grade_id}>{team?.grade_name || 'Current grade'}</option>}
               {gradeSeasons.map((s) => (
                 <optgroup key={s.season_id} label={formatSeason(s.season_name)}>
@@ -173,7 +173,7 @@ function BulkAddModal({ fixedTeam, teams, players, dormantCutoff, statusOf, onAs
             ) : (
               <select value={targetId} onChange={(e) => setTargetId(e.target.value)}
                 className="mt-1 bg-pb-surface2 border pb-hairline rounded-lg px-2.5 py-1.5 text-pb-text text-[15px] font-medium focus:outline-none focus:border-pb-accent">
-                <option value="">— choose a squad —</option>
+                <option value="">. Choose a squad, </option>
                 {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select>
             )}
@@ -290,7 +290,7 @@ function SquadColumn({ col, members, dormantCutoff, statusOf, canManage, collaps
             ))}
             {members.length === 0 && (
               <div className="m-1 px-2.5 py-5 text-center text-pb-faintest text-[11.5px] border border-dashed border-pb-hairline2 rounded-lg">
-                {col.unassigned ? (col.emptyText || 'Everyone shown is assigned') : 'Empty — drag or add players'}
+                {col.unassigned ? (col.emptyText || 'Everyone shown is assigned') : 'Empty: drag or add players'}
               </div>
             )}
           </div>
@@ -366,7 +366,7 @@ function AutoAssignModal({ onApply, onClose }) {
           <div className="flex-1 min-w-0">
             <div className="font-mono text-[10px] uppercase tracking-wide3 text-pb-accent">Auto-assign squads</div>
             <div className="font-display font-bold text-[18px] mt-0.5">From where players actually played</div>
-            <div className="text-[12px] text-pb-faint mt-1">Each player is matched to the squad they played the most games for over the chosen window. Review and adjust before applying — nothing is saved until you hit Apply.</div>
+            <div className="text-[12px] text-pb-faint mt-1">Each player is matched to the squad they played the most games for over the chosen window. Review and adjust before applying. Nothing is saved until you hit Apply.</div>
           </div>
           <button onClick={onClose} className="text-pb-faint hover:text-pb-text p-1 shrink-0"><Icon name="close" size={18} /></button>
         </div>
@@ -950,7 +950,7 @@ export default function AdminTeams() {
                           <div>Showing {members.length} of {poolTotal} · {poolTotal - members.length} hidden by filters</div>
                         )}
                         {col.pool === 'unassigned' && !values.showinactive && poolCounts.inactive > 0 && (
-                          <div>{poolCounts.inactive} inactive not shown — tick “Show inactive players” to include them.</div>
+                          <div>{poolCounts.inactive} inactive not shown. Tick “Show inactive players” to include them.</div>
                         )}
                       </div>
                     )}

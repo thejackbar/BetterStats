@@ -48,11 +48,11 @@ function FindMemberTab({ seasonId, tiers, onClose, onCreated }) {
     <div className="grid gap-3">
       <Field label="Player or member *" composite>
         <PersonSearch value={person} onChange={setPerson}
-          placeholder="Type a name — anyone the club knows, including players who sat out last season…" autoFocus />
+          placeholder="Type a name. Anyone the club knows, including players who sat out last season…" autoFocus />
       </Field>
       <Field label="Tier">
         <Select value={feeScheduleId} onChange={e => setFeeScheduleId(e.target.value)}>
-          <option value="">— Needs tier —</option>
+          <option value="">. Needs tier, </option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
@@ -101,13 +101,13 @@ function NewMemberTab({ seasonId, tiers, membershipTypes, onClose, onCreated }) 
       </div>
       <Field label="Tier">
         <Select value={form.fee_schedule_id} onChange={e => setForm(f => ({ ...f, fee_schedule_id: e.target.value }))}>
-          <option value="">— Needs tier —</option>
+          <option value="">. Needs tier, </option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
       <Field label="Membership type">
         <Select value={form.membership_type_id} onChange={e => setForm(f => ({ ...f, membership_type_id: e.target.value }))}>
-          <option value="">— None —</option>
+          <option value="">, None, </option>
           {membershipTypes.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
         </Select>
       </Field>
@@ -127,7 +127,7 @@ function AddMemberModal({ seasonId, tiers, membershipTypes, onClose, onCreated }
     <Modal
       onClose={onClose}
       title="Add a person"
-      subtitle="Find anyone the club already knows — a player who sat out last season, or one new to the club — or add a non-playing member (life member, sponsor, ICL). Players who appear in a game this season are still added automatically."
+      subtitle="Find anyone the club already knows, a player who sat out last season, or one new to the club, or add a non-playing member (life member, sponsor, ICL). Players who appear in a game this season are still added automatically."
     >
       <div className="flex gap-2 mb-3.5">
         <FilterPill active={tab === 'find'} onClick={() => setTab('find')}>Find in club</FilterPill>
@@ -152,7 +152,7 @@ function ImportMembersModal({ seasonId, onClose, onDone }) {
     setBusy(true)
     try {
       const r = await api.feeMembersImportCommit(text, seasonId)
-      toast.success(`Imported — ${r.created} added, ${r.updated} updated, ${r.added_to_season} into this season`)
+      toast.success(`Imported. ${r.created} added, ${r.updated} updated, ${r.added_to_season} into this season`)
       onDone()
     } catch (e) { toast.error(e.message) } finally { setBusy(false) }
   }
@@ -190,7 +190,7 @@ function ImportMembersModal({ seasonId, onClose, onDone }) {
                 <span className="text-pb-text">{r.name}</span>
                 {r.category && <span className="font-mono text-[9.5px] text-pb-faint">{r.category}</span>}
                 {r.roles.length > 0 && <span className="font-mono text-[9.5px]" style={{ color: 'var(--pb-accent-ink)' }}>{r.roles.join(', ')}</span>}
-                {r.unknown_roles.length > 0 && <span className="font-mono text-[9.5px] text-pb-amber" title="Not a known role — skipped">?{r.unknown_roles.join(', ')}</span>}
+                {r.unknown_roles.length > 0 && <span className="font-mono text-[9.5px] text-pb-amber" title="Not a known role: skipped">?{r.unknown_roles.join(', ')}</span>}
               </div>
             ))}
           </div>
@@ -224,7 +224,7 @@ function BulkTierModal({ seasonId, memberIds, tiers, onClose, onSaved }) {
     >
       <Field label="Tier">
         <Select autoFocus value={tierId} onChange={e => setTierId(e.target.value)}>
-          <option value="">— Clear tier (needs review) —</option>
+          <option value="">. Clear tier (needs review), </option>
           {tiers.map(t => <option key={t.id} value={t.id}>{t.name} ({t.payment_type})</option>)}
         </Select>
       </Field>
@@ -256,7 +256,7 @@ function RolloverModal({ seasonId, seasonName, fromSeason, tiers, onClose, onDon
     >
       {tiers.length === 0 && (
         <Note toneKey="warn" className="mb-3.5">
-          {seasonName} has no fee schedule yet — every member rolled over will land as "needs tier" with no way to
+          {seasonName} has no fee schedule yet. Every member rolled over will land as "needs tier" with no way to
           match their old tier by name. <Link to="/admin/fees/schedule" className="underline">Set up {seasonName}'s
           fee schedule</Link> (or copy it from {fromSeason.name}) before rolling over, so tiers carry across cleanly.
         </Note>
@@ -281,7 +281,7 @@ function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone 
     try {
       const r = await api.feeRolloverUndo(seasonId)
       const keptNote = r.kept_with_payments.length
-        ? ` — ${r.kept_with_payments.length} kept (already has a payment recorded: ${r.kept_with_payments.join(', ')})`
+        ? `. ${r.kept_with_payments.length} kept (already has a payment recorded: ${r.kept_with_payments.join(', ')})`
         : ''
       toast.success(`Removed ${r.removed} member${r.removed === 1 ? '' : 's'} from ${seasonName}${keptNote}`)
       onDone()
@@ -291,14 +291,14 @@ function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone 
     <Modal
       onClose={onClose}
       title={`Remove everyone from ${seasonName}`}
-      subtitle="For undoing a rollover done before the fee schedule was ready — this clears every member's line in this season so you can set up the rate card and roll over again."
+      subtitle="For undoing a rollover done before the fee schedule was ready. This clears every member's line in this season so you can set up the rate card and roll over again."
       footer={<>
         <Button onClick={onClose}>Cancel</Button>
         <Button variant="danger" onClick={go} disabled={busy}>{busy ? 'Removing…' : `Remove all ${memberCount}`}</Button>
       </>}
     >
       <Note toneKey="warn">
-        This can't be undone from here. Anyone with a payment already recorded this season is kept, not deleted —
+        This can't be undone from here. Anyone with a payment already recorded this season is kept, not deleted, 
         everyone else's line in {seasonName} is gone. The club's own people record and every other season are
         untouched either way.
       </Note>
@@ -314,7 +314,7 @@ export default function AdminFeesMembers() {
   const [seasons, setSeasons] = useState([])
   // The season lives in the URL so it survives a trip into a member and back.
   // The member page's "← MEMBERS" link carries ?season=, and this screen used
-  // to ignore it and snap to the newest season instead — so an admin working
+  // to ignore it and snap to the newest season instead, so an admin working
   // through 2025/26 was thrown into 2026/27 on every return.
   const [params, setParams] = useSearchParams()
   const [seasonId, setSeasonId] = useState(params.get('season') || '')
@@ -341,7 +341,7 @@ export default function AdminFeesMembers() {
         const sorted = sortSeasons(s)
         setSeasons(sorted)
         // Keep a season named in the URL, and only fall back to the newest
-        // when there is none — or when the one named is no longer a season
+        // when there is none, or when the one named is no longer a season
         // this club holds, which would otherwise leave the screen empty with
         // no obvious way back.
         setSeasonId(cur => (cur && sorted.some(x => x.id === cur) ? cur : (sorted[0]?.id || '')))
@@ -378,13 +378,13 @@ export default function AdminFeesMembers() {
     setRecomputing(true)
     try {
       const r = await api.feeRecompute(seasonId)
-      toast.success(`Match days rebuilt — ${r.members_created} new members, ${r.entries_upserted} entries`)
+      toast.success(`Match days rebuilt. ${r.members_created} new members, ${r.entries_upserted} entries`)
       load()
     } catch (e) { toast.error(e.message) } finally { setRecomputing(false) }
   }
 
   async function removeMember(memberId, fullName) {
-    if (!window.confirm(`Remove ${fullName} from this season? They stay in the club's own records — this only clears their line here. Refused if a payment is already recorded against them this season.`)) return
+    if (!window.confirm(`Remove ${fullName} from this season? They stay in the club's own records. This only clears their line here. Refused if a payment is already recorded against them this season.`)) return
     try {
       await api.feeRemoveMemberSeason(memberId, seasonId)
       toast.success(`${fullName} removed from this season`)
@@ -423,7 +423,7 @@ export default function AdminFeesMembers() {
       }
     }
     setRemovingSelected(false)
-    toast.success(`Removed ${removed}${kept.length ? ` — ${kept.length} kept (has a payment recorded): ${kept.join(', ')}` : ''}`)
+    toast.success(`Removed ${removed}${kept.length ? `. ${kept.length} kept (has a payment recorded): ${kept.join(', ')}` : ''}`)
     load()
   }
 
@@ -534,7 +534,7 @@ export default function AdminFeesMembers() {
                   <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Open Season</p>
                   <p className="text-pb-text text-sm mb-1">No members yet for this season.</p>
                   <p className="text-pb-dim text-sm mb-4 leading-relaxed">
-                    Roll forward everyone from <span className="text-pb-text">{previousSeason.name}</span> — each member keeps their tier
+                    Roll forward everyone from <span className="text-pb-text">{previousSeason.name}</span>. Each member keeps their tier
                     (so you only bulk-edit the exceptions, e.g. graduating students). Payments stay behind, "Left Club" members are skipped.
                   </p>
                   <div className="flex gap-2 flex-wrap">
@@ -579,7 +579,7 @@ export default function AdminFeesMembers() {
                         <th className="font-medium py-2.5 pr-3">NAME</th>
                         <th className="font-medium py-2.5 pr-3">TYPE</th>
                         <th className="font-medium py-2.5 pr-3">TIER</th>
-                        <th className="font-medium py-2.5 pr-3 w-20 text-center" title="Registered for this season with PlayHQ — a playing requirement">PLAYHQ</th>
+                        <th className="font-medium py-2.5 pr-3 w-20 text-center" title="Registered for this season with PlayHQ. A playing requirement">PLAYHQ</th>
                         <th className="font-medium py-2.5 pr-3 w-16 text-right">DAYS</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAYABLE</th>
                         <th className="font-medium py-2.5 pr-3 w-24 text-right">PAID</th>
@@ -626,7 +626,7 @@ export default function AdminFeesMembers() {
                               <input type="checkbox" checked={!!m.playhq_registered}
                                 disabled={togglingPlayhq.has(m.member_id)}
                                 onChange={e => togglePlayhq(m.member_id, e.target.checked)}
-                                title={m.playhq_registered ? 'Registered with PlayHQ for this season' : 'Not yet registered with PlayHQ — required to play'}
+                                title={m.playhq_registered ? 'Registered with PlayHQ for this season' : 'Not yet registered with PlayHQ, required to play'}
                                 className="cursor-pointer align-middle accent-pb-accent" />
                             </td>
                             <td className="py-2.5 pr-3 text-right font-mono text-[11px] text-pb-dim tabular-nums">{m.match_days || 0}</td>
@@ -644,7 +644,7 @@ export default function AdminFeesMembers() {
                               <StatusPill status={m.status} />
                             </td>
                             <td className="py-2.5 pr-5 text-right">
-                              <button type="button" title="Remove from this season — not coming back?"
+                              <button type="button" title="Remove from this season, not coming back?"
                                 onClick={() => removeMember(m.member_id, m.full_name)}
                                 className="text-pb-faint hover:text-pb-red text-[13px] leading-none transition-colors">
                                 ✕
@@ -662,7 +662,7 @@ export default function AdminFeesMembers() {
         )}
       </div>
 
-      {/* Sticky bulk-action bar — appears when any row is checked. */}
+      {/* Sticky bulk-action bar. Appears when any row is checked. */}
       {selected.size > 0 && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 bg-pb-surface border pb-hairline rounded-lg shadow-2xl px-4 py-3 flex items-center gap-3"
           style={{ borderColor: 'var(--pb-accent)' }}>

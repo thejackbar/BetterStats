@@ -256,7 +256,7 @@ async def verify(
     ip = _client_ip(request)
     rate_limit.enforce(
         f"nets-verify-ip:{token}:{ip}", VERIFY_IP_LIMIT, VERIFY_IP_WINDOW,
-        detail="Too many attempts — slow down and try again shortly.",
+        detail="Too many attempts, slow down and try again shortly.",
     )
 
     try:
@@ -284,7 +284,7 @@ async def verify(
             # lockout: there is nothing they could have typed that would work.
             raise HTTPException(
                 status_code=409,
-                detail="No mobile number is on file for you yet — ask whoever is running nets to check you in.",
+                detail="No mobile number is on file for you yet. Ask whoever is running nets to check you in.",
             )
         given = phone_last4(body.pin)
         if given is None or given != want:
@@ -394,7 +394,7 @@ async def register(
     ip = _client_ip(request)
     rate_limit.enforce(
         f"nets-register:{token}:{ip}", REGISTER_LIMIT, REGISTER_WINDOW,
-        detail="That's a few registrations from one place — check with whoever is running nets.",
+        detail="That's a few registrations from one place. Check with whoever is running nets.",
     )
 
     name = (body.full_name or "").strip()[:MAX_NAME]

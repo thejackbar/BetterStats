@@ -35,7 +35,7 @@ export default function SalesManagement() {
           </Link>
         </div>
         <h1 className="font-display font-bold text-2xl text-pb-text">Sales Management</h1>
-        <p className="text-pb-faint text-sm mb-5">Everything for running the sales team — call queue through to targets.</p>
+        <p className="text-pb-faint text-sm mb-5">Everything for running the sales team. Call queue through to targets.</p>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
           {SALES_MANAGEMENT_ITEMS.map(item => (

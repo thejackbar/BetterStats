@@ -105,7 +105,7 @@ async def unlock_club(slug: str, body: UnlockBody, request: Request, response: R
     ip = _client_ip(request)
     rate_limit.enforce(
         f"club-unlock-ip:{org.id}:{ip}", VERIFY_IP_LIMIT, VERIFY_IP_WINDOW,
-        detail="Too many attempts — slow down and try again shortly.",
+        detail="Too many attempts, slow down and try again shortly.",
     )
     lock_key = f"club-unlock:{org.id}:{ip}"
     rate_limit.assert_not_locked(
@@ -140,7 +140,7 @@ async def request_unpause(slug: str, body: RequestUnpauseBody, request: Request,
     ip = _client_ip(request)
     rate_limit.enforce(
         f"club-unpause-ip:{ip}", REQUEST_IP_LIMIT, REQUEST_IP_WINDOW,
-        detail="Too many requests — please try again later.",
+        detail="Too many requests, please try again later.",
     )
 
     email = (body.email or "").strip().lower()
@@ -167,7 +167,7 @@ async def request_unpause(slug: str, body: RequestUnpauseBody, request: Request,
     try:
         msg = email_service.EmailMessage(
             to_email=UNPAUSE_NOTIFY_EMAIL,
-            subject=f"Unpause request — {org.name}",
+            subject=f"Unpause request: {org.name}",
             html=(
                 f"<p><strong>{org.name}</strong> ({org.slug}) has a new unpause request.</p>"
                 f"<p>From: {email}</p>"

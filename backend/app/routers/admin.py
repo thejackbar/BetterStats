@@ -1677,7 +1677,7 @@ async def get_social_potm(match_id: str, db: AsyncSession = Depends(get_db), clu
 async def _get_social_scorecard_inner(match_id: str, db: AsyncSession, club=None):
     raw = await get_match_scorecard(match_id)
     if raw is None:
-        raise HTTPException(404, "Scorecard not found — match may be PlayHQ-only or not yet completed")
+        raise HTTPException(404, "Scorecard not found. Match may be PlayHQ-only or not yet completed")
 
     match_summary = raw.get("matchSummary") or {}
     teams_raw = raw.get("teams") or []

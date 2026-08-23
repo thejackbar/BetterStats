@@ -286,10 +286,10 @@ async def _resolve(db: AsyncSession, org_id, req: ResolveRequest) -> dict:
                         + ", ".join(unresolved_names[:8]) + ("…" if len(unresolved_names) > 8 else ""))
     ambiguous = [n for n, m in pmatch.items() if m.get("status") == "ambiguous"]
     if ambiguous:
-        warnings.append(f"{len(ambiguous)} name(s) match two players — merge those first: "
+        warnings.append(f"{len(ambiguous)} name(s) match two players. Merge those first: "
                         + ", ".join(ambiguous[:5]))
     if unresolved_squads:
-        warnings.append(f"{len(unresolved_squads)} squad name(s) don't match a team — they'll be left unset "
+        warnings.append(f"{len(unresolved_squads)} squad name(s) don't match a team, they'll be left unset "
                         "unless you pick or create one: " + ", ".join(sorted(unresolved_squads)[:6]))
     bad_values = sorted(note_set)
     if bad_values:

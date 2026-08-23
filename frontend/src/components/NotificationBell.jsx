@@ -42,7 +42,7 @@ export default function NotificationBell({ onOpen, refreshTrigger }) {
   const badgeBg = hasFailures ? 'var(--pb-negative)' : 'var(--pb-accent)'
   const badgeColor = hasFailures ? '#fff' : '#000'
   const tooltip = hasFailures
-    ? `${data.failed_sync_count} sync failure${data.failed_sync_count > 1 ? 's' : ''} — open notifications`
+    ? `${data.failed_sync_count} sync failure${data.failed_sync_count > 1 ? 's' : ''}. Open notifications`
     : 'Notifications'
 
   return (

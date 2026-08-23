@@ -439,9 +439,9 @@ export default function AdminAvailability() {
                   const empty = st === 'NO_RESPONSE'
                   const sel = d.date === selDate
                   const title = fromPeriod
-                    ? `${meta.label}${cell.note ? ' · ' + cell.note : ''} — from a period${canEdit ? ' (click to override)' : ''}`
+                    ? `${meta.label}${cell.note ? ' · ' + cell.note : ''}, from a period${canEdit ? ' (click to override)' : ''}`
                     : fromSelf
-                      ? `${meta.label}${cell.note ? ' · ' + cell.note : ''} — set by the player${canEdit ? ' (click to override)' : ''}`
+                      ? `${meta.label}${cell.note ? ' · ' + cell.note : ''}. Set by the player${canEdit ? ' (click to override)' : ''}`
                       : meta.label
                   return (
                     <td key={d.date} className="text-center border-b border-l pb-hairline"

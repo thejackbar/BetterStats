@@ -35,7 +35,7 @@ export default function AdminChangelog() {
         </div>
         <p className="text-pb-faint text-sm mb-6 leading-relaxed">
           Full history of BetterStats updates. The bell shows only entries newer than the
-          last one you dismissed — this page keeps everything around.
+          last one you dismissed. This page keeps everything around.
         </p>
 
         <div className="space-y-5">

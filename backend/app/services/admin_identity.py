@@ -37,7 +37,7 @@ INTL_MOBILE_RE = re.compile(r"^\+\d{8,15}$")
 
 EMAIL_TAKEN_MESSAGE = (
     "This email already belongs to a BetterCricket account. Registration "
-    "doesn't yet support adding an existing admin to a second club — email "
+    "doesn't yet support adding an existing admin to a second club. Email "
     "support@bettersports.com.au for help."
 )
 

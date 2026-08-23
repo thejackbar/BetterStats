@@ -102,7 +102,7 @@ function FontRoleField({ role, label, hint, presets, config, sampleText, busy, o
           className="bg-pb-surface2 border pb-hairline rounded px-3 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent">
           {FONT_WEIGHT_CHOICES.map(w => (
             <option key={w.value} value={w.value}>
-              {w.label} ({w.value}){w.value === FONT_WEIGHT_DEFAULTS[role] ? ' — default' : ''}
+              {w.label} ({w.value}){w.value === FONT_WEIGHT_DEFAULTS[role] ? ', default' : ''}
             </option>
           ))}
         </select>
@@ -163,7 +163,7 @@ function PrimaryAdminCard() {
         to a module; any club admin can request a trial.
       </p>
       <p className="text-sm text-pb-text mb-3">
-        Current: <span className="font-medium">{primary ? (primary.display_name || primary.username) : '— none —'}</span>
+        Current: <span className="font-medium">{primary ? (primary.display_name || primary.username) : ', none, '}</span>
         {primary?.is_me && <span className="text-pb-faint"> (you)</span>}
       </p>
       {data.can_transfer ? (
@@ -274,7 +274,7 @@ export default function AdminSettings() {
       await navigator.clipboard.writeText(publicUrl)
       flash('Link copied')
     } catch {
-      flashError('Could not copy link — select and copy manually')
+      flashError('Could not copy link. Select and copy manually')
     }
   }
 
@@ -553,7 +553,7 @@ export default function AdminSettings() {
               ))}
             </div>
 
-            {/* Gradient preview — shows how the two accents pair up */}
+            {/* Gradient preview. Shows how the two accents pair up */}
             <div className="mt-4 rounded-md border pb-hairline overflow-hidden">
               <div className="h-9" style={{ background: gradientCss(theme.accent, theme.accent2) }} />
               <p className="font-mono text-[10px] text-pb-faintest px-2.5 py-1.5">
@@ -595,7 +595,7 @@ export default function AdminSettings() {
             {/* Light theme surfaces — bg / cards / text picked individually */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-2">
-                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">light theme — background &amp; text</label>
+                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">light theme, background &amp; text</label>
                 <button type="button"
                   onClick={() => setTheme(t => ({ ...t, light: { ...BRAND.light } }))}
                   className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
@@ -616,7 +616,7 @@ export default function AdminSettings() {
             {/* Dark theme — pick one base colour; cards/panels/borders derive from it */}
             <div className="mt-5">
               <div className="flex items-center justify-between mb-2">
-                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">dark theme — background</label>
+                <label className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase">dark theme, background</label>
                 <button type="button"
                   onClick={() => setTheme(t => ({ ...t, dark: { ...BRAND.dark } }))}
                   className="font-mono text-[9px] tracking-wide2 text-pb-faint hover:text-pb-accent transition">Reset</button>
@@ -654,7 +654,7 @@ export default function AdminSettings() {
           <div className="pt-5 pb-hairline-t">
             <h2 className="font-display font-bold text-sm text-pb-text uppercase tracking-wide2 mb-1">Typography</h2>
             <p className="font-mono text-[10px] text-pb-faintest mb-4">
-              Pick a built-in font or upload your own (e.g. to match your club's own website) — separately for headings and body text.
+              Pick a built-in font or upload your own (e.g. to match your club's own website). Separately for headings and body text.
             </p>
             <div className="space-y-6">
               <FontRoleField role="display" label="Headings" hint="Page titles, navigation, section headers. Font files: woff2, woff, ttf or otf, max 6 MB."
@@ -701,7 +701,7 @@ export default function AdminSettings() {
           {/* --- BetterSelect settings moved to their own screen ---
                The dormant-player window, default side size and age display now
                live with the association rules they belong to, under
-               BetterSelect → Setup, which is gated on MANAGE_SELECTIONS —
+               BetterSelect → Setup, which is gated on MANAGE_SELECTIONS, 
                the person picking sides, rather than whoever edits the club's
                colours. Nothing else on this page changed. */}
           <div className="pt-5 pb-hairline-t">
@@ -718,7 +718,7 @@ export default function AdminSettings() {
 
           {/* --- Public profile: visible player attributes --- */}
           <div className="pt-5 pb-hairline-t">
-            <label className={LABEL}>Public profile — visible attributes</label>
+            <label className={LABEL}>Public profile: visible attributes</label>
             <p className="font-mono text-[10px] text-pb-faintest mb-3">
               Choose which descriptive player attributes appear on the public player profile. Overseas status is always shown.
             </p>
@@ -750,7 +750,7 @@ export default function AdminSettings() {
               A borrowed player's runs and wickets always show on a game's batting/bowling
               card. This decides whether they also show by name in the partnerships and
               fielding cards on that same scorecard, or are left out of those two. Never
-              affects club records — a fill-in never counts toward an all-time record either way.
+              affects club records. A fill-in never counts toward an all-time record either way.
             </p>
             <label className="flex items-start gap-2.5 cursor-pointer">
               <input type="checkbox" checked={!!form.include_fill_ins_in_stats}
@@ -770,14 +770,14 @@ export default function AdminSettings() {
               <p className="font-mono text-[10px] text-pb-faintest mb-3">
                 Which of your grades count towards career totals, leaderboards and club
                 records. Junior grades are left out by default, so an Under-14 season
-                doesn't sit inside a senior batting average — a player who made 200
+                doesn't sit inside a senior batting average, a player who made 200
                 against other 14-year-olds and 50 in first grade reads as a first-grade
                 batsman.
               </p>
               <p className="font-mono text-[10px] text-pb-faintest mb-3">
                 This is what a visitor sees first, not a wall. Every stats page has an
                 Include row for switching a category back on, and nothing is deleted or
-                hidden — the figures come straight back. Picking a specific grade from a
+                hidden. The figures come straight back. Picking a specific grade from a
                 Grade dropdown always shows that grade, whatever is ticked here.
               </p>
               <div className="space-y-2">
@@ -801,7 +801,7 @@ export default function AdminSettings() {
                       <span className="text-pb-text text-sm">{CATEGORY_LABELS[key] || key} grades count by default</span>
                       {key === 'senior' && (
                         <span className="font-mono text-[10px] text-pb-faintest block">
-                          Always counted — it's the baseline the others are added to
+                          Always counted. It's the baseline the others are added to
                         </span>
                       )}
                     </span>
@@ -827,7 +827,7 @@ export default function AdminSettings() {
                     A 13-year-old who has only ever played junior cricket would otherwise
                     open their own profile on a page of zeroes. With this on, a profile
                     that would have nothing to show counts the grades that player did play
-                    and says so at the top. It only changes what loads first — anyone can
+                    and says so at the top. It only changes what loads first. Anyone can
                     still switch a category on or off themselves, and it never affects the
                     Leaderboard or Records.
                   </span>
@@ -840,7 +840,7 @@ export default function AdminSettings() {
           <div className="pt-5 pb-hairline-t">
             <label className={LABEL}>Password protection</label>
             <p className="font-mono text-[10px] text-pb-faintest mb-3">
-              Make your public page private behind a 4-digit PIN — share it internally
+              Make your public page private behind a 4-digit PIN, share it internally
               (committee, teammates) without it being publicly visible. This doesn't
               affect your own admin login.
             </p>
@@ -853,7 +853,7 @@ export default function AdminSettings() {
                 <span className="text-pb-text text-sm">Password protect this page</span>
                 <span className="font-mono text-[10px] text-pb-faintest block">
                   {settings?.password_protect_reason === 'trial_ended'
-                    ? "Currently locked by BetterCricket (trial ended) — get in touch to unlock."
+                    ? "Currently locked by BetterCricket (trial ended). Get in touch to unlock."
                     : 'Visitors must enter the PIN below to view your public page'}
                 </span>
               </span>

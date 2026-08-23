@@ -5,7 +5,7 @@ export default {
   sortKey: '2026-08-16T01:30:00Z',
   title: 'Scorecard posts can split into two Instagram squares',
   items: [
-    'The Scorecard post has a new Layout choice: one wide post, or 2 square (1080×1080) Instagram posts — one for each team, the side that batted first then the side that chased. Available on all three scorecard designs (Broadcast, Brutalist, Dashboard).',
+    'The Scorecard post has a new Layout choice: one wide post, or 2 square (1080×1080) Instagram posts. One for each team, the side that batted first then the side that chased. Available on all three scorecard designs (Broadcast, Brutalist, Dashboard).',
     'Downloads as 2 PNGs, one per square, with the page rail to preview each before exporting.',
   ],
 }

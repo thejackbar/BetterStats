@@ -633,7 +633,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                 />
 
                 {showResults && results.length > 0 && !selectedClub && (
-                  // Normal flow, not absolute — an absolutely positioned box is
+                  // Normal flow, not absolute. An absolutely positioned box is
                   // taken out of layout and doesn't expand the scrollable body's
                   // content height, so it silently gets clipped by the modal
                   // card's own height limit regardless of its own max-h. Normal
@@ -930,7 +930,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
               ) : submitted ? (
                 <div className="pb-card p-4 bg-pb-surface2">
                   <p className="font-mono text-[11px] text-emerald-400">
-                    ✓ Club and admin account created — sync started
+                    ✓ Club and admin account created, sync started
                   </p>
 
                   <div className="mt-3 pt-3 border-t pb-hairline">
@@ -938,7 +938,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                       pct={syncRun?.status === 'success' ? 100 : (syncRun?.stats?.progress_pct ?? 0)}
                       label={
                         syncRun?.status === 'success' ? 'Sync complete'
-                          : syncRun?.status === 'error' ? `Sync failed — ${syncRun.error || 'unknown error'}`
+                          : syncRun?.status === 'error' ? `Sync failed, ${syncRun.error || 'unknown error'}`
                           : syncProgressLabel(syncRun?.stats)
                       }
                       color={syncRun?.status === 'error' ? 'var(--pb-red, #ef4444)' : undefined}
@@ -961,7 +961,7 @@ export default function SelfServeTrialModal({ defaultTrialDays, onClose, publicM
                   <div>
                     <p className="font-mono text-[10px] text-pb-faint block mb-1">Modules to trial</p>
                     <p className="font-mono text-[10px] text-pb-faintest mb-2">
-                      Every club gets every module on trial — nothing to choose here.
+                      Every club gets every module on trial, nothing to choose here.
                     </p>
                     {MODULE_TOGGLES.map((m) => (
                       <div key={m.key} className="flex items-center gap-2 mb-1.5">

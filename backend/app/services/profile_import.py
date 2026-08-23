@@ -415,7 +415,7 @@ def row_profile(values: dict) -> tuple[dict, list]:
         if val:
             patch["email"] = val
         elif err:
-            notes.append(f"email “{raw('email')}” looks invalid — left unchanged")
+            notes.append(f"email “{raw('email')}” looks invalid, left unchanged")
 
     if raw("phone") is not None:
         ph = norm_phone(values["phone"])
@@ -427,21 +427,21 @@ def row_profile(values: dict) -> tuple[dict, list]:
         if g:
             patch["gender"] = g
         else:
-            notes.append(f"gender “{raw('gender')}” not recognised — left unchanged")
+            notes.append(f"gender “{raw('gender')}” not recognised, left unchanged")
 
     if raw("player_role") is not None:
         role = norm_role(values["player_role"])
         if role:
             patch["player_role"] = role
         else:
-            notes.append(f"role “{raw('player_role')}” not recognised — left unchanged")
+            notes.append(f"role “{raw('player_role')}” not recognised, left unchanged")
 
     if raw("batting_hand") is not None:
         bh = norm_batting_hand(values["batting_hand"])
         if bh:
             patch["batting_hand"] = bh
         else:
-            notes.append(f"batting hand “{raw('batting_hand')}” not recognised — left unchanged")
+            notes.append(f"batting hand “{raw('batting_hand')}” not recognised, left unchanged")
 
     if raw("bowling") is not None:
         action, btype = norm_bowling(values["bowling"])
@@ -451,7 +451,7 @@ def row_profile(values: dict) -> tuple[dict, list]:
             patch["bowling_action"] = action
             patch["bowling_type"] = btype
         else:
-            notes.append(f"bowling “{raw('bowling')}” not recognised — left unchanged")
+            notes.append(f"bowling “{raw('bowling')}” not recognised, left unchanged")
 
     if raw("date_of_birth") is not None:
         dob, err = norm_date_of_birth(values["date_of_birth"])
@@ -459,9 +459,9 @@ def row_profile(values: dict) -> tuple[dict, list]:
             patch["date_of_birth"] = dob
         elif err == "unreadable":
             notes.append(f"date of birth “{raw('date_of_birth')}” couldn't be read "
-                         "(try 1 Mar 2012 or 2012-03-01) — left unchanged")
+                         "(try 1 Mar 2012 or 2012-03-01), left unchanged")
         else:
-            notes.append(f"date of birth “{raw('date_of_birth')}”: {err.lower()} — left unchanged")
+            notes.append(f"date of birth “{raw('date_of_birth')}”: {err.lower()}, left unchanged")
 
     # The plain yes/no attributes. Each writes only when the cell says one or
     # the other; anything else is a note, never a guess.
@@ -474,7 +474,7 @@ def row_profile(values: dict) -> tuple[dict, list]:
             continue
         b = norm_bool(values[field], true_words, false_words)
         if b is None:
-            notes.append(f"{FIELD_LABELS[field].lower()} “{raw(field)}” not recognised — left unchanged")
+            notes.append(f"{FIELD_LABELS[field].lower()} “{raw(field)}” not recognised, left unchanged")
         else:
             patch[column] = b
 
@@ -491,7 +491,7 @@ def row_profile(values: dict) -> tuple[dict, list]:
         if st:
             patch["status"] = st
         else:
-            notes.append(f"status “{raw('status')}” not recognised — left unchanged")
+            notes.append(f"status “{raw('status')}” not recognised, left unchanged")
 
     # The two BetterSelect overrides. A sheet can SET one; clearing it back to
     # automatic stays a profile-screen action, because a blank cell already
@@ -509,7 +509,7 @@ def row_profile(values: dict) -> tuple[dict, list]:
             continue
         b = norm_bool(values[field], true_words, false_words)
         if b is None:
-            notes.append(f"{FIELD_LABELS[field].lower()} “{raw(field)}” not recognised — left unchanged")
+            notes.append(f"{FIELD_LABELS[field].lower()} “{raw(field)}” not recognised, left unchanged")
         else:
             patch[column] = b
 

@@ -70,7 +70,7 @@ export default function KlubproSponsors({ clubMapping }) {
     setImporting(true)
     try {
       const r = await api.kpSponsorImport(cm, [...selected])
-      toast.success(`Imported — ${r.inserted} inserted, ${r.skipped} skipped`)
+      toast.success(`Imported, ${r.inserted} inserted, ${r.skipped} skipped`)
       await load()
     } catch (e) { toast.error(e.message) } finally { setImporting(false) }
   }
@@ -98,7 +98,7 @@ export default function KlubproSponsors({ clubMapping }) {
       </Card>
 
       {dry && (
-        <Card title={`Dry-run — ${dry.to_insert.length} to insert, ${dry.duplicate_skip.length} duplicate(s) skipped`}>
+        <Card title={`Dry-run: ${dry.to_insert.length} to insert, ${dry.duplicate_skip.length} duplicate(s) skipped`}>
           {dry.to_insert.length === 0
             ? <p className="text-pb-faint text-sm">Nothing new to insert (all selected sponsors already imported).</p>
             : <div className="flex flex-wrap gap-x-4 gap-y-1">

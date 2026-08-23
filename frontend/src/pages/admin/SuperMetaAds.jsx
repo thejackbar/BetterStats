@@ -682,7 +682,7 @@ export default function SuperMetaAds() {
               value={activeCampaignId}
               onChange={(e) => changeCampaign(e.target.value)}
               disabled={switchingCampaign}
-              title="Which campaign the dashboard tracks (saved to the platform — no redeploy)"
+              title="Which campaign the dashboard tracks (saved to the platform, no redeploy)"
               className="bg-pb-surface2 border border-pb-hairline rounded px-2 py-1 text-sm text-pb-text max-w-[340px] disabled:opacity-50"
             >
               {!campaigns.some((c) => c.id === activeCampaignId) && activeCampaignId && (
@@ -691,7 +691,7 @@ export default function SuperMetaAds() {
               {campaigns.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}{c.effective_status && c.effective_status !== 'ACTIVE'
-                    ? ` — ${c.effective_status.toLowerCase().replace(/_/g, ' ')}` : ''}
+                    ? `. ${c.effective_status.toLowerCase().replace(/_/g, ' ')}` : ''}
                 </option>
               ))}
             </select>
@@ -730,7 +730,7 @@ export default function SuperMetaAds() {
             <>
               <span
                 className="font-mono text-[10px] text-pb-faint"
-                title="Excludes earlier data from the funnel/table numbers and Meta's own insights — never from Free trial registrations, which always counts every real completed registration."
+                title="Excludes earlier data from the funnel/table numbers and Meta's own insights. Never from Free trial registrations, which always counts every real completed registration."
               >
                 {summary?.counting_since
                   ? <>Counting since {fmtTime(summary.counting_since)}</>
@@ -984,7 +984,7 @@ export default function SuperMetaAds() {
                   && !(showHiddenSelections && (selectedClubs.hidden_clubs || []).length) ? (
                   <p className="text-xs text-pb-faint">
                     {selectedClubs.anonymous} club selection{selectedClubs.anonymous === 1 ? '' : 's'} in
-                    this window, but none can be named yet — they were picked before the club was captured
+                    this window, but none can be named yet. They were picked before the club was captured
                     on the selection beacon and never reached the Terms step. New selections from now on
                     will be named here.
                   </p>
@@ -1214,7 +1214,7 @@ export default function SuperMetaAds() {
             )}
 
             {/* Ad-driven self-serve signups joined to their Twenty engagement
-                score — which ads produced clubs that actually use the thing. */}
+                score. Which ads produced clubs that actually use the thing. */}
             {adSignups && (
               <div className="pb-card p-4 mb-4">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
