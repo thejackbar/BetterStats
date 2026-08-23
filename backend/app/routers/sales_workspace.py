@@ -1027,6 +1027,7 @@ async def edit_note(
 async def email_templates(actor: SalesActor = Depends(require_sales_or_super), db: AsyncSession = Depends(get_db)):
     from app.services import platform_settings as ps
     from app.services import sales_email as se
+    from app.services import email_service
     # Self-heals the outreach org's editable copies of the three built-in
     # templates (cheap no-op once seeded) — same "call it on the read path"
     # pattern as comms.py's own seed_starter_templates.
@@ -1041,6 +1042,10 @@ async def email_templates(actor: SalesActor = Depends(require_sales_or_super), d
         "templates": [{"key": k, "label": v, "built_in": k in se.BUILT_IN_TEMPLATES}
                       for k, v in se.TEMPLATE_LABELS.items()],
         "demo_link_configured": bool(links.get(rep_name)),
+        # Whether a send would actually leave the building. The Comms screens
+        # already warn about this; the drawer never did, so a rep could work a
+        # club for a week believing every email had gone out.
+        "email": email_service.provider_status(),
     }
 
 
@@ -1197,10 +1202,14 @@ async def send_email(
     html_body = se.apply_sales_utm(html_body, template_key=template, rep_username=actor.user.username, utm_code=utm_code)
 
     try:
-        await se.send_sales_email(
+        sent = await se.send_sales_email(
             to_email=to_email, to_name=person.full_name, subject=subject, html=html_body, text=text_body,
             rep_name=rep_name, rep_email=actor.user.email,
         )
+    except se.EmailNotLive as e:
+        # Not a delivery failure — there was no attempt. Said plainly, so the
+        # rep does not walk away believing the club has been emailed.
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:  # noqa: BLE001 - surfaced to the rep, this is an explicit action, not best-effort
         raise HTTPException(status_code=502, detail=f"Could not send email: {e}")
 
@@ -1211,6 +1220,9 @@ async def send_email(
         meta={
             "template": template, "subject": subject, "html": html_body, "text": text_body,
             "to_email": to_email, "to_name": person.full_name,
+            # What actually took it, and its id at that provider — so "did this
+            # really go?" has an answer months later rather than a bare "sent".
+            "provider": sent.get("provider"), "message_id": sent.get("message_id"),
         },
     )
     # The other qualifying action: the rep put something in front of one of
@@ -1800,6 +1812,8 @@ async def extend_trial(
     rep_name = actor.user.display_name or actor.user.username
     utm_code = _resolve_utm_code(club)
     email_sent = False
+    email_error = None
+    sent_meta = {}
     subject = html_body = text_body = None
     try:
         subject, html_body, text_body = await se.render_template(
@@ -1809,13 +1823,19 @@ async def extend_trial(
         html_body = se.apply_sales_utm(
             html_body, template_key="trial_extension", rep_username=actor.user.username, utm_code=utm_code,
         )
-        await se.send_sales_email(
+        sent_meta = await se.send_sales_email(
             to_email=to_email, to_name=person.full_name, subject=subject, html=html_body, text=text_body,
             rep_name=rep_name, rep_email=actor.user.email,
         )
         email_sent = True
-    except Exception:  # noqa: BLE001 - best-effort: the extension already landed
+    except se.EmailNotLive as e:
+        # Nothing was attempted, so say which it was rather than letting the
+        # rep guess between "bounced" and "never sent".
+        logger.warning("extend_trial: no email provider connected, nothing sent for deal %s", deal.id)
+        email_error = str(e)
+    except Exception as e:  # noqa: BLE001 - best-effort: the extension already landed
         logger.exception("extend_trial: could not send confirmation email for deal %s", deal.id)
+        email_error = str(e)
 
     note = f"Extended trial by {body.days} day(s) to {new_trial_end.date().isoformat()} for {to_email}"
     if nominated_invited is True:
@@ -1835,6 +1855,8 @@ async def extend_trial(
             "days": body.days, "new_trial_end": new_trial_end.isoformat(), "email_sent": email_sent,
             "subject": subject, "html": html_body, "text": text_body,
             "to_email": to_email, "to_name": person.full_name,
+            "provider": sent_meta.get("provider"), "message_id": sent_meta.get("message_id"),
+            "email_error": email_error,
         },
     )
     await db.commit()
@@ -1844,6 +1866,7 @@ async def extend_trial(
         "days": body.days,
         "new_trial_end": new_trial_end.isoformat(),
         "email_sent": email_sent,
+        "email_error": email_error,
         "contact_email": to_email,
         "nominated_primary_admin": nominated_invited is not None,
         "primary_admin_invited": bool(nominated_invited),

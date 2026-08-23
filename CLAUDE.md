@@ -322,6 +322,38 @@ payments.**
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,
   so opening it to a rep later is a route change rather than a rewrite.
 
+### A sales email that reported itself sent, and was not (v9.51.4)
+
+Reported: the club never received the trial-extension email the rep had been
+told was sent.
+
+- **THE CONSOLE PROVIDER IS A FAILURE, NOT A SUCCESS, and reading it as one is
+  the whole bug.** `email_service.get_email_provider` falls back to
+  `ConsoleEmailProvider` whenever the configured provider is missing or has no
+  key — deliberately, so a misconfigured deploy never sends unauthenticated
+  mail — and console's own `send` writes a log line and returns `ok=True`.
+  `send_sales_email` only raised on `not result.ok`, so every caller recorded
+  the email as sent. A rep could work a club for a week believing each email had
+  gone out.
+- **`sales_email.EmailNotLive` is its own type** because it is not a delivery
+  failure: there was no attempt. The compose endpoint turns it into a 503 the
+  rep reads, and `extend_trial` records `email_sent=false` with the reason, so
+  the extension still lands and the confirmation says to reach them another way.
+- **`send_sales_email` returns the provider and the message id**, stamped onto
+  the activity's meta, so "did that actually go?" has an answer months later
+  rather than a bare "sent".
+- **The drawer says so BEFORE the rep writes anything** (`email_templates` now
+  carries `provider_status()`), which is what the Comms screens already did and
+  this one never had.
+- **Verified** (14 checks through the shipped function: console refusing, a
+  selected-but-keyless provider falling back and refusing too, the wording, a
+  live provider's id and reply-to, and a rejected send raising something that is
+  NOT "not connected"), with a control run showing the old code returning
+  normally with nothing configured.
+- **Still to do on the server, not in code**: `email_provider` defaults to
+  `console`, so a deploy with no provider configured sends nothing at all — and
+  `bettersports.com.au` still needs SPF/DKIM/DMARC before mail authenticates.
+
 ### A club that loaded forever, then failed (v9.51.3)
 
 Reported off the Sales Workspace: opening Blacktown District Cricket Club sat on

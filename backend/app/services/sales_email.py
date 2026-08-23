@@ -781,16 +781,43 @@ def apply_sales_utm(html: str, *, template_key: str, rep_username: str, utm_code
     )
 
 
+class EmailNotLive(RuntimeError):
+    """No real provider is connected, so nothing was sent.
+
+    Its own type because it is not a delivery failure — there was no attempt.
+    A rep needs to hear that plainly rather than be told the email went."""
+
+
 async def send_sales_email(
     *, to_email: str, to_name: Optional[str], subject: str, html: str, text: str,
     rep_name: str, rep_email: Optional[str],
-) -> None:
+) -> dict:
     """Sends immediately and RAISES on failure — unlike user_invite.py's
     best-effort emails (the account exists regardless of delivery), this is
     an explicit "send this now" action a rep is watching for a result on.
     from_email stays the platform's own verified sending address (spoofing
     an arbitrary from-address would fail SPF/DKIM); reply_to is the rep's
-    own address so a reply reaches them directly."""
+    own address so a reply reaches them directly.
+
+    THE CONSOLE PROVIDER IS A FAILURE HERE, NOT A SUCCESS. `get_email_provider`
+    falls back to `console` whenever the configured provider is missing or has
+    no key — deliberately, so a misconfigured deploy never sends unauthenticated
+    mail — and console's own `send` returns ok=True after writing a log line.
+    Every caller read that as "sent", so a rep was told their email had gone out
+    while nothing had left the building, and the club they were chasing never
+    got it. Reported live. Refusing here is what makes the whole chain honest:
+    the compose endpoint turns it into a 502 the rep reads, and the trial
+    extension records email_sent=false and says to reach them another way.
+
+    Returns what actually happened — the provider that took it and its message
+    id — so the activity written afterwards carries evidence rather than a bare
+    "sent"."""
+    provider = email_service.get_email_provider()
+    if provider.name == "console":
+        raise EmailNotLive(
+            "No email provider is connected, so nothing was sent. "
+            "Connect one under Comms → Email settings, then send it again."
+        )
     msg = email_service.EmailMessage(
         to_email=to_email,
         to_name=to_name,
@@ -802,6 +829,7 @@ async def send_sales_email(
         reply_to=rep_email or settings.email_reply_to,
         configuration_set=(settings.ses_configuration_set_transactional or "").strip() or None,
     )
-    result = await email_service.get_email_provider().send(msg)
+    result = await provider.send(msg)
     if not result.ok:
         raise RuntimeError(result.error or "Email provider did not confirm delivery")
+    return {"provider": provider.name, "message_id": result.message_id}

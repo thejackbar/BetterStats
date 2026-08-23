@@ -1009,7 +1009,8 @@ export default function SalesWorkspace() {
       let msg = `Trial extended by ${result.days} day${result.days === 1 ? '' : 's'} to ${newEnd}. `
       msg += result.email_sent
         ? `A confirmation email was sent to ${result.contact_email}.`
-        : `The confirmation email could not be sent — let them know another way.`
+        : `The confirmation email was NOT sent${result.email_error ? ` — ${result.email_error}` : ''} `
+          + `Let them know another way.`
       if (result.nominated_primary_admin) {
         msg += result.primary_admin_invited
           ? ' An invite email was also sent so they can set up their Primary Admin account.'
@@ -2233,6 +2234,15 @@ export default function SalesWorkspace() {
                       </div>
                     )}
                   </Field>
+                  {/* Sending is not wired up until a provider is connected, and
+                      the fallback logs instead of sending. Say so BEFORE the rep
+                      writes an email, not after the club says it never arrived. */}
+                  {emailTemplates.email && emailTemplates.email.live === false && (
+                    <p className="text-[12px] text-pb-amber leading-[1.5] pb-card px-2.5 py-2">
+                      No email provider is connected, so nothing will actually be sent.
+                      Connect one under Comms → Email settings first.
+                    </p>
+                  )}
                   <Field label="Template">
                     <Select value={emailForm.template} onChange={e => {
                       const key = e.target.value
