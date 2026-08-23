@@ -551,7 +551,13 @@ export default function Committee({ st, patch, narrow }) {
   // beside OPEN, and a delete that shouts is a delete that gets pressed.
   const delBtn = { background: 'transparent', border: `1px solid ${C.hair2}`, borderRadius: 4, padding: '2px 5px', lineHeight: 1, fontSize: 11, color: C.faint, cursor: 'pointer', fontFamily: MONO, flexShrink: 0 }
 
-  const Header = ({ children }) => (
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER. React compares element types by
+  // identity, so a `const X = () => …` written here is a different type on
+  // every render and its whole subtree is torn down and rebuilt. That is what
+  // threw the caret out of the search box after each character. These are plain
+  // functions returning elements, called below, so the elements keep their
+  // types and the input keeps its focus.
+  const header = (children) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
       <div>
@@ -603,7 +609,7 @@ export default function Committee({ st, patch, narrow }) {
   // meeting, and an action or a motion is inside a plan, so a box that only
   // filtered the visible rows would answer the wrong question. It sits on its
   // own line, below the section buttons and above any second row of them.
-  const SubBar = () => (searchable ? (
+  const subBar = () => (searchable ? (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
         {/* box-sizing, or the padding is added on top of the cap and the row
@@ -628,7 +634,7 @@ export default function Committee({ st, patch, narrow }) {
   )))
 
   if (!data) {
-    return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load committee data.' : 'Loading committee…'}</div></div>
+    return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>{header(null)}<div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load committee data.' : 'Loading committee…'}</div></div>
   }
 
   const { positions, meetings, tasks, members, nameById } = data
@@ -704,14 +710,14 @@ export default function Committee({ st, patch, narrow }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header>
+      {header(
         <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginLeft: 'auto', flexWrap: 'wrap' }}>
           <StatReadout value={(positions.length - vacancies.length) + '/' + positions.length} label="POSITIONS FILLED" fg={vacancies.length ? C.warn : C.ok} />
           <StatReadout value={String(openTasks.length)} label="OPEN ACTIONS" fg={openTasks.some(t => taskState(t).label === 'OVERDUE') ? C.block : C.text} />
           <StatReadout value={String(allMotions.length)} label="MOTIONS THIS SEASON" />
         </div>
-      </Header>
-      <SubBar />
+      )}
+      {subBar()}
 
       {msg && (
         <div style={{ padding: '10px 20px', fontSize: 12.5, color: C.block, borderBottom: `1px solid ${C.hair}` }}>{msg}</div>

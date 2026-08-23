@@ -865,6 +865,16 @@ as sections with their own buttons rather than three tabs and a manage page.
   so a label can be renamed without moving anyone's view. **Positions is kept
   even though the brief's list did not name it** — dropping a working screen is
   not something a rename asks for.
+- **NEVER DECLARE A COMPONENT INSIDE A RENDER (v9.51.1).** Reported: typing in
+  the section search threw the caret out after ONE character and nothing landed.
+  `Header` and `SubBar` were written as `const X = () => …` in the render body,
+  so React saw a different element TYPE on every render and tore the whole
+  subtree down and rebuilt it — taking the focused input with it. They are plain
+  functions returning elements now, CALLED (`{subBar()}`) rather than mounted.
+  **`fill()` cannot catch this**: it sets the value in one shot, so the suite
+  types character by character and asserts `document.activeElement` is still the
+  box after each one. Control run with the fix stashed: all five characters lost
+  focus and only the first landed, exactly as reported.
 - **ONE SEARCH PER SECTION, and it searches the SECTION rather than the list on
   screen (v9.50.9).** A box on Meetings that only filtered the visible meetings
   would answer the wrong question: a motion, an action or something minuted sits
