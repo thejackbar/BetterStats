@@ -4179,6 +4179,33 @@ BetterClubhouse**, on the old BetterAdmin amber. Handoff:
   (screen owns its padding), `hideHeader` (screen draws its own — the
   transitional escape hatch the promoted ClubManager screens use). **One
   breakpoint for the module: `lg` (1024px)**, sidebar becomes a drawer below it.
+- **ONE SEARCH BOX, ONE PLACE (v9.51.2).** Below the heading, left aligned, with
+  Bookmarks and the primary action beside it. `ModuleLayout` grew two opt-in
+  props for it: **`twoRow`** moves `filters`, the bookmark and `actions` onto a
+  full-width second line, and **`tabs`** puts a section's own button row CENTRED
+  on the title line (the title block and the right-hand group each take
+  `flex-1 basis-0`, so the buttons land in the middle rather than wherever the
+  title happens to end). Both default off, so a screen that has not asked is
+  byte-for-byte what it was. Carried by Accounts, Payments, Stock, Equipment,
+  Emails, Lists, Segments and Templates; Roster and the Directory do the same
+  thing by hand inside `ScreenHeader`, since they do not use `ModuleLayout`.
+- **THE SECOND ROW'S FILTERS WRAP INSIDE THEIR OWN BOX.** `flex-1 min-w-0` on
+  the filters and `shrink-0` on the action cluster, so the search and the
+  buttons always share the top of that row — letting the whole row wrap put the
+  buttons on a line of their own the moment a screen carried a few filters.
+- **A WIDTH UTILITY DOES NOT BEAT `w-full` RELIABLY.** `INPUT_CLS` carries
+  `w-full`, and which of two width classes wins is the order Tailwind EMITS
+  them, not the order in the class string. `SearchInput`'s `wide` and the Stock
+  category select therefore set their width INLINE; with a class they
+  intermittently took the whole line and pushed everything beside them onto the
+  next row. Measured, not guessed — the box read 380px while its sibling select
+  read 522px in the same row.
+- **`SegButtons`** is the house segmented control in the admin kit, the same
+  markup Committee's `SegTabs` draws, so a Merch or Comms screen asking for "the
+  same buttons as Committee" gets them rather than a lookalike.
+- **`RecordListPane` takes a `query`** and filters on what a row actually says
+  (its name and its second line), so one box serves every screen built on
+  `crudShell` instead of four different filters. `SegmentListPane` forwards it.
 - **`components/admin/ui.jsx` is the one admin UI language** — Button,
   TextInput/Select/Field/SearchInput, FilterPill, StatCard, StatReadout,
   Caption/FieldLabel/StatLabel, AttentionRow, TableWrap/TableHead/TableRow/

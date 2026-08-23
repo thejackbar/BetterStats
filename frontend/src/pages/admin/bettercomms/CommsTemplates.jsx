@@ -3,7 +3,7 @@ import { useLocation } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-import { Button, Note, Empty, Toast, SectionHeading, Field, TextInput } from '../../../components/admin/ui'
+import { Button, Note, Empty, Toast, SectionHeading, Field, TextInput, SearchInput } from '../../../components/admin/ui'
 import EmailEditorTabs from '../../../components/admin/EmailEditorTabs'
 import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
@@ -83,6 +83,7 @@ export default function CommsTemplates() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [toast, setToast] = useState(null)
+  const [q, setQ] = useState('')
   // Bumped whenever the HTML is replaced wholesale (a different template
   // selected, a file imported). EmailEditorTabs seeds its design iframe once on
   // mount, so a new body only lands if the editor remounts.
@@ -223,12 +224,14 @@ export default function CommsTemplates() {
       title="Templates"
       caption={`Reusable email layouts · ${templates?.length ?? 0} saved`}
       onHelp={intro.reopen}
+      twoRow
+      filters={<SearchInput wide value={q} onChange={setQ} placeholder="Search templates…" />}
       actions={<Button variant="primary" onClick={startNew}>New template</Button>}
       bare
     >
       <CrudPanes>
         <RecordListPane
-          items={items} loading={templates == null} selId={selId} onSelect={setSelId}
+          items={items} loading={templates == null} selId={selId} onSelect={setSelId} query={q}
           emptyText="No templates yet. Start from scratch, paste HTML, or import a .html file."
         >
           <Note toneKey="calm">

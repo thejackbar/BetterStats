@@ -108,7 +108,7 @@ function buildInternalNav({ counts }) {
 }
 
 export default function BetterClubhouseLayout({
-  children, title, caption, onHelp, filters, stats, actions, bare, hideHeader, storefront = false,
+  children, title, caption, onHelp, filters, stats, actions, tabs, twoRow, bare, hideHeader, storefront = false,
 }) {
   const { user, hasModule } = useAuth()
   const modules = clubhouseModules(hasModule)
@@ -125,7 +125,8 @@ export default function BetterClubhouseLayout({
     <ModuleLayout
       moduleName="Admin" nav={nav}
       title={title} caption={caption} onHelp={onHelp}
-      filters={filters} stats={stats} actions={actions} bare={bare} hideHeader={hideHeader}
+      filters={filters} stats={stats} actions={actions} tabs={tabs} twoRow={twoRow}
+      bare={bare} hideHeader={hideHeader}
       sidebarFooterTop={<ClubhouseContextControl />}
     >
       {children}

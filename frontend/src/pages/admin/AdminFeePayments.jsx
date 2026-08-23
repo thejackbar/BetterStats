@@ -75,9 +75,12 @@ export default function AdminFeePayments() {
   const header = {
     title: 'Payments',
     caption: `The season's full ledger · ${filtered.length} of ${payments?.length ?? 0} shown`,
+    // The search sits under the heading, on the same line as Bookmarks — the
+    // one place every Committee screen and the Directory carry theirs.
+    twoRow: true,
     filters: (
       <div className="flex items-center gap-2 flex-wrap">
-        <SearchInput value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
+        <SearchInput wide value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
         {people.menus}
         <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="!w-auto">
           <option value="">All kinds</option>

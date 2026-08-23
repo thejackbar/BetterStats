@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import BetterMerchLayout from '../../../components/admin/BetterMerchLayout'
+import { SearchInput } from '../../../components/admin/ui'
 import { PbSpinner } from '../../../lib/presskit'
 import {
   money, CONDITIONS, ASSET_STATUSES, Btn, Field, TextInput, NumberInput, Select, TextArea, Modal, Pill, Icon,
@@ -132,6 +133,7 @@ export default function MerchAssets() {
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [q, setQ] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -146,17 +148,31 @@ export default function MerchAssets() {
   }, [])
   useEffect(() => { load() }, [load])
 
+  // A piece of equipment is found by what it is, where it lives, what state it
+  // is in or the tag written on it — not only its name.
+  const needle = q.trim().toLowerCase()
+  const shown = needle
+    ? assets.filter(a => [a.name, a.asset_tag, a.location, a.condition, a.status, a.notes]
+        .some(v => v && String(v).toLowerCase().includes(needle)))
+    : assets
+
   return (
     <BetterMerchLayout title="Equipment"
+      // Search under the heading, with Bookmarks and the primary action beside
+      // it on that same line.
+      twoRow
+      filters={<SearchInput wide value={q} onChange={setQ} placeholder="Search equipment, location, condition…" />}
       actions={<Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New equipment</Btn>}>
       <p className="text-[12.5px] text-pb-faint mb-4">High-value gear tracked one item at a time — condition plus service and replace dates feed the alerts and your cashflow planning. Bulk gear (a box of balls) lives in <b>Stock</b> instead.</p>
       {loading ? <PbSpinner message="Loading equipment…" /> : assets.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
           No equipment yet. <button className="text-pb-accent" onClick={() => setShowNew(true)}>Add a bowling machine, covers, sight screen…</button>
         </div>
+      ) : shown.length === 0 ? (
+        <div className="pb-card p-8 text-center text-pb-faint text-sm">Nothing matches “{q}”.</div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {assets.map((a) => <AssetRow key={a.id} asset={a} onEdit={setEditing} />)}
+          {shown.map((a) => <AssetRow key={a.id} asset={a} onEdit={setEditing} />)}
         </div>
       )}
       {showNew && <AssetModal onClose={() => setShowNew(false)} onSaved={() => { setShowNew(false); load() }} />}

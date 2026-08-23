@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import BetterMerchLayout from '../../../components/admin/BetterMerchLayout'
+import { SegButtons, SearchInput } from '../../../components/admin/ui'
 import { PbSpinner } from '../../../lib/presskit'
 import {
   money, CATEGORIES, categoryLabel, MOVEMENT_KINDS, kindLabel,
@@ -728,26 +729,30 @@ export default function MerchStock() {
 
   return (
     <BetterMerchLayout title="Stock"
+      // What kind of stock you are looking at sits on the title line, in the
+      // house segmented control; the search and the category narrowing go
+      // underneath, where every other screen carries them.
+      twoRow
+      tabs={<SegButtons value={cat} onChange={pickTab}
+        tabs={[{ key: 'all', label: 'All' }, ...CATEGORIES.map(c => ({ key: c.key, label: c.label }))]} />}
+      filters={<div className="flex items-center gap-2 flex-wrap">
+        <SearchInput wide value={q} onChange={setQ} placeholder="Search products…" />
+        {/* Inline width on the select: the shared input class carries `w-full`,
+            and which of two width utilities wins is emission order rather than
+            the class string, so a `w-48` here sometimes lost and the select
+            took the whole line, pushing itself under the search box. */}
+        {scopedCats.length > 0 && (
+          <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
+            style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box' }}>
+            <option value="">All categories</option>
+            {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
+          </Select>
+        )}
+      </div>}
       actions={<div className="flex items-center gap-2">
         <Btn sm icon="list" onClick={() => setShowCatManager(true)}>Categories</Btn>
         <Btn variant="primary" sm icon="plus" onClick={() => setShowNew(true)}>New product</Btn>
       </div>}>
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button onClick={() => pickTab('all')} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === 'all' ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>All</button>
-        {CATEGORIES.map((c) => (
-          <button key={c.key} onClick={() => pickTab(c.key)} className={`px-3 py-1.5 rounded-lg text-[12.5px] ${cat === c.key ? 'bg-pb-accent/12 text-pb-accent' : 'text-pb-faint hover:text-pb-text'}`}>{c.label}</button>
-        ))}
-        <div className="ml-auto flex items-center gap-2">
-          {scopedCats.length > 0 && (
-            <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="w-48">
-              <option value="">All categories</option>
-              {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
-            </Select>
-          )}
-          <TextInput placeholder="Search products…" value={q} onChange={(e) => setQ(e.target.value)} className="w-44" />
-        </div>
-      </div>
-
       {loading ? <PbSpinner message="Loading stock…" /> : products.length === 0 ? (
         <div className="pb-card p-8 text-center text-pb-faint text-sm">
           {catFilter || q ? 'No products match.' : <>No products yet. <button className="text-pb-accent" onClick={() => setShowNew(true)}>Add your first one</button>.</>}

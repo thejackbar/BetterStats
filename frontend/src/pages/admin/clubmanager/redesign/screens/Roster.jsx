@@ -495,7 +495,11 @@ export default function Roster({ st, patch, narrow }) {
     borderRight: `1px solid ${C.hair2}`, ...extra,
   })
 
-  const Header = ({ children }) => (
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER — a `const X = () => …` written
+  // here is a new element type on every render, so React rebuilds its whole
+  // subtree and any focused input inside it loses the caret after one
+  // character. This is a plain function returning elements, called below.
+  const header = (children) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
       <div>
@@ -503,6 +507,18 @@ export default function Roster({ st, patch, narrow }) {
         <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint, marginTop: 2 }}>{data?.week ? 'WEEK OF ' + weekDates(data.week.week_start)[0].toUpperCase() + (data.week.status === 'published' ? ' · PUBLISHED' : (data.week.status === 'confirmed' ? ' · CONFIRMED' : '')) : 'THIS WEEK'}</div>
       </div>
       {children}
+      {/* The search sits on its own line under the heading, the place every
+          Committee screen and the Directory carry theirs. `flex: 1 1 100%` is
+          what makes the wrapping header break before it. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
+        <input value={st.rosterQuery || ''} onChange={e => patch({ rosterQuery: e.target.value })}
+          placeholder="Search people, areas, roles and shifts…" aria-label="Search people, areas, roles and shifts"
+          style={{ width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }} />
+        {(st.rosterQuery || '').trim() && (
+          <button onClick={() => patch({ rosterQuery: '' })}
+            style={{ background: 'transparent', border: 'none', color: C.faint, fontFamily: MONO, fontSize: 10, cursor: 'pointer' }}>CLEAR</button>
+        )}
+      </div>
     </ScreenHeader>
   )
 
@@ -511,7 +527,7 @@ export default function Roster({ st, patch, narrow }) {
   // timed out, or the server threw. Say which, so it can be acted on.
   if (!data) return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header />
+      {header(null)}
       <div style={{ padding: 24, fontSize: 13, color: C.faint, maxWidth: '46rem' }}>
         {!err ? 'Loading the roster…' : (
           <div style={{ background: C.surface, border: `1px solid ${C.hair2}`, borderRadius: 9, padding: 18, lineHeight: 1.6 }}>
@@ -541,7 +557,7 @@ export default function Roster({ st, patch, narrow }) {
   if (areas.length === 0) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <Header />
+        {header(null)}
         <div style={{ padding: 24, maxWidth: '46rem' }}>
           <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 22, fontSize: 13.5, color: C.dim, lineHeight: 1.6 }}>
             No operational areas set up yet. An area is a slice of club work (Bar, Umpires, Groundsman…) with its own weekly shift pattern, the role that covers it and the qualification that gates it. Add a starter set to see the weekly roster generate — you can rename, re-time or remove them afterwards in Areas &amp; Roles.
@@ -722,11 +738,35 @@ export default function Roster({ st, patch, narrow }) {
     return { d, groups }
   })
 
-  const depts = []; areas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
+  // ── the section search ────────────────────────────────────────────────
+  //
+  // A roster is people, areas, roles and shifts at once, so the box reaches all
+  // four: a person is kept when their own name or role matches OR one of their
+  // shifts does, and an area when its own name, department or required role
+  // matches OR one of its shifts does. Filtering the ROWS rather than the cells
+  // keeps a week readable — a row with its shifts blanked out would say the
+  // person is free when they are not.
+  const rq = (st.rosterQuery || '').trim().toLowerCase()
+  const rHit = (...vals) => vals.some(v => v != null && String(v).toLowerCase().includes(rq))
+  const shiftHit = (x) => {
+    const a = areaById[x.area_id]
+    return rHit(a?.name, a?.department, a?.required_role_name, x.area_name, x.role_name,
+                x.notes, x.full_name, DOW[x.day_of_week])
+  }
+  const personMatches = (p) => !rq
+    || rHit(p.name, ...(p.role_names || []))
+    || shifts.some(x => x.assignee_member_id === p.member_id && shiftHit(x))
+  const areaMatches = (a) => !rq
+    || rHit(a.name, a.department, a.required_role_name, a.required_qualification_name)
+    || shifts.some(x => x.area_id === a.id && shiftHit(x))
+  const shownCandidates = candidates.filter(personMatches)
+  const shownAreas = areas.filter(areaMatches)
+
+  const depts = []; shownAreas.forEach(a => { if (!depts.includes(a.department || 'Areas')) depts.push(a.department || 'Areas') })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header>
+      {header(<>
         <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
           {[['people', 'People'], ['areas', 'Areas'], ['confirm', 'Confirm'], ['hours', 'Hours']].map(([v, label]) => (
             <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', background: view === v ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: view === v ? C.accent : C.faint }}>{label}</button>
@@ -746,7 +786,7 @@ export default function Roster({ st, patch, narrow }) {
           <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
         </div>
-      </Header>
+      </>)}
 
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
 
@@ -813,7 +853,7 @@ export default function Roster({ st, patch, narrow }) {
               </div>
             )}
 
-            {view === 'people' && candidates.map(p => {
+            {view === 'people' && shownCandidates.map(p => {
               const mine = shifts.filter(x => x.assignee_member_id === p.member_id)
               const cap = settings.weekly_shift_cap || p.max_shifts || DEFAULT_CAP
               const loadPct = Math.min(100, Math.round((mine.length / cap) * 100))
@@ -861,7 +901,7 @@ export default function Roster({ st, patch, narrow }) {
                   <div style={{ position: 'sticky', left: 0, zIndex: 12, background: C.surface, padding: railMin ? '8px 6px' : '8px 14px', fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.dim, whiteSpace: 'nowrap' }}
                     title={dept}>{railMin ? dept.slice(0, 3).toUpperCase() : dept}</div>
                 </div>
-                {areas.filter(a => (a.department || 'Areas') === dept).map(a => {
+                {shownAreas.filter(a => (a.department || 'Areas') === dept).map(a => {
                   const mine = shifts.filter(x => x.area_id === a.id)
                   const filledN = mine.filter(x => x.assignee_member_id).length
                   return (

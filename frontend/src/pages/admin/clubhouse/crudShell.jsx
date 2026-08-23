@@ -59,14 +59,22 @@ export function CrudPanes({ children }) {
 // the club's own lists apart from the ones other BetterCricket tools built. A
 // group with no rows still renders its heading and its own empty line, so a
 // section that exists but is empty says so rather than vanishing.
+// `query` narrows the rail on what a row actually says — its name and its
+// second line — so one search box in the header serves every screen built on
+// this shell rather than each one filtering its own way.
 export function RecordListPane({
-  items, groups, selId, onSelect, emptyText, loading = false, avatar = false, children,
+  items, groups, selId, onSelect, emptyText, loading = false, avatar = false, children, query = '',
 }) {
-  const sections = groups || [{ items: items || [] }]
+  const q = query.trim().toLowerCase()
+  const keep = it => !q || [it.name, it.sub].some(v => v && String(v).toLowerCase().includes(q))
+  const sections = (groups || [{ items: items || [] }])
+    .map(g => ({ ...g, items: (g.items || []).filter(keep) }))
   const nothing = sections.every(g => !(g.items || []).length)
   return (
     <div className="ch-listpane bg-pb-surface overflow-y-auto p-2.5 pb-scroll">
-      {loading ? <Empty>Loading…</Empty> : nothing ? <Empty>{emptyText}</Empty> : sections.map((g, gi) => (
+      {loading ? <Empty>Loading…</Empty>
+        : nothing ? <Empty>{q ? `Nothing matches “${query}”.` : emptyText}</Empty>
+        : sections.map((g, gi) => (
         <div key={g.key || gi} className={gi ? 'mt-4' : ''}>
           {g.heading && <Caption className="px-1 mb-1.5">{g.heading}</Caption>}
           {(g.items || []).length === 0 ? (

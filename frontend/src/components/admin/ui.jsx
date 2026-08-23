@@ -226,12 +226,48 @@ export function Checkbox({ checked, onChange, children, hint, disabled = false, 
 }
 
 // The header search box. Capped narrow so it never crowds the stat readouts.
-export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
+export function SearchInput({ value, onChange, placeholder = 'Search…', className = '', wide = false, ...rest }) {
   return (
     <input
       value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-      className={`${INPUT_CLS} max-w-[280px] ${className}`}
+      aria-label={rest['aria-label'] || placeholder}
+      {...rest}
+      // `wide` is the header search: one width across every screen that carries
+      // one, capped so it cannot push a phone sideways. The width is inline
+      // because INPUT_CLS carries `w-full`, and which of two width utilities
+      // wins is decided by the order Tailwind emits them, not by the class
+      // string — so a class here would sometimes lose and the box would take
+      // the whole line, pushing the buttons beside it onto a row of their own.
+      style={{ ...(wide ? { width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box' } : null), ...(rest.style || {}) }}
+      className={`${INPUT_CLS} ${wide ? '' : 'max-w-[280px]'} ${className}`}
     />
+  )
+}
+
+// The house segmented control — one container, the active button tinted. This
+// is what Committee's own section buttons look like, and it is exported here so
+// a Merch or Comms screen asking for "the same buttons as Committee" gets the
+// same markup rather than a lookalike. Values are compared with ===, so a tab's
+// `key` can be anything.
+export function SegButtons({ tabs, value, onChange, className = '' }) {
+  return (
+    <div className={`flex items-center flex-wrap gap-0.5 bg-pb-surface2 border pb-hairline rounded-lg p-[3px] ${className}`}>
+      {tabs.map(t => {
+        const active = t.key === value
+        return (
+          <button key={t.key} type="button" onClick={() => onChange(t.key)}
+            aria-pressed={active}
+            className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold whitespace-nowrap ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
+            style={active ? { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' } : undefined}>
+            {t.label}
+            {t.badge != null && t.badge > 0 && (
+              <span className="font-mono text-[9px] px-[5px] py-px rounded-full ml-1.5"
+                style={{ background: 'rgba(245,181,66,0.18)', color: '#f5b542' }}>{t.badge}</span>
+            )}
+          </button>
+        )
+      })}
+    </div>
   )
 }
 

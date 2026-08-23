@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, lazy, Suspense } from 'react
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-import { Button, Note, Empty } from '../../../components/admin/ui'
+import { Button, Note, Empty, SearchInput } from '../../../components/admin/ui'
 import { CrudPanes, RecordListPane, DetailPane } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
 
@@ -102,6 +102,7 @@ export default function CommsCampaigns() {
   })), [campaigns])
 
   const live = settings?.provider?.live
+  const [q, setQ] = useState('')
 
   if (intro.showing) {
     return (
@@ -116,6 +117,9 @@ export default function CommsCampaigns() {
       title="Emails"
       caption={`Drafts and sends · ${campaigns.length} total`}
       onHelp={intro.reopen}
+      // Search under the heading, with Bookmarks and the actions on that line.
+      twoRow
+      filters={<SearchInput wide value={q} onChange={setQ} placeholder="Search emails by name or subject…" />}
       actions={<>
         <Button as={Link} to="/admin/comms/templates">Templates</Button>
         <Button variant="primary" onClick={newEmail} disabled={creating}>
@@ -126,7 +130,7 @@ export default function CommsCampaigns() {
     >
       <CrudPanes>
         <RecordListPane
-          items={items} loading={loading} selId={id || null}
+          items={items} loading={loading} selId={id || null} query={q}
           onSelect={cid => navigate(`/admin/comms/${cid}`, { state: { skipIntro: true } })}
           emptyText="No emails yet. Send your first newsletter or announcement to the club."
         >

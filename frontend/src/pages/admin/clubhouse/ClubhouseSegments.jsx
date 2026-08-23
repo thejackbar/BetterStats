@@ -1,7 +1,8 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
 import {
-  Button, Note, Badge, Empty, Toast, SectionHeading,
+  Button, Note, Badge, Empty, Toast, SectionHeading, SearchInput,
   TableWrap, TableHead, TableRow, Cell,
 } from '../../../components/admin/ui'
 import { CLUB_FIELD_DEFS } from '../bettercomms/segmentFields'
@@ -45,6 +46,7 @@ export default function ClubhouseSegments() {
   // introduction to everyone who has already dismissed it.
   const intro = useScreenIntro('audiences')
   const s = useSegments({ defs: CLUB_FIELD_DEFS, presets: PRESETS, presetFrom })
+  const [q, setQ] = useState('')
 
   if (intro.showing) {
     return (
@@ -60,12 +62,14 @@ export default function ClubhouseSegments() {
       title="Segments"
       caption={`Resolved when you send · ${s.segments?.length || 0} saved`}
       onHelp={intro.reopen}
+      twoRow
+      filters={<SearchInput wide value={q} onChange={setQ} placeholder="Search segments…" />}
       actions={<Button variant="primary" onClick={() => s.startNew()}>New segment</Button>}
       bare
     >
       <CrudPanes>
         <SegmentListPane
-          segments={s.segments} sizes={s.sizes} selId={s.selId} onSelect={s.setSelId}
+          segments={s.segments} sizes={s.sizes} selId={s.selId} onSelect={s.setSelId} query={q}
           emptyText="No segments yet. Start one and it counts as you build it."
         >
           <Note toneKey="calm">

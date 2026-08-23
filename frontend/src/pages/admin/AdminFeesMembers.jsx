@@ -450,9 +450,12 @@ export default function AdminFeesMembers() {
   const header = {
     title: 'Accounts',
     caption: `One balance per person · ${filtered.length} of ${data?.members?.length ?? 0} shown`,
-    filters: (
-      <div className="flex items-center gap-2 flex-wrap">
-        <SearchInput value={q} onChange={setQ} placeholder="Search name or tier…" />
+    // The four buttons that say WHO you are looking at sit on the title line,
+    // centred. The search and the Directory menus go underneath, where every
+    // other screen carries them.
+    twoRow: true,
+    tabs: (
+      <div className="flex items-center gap-2 flex-wrap justify-center">
         <FilterPill active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
           onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
           Everyone
@@ -466,6 +469,11 @@ export default function AdminFeesMembers() {
         <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
           Not on PlayHQ
         </FilterPill>
+      </div>
+    ),
+    filters: (
+      <div className="flex items-center gap-2 flex-wrap">
+        <SearchInput wide value={q} onChange={setQ} placeholder="Search name or tier…" />
         {/* The same Membership / Role / More menus the Directory carries, so a
             money job can be scoped to a group of people ("every Junior Player
             who owes") without leaving this screen. */}

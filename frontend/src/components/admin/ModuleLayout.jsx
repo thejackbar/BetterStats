@@ -30,6 +30,13 @@ import BookmarkButton from './BookmarkButton'
 //   filters   — pills/search, sitting left of the `margin-left: auto` break.
 //   stats     — right-aligned StatReadouts.
 //   actions   — the primary action, last.
+//   tabs      — a section's own button row, CENTRED on the title line.
+//   twoRow    — put `filters`, the bookmark and `actions` on a full-width
+//               second line under the title, which is where every Committee
+//               screen and the Directory now carry their search box. The title
+//               line then holds the title, `tabs` and `stats` only. Off by
+//               default, so every screen that has not asked for it is
+//               byte-for-byte what it was.
 //   bare      — the screen manages its own padding and width (full-bleed
 //               master-detail screens); otherwise children get the standard pad.
 //   hideHeader— the screen draws its own sticky header. A transitional escape
@@ -85,7 +92,7 @@ function NavBadge({ count, toneKey }) {
 }
 
 export default function ModuleLayout({
-  moduleName, nav = [], children, title, caption, onHelp, filters, stats, actions,
+  moduleName, nav = [], children, title, caption, onHelp, filters, stats, actions, tabs, twoRow = false,
   bare = false, hideHeader = false, sidebarFooterTop = null,
 }) {
   // Each module surface wears its own brand colour (BetterSocials magenta,
@@ -259,23 +266,42 @@ export default function ModuleLayout({
             <button onClick={() => setMobileOpen(true)} className="text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
           </div>
         ) : (
-        <header className="sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-5 py-3.5 flex items-center gap-3.5 flex-wrap">
-          <button onClick={() => setMobileOpen(true)} className="lg:hidden text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="min-w-0">
-              {title
-                ? <h1 className="font-display font-bold text-[19px] tracking-[-0.01em] truncate">{title}</h1>
-                : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></span>}
-              {caption && <Caption screen className="mt-0.5">{caption}</Caption>}
+        <header className="sticky top-0 z-40 bg-pb-surface border-b pb-hairline px-5 py-3.5 flex flex-col gap-2.5">
+          <div className="flex items-center gap-3.5 flex-wrap">
+            <button onClick={() => setMobileOpen(true)} className="lg:hidden text-pb-dim border border-pb-hairline2 rounded-lg px-2.5 py-[7px] leading-none" aria-label="Open menu">☰</button>
+            {/* With `tabs` the title block and the right-hand group each take an
+                equal share, so the button row lands in the middle of the header
+                rather than wherever the title happens to end. */}
+            <div className={`flex items-center gap-2 min-w-0 ${tabs ? 'flex-1 basis-0' : ''}`}>
+              <div className="min-w-0">
+                {title
+                  ? <h1 className="font-display font-bold text-[19px] tracking-[-0.01em] truncate">{title}</h1>
+                  : <span className="font-mono text-[11px] tracking-wide2 text-pb-faint">Better<span style={{ color: 'var(--pb-accent-ink)' }}>{moduleName}</span></span>}
+                {caption && <Caption screen className="mt-0.5">{caption}</Caption>}
+              </div>
+              {onHelp && <HelpDot onClick={onHelp} />}
             </div>
-            {onHelp && <HelpDot onClick={onHelp} />}
+            {tabs && <div className="flex items-center justify-center shrink-0">{tabs}</div>}
+            {!twoRow && filters}
+            <div className={`ml-auto flex items-center gap-[26px] ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
+              {stats}
+              {!twoRow && <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />}
+              {!twoRow && actions && <div className="flex items-center gap-2">{actions}</div>}
+            </div>
           </div>
-          {filters}
-          <div className="ml-auto flex items-center gap-[26px]">
-            {stats}
-            <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />
-            {actions && <div className="flex items-center gap-2">{actions}</div>}
-          </div>
+          {twoRow && (
+            // The filters wrap INSIDE their own box and the action cluster does
+            // not shrink, so the search box and the buttons always share the
+            // top of this row. Letting the whole row wrap put the buttons on a
+            // line of their own the moment a screen carried a few filters.
+            <div className="flex items-start gap-3.5">
+              <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">{filters}</div>
+              <div className="flex items-center gap-[26px] shrink-0">
+                <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />
+                {actions && <div className="flex items-center gap-2 flex-wrap justify-end">{actions}</div>}
+              </div>
+            </div>
+          )}
         </header>
         )}
         {bare

@@ -57,7 +57,7 @@ export function RuleBuilder({ defs, rules, setRules, opts, label = 'Match people
 // The saved-segment list, with whatever notes the screen wants underneath it.
 // A segment's own row: its name, how many conditions it carries, and how many
 // people it matches today.
-export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, children }) {
+export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, children, query = '' }) {
   const items = (segments || []).map(s => {
     const n = (s.definition?.rules || []).length
     return {
@@ -70,6 +70,7 @@ export function SegmentListPane({ segments, sizes, selId, onSelect, emptyText, c
   return (
     <RecordListPane
       items={items} loading={segments == null} selId={selId} onSelect={onSelect} emptyText={emptyText}
+      query={query}
     >
       {children}
     </RecordListPane>

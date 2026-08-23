@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../lib/api'
 import { useAuth } from '../../../contexts/AuthContext'
 import BetterCommsLayout from '../../../components/admin/BetterCommsLayout'
-import { Button, Badge, Caption, SectionHeading, Note, Empty, Toast, INPUT_CLS } from '../../../components/admin/ui'
+import { Button, Badge, Caption, SectionHeading, Note, Empty, Toast, INPUT_CLS, SearchInput } from '../../../components/admin/ui'
 import { CrudPanes, RecordListPane, DetailPane, RecordTitleRow, CountBar, SaveRow, reachability } from '../clubhouse/crudShell'
 import ScreenIntro, { useScreenIntro, INTROS } from '../clubhouse/intro'
 import { ContactDetailModal } from './CommsContacts'
@@ -343,6 +343,7 @@ export default function CommsLists() {
   const { emailList, busyId: emailing, error: emailError } = useEmailList()
   const [lists, setLists] = useState(null)
   const [selId, setSelId] = useState(null)
+  const [listQ, setListQ] = useState('')            // the header search, over the rail
   const [draft, setDraft] = useState(null)          // { id, name }
   const [members, setMembers] = useState(null)      // the selected list's contacts
   const [busy, setBusy] = useState(false)
@@ -436,6 +437,8 @@ export default function CommsLists() {
       title="Lists"
       caption={`Picked by hand · ${lists?.length ?? 0} saved`}
       onHelp={intro.reopen}
+      twoRow
+      filters={<SearchInput wide value={listQ} onChange={setListQ} placeholder="Search lists…" />}
       actions={<Button variant="primary" onClick={startNew}>New list</Button>}
       bare
     >
@@ -443,7 +446,7 @@ export default function CommsLists() {
         <RecordListPane
           items={showSections ? undefined : manualLists.map(rowFor)}
           groups={groups}
-          loading={lists == null} selId={selId} onSelect={setSelId}
+          loading={lists == null} selId={selId} onSelect={setSelId} query={listQ}
           emptyText="No lists yet. Start one and pick who belongs in it."
         >
           <Note toneKey="calm">
