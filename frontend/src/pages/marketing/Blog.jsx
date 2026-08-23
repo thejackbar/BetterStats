@@ -47,7 +47,7 @@ function PostThumb({ src, title }) {
 
 export default function Blog() {
   usePageMeta({
-    title: 'Blog — Cricket Stats Guides & Club Tips | BetterCricket',
+    title: 'Blog: Cricket Stats Guides & Club Tips | BetterCricket',
     description: 'Cricket statistics guides and club management tips from the BetterCricket team: batting averages, bowling economy, historical data and more.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/blog',

@@ -2,7 +2,7 @@ export default {
   version: 'v9.9.0',
   date: '2026-08-05',
   sortKey: '2026-08-08T09:00:00Z',
-  title: 'Import Awards — bring your whole honour board in from a spreadsheet (BetterFootball)',
+  title: 'Import Awards: bring your whole honour board in from a spreadsheet (BetterFootball)',
   items: [
     "A new Import Awards tool takes a club's honour board from a spreadsheet: upload it, check the columns, match the names, and see exactly what will be recorded before anything is saved. Built the same way as Import Stats and Import Results, and undoable in one click.",
     "An award your club doesn't have an award type for yet is added to your catalogue as part of the import, so the honour board and the Awards dropdown agree afterwards. A trophy you already have is matched and keeps the category you filed it under.",

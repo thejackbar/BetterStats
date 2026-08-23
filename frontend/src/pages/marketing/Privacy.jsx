@@ -4,7 +4,7 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Privacy() {
   usePageMeta({
-    title: 'Privacy Policy — BetterCricket',
+    title: 'Privacy Policy | BetterCricket',
     description: 'How BetterCricket, provided by BetterSports, collects, stores and handles club, player and account information under the Australian Privacy Act.',
     url: 'https://betterat.cricket/privacy',
   })

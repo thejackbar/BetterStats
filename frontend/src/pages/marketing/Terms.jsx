@@ -5,7 +5,7 @@ import { usePageMeta } from '../../hooks/usePageMeta'
 
 export default function Terms() {
   usePageMeta({
-    title: 'Terms of Service — BetterCricket',
+    title: 'Terms of Service | BetterCricket',
     description: 'Terms of service for BetterCricket, the cricket platform for Australian clubs, provided by BetterSports.',
     url: 'https://betterat.cricket/terms',
   })

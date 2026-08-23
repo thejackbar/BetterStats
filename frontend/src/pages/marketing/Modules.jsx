@@ -138,7 +138,7 @@ function CTA({ onCta }) {
 
 export default function Modules() {
   usePageMeta({
-    title: 'Modules — BetterSelect, BetterSocials, BetterAdmin & BetterIQ | BetterCricket',
+    title: 'Modules: BetterSelect, BetterSocials, BetterAdmin & BetterIQ | BetterCricket',
     description:
       'BetterCricket in parts: the BetterStats Core plus four bolt-on modules, BetterSelect (selection), BetterSocials (website & social posts), BetterAdmin (fees, comms & merch) and BetterIQ (analytics & opposition scouting), with BetterFantasyCricket as a standalone club fantasy game. Start with the BetterStats Core and add the modules you want.',
     image: 'https://betterat.cricket/og-cover.png',

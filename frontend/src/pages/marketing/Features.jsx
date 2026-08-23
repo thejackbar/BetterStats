@@ -361,7 +361,7 @@ function FeaturesCTA({ onCta }) {
 // ─── Page ────────────────────────────────────────────────────────────────
 export default function Features() {
   usePageMeta({
-    title: 'Features — Automated Cricket Club Stats | BetterCricket',
+    title: 'Features: Automated Cricket Club Stats | BetterCricket',
     description: 'Automatic stats sync, rich player profiles, leaderboards, records and season yearbooks, the foundation of every BetterCricket plan. Plus partnership records, StatLab custom queries, awards & honours management, and admin tools.',
     image: 'https://betterat.cricket/og-cover.png',
     url: 'https://betterat.cricket/features',
