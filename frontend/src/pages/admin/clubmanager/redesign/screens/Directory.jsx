@@ -607,8 +607,15 @@ export default function Directory({ st, patch, narrow }) {
             {list.length > 0 && emailable < list.length && ` · ${list.length - emailable} with no email`}
           </Caption>
         </div>
-        <input placeholder="Search name or role…" value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
-          style={{ flex: 1, minWidth: 180, maxWidth: 300, background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
+        {/* The search sits on its own line above the filters, left aligned
+            with them, the same place it sits on Committee. box-sizing, or the
+            padding is added on top of the cap and the row pushes the page
+            sideways on a phone. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
+          <input placeholder="Search name or role…" aria-label="Search name or role"
+            value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
+            style={{ width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
+        </div>
         {/* One row: the three axes as menus, then what you can DO, ending in
             the single primary action. Every option that used to be its own pill
             still exists — it lives in the menu for its axis, so the number of

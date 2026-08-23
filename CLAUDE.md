@@ -3651,6 +3651,9 @@ sponsor's contact and this season's opening bat all just "Player" or nothing.
 - **The `membership_types` join is org-scoped on BOTH sides**
   (`mt.organisation_id = fm.organisation_id`), same rule as the `players` join
   above it — see the cross-club member leak note further down.
+- **The search sits on its own line above the filter buttons** (v9.51.0), left
+  aligned with them, the same place Committee's own search box sits. It used to
+  be squeezed against the right of the title line.
 - **Frontend** (`redesign/screens/Directory.jsx`): `typeLabel(p)` falls
   membership type → category → player/former player → "Member", shown on every
   list row and as an accented chip on the detail pane. New filters: Playing /
