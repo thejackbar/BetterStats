@@ -281,7 +281,13 @@ export default function ModuleLayout({
               </div>
               {onHelp && <HelpDot onClick={onHelp} />}
             </div>
-            {tabs && <div className="flex items-center justify-center shrink-0">{tabs}</div>}
+            {/* Shrinkable, deliberately: `flex-wrap` on the row cannot save a
+                child told not to shrink, and `shrink-0` here pushed Accounts
+                70px sideways at 390px once its filters wore one box. Both
+                sides carry a zero basis, so they give way first and this only
+                narrows when there is nothing left — which is when the button
+                row should be wrapping anyway. */}
+            {tabs && <div className="flex items-center justify-center min-w-0">{tabs}</div>}
             {!twoRow && filters}
             <div className={`ml-auto flex items-center gap-[26px] ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
               {stats}

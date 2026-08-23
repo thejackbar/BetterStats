@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
 import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 import AreaEditor from '../parts/AreaEditor'
 
@@ -23,6 +23,15 @@ const ROLE_CAT_OPTS = [
   { value: 'other', label: 'Other' },
 ]
 const catLabel = (v) => (ROLE_CAT_OPTS.find(o => o.value === v) || {}).label || ''
+
+// The placeholder names the list the box is actually pointed at, since each
+// section holds a different catalogue.
+const SEARCH_PLACEHOLDER = {
+  roles: 'Search roles and role types…',
+  activities: 'Search activities and activity types…',
+  quals: 'Search qualifications…',
+  areas: 'Search areas and departments…',
+}
 
 // A compact secondary tab bar, sized to content (not full width).
 function SubBar({ value, onChange, tabs }) {
@@ -52,10 +61,14 @@ export default function AreasRoles({ st, patch, narrow }) {
   const reloadActTypes = () => api.raActivityTypes().then(r => setActTypes(r?.types || r || [])).catch(() => {})
   useEffect(() => {
     setSub('main')  // reset the secondary tab when switching sections
+    // A query typed against roles means nothing against qualifications, so
+    // moving section starts a fresh one. Same rule Committee's own box keeps.
+    if (st.setupQuery) patch({ setupQuery: '' })
     if (tab === 'roles') reloadRoleTypes()
     if (tab === 'activities') reloadActTypes()
   }, [tab])
 
+  const q = (st.setupQuery || '').trim()
   const roleTypeOpts = roleTypes.map(t => ({ value: t.id, label: t.name }))
   const actTypeOpts = actTypes.map(t => ({ value: t.id, label: t.name }))
   const scroll = (max) => ({ flex: 1, overflowY: 'auto', padding: 20, maxWidth: max })
@@ -64,11 +77,21 @@ export default function AreasRoles({ st, patch, narrow }) {
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       <ScreenHeader>
         <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-        <div>
-          <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Areas &amp; Roles</h1>
+        <div style={HEAD_SIDE}>
+          <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Areas &amp; Roles</h1>
           <Caption tone={C.faint} style={{ marginTop: 2 }}>THE CONFIGURATION EVERY OTHER SCREEN READS FROM</Caption>
         </div>
-        <SegTabs value={tab} onChange={k => patch({ setupTab: k })} tabs={[{ key: 'roles', label: 'Roles' }, { key: 'activities', label: 'Activities' }, { key: 'quals', label: 'Qualifications' }, { key: 'areas', label: 'Operational areas' }]} />
+        <div style={HEAD_CENTRE}>
+          <SegTabs value={tab} onChange={k => patch({ setupTab: k })} tabs={[{ key: 'roles', label: 'Roles' }, { key: 'activities', label: 'Activities' }, { key: 'quals', label: 'Qualifications' }, { key: 'areas', label: 'Operational areas' }]} />
+        </div>
+        <div style={HEAD_SIDE_END} />
+        {/* One box, searching whichever catalogue is on screen — these lists
+            grow to a few dozen rows at a club that has set itself up properly,
+            and finding "Umpire" among them should not be a scroll. It narrows
+            what is DRAWN only, so the drag-to-reorder grip is withdrawn while a
+            query is running rather than renumbering against a filtered list. */}
+        <HeaderSearch value={st.setupQuery} onChange={v => patch({ setupQuery: v })}
+          placeholder={SEARCH_PLACEHOLDER[tab] || 'Search…'} />
       </ScreenHeader>
 
 
@@ -90,7 +113,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               onReorder={reorderBySortOrder(api.raUpdateRole)} onChanged={reloadRoleTypes}
               seed={{ label: 'Add Roles Starter Pack', fn: () => api.raSeedRoles(false) }}
               primaryKey="title" subtitle={it => [it.role_type_name, it.description].filter(Boolean).join(' · ')}
-              addLabel="Add role" emptyText="No general roles yet." />
+              addLabel="Add role" emptyText="No general roles yet." query={q} />
           ) : (
             <EntityManager key="role-types"
               describe="Role types classify your roles. A Committee type feeds committee positions (not the Roles list); an Official type is a formal scorecard role (umpire/scorer); Volunteer / Paid / Third party / Other are everyday roles. Pick a type when adding a role."
@@ -104,7 +127,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               onReorder={reorderBySortOrder(api.raUpdateRoleType)} onChanged={reloadRoleTypes}
               seed={{ label: 'Add Role Types Starter Pack', fn: () => api.raSeedRoleTypes() }}
               primaryKey="name" subtitle={it => [catLabel(it.category), it.description].filter(Boolean).join(' · ')}
-              addLabel="Add role type" emptyText="No role types yet." />
+              addLabel="Add role type" emptyText="No role types yet." query={q} />
           )}
         </div>
       )}
@@ -127,7 +150,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               onReorder={reorderBySortOrder(api.raUpdateActivity)} onChanged={reloadActTypes}
               seed={{ label: 'Add Activities Starter Pack', fn: () => api.raSeedActivities() }}
               primaryKey="title" subtitle={it => it.activity_type_name || ''}
-              addLabel="Add activity" emptyText="No activities yet." />
+              addLabel="Add activity" emptyText="No activities yet." query={q} />
           ) : (
             <EntityManager key="activity-types"
               describe="Activity types group your activities (Committee & Administration, Ground & Equipment…). Pick one when adding an activity. The Activities Starter Pack seeds these for you."
@@ -137,7 +160,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               onReorder={reorderBySortOrder(api.raUpdateActivityType)} onChanged={reloadActTypes}
               seed={{ label: 'Add Activity Types Starter Pack', fn: () => api.raSeedActivityTypes() }}
               primaryKey="name" subtitle={it => it.description || ''}
-              addLabel="Add activity type" emptyText="No activity types yet." />
+              addLabel="Add activity type" emptyText="No activity types yet." query={q} />
           )}
         </div>
       )}
@@ -152,7 +175,7 @@ export default function AreasRoles({ st, patch, narrow }) {
             onReorder={reorderBySortOrder(api.qualUpdateType)}
             seed={{ label: 'Add Qualifications Starter Pack', fn: () => api.qualSeedStarterTypes() }}
             primaryKey="name" subtitle={it => it.validity_months ? 'valid ' + it.validity_months + ' months' : 'no expiry'}
-            addLabel="Add qualification" emptyText="No qualification types yet." />
+            addLabel="Add qualification" emptyText="No qualification types yet." query={q} />
         </div>
       )}
 
@@ -161,7 +184,7 @@ export default function AreasRoles({ st, patch, narrow }) {
           <SubBar value={sub} onChange={setSub} tabs={[{ key: 'main', label: 'Operational areas' }, { key: 'types', label: 'Departments' }]} />
           {sub === 'main' ? (
             <>
-              <AreaEditor key={areaKey} focusAreaId={deepLink.area}
+              <AreaEditor key={areaKey} focusAreaId={deepLink.area} query={q}
                 onFocused={() => setDeepLink(d => ({ ...d, area: null }))} />
               <div style={{ marginTop: 20, borderTop: `1px solid ${C.hair}`, paddingTop: 14 }}>
                 <button disabled={busy} onClick={async () => { if (!window.confirm('Remove all operational areas, their patterns and every roster week for this club? (Testing reset — only this club; players/members/committee are untouched.)')) return; setBusy(true); await api.rosterClearConfig().catch(() => {}); setAreaKey(k => k + 1); setBusy(false) }}
@@ -176,7 +199,7 @@ export default function AreasRoles({ st, patch, narrow }) {
               onCreate={v => api.rosterCreateDepartment(v)} onUpdate={(id, v) => api.rosterUpdateDepartment(id, v)} onDelete={id => api.rosterDeleteDepartment(id)}
               onReorder={reorderBySortOrder(api.rosterUpdateDepartment)}
               seed={{ label: 'Add Departments Starter Pack', fn: () => api.rosterSeedDepartments() }}
-              primaryKey="name" addLabel="Add department" emptyText="No departments yet." />
+              primaryKey="name" addLabel="Add department" emptyText="No departments yet." query={q} />
           )}
         </div>
       )}

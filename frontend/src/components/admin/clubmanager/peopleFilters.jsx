@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import { api } from '../../../lib/api'
-import { MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip, C } from '../../../pages/admin/clubmanager/redesign/ui'
+import { MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip, SegGroup, C } from '../../../pages/admin/clubmanager/redesign/ui'
 
 // The Directory's People filters, reusable on any screen that lists the club's
 // people by `member_id` — Accounts and Payments today.
@@ -25,7 +25,10 @@ const ROLE_SEGS = [
   { seg: 'Official', label: 'Officials' },
 ]
 
-export function usePeopleFilters() {
+// `seg` dresses the three menus as Committee's own segmented control and puts
+// them in one box, for a screen that carries them on its title line rather than
+// among its filters. It changes nothing about what they filter.
+export function usePeopleFilters({ seg = false } = {}) {
   const [people, setPeople] = useState(null)
   const [failed, setFailed] = useState(false)
   const [opts, setOpts] = useState({ genders: [], squads: [], tiers: [], tier_season: null })
@@ -76,9 +79,9 @@ export function usePeopleFilters() {
   const external = types.filter(t => (t.scope || 'internal') === 'external')
   const label = (seg, prefix) => (seg || '').slice(prefix.length)
 
-  const menus = failed ? null : (
+  const menuButtons = (
     <>
-      <MenuButton label="Membership" width={260}
+      <MenuButton seg={seg} label="Membership" width={260}
         value={f.membership ? (f.membership === 'Player' ? 'Players' : f.membership === 'External' ? 'Not members' : label(f.membership, TYPE_PREFIX)) : null}>
         {close => (
           <>
@@ -101,7 +104,7 @@ export function usePeopleFilters() {
         )}
       </MenuButton>
 
-      <MenuButton label="Role" width={220}
+      <MenuButton seg={seg} label="Role" width={220}
         value={f.role ? (ROLE_SEGS.find(r => r.seg === f.role) || {}).label : null}>
         {close => (
           <>
@@ -113,7 +116,7 @@ export function usePeopleFilters() {
         )}
       </MenuButton>
 
-      <MenuButton label="More" width={240}
+      <MenuButton seg={seg} label="More" width={240}
         value={active.filter(([k]) => !['membership', 'role'].includes(k)).length
           ? String(active.filter(([k]) => !['membership', 'role'].includes(k)).length) : null}>
         {close => (
@@ -145,6 +148,9 @@ export function usePeopleFilters() {
       </MenuButton>
     </>
   )
+  // Loose in the caller's own filter row by default; inside the segmented box
+  // when the caller carries them on its title line.
+  const menus = failed ? null : (seg ? <SegGroup>{menuButtons}</SegGroup> : menuButtons)
 
   const CHIP_LABEL = {
     membership: v => v === 'Player' ? 'Players' : v === 'External' ? 'Not members' : label(v, TYPE_PREFIX),

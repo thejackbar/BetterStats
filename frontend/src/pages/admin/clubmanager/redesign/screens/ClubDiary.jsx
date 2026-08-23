@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout, Toast, Drawer , ManageLink } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, SegGroup, SegItem, StatReadout, Toast, Drawer, ManageLink, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Club Diary on real data — the board (one current occurrence per active task
@@ -81,20 +81,36 @@ export default function ClubDiary({ st, patch, narrow }) {
   }, [])
 
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 7 }
-  const Header = ({ children }) => (
+  const q = (st.diaryQuery || '').trim()
+
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER. React compares element types by
+  // identity, so a `const Header = () => …` written here is a different type on
+  // every render and its whole subtree is torn down and rebuilt — which throws
+  // the caret out of the search box below after every character typed. A plain
+  // function returning elements, CALLED rather than mounted, keeps the types
+  // stable. Same fix the Committee screen carries.
+  const header = (children) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-      <div>
-        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Club Diary</h1>
+      <div style={HEAD_SIDE}>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Club Diary</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THE CLUB'S RECURRING OBLIGATIONS, BY SEASON</Caption>
       </div>
-      <SegTabs value={tab} onChange={k => patch({ diaryTab: k })} tabs={[{ key: 'plan', label: 'Season plan' }, { key: 'templates', label: 'Template library' }]} />
-      <ManageLink to="/admin/clubhouse/diary/manage">Full diary editor</ManageLink>
-      {children}
+      <div style={HEAD_CENTRE}>
+        <SegTabs value={tab} onChange={k => patch({ diaryTab: k })} tabs={[{ key: 'plan', label: 'Season plan' }, { key: 'templates', label: 'Template library' }]} />
+      </div>
+      <div style={HEAD_SIDE_END}>
+        <ManageLink to="/admin/clubhouse/diary/manage">Full diary editor</ManageLink>
+        {children}
+      </div>
+      {/* On its own line under the heading, the place every other Clubhouse
+          screen carries its search. */}
+      <HeaderSearch value={st.diaryQuery} onChange={v => patch({ diaryQuery: v })}
+        placeholder={tab === 'templates' ? 'Search the template library…' : 'Search tasks, roles and who is doing them…'} />
     </ScreenHeader>
   )
 
-  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load the club diary.' : 'Loading the club diary…'}</div></div>
+  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>{header()}<div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load the club diary.' : 'Loading the club diary…'}</div></div>
 
   const { board, depsById, roleName, memberName, defs, years } = data
   const nowUTC = Date.now()
@@ -181,6 +197,10 @@ export default function ClubDiary({ st, patch, narrow }) {
   const visible = tasks.filter(t => {
     if (cadFilter !== 'All' && t.cadence !== cadFilter) return false
     if (issuesOnly && !(t.status === 'overdue' || t.status === 'blocked')) return false
+    // The search reaches who a task is ON as well as what it is called — the
+    // diary is read as "what is Sam still holding" at least as often as by task
+    // name.
+    if (!matchesQuery(q, t.title, t.cadence, t.role, t.person)) return false
     return true
   })
 
@@ -189,22 +209,18 @@ export default function ClubDiary({ st, patch, narrow }) {
   const months = monthDefs(startIdx, seasonYear).map(([label, days]) => { acc += days; const pct = (acc / SEASON_DAYS) * 100; stops.push(`transparent calc(${pct}% - 1px), ${C.surface2} calc(${pct}% - 1px), ${C.surface2} ${pct}%`); return { label, days } })
   const trackGrid = `linear-gradient(to right, ${stops.join(', ')})`
 
-  const pill = (active, tone = 'accent') => {
-    const on = { accent: ['color-mix(in srgb, var(--pb-accent) 45%, transparent)', 'color-mix(in srgb, var(--pb-accent) 12%, transparent)', C.accent], red: ['rgba(239,91,91,0.45)', 'rgba(239,91,91,0.12)', C.block] }[tone]
-    return { padding: '5px 10px', borderRadius: 999, fontSize: 12, cursor: 'pointer', border: `1px solid ${active ? on[0] : C.hair2}`, background: active ? on[1] : 'transparent', color: active ? on[2] : C.dim }
-  }
   const clamp = (v) => Math.max(0, Math.min(100, v))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginLeft: 'auto', flexWrap: 'wrap' }}>
+      {header(<>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
           <StatReadout value={doneCount + '/' + dated.length} label="DATED TASKS DONE" />
           <StatReadout value={String(overdue.length)} label="OVERDUE" fg={overdue.length ? C.block : C.ok} />
           <StatReadout value={String(blocked.length)} label="BLOCKED" fg={blocked.length ? C.block : C.ok} />
           <StatReadout value={money(spent) + ' / ' + money(budget)} label="SPENT / BUDGETED" />
         </div>
-      </Header>
+      </>)}
 
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
 
@@ -235,9 +251,16 @@ export default function ClubDiary({ st, patch, narrow }) {
             </div>
           </div>
 
-          <div style={{ padding: '11px 20px', borderBottom: `1px solid ${C.hair}`, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {['All'].concat(CAD_ORDER.filter(c => tasks.some(t => t.cadence === c))).map(c => <button key={c} onClick={() => patch({ cadFilter: c })} style={pill(cadFilter === c)}>{c}</button>)}
-            <button onClick={() => patch({ issuesOnly: !issuesOnly })} style={pill(issuesOnly, 'red')}>Overdue &amp; blocked only</button>
+          {/* Committee's own segmented control. Cadence is one value, so it is
+              a SegTabs; "Overdue & blocked only" narrows on a different axis
+              and can be on alongside any cadence, so it keeps its own box
+              rather than pretending to be a fifth cadence. */}
+          <div style={{ padding: '11px 20px', borderBottom: `1px solid ${C.hair}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <SegTabs value={cadFilter} onChange={c => patch({ cadFilter: c })}
+              tabs={['All'].concat(CAD_ORDER.filter(c => tasks.some(t => t.cadence === c))).map(c => ({ key: c, label: c }))} />
+            <SegGroup>
+              <SegItem tone="red" active={issuesOnly} onClick={() => patch({ issuesOnly: !issuesOnly })}>Overdue &amp; blocked only</SegItem>
+            </SegGroup>
           </div>
 
           <div className="pb-scroll" style={{ flex: 1, overflow: 'auto' }}>
@@ -318,7 +341,7 @@ export default function ClubDiary({ st, patch, narrow }) {
               seed={{ label: 'Add Club Diary Starter Pack', fn: () => api.diarySeedStarterDefinitions() }}
               primaryKey="title"
               subtitle={it => [mapFreq(it.frequency), roleName[it.responsibility_role_id], it.budget_estimate ? money(it.budget_estimate) : null].filter(Boolean).join(' · ')}
-              addLabel="Add task" emptyText="No task definitions yet." />
+              addLabel="Add task" emptyText="No task definitions yet." query={q} />
           </div>
           <div className="pb-scroll" style={{ borderLeft: `1px solid ${C.hair}`, background: C.surface, padding: '18px 16px', overflowY: 'auto', alignSelf: 'stretch' }}>
             <div style={cap}>GENERATE A SEASON</div>

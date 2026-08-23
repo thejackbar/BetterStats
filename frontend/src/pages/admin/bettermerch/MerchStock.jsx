@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import BetterMerchLayout from '../../../components/admin/BetterMerchLayout'
-import { SegButtons, SearchInput } from '../../../components/admin/ui'
+import { SegButtons, SegGroup, SearchInput } from '../../../components/admin/ui'
 import { PbSpinner } from '../../../lib/presskit'
 import {
   money, CATEGORIES, categoryLabel, MOVEMENT_KINDS, kindLabel,
@@ -737,16 +737,25 @@ export default function MerchStock() {
         tabs={[{ key: 'all', label: 'All' }, ...CATEGORIES.map(c => ({ key: c.key, label: c.label }))]} />}
       filters={<div className="flex items-center gap-2 flex-wrap">
         <SearchInput wide value={q} onChange={setQ} placeholder="Search products…" />
-        {/* Inline width on the select: the shared input class carries `w-full`,
-            and which of two width utilities wins is emission order rather than
-            the class string, so a `w-48` here sometimes lost and the select
-            took the whole line, pushing itself under the search box. */}
+        {/* Dressed as one more of the buttons above it — same box, same tint
+            when it is narrowing something — but still a real <select>, because
+            a club's category tree is as long as the club makes it and that is
+            what a native picker is for.
+
+            Inline width: the shared input class carries `w-full`, and which of
+            two width utilities wins is emission order rather than the class
+            string, so a `w-48` here sometimes lost and the select took the
+            whole line, pushing itself under the search box. */}
         {scopedCats.length > 0 && (
-          <Select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
-            style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box' }}>
-            <option value="">All categories</option>
-            {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
-          </Select>
+          <SegGroup>
+            <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
+              aria-label="Category"
+              className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold bg-transparent border-none outline-none cursor-pointer ${catFilter ? '' : 'text-pb-faint'}`}
+              style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box', ...(catFilter ? { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' } : {}) }}>
+              <option value="">All categories</option>
+              {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
+            </select>
+          </SegGroup>
         )}
       </div>}
       actions={<div className="flex items-center gap-2">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref } from '../ui'
+import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref, SegTabs, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
 
 // Roster on the real backend. Operational areas + shift patterns are config; a
 // roster week materialises shifts from the patterns; assignments run through the
@@ -502,23 +502,16 @@ export default function Roster({ st, patch, narrow }) {
   const header = (children) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-      <div>
-        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Roster</h1>
+      <div style={HEAD_SIDE}>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Roster</h1>
         <div style={{ fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faint, marginTop: 2 }}>{data?.week ? 'WEEK OF ' + weekDates(data.week.week_start)[0].toUpperCase() + (data.week.status === 'published' ? ' · PUBLISHED' : (data.week.status === 'confirmed' ? ' · CONFIRMED' : '')) : 'THIS WEEK'}</div>
       </div>
       {children}
       {/* The search sits on its own line under the heading, the place every
           Committee screen and the Directory carry theirs. `flex: 1 1 100%` is
           what makes the wrapping header break before it. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
-        <input value={st.rosterQuery || ''} onChange={e => patch({ rosterQuery: e.target.value })}
-          placeholder="Search people, areas, roles and shifts…" aria-label="Search people, areas, roles and shifts"
-          style={{ width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }} />
-        {(st.rosterQuery || '').trim() && (
-          <button onClick={() => patch({ rosterQuery: '' })}
-            style={{ background: 'transparent', border: 'none', color: C.faint, fontFamily: MONO, fontSize: 10, cursor: 'pointer' }}>CLEAR</button>
-        )}
-      </div>
+      <HeaderSearch value={st.rosterQuery} onChange={v => patch({ rosterQuery: v })}
+        placeholder="Search people, areas, roles and shifts…" />
     </ScreenHeader>
   )
 
@@ -767,14 +760,21 @@ export default function Roster({ st, patch, narrow }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       {header(<>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
-          {[['people', 'People'], ['areas', 'Areas'], ['confirm', 'Confirm'], ['hours', 'Hours']].map(([v, label]) => (
-            <button key={v} onClick={() => patch({ view: v, selected: null })} style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', background: view === v ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: view === v ? C.accent : C.faint }}>{label}</button>
-          ))}
+        {/* Centred on the title line: the title block and the actions on the
+            right each take an equal share of what is left, so the four
+            buttons land in the middle of the header rather than wherever the
+            week label happens to end. */}
+        <div style={HEAD_CENTRE}>
+          <SegTabs value={view} onChange={v => patch({ view: v, selected: null })}
+            tabs={[{ key: 'people', label: 'People' }, { key: 'areas', label: 'Areas' }, { key: 'confirm', label: 'Confirm' }, { key: 'hours', label: 'Hours' }]} />
         </div>
         {/* Every one of these acts on the shift grid, so none of them mean
-            anything on the hours or confirmation tabs. */}
-        <div style={{ display: (view === 'hours' || view === 'confirm') ? 'none' : 'flex', alignItems: 'center', gap: 14, marginLeft: 'auto', flexWrap: 'wrap' }}>
+            anything on the hours or confirmation tabs. The BOX stays either
+            way — it has a zero basis, so it costs nothing empty, and dropping
+            it would let the title take the whole row and slide the buttons off
+            centre. */}
+        <div style={{ ...HEAD_SIDE_END, gap: 14 }}>
+          {(view === 'hours' || view === 'confirm') ? null : <>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, whiteSpace: 'nowrap' }}>
             <span style={{ fontWeight: 700, fontSize: 18, color: C.text, fontVariantNumeric: 'tabular-nums' }}>{filled}</span>
             <span style={{ fontFamily: MONO, fontSize: 10, color: C.faint, letterSpacing: '0.08em' }}>/ {shifts.length} FILLED</span>
@@ -785,6 +785,7 @@ export default function Roster({ st, patch, narrow }) {
           <EmailRostered weekStart={data.week.week_start} onToast={t => patch({ toast: t })} />
           <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
+          </>}
         </div>
       </>)}
 

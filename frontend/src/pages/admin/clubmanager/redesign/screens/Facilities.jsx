@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast , ManageLink } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast, ManageLink, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Facilities on real data — the availability grid (this week's real bookings,
@@ -15,6 +15,16 @@ function fmtHour(h) { const hh = Math.floor(h), mm = Math.round((h - hh) * 60); 
 function monday(d) { const x = new Date(d); const day = (x.getDay() + 6) % 7; x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - day); return x }
 const hoursOf = (dt) => dt.getHours() + dt.getMinutes() / 60
 
+// Pull a list out of a response whatever it is wrapped in, and ALWAYS hand back
+// an array. Every endpoint here answers `{<key>: [...]}`, but a wrong or changed
+// key used to reach `.filter` as an object and take the entire screen down with
+// a TypeError — a list that cannot be read should cost that list, not the page.
+const rows = (res, ...keys) => {
+  if (Array.isArray(res)) return res
+  for (const k of keys) if (Array.isArray(res?.[k])) return res[k]
+  return []
+}
+
 export default function Facilities({ st, patch, narrow }) {
   const tab = st.facTab || 'availability'
   const [data, setData] = useState(null)
@@ -23,7 +33,7 @@ export default function Facilities({ st, patch, narrow }) {
   const [adding, setAdding] = useState(false)
   const [form, setForm] = useState({ facility_id: '', title: '', starts_at: '', ends_at: '', requester_name: '' })
 
-  const loadReqs = () => api.facilityRequests().then(r => setReqs(r?.requests || r || [])).catch(() => {})
+  const loadReqs = () => api.facilityRequests().then(r => setReqs(rows(r, 'requests'))).catch(() => {})
   useEffect(() => {
     let alive = true
     Promise.all([
@@ -34,30 +44,48 @@ export default function Facilities({ st, patch, narrow }) {
     ]).then(([facRes, bookRes, itemRes, reqRes]) => {
       if (!alive) return
       setData({
-        facilities: (facRes?.facilities || facRes || []).filter(f => f.is_active !== false),
-        bookings: bookRes?.bookings || bookRes || [],
-        assets: (itemRes?.items || itemRes || []).filter(a => a.is_active !== false),
+        facilities: rows(facRes, 'facilities').filter(f => f.is_active !== false),
+        bookings: rows(bookRes, 'bookings'),
+        // `GET /assets/items` answers with `assets`, not `items` — reading the
+        // wrong key handed the response OBJECT to .filter, which threw inside
+        // this .then and was caught below as "Could not load facilities.". The
+        // whole screen went down over one mis-read key, which is why `rows`
+        // exists rather than another inline `a || b || []` chain.
+        assets: rows(itemRes, 'assets', 'items').filter(a => a.is_active !== false),
       })
-      setReqs(reqRes?.requests || reqRes || [])
+      setReqs(rows(reqRes, 'requests'))
     }).catch(e => { if (alive) setErr(String(e?.message || e)) })
     return () => { alive = false }
   }, [])
 
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
-  const Header = ({ children }) => (
+  const q = (st.facQuery || '').trim()
+
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER. React compares element types by
+  // identity, so a `const Header = () => …` written here is a different type on
+  // every render and its whole subtree is torn down and rebuilt — which throws
+  // the caret out of the search box below after every character typed. A plain
+  // function returning elements, CALLED rather than mounted, keeps the types
+  // stable. Same fix the Committee screen carries.
+  const header = () => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-      <div>
-        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Facilities</h1>
+      <div style={HEAD_SIDE}>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Facilities</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THIS WEEK · EACH COLUMN RUNS 8AM → MIDNIGHT</Caption>
       </div>
-      <SegTabs value={tab} onChange={k => patch({ facTab: k })} tabs={[{ key: 'availability', label: 'Availability' }, { key: 'requests', label: 'Requests' }, { key: 'assets', label: 'Assets' }]} />
-      <ManageLink to="/admin/clubhouse/facilities/manage">Manage assets &amp; bookings</ManageLink>
-      {children}
+      <div style={HEAD_CENTRE}>
+        <SegTabs value={tab} onChange={k => patch({ facTab: k })} tabs={[{ key: 'availability', label: 'Availability' }, { key: 'requests', label: 'Requests' }, { key: 'assets', label: 'Assets' }]} />
+      </div>
+      <div style={HEAD_SIDE_END}>
+        <ManageLink to="/admin/clubhouse/facilities/manage">Manage assets &amp; bookings</ManageLink>
+      </div>
+      <HeaderSearch value={st.facQuery} onChange={v => patch({ facQuery: v })}
+        placeholder="Search facilities, bookings and assets…" />
     </ScreenHeader>
   )
 
-  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load facilities.' : 'Loading facilities…'}</div></div>
+  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>{header()}<div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load facilities.' : 'Loading facilities…'}</div></div>
 
   const { facilities, bookings, assets } = data
   const weekStart = monday(new Date())
@@ -78,6 +106,15 @@ export default function Facilities({ st, patch, narrow }) {
   weekBookings.forEach((a, i) => weekBookings.slice(i + 1).forEach(b => {
     if (a.fac === b.fac && a.day === b.day && a.start < b.end && b.start < a.end) { conflict[a.id] = true; conflict[b.id] = true }
   }))
+
+  // The search reaches what is INSIDE a row, not only its name: a facility is
+  // kept when one of this week's bookings on it matches, because "where is the
+  // Doyle engagement" is the question a booking grid is actually asked.
+  const shownFacilities = !q ? facilities : facilities.filter(f =>
+    matchesQuery(q, f.name, f.facility_type, f.description, f.key_location)
+    || weekBookings.some(b => b.fac === f.id && matchesQuery(q, b.title)))
+  const shownReqs = !q ? reqs : reqs.filter(r =>
+    matchesQuery(q, r.title, r.facility_name, r.requester_name, r.note))
 
   const Block = ({ b }) => {
     const clash = !!conflict[b.id]
@@ -109,7 +146,7 @@ export default function Facilities({ st, patch, narrow }) {
     const res = await api.facilityRequestApprove(r.id).catch(() => null)
     if (res && res.ok === false && res.clashes) { patch({ toast: { tone: 'block', title: 'That would double-book ' + r.facility_name + '.', body: 'A confirmed booking already holds the space.' } }); await loadReqs(); return }
     await loadReqs()
-    api.assetsListBookings({ upcomingOnly: false }).then(b => setData(d => ({ ...d, bookings: b?.bookings || b || [] }))).catch(() => {})
+    api.assetsListBookings({ upcomingOnly: false }).then(b => setData(d => ({ ...d, bookings: rows(b, 'bookings') }))).catch(() => {})
     patch({ toast: { tone: 'ok', title: 'Approved — ' + r.title + '.', body: 'On the ' + r.facility_name + ' calendar now.' } })
   }
   const declineReq = async (r) => { await api.facilityRequestDecline(r.id).catch(() => {}); await loadReqs(); patch({ toast: { tone: 'info', title: 'Declined — ' + r.title + '.', body: 'The requester can be notified with your reason.' } }) }
@@ -123,13 +160,16 @@ export default function Facilities({ st, patch, narrow }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header />
+      {header()}
       <Toast toast={st.toast} onClear={() => patch({ toast: null })} />
 
       {tab === 'availability' && (
         <div className="pb-scroll" style={{ flex: 1, overflow: 'auto' }}>
-          {facilities.length === 0 ? (
-            <div style={{ padding: 24, fontSize: 13.5, color: C.dim, maxWidth: '46rem' }}>No facilities set up yet. Add your grounds, nets and clubrooms in the Assets &amp; Facilities admin and their bookings will show here.</div>
+          {shownFacilities.length === 0 ? (
+            <div style={{ padding: 24, fontSize: 13.5, color: C.dim, maxWidth: '46rem' }}>
+              {q ? `No facility or booking matches “${q}”.`
+                 : 'No facilities set up yet. Add your grounds, nets and clubrooms in the Assets & Facilities admin and their bookings will show here.'}
+            </div>
           ) : (
             <div style={{ minWidth: 1100 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '200px repeat(7, minmax(0, 1fr))', position: 'sticky', top: 0, zIndex: 20, background: C.bg, borderBottom: `1px solid ${C.hair2}` }}>
@@ -141,7 +181,7 @@ export default function Facilities({ st, patch, narrow }) {
                   </div>
                 ))}
               </div>
-              {facilities.map(f => {
+              {shownFacilities.map(f => {
                 const mine = weekBookings.filter(b => b.fac === f.id)
                 const hours = mine.reduce((a, b) => a + (b.end - b.start), 0)
                 return (
@@ -187,7 +227,7 @@ export default function Facilities({ st, patch, narrow }) {
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
-            {reqs.map(r => (
+            {shownReqs.map(r => (
               <div key={r.id} style={{ background: C.surface, border: `1px solid ${r.clashes.length ? 'rgba(239,91,91,0.35)' : C.hair}`, borderRadius: 9, padding: '13px 15px' }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
@@ -208,8 +248,10 @@ export default function Facilities({ st, patch, narrow }) {
                 )}
               </div>
             ))}
-            {reqs.length === 0 && (
-              <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 28, textAlign: 'center', fontSize: 13.5, color: C.dim }}>Nothing waiting on you. New requests land here with their conflicts already checked.</div>
+            {shownReqs.length === 0 && (
+              <div style={{ background: C.surface, border: `1px dashed ${C.hair2}`, borderRadius: 9, padding: 28, textAlign: 'center', fontSize: 13.5, color: C.dim }}>
+                {q ? `No request matches “${q}”.` : 'Nothing waiting on you. New requests land here with their conflicts already checked.'}
+              </div>
             )}
           </div>
         </div>
@@ -225,17 +267,17 @@ export default function Facilities({ st, patch, narrow }) {
             onCreate={v => api.assetsCreateFacility(v)} onUpdate={(id, v) => api.assetsUpdateFacility(id, v)} onDelete={id => api.assetsDeleteFacility(id)}
             seed={{ label: 'Add Facilities Starter Pack', fn: () => api.assetsSeedFacilities() }}
             primaryKey="name" subtitle={it => [it.facility_type, it.key_location, it.description].filter(Boolean).join(' · ')}
-            addLabel="Add facility" emptyText="No facilities yet." />
+            addLabel="Add facility" emptyText="No facilities yet." query={q} />
 
           <div style={{ ...cap, marginTop: 26 }}>ASSETS</div>
           <EntityManager
             describe="Club gear — kit bags, machines, markers and the like."
-            load={() => api.assetsListItems({}).then(r => (r?.items || r || []).filter(a => a.is_active !== false))}
+            load={() => api.assetsListItems({}).then(r => rows(r, 'assets', 'items').filter(a => a.is_active !== false))}
             fields={[{ key: 'name', label: 'Asset', type: 'text', required: true, span: 2 }, { key: 'category', label: 'Category', type: 'text' }, { key: 'condition', label: 'Condition', type: 'text' }, { key: 'status', label: 'Status', type: 'text' }, { key: 'notes', label: 'Notes', type: 'text', span: 2 }]}
             onCreate={v => api.assetsCreateItem(v)} onUpdate={(id, v) => api.assetsUpdateItem(id, v)} onDelete={id => api.assetsDeleteItem(id)}
             seed={{ label: 'Add Assets Starter Pack', fn: () => api.assetsSeedItems() }}
             primaryKey="name" subtitle={it => [it.category, it.condition, it.status].filter(Boolean).join(' · ')}
-            addLabel="Add asset" emptyText="No assets yet." />
+            addLabel="Add asset" emptyText="No assets yet." query={q} />
         </div>
       )}
     </div>

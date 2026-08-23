@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
-import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
+import { SegButtons, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import DateTimePicker from '../../components/admin/crm/DateTimePicker'
@@ -35,16 +35,14 @@ const fmtTime = (iso) => {
 }
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
-function TabBar({ tab, setTab }) {
-  const tabs = [['facilities', 'Facilities'], ['bookings', 'Bookings'], ['assets', 'Assets']]
-  return (
-    <div className="flex flex-wrap gap-1 mb-5">
-      {tabs.map(([k, l]) => (
-        <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
-      ))}
-    </div>
-  )
-}
+// The three sections, in Committee's own segmented control. The shell centres
+// it on the title line (see ModuleLayout's `tabs`), so this is one control in
+// one place rather than a pill row floating above the content.
+const ASSET_TABS = [
+  { key: 'facilities', label: 'Facilities' },
+  { key: 'bookings', label: 'Bookings' },
+  { key: 'assets', label: 'Assets' },
+]
 
 // ── Maintenance log (shared by Facilities and Assets) ───────────────────────
 function MaintenanceLogPanel({ subjectType, subjectId }) {
@@ -677,9 +675,9 @@ export default function AdminAssets() {
   }, [toast])
 
   return (
-    <BetterClubManagerLayout title="Facilities" caption="Grounds, gear, bookings and service history">
+    <BetterClubManagerLayout title="Facilities" caption="Grounds, gear, bookings and service history"
+      tabs={<SegButtons value={tab} onChange={setTab} tabs={ASSET_TABS} />}>
       <div className="max-w-4xl">
-        <TabBar tab={tab} setTab={setTab} />
         {tab === 'facilities' && <FacilitiesTab onFacilitiesChanged={loadFacilities} />}
         {tab === 'bookings' && <BookingsTab facilities={facilities} members={members} />}
         {tab === 'assets' && <AssetsTab facilities={facilities} />}

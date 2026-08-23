@@ -42,27 +42,105 @@ export function Caption({ children, tone, style }) {
   )
 }
 
+// The chrome of the segmented control, on its own.
+//
+// `SegTabs` below is the common case — one row, one value, pick exactly one.
+// Plenty of header rows are not that: the Directory's Membership / Role / More
+// are MENUS, and the Club Diary's "Overdue & blocked only" is an independent
+// toggle. Those rows still have to read as Committee's, so the box is exported
+// separately and they fill it with their own controls rather than inventing a
+// lookalike.
+export const SEG_GROUP = {
+  display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2,
+  background: 'var(--pb-surface2)', border: '1px solid var(--pb-hairline)', borderRadius: 8, padding: 3,
+}
+// The one button inside that box, as a style rather than a component, so a
+// <button> and a MenuButton's own trigger can both wear it.
+export const segItemStyle = (active, tone) => ({
+  padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none',
+  cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+  background: active ? (tone === 'red' ? 'rgba(239,91,91,0.18)' : 'color-mix(in srgb, var(--pb-accent) 15%, transparent)') : 'transparent',
+  color: active ? (tone === 'red' ? C.block : C.accent) : C.faint,
+})
+
+export function SegGroup({ children, style }) {
+  return <div style={{ ...SEG_GROUP, ...style }}>{children}</div>
+}
+
+// One button inside a SegGroup, for a row whose buttons are not one
+// mutually-exclusive value.
+export function SegItem({ active, onClick, children, tone }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={!!active} style={segItemStyle(active, tone)}>
+      {children}
+    </button>
+  )
+}
+
 // The segmented tab control used in every screen header. Wraps rather than
 // running off the side of a phone — the Directory's filter chips already wrap,
 // and a control you have to scroll sideways to reach hides its own options.
-export function SegTabs({ tabs, value, onChange }) {
+export function SegTabs({ tabs, value, onChange, style }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 2, background: C.surface2, border: `1px solid ${C.hair}`, borderRadius: 8, padding: 3 }}>
-      {tabs.map(t => {
-        const active = t.key === value
-        return (
-          <button key={t.key} onClick={() => onChange(t.key)}
-            style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12.5, fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              background: active ? 'color-mix(in srgb, var(--pb-accent) 15%, transparent)' : 'transparent', color: active ? C.accent : C.faint }}>
-            {t.label}
-            {t.badge != null && t.badge > 0 && (
-              <span style={{ fontFamily: MONO, fontSize: 9, padding: '1px 5px', borderRadius: 999, background: 'rgba(245,181,66,0.18)', color: C.warn, marginLeft: 5 }}>{t.badge}</span>
-            )}
-          </button>
-        )
-      })}
+    <SegGroup style={style}>
+      {tabs.map(t => (
+        <button key={t.key} onClick={() => onChange(t.key)} type="button"
+          aria-pressed={t.key === value} style={segItemStyle(t.key === value)}>
+          {t.label}
+          {t.badge != null && t.badge > 0 && (
+            <span style={{ fontFamily: MONO, fontSize: 9, padding: '1px 5px', borderRadius: 999, background: 'rgba(245,181,66,0.18)', color: C.warn, marginLeft: 5 }}>{t.badge}</span>
+          )}
+        </button>
+      ))}
+    </SegGroup>
+  )
+}
+
+// CENTRING A BUTTON ROW ON THE TITLE LINE TAKES THREE PARTS, NOT ONE. The title
+// block and the right-hand group each claim an equal share of what is left
+// (`flex: 1 1 0`), so the row between them lands in the middle of the header
+// rather than wherever the title happens to end. Same rule `ModuleLayout`'s own
+// `tabs` prop follows, so a Clubhouse screen built on either shell centres its
+// buttons the same way.
+//
+// The title carries its own `minWidth: 0` + ellipsis, since with a zero basis
+// it is the side that gives way first on a phone.
+export const HEAD_SIDE = { flex: '1 1 0', minWidth: 0 }
+// The centre group MAY SHRINK, and that is load-bearing rather than a detail:
+// `flex-wrap` on the header cannot save a child that has been told not to
+// shrink, so a `flexShrink: 0` here pushed Areas & Roles 68px sideways at 390px
+// the moment its four buttons no longer fitted. Because both sides have a ZERO
+// basis, they give way first — so the centre only ever shrinks once there is
+// genuinely nothing left, which is exactly when its own buttons should wrap.
+export const HEAD_CENTRE = { display: 'flex', alignItems: 'center', justifyContent: 'center', flex: '0 1 auto', minWidth: 0 }
+export const HEAD_SIDE_END = { ...HEAD_SIDE, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }
+
+// The search box on its own line under the heading — the place Committee and
+// the Directory both carry theirs. `flex: 1 1 100%` is what makes the wrapping
+// header break before it; `box-sizing` is what stops the padding being added on
+// top of the cap and pushing the page sideways on a phone.
+export function HeaderSearch({ value, onChange, placeholder, width = 380 }) {
+  const q = (value || '').trim()
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
+      <input value={value || ''} onChange={e => onChange(e.target.value)}
+        placeholder={placeholder} aria-label={placeholder}
+        style={{ width, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }} />
+      {q && (
+        <button onClick={() => onChange('')} type="button"
+          style={{ background: 'transparent', border: 'none', color: C.faint, fontFamily: MONO, fontSize: 10, cursor: 'pointer' }}>CLEAR</button>
+      )}
     </div>
   )
+}
+
+// Case-folded substring over any number of fields — the one search rule, so no
+// two screens narrow their lists differently.
+export function matchesQuery(q, ...vals) {
+  if (!q) return true
+  const needle = q.trim().toLowerCase()
+  if (!needle) return true
+  return vals.some(v => v != null && String(v).toLowerCase().includes(needle))
 }
 
 // Right-aligned stat readouts in a screen header.
@@ -175,7 +253,7 @@ export function usePref(key, fallback) {
 // `value` is the current selection, shown on the button so the menu never has
 // to be opened to read the state. `children` is called with `close`, so an item
 // decides for itself whether picking it dismisses the menu.
-export function MenuButton({ label, value, width = 250, align = 'left', disabled, children }) {
+export function MenuButton({ label, value, width = 250, align = 'left', disabled, seg = false, children }) {
   const [open, setOpen] = useState(false)
   // Which edge the panel hangs off, decided from where the button actually sits
   // when it opens. A left-aligned panel on a button near the right of the screen
@@ -207,8 +285,12 @@ export function MenuButton({ label, value, width = 250, align = 'left', disabled
   const on = !!value
   return (
     <div ref={wrap} style={{ position: 'relative', flexShrink: 0 }}>
+      {/* `seg` wears the segmented control's own button styling, for a menu
+          sitting inside a SegGroup — that is what lets the Directory's and
+          Payments' filter menus read as Committee's section buttons rather
+          than as a second, differently-shaped control beside them. */}
       <button type="button" disabled={disabled} onClick={() => { if (!open) place(); setOpen(o => !o) }}
-        style={{
+        style={seg ? { ...segItemStyle(on), display: 'inline-flex', alignItems: 'center', gap: 6, maxWidth: 230, opacity: disabled ? 0.5 : 1 } : {
           display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 8,
           fontSize: 12.5, cursor: disabled ? 'default' : 'pointer', maxWidth: 230,
           border: `1px solid ${on ? 'color-mix(in srgb, var(--pb-accent) 45%, transparent)' : C.hair2}`,

@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import {
-  Button, FilterPill, SearchInput, StatCard, StatReadout,
+  Button, FilterPill, SegGroup, SegItem, SearchInput, StatCard, StatReadout,
   Modal, Field, TextInput, Select, TextArea, Checkbox, Note, Badge,
 } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
@@ -455,21 +455,26 @@ export default function AdminFeesMembers() {
     // other screen carries them.
     twoRow: true,
     tabs: (
-      <div className="flex items-center gap-2 flex-wrap justify-center">
-        <FilterPill active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
+      <SegGroup>
+        {/* Committee's own segmented control, not a row of loose pills — these
+            four say WHO you are looking at, which is the same job that screen's
+            section buttons do. They are NOT one value though: a person can be
+            looking at who owes money AND who is missing from PlayHQ at once, so
+            each keeps its own on/off rather than becoming a tab. */}
+        <SegItem active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
           onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
           Everyone
-        </FilterPill>
-        <FilterPill warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
+        </SegItem>
+        <SegItem warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
           Owes money
-        </FilterPill>
-        <FilterPill active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
+        </SegItem>
+        <SegItem active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
           Needs tier
-        </FilterPill>
-        <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
+        </SegItem>
+        <SegItem warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
           Not on PlayHQ
-        </FilterPill>
-      </div>
+        </SegItem>
+      </SegGroup>
     ),
     filters: (
       <div className="flex items-center gap-2 flex-wrap">

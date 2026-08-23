@@ -244,6 +244,37 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
   )
 }
 
+// The chrome of the house segmented control, on its own.
+//
+// `SegButtons` below is the common case — one row, one value, pick exactly one.
+// Plenty of rows are not that: Accounts' four filters can each be on at once,
+// and Payments' Membership / Role / More are menus rather than buttons. Those
+// rows still have to READ as Committee's, so the container is exported
+// separately and they fill it with `SegItem`s (or seg-styled menus) instead of
+// inventing a lookalike box.
+export const SEG_GROUP_CLS =
+  'flex items-center flex-wrap gap-0.5 bg-pb-surface2 border pb-hairline rounded-lg p-[3px]'
+
+export function SegGroup({ children, className = '', ...rest }) {
+  return <div className={`${SEG_GROUP_CLS} ${className}`} {...rest}>{children}</div>
+}
+
+// One button inside a SegGroup. `warn` keeps the amber an attention filter
+// already carried, so "Owes money" still reads as the one to look at.
+export function SegItem({ active, onClick, children, warn = false, count, className = '', ...rest }) {
+  const activeStyle = warn
+    ? { background: 'rgba(245,181,66,0.18)', color: '#f5b542' }
+    : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' }
+  return (
+    <button type="button" onClick={onClick} aria-pressed={!!active}
+      className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold whitespace-nowrap ${active ? '' : 'text-pb-faint hover:text-pb-text'} ${className}`}
+      style={active ? activeStyle : undefined} {...rest}>
+      {children}
+      {count != null && <span className="font-mono text-[10px] ml-1.5 opacity-70">{count}</span>}
+    </button>
+  )
+}
+
 // The house segmented control — one container, the active button tinted. This
 // is what Committee's own section buttons look like, and it is exported here so
 // a Merch or Comms screen asking for "the same buttons as Committee" gets the
@@ -251,23 +282,17 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
 // `key` can be anything.
 export function SegButtons({ tabs, value, onChange, className = '' }) {
   return (
-    <div className={`flex items-center flex-wrap gap-0.5 bg-pb-surface2 border pb-hairline rounded-lg p-[3px] ${className}`}>
-      {tabs.map(t => {
-        const active = t.key === value
-        return (
-          <button key={t.key} type="button" onClick={() => onChange(t.key)}
-            aria-pressed={active}
-            className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold whitespace-nowrap ${active ? '' : 'text-pb-faint hover:text-pb-text'}`}
-            style={active ? { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' } : undefined}>
-            {t.label}
-            {t.badge != null && t.badge > 0 && (
-              <span className="font-mono text-[9px] px-[5px] py-px rounded-full ml-1.5"
-                style={{ background: 'rgba(245,181,66,0.18)', color: '#f5b542' }}>{t.badge}</span>
-            )}
-          </button>
-        )
-      })}
-    </div>
+    <SegGroup className={className}>
+      {tabs.map(t => (
+        <SegItem key={t.key} active={t.key === value} onClick={() => onChange(t.key)}>
+          {t.label}
+          {t.badge != null && t.badge > 0 && (
+            <span className="font-mono text-[9px] px-[5px] py-px rounded-full ml-1.5"
+              style={{ background: 'rgba(245,181,66,0.18)', color: '#f5b542' }}>{t.badge}</span>
+          )}
+        </SegItem>
+      ))}
+    </SegGroup>
   )
 }
 

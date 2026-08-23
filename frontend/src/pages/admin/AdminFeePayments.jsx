@@ -19,7 +19,7 @@ const KIND_LABEL = { membership: "M'ship", match_day: 'Match' }
 export default function AdminFeePayments() {
   // The Directory's People filters (see peopleFilters.jsx) — matched on the
   // segments that service computes, so this screen never re-derives them.
-  const people = usePeopleFilters()
+  const people = usePeopleFilters({ seg: true })
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
   const [seasonId, setSeasonId] = useState('')
@@ -78,10 +78,15 @@ export default function AdminFeePayments() {
     // The search sits under the heading, on the same line as Bookmarks — the
     // one place every Committee screen and the Directory carry theirs.
     twoRow: true,
+    // WHO you are looking at sits on the title line, centred, in Committee's
+    // own segmented control — the same three menus the Directory carries, so a
+    // money job can be scoped to a group of people ("every Junior Player") from
+    // here. The search and the kind filter stay underneath.
+    tabs: people.menus,
     filters: (
       <div className="flex items-center gap-2 flex-wrap">
         <SearchInput wide value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
-        {people.menus}
+        {people.chips}
         <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="!w-auto">
           <option value="">All kinds</option>
           <option value="membership">Membership only</option>

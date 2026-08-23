@@ -918,6 +918,94 @@ had finished.
 
 
 
+## Committee's buttons are the house control, everywhere in BetterAdmin (v9.52.0, Aug 2026)
+
+Asked for directly: make every module screen's button row look like the
+Committee screen's, centre several of them on the title line, and add a search
+where a section had none. Plus a reported failure: Facilities read "Could not
+load facilities." whatever the club held.
+
+- **"COULD NOT LOAD FACILITIES" WAS A MIS-READ KEY, NOT A BACKEND FAULT.**
+  `GET /club-admin/assets/items` answers `{assets: [...]}` and `Facilities.jsx`
+  read `r?.items || r || []` — so the fallback handed the RESPONSE OBJECT to
+  `.filter`, which threw inside the `.then` and was caught by the outer
+  `.catch` as the load failing. **One wrong key took the entire screen down**,
+  including the availability grid and the requests queue, neither of which
+  reads that endpoint. `rows(res, ...keys)` replaces the `a || b || []` chain
+  and ALWAYS hands back an array, so the next shape change costs one list
+  rather than the page. Reproduced against the real payload shape before
+  fixing it (`AdminAssets.jsx` was reading `d.assets` correctly all along,
+  which is what confirmed which side was wrong).
+- **THE BOX IS EXPORTED SEPARATELY FROM THE TABS, and that is the whole
+  design.** `SegButtons` / `SegTabs` are one row, one value, pick exactly one.
+  Half the rows asked for are not that: Accounts' four filters can each be on
+  at once, the Directory's and Payments' Membership / Role / More are MENUS,
+  and Stock's category narrowing is a real `<select>`. So `SegGroup` (the
+  container) and `SegItem` (the button) are their own exports in BOTH kits, and
+  `SegButtons`/`SegTabs` are now built from them — one definition of the
+  chrome, filled by whatever control the row actually needs. A `seg` prop on
+  `MenuButton` wears the same button styling, which is what lets a dropdown sit
+  in the row without reading as a different kind of thing.
+- **CENTRING TAKES THREE PARTS, NOT ONE.** The title block and the right-hand
+  group each claim an equal share of what is left (`flex: 1 1 0`), so the row
+  between them lands in the middle of the header rather than wherever the title
+  happens to end. `HEAD_SIDE` / `HEAD_CENTRE` / `HEAD_SIDE_END` are that rule
+  named, mirroring what `ModuleLayout`'s own `tabs` prop already did, so a
+  screen on either shell centres the same way. **The right-hand box stays even
+  when it is empty** (the Roster's grid actions on the Hours tab): it has a
+  zero basis so it costs nothing, and dropping it lets the title take the whole
+  row and slides the buttons off centre.
+- **A CENTRING WRAPPER MUST BE ALLOWED TO SHRINK, and getting this wrong is
+  what the 390px check caught.** The first cut gave both `HEAD_CENTRE` and
+  `ModuleLayout`'s `tabs` slot `flex-shrink: 0`, which pushed Areas & Roles
+  68px sideways and made Accounts' existing overflow worse — the same trap the
+  Selection-header note documents, since `flex-wrap` on the row cannot save a
+  child told not to shrink. Both are shrinkable now. It costs nothing at width,
+  because the two sides carry a ZERO basis and therefore give way first: the
+  centre only narrows once there is genuinely nothing left, which is exactly
+  when its own buttons should be wrapping.
+- **`Header` DECLARED INSIDE THE RENDER had to go before a search box could be
+  added to it.** Facilities, Events and Club Diary each wrote
+  `const Header = () => …` in the render body, so React saw a different element
+  TYPE every render and tore the subtree down — which throws the caret out of
+  an input after one character, the bug the Committee screen already documents.
+  All three are plain functions CALLED (`{header()}`) now. The suite types
+  character by character and re-reads `document.activeElement` after each,
+  since `fill()` sets the value in one shot and cannot catch this.
+- **A SEARCH BOX SEARCHES ITS SECTION, NOT THE LIST ON SCREEN.** Facilities
+  keeps a facility whose BOOKING matches ("where is the Doyle engagement" is
+  what a booking grid is asked), and Events keeps an event whose ATTENDEE
+  matches. `EntityManager` and `AreaEditor` gained a `query` prop that narrows
+  what is DRAWN and never what is loaded, so a reorder still renumbers against
+  the whole list — and the drag grip is WITHDRAWN while a query runs, rather
+  than letting a filtered list be dragged into an order nobody can see.
+- **The Directory's own search moved to its own line and the four menus took
+  the title line.** Nothing about what they filter changed; the chips
+  underneath still carry the state, which is what makes hiding options in a
+  menu defensible.
+- **Payments gained the chips it never had.** Its menus moved off the filter
+  row, so the state needed a visible home; Accounts already worked this way.
+  `usePeopleFilters({ seg: true })` is per-call, so Accounts' own copy of those
+  menus is untouched.
+- **Stock's category control is still a real `<select>`.** A club's category
+  tree is as long as the club makes it, which is what a native picker is for —
+  it just wears the same box as the buttons above it now.
+- **Verified in Chromium** (`frontend/verification/verify_clubhouse_buttons_browser.mjs`,
+  63 checks against the real screens with the API stubbed at the network
+  layer): every button row's box read off the COMPUTED style rather than a
+  class name, so a hand-built lookalike fails; each centred row measured as
+  "its midpoint sits within 24px of the header's"; each new search box measured
+  as below the caption and starting at the header's own left edge; the caret
+  held per character in all four; the reported Facilities failure gone and the
+  club's own facilities and gear drawn; and no page errors. **With the change
+  stashed, 41 of the 63 fail**, including the reported one.
+- **Three screens overflow at 390px and that is PRE-EXISTING**, confirmed by
+  re-running the same probe with the change stashed: Accounts 33px, Payments
+  111px ("Import bank CSV") and Stock 12px ("New product"), each an action
+  cluster carrying `shrink-0`, none of them a button row this touched. The
+  suite's budget is those measured numbers, so this can never make one worse or
+  introduce a new one — Accounts in fact comes out at 27px now.
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out
