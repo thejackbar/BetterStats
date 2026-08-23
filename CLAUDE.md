@@ -4624,6 +4624,32 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   spacing now; the agenda item is the only full container. The suite asserts it
   on the computed style (no element around a record has four borders, and each
   still has its left one), not on class names.
+- **A GRID TRACK'S AUTOMATIC MINIMUM IS ITS CONTENT, WHICH IS WHY `1fr` LEAKS
+  (v9.51.6).** Reported off a live meeting: the room ran off the right of the
+  screen and took the attendance and minutes rail with it. The room is
+  `grid-cols-[1fr_320px]`, and a bare `1fr` resolves to `minmax(auto, 1fr)` — so
+  one unbreakable line in the main column widens the whole grid rather than
+  being contained by it, and the fixed rail is pushed past the viewport. It is
+  `minmax(0,1fr)` now. The pane it sits in already carried `minWidth: 0`, which
+  is the same rule one level up and is not enough on its own: **every level
+  between the long text and the scroll container has to be told it may shrink.**
+- **`truncate` INSIDE A WRAPPING FLEX ROW DOES NOT TRUNCATE, IT EXPANDS
+  (v9.51.6).** The other half of the same report. A motion's `serves …`
+  breadcrumb carried `truncate`, which is `overflow:hidden` + `nowrap` — but
+  nothing constrained its width, so the nowrap won and a 927px line stretched
+  the row. It wraps now, which is also the better answer on its own terms: a
+  breadcrumb is PLAN › THEME › OBJECTIVE and the objective's own title is the
+  part on the END, so an ellipsis hides exactly the half that says which
+  objective it is. Truncating is for a name in a fixed-width rail, not for a
+  breadcrumb.
+- **The suite measures the EMBEDDED room, not only the standalone page.** The
+  report came from the room mounted inside Committee, where the pane is narrower
+  than the window — so a check that only asks "is it inside the viewport" passes
+  while the thing is visibly off screen. `room.mjs` opens the meeting from the
+  Committee screen, expands an agenda item and asserts the breadcrumb sits
+  inside its own `.pb-scroll` pane. With the fix stashed: 282px of document
+  overflow at 1440px, 442px at 1280px, and 70 elements drawn past the right
+  edge in the embedded case.
 - **Motions drag two ways** (v9.7.2). One `drag` ref carries a `kind` of
   `'item' | 'motion'`, because an agenda row is a drop target for both: drop an
   item on it to reorder the agenda, drop a motion on it to move that motion

@@ -384,7 +384,10 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
               <span style={{ color: TONE.lost }}>{motion.votes_against ?? 0} against</span>
               <span className="text-pb-faintest"> · {motion.votes_abstain ?? 0} abstain</span>
             </span>
-            <span className="text-pb-faintest truncate">{serves ? `serves ${serves}` : 'not on the plan'}</span>
+            {/* Wraps rather than truncates: a breadcrumb is PLAN › THEME › OBJECTIVE
+                and the objective's own title is the part on the end, so an ellipsis
+                hides exactly the half that says which objective this is. */}
+            <span className="text-pb-faintest min-w-0">{serves ? `serves ${serves}` : 'not on the plan'}</span>
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -839,7 +842,10 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
           </div>
         </div>
       )}
-      <div className="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-5 items-start">
+      {/* minmax(0,1fr), never a bare 1fr: a grid track's automatic minimum is its
+          content, so one long unbreakable line in the main column pushes the whole
+          grid wider than the pane and drives the rail off the right edge. */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
         <div className="space-y-2">
           {isClosed && (
             <div className="pb-card p-3 font-mono text-[10px] text-pb-faint">
