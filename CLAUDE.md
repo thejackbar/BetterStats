@@ -1626,6 +1626,72 @@ as sections with their own buttons rather than three tabs and a manage page.
   are unchanged.
 
 
+## The minutes leave the screen as a document (v9.53.1, Aug 2026)
+
+Asked for directly: two buttons under MINUTES and two under YOUR NOTES, to take
+each away as a Word document or a PDF.
+
+- **BOTH FORMATS ARE WRITTEN IN THE BROWSER FROM THE BOX, NOT FETCHED BACK FROM
+  THE RECORD, and that is the whole reason it is not a download endpoint.** The
+  autosave is a 700ms debounce, so a download taken a second after the last
+  sentence would hand back the version without it. `downloadField` reads the
+  textarea's own ref, so what is on screen is what is in the file. Measured, not
+  assumed: the suite blocks the PATCH entirely and still finds the typed text in
+  all four files.
+- **`lib/textDocs.js` carries no dependency, deliberately.** A `.docx` is a zip
+  of three XML parts and a PDF is a handful of objects and a table of byte
+  offsets; a document toolkit would cost more to ship than the ~250 lines that
+  write both. The zip entries are STORED rather than deflated — Word accepts
+  either and storing them means no compressor to carry.
+- **The PDF wraps against real Helvetica advance widths**, not a guessed
+  character count, which is what puts the line break where the text actually
+  ends. A word too long for a line of its own is broken by character, so a
+  pasted URL cannot overrun the margin silently. Every one of the 150 rows the
+  suite draws is measured: widest 476.88pt against a 483.28pt column.
+- **A PDF is WinAnsi, so it genuinely cannot hold every character.** Curly
+  quotes, dashes and an ellipsis live in WinAnsi's own 0x80–0x9F block rather
+  than at their Unicode code points and are mapped; Latin-1 passes through; a
+  character outside it becomes a question mark rather than a broken glyph. **The
+  .docx is UTF-8 and has no such limit**, which is the honest answer for a club
+  whose minutes carry a name the base-14 fonts cannot draw.
+- **`w:sz` is HALF-points and `w:spacing w:after` is twentieths of a point**, so
+  32 reads as 16pt and 120 as 6pt. A line of the box becomes its own paragraph
+  and a blank line becomes an empty one, so the text reads in Word as it is laid
+  out on screen. A control character is stripped before it reaches the XML —
+  Word refuses the whole document over one, rather than skipping it.
+- **A NULL means "nobody has touched this box".** `minutesTyped`/`notesTyped`
+  start null and the disabled flag falls back to the record; once typed in they
+  follow the box. Without that, a reload after some unrelated action would
+  recompute the flag off minutes the autosave has not sent yet and disable a
+  button over a full field. `draft()` writes straight into the ref, so it sets
+  the flag too.
+- **The buttons are disabled on an empty field rather than hidden**, so the
+  option is visible before there is anything to download, and the title says why
+  it cannot be pressed.
+- **The notes document says on it that it is not part of the minutes.** The
+  screen says they are never circulated; a file that has left the screen should
+  keep saying so.
+- **Verified in Chromium** (`frontend/verification/verify_minutes_download_browser.mjs`,
+  40 checks against the real meeting room with the API stubbed: both rows
+  measured as BELOW their own text box off the real boxes rather than source
+  order, disabled while empty and enabled once not, the four files produced and
+  named for the meeting and its date, the typed text present with the PATCH
+  deliberately blocked, `&` and `<` escaped rather than breaking the XML, the
+  blank line kept, minutes and notes not leaking into each other, each `.docx`
+  unzipping to the OOXML parts a reader expects and each `.pdf` carrying an
+  xref table whose `startxref` points at it, the same two rows with the room
+  EMBEDDED in the Committee screen, the autosave still firing afterwards, no
+  page errors, no overflow at 390px) **with a control run**: with the change
+  stashed the rows are absent and nothing downloads at all.
+- **A stub that returns the wrong SHAPE measures a broken page**, twice over
+  here: `previous_attendance` is an object or null and an empty array is truthy,
+  which crashed the attendance panel; and the single-meeting GET must answer
+  with the MEETING, not the list, or every card on the Committee screen has no
+  id and no OPEN button — which also produced a React key warning that read as a
+  pre-existing app bug and was the stub's own fault.
+- **`page.evaluate` treats a STRING as an expression**, so a probe written as a
+  function-expression string comes back unevaluated rather than called.
+
 ## A club writes its association's rules down once (migration 271, v9.39.0, Aug 2026)
 
 Asked for so a selector isn't holding the handbook in their head on a Friday

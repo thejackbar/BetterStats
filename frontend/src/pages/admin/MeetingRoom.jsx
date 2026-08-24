@@ -5,6 +5,7 @@ import { useToast } from '../../contexts/ToastContext'
 import BetterClubhouseLayout from '../../components/admin/BetterClubhouseLayout'
 import { PbSpinner } from '../../lib/presskit'
 import { ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
+import { downloadDocx, downloadPdf, docFilename } from '../../lib/textDocs'
 
 // The meeting room — one screen a secretary runs a meeting from.
 //
@@ -90,6 +91,27 @@ function Hint({ text }) {
   return (
     <span title={text} aria-label={text}
       className="inline-flex items-center justify-center w-[13px] h-[13px] ml-1 align-middle rounded-full border border-pb-hairline2 text-[8px] leading-none text-pb-faintest cursor-help">?</span>
+  )
+}
+
+// Taking a text field away as a document. Word and PDF because those are what a
+// committee actually opens: minutes get circulated and filed, and the club's own
+// copy should not have to be a screenshot or a copy-paste out of a textarea.
+//
+// Disabled on an empty field rather than hidden, so the option is visible before
+// there is anything to download and the button says why it cannot be pressed.
+function DownloadRow({ label, empty, onDownload }) {
+  return (
+    <div className="flex items-center gap-1.5 mt-2">
+      <span className={cap}>DOWNLOAD</span>
+      {[['docx', 'Word Doc'], ['pdf', 'PDF']].map(([format, text]) => (
+        <button key={format} type="button" className={btn} disabled={empty}
+          onClick={() => onDownload(format)}
+          title={empty ? `Nothing in ${label} to download yet` : `Download ${label} as ${text === 'PDF' ? 'a PDF' : 'a Word document'}`}>
+          {text}
+        </button>
+      ))}
+    </div>
   )
 }
 
@@ -700,7 +722,14 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
     [attendance, nameOf])
 
   const minutesRef = useRef(null)
+  const notesRef = useRef(null)
   const [drafting, setDrafting] = useState(false)
+  // Whether each box has anything in it, for the download buttons. Null means
+  // nobody has touched it, so it follows the record; once typed in it follows
+  // the box, which is what stops a reload after some unrelated action reading a
+  // flag off minutes the autosave has not sent yet.
+  const [minutesTyped, setMinutesTyped] = useState(null)
+  const [notesTyped, setNotesTyped] = useState(null)
   const saveMinutes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { minutes: v }).catch(e => toast.error(e.message)))
 
   // Writes into the box rather than saving straight over the record: minutes
@@ -713,11 +742,36 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
     try {
       const r = await api.committeeDraftMinutes(meetingId)
       if (minutesRef.current) minutesRef.current.value = r.draft
+      setMinutesTyped(r.draft)
       await api.committeeUpdateMeeting(meetingId, { minutes: r.draft })
       toast.success('Draft written. Read it before it becomes the record.')
     } catch (e) { toast.error(e.message) } finally { setDrafting(false) }
   }
   const saveNotes = useAutosave(v => api.committeeUpdateMeeting(meetingId, { private_notes: v }).catch(e => toast.error(e.message)))
+
+  // Written from the BOX, never re-fetched from the record: the autosave is
+  // 700ms behind, and a download pressed straight after the last sentence has
+  // to carry that sentence. The meeting's own name and date ride along, or a
+  // file called Minutes.pdf in somebody's downloads folder says nothing about
+  // which meeting it came from.
+  function downloadField(field, format) {
+    const minutes = field === 'minutes'
+    const text = (minutes ? minutesRef.current?.value : notesRef.current?.value) || ''
+    if (!text.trim()) return
+    const label = minutes ? 'Minutes' : 'Private notes'
+    const when = shortDate(meeting.scheduled_at)
+    const title = meeting.title || 'Meeting'
+    const write = format === 'pdf' ? downloadPdf : downloadDocx
+    write({
+      filename: docFilename(title, when, minutes ? 'Minutes' : 'Notes'),
+      title,
+      subtitle: [label, when, meeting.location,
+        // The screen says these are never circulated with the minutes; a file
+        // that has left the screen should keep saying it.
+        minutes ? null : 'Not part of the minutes'].filter(Boolean).join(' \u00b7 '),
+      body: text,
+    })
+  }
 
   // One write, not one per person: the endpoint replaces the whole list anyway.
   const carryOver = wrap(async ids => {
@@ -956,14 +1010,22 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
               </button>
             </div>
             <textarea ref={minutesRef} className={`${inp} min-h-[120px]`} defaultValue={meeting.minutes || ''}
-              placeholder="The record that gets circulated…" onChange={e => saveMinutes(e.target.value)} />
+              placeholder="The record that gets circulated…"
+              onChange={e => { setMinutesTyped(e.target.value); saveMinutes(e.target.value) }} />
+            <DownloadRow label="the minutes"
+              empty={!(minutesTyped ?? meeting.minutes ?? '').trim()}
+              onDownload={f => downloadField('minutes', f)} />
           </div>
 
           <div className="pb-card p-4">
             <div className={`${cap} mb-1.5`}>YOUR NOTES</div>
-            <textarea className={`${inp} min-h-[80px]`} defaultValue={meeting.private_notes || ''}
-              placeholder="Not part of the minutes…" onChange={e => saveNotes(e.target.value)} />
-            <div className="font-mono text-[9px] text-pb-faintest mt-1">
+            <textarea ref={notesRef} className={`${inp} min-h-[80px]`} defaultValue={meeting.private_notes || ''}
+              placeholder="Not part of the minutes…"
+              onChange={e => { setNotesTyped(e.target.value); saveNotes(e.target.value) }} />
+            <DownloadRow label="your notes"
+              empty={!(notesTyped ?? meeting.private_notes ?? '').trim()}
+              onDownload={f => downloadField('notes', f)} />
+            <div className="font-mono text-[9px] text-pb-faintest mt-2">
               Never circulated with the minutes.
             </div>
           </div>
