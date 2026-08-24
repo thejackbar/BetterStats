@@ -77,6 +77,12 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
   if (/\/assets\/facilities/.test(url)) return json({ facilities: FACILITIES })
   if (/\/assets\/bookings/.test(url)) return json({ bookings: BOOKINGS })
   if (/\/assets\/maintenance-logs/.test(url)) return json({ logs: [] })
+  if (/\/assets\/alerts/.test(url)) {
+    return json({ service_due: [{ asset_id: 'a1', name: 'Bowling machine', category: 'equipment',
+                                  condition: 'good', service_due_date: '2026-09-01', replace_due_date: null,
+                                  service_due: true, replace_due: false,
+                                  service_overdue: false, replace_overdue: false }], total: 1 })
+  }
   if (url.includes('/facility-requests')) return json({ requests: [] })
   // Roster
   if (/\/roster\/week/.test(url)) {
@@ -112,9 +118,16 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
                               playhq_registered: false, is_new_registration: false }],
                   summary: { total_outstanding: 100, total_members: 1, non_financial: 1, needs_tier: 0, playhq_missing: 1 } })
   }
+  // Bare arrays, which is what these two routers return. An object made the
+  // screens throw on `.filter` / `.map`, so they rendered nothing at all and
+  // every measurement was taken against a broken page.
   if (/\/fees\/payments/.test(url)) {
-    return json({ payments: [{ id: 'pay1', member_id: 'm1', full_name: 'Amardeep Gill', amount: 100,
-                               kind: 'membership', paid_on: '2026-08-01', method: 'bank', reference: 'REF1' }] })
+    return json([{ id: 'pay1', member_id: 'm1', full_name: 'Amardeep Gill', amount: 100,
+                   kind: 'membership', paid_on: '2026-08-01', method: 'bank', reference: 'REF1' }])
+  }
+  if (/\/fees\/schedule/.test(url)) {
+    return json([{ id: 'sc1', season_id: 'se1', tier_name: 'Senior', payment_type: 'per_match',
+                   membership_fee: 120, per_day_fee: 15 }])
   }
   if (/\/fees\/all-members/.test(url)) return json({ members: [] })
   // Merch
@@ -127,7 +140,10 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
   if (/\/merch\/reports|\/merch\/summary/.test(url)) return json({})
   // Clubhouse roll-up (Today / Reports / sidebar counts)
   if (/\/clubhouse|\/notifications/.test(url)) return json({})
-  if (/\/seasons/.test(url)) return json({ seasons: [SEASON] })
+  // A BARE ARRAY, which is what the router returns. An object here made
+  // `newestSeason` throw and rejected the whole clubhouse roll-up, so every
+  // Today figure silently read zero.
+  if (/\/seasons/.test(url)) return json([SEASON])
   if (/\/settings/.test(url)) return json({ diary_start_month: 7 })
   return json({})
 })
@@ -141,7 +157,11 @@ const FIND = `(text) => {
   const hit = (root) => [...root.querySelectorAll('button, select, a')].find(b => {
     const raw = (b.textContent || '').replace(/\u25be/g, '').trim()
     const bare = raw.split(':')[0].trim()
-    return raw === text || bare === text || (b.getAttribute('aria-label') || '') === text
+    // A seg item may carry a count ("Owes money1") and a menu its value
+    // ("Membership: Players"); neither changes which control this is.
+    const nocount = raw.replace(/\\d+$/, '').trim()
+    return raw === text || bare === text || nocount === text
+        || (b.getAttribute('aria-label') || '') === text
   })
   for (const h of document.querySelectorAll('header')) { const f = hit(h); if (f) return f }
   return hit(document)
@@ -497,6 +517,35 @@ const run = async () => {
     check('Membership tiers: its title-line button wears the Committee box', looksSeg(box), JSON.stringify(box))
   }
 
+  // ── One asset register (migration 279) ────────────────────────────────────
+  // Equipment is an asset rather than inventory, so it left Stock. The old URL
+  // must land on the register rather than 404 on somebody's bookmark, the
+  // Stock sidebar must no longer offer it, and the service alert must reach a
+  // club through the CORE endpoint.
+  await open('/admin/merch/equipment', 'h1')
+  {
+    check('Equipment: the old Stock URL redirects to the asset register',
+      page.url().endsWith('/admin/assets'), page.url())
+    check('Equipment: it lands on Facilities & Assets',
+      (await page.textContent('h1')) === 'Facilities & Assets', await page.textContent('h1'))
+    const nav = await page.evaluate(() => {
+      const a = [...document.querySelectorAll('a')].find(x => (x.getAttribute('href') || '').includes('/merch/equipment'))
+      return a ? a.textContent.trim() : null
+    })
+    check('Equipment: the Stock sidebar no longer offers it', nav === null, nav)
+  }
+  await open('/admin/clubhouse', 'h1')
+  {
+    const body = await page.textContent('body')
+    check('Today: the service alert still reaches the club', body.includes('due for service'), '')
+    check('Today: it is filed under Facilities & Assets, not Stock',
+      !body.includes('Club · Stock') || body.includes('Facilities & Assets'))
+    await page.click('button:has-text("Open the asset register")').catch(() => {})
+    await page.waitForTimeout(600)
+    check('Today: its action opens the asset register',
+      page.url().endsWith('/admin/assets'), page.url())
+  }
+
   // ── Reports ───────────────────────────────────────────────────────────────
   await open('/admin/clubhouse/reports', 'h1')
   {
@@ -512,14 +561,20 @@ const run = async () => {
   // ── 390px: nothing pushes the page sideways ───────────────────────────────
   //
   // Three screens overflow at 390px BEFORE any of this, measured by re-running
-  // this same probe with the change stashed: Accounts 33px (its twoRow action
-  // cluster — BOOKMARKS / Import / Add member — which carries `shrink-0`),
-  // Payments 111px (the "Import bank CSV" button) and Stock 12px ("New
-  // product"). None of them is a button row this change touches, and each is
-  // the trap the Selection-header note already documents, so they are recorded
-  // rather than quietly widened into. The budget is the measured baseline:
-  // this must never make an existing overflow worse, and must introduce none.
-  const OVERFLOW_BASELINE = { Accounts: 33, Payments: 111, Stock: 12 }
+  // this same probe with the change stashed: Accounts 245px and Payments 168px
+  // (their members / ledger TABLES, which are genuinely wide — the same thing
+  // the v9.25.2 note already records as "not this fix's to solve") and Stock
+  // 12px ("New product"). None is a button row this change touches, so they
+  // are recorded rather than quietly widened into. The budget is the measured
+  // baseline: this must never make an existing overflow worse, and must
+  // introduce none.
+  //
+  // These figures REPLACE an earlier 33 / 111 / 12, which were measured while
+  // the stub returned `{payments: […]}` and `{seasons: […]}` where the routers
+  // answer bare ARRAYS — so those two screens threw on `.filter` and drew no
+  // table at all. A budget taken against a page that failed to render is not a
+  // baseline. Check the shape of what a router actually returns.
+  const OVERFLOW_BASELINE = { Accounts: 245, Payments: 168, Stock: 12 }
   await page.setViewportSize({ width: 390, height: 900 })
   for (const [path, name] of [
     ['/admin/clubhouse/directory', 'Directory'],

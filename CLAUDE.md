@@ -1106,6 +1106,88 @@ load facilities." whatever the club held.
   against the previous commit** — including the pale border, read back as the
   measured `rgb(229,231,235)`.
 
+## ONE asset register: equipment is not inventory (migration 279, v9.53.0, Aug 2026)
+
+Asked for after a question about the accounting shape: treat inventory as one
+thing, and property / facilities / fixed assets / equipment as another.
+
+- **THE SPLIT WAS JUSTIFIED AGAINST THE WRONG TABLE, and that is the whole
+  origin of the duplication.** Migration 177's own docstring says why it did not
+  reuse what existed: general club property "is a different concern from
+  BetterMerch's retail/kit stock tracking (merch_assets, a paid-module table)".
+  `merch_assets` is not retail or kit stock — retail stock is `merch_products` /
+  `merch_variants`, which carry quantity, cost, price and movements. The
+  MerchAsset model's own docstring reads "an individual high-value piece of
+  equipment (bowling machine, covers, sight screen) … quantity is implicitly 1;
+  not stock-counted", which is a fixed-asset register. 177 compared club
+  property against a table it believed was stock and built a second register of
+  the same thing. A mis-description, not a decision, which is why undoing it is
+  safe.
+- **`club_assets` IS THE BASE, and not arbitrarily: `merch_assets` is a strict
+  column SUBSET of it.** All thirteen of its columns have same-named,
+  same-typed, same-defaulted twins among `club_assets`' sixteen; only `category`
+  and `facility_id` are unique to the club side. Nothing is given up, and the
+  club register additionally has maintenance history and lives in core.
+- **`services/asset_register_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule, and it runs AFTER both
+  tables are created in that same lifespan.
+- **`merch_asset_id` MAKES THE CARRY IDEMPOTENT, `source` MAKES IT REVERSIBLE,
+  and conflating the two would have destroyed club data.** A gap-filled row and
+  an inserted row both carry the id, because both have dealt with that merch
+  row and neither must be processed twice. Only an INSERTED row is the
+  migration's to remove, so it is marked `source='merch'`; the first cut's
+  downgrade deleted on the id and took the club's own pre-existing assets with
+  it. **Found by the verification, not by reading the code.**
+- **The carry FILLS, NEVER CLOBBERS.** Every field is `COALESCE(what is here,
+  what is coming)`, so a figure somebody typed always wins. `condition` and
+  `status` are NOT NULL on the club side, so they always have a value and are
+  never touched. Notes are the one field where keeping what is here would lose
+  something, so a merch note not already contained in the club note is
+  appended.
+- **`DISTINCT ON` picks one merch row per club row.** Two merch rows matching
+  one club asset must not silently merge into a single object — the second
+  stays uncarried and step 2 gives it its own row.
+- **Matching is asset tag first, then case-folded name, and NOTHING fuzzier.** A
+  serial number is a real identity. A club really can own a "Line marker" and a
+  "Line marking machine", and folding those would put one object's service
+  history on another.
+- **The two vocabularies are MAPPED, not unioned** (`new`→`excellent`,
+  `retired`→`unserviceable`, `out_for_repair`→`in_repair`), so the register ends
+  up with one vocabulary rather than the sum of two.
+- **`merch_assets` IS LEFT IN PLACE AND READ BY NOTHING**, the call 267 made for
+  `vote_settings`. Its ROUTES are deleted rather than merely unused: a second
+  register still answering writes could only drift from the live one.
+- **THE ALERTS MOVED TO CORE, and that was half the point.** Service and
+  replacement due fired only from the merch copy, so `club_assets.
+  service_due_date` reached no bell, no Today row and no badge — a club without
+  the paid module had a field that warned nobody. `assets.asset_alerts` +
+  `GET /club-admin/assets/alerts` are core, with no module gate.
+- **`replace_due_date` had existed since 177 through the model, DDL, API and
+  serialiser with NO screen reading or writing it.** It is what the merch
+  register raised its replacement alerts from, so it had to become reachable.
+- **Deliberately NOT built: depreciation, useful life, written-down value,
+  disposal proceeds, insurance valuation, or a total asset value.** None of them
+  exists on either register today (`purchase_cost` is stored, filtered, and
+  never summed anywhere), so this is a maintenance and cashflow register, not
+  yet an accounting one. Making it one is a bigger, separate piece of work.
+- **Verified against a real Postgres** (44 checks through the shipped statements
+  and `asset_alerts` itself: the list applied three times to a populated pre-279
+  schema without duplicating, the gap-fill filling and never clobbering, a note
+  appended rather than dropped and an identical note not appended twice, a
+  serial matching where the names differ, the enum mapping, two merch rows on
+  one asset staying two, cross-club isolation, no merch row left behind, the
+  alerts reading the carried dates and ignoring a retired asset, and the
+  downgrade removing only what the carry created) and **driven in Chromium**
+  (the suite is 90 now: the old Stock URL redirecting, Equipment gone from the
+  Stock sidebar, and the service alert still reaching Today through the core
+  endpoint).
+- **A STUB THAT RETURNS THE WRONG SHAPE MEASURES A BROKEN PAGE.** The browser
+  suite had `{seasons: […]}` and `{payments: […]}` where those routers answer
+  bare ARRAYS, so Accounts and Payments threw on `.filter` and drew no table —
+  and the 390px overflow "baseline" recorded from that was 33px / 111px rather
+  than the real 245px / 168px. Check what a router actually returns before
+  recording a measurement against it.
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out

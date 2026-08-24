@@ -286,7 +286,7 @@ export default function Facilities({ st, patch, narrow }) {
           <EntityManager
             describe="Club gear — kit bags, machines, markers and the like."
             load={() => api.assetsListItems({}).then(r => rows(r, 'assets', 'items').filter(a => a.is_active !== false))}
-            fields={[{ key: 'name', label: 'Asset', type: 'text', required: true, span: 2 }, { key: 'category', label: 'Category', type: 'text' }, { key: 'condition', label: 'Condition', type: 'text' }, { key: 'status', label: 'Status', type: 'text' }, { key: 'notes', label: 'Notes', type: 'text', span: 2 }]}
+            fields={[{ key: 'name', label: 'Asset', type: 'text', required: true, span: 2 }, { key: 'category', label: 'Category', type: 'text' }, { key: 'condition', label: 'Condition', type: 'text' }, { key: 'status', label: 'Status', type: 'text' }, { key: 'service_due_date', label: 'Service due', type: 'text', placeholder: 'YYYY-MM-DD' }, { key: 'replace_due_date', label: 'Replace due', type: 'text', placeholder: 'YYYY-MM-DD' }, { key: 'notes', label: 'Notes', type: 'text', span: 2 }]}
             onCreate={v => api.assetsCreateItem(v)} onUpdate={(id, v) => api.assetsUpdateItem(id, v)} onDelete={id => api.assetsDeleteItem(id)}
             seed={{ label: 'Add Assets Starter Pack', fn: () => api.assetsSeedItems() }}
             primaryKey="name" subtitle={it => [it.category, it.condition, it.status].filter(Boolean).join(' · ')}

@@ -36,10 +36,13 @@ function newestSeason(seasons) {
 }
 
 async function fetchAll(modules) {
-  const [seasons, merch, campaigns] = await Promise.all([
+  // Asset alerts are fetched unconditionally: the register is core since
+  // migration 279, so a club with no paid module still has equipment coming due.
+  const [seasons, merch, campaigns, assetAlerts] = await Promise.all([
     modules.fees ? ok(api.adminListSeasons()) : null,
     modules.merch ? ok(api.merchOverview()) : null,
     modules.comms ? ok(api.commsListCampaigns()) : null,
+    ok(api.assetsAlerts()),
   ])
 
   const season = newestSeason(seasons)
@@ -50,6 +53,7 @@ async function fetchAll(modules) {
     fees: fees || null,
     merch: merch || null,
     campaigns: Array.isArray(campaigns) ? campaigns : campaigns?.campaigns || [],
+    assetAlerts: assetAlerts || null,
   }
 }
 
@@ -61,7 +65,10 @@ export function deriveCounts(data) {
   const needsTier = Number(summary.needs_tier || 0)
   const reorder = (alerts.low_stock || []).length
   const expiring = (alerts.expiring || []).length
-  const serviceDue = (alerts.service_due || []).length
+  // From the CORE asset register now, not the merch payload. `merch.alerts
+  // .service_due` still rides on the wire as an empty list for one release, so
+  // reading it here would silently report zero.
+  const serviceDue = (data?.assetAlerts?.service_due || []).length
   const drafts = (data?.campaigns || []).filter(c => (c.status || '').toLowerCase() === 'draft').length
   return {
     owing,

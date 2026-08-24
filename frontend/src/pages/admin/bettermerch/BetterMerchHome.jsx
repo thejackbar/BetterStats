@@ -74,24 +74,16 @@ export default function BetterMerchHome() {
                   <Pill tone={it.expired ? 'red' : 'amber'}>{it.expired ? 'expired' : it.expiry_date}</Pill>
                 </li>
               )} />
-            <AlertCard title="Service / replace due" icon="settings" tone="amber" items={alerts.service_due}
-              empty="No equipment due for service or replacement."
-              render={(it) => (
-                <li key={it.asset_id} className="flex items-center justify-between gap-2 text-[12.5px]">
-                  <Link to="/admin/merch/equipment" className="truncate hover:text-pb-accent">{it.name}</Link>
-                  <Pill tone={(it.service_overdue || it.replace_overdue) ? 'red' : 'amber'}>
-                    {it.replace_due ? 'replace' : 'service'} {(it.replace_due ? it.replace_due_date : it.service_due_date)}
-                  </Pill>
-                </li>
-              )} />
+            {/* Service and replacement due left this screen with migration 279.
+                Equipment is an asset rather than stock, so it is raised on the
+                core asset register (Facilities & Assets), on Today and in the
+                notification bell — for every club, not only the ones holding
+                this module. */}
           </div>
 
           <div className="flex flex-wrap gap-3">
             <Link to="/admin/merch/stock" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
               <Icon name="plus" size={16} /> Add stock
-            </Link>
-            <Link to="/admin/merch/equipment" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
-              <Icon name="settings" size={16} /> Add equipment
             </Link>
             <Link to="/admin/merch/reports" className="pb-card px-4 py-3 hover:border-pb-accent/40 transition flex items-center gap-2 text-sm">
               <Icon name="ladders" size={16} /> Reports

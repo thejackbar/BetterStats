@@ -42,7 +42,6 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Stock' },
     { to: '/admin/merch/stock', label: 'Inventory', icon: 'list', cap: CAP.MANAGE_MERCH, module: 'merch', badge: counts.reorder },
-    { to: '/admin/merch/equipment', label: 'Equipment', icon: 'settings', cap: CAP.MANAGE_MERCH, module: 'merch' },
     ...(storefront ? [{ to: '/admin/merch/orders', label: 'Online store', icon: 'sheet', cap: CAP.MANAGE_MERCH, module: 'merch' }] : []),
 
     { heading: 'Comms' },

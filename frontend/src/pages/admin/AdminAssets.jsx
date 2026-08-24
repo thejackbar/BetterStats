@@ -497,6 +497,7 @@ function AssetCard({ asset, facilities, onChanged }) {
             {asset.purchase_cost != null && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">PURCHASE COST</span><span className="text-pb-text">${asset.purchase_cost}</span></div>}
             {asset.purchase_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">ACQUIRED</span><span className="text-pb-text">{asset.purchase_date}</span></div>}
             {asset.service_due_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">SERVICE DUE</span><span className="text-pb-text">{asset.service_due_date}</span></div>}
+            {asset.replace_due_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">REPLACE DUE</span><span className="text-pb-text">{asset.replace_due_date}</span></div>}
           </div>
           {asset.notes && <div className="text-pb-faint text-[12px]">{asset.notes}</div>}
           <MaintenanceLogPanel subjectType="asset" subjectId={asset.id} />
@@ -508,7 +509,7 @@ function AssetCard({ asset, facilities, onChanged }) {
 
 function NewAssetForm({ facilities, onCreated, onCancel }) {
   const toast = useToast()
-  const [form, setForm] = useState({ name: '', category: 'other', asset_tag: '', purchase_cost: '', purchase_date: '', condition: 'good', status: 'in_service', service_due_date: '', facility_id: '', notes: '' })
+  const [form, setForm] = useState({ name: '', category: 'other', asset_tag: '', purchase_cost: '', purchase_date: '', condition: 'good', status: 'in_service', service_due_date: '', replace_due_date: '', facility_id: '', notes: '' })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   async function submit() {
@@ -525,6 +526,7 @@ function NewAssetForm({ facilities, onCreated, onCancel }) {
         condition: form.condition,
         status: form.status,
         service_due_date: form.service_due_date || null,
+        replace_due_date: form.replace_due_date || null,
         notes: form.notes || null,
       })
       onCreated()
@@ -557,6 +559,14 @@ function NewAssetForm({ facilities, onCreated, onCancel }) {
         <div className="flex flex-col">
           <span className="font-mono text-[8px] text-pb-faintest">SERVICE DUE</span>
           <input type="date" className={`${inp} w-40`} value={form.service_due_date} onChange={e => set('service_due_date', e.target.value)} />
+        </div>
+        {/* `replace_due_date` has existed through the model, DDL, API and
+            serialiser since migration 177 with no screen reading or writing it.
+            It is what the old merch register raised its replacement alerts
+            from, so it has to be reachable now the two registers are one. */}
+        <div className="flex flex-col">
+          <span className="font-mono text-[8px] text-pb-faintest">REPLACE DUE</span>
+          <input type="date" className={`${inp} w-40`} value={form.replace_due_date} onChange={e => set('replace_due_date', e.target.value)} />
         </div>
       </div>
       <input className={`${inp} mt-2`} placeholder="Notes (optional)" value={form.notes} onChange={e => set('notes', e.target.value)} />

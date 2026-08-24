@@ -3555,8 +3555,15 @@ class FacilityBooking(Base):
 
 
 class ClubAsset(Base):
-    """General club property — mower, scoreboard, nets, tables — distinct
-    from BetterMerch's merch_assets (paid-module retail/kit stock)."""
+    """THE club's asset register — every piece of property, equipment and fixed
+    asset it owns: mower, scoreboard, nets, tables, bowling machine, covers.
+
+    One register, deliberately. BetterMerch's `merch_assets` was a second one
+    describing the same class of object (its own docstring: "an individual
+    high-value piece of equipment … not stock-counted") and migration 279
+    carried it in here; `merch_asset_id` records which rows came across.
+    Inventory is the separate concern — that is `merch_products` /
+    `merch_variants`, which have a quantity."""
     __tablename__ = "club_assets"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -3575,6 +3582,15 @@ class ClubAsset(Base):
     is_active = Column(Boolean, nullable=False, server_default="true", default=True)
     created_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
+    # The `merch_assets` row this was carried from (migration 279), or NULL for
+    # a row the club entered here. No FK: that table is history now, and tidying
+    # it must not take the live register's rows with it.
+    merch_asset_id = Column(UUID(as_uuid=True), nullable=True)
+    # 'club' for a row entered here, 'merch' for one migration 279 created from
+    # the old BetterMerch register. A GAP-FILLED row keeps 'club': it is the
+    # club's own asset that merely had its blanks filled in, and the downgrade
+    # turns on that difference.
+    source = Column(Text, nullable=False, server_default="club", default="club")
 
 
 class MaintenanceLog(Base):
@@ -4029,9 +4045,15 @@ class MerchOrderItem(Base):
 
 
 class MerchAsset(Base):
-    """An individual high-value piece of equipment (bowling machine, covers,
-    sight screen) tracked as one item with its own condition and service/replace
-    dates for cashflow planning. Quantity is implicitly 1; not stock-counted."""
+    """HISTORY. Was BetterMerch's own register of individual high-value
+    equipment (bowling machine, covers, sight screen), which is the same class
+    of object `club_assets` holds — never inventory, since quantity is
+    implicitly 1 and it was not stock-counted.
+
+    Migration 279 carried every row into `club_assets` and NOTHING READS THIS
+    AFTER IT. Left in place rather than dropped, the call migration 267 made for
+    `vote_settings`. Do not write to it: a second register that still answered
+    writes could only drift from the one people are looking at."""
     __tablename__ = "merch_assets"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

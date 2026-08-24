@@ -4207,6 +4207,17 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_maintenance_logs_subject ON maintenance_logs(subject_type, subject_id, performed_at DESC)"
         ))
 
+        # Migration 279: ONE asset register. BetterMerch's `merch_assets` was a
+        # second register of the same class of object (equipment, quantity 1,
+        # not stock-counted), so its rows are carried into `club_assets` here.
+        # The shared list is idempotent end to end — a row already carried is
+        # found by `merch_asset_id` and skipped rather than inserted twice.
+        # This runs AFTER club_assets exists above and after merch_assets, which
+        # migration 083's block created far earlier in this same lifespan.
+        from app.services.asset_register_ddl import ASSET_REGISTER_SQL
+        for _stmt in ASSET_REGISTER_SQL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.

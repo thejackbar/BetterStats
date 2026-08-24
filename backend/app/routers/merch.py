@@ -29,7 +29,7 @@ from jose import jwt
 from app.config.settings import settings
 from app.models.db import (
     User, Organisation, Player,
-    MerchProduct, MerchVariant, MerchMovement, MerchAsset, MerchSquareConnection, MerchCategory,
+    MerchProduct, MerchVariant, MerchMovement, MerchSquareConnection, MerchCategory,
     MerchOrder, MERCH_ORDER_STATUSES,
     MERCH_CATEGORIES, MERCH_MOVEMENT_KINDS, MERCH_ASSET_CONDITIONS, MERCH_ASSET_STATUSES,
     MERCH_MAX_CATEGORY_DEPTH,
@@ -106,16 +106,6 @@ async def _variant_or_404(db: AsyncSession, club: Organisation, vid: str) -> Mer
     return v
 
 
-async def _asset_or_404(db: AsyncSession, club: Organisation, aid: str) -> MerchAsset:
-    try:
-        a = await db.get(MerchAsset, uuid.UUID(str(aid)))
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=422, detail="Invalid asset id")
-    if not a or a.organisation_id != club.id:
-        raise HTTPException(status_code=404, detail="Asset not found")
-    return a
-
-
 def _eff_cost(v: MerchVariant, p: MerchProduct | None):
     return v.unit_cost if v.unit_cost is not None else (p.unit_cost if p else None)
 
@@ -169,22 +159,6 @@ def _product_out(p: MerchProduct, variants: list[MerchVariant] | None = None) ->
         out["variant_count"] = len(active)
         out["low_stock"] = any(merch_service.is_low_stock(v, p) for v in active)
     return out
-
-
-def _asset_out(a: MerchAsset) -> dict:
-    return {
-        "id": str(a.id),
-        "name": a.name,
-        "asset_tag": a.asset_tag,
-        "purchase_cost": _f(a.purchase_cost),
-        "purchase_date": a.purchase_date.isoformat() if a.purchase_date else None,
-        "condition": a.condition,
-        "service_due_date": a.service_due_date.isoformat() if a.service_due_date else None,
-        "replace_due_date": a.replace_due_date.isoformat() if a.replace_due_date else None,
-        "status": a.status,
-        "notes": a.notes,
-        "is_active": a.is_active,
-    }
 
 
 def _player_name(p: Player | None) -> Optional[str]:
@@ -944,116 +918,16 @@ async def delete_movement(
 # ───────────────────────────────────────────────────────────────────────────
 # Individual equipment assets
 # ───────────────────────────────────────────────────────────────────────────
-
-class AssetIn(BaseModel):
-    name: str
-    asset_tag: Optional[str] = None
-    purchase_cost: Optional[float] = None
-    purchase_date: Optional[str] = None
-    condition: Optional[str] = "good"
-    service_due_date: Optional[str] = None
-    replace_due_date: Optional[str] = None
-    status: Optional[str] = "in_service"
-    notes: Optional[str] = None
-
-
-class AssetPatch(BaseModel):
-    name: Optional[str] = None
-    asset_tag: Optional[str] = None
-    purchase_cost: Optional[float] = None
-    purchase_date: Optional[str] = None
-    condition: Optional[str] = None
-    service_due_date: Optional[str] = None
-    replace_due_date: Optional[str] = None
-    status: Optional[str] = None
-    notes: Optional[str] = None
-    is_active: Optional[bool] = None
-
-
-@router.get("/assets", dependencies=[_require])
-async def list_assets(
-    include_inactive: bool = False,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    q = select(MerchAsset).where(MerchAsset.organisation_id == club.id)
-    if not include_inactive:
-        q = q.where(MerchAsset.is_active.is_(True))
-    q = q.order_by(
-        func.coalesce(MerchAsset.service_due_date, MerchAsset.replace_due_date).asc().nullslast(),
-        MerchAsset.name,
-    )
-    assets = (await db.execute(q)).scalars().all()
-    return {"assets": [_asset_out(a) for a in assets]}
-
-
-@router.post("/assets", dependencies=[_require])
-async def create_asset(
-    body: AssetIn,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    if not (body.name or "").strip():
-        raise HTTPException(status_code=422, detail="Name is required")
-    if body.condition and body.condition not in MERCH_ASSET_CONDITIONS:
-        raise HTTPException(status_code=422, detail=f"Unknown condition: {body.condition}")
-    if body.status and body.status not in MERCH_ASSET_STATUSES:
-        raise HTTPException(status_code=422, detail=f"Unknown status: {body.status}")
-    a = MerchAsset(
-        organisation_id=club.id,
-        name=body.name.strip(),
-        asset_tag=body.asset_tag,
-        purchase_cost=_money(body.purchase_cost),
-        purchase_date=_parse_date(body.purchase_date),
-        condition=body.condition or "good",
-        service_due_date=_parse_date(body.service_due_date),
-        replace_due_date=_parse_date(body.replace_due_date),
-        status=body.status or "in_service",
-        notes=body.notes,
-    )
-    db.add(a)
-    await db.commit()
-    await db.refresh(a)
-    return _asset_out(a)
-
-
-@router.patch("/assets/{asset_id}", dependencies=[_require])
-async def update_asset(
-    asset_id: str,
-    body: AssetPatch,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    a = await _asset_or_404(db, club, asset_id)
-    data = body.model_dump(exclude_unset=True)
-    if "condition" in data and data["condition"] and data["condition"] not in MERCH_ASSET_CONDITIONS:
-        raise HTTPException(status_code=422, detail=f"Unknown condition: {data['condition']}")
-    if "status" in data and data["status"] and data["status"] not in MERCH_ASSET_STATUSES:
-        raise HTTPException(status_code=422, detail=f"Unknown status: {data['status']}")
-    for field in ("name", "asset_tag", "condition", "status", "notes", "is_active"):
-        if field in data:
-            setattr(a, field, data[field])
-    if "purchase_cost" in data:
-        a.purchase_cost = _money(data["purchase_cost"])
-    for dfield in ("purchase_date", "service_due_date", "replace_due_date"):
-        if dfield in data:
-            setattr(a, dfield, _parse_date(data[dfield]))
-    a.updated_at = func.now()
-    await db.commit()
-    await db.refresh(a)
-    return _asset_out(a)
-
-
-@router.delete("/assets/{asset_id}", dependencies=[_require])
-async def delete_asset(
-    asset_id: str,
-    club: Organisation = Depends(get_current_club),
-    db: AsyncSession = Depends(get_db),
-):
-    a = await _asset_or_404(db, club, asset_id)
-    a.is_active = False
-    await db.commit()
-    return {"ok": True}
+# ───────────────────────────────────────────────────────────────────────────
+# Equipment moved out of this module (migration 279)
+#
+# `/club-admin/merch/assets*` is GONE, not merely unused. It wrote to
+# `merch_assets`, which is history now — a second register still answering
+# writes could only drift from `club_assets`, the one people are looking at.
+# Equipment is an asset rather than stock, and lives at
+# `/club-admin/assets/items` under the core MANAGE_ASSETS capability. The
+# frontend route redirects there.
+# ───────────────────────────────────────────────────────────────────────────
 
 
 # ───────────────────────────────────────────────────────────────────────────
