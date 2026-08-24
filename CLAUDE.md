@@ -401,6 +401,64 @@ Reported off the Sales Workspace: opening Blacktown District Cricket Club sat on
   raising, and one failed signal card leaving the others alone) with a control
   run that fails on exactly the reported behaviour.
 
+## A quiet week is not an empty book (v9.52.1, Aug 2026)
+
+Reported off Sales Performance on a Monday morning: Contact activity read
+"Nobody has made contact this week yet." while the team had been calling clubs
+for months. Every figure on the screen was correct and every one of them was
+about a window that had barely started.
+
+- **ALL TIME IS NOT A LONGER WINDOW, IT IS NO WINDOW.** `report_windows` gains
+  `'all': None` — a lower bound of None, read by every caller as "do not
+  filter". Deliberately not an early date: an arbitrary epoch would quietly
+  become the start of the club's history, and the first club whose records
+  predate it would be silently short.
+- **A REP IS LISTED AS SOON AS THEY HAVE EVER MADE CONTACT.** The rows come
+  from the same pass, so the table now says something whatever the day. **The
+  ORDER is unchanged** — this week, then today, with all time only as the
+  tiebreaker: the two dated windows are what a working day is managed on, and
+  all time decides the order precisely when they are all zero, which is the
+  morning this exists for.
+- **`REPORT_WINDOWS` is the one list**, and the screen's column groups and KPI
+  rows are drawn from it. A fourth window would be one tuple entry plus one
+  entry in the frontend's `ACTIVITY_WINDOWS`, not a third hand-written column
+  block.
+- **AN ALL-TIME PULL MUST NOT DRAG EVERY SENT EMAIL'S HTML WITH IT.** The
+  dated windows could afford `select(CrmActivity)`; reading every contact row
+  ever written cannot, because an email activity's `meta` holds the whole
+  message body (`routers/sales_workspace.py` stamps subject/html/text onto it).
+  `_contact_rows` selects the six columns a tally reads plus a Twenty flag, and
+  is now the ONE place "the contact rows in scope" is defined — shared by the
+  report, the drill-down and `contacted_deal_ids`, which was already paying
+  that cost unbounded on the same page.
+- **`_IS_TWENTY_IMPORTED_SQL` is derived from the same `_TWENTY_IMPORT_META_KEYS`
+  tuple as `_is_twenty_imported`**, so the SQL and the Python cannot disagree
+  about what an imported row is; the suite asserts they agree row by row. `?`
+  against a NULL meta yields NULL, which is False in Python and correct — a row
+  with no meta has no keys. This is the one place a JSONB key test is safe in
+  SQL here: the trap `list_activities_for_workspace` documents is `NOT (meta ?
+  'k')` in a WHERE, and this is a selected value, not a filter.
+- **`_contact_kind` still takes any row carrying the four fields it reads**, so
+  a full CrmActivity and a lean reporting row are classified by one function.
+  `_row_contact_kind` is the wrapper that always passes the flag, since a lean
+  row deliberately carries no `meta` to read it from.
+- **Verified against a real Postgres** (75 checks through the shipped service
+  and route bodies: the reported case replayed — today and this week zero, six
+  contacts behind them, two reps listed — every contact rule holding all time
+  as well as this week, a Twenty-imported row and a general-outcome call still
+  excluded, clubs_contacted distinct rather than summed, the drill-down for
+  each window/metric adding up to the cell it opens, an unknown window refused,
+  a 'sales' caller pinned to their own work even when naming another rep, the
+  lean row carrying neither `meta` nor `body`, and the SQL and Python Twenty
+  tests agreeing on every seeded row) **with a control run**: with the change
+  stashed the same data reads 0 rows and no all-time window at all, exactly as
+  reported. **Driven in Chromium** (20: the three KPI rows and three column
+  groups in order, a rep listed on a blank week, the twelve figure cells, a
+  zero still not a button, the group rules measured off the computed style,
+  the exact params on the wire for an all-time drill-down and the panel it
+  opens, the totals row matching the KPI card, no page errors, no overflow at
+  390px).
+
 ## Every figure on Sales Performance opens its clubs (v9.48.2, Aug 2026)
 
 Asked for directly: make every number in both tables clickable and list the
