@@ -133,23 +133,38 @@ const routes = (page, calls) => page.route('**/api/**', async (route) => {
 })
 
 // ── Measurement helpers, all computed-style based ───────────────────────────
-const FIND = `(text) => [...document.querySelectorAll('button, select')].find(b => {
-  const raw = (b.textContent || '').replace(/\u25be/g, '').trim()
-  const bare = raw.split(':')[0].trim()
-  return raw === text || bare === text || (b.getAttribute('aria-label') || '') === text
-})`
+// Anchors are included because a Manage LINK now sits among its section's
+// buttons. The header is searched first and the document only as a fallback,
+// or a sidebar nav link with the same word ("Events") would be found instead of
+// the control being measured.
+const FIND = `(text) => {
+  const hit = (root) => [...root.querySelectorAll('button, select, a')].find(b => {
+    const raw = (b.textContent || '').replace(/\u25be/g, '').trim()
+    const bare = raw.split(':')[0].trim()
+    return raw === text || bare === text || (b.getAttribute('aria-label') || '') === text
+  })
+  for (const h of document.querySelectorAll('header')) { const f = hit(h); if (f) return f }
+  return hit(document)
+}`
 
 const SEG_PROBE = `(el) => {
   const cs = getComputedStyle(el)
   const r = el.getBoundingClientRect()
-  return { bg: cs.backgroundColor, border: cs.borderTopWidth, radius: cs.borderTopLeftRadius,
+  return { bg: cs.backgroundColor, border: cs.borderTopWidth, borderColor: cs.borderTopColor,
+           radius: cs.borderTopLeftRadius,
            padding: cs.paddingTop, x: r.x, width: r.width, mid: r.x + r.width / 2 }
 }`
 
 // Committee's box: a real 1px border, a rounded corner, a 3px inner pad and a
 // fill that is NOT transparent. A loose row of pills has no such container.
+// `--pb-hairline` on the dark theme. Asserted as a VALUE, because the reported
+// "white border" was `border pb-hairline` — not a class at all, so the width
+// applied and the colour fell through to Tailwind's preflight #e5e7eb
+// (rgb(229,231,235)). A box that merely "has a border" would pass that.
+const HAIRLINE = 'rgb(29, 35, 49)'
 const looksSeg = (m) => !!m && m.border === '1px' && parseFloat(m.radius) >= 6
   && parseFloat(m.padding) >= 2 && m.bg !== 'rgba(0, 0, 0, 0)'
+  && m.borderColor === HAIRLINE
 
 async function segBox(page, label) {
   return page.evaluate(([text, probe, find]) => {
@@ -204,6 +219,33 @@ async function searchBelowCaption(page, placeholder) {
     const i = input.getBoundingClientRect(), t = h1.getBoundingClientRect()
     return { below: i.top >= t.bottom, ownLine: i.x < t.x + 40 }
   }, placeholder)
+}
+
+// Is the first control drawn ABOVE the second? Measured off the real boxes, so
+// "below the buttons" is a fact rather than a reading of the source order.
+async function isAbove(page, topLabel, bottomSel) {
+  return page.evaluate(([text, sel, find]) => {
+    const a = eval(find)(text)
+    const b = document.querySelector(sel)
+    if (!a || !b) return null
+    const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect()
+    return { above: ra.bottom <= rb.top + 2, aTop: Math.round(ra.top), bTop: Math.round(rb.top) }
+  }, [topLabel, bottomSel, FIND])
+}
+
+// The labels inside a seg box, in the order they are actually drawn.
+async function segOrder(page, anyLabel) {
+  return page.evaluate(([text, find]) => {
+    const btn = eval(find)(text)
+    if (!btn) return null
+    let box = null
+    for (let el = btn.parentElement, i = 0; el && i < 4; el = el.parentElement, i++) {
+      const cs = getComputedStyle(el)
+      if (cs.borderTopWidth === '1px' && parseFloat(cs.borderTopLeftRadius) >= 6) { box = el; break }
+    }
+    if (!box) return null
+    return [...box.children].map(c => (c.textContent || '').replace(/\u25be/g, '').trim())
+  }, [anyLabel, FIND])
 }
 
 // Type character by character, re-reading document.activeElement each time.
@@ -273,6 +315,21 @@ const run = async () => {
     check('Roster: People/Areas/Confirm/Hours wear the Committee box', looksSeg(box), JSON.stringify(box))
     const c = await centredInHeader(page, 'People')
     check('Roster: that group is centred', c && c.drift <= 24, `drift ${c?.drift}px`)
+    for (const label of ['Auto-fill open shifts', 'Email rostered', 'Reset']) {
+      const wk = await segBox(page, label)
+      check(`Roster: "${label}" wears the Committee button box`, looksSeg(wk), JSON.stringify(wk))
+    }
+    // Volunteer pool is a view toggle and Publish week is the primary action,
+    // so neither should have been swept into that box.
+    const pool = await segBox(page, 'Volunteer pool')
+    check('Roster: Volunteer pool is NOT in that box', !looksSeg(pool))
+  }
+
+  // ── Committee ─────────────────────────────────────────────────────────────
+  await open('/admin/committee', 'h1')
+  {
+    const ord = await isAbove(page, 'All Meetings', 'input[placeholder*="Search meetings"]')
+    check('Committee: the search sits below the second row of buttons', !!ord?.above, JSON.stringify(ord))
   }
 
   // ── Areas & roles ─────────────────────────────────────────────────────────
@@ -289,8 +346,8 @@ const run = async () => {
   // ── Club Diary ────────────────────────────────────────────────────────────
   await open('/admin/club-diary', 'h1')
   {
-    const s = await searchBelowCaption(page, 'Search tasks')
-    check('Club Diary: search on its own line below the caption', !!s?.below && !!s?.ownLine, JSON.stringify(s))
+    const ord = await isAbove(page, 'Overdue & blocked only', 'input[placeholder*="Search tasks"]')
+    check('Club Diary: the search sits below the cadence buttons', !!ord?.above, JSON.stringify(ord))
     const t = await typesWithoutLosingFocus(page, 'Search tasks', 'BAS')
     check('Club Diary: search keeps focus per character', t.held && t.value === 'BAS', JSON.stringify(t))
     // Clear it again so the cadence row is measured unfiltered.
@@ -307,6 +364,12 @@ const run = async () => {
   {
     const box = await segBox(page, 'Events')
     check('Events: Events/Event types wear the Committee box', looksSeg(box), JSON.stringify(box))
+    const mbox = await segBox(page, 'Manage events & tickets')
+    check('Events: the Manage link is inside that same box', looksSeg(mbox), JSON.stringify(mbox))
+    const order = await segOrder(page, 'Events')
+    check('Events: Manage sits between Events and Event types',
+      JSON.stringify(order) === JSON.stringify(['Events', 'Manage events & tickets', 'Event types']),
+      JSON.stringify(order))
     const c = await centredInHeader(page, 'Events')
     check('Events: that group is centred', c && c.drift <= 24, `drift ${c?.drift}px`)
     const s = await searchBelowCaption(page, 'Search events')
@@ -320,9 +383,19 @@ const run = async () => {
   {
     const body = await page.textContent('body')
     check('Facilities: no longer says "Could not load facilities."', !body.includes('Could not load facilities'))
+    check('Facilities: the page is titled "Facilities & Assets"',
+      (await page.textContent('h1')) === 'Facilities & Assets', await page.textContent('h1'))
+    check('Facilities: the sidebar item reads "Facilities & Assets"',
+      body.includes('Facilities & Assets'))
     check('Facilities: the club\'s facilities are drawn', body.includes('Main Ground') && body.includes('Nets'))
     const box = await segBox(page, 'Availability')
     check('Facilities: Availability/Requests/Assets wear the Committee box', looksSeg(box), JSON.stringify(box))
+    const mbox = await segBox(page, 'Manage assets & bookings')
+    check('Facilities: the Manage link is inside that same box', looksSeg(mbox), JSON.stringify(mbox))
+    const order = await segOrder(page, 'Availability')
+    check('Facilities: Manage sits in the middle of the row',
+      JSON.stringify(order) === JSON.stringify(['Availability', 'Requests', 'Manage assets & bookings', 'Assets']),
+      JSON.stringify(order))
     const c = await centredInHeader(page, 'Availability')
     check('Facilities: that group is centred', c && c.drift <= 24, `drift ${c?.drift}px`)
     const s = await searchBelowCaption(page, 'Search facilities')
@@ -357,6 +430,16 @@ const run = async () => {
     const box = await segBox(page, label)
     check(`Accounts: "${label}" wears the Committee button box`, looksSeg(box), JSON.stringify(box))
   }
+  for (const label of ['Membership', 'Role', 'More']) {
+    const box = await segBox(page, label)
+    check(`Accounts: "${label}" wears the Committee button box`, looksSeg(box), JSON.stringify(box))
+  }
+  {
+    const ord = await isAbove(page, 'Membership', 'input[placeholder*="Search name or tier"]')
+    check('Accounts: the menus sit above the search', !!ord?.above, JSON.stringify(ord))
+    const below = await isAbove(page, 'Everyone', 'input[placeholder*="Search name or tier"]')
+    check('Accounts: the four filters sit above both', !!below?.above, JSON.stringify(below))
+  }
 
   // ── Payments ──────────────────────────────────────────────────────────────
   await open('/admin/fees/payments', 'h1')
@@ -368,6 +451,18 @@ const run = async () => {
     const c = await centredInHeader(page, 'Membership')
     check('Payments: the group sits on the title line', !!c?.sameLine, JSON.stringify(c))
     check('Payments: the group is centred', c && c.drift <= 24, `drift ${c?.drift}px`)
+    // The kind filter directly under the caption, the search on the line after.
+    const ord = await page.evaluate(() => {
+      const sel = [...document.querySelectorAll('select')].find(s => s.textContent.includes('All kinds'))
+      const inp = document.querySelector('input[placeholder*="Search name, bank ref"]')
+      const h1 = document.querySelector('h1')
+      if (!sel || !inp || !h1) return null
+      const rs = sel.getBoundingClientRect(), ri = inp.getBoundingClientRect(), rh = h1.getBoundingClientRect()
+      return { kindAboveSearch: rs.bottom <= ri.top + 2, kindBelowTitle: rs.top >= rh.bottom,
+               kindOnLeft: rs.x < rh.x + 40, searchOnLeft: ri.x < rh.x + 40 }
+    })
+    check('Payments: All kinds sits under the caption, on the left', !!ord?.kindBelowTitle && !!ord?.kindOnLeft, JSON.stringify(ord))
+    check('Payments: the search is on the line below it', !!ord?.kindAboveSearch, JSON.stringify(ord))
   }
 
   // ── Stock ─────────────────────────────────────────────────────────────────
@@ -383,6 +478,23 @@ const run = async () => {
     // every option it holds.
     const box = await segBox(page, 'Category')
     check('Stock: the "All categories" control wears the Committee button box', looksSeg(box), JSON.stringify(box))
+    const ord = await page.evaluate(() => {
+      const sel = document.querySelector('select[aria-label="Category"]')
+      const inp = document.querySelector('input[placeholder*="Search products"]')
+      const h1 = document.querySelector('h1')
+      if (!sel || !inp || !h1) return null
+      const rs = sel.getBoundingClientRect(), ri = inp.getBoundingClientRect(), rh = h1.getBoundingClientRect()
+      return { catAboveSearch: rs.bottom <= ri.top + 2, catOnLeft: rs.x < rh.x + 60 }
+    })
+    check('Stock: All categories is on the far left', !!ord?.catOnLeft, JSON.stringify(ord))
+    check('Stock: the search is on the line below it', !!ord?.catAboveSearch, JSON.stringify(ord))
+  }
+
+  // ── Membership tiers ──────────────────────────────────────────────────────
+  await open('/admin/fees/schedule', 'h1')
+  {
+    const box = await segBox(page, 'Membership types')
+    check('Membership tiers: its title-line button wears the Committee box', looksSeg(box), JSON.stringify(box))
   }
 
   // ── Reports ───────────────────────────────────────────────────────────────

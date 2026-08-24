@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, ManageLink, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegGroup, segItemStyle, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 
 // Events — the club's real events (club_events) with their registrations.
@@ -70,12 +71,22 @@ export default function Events({ st, patch, narrow }) {
         <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Events</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>TICKETING, RSVPS AND WHO IS COMING</Caption>
       </div>
+      {/* All three in one centred box: the two views with the editor between
+          them. The Manage link used to float on the right on its own, which
+          read as a different kind of control from the buttons beside it. It
+          navigates rather than toggles, so it carries no on state. */}
       <div style={HEAD_CENTRE}>
-        <SegTabs value={view} onChange={setView} tabs={[{ key: 'events', label: 'Events' }, { key: 'types', label: 'Event types' }]} />
+        <SegGroup>
+          <button type="button" onClick={() => setView('events')} aria-pressed={view === 'events'}
+            style={segItemStyle(view === 'events')}>Events</button>
+          <Link to="/admin/clubhouse/events/manage" style={{ ...segItemStyle(false), textDecoration: 'none' }}>
+            Manage events &amp; tickets
+          </Link>
+          <button type="button" onClick={() => setView('types')} aria-pressed={view === 'types'}
+            style={segItemStyle(view === 'types')}>Event types</button>
+        </SegGroup>
       </div>
-      <div style={HEAD_SIDE_END}>
-        <ManageLink to="/admin/clubhouse/events/manage">Manage events &amp; tickets</ManageLink>
-      </div>
+      <div style={HEAD_SIDE_END} />
       <HeaderSearch value={st.eventQuery} onChange={v => patch({ eventQuery: v })}
         placeholder={view === 'types' ? 'Search event types…' : 'Search events, venues and who is coming…'} />
     </ScreenHeader>

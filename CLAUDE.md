@@ -1006,6 +1006,48 @@ load facilities." whatever the club held.
   suite's budget is those measured numbers, so this can never make one worse or
   introduce a new one — Accounts in fact comes out at 27px now.
 
+### The pale edge was a class that does not exist (v9.52.1)
+
+- **`border pb-hairline` IS NOT A CLASS, and that is the reported "white
+  border".** `pb-hairline` is a tailwind COLOUR (`colors.pb.hairline`), so the
+  utility is `border-pb-hairline`; the bare form only applies the WIDTH and lets
+  the colour fall through to Tailwind's preflight default of `#e5e7eb`. Measured
+  off the computed style rather than guessed: Committee's own box reads
+  `rgb(29,35,49)` and the Tailwind kit's read `rgb(229,231,235)`. Only
+  `.pb-hairline-t/-b/-r` exist as real classes, which is why the sibling
+  `border-b pb-hairline-b` on the module header was always right.
+- **The same typo appears ~917 times across the app and is DELIBERATELY NOT
+  SWEPT.** One shared definition (`SEG_GROUP_CLS`) is what every reported row
+  reads, so fixing it there fixed all of them; a 900-line sweep of screens
+  nobody mentioned is a different change with a different risk, and belongs to
+  whoever asks for it. The suite asserts the COLOUR now, not "has a border", so
+  a box that regresses to the default fails.
+- **A SEARCH BOX BELONGS BELOW THE BUTTONS THAT NARROW THE SAME LIST.**
+  Committee, Club Diary, Accounts, Payments and Stock all read top to bottom:
+  pick the group, then search what is left. `isAbove` measures it off the real
+  boxes, so "below" is a fact rather than a reading of the source order.
+- **`HeaderSearch` gained a `style` escape hatch, and it is load-bearing.** Its
+  `flex: 1 1 100%` is what forces the line break inside the wrapping header;
+  inside a COLUMN container that basis is read against the HEIGHT instead, so a
+  caller there passes `{ flex: '0 0 auto' }`.
+- **Moving the Club Diary's box down beside its cadence buttons would have left
+  the template library with no search at all** — those buttons only exist on the
+  Season plan tab. The templates tab keeps its own box at the top of the list it
+  narrows.
+- **`SegItem` gained `as`**, mirroring `Button`'s own escape hatch, for a row
+  whose item NAVIGATES rather than toggles. `aria-pressed` is only emitted on a
+  real button, since a link has no pressed state.
+- **Events' and Facilities' Manage links moved INTO their section's box**, in
+  the middle of the row. They were floating on the right on their own, which
+  read as a different kind of control from the buttons beside them. The suite
+  asserts the box's children IN ORDER, so "in between" is measured.
+- **Facilities is `Facilities & Assets`** in the sidebar, on the screen and on
+  its manage screen. The rename is display only: `/admin/assets`,
+  `MANAGE_ASSETS` and every stored row are untouched.
+- **Verified in Chromium**: the suite is 84 checks now, and **31 of them fail
+  against the previous commit** — including the pale border, read back as the
+  measured `rgb(229,231,235)`.
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out

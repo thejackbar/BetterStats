@@ -608,9 +608,14 @@ export default function Committee({ st, patch, narrow }) {
   // one list on screen: a motion, an action or something minuted is inside a
   // meeting, and an action or a motion is inside a plan, so a box that only
   // filtered the visible rows would answer the wrong question. It sits on its
-  // own line, below the section buttons and above any second row of them.
+  // own line BELOW every row of section buttons, so what it searches reads as
+  // everything above it.
   const subBar = () => (searchable ? (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+      {/* The buttons first, then the box. A search typed here reaches the whole
+          section, so it reads as belonging to everything above it rather than
+          to the row of buttons that would otherwise follow it. */}
+      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
         {/* box-sizing, or the padding is added on top of the cap and the row
             pushes the page sideways on a phone. */}
@@ -625,7 +630,6 @@ export default function Committee({ st, patch, narrow }) {
           </button>
         )}
       </div>
-      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
     </div>
   ) : (subRows.length === 0 ? null : (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>

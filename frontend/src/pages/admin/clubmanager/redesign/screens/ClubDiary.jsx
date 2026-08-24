@@ -103,10 +103,6 @@ export default function ClubDiary({ st, patch, narrow }) {
         <ManageLink to="/admin/clubhouse/diary/manage">Full diary editor</ManageLink>
         {children}
       </div>
-      {/* On its own line under the heading, the place every other Clubhouse
-          screen carries its search. */}
-      <HeaderSearch value={st.diaryQuery} onChange={v => patch({ diaryQuery: v })}
-        placeholder={tab === 'templates' ? 'Search the template library…' : 'Search tasks, roles and who is doing them…'} />
     </ScreenHeader>
   )
 
@@ -255,12 +251,19 @@ export default function ClubDiary({ st, patch, narrow }) {
               a SegTabs; "Overdue & blocked only" narrows on a different axis
               and can be on alongside any cadence, so it keeps its own box
               rather than pretending to be a fifth cadence. */}
-          <div style={{ padding: '11px 20px', borderBottom: `1px solid ${C.hair}`, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <SegTabs value={cadFilter} onChange={c => patch({ cadFilter: c })}
-              tabs={['All'].concat(CAD_ORDER.filter(c => tasks.some(t => t.cadence === c))).map(c => ({ key: c, label: c }))} />
-            <SegGroup>
-              <SegItem tone="red" active={issuesOnly} onClick={() => patch({ issuesOnly: !issuesOnly })}>Overdue &amp; blocked only</SegItem>
-            </SegGroup>
+          {/* The search sits UNDER the cadence buttons, on its own line: the two
+              narrow the same list, and reading them top to bottom is what says
+              the box applies to everything the buttons left standing. */}
+          <div style={{ padding: '11px 20px', borderBottom: `1px solid ${C.hair}`, display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <SegTabs value={cadFilter} onChange={c => patch({ cadFilter: c })}
+                tabs={['All'].concat(CAD_ORDER.filter(c => tasks.some(t => t.cadence === c))).map(c => ({ key: c, label: c }))} />
+              <SegGroup>
+                <SegItem tone="red" active={issuesOnly} onClick={() => patch({ issuesOnly: !issuesOnly })}>Overdue &amp; blocked only</SegItem>
+              </SegGroup>
+            </div>
+            <HeaderSearch value={st.diaryQuery} onChange={v => patch({ diaryQuery: v })}
+              placeholder="Search tasks, roles and who is doing them…" style={{ flex: '0 0 auto' }} />
           </div>
 
           <div className="pb-scroll" style={{ flex: 1, overflow: 'auto' }}>
@@ -326,6 +329,14 @@ export default function ClubDiary({ st, patch, narrow }) {
         <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 340px', gap: 0, alignItems: 'start', minHeight: 0 }}>
           <div className="pb-scroll" style={{ padding: '18px 20px', overflowY: 'auto' }}>
             <div style={{ ...cap, marginBottom: 4 }}>TEMPLATE LIBRARY</div>
+            {/* The template library has no button row of its own, so its box
+                sits at the top of the list it narrows. Moving the season plan's
+                search down beside its cadence buttons must not leave this tab
+                with no search at all. */}
+            <div style={{ marginBottom: 12 }}>
+              <HeaderSearch value={st.diaryQuery} onChange={v => patch({ diaryQuery: v })}
+                placeholder="Search the template library…" style={{ flex: '0 0 auto' }} />
+            </div>
             <EntityManager
               describe="The club's standing obligations — what has to happen every season and who owns it by role. Edit here and every future season you generate inherits it."
               load={() => api.diaryListDefinitions().then(r => r?.definitions || r || [])}

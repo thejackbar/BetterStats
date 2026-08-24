@@ -119,10 +119,13 @@ export const HEAD_SIDE_END = { ...HEAD_SIDE, display: 'flex', alignItems: 'cente
 // the Directory both carry theirs. `flex: 1 1 100%` is what makes the wrapping
 // header break before it; `box-sizing` is what stops the padding being added on
 // top of the cap and pushing the page sideways on a phone.
-export function HeaderSearch({ value, onChange, placeholder, width = 380 }) {
+// `style` is for a caller that is NOT the wrapping header row — `flex: 1 1 100%`
+// is what forces the line break there, and inside a COLUMN container that basis
+// would be read against the height instead. Pass `{ flex: '0 0 auto' }` there.
+export function HeaderSearch({ value, onChange, placeholder, width = 380, style }) {
   const q = (value || '').trim()
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%', ...style }}>
       <input value={value || ''} onChange={e => onChange(e.target.value)}
         placeholder={placeholder} aria-label={placeholder}
         style={{ width, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }} />

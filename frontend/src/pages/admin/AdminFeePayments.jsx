@@ -83,15 +83,26 @@ export default function AdminFeePayments() {
     // money job can be scoped to a group of people ("every Junior Player") from
     // here. The search and the kind filter stay underneath.
     tabs: people.menus,
+    // Three lines, reading top to bottom: WHO you are looking at (on the title
+    // line), then WHAT KIND of payment, then the box that searches what is left.
     filters: (
-      <div className="flex items-center gap-2 flex-wrap">
-        <SearchInput wide value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
+      <div className="flex flex-col gap-2 w-full min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Inline width: the shared input class carries `w-full`, and which of
+              two width utilities wins is emission order rather than the class
+              string, so a utility here can lose and let the select take the
+              whole line. */}
+          <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)}
+            style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box' }}>
+            <option value="">All kinds</option>
+            <option value="membership">Membership only</option>
+            <option value="match_day">Match day only</option>
+          </Select>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <SearchInput wide value={q} onChange={setQ} placeholder="Search name, bank ref, method…" />
+        </div>
         {people.chips}
-        <Select value={kindFilter} onChange={e => setKindFilter(e.target.value)} className="!w-auto">
-          <option value="">All kinds</option>
-          <option value="membership">Membership only</option>
-          <option value="match_day">Match day only</option>
-        </Select>
       </div>
     ),
     actions: (

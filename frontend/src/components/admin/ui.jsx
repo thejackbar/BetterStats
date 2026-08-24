@@ -252,8 +252,15 @@ export function SearchInput({ value, onChange, placeholder = 'Search…', classN
 // rows still have to READ as Committee's, so the container is exported
 // separately and they fill it with `SegItem`s (or seg-styled menus) instead of
 // inventing a lookalike box.
+// `border-pb-hairline`, NOT `border pb-hairline`. The latter is what this used
+// to say and it is not a class at all — `.pb-hairline` does not exist (only
+// `.pb-hairline-t/-b/-r` do), so the width applied and the COLOUR fell through
+// to Tailwind's preflight default of #e5e7eb. That is the near-white edge these
+// rows were drawing, measured off the computed style: Committee's own box reads
+// rgb(29,35,49) and this one read rgb(229,231,235). The same typo appears ~900
+// times elsewhere in the app and is NOT swept here.
 export const SEG_GROUP_CLS =
-  'flex items-center flex-wrap gap-0.5 bg-pb-surface2 border pb-hairline rounded-lg p-[3px]'
+  'flex items-center flex-wrap gap-0.5 bg-pb-surface2 border border-pb-hairline rounded-lg p-[3px]'
 
 export function SegGroup({ children, className = '', ...rest }) {
   return <div className={`${SEG_GROUP_CLS} ${className}`} {...rest}>{children}</div>
@@ -261,17 +268,23 @@ export function SegGroup({ children, className = '', ...rest }) {
 
 // One button inside a SegGroup. `warn` keeps the amber an attention filter
 // already carried, so "Owes money" still reads as the one to look at.
-export function SegItem({ active, onClick, children, warn = false, count, className = '', ...rest }) {
+// `as` mirrors Button's own escape hatch, for a row whose item navigates rather
+// than toggles (a Manage link sitting among its section's buttons). A link has
+// no pressed state, so `aria-pressed` is only emitted on a real button.
+export function SegItem({ active, onClick, children, warn = false, count, className = '', as: As = 'button', ...rest }) {
   const activeStyle = warn
     ? { background: 'rgba(245,181,66,0.18)', color: '#f5b542' }
     : { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' }
   return (
-    <button type="button" onClick={onClick} aria-pressed={!!active}
-      className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold whitespace-nowrap ${active ? '' : 'text-pb-faint hover:text-pb-text'} ${className}`}
+    <As
+      type={As === 'button' ? 'button' : undefined}
+      onClick={onClick}
+      aria-pressed={As === 'button' ? !!active : undefined}
+      className={`inline-flex items-center px-3 py-[5px] rounded-md text-[12.5px] font-semibold whitespace-nowrap no-underline ${active ? '' : 'text-pb-faint hover:text-pb-text'} ${className}`}
       style={active ? activeStyle : undefined} {...rest}>
       {children}
       {count != null && <span className="font-mono text-[10px] ml-1.5 opacity-70">{count}</span>}
-    </button>
+    </As>
   )
 }
 

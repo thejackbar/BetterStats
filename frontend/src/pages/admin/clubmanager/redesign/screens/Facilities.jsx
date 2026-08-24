@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, Toast, ManageLink, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegGroup, segItemStyle, Toast, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager from '../parts/EntityManager'
 
 // Facilities on real data — the availability grid (this week's real bookings,
@@ -71,15 +72,27 @@ export default function Facilities({ st, patch, narrow }) {
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
       <div style={HEAD_SIDE}>
-        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Facilities</h1>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Facilities &amp; Assets</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>THIS WEEK · EACH COLUMN RUNS 8AM → MIDNIGHT</Caption>
       </div>
+      {/* All four in one centred box, with the editor in the middle of the row.
+          The Manage link used to float on the right on its own, which read as a
+          different kind of control from the buttons beside it. It navigates
+          rather than toggles, so it carries no on state. */}
       <div style={HEAD_CENTRE}>
-        <SegTabs value={tab} onChange={k => patch({ facTab: k })} tabs={[{ key: 'availability', label: 'Availability' }, { key: 'requests', label: 'Requests' }, { key: 'assets', label: 'Assets' }]} />
+        <SegGroup>
+          {[{ key: 'availability', label: 'Availability' }, { key: 'requests', label: 'Requests' }].map(t => (
+            <button key={t.key} type="button" onClick={() => patch({ facTab: t.key })}
+              aria-pressed={tab === t.key} style={segItemStyle(tab === t.key)}>{t.label}</button>
+          ))}
+          <Link to="/admin/clubhouse/facilities/manage" style={{ ...segItemStyle(false), textDecoration: 'none' }}>
+            Manage assets &amp; bookings
+          </Link>
+          <button type="button" onClick={() => patch({ facTab: 'assets' })}
+            aria-pressed={tab === 'assets'} style={segItemStyle(tab === 'assets')}>Assets</button>
+        </SegGroup>
       </div>
-      <div style={HEAD_SIDE_END}>
-        <ManageLink to="/admin/clubhouse/facilities/manage">Manage assets &amp; bookings</ManageLink>
-      </div>
+      <div style={HEAD_SIDE_END} />
       <HeaderSearch value={st.facQuery} onChange={v => patch({ facQuery: v })}
         placeholder="Search facilities, bookings and assets…" />
     </ScreenHeader>

@@ -309,7 +309,7 @@ function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone 
 export default function AdminFeesMembers() {
   // The Directory's People filters, matched on the segments that service
   // computes. Fetched once here; this screen's own data layer is untouched.
-  const people = usePeopleFilters()
+  const people = usePeopleFilters({ seg: true })
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
   // The season lives in the URL so it survives a trip into a member and back.
@@ -476,13 +476,17 @@ export default function AdminFeesMembers() {
         </SegItem>
       </SegGroup>
     ),
+    // Three lines, reading top to bottom: WHO you are looking at (on the title
+    // line), then WHICH GROUP of them, then the box that searches what is left.
     filters: (
-      <div className="flex items-center gap-2 flex-wrap">
-        <SearchInput wide value={q} onChange={setQ} placeholder="Search name or tier…" />
+      <div className="flex flex-col gap-2 w-full min-w-0">
         {/* The same Membership / Role / More menus the Directory carries, so a
             money job can be scoped to a group of people ("every Junior Player
             who owes") without leaving this screen. */}
-        {people.menus}
+        <div className="flex items-center gap-2 flex-wrap">{people.menus}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <SearchInput wide value={q} onChange={setQ} placeholder="Search name or tier…" />
+        </div>
         {people.chips}
       </div>
     ),

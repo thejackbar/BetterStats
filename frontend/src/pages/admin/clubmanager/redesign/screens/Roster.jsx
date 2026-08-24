@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref, SegTabs, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
+import { C, MONO, ScreenHeader, NavToggle, Toast, initials, usePref, SegTabs, SegGroup, segItemStyle, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
 
 // Roster on the real backend. Operational areas + shift patterns are config; a
 // roster week materialises shifts from the patterns; assignments run through the
@@ -80,7 +80,7 @@ function EmailRostered({ weekStart, onToast }) {
   return (
     <span style={{ position: 'relative' }}>
       <button disabled={busy} onClick={() => setOpen(o => !o)}
-        style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+        style={{ ...segItemStyle(open), opacity: busy ? 0.6 : 1 }}>
         {busy ? 'Building…' : 'Email rostered'}
       </button>
       {open && (
@@ -781,9 +781,15 @@ export default function Roster({ st, patch, narrow }) {
           </div>
           <div style={{ width: 120, height: 6, borderRadius: 3, background: C.surface2, overflow: 'hidden' }}><div style={{ height: '100%', width: pct + '%', background: pct === 100 ? C.ok : C.accent }} /></div>
           <button onClick={() => setPoolOpen(v => !v)} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(poolOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{poolOpen ? 'Hide pool' : 'Volunteer pool'}</button>
-          <button disabled={busy} onClick={autoFill} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
-          <EmailRostered weekStart={data.week.week_start} onToast={t => patch({ toast: t })} />
-          <button onClick={resetWeek} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.faint, cursor: 'pointer' }}>Reset</button>
+          {/* The three that act on the week itself, in Committee's own
+              segmented control — one box rather than three loose buttons.
+              "Volunteer pool" is a view toggle and "Publish week" is the
+              primary action, so neither joins them. */}
+          <SegGroup>
+            <button disabled={busy} onClick={autoFill} style={{ ...segItemStyle(false), opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
+            <EmailRostered weekStart={data.week.week_start} onToast={t => patch({ toast: t })} />
+            <button onClick={resetWeek} style={segItemStyle(false)}>Reset</button>
+          </SegGroup>
           <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
           </>}
         </div>

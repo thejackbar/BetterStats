@@ -675,7 +675,7 @@ export default function AdminAssets() {
   }, [toast])
 
   return (
-    <BetterClubManagerLayout title="Facilities" caption="Grounds, gear, bookings and service history"
+    <BetterClubManagerLayout title="Facilities & Assets" caption="Grounds, gear, bookings and service history"
       tabs={<SegButtons value={tab} onChange={setTab} tabs={ASSET_TABS} />}>
       <div className="max-w-4xl">
         {tab === 'facilities' && <FacilitiesTab onFacilitiesChanged={loadFacilities} />}

@@ -735,8 +735,9 @@ export default function MerchStock() {
       twoRow
       tabs={<SegButtons value={cat} onChange={pickTab}
         tabs={[{ key: 'all', label: 'All' }, ...CATEGORIES.map(c => ({ key: c.key, label: c.label }))]} />}
-      filters={<div className="flex items-center gap-2 flex-wrap">
-        <SearchInput wide value={q} onChange={setQ} placeholder="Search products…" />
+      // Two lines, reading top to bottom: which CATEGORY of stock, then the box
+      // that searches what is left. (What KIND of stock is on the title line.)
+      filters={<div className="flex flex-col gap-2 w-full min-w-0">
         {/* Dressed as one more of the buttons above it — same box, same tint
             when it is narrowing something — but still a real <select>, because
             a club's category tree is as long as the club makes it and that is
@@ -747,16 +748,21 @@ export default function MerchStock() {
             string, so a `w-48` here sometimes lost and the select took the
             whole line, pushing itself under the search box. */}
         {scopedCats.length > 0 && (
-          <SegGroup>
-            <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
-              aria-label="Category"
-              className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold bg-transparent border-none outline-none cursor-pointer ${catFilter ? '' : 'text-pb-faint'}`}
-              style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box', ...(catFilter ? { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' } : {}) }}>
-              <option value="">All categories</option>
-              {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
-            </select>
-          </SegGroup>
+          <div className="flex items-center gap-2 flex-wrap">
+            <SegGroup>
+              <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)}
+                aria-label="Category"
+                className={`px-3 py-[5px] rounded-md text-[12.5px] font-semibold bg-transparent border-none outline-none cursor-pointer ${catFilter ? '' : 'text-pb-faint'}`}
+                style={{ width: 192, maxWidth: '100%', boxSizing: 'border-box', ...(catFilter ? { background: 'color-mix(in srgb, var(--pb-accent) 15%, transparent)', color: 'var(--pb-accent-ink)' } : {}) }}>
+                <option value="">All categories</option>
+                {scopedCats.map((c) => <option key={c.id} value={c.id}>{catPathById[c.id]}</option>)}
+              </select>
+            </SegGroup>
+          </div>
         )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <SearchInput wide value={q} onChange={setQ} placeholder="Search products…" />
+        </div>
       </div>}
       actions={<div className="flex items-center gap-2">
         <Btn sm icon="list" onClick={() => setShowCatManager(true)}>Categories</Btn>

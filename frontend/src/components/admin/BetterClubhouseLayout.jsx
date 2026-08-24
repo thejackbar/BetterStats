@@ -59,7 +59,7 @@ function buildNav({ modules, counts, storefront }) {
     { heading: 'Club' },
     { to: '/admin/club-diary', label: 'Diary', icon: 'ladders', cap: CAP.MANAGE_CLUB_DIARY },
     { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE },
-    { to: '/admin/assets', label: 'Facilities', icon: 'nets', cap: CAP.MANAGE_ASSETS },
+    { to: '/admin/assets', label: 'Facilities & Assets', icon: 'nets', cap: CAP.MANAGE_ASSETS },
 
     { heading: 'Setup' },
     // The catalogue every other screen reads from: roles (a committee-flagged
