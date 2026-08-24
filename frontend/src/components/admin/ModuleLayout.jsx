@@ -297,10 +297,17 @@ export default function ModuleLayout({
           </div>
           {twoRow && (
             // The filters wrap INSIDE their own box and the action cluster does
-            // not shrink, so the search box and the buttons always share the
-            // top of this row. Letting the whole row wrap put the buttons on a
-            // line of their own the moment a screen carried a few filters.
-            <div className="flex items-start gap-3.5">
+            // not shrink, so the search box and the buttons always share this
+            // row. Letting the whole row wrap put the buttons on a line of
+            // their own the moment a screen carried a few filters.
+            //
+            // `items-end`, so where a screen stacks its filters (a control row,
+            // then the search below it) the action lands beside the SEARCH
+            // rather than up beside the controls. Narrowing a list and adding
+            // to it are the two things a person does with what is underneath,
+            // and they belong on one line. A screen whose filters are a single
+            // row is unaffected: both boxes are one line tall either way.
+            <div className="flex items-end gap-3.5">
               <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">{filters}</div>
               <div className="flex items-center gap-[26px] shrink-0">
                 <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />

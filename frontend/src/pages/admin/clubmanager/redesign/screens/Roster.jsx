@@ -499,6 +499,20 @@ export default function Roster({ st, patch, narrow }) {
   // here is a new element type on every render, so React rebuilds its whole
   // subtree and any focused input inside it loses the caret after one
   // character. This is a plain function returning elements, called below.
+  // DECLARED ABOVE `header` DELIBERATELY. The header draws the week's primary
+  // action, and two of the three `header(...)` calls are in early returns that
+  // run before this point in the render body — so leaving it further down made
+  // the "no operational areas yet" screen throw on a `const` in its temporal
+  // dead zone. Nothing between here and where it used to sit is read by it.
+  const publish = async () => {
+    const res = await api.rosterPublish(data.week.id).catch(() => null)
+    if (!res) return
+    setData(d => ({ ...d, week: { ...d.week, status: 'published' } }))
+    patch({ toast: res.open
+      ? { tone: 'warn', title: 'Published with ' + res.open + ' open shift' + (res.open === 1 ? '' : 's') + '.', body: 'Volunteers can self-nominate for the gaps; you confirm each one.' }
+      : { tone: 'ok', title: 'Week published.', body: 'Everyone rostered gets their shift and a check-in tap that logs their hours.' } })
+  }
+
   const header = (children) => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
@@ -511,7 +525,14 @@ export default function Roster({ st, patch, narrow }) {
           Committee screen and the Directory carry theirs. `flex: 1 1 100%` is
           what makes the wrapping header break before it. */}
       <HeaderSearch value={st.rosterQuery} onChange={v => patch({ rosterQuery: v })}
-        placeholder="Search people, areas, roles and shifts…" />
+        placeholder="Search people, areas, roles and shifts…"
+        // The week's primary action rides on the search line rather than up in
+        // the right-hand group, where it wrapped onto a line of its own.
+        // Withheld on Hours and Confirm for the same reason the rest of that
+        // group is: neither of those is the shift grid.
+        trailing={data && view !== 'hours' && view !== 'confirm' ? (
+          <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
+        ) : null} />
     </ScreenHeader>
   )
 
@@ -595,14 +616,6 @@ export default function Roster({ st, patch, narrow }) {
     if (!res) return
     setShifts(res.shifts || shifts)
     patch({ toast: { tone: res.placed ? 'ok' : 'warn', title: 'Auto-fill proposed ' + res.placed + ' assignment' + (res.placed === 1 ? '' : 's') + '.', body: res.remaining ? res.remaining + ' shift' + (res.remaining === 1 ? '' : 's') + ' still need a qualified, available volunteer.' : 'Every shift is covered. Review the amber chips, then publish.' } })
-  }
-  const publish = async () => {
-    const res = await api.rosterPublish(data.week.id).catch(() => null)
-    if (!res) return
-    setData(d => ({ ...d, week: { ...d.week, status: 'published' } }))
-    patch({ toast: res.open
-      ? { tone: 'warn', title: 'Published with ' + res.open + ' open shift' + (res.open === 1 ? '' : 's') + '.', body: 'Volunteers can self-nominate for the gaps; you confirm each one.' }
-      : { tone: 'ok', title: 'Week published.', body: 'Everyone rostered gets their shift and a check-in tap that logs their hours.' } })
   }
   const resetWeek = async () => {
     if (!window.confirm('Reset this week? Every assignment is cleared and the shifts are regenerated from your patterns. This only affects this week.')) return
@@ -783,14 +796,14 @@ export default function Roster({ st, patch, narrow }) {
           <button onClick={() => setPoolOpen(v => !v)} style={{ padding: '8px 12px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', ...(poolOpen ? { border: '1px solid color-mix(in srgb, var(--pb-accent) 45%, transparent)', color: C.accent, background: 'color-mix(in srgb, var(--pb-accent) 10%, transparent)' } : { border: `1px solid ${C.hair2}`, color: C.dim, background: 'transparent' }) }}>{poolOpen ? 'Hide pool' : 'Volunteer pool'}</button>
           {/* The three that act on the week itself, in Committee's own
               segmented control — one box rather than three loose buttons.
-              "Volunteer pool" is a view toggle and "Publish week" is the
-              primary action, so neither joins them. */}
+              "Volunteer pool" is a view toggle, so it does not join them, and
+              "Publish week" is the primary action and has moved up onto the
+              search line. */}
           <SegGroup>
             <button disabled={busy} onClick={autoFill} style={{ ...segItemStyle(false), opacity: busy ? 0.6 : 1 }}>Auto-fill open shifts</button>
             <EmailRostered weekStart={data.week.week_start} onToast={t => patch({ toast: t })} />
             <button onClick={resetWeek} style={segItemStyle(false)}>Reset</button>
           </SegGroup>
-          <button onClick={publish} style={{ padding: '8px 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }}>Publish week</button>
           </>}
         </div>
       </>)}

@@ -253,6 +253,26 @@ async function isAbove(page, topLabel, bottomSel) {
   }, [topLabel, bottomSel, FIND])
 }
 
+// Is the primary action on the SAME LINE as the search box, and to its right?
+// Measured off the two real boxes: the rows must overlap vertically (so it is
+// genuinely one line, not a wrap) and the action must start after the box ends.
+// A check that only asked "are they both in the header" would pass with the
+// action still up on the title line.
+async function onSearchLine(page, actionLabel, placeholder) {
+  return page.evaluate(([text, ph, find]) => {
+    const btn = eval(find)(text)
+    const input = document.querySelector(`input[placeholder*="${ph}"]`)
+    if (!btn || !input) return { missing: !btn ? 'action' : 'input' }
+    const a = btn.getBoundingClientRect(), i = input.getBoundingClientRect()
+    return {
+      sameLine: a.top < i.bottom - 2 && a.bottom > i.top + 2,
+      toTheRight: a.left >= i.right - 2,
+      aTop: Math.round(a.top), iTop: Math.round(i.top),
+      aLeft: Math.round(a.left), iRight: Math.round(i.right),
+    }
+  }, [actionLabel, placeholder, FIND])
+}
+
 // The labels inside a seg box, in the order they are actually drawn.
 async function segOrder(page, anyLabel) {
   return page.evaluate(([text, find]) => {
@@ -326,6 +346,9 @@ const run = async () => {
     check('Directory: search on its own line below the heading', !!s?.below && !!s?.ownLine, JSON.stringify(s))
     const t = await typesWithoutLosingFocus(page, 'Search name or role', 'Gill')
     check('Directory: search keeps focus per character', t.held && t.value === 'Gill', JSON.stringify(t))
+    const a = await onSearchLine(page, '+ Add person', 'Search name or role')
+    check('Directory: + Add person sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
   }
 
   // ── Roster ────────────────────────────────────────────────────────────────
@@ -343,6 +366,9 @@ const run = async () => {
     // so neither should have been swept into that box.
     const pool = await segBox(page, 'Volunteer pool')
     check('Roster: Volunteer pool is NOT in that box', !looksSeg(pool))
+    const a = await onSearchLine(page, 'Publish week', 'Search people, areas')
+    check('Roster: Publish week sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
   }
 
   // ── Committee ─────────────────────────────────────────────────────────────
@@ -350,6 +376,22 @@ const run = async () => {
   {
     const ord = await isAbove(page, 'All Meetings', 'input[placeholder*="Search meetings"]')
     check('Committee: the search sits below the second row of buttons', !!ord?.above, JSON.stringify(ord))
+    const a = await onSearchLine(page, '+ New meeting', 'Search meetings')
+    check('Committee: + New meeting sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
+    // The three readouts moved UP to the title line, which is what freed the
+    // right of the search row for the action. Measured against the <h1>, since
+    // "in the header" was already true before the move.
+    const stats = await page.evaluate(() => {
+      const lab = [...document.querySelectorAll('header *')]
+        .find(n => n.children.length === 0 && (n.textContent || '').trim() === 'POSITIONS FILLED')
+      const h1 = document.querySelector('header h1')
+      if (!lab || !h1) return null
+      const r = lab.getBoundingClientRect(), t = h1.getBoundingClientRect()
+      return { sameLine: r.top < t.bottom + 8 && r.bottom > t.top - 8, onRight: r.x > t.right }
+    })
+    check('Committee: the three readouts sit on the title line',
+      !!stats?.sameLine && !!stats?.onRight, JSON.stringify(stats))
   }
 
   // ── Areas & roles ─────────────────────────────────────────────────────────
@@ -459,6 +501,9 @@ const run = async () => {
     check('Accounts: the menus sit above the search', !!ord?.above, JSON.stringify(ord))
     const below = await isAbove(page, 'Everyone', 'input[placeholder*="Search name or tier"]')
     check('Accounts: the four filters sit above both', !!below?.above, JSON.stringify(below))
+    const a = await onSearchLine(page, 'Add member', 'Search name or tier')
+    check('Accounts: Add member sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
   }
 
   // ── Payments ──────────────────────────────────────────────────────────────
@@ -483,6 +528,9 @@ const run = async () => {
     })
     check('Payments: All kinds sits under the caption, on the left', !!ord?.kindBelowTitle && !!ord?.kindOnLeft, JSON.stringify(ord))
     check('Payments: the search is on the line below it', !!ord?.kindAboveSearch, JSON.stringify(ord))
+    const a = await onSearchLine(page, 'Import bank CSV', 'Search name, bank ref')
+    check('Payments: Import bank CSV sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
   }
 
   // ── Stock ─────────────────────────────────────────────────────────────────
@@ -508,6 +556,9 @@ const run = async () => {
     })
     check('Stock: All categories is on the far left', !!ord?.catOnLeft, JSON.stringify(ord))
     check('Stock: the search is on the line below it', !!ord?.catAboveSearch, JSON.stringify(ord))
+    const a = await onSearchLine(page, 'New product', 'Search products')
+    check('Stock: New product sits on the search line, to its right',
+      !!a?.sameLine && !!a?.toTheRight, JSON.stringify(a))
   }
 
   // ── Membership tiers ──────────────────────────────────────────────────────

@@ -731,14 +731,17 @@ export default function Directory({ st, patch, narrow }) {
             </MenuButton>
         </SegGroup>
         </div>
-        <div style={HEAD_SIDE_END}>
-          <button onClick={openAdd} style={btnP}>+ Add person</button>
-        </div>
+        {/* Kept, empty: it has a zero basis so it costs nothing, and dropping it
+            would let the title take the whole row and slide the centred buttons
+            off centre. */}
+        <div style={HEAD_SIDE_END} />
 
-        {/* The search sits on its own line under the heading, the same place it
-            sits on Committee and every other Clubhouse screen. */}
+        {/* The search on its own line under the heading, with the one primary
+            action at the right of that same line — narrowing the list and
+            adding to it are the two things done with the list below. */}
         <HeaderSearch value={st.dirQuery} onChange={v => patch({ dirQuery: v })}
-          placeholder="Search name or role…" />
+          placeholder="Search name or role…"
+          trailing={<button onClick={openAdd} style={btnP}>+ Add person</button>} />
 
         {/* What is actually filtered, and how to undo it. Drawn only when
             something is on, so an unfiltered Directory carries no extra row. */}

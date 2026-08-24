@@ -1136,6 +1136,52 @@ load facilities." whatever the club held.
   against the previous commit** — including the pale border, read back as the
   measured `rgb(229,231,235)`.
 
+### The primary action moved down beside the search (v9.53.1)
+
+- **NARROWING A LIST AND ADDING TO IT ARE ONE LINE.** `+ Add person`,
+  `Publish week`, `+ New meeting`, `Add member`, `Import bank CSV` and
+  `New product` each sat on the title line while the box that searches the very
+  list they add to sat below. They are on the right of the search row now, on
+  all six screens.
+- **`HeaderSearch` grew a `trailing` slot** rather than each screen hand-rolling
+  the row, so the two kits stay one definition apart: `ModuleLayout`'s `twoRow`
+  block does the same job for the screens on that shell.
+- **`items-start` → `items-end` is the whole `ModuleLayout` change, and it is
+  the right one.** Accounts, Payments and Stock stack their filters (a control
+  row, then the search under it), so top-aligning the action cluster put it
+  beside the CONTROLS. Bottom-aligning lands it beside the search. A screen
+  whose filters are a single row (every Comms screen) is unaffected — both
+  boxes are one line tall either way — which is why this needed no per-screen
+  opt-in.
+- **On Committee the action had to LEAVE the header for the readouts to
+  arrive.** `POSITIONS FILLED` / `OPEN ACTIONS` / `MOTIONS THIS SEASON` are
+  passed in as `header(children)` and carry `marginLeft: 'auto'`; so did the
+  action cluster, and two auto-margin siblings share the space rather than one
+  taking the right edge. Removing the action div is what puts the readouts on
+  the title line — nothing about the readouts themselves changed.
+- **`alignSelf: 'stretch'` on Committee's search row is load-bearing.** The
+  column above it sets `alignItems: 'flex-start'`, so the row is only as wide as
+  its own contents and an auto left margin has nothing to push the button
+  against. Without it the action sits immediately after CLEAR rather than on the
+  right.
+- **A `const` READ BY THE HEADER MUST BE DECLARED ABOVE IT.** Roster's
+  `publish` sat below `header`, which is fine while the header does not read it
+  — but two of the three `header(...)` calls are inside EARLY RETURNS that run
+  before that point in the render body, so putting the button in the header
+  threw on a temporal-dead-zone reference the moment the "no operational areas
+  yet" screen drew. `publish` moved up. A `data &&` guard is not a fix here:
+  that branch runs with `data` truthy.
+- **Verified in Chromium**: `onSearchLine` measures the two real boxes — they
+  must overlap VERTICALLY (genuinely one line, not a wrap) and the action must
+  start after the box ends. A check that only asked "are both in the header"
+  would have passed with the action still up on the title line. The Committee
+  readouts are measured against the `<h1>` for the same reason. The suite is 97
+  checks now, and **all seven of the new ones fail against the previous
+  commit** — each reporting the gap it was measuring (`aTop` 76 against `iTop`
+  133 on the Directory, 173/224 on the Roster, 76/244 on Committee, 127/171 on
+  Accounts and Payments, 119/161 on Stock), and the Committee readouts reading
+  `sameLine: false`.
+
 ## ONE asset register: equipment is not inventory (migration 279, v9.53.0, Aug 2026)
 
 Asked for after a question about the accounting shape: treat inventory as one

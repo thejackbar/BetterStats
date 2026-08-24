@@ -122,16 +122,22 @@ export const HEAD_SIDE_END = { ...HEAD_SIDE, display: 'flex', alignItems: 'cente
 // `style` is for a caller that is NOT the wrapping header row — `flex: 1 1 100%`
 // is what forces the line break there, and inside a COLUMN container that basis
 // would be read against the height instead. Pass `{ flex: '0 0 auto' }` there.
-export function HeaderSearch({ value, onChange, placeholder, width = 380, style }) {
+// `trailing` is the screen's primary action, on the RIGHT of the same line as
+// the box. It sits here rather than up on the title line because the two are
+// what a person does with the list underneath: narrow it, or add to it.
+export function HeaderSearch({ value, onChange, placeholder, width = 380, style, trailing }) {
   const q = (value || '').trim()
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%', ...style }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%', flexWrap: 'wrap', ...style }}>
       <input value={value || ''} onChange={e => onChange(e.target.value)}
         placeholder={placeholder} aria-label={placeholder}
         style={{ width, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none', fontFamily: 'inherit' }} />
       {q && (
         <button onClick={() => onChange('')} type="button"
           style={{ background: 'transparent', border: 'none', color: C.faint, fontFamily: MONO, fontSize: 10, cursor: 'pointer' }}>CLEAR</button>
+      )}
+      {trailing && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto', flexShrink: 0 }}>{trailing}</div>
       )}
     </div>
   )
