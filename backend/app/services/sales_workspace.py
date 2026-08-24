@@ -22,7 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.db import (
@@ -532,6 +532,18 @@ def _is_twenty_imported(activity: CrmActivity) -> bool:
     return any(k in meta for k in _TWENTY_IMPORT_META_KEYS)
 
 
+# The same key-presence test, expressed in SQL and derived from the same tuple
+# so the two can never disagree about what an imported row is. It exists so a
+# reporting query can carry the answer WITHOUT selecting `meta` itself: a sent
+# email's meta holds the whole HTML body (routers/sales_workspace.py stamps
+# subject/html/text onto it), and the all-time figures below read every contact
+# row ever written. `?` against a NULL meta yields NULL, which is False in
+# Python and correct — a row with no meta has no keys.
+_IS_TWENTY_IMPORTED_SQL = or_(
+    *(CrmActivity.meta.has_key(k) for k in _TWENTY_IMPORT_META_KEYS)
+)
+
+
 # A reassignment is still WRITTEN (log_reassignment, below) — it is the deal's
 # audit trail of who has owned it — it is just no longer drawn in the drawer's
 # History feed, per direct instruction: a rep reading a club's history wants
@@ -1032,15 +1044,21 @@ _IS_EMAIL_ROW = CrmActivity.type == "email"
 _IS_CONTACT_ROW = _IS_CALL_ROW | _IS_FOLLOW_UP_ROW | _IS_EMAIL_ROW
 
 
-def _contact_kind(activity: CrmActivity) -> Optional[str]:
+def _contact_kind(activity, *, twenty_imported: Optional[bool] = None) -> Optional[str]:
     """'call' | 'email' | None for one timeline row, plus whether it booked a
     follow-up — read in Python so the SQL predicate above and the per-rep
     tallies can never disagree about what a contact is.
 
     A Twenty-imported row never counts, for the reason emailed_deal_ids
     already gives: it is a backfill of somebody else's pipeline, not work
-    this workspace did."""
-    if _is_twenty_imported(activity):
+    this workspace did. `twenty_imported` lets a caller hand that answer in
+    when it already has it (a lean row from `_contact_rows`, which never
+    loads `meta`); left None it is read off the activity itself.
+
+    Takes any row carrying the four fields it reads, so a full CrmActivity
+    and a lean reporting row are classified by this one function."""
+    imported = _is_twenty_imported(activity) if twenty_imported is None else twenty_imported
+    if imported:
         return None
     if activity.type == "email":
         return "email"
@@ -1053,16 +1071,50 @@ def _contact_kind(activity: CrmActivity) -> Optional[str]:
     return None
 
 
+# Just the columns a tally or a drill-down reads, plus the Twenty flag above.
+# Every figure on the Performance screen goes through this rather than
+# selecting whole CrmActivity rows: the all-time columns read every contact
+# row ever written, and a full select would drag every sent email's HTML body
+# through with them.
+_CONTACT_ROW_COLUMNS = (
+    CrmActivity.deal_id,
+    CrmActivity.created_by_user_id,
+    CrmActivity.occurred_at,
+    CrmActivity.type,
+    CrmActivity.outcome,
+    CrmActivity.next_follow_up_at,
+    _IS_TWENTY_IMPORTED_SQL.label("twenty_imported"),
+)
+
+
+async def _contact_rows(session: AsyncSession, *, since: Optional[datetime] = None,
+                        created_by=None, deal_ids=None) -> list:
+    """The contact rows in scope, as lean rows. `since` of None means no lower
+    bound at all — which is what the all-time window asks for."""
+    stmt = select(*_CONTACT_ROW_COLUMNS).where(_IS_CONTACT_ROW)
+    if since is not None:
+        stmt = stmt.where(CrmActivity.occurred_at >= since)
+    if created_by is not None:
+        stmt = stmt.where(CrmActivity.created_by_user_id == created_by)
+    if deal_ids is not None:
+        stmt = stmt.where(CrmActivity.deal_id.in_(deal_ids))
+    return (await session.execute(stmt)).all()
+
+
+def _row_contact_kind(row) -> Optional[str]:
+    """_contact_kind for a lean row — the flag is always passed, since such a
+    row deliberately carries no `meta` to read it from."""
+    return _contact_kind(row, twenty_imported=bool(row.twenty_imported))
+
+
 async def contacted_deal_ids(session: AsyncSession, deal_ids) -> set:
     """The subset of `deal_ids` a rep has actually made contact with —
     call, follow-up or email. Batched; one query however many deals."""
     ids = {d for d in deal_ids if d is not None}
     if not ids:
         return set()
-    rows = (await session.execute(
-        select(CrmActivity).where(CrmActivity.deal_id.in_(ids), _IS_CONTACT_ROW)
-    )).scalars().all()
-    return {a.deal_id for a in rows if _contact_kind(a) is not None}
+    rows = await _contact_rows(session, deal_ids=ids)
+    return {r.deal_id for r in rows if _row_contact_kind(r) is not None}
 
 
 # ─── Windows ─────────────────────────────────────────────────────────────────
@@ -1072,13 +1124,30 @@ async def contacted_deal_ids(session: AsyncSession, deal_ids) -> set:
 PERTH = ZoneInfo("Australia/Perth")
 
 
+# The report's three windows, in the order the screen draws them. All time is
+# not a longer window, it is NO window — a lower bound of None, so nothing a
+# rep has ever done falls out of it. The two dated ones answer "what is
+# happening now"; all time answers "what has this rep done", which is the only
+# figure that still says something on a quiet Monday morning.
+ALL_TIME_WINDOW = "all"
+REPORT_WINDOWS = ("today", "week", ALL_TIME_WINDOW)
+
+
 def report_windows(now: Optional[datetime] = None) -> dict:
-    """{'today': start, 'week': start} as UTC instants, from the Perth
-    calendar day. Week starts Monday, same as the rest of the app."""
+    """{'today': start, 'week': start, 'all': None} — UTC instants, from the
+    Perth calendar day. Week starts Monday, same as the rest of the app.
+
+    'all' is None rather than an early date: a caller must read it as "do not
+    filter", never as an instant, or an arbitrary epoch would quietly become
+    the start of the club's history."""
     now = (now or datetime.now(timezone.utc)).astimezone(PERTH)
     day = now.replace(hour=0, minute=0, second=0, microsecond=0)
     week = day - timedelta(days=day.weekday())
-    return {"today": day.astimezone(timezone.utc), "week": week.astimezone(timezone.utc)}
+    return {
+        "today": day.astimezone(timezone.utc),
+        "week": week.astimezone(timezone.utc),
+        ALL_TIME_WINDOW: None,
+    }
 
 
 # ─── Stage columns ───────────────────────────────────────────────────────────
@@ -1132,57 +1201,62 @@ async def performance_summary(session: AsyncSession, *, owner_user_id=None) -> d
     reassigned is still their call. owner_user_id restricts to one rep; None
     covers everyone (super admin only — enforced by the caller, not here)."""
     report = await activity_report(session, owner_user_id=owner_user_id)
-    return {"today": report["totals"]["today"], "week": report["totals"]["week"]}
+    return {w: report["totals"][w] for w in REPORT_WINDOWS}
 
 
 async def activity_report(session: AsyncSession, *, owner_user_id=None) -> dict:
-    """Per-rep contact activity for today and this week, plus the totals.
+    """Per-rep contact activity for today, this week and all time, plus the
+    totals.
 
-    ``{"rows": [...], "totals": {"today": {...}, "week": {...}}}``. The
-    totals are computed over the same activity rows the per-rep numbers come
-    from, so the KPI strip at the top of the screen and the table under it
-    cannot disagree — `clubs_contacted` in particular is a genuine distinct
-    count across everyone, never a sum of per-rep distinct counts."""
+    ``{"rows": [...], "totals": {"today": {...}, "week": {...}, "all": {...}}}``.
+    The totals are computed over the same activity rows the per-rep numbers
+    come from, so the KPI strip at the top of the screen and the table under
+    it cannot disagree — `clubs_contacted` in particular is a genuine distinct
+    count across everyone, never a sum of per-rep distinct counts.
+
+    A rep appears as soon as they have EVER made contact, not only when they
+    have this week: an empty table on a Monday morning reads as "the numbers
+    are broken", when the work is simply behind the window."""
     windows = report_windows()
-    week_start = windows["week"]
-    today_start = windows["today"]
-    # One pull covering the wider of the two windows; both are then counted
-    # in Python. Two queries would double the work for the same rows.
-    start = min(week_start, today_start)
+    # One unbounded pull, counted into every window each row falls inside.
+    # All time has no lower bound, so it is already the widest — a `since`
+    # here would only ever narrow it, and three queries would re-read the
+    # same rows for the two dated windows.
+    activities = await _contact_rows(session, created_by=owner_user_id)
 
-    stmt = select(CrmActivity).where(CrmActivity.occurred_at >= start, _IS_CONTACT_ROW)
-    if owner_user_id is not None:
-        stmt = stmt.where(CrmActivity.created_by_user_id == owner_user_id)
-    activities = (await session.execute(stmt)).scalars().all()
-
-    trial_stmt = select(CrmActivity).where(
-        CrmActivity.occurred_at >= start, CrmActivity.type == "system",
+    trial_stmt = select(CrmActivity.created_by_user_id, CrmActivity.occurred_at).where(
+        CrmActivity.type == "system",
         CrmActivity.body.like(f"{TRIAL_STARTED_ACTIVITY_PREFIX}%"),
     )
     if owner_user_id is not None:
         trial_stmt = trial_stmt.where(CrmActivity.created_by_user_id == owner_user_id)
-    trials = (await session.execute(trial_stmt)).scalars().all()
+    trials = (await session.execute(trial_stmt)).all()
 
     def _blank() -> dict:
         return {"calls": 0, "emails": 0, "contacts": 0, "positive_conversations": 0,
                 "callbacks_created": 0, "trials_started": 0, "_clubs": set()}
 
+    def _blank_windows() -> dict:
+        return {w: _blank() for w in REPORT_WINDOWS}
+
     per_rep: dict = {}
-    totals = {"today": _blank(), "week": _blank()}
+    totals = _blank_windows()
 
     def _buckets(user_id, occurred_at) -> list:
         """Every bucket this row lands in — a rep's own, plus the totals,
-        for each window it falls inside."""
-        rep = per_rep.setdefault(user_id, {"today": _blank(), "week": _blank()})
+        for each window it falls inside. A window whose start is None takes
+        every row, however old."""
+        rep = per_rep.setdefault(user_id, _blank_windows())
         out = []
-        for name, ws in (("today", today_start), ("week", week_start)):
-            if occurred_at >= ws:
+        for name in REPORT_WINDOWS:
+            start = windows[name]
+            if start is None or occurred_at >= start:
                 out.append(rep[name])
                 out.append(totals[name])
         return out
 
     for a in activities:
-        kind = _contact_kind(a)
+        kind = _row_contact_kind(a)
         if kind is None:
             continue
         for b in _buckets(a.created_by_user_id, a.occurred_at):
@@ -1210,15 +1284,21 @@ async def activity_report(session: AsyncSession, *, owner_user_id=None) -> dict:
         return out
 
     rows = [
-        {
-            "user_id": str(uid) if uid else None,
-            "name": names.get(uid) or ("Automated" if uid is None else "Unknown"),
-            "today": _finish(w["today"]),
-            "week": _finish(w["week"]),
-        }
+        dict(
+            {
+                "user_id": str(uid) if uid else None,
+                "name": names.get(uid) or ("Automated" if uid is None else "Unknown"),
+            },
+            **{name: _finish(w[name]) for name in REPORT_WINDOWS},
+        )
         for uid, w in per_rep.items()
     ]
-    rows.sort(key=lambda r: (-r["week"]["contacts"], -r["today"]["contacts"], r["name"].lower()))
+    # This week first, then today, and all time only as the tiebreaker: the
+    # two live windows are what a working day is managed on, and all time
+    # decides the order precisely when they are all zero — which is the
+    # morning this column exists for.
+    rows.sort(key=lambda r: (-r["week"]["contacts"], -r["today"]["contacts"],
+                             -r[ALL_TIME_WINDOW]["contacts"], r["name"].lower()))
     return {"rows": rows, "totals": {k: _finish(v) for k, v in totals.items()}}
 
 
@@ -1367,7 +1447,7 @@ async def activity_cell_clubs(session: AsyncSession, *, user_id, window: str,
     """The clubs behind one Contact activity cell.
 
     `user_id` is a rep's id, or EVERYONE_KEY for the totals row. `window` is
-    'today' or 'week'; `metric` is one of ACTIVITY_METRICS.
+    one of REPORT_WINDOWS; `metric` is one of ACTIVITY_METRICS.
 
     A count and a club list are NOT the same length for three of the four
     metrics — 24 contacts can be 10 clubs — so each row carries its own
@@ -1375,21 +1455,20 @@ async def activity_cell_clubs(session: AsyncSession, *, user_id, window: str,
     `clubs_contacted` has one row per unit."""
     if metric not in ACTIVITY_METRICS:
         raise ValueError(f"unknown metric {metric!r}")
-    if window not in ("today", "week"):
+    if window not in REPORT_WINDOWS:
         raise ValueError(f"unknown window {window!r}")
+    # None for the all-time window — every contact ever, no lower bound.
     start = report_windows()[window]
 
-    stmt = select(CrmActivity).where(CrmActivity.occurred_at >= start, _IS_CONTACT_ROW)
-    if owner_user_id is not None:
-        stmt = stmt.where(CrmActivity.created_by_user_id == owner_user_id)
-    elif user_id != EVERYONE_KEY:
-        stmt = stmt.where(CrmActivity.created_by_user_id == user_id)
-    activities = (await session.execute(stmt)).scalars().all()
+    created_by = owner_user_id
+    if created_by is None and user_id != EVERYONE_KEY:
+        created_by = user_id
+    activities = await _contact_rows(session, since=start, created_by=created_by)
 
     per_deal: dict = {}
     total = 0
     for a in activities:
-        kind = _contact_kind(a)
+        kind = _row_contact_kind(a)
         if kind is None or a.deal_id is None:
             continue
         # 'clubs_contacted' counts each club once however many times it was

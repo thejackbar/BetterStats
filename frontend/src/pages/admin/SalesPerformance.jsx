@@ -9,6 +9,8 @@ import { Pill } from '../../components/admin/crm/ui'
 const CARD = 'pb-card p-3'
 const TH = 'text-right py-1.5 px-2 whitespace-nowrap'
 const TD = 'text-right py-1.5 px-2 whitespace-nowrap'
+// Marks where one window's columns end and the next begin.
+const GROUP_EDGE = ' border-l border-pb-hairline/60'
 
 function Kpi({ label, value }) {
   return (
@@ -136,20 +138,27 @@ const ACTIVITY_COLS = [
   { key: 'emails', label: 'Emails' },
   { key: 'clubs_contacted', label: 'Clubs' },
 ]
-const WINDOW_LABEL = { today: 'today', week: 'this week' }
+// The three column groups, in the order the backend's own REPORT_WINDOWS
+// draws them. All time is every contact ever recorded — the only figure that
+// still says anything on a Monday morning, which is why it is here.
+const ACTIVITY_WINDOWS = [
+  { key: 'today', label: 'Today', what: 'today' },
+  { key: 'week', label: 'This week', what: 'this week' },
+  { key: 'all', label: 'All time', what: 'all time' },
+]
 
 function ActivityTable({ rows, totals, onOpen, activeKey }) {
   if (rows.length === 0) {
-    return <p className="text-[12px] text-pb-faintest">Nobody has made contact this week yet.</p>
+    return <p className="text-[12px] text-pb-faintest">Nobody has made contact yet.</p>
   }
-  const cell = (row, userKey, name, window, col) => (
-    <td key={`${window}-${col.key}`} className={TD}>
+  const cell = (row, userKey, name, win, col, first) => (
+    <td key={`${win.key}-${col.key}`} className={`${TD}${first ? GROUP_EDGE : ''}`}>
       <Figure
-        value={row[window][col.key]}
-        active={activeKey === `${userKey}|${window}|${col.key}`}
+        value={row[win.key]?.[col.key]}
+        active={activeKey === `${userKey}|${win.key}|${col.key}`}
         onOpen={() => onOpen({
-          user_id: userKey, window, metric: col.key, label: name,
-          what: `${col.label.toLowerCase()} ${WINDOW_LABEL[window]}`,
+          user_id: userKey, window: win.key, metric: col.key, label: name,
+          what: `${col.label.toLowerCase()} ${win.what}`,
         })}
       />
     </td>
@@ -157,8 +166,8 @@ function ActivityTable({ rows, totals, onOpen, activeKey }) {
   const line = (row, userKey, name) => (
     <>
       <td className="py-1.5 pr-2 text-pb-text font-medium">{name}</td>
-      {ACTIVITY_COLS.map(c => cell(row, userKey, name, 'today', c))}
-      {ACTIVITY_COLS.map(c => cell(row, userKey, name, 'week', c))}
+      {ACTIVITY_WINDOWS.flatMap((w, wi) => ACTIVITY_COLS.map(
+        (c, ci) => cell(row, userKey, name, w, c, wi > 0 && ci === 0)))}
     </>
   )
   return (
@@ -167,13 +176,19 @@ function ActivityTable({ rows, totals, onOpen, activeKey }) {
         <thead>
           <tr className="text-pb-faint">
             <th />
-            <th className="text-center py-1 px-2 border-b border-pb-hairline" colSpan={ACTIVITY_COLS.length}>Today</th>
-            <th className="text-center py-1 px-2 border-b border-pb-hairline" colSpan={ACTIVITY_COLS.length}>This week</th>
+            {ACTIVITY_WINDOWS.map((w, wi) => (
+              <th key={w.key} colSpan={ACTIVITY_COLS.length}
+                  className={`text-center py-1 px-2 border-b border-pb-hairline${wi > 0 ? GROUP_EDGE : ''}`}>
+                {w.label}
+              </th>
+            ))}
           </tr>
           <tr className="text-pb-faint border-b border-pb-hairline">
             <th className="text-left py-1.5 pr-2">Salesperson</th>
-            {ACTIVITY_COLS.map(c => <th key={`t-${c.key}`} className={TH}>{c.label}</th>)}
-            {ACTIVITY_COLS.map(c => <th key={`w-${c.key}`} className={TH}>{c.label}</th>)}
+            {ACTIVITY_WINDOWS.flatMap((w, wi) => ACTIVITY_COLS.map((c, ci) => (
+              <th key={`${w.key}-${c.key}`}
+                  className={`${TH}${wi > 0 && ci === 0 ? GROUP_EDGE : ''}`}>{c.label}</th>
+            )))}
           </tr>
         </thead>
         <tbody>
@@ -301,8 +316,9 @@ export default function SalesPerformance() {
         <p className="text-[12px] text-pb-faintest">Loading…</p>
       ) : (
         <>
-          <KpiRow title="Today" data={data.summary?.today} />
-          <KpiRow title="This week" data={data.summary?.week} />
+          {ACTIVITY_WINDOWS.map(w => (
+            <KpiRow key={w.key} title={w.label} data={data.summary?.[w.key]} />
+          ))}
 
           <div className={`${CARD} mb-4`}>
             <div className="flex items-center justify-between mb-2">
@@ -313,7 +329,9 @@ export default function SalesPerformance() {
                            onOpen={openActivity} activeKey={activeKey('activity')} />
             <p className="text-[11px] text-pb-faintest mt-2">
               A contact is a logged call, a follow-up recorded, or an email sent. Days run to
-              Perth time and the week starts Monday. Click any figure for the clubs behind it.
+              Perth time and the week starts Monday. All time counts every contact ever
+              recorded, so a rep is listed here as soon as they have made one. Click any
+              figure for the clubs behind it.
             </p>
             <Drilldown open={panelDrill('activity')} onClose={() => setDrill(null)} />
           </div>
