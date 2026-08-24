@@ -157,6 +157,36 @@ been paid.
   save-a-rate-then-read-the-column flow for three reps), and the Chromium run
   is 41.
 
+### Picking a module pill scrolled the page out from under the rep (v9.52.2.1)
+
+Reported off the Sales Workspace: clicking a pill under "Interested in" moved
+the page, taking the club pane and the pill itself away from the cursor.
+
+- **THE QUEUE'S RE-ANCHOR SCROLLS THE WHOLE PAGE, NOT JUST THE RAIL.**
+  `toggleInterest` called `loadClubs()` at its default `anchor: true`, which
+  `scrollIntoView`es the open club's RAIL row once the reload lands. The rail
+  is its own scroll box, so that reads as harmless — but when the row sits
+  above the fold the browser walks up and scrolls the DOCUMENT to reach it.
+  Measured, not eyeballed: with a real-shaped club (14 contacts, a 30-row
+  timeline) the click moved the page **683px**.
+- **THE PILLS SIT BELOW THE RAIL, WHICH IS THE WHOLE REASON THIS BITES.** A
+  first repro with an empty pane proved nothing and PASSED against the broken
+  code — the pills were level with the rail, the row was on screen, and
+  `block: 'nearest'` is a no-op. The contacts and timeline cards are what
+  push the call form past the rail's bottom, so the harness has to carry them
+  or it is testing a club nobody has.
+- **`anchor: false` is right because picking a module is not navigating.** The
+  re-anchor exists for a call/email/assign action, where the rep expects to
+  move on; a pill is a mid-form edit and must leave the view alone. The queue
+  is still refreshed behind it, and a toggle that genuinely drops the club out
+  of the filtered list is unaffected — that branch runs whatever `anchor`
+  says, and advancing to the next club there is still right.
+- **Verified in Chromium** (the interest-pills suite is 11 checks now: the
+  page not moving, the pill holding its position to within 2px, the rail row
+  measured as genuinely off screen first, and the queue still reloading),
+  **with a control run**: with the fix reverted the same two checks fail on
+  exactly the reported behaviour.
+
 ### A `?club=` deep link opened the Workspace on the WRONG club (v9.49.3)
 
 Reported off the commission drill-down: the link built the right URL and the
