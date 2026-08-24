@@ -1078,7 +1078,10 @@ export default function SalesWorkspace() {
 
   // `anchor` (default true) re-scrolls the open club's row back into view once
   // the reload lands, for the cases that can genuinely move it: a call/email/
-  // assign/interest action re-sorts or re-scopes the queue. A reload fired by
+  // assign action re-sorts or re-scopes the queue. Toggling a module-interest
+  // pill also re-sorts, and deliberately passes `false` anyway — those pills
+  // sit down the detail pane, so anchoring the RAIL scrolls the page and
+  // takes the pane the rep is reading with it. A reload fired by
   // nothing more than a filter tweak (the effect below) passes `false` — the
   // row the rep is looking at may now sit further down the SAME filtered
   // list, and jumping the viewport to chase it there is not something a
@@ -1366,7 +1369,16 @@ export default function SalesWorkspace() {
     try {
       const d = await api.salesWorkspaceSetInterest(drawer.deal.id, next)
       setDrawer(d)
-      loadClubs()
+      // anchor: false — the queue is refreshed, but the viewport is left
+      // exactly where the rep put it. These pills sit well down the detail
+      // pane, and the re-anchor scrollIntoView pulls the open club's RAIL
+      // row back into view, which scrolls the whole page and throws the
+      // pane the rep is reading (and the pill they just clicked) off
+      // screen. Picking a module is not navigation, so it must not move
+      // anything. A toggle that genuinely drops the club out of the
+      // filtered queue is unaffected: that branch runs whatever `anchor`
+      // says, and advancing to the next club there is still right.
+      loadClubs({ anchor: false })
     } catch (e) { toast?.error(e.message || 'Could not save module interest') }
   }
 
