@@ -33,20 +33,73 @@ const check = (name, cond, detail = '') => {
 }
 
 const MEETING_ID = 'mtg1'
-// A meeting with a name and a date, since both are meant to reach the filename.
+// The meeting reported off the live screen: a motion moved during the
+// President's report, serving a plan objective, with the votes recorded by name
+// — the detail the old draft dropped on the floor.
 const MEETING = {
-  id: MEETING_ID, title: 'August Committee Meeting', meeting_type: 'committee',
-  scheduled_at: '2026-08-18T19:30:00Z', location: 'Clubrooms',
+  id: MEETING_ID, title: 'Mid Month', meeting_type: 'committee',
+  scheduled_at: '2026-08-10T19:30:00Z', location: 'Clubrooms',
   status: 'in_progress', minutes: '', private_notes: '',
 }
+const MEMBERS = [
+  { member_id: 'm1', full_name: 'Hullett, Mark', on_committee: true, position: 'President' },
+  { member_id: 'm2', full_name: 'Bairstow, Hayden', on_committee: true, position: null },
+  { member_id: 'm3', full_name: 'Barendse, Jack', on_committee: true, position: 'Treasurer' },
+  { member_id: 'm4', full_name: 'Fletcher, Tristram', on_committee: true, position: null },
+  { member_id: 'm5', full_name: 'Monument, Darren', on_committee: true, position: null },
+  { member_id: 'm6', full_name: 'Birbeck, James', on_committee: true, position: null },
+  { member_id: 'm7', full_name: 'Brennan, Joshua', on_committee: true, position: null },
+]
+const ATTENDANCE = [
+  { member_id: 'm1', full_name: 'Hullett, Mark', status: 'chair' },
+  { member_id: 'm2', full_name: 'Bairstow, Hayden', status: 'present' },
+  { member_id: 'm3', full_name: 'Barendse, Jack', status: 'present' },
+  { member_id: 'm4', full_name: 'Fletcher, Tristram', status: 'present' },
+  { member_id: 'm5', full_name: 'Monument, Darren', status: 'present' },
+  { member_id: 'm6', full_name: 'Birbeck, James', status: 'absent' },
+  { member_id: 'm7', full_name: 'Brennan, Joshua', status: 'apology' },
+]
+const AGENDA = [
+  { id: 'a1', title: 'Welcome & attendance', status: 'proposed', position: 0, section: null, outcome_notes: '' },
+  { id: 'a2', title: 'Apologies', status: 'proposed', position: 1, section: null, outcome_notes: '' },
+  { id: 'a3', title: 'Minutes of previous meeting', status: 'proposed', position: 2, section: null, outcome_notes: '' },
+  { id: 'a4', title: "President's report", status: 'proposed', position: 3, section: 'Reports', outcome_notes: '' },
+  { id: 'a5', title: 'Sponsorship & Fundraising', status: 'proposed', position: 4, section: 'Reports', outcome_notes: '' },
+]
+const OBJECTIVES = [
+  { id: 'o1', title: 'Diversify revenue streams through grants, sponsorships, canteen sales, and social memberships',
+    plan_name: 'Strategic Plan - 2026/27', pillar_name: 'Financial Stability & Governance' },
+  { id: 'o2', title: 'Host regular social events and volunteer appreciation days to build a strong club identity',
+    plan_name: 'Strategic Plan - 2026/27', pillar_name: 'Community & Club Culture' },
+]
+const MOTIONS = [
+  { id: 'mo1', meeting_id: MEETING_ID, agenda_item_id: 'a4', position: 0, motion_type: 'motion',
+    description: 'That the club should have Premium Sponsorship package',
+    proposed_by_member_id: 'm1', seconded_by_member_id: null,
+    votes_for: 1, votes_against: 2, votes_abstain: 1, outcome: 'lost', notes: null,
+    is_resolution: false, resolution_ref: null, resolved_at: null, objective_id: 'o1',
+    votes: [{ member_id: 'm4', vote: 'for' }, { member_id: 'm1', vote: 'against' },
+            { member_id: 'm5', vote: 'against' }, { member_id: 'm3', vote: 'abstain' }] },
+]
+const ACTIONS = [
+  { id: 't1', title: 'Prepare plan for Sponsorship packages', description: null, category: null,
+    status: 'done', due_date: '2026-10-01', budget_estimate: 500, objective_id: 'o2',
+    agenda_item_id: 'a4', meeting_id: MEETING_ID, motion_id: null,
+    assignee_member_ids: ['m3'], assigned_to_member_id: 'm3', depends_on: [], percent_complete: 100 },
+  { id: 't2', title: 'Sign up 3 new sponsors before start of season', description: null, category: null,
+    status: 'todo', due_date: '2026-09-10', budget_estimate: null, objective_id: null,
+    agenda_item_id: null, meeting_id: MEETING_ID, motion_id: null,
+    assignee_member_ids: ['m1'], assigned_to_member_id: 'm1', depends_on: [], percent_complete: 0 },
+]
 const ROOM = {
-  meeting: MEETING, agenda_items: [], motions: [], actions: [],
-  attendance: [], attendee_pool: [], previous_attendance: null,
+  meeting: MEETING, club: { name: 'Applecross Cricket Club', short_name: 'Applecross' },
+  agenda_items: AGENDA, motions: MOTIONS, actions: ACTIONS,
+  attendance: ATTENDANCE, attendee_pool: MEMBERS, previous_attendance: null,
 }
 
 // What gets typed. Deliberately awkward: XML metacharacters that would break a
 // hand-built document.xml, and punctuation a phone keyboard produces.
-const MINUTES_TEXT = 'Opened 7:32pm. Apologies: J. Smith & R. Jones <away>.\n\nTreasurer’s report — balance $12,430.55.'
+const MINUTES_TEXT = 'Opened 7:32pm. Apologies: J. Smith & R. Jones <away>.\n\nTreasurer\u2019s report \u2014 balance $12,430.55.'
 const NOTES_TEXT = 'Chase the grant form. Ring Bev about the roster.'
 
 const routes = (page, state) => page.route('**/api/**', async (route) => {
@@ -74,7 +127,8 @@ const routes = (page, state) => page.route('**/api/**', async (route) => {
   if (/\/committee\/meetings/.test(url)) return json([MEETING])
   if (/\/committee\/positions/.test(url)) return json({ positions: [] })
   if (/\/committee\/tasks/.test(url)) return json([])
-  if (/\/committee\/objectives|\/plans/.test(url)) return json({ objectives: [], plans: [] })
+  if (/\/committee\/objectives/.test(url)) return json({ objectives: OBJECTIVES })
+  if (/\/plans/.test(url)) return json({ plans: [] })
   if (/\/fees\/all-members/.test(url)) return json({ members: [] })
   if (/\/seasons/.test(url)) return json([{ id: 'se1', name: 'Summer 2025/26', year: 2025 }])
   if (/\/settings/.test(url)) return json({ diary_start_month: 7 })
@@ -180,15 +234,15 @@ async function run() {
 
   // The record the server holds is still empty, so anything found in these
   // files can only have come from the box.
+  check('minutes .docx is named for the meeting and its date',
+    /Mid Month/.test(files.minutesDocx.name) && /2026/.test(files.minutesDocx.name)
+      && files.minutesDocx.name.endsWith('Minutes.docx'), files.minutesDocx.name)
+  check('notes .pdf is named for the meeting and says Notes',
+    /Mid Month/.test(files.notesPdf.name) && files.notesPdf.name.endsWith('Notes.pdf'),
+    files.notesPdf.name)
   check('the stub never applied the autosave (the record stays empty)',
     ROOM.meeting.minutes === '' && ROOM.meeting.private_notes === '')
 
-  check('minutes .docx is named for the meeting and its date',
-    /August Committee Meeting/.test(files.minutesDocx.name) && /2026/.test(files.minutesDocx.name)
-      && files.minutesDocx.name.endsWith('Minutes.docx'), files.minutesDocx.name)
-  check('notes .pdf is named for the meeting and says Notes',
-    /August Committee Meeting/.test(files.notesPdf.name) && files.notesPdf.name.endsWith('Notes.pdf'),
-    files.notesPdf.name)
 
   // ── The files themselves ─────────────────────────────────────────────────
   const readDocx = (p) => {
@@ -208,19 +262,99 @@ async function run() {
   }
   const minutesXml = readDocx(files.minutesDocx.path).xml
   const notesXml = readDocx(files.notesDocx.path).xml
-  check('minutes .docx carries the typed text, autosave or not',
-    minutesXml.includes('Opened 7:32pm') && minutesXml.includes('balance $12,430.55'))
-  check('minutes .docx escapes & and < rather than breaking the XML',
+  // The paragraph texts in document order, which is what makes "under the right
+  // heading" a measurable claim rather than a substring search.
+  const paras = (xml) => [...xml.matchAll(/<w:p[ >][\s\S]*?<\/w:p>/g)]
+    .map(m => [...m[0].matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(t => t[1]).join(''))
+    .map(t => t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'))
+  const mp = paras(minutesXml)
+  const at = (re) => mp.findIndex(t => re.test(t))
+  const joined = mp.join('\n')
+
+  check('the document is headed by the CLUB, not just the meeting',
+    mp.slice(0, 4).some(t => t === 'APPLECROSS CRICKET CLUB'), JSON.stringify(mp.slice(0, 4)))
+  check('the title block names the meeting and its date',
+    joined.includes('Mid Month Committee Meeting Minutes') && joined.includes('10 August 2026'))
+
+  check('§1 is a Meeting Details section', at(/^1\. Meeting Details$/) >= 0)
+  check('§2 is the Agenda', at(/^2\. Agenda$/) >= 0)
+  check('the agenda is a bulleted list of the real items',
+    mp.some(t => t.startsWith('\u2022') && t.includes("President's report")))
+
+  // The details table, read out of the real table cells.
+  const tables = [...minutesXml.matchAll(/<w:tbl>[\s\S]*?<\/w:tbl>/g)].map(m => m[0])
+  check('the document carries real Word tables, not laid-out text', tables.length >= 2, `${tables.length}`)
+  const unesc = t => t.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  const cellsOf = (tbl) => [...tbl.matchAll(/<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>/g)].map(m => unesc(m[1]))
+  const detailCells = tables.length ? cellsOf(tables[0]) : []
+  for (const row of ['Date', 'Time', 'Location', 'Chair', 'Present', 'Apologies', 'Absent']) {
+    check(`meeting details: ${row} is a row`, detailCells.includes(row), JSON.stringify(detailCells.slice(0, 8)))
+  }
+  check('meeting details: the chair is named', detailCells.some(c => c === 'Hullett, Mark'))
+  check('meeting details: everyone present is listed',
+    detailCells.some(c => c.includes('Bairstow, Hayden') && c.includes('Monument, Darren')))
+  check('meeting details: the apology is not counted as present',
+    detailCells.some(c => c === 'Brennan, Joshua'))
+  check('meeting details: the absent member is recorded as absent',
+    detailCells.some(c => c === 'Birbeck, James'))
+
+  // THE REPORTED BUG: the motion belongs to the President's report, and it must
+  // be written up there rather than under whichever heading its subject suits.
+  const presIdx = at(/^\d+\. President's report$/)
+  const nextIdx = at(/^\d+\. Sponsorship & Fundraising$/)
+  const motionIdx = at(/Premium Sponsorship package/)
+  check("the President's report has its own numbered section", presIdx >= 0)
+  check('the motion is written up under the President\u2019s report, not Sponsorship',
+    presIdx >= 0 && motionIdx > presIdx && motionIdx < nextIdx,
+    `pres ${presIdx}, motion ${motionIdx}, next ${nextIdx}`)
+  const inSection = mp.slice(presIdx, nextIdx).join('\n')
+  check('the motion is labelled as a motion', inSection.includes('MOTION'))
+  check('the motion records who moved it', inSection.includes('Moved by Hullett, Mark'))
+  check('the motion names the strategic objective it serves',
+    inSection.includes('Serves objective: Strategic Plan - 2026/27')
+      && inSection.includes('Financial Stability & Governance')
+      && inSection.includes('Diversify revenue streams'), inSection)
+  check('the motion records its outcome and the tally',
+    inSection.includes('Outcome: Lost. For 1, against 2, abstain 1.'), inSection)
+  check('the motion records how each person voted',
+    inSection.includes('Fletcher, Tristram') && inSection.includes('Monument, Darren')
+      && inSection.includes('Barendse, Jack') && /Votes recorded\./.test(inSection)
+      && /For: Fletcher, Tristram/.test(inSection)
+      // Names read "Surname, First", so a comma-joined pair would read as four
+      // people. The against pair has to be separated by something else.
+      && /Against: Hullett, Mark; Monument, Darren/.test(inSection), inSection)
+  check('the action raised in that item is recorded there too',
+    inSection.includes('Prepare plan for Sponsorship packages')
+      && inSection.includes('Barendse, Jack') && inSection.includes('$500'), inSection)
+  check('the action names its own objective, which differs from the motion\u2019s',
+    inSection.includes('Community & Club Culture'), inSection)
+
+  // The actions table.
+  const actionsTable = tables[tables.length - 1] || ''
+  const actionCells = actionsTable ? cellsOf(actionsTable) : []
+  for (const col of ['Owner', 'Action', 'Due', 'Budget', 'Serves objective', 'Status']) {
+    check(`actions table: a ${col} column`, actionCells.includes(col), JSON.stringify(actionCells.slice(0, 8)))
+  }
+  check('actions table: every action is a row, including one raised outside the agenda',
+    actionCells.some(c => c === 'Prepare plan for Sponsorship packages')
+      && actionCells.some(c => c === 'Sign up 3 new sponsors before start of season'))
+  check('actions table: an action with no objective says so rather than being blank',
+    actionCells.filter(c => c === 'Not recorded').length >= 1)
+  check('actions table: the objective is carried through',
+    actionCells.some(c => c.includes('Community & Club Culture')))
+
+  check('the narrative typed into the box is used, autosave or not',
+    joined.includes('Opened 7:32pm'), joined.slice(0, 300))
+  check('markdown asterisks are not printed literally', !joined.includes('**'))
+  check('& and < are escaped rather than breaking the XML',
     minutesXml.includes('J. Smith &amp; R. Jones &lt;away&gt;'))
-  check('minutes .docx keeps the blank line as an empty paragraph',
-    (minutesXml.match(/<w:p>/g) || []).length >= 4)
-  check('minutes .docx names the meeting and the date at the top',
-    minutesXml.includes('August Committee Meeting') && minutesXml.includes('Minutes'))
+  check('the document closes off', joined.includes('End of minutes'))
+
   check('notes .docx carries the notes', notesXml.includes('Chase the grant form'))
   check('the notes document is marked as not part of the minutes',
     notesXml.includes('Not part of the minutes'))
   check('minutes and notes do not leak into each other',
-    !minutesXml.includes('Chase the grant form') && !notesXml.includes('Opened 7:32pm'))
+    !minutesXml.includes('Chase the grant form') && !notesXml.includes('Premium Sponsorship'))
 
   for (const [key, f] of [['minutes', files.minutesPdf], ['notes', files.notesPdf]]) {
     const buf = fs.readFileSync(f.path)
@@ -236,10 +370,70 @@ async function run() {
     check(`${key} .pdf: draws its text with a real font resource`,
       s.includes('/Helvetica') && s.includes(' Tj'))
   }
-  const minutesPdfText = fs.readFileSync(files.minutesPdf.path).toString('latin1')
-  check('minutes .pdf carries the typed text', minutesPdfText.includes('Opened 7:32pm'))
-  check('minutes .pdf escapes the brackets a PDF string cannot hold raw',
-    !/\([^)]*<away>[^)]*\)/.test(minutesPdfText) || minutesPdfText.includes('away'))
+  const minutesPdfRaw = fs.readFileSync(files.minutesPdf.path).toString('latin1')
+  const pdfText = [...minutesPdfRaw.matchAll(/\((.*?)\) Tj/g)].map(m => m[1]).join(' ')
+  check('minutes .pdf carries the typed narrative', pdfText.includes('Opened 7:32pm'))
+  check('minutes .pdf carries the motion, its objective and the vote',
+    pdfText.includes('Premium Sponsorship') && pdfText.includes('Financial')
+      && pdfText.includes('Outcome: Lost') && pdfText.includes('Votes recorded'), pdfText.slice(0, 200))
+  check('minutes .pdf draws the tables it needs',
+    / re S/.test(minutesPdfRaw) && pdfText.includes('Serves objective'))
+
+  // PAGINATION, which the earlier checks never looked at and should have. A
+  // rule under a heading reported no height, so every element after the first
+  // landed on a page of its own: a two-page document came out as 19, half of
+  // them blank, and every content check still passed.
+  const pageCount = Number((minutesPdfRaw.match(/\/Count (\d+)/) || [])[1] || 0)
+  const streams = [...minutesPdfRaw.matchAll(/stream\n([\s\S]*?)\nendstream/g)].map(m => m[1])
+  check('minutes .pdf is a sensibly paged document, not one element per page',
+    pageCount >= 1 && pageCount <= 4, `${pageCount} pages`)
+  check('minutes .pdf has no blank pages',
+    streams.length === pageCount && streams.every(s2 => / Tj/.test(s2)),
+    `${streams.filter(s2 => !/ Tj/.test(s2)).length} blank of ${streams.length}`)
+
+  // Nothing may be drawn outside the margins, text or table rule alike.
+  const outside = []
+  for (const s2 of streams) {
+    for (const m of s2.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re/g)) {
+      const [x, y2, w, h] = m.slice(1).map(Number)
+      if (x < 55.5 || x + w > 539.8 || y2 < 55.5 || y2 + h > 786.4) outside.push(['rect', x, y2, w, h])
+    }
+    for (const m of s2.matchAll(/([\d.]+) ([\d.]+) Td/g)) {
+      const [x, y2] = m.slice(1).map(Number)
+      if (x < 55.5 || x > 539.8 || y2 < 55.5 || y2 > 786.4) outside.push(['text', x, y2])
+    }
+  }
+  check('minutes .pdf draws nothing outside the margins', outside.length === 0,
+    JSON.stringify(outside.slice(0, 3)))
+  // A table's cells must tile across the row: no gap, no overlap.
+  const byRow = new Map()
+  for (const s2 of streams) {
+    for (const m of s2.matchAll(/([\d.]+) ([\d.]+) ([\d.]+) ([\d.]+) re S/g)) {
+      const [x, y2, w] = m.slice(1).map(Number)
+      const k = `${streams.indexOf(s2)}:${y2.toFixed(1)}`
+      byRow.set(k, [...(byRow.get(k) || []), [x, w]])
+    }
+  }
+  const tiled = [...byRow.values()].every(cells => {
+    const sorted = cells.sort((a, b) => a[0] - b[0])
+    return sorted.every((c, i) => i === sorted.length - 1 || Math.abs(c[0] + c[1] - sorted[i + 1][0]) < 0.6)
+  })
+  check('minutes .pdf table cells tile across each row', byRow.size > 0 && tiled, `${byRow.size} rows`)
+  // EVERY row of every table has to be drawn. The first cut spread a whole
+  // table into a one-argument helper, so each table drew its first row and
+  // dropped the rest, and a check that only asked "is a row drawn" passed.
+  const drawnRows = byRow.size
+  check('minutes .pdf draws every table row, not just the first',
+    drawnRows >= 8 + 1 + ACTIONS.length, `${drawnRows} rows drawn`)
+  const wide = [...byRow.values()].filter(c => c.length === 6).length
+  check('minutes .pdf draws the six-column actions table in full',
+    wide === 1 + ACTIONS.length, `${wide} six-column rows`)
+  // A short column too narrow for its own placeholder breaks it across lines
+  // ("Not recorde / d"), which reads as a fault in the document.
+  const runs = [...minutesPdfRaw.matchAll(/\((.*?)\) Tj/g)].map(m => m[1])
+  check('minutes .pdf: no short table column breaks a word',
+    runs.includes('Not recorded') && !runs.some(r => /recorde$|^d$/.test(r)),
+    JSON.stringify(runs.filter(r => r.includes('recorde'))))
   check('notes .pdf carries the notes',
     fs.readFileSync(files.notesPdf.path).toString('latin1').includes('Chase the grant form'))
 

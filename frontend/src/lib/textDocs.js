@@ -7,14 +7,18 @@
 //
 // BOTH ARE WRITTEN IN THE BROWSER FROM WHAT IS ON SCREEN, not fetched back from
 // the server, so a download always carries the last keystroke rather than
-// whatever the 700ms autosave last managed to send. Downloading the minutes a
-// second after typing the final sentence must not hand back the version without
-// it.
+// whatever the 700ms autosave last managed to send.
 //
 // No library, deliberately. A .docx is a zip of three XML parts and a PDF is a
 // handful of objects and a table of byte offsets; a document toolkit would cost
-// more to carry than this whole file, which is ~250 lines and has no network,
-// no fonts to ship and nothing to keep in step with a release.
+// more to carry than this file, which has no network, no fonts to ship and
+// nothing to keep in step with a release.
+//
+// A CALLER HANDS OVER BLOCKS, NOT A STRING. Minutes are a structured document —
+// a details table, a numbered section per agenda item, an actions table — and a
+// textarea's worth of plain text cannot express any of that. `blocks` is that
+// structure; `body` is still accepted for the plain-text case (the secretary's
+// own notes), and is turned into paragraphs.
 
 const enc = new TextEncoder()
 
@@ -50,6 +54,17 @@ export function docFilename(...parts) {
     .replace(/\s+/g, ' ')
     .trim()
   return name || 'document'
+}
+
+// Plain text becomes one paragraph per line, so a blank line survives the trip.
+const textBlocks = (body) => String(body || '').split('\n').map(text => ({ type: 'para', text }))
+
+function docBlocks({ title, subtitle, body, blocks }) {
+  const out = []
+  if (title) out.push({ type: 'title', text: title })
+  if (subtitle) out.push({ type: 'subtitle', text: subtitle })
+  out.push(...(blocks && blocks.length ? blocks : textBlocks(body)))
+  return out
 }
 
 /* ── zip, stored ─────────────────────────────────────────────────────────── */
@@ -117,26 +132,78 @@ const xml = s => String(s)
 
 // `w:sz` is HALF-points, so 32 reads as 16pt. `w:spacing w:after` is twentieths
 // of a point, so 120 is 6pt.
-function para(text, { bold = false, size = null, after = 0, colour = null } = {}) {
-  const rPr = (bold || size || colour)
-    ? `<w:rPr>${bold ? '<w:b/>' : ''}${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}${colour ? `<w:color w:val="${colour}"/>` : ''}</w:rPr>`
+function run(text, { bold, size, colour, italic } = {}) {
+  const rPr = (bold || size || colour || italic)
+    ? `<w:rPr>${bold ? '<w:b/>' : ''}${italic ? '<w:i/>' : ''}${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}${colour ? `<w:color w:val="${colour}"/>` : ''}</w:rPr>`
     : ''
-  // An empty paragraph is how a blank line in the box survives the trip.
-  const run = text ? `<w:r>${rPr}<w:t xml:space="preserve">${xml(text)}</w:t></w:r>` : ''
-  return `<w:p><w:pPr><w:spacing w:after="${after}"/></w:pPr>${run}</w:p>`
+  return `<w:r>${rPr}<w:t xml:space="preserve">${xml(text)}</w:t></w:r>`
 }
 
-export function downloadDocx({ filename, title, subtitle, body }) {
-  const paras = [
-    para(title, { bold: true, size: 32, after: subtitle ? 40 : 200 }),
-    ...(subtitle ? [para(subtitle, { size: 19, colour: '595959', after: 200 })] : []),
-    // Each line of the box becomes its own paragraph, so the text reads in Word
-    // exactly as it is laid out on screen.
-    ...String(body || '').split('\n').map(line => para(line, { size: 22 })),
-  ]
+function para(text, { bold, size, after = 0, colour, italic, indent = 0, align } = {}) {
+  const pPr = `<w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}`
+    + `${indent ? `<w:ind w:left="${indent}"/>` : ''}<w:spacing w:after="${after}"/></w:pPr>`
+  // An empty paragraph is how a blank line in the box survives the trip.
+  return `<w:p>${pPr}${text ? run(text, { bold, size, colour, italic }) : ''}</w:p>`
+}
+
+const CELL_PAD = '<w:tcMar><w:top w:w="60" w:type="dxa"/><w:left w:w="90" w:type="dxa"/>'
+  + '<w:bottom w:w="60" w:type="dxa"/><w:right w:w="90" w:type="dxa"/></w:tcMar>'
+const BORDER = '<w:tblBorders>'
+  + ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']
+    .map(s => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`).join('')
+  + '</w:tblBorders>'
+
+// A4 inside 2cm margins is 9638 twips of usable width.
+const TABLE_WIDTH = 9638
+
+function table(block) {
+  const cols = Math.max(1, (block.header || block.rows[0] || []).length)
+  const weights = block.widths && block.widths.length === cols ? block.widths : Array(cols).fill(1)
+  const total = weights.reduce((a, b) => a + b, 0)
+  const widths = weights.map(w => Math.round(TABLE_WIDTH * w / total))
+
+  const cell = (text, { bold, shaded } = {}) =>
+    `<w:tc><w:tcPr><w:tcW w:w="0" w:type="auto"/>`
+    + `${shaded ? '<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>' : ''}${CELL_PAD}</w:tcPr>`
+    + String(text ?? '').split('\n').map(line => para(line, { size: 19, bold })).join('')
+    + `</w:tc>`
+
+  const row = (cells, opts) => `<w:tr>${cells.map(c => cell(c, opts)).join('')}</w:tr>`
+  return `<w:tbl><w:tblPr><w:tblW w:w="${TABLE_WIDTH}" w:type="dxa"/>${BORDER}</w:tblPr>`
+    + `<w:tblGrid>${widths.map(w => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid>`
+    + (block.header ? row(block.header, { bold: true, shaded: true }) : '')
+    + block.rows.map(r => row(r)).join('')
+    + `</w:tbl>${para('', { after: 80 })}`
+}
+
+function blockToDocx(b) {
+  switch (b.type) {
+    case 'title':
+      return String(b.text).split('\n')
+        .map(t => para(t, { bold: true, size: 34, after: 40, align: 'center' })).join('')
+    case 'subtitle':
+      return String(b.text).split('\n')
+        .map(t => para(t, { size: 20, colour: '595959', after: 60, align: 'center' })).join('')
+    case 'heading': return para(b.text, { bold: true, size: 26, after: 80, colour: '1F3864' })
+    case 'label': return para(b.text, { bold: true, size: 19, colour: '595959', after: 40, indent: b.indent || 0 })
+    case 'bullets':
+      return (b.items || []).map(t => para(`•  ${t}`, { size: 21, after: 20, indent: 340 })).join('')
+    case 'table': return table(b)
+    case 'spacer': return para('', { after: b.after ?? 120 })
+    case 'para':
+    default:
+      return para(b.text, {
+        size: 21, after: b.after ?? 80, italic: b.italic,
+        colour: b.muted ? '595959' : undefined, indent: b.indent || 0,
+      })
+  }
+}
+
+export function downloadDocx({ filename, title, subtitle, body, blocks }) {
+  const parts = docBlocks({ title, subtitle, body, blocks }).map(blockToDocx).join('')
 
   const document = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${paras.join('')}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${parts}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
 
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>`
@@ -184,24 +251,29 @@ const WINANSI = {
   0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C,
   0x017E: 0x9E, 0x0178: 0x9F,
 }
+// A character with no WinAnsi slot of its own, folded onto the nearest thing the
+// base-14 fonts can actually draw. The breadcrumb separator the plan labels use
+// (a heavy angle quote) is the one that matters here.
+const FOLD = { 0x276F: 0xBB, 0x276E: 0xAB, 0x2192: 0x3E }
 
 function winAnsi(ch) {
   const c = ch.codePointAt(0)
   if (c === 9) return 32
   if (c >= 32 && c <= 126) return c
   if (WINANSI[c] != null) return WINANSI[c]
+  if (FOLD[c] != null) return FOLD[c]
   if (c >= 160 && c <= 255) return c
   return 63
 }
 
 function textWidth(s, size, bold) {
   let w = 0
-  for (const ch of s) {
+  for (const ch of String(s)) {
     const c = winAnsi(ch)
     w += (c >= 32 && c <= 126) ? HELVETICA[c - 32] : 556
   }
-  // Helvetica-Bold runs a little wider than the table above; the title is the
-  // only bold line, so an approximation is enough to keep it inside the margin.
+  // Helvetica-Bold runs a little wider than the table above; used for headings
+  // and table headers, so an approximation is enough to keep them in the column.
   return (w * size / 1000) * (bold ? 1.06 : 1)
 }
 
@@ -232,9 +304,12 @@ function wrapLine(line, size, maxWidth, bold) {
   return rows.length ? rows : ['']
 }
 
+const wrapText = (text, size, maxWidth, bold) =>
+  String(text ?? '').split('\n').flatMap(l => wrapLine(l, size, maxWidth, bold))
+
 function pdfString(s) {
   const out = [0x28]
-  for (const ch of s) {
+  for (const ch of String(s)) {
     const c = winAnsi(ch)
     if (c === 0x28 || c === 0x29 || c === 0x5C) out.push(0x5C)
     out.push(c)
@@ -245,44 +320,176 @@ function pdfString(s) {
 
 const ascii = s => Array.from(enc.encode(s))
 
-export function downloadPdf({ filename, title, subtitle, body }) {
-  const PAGE_W = 595.28, PAGE_H = 841.89, MARGIN = 56
-  const maxWidth = PAGE_W - MARGIN * 2
-  const BODY_SIZE = 11
+const PAGE_W = 595.28, PAGE_H = 841.89, MARGIN = 56
+const COL = PAGE_W - MARGIN * 2
 
-  const lines = [
-    ...wrapLine(title, 16, maxWidth, true).map(text => ({ text, size: 16, bold: true, after: subtitle ? 3 : 10 })),
-    ...(subtitle ? wrapLine(subtitle, 9.5, maxWidth, false).map(text => ({ text, size: 9.5, grey: true, after: 10 })) : []),
-    ...String(body || '').split('\n').flatMap(raw =>
-      wrapLine(raw, BODY_SIZE, maxWidth, false).map(text => ({ text, size: BODY_SIZE }))),
-  ]
+// Every block becomes drawing instructions with their own height, so paging is
+// decided once over the whole document rather than per block.
+function layout(blocks) {
+  const ops = []
+  // Variadic: `push(...tableOps(b))` was spreading a whole table into a
+  // one-argument helper, so every table drew its first row and silently
+  // dropped the rest.
+  const push = (...o) => ops.push(...o)
 
-  // Paged before anything is drawn, so the page objects and their content
-  // streams are built from one agreed layout.
+  for (const b of blocks) {
+    switch (b.type) {
+      case 'title':
+        for (const t of wrapText(b.text, 17, COL, true)) push({ kind: 'text', text: t, size: 17, bold: true, centre: true, gap: 3 })
+        break
+      case 'subtitle':
+        for (const t of wrapText(b.text, 10, COL, false)) push({ kind: 'text', text: t, size: 10, grey: true, centre: true, gap: 3 })
+        push({ kind: 'gap', height: 8 })
+        break
+      case 'heading':
+        push({ kind: 'gap', height: 6 })
+        for (const t of wrapText(b.text, 13, COL, true)) push({ kind: 'text', text: t, size: 13, bold: true, keepNext: true, gap: 3 })
+        push({ kind: 'rule', gap: 7 })
+        break
+      case 'label':
+        for (const t of wrapText(b.text, 9, COL - (b.indent || 0), true))
+          push({ kind: 'text', text: t, size: 9, bold: true, grey: true, indent: b.indent || 0, gap: 2 })
+        break
+      case 'bullets':
+        for (const item of (b.items || [])) {
+          const rows = wrapText(item, 10.5, COL - 18, false)
+          rows.forEach((t, i) => push({
+            kind: 'text', text: i === 0 ? `•  ${t}` : `   ${t}`, size: 10.5, indent: 12, gap: 1,
+          }))
+        }
+        push({ kind: 'gap', height: 4 })
+        break
+      case 'table':
+        push(...tableOps(b))
+        break
+      case 'spacer':
+        push({ kind: 'gap', height: b.height ?? 8 })
+        break
+      case 'para':
+      default: {
+        const indent = b.indent || 0
+        const rows = wrapText(b.text, 10.5, COL - indent, false)
+        for (const t of rows) push({ kind: 'text', text: t, size: 10.5, grey: b.muted, italic: b.italic, indent, gap: 2 })
+        push({ kind: 'gap', height: b.after ?? 5 })
+      }
+    }
+  }
+  return ops
+}
+
+// A table row is one op carrying every cell's already-wrapped lines, so it can
+// be moved to the next page whole rather than split across the break.
+function tableOps(b) {
+  const cols = Math.max(1, (b.header || b.rows[0] || []).length)
+  const weights = b.widths && b.widths.length === cols ? b.widths : Array(cols).fill(1)
+  const total = weights.reduce((a, x) => a + x, 0)
+  const widths = weights.map(w => COL * w / total)
+  const PAD = 4
+  const SIZE = 9
+
+  const rowOp = (cells, header) => {
+    const lines = cells.map((c, i) => wrapText(c, SIZE, widths[i] - PAD * 2, header))
+    const height = Math.max(...lines.map(l => l.length)) * (SIZE * 1.32) + PAD * 2
+    return { kind: 'row', lines, widths, height, header, size: SIZE, pad: PAD }
+  }
+
+  const ops = []
+  if (b.header) ops.push({ ...rowOp(b.header, true), repeat: true })
+  for (const r of b.rows) ops.push(rowOp(r, false))
+  ops.push({ kind: 'gap', height: 8 })
+  return ops
+}
+
+export function downloadPdf({ filename, title, subtitle, body, blocks }) {
+  const ops = layout(docBlocks({ title, subtitle, body, blocks }))
+
+  // Paged before anything is drawn. A table header repeats on each page it runs
+  // onto, or the columns on page two mean nothing.
   const pages = [[]]
   let y = PAGE_H - MARGIN
-  for (const line of lines) {
-    const height = line.size * 1.42 + (line.after || 0)
-    if (y - height < MARGIN && pages[pages.length - 1].length) {
-      pages.push([])
-      y = PAGE_H - MARGIN
+  let header = null
+  const room = (h) => y - h >= MARGIN
+  const newPage = () => {
+    pages.push([])
+    y = PAGE_H - MARGIN
+    if (header) {
+      pages[pages.length - 1].push({ ...header, y: y - header.height })
+      y -= header.height
     }
-    pages[pages.length - 1].push({ ...line, baseline: y - line.size * 1.05 })
-    y -= height
+  }
+
+  // Every op has to report a NUMBER here. The rule under a heading carries no
+  // font size, so working its height out from `op.size` produced NaN: `room()`
+  // was then false for everything after it and `y` never recovered, which put
+  // each element on a page of its own, 19 pages for a two-page document.
+  const heightOf = (op) => {
+    const h = op.kind === 'row' ? op.height
+      : op.kind === 'rule' ? (op.gap || 0)
+        : (op.size || 0) * 1.32 + (op.gap || 0)
+    return Number.isFinite(h) ? h : 0
+  }
+
+  for (const op of ops) {
+    if (op.kind === 'gap') { y -= op.height || 0; continue }
+    if (op.kind === 'row' && op.repeat) header = op
+    // A table that has finished resets the repeating header.
+    if (op.kind !== 'row') header = null
+
+    const h = heightOf(op)
+    // A heading alone at the foot of a page reads as a mistake, so it moves to
+    // the next one with the first lines of its section.
+    const need = op.keepNext ? h + 46 : h
+    if (!room(need) && pages[pages.length - 1].length) newPage()
+    pages[pages.length - 1].push({
+      ...op,
+      y: op.kind === 'row' ? y - op.height : y - (op.size || 0) * 1.02,
+    })
+    y -= h
   }
 
   const streams = pages.map(page => {
-    let ops = []
-    for (const line of page) {
-      if (!line.text) continue
-      const font = line.bold ? '/F2' : '/F1'
-      if (line.grey) ops = ops.concat(ascii('0.42 0.42 0.42 rg\n'))
-      ops = ops.concat(ascii(`BT ${font} ${line.size} Tf ${MARGIN.toFixed(2)} ${line.baseline.toFixed(2)} Td `))
-      ops = ops.concat(pdfString(line.text))
-      ops = ops.concat(ascii(' Tj ET\n'))
-      if (line.grey) ops = ops.concat(ascii('0 g\n'))
+    let s = []
+    for (const op of page) {
+      if (op.kind === 'rule') {
+        s = s.concat(ascii(`0.78 0.78 0.78 RG 0.6 w ${MARGIN} ${(op.y + 3).toFixed(2)} m ${(PAGE_W - MARGIN).toFixed(2)} ${(op.y + 3).toFixed(2)} l S\n`))
+        continue
+      }
+      if (op.kind === 'row') {
+        let x = MARGIN
+        if (op.header) {
+          s = s.concat(ascii(`0.95 0.95 0.95 rg ${MARGIN} ${op.y.toFixed(2)} ${COL.toFixed(2)} ${op.height.toFixed(2)} re f\n`))
+        }
+        // The cell borders, drawn as a box per column.
+        s = s.concat(ascii('0.75 0.75 0.75 RG 0.5 w\n'))
+        for (let i = 0; i < op.widths.length; i++) {
+          s = s.concat(ascii(`${x.toFixed(2)} ${op.y.toFixed(2)} ${op.widths[i].toFixed(2)} ${op.height.toFixed(2)} re S\n`))
+          x += op.widths[i]
+        }
+        x = MARGIN
+        for (let i = 0; i < op.lines.length; i++) {
+          let ty = op.y + op.height - op.pad - op.size
+          for (const line of op.lines[i]) {
+            s = s.concat(ascii(`0 g BT ${op.header ? '/F2' : '/F1'} ${op.size} Tf ${(x + op.pad).toFixed(2)} ${ty.toFixed(2)} Td `))
+            s = s.concat(pdfString(line))
+            s = s.concat(ascii(' Tj ET\n'))
+            ty -= op.size * 1.32
+          }
+          x += op.widths[i]
+        }
+        continue
+      }
+      if (!op.text) continue
+      const font = op.bold ? '/F2' : '/F1'
+      const x = op.centre
+        ? MARGIN + (COL - textWidth(op.text, op.size, op.bold)) / 2
+        : MARGIN + (op.indent || 0)
+      if (op.grey) s = s.concat(ascii('0.42 0.42 0.42 rg\n'))
+      s = s.concat(ascii(`BT ${font} ${op.size} Tf ${x.toFixed(2)} ${op.y.toFixed(2)} Td `))
+      s = s.concat(pdfString(op.text))
+      s = s.concat(ascii(' Tj ET\n'))
+      if (op.grey) s = s.concat(ascii('0 g\n'))
     }
-    return new Uint8Array(ops)
+    return new Uint8Array(s)
   })
 
   // 1 catalog, 2 pages, 3 Helvetica, 4 Helvetica-Bold, 5 info, then a page

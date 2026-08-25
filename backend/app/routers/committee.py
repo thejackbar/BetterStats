@@ -467,7 +467,97 @@ async def delete_document(doc_id: str, user: User = _require, club: Organisation
 
 # ─── A first draft of the minutes ────────────────────────────────────────────
 
-def _minutes_prompt(club_name, meeting, attendance_lines, agenda, motions, actions) -> str:
+def _minutes_context(room: dict, names: dict, objectives: dict) -> tuple[str, str]:
+    """The agenda as the model is shown it, and anything raised outside it.
+
+    EVERYTHING IS FILED UNDER ITS AGENDA ITEM. The old context listed motions and
+    actions flat, with nothing saying which item each belonged to, so the model
+    placed them wherever they read as belonging — which is how a motion moved in
+    the President's report came out under Sponsorship & Fundraising.
+
+    Pure, so it can be exercised against a real meeting's payload with no
+    database, no API key and no network.
+    """
+    def objective_of(oid):
+        o = objectives.get(oid)
+        if not o:
+            return ""
+        tiers = [o.get("plan_name"), o.get("pillar_name"), o.get("title")]
+        return " > ".join(t for t in tiers if t)
+
+    def motion_block(mo, pad="   "):
+        out = [f'{pad}MOTION: "{mo["description"]}"']
+        moved = ", ".join(filter(None, [
+            f"moved by {names[mo['proposed_by_member_id']]}"
+            if mo.get("proposed_by_member_id") in names else None,
+            f"seconded by {names[mo['seconded_by_member_id']]}"
+            if mo.get("seconded_by_member_id") in names else None,
+        ]))
+        if moved:
+            out.append(f"{pad}  {moved[0].upper()}{moved[1:]}.")
+        obj = objective_of(mo.get("objective_id"))
+        if obj:
+            out.append(f"{pad}  Serves objective: {obj}")
+        f, a, ab = mo.get("votes_for") or 0, mo.get("votes_against") or 0, mo.get("votes_abstain") or 0
+        tally = f" For {f}, against {a}, abstain {ab}." if (f or a or ab) else ""
+        out.append(f"{pad}  Outcome: {mo.get('outcome') or 'pending'}.{tally}")
+        # Named votes, where the club records them rather than a show of hands.
+        by: dict = {}
+        for v in (mo.get("votes") or []):
+            if v.get("vote"):
+                by.setdefault(v["vote"], []).append(names.get(v["member_id"], "Unknown"))
+        if by:
+            said = "; ".join(f"{k} - {', '.join(sorted(v))}" for k, v in sorted(by.items()))
+            out.append(f"{pad}  Votes by name: {said}")
+        return out
+
+    def action_block(t, pad="   "):
+        who = ", ".join(names.get(a, "Unassigned") for a in (t.get("assignee_member_ids") or [])) \
+            or names.get(t.get("assigned_to_member_id"), "Unassigned")
+        bits = [who]
+        if t.get("due_date"):
+            bits.append(f"due {t['due_date']}")
+        if t.get("budget_estimate"):
+            bits.append(f"budget ${t['budget_estimate']:,.0f}")
+        if t.get("status"):
+            bits.append(f"status {t['status']}")
+        out = [f"{pad}ACTION: {t['title']} ({', '.join(bits)})"]
+        obj = objective_of(t.get("objective_id"))
+        if obj:
+            out.append(f"{pad}  Serves objective: {obj}")
+        return out
+
+    item_ids = {i["id"] for i in room["agenda_items"]}
+    agenda_lines = []
+    for i, item in enumerate(room["agenda_items"], 1):
+        agenda_lines.append(f"{i}. {item['title']} [{item['status']}]")
+        note = (item.get("outcome_notes") or "").strip()
+        if note:
+            agenda_lines.append(f"   Notes taken: {note}")
+        for mo in [m for m in room["motions"] if m.get("agenda_item_id") == item["id"]]:
+            agenda_lines.extend(motion_block(mo))
+        for t in [a for a in room["actions"] if a.get("agenda_item_id") == item["id"]]:
+            agenda_lines.extend(action_block(t))
+
+    loose_lines = []
+    for mo in [m for m in room["motions"] if m.get("agenda_item_id") not in item_ids]:
+        loose_lines.extend(motion_block(mo, pad=""))
+    for t in [a for a in room["actions"] if a.get("agenda_item_id") not in item_ids]:
+        loose_lines.extend(action_block(t, pad=""))
+    loose = ("RAISED WITHOUT AN AGENDA ITEM, to be written up under other business\n"
+             + "\n".join(loose_lines) + "\n") if loose_lines else ""
+    return "\n".join(agenda_lines), loose
+
+
+def _minutes_prompt(club_name, meeting, attendance_lines, agenda, loose) -> str:
+    """The brief for the first pass at the minutes.
+
+    EVERY MOTION AND ACTION IS PRESENTED UNDER THE AGENDA ITEM IT BELONGS TO,
+    never as a flat list, because a flat list is what made the model guess: a
+    motion moved during the President's report was written up under Sponsorship
+    & Fundraising simply because that is where it read as belonging. The model is
+    told the section, so it no longer has to work it out.
+    """
     return f"""You are the secretary of {club_name}, writing up the minutes of a
 club committee meeting from the notes taken during it.
 
@@ -477,23 +567,26 @@ MEETING: {meeting['title']} on {meeting.get('scheduled_at') or 'an unrecorded da
 ATTENDANCE
 {attendance_lines or 'Not recorded.'}
 
-AGENDA, IN ORDER, WITH WHAT WAS NOTED AGAINST EACH ITEM
+THE AGENDA, IN ORDER. Everything moved or agreed is listed under the item it
+was raised under, and that is where it must be written up.
 {agenda or 'No agenda items.'}
 
-MOTIONS
-{motions or 'No motions.'}
-
-ACTIONS AGREED
-{actions or 'No actions.'}
-
+{loose}
 Write the minutes as a club secretary would, in plain Australian English.
 Rules:
 - Use ONLY what is above. Do not invent discussion, names, figures or outcomes.
   Where a note is thin, keep the entry short rather than padding it.
-- Follow the agenda order, one short section per item, using the item's own title.
-- Record each motion with its wording, its outcome and the vote if there is one.
-- Finish with a list of actions, who has each one and when it is due.
-- No preamble, no sign-off, no headings above the first agenda item.
+- Follow the agenda order. One section per item, headed by the item's own title
+  on a line of its own, with no numbering and no other markup.
+- WRITE UP A MOTION UNDER THE AGENDA ITEM IT IS LISTED AGAINST ABOVE, never
+  under the item its subject seems to suit. Give its wording, who moved and
+  seconded it where that is recorded, its outcome, the vote, and the strategic
+  objective it serves where one is named.
+- Where the votes are recorded by name, say how each person voted.
+- Record each action under its own item too, with who has it, when it is due,
+  what it may cost and the objective it serves where one is named.
+- No preamble, no sign-off, no closing summary, and no separate list of actions
+  at the end. The document this becomes adds its own.
 - Plain sentences. No em dashes. Nothing promotional."""
 
 
@@ -527,27 +620,13 @@ async def draft_minutes(meeting_id: str, _: User = _require, club: Organisation 
     attendance_lines = "\n".join(
         f"{k.title()}: {', '.join(sorted(v))}" for k, v in sorted(by_status.items()))
 
-    agenda_lines = []
-    for i, item in enumerate(room["agenda_items"], 1):
-        note = (item.get("outcome_notes") or "").strip()
-        agenda_lines.append(f"{i}. {item['title']} [{item['status']}]" + (f"\n   Notes: {note}" if note else ""))
-
-    motion_lines = []
-    for mo in room["motions"]:
-        votes = ""
-        if mo.get("votes_for") is not None or mo.get("votes_against") is not None:
-            votes = f" (for {mo.get('votes_for') or 0}, against {mo.get('votes_against') or 0}, abstain {mo.get('votes_abstain') or 0})"
-        motion_lines.append(f"- \"{mo['description']}\" — {mo['outcome']}{votes}")
-
-    action_lines = []
-    for t in room["actions"]:
-        who = ", ".join(names.get(a, "Unassigned") for a in (t.get("assignee_member_ids") or [])) or "Unassigned"
-        due = f", due {t['due_date']}" if t.get("due_date") else ""
-        budget = f", budget ${t['budget_estimate']:,.0f}" if t.get("budget_estimate") else ""
-        action_lines.append(f"- {t['title']} ({who}{due}{budget})")
+    # The plan, so a motion or an action can name the objective it serves rather
+    # than the model being handed a bare id it cannot say anything about.
+    objectives = {o["id"]: o for o in await committee_service.list_objectives(db, club.id)}
+    agenda_text, loose = _minutes_context(room, names, objectives)
 
     prompt = _minutes_prompt(club.name, room["meeting"], attendance_lines,
-                             "\n".join(agenda_lines), "\n".join(motion_lines), "\n".join(action_lines))
+                             agenda_text, loose)
     client = anthropic_sdk.AsyncAnthropic(api_key=settings.anthropic_api_key)
     message = await client.messages.create(
         model="claude-haiku-4-5", max_tokens=1500,
@@ -880,7 +959,12 @@ async def meeting_room(meeting_id: str, _: User = _require, club: Organisation =
     with their votes, the actions raised, attendance, and who can be marked
     present. A secretary mid-meeting should not wait on six requests."""
     m = await _meeting_or_404(db, club, meeting_id)
-    return await committee_service.meeting_room(db, club.id, m)
+    room = await committee_service.meeting_room(db, club.id, m)
+    # The club's own name, so a minutes document downloaded from this screen can
+    # be headed by the club rather than by the meeting alone. One field on a
+    # fetch the screen already makes, rather than a second request for a name.
+    room["club"] = {"name": club.name, "short_name": club.short_name}
+    return room
 
 
 class OrderBody(BaseModel):

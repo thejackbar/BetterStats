@@ -1672,6 +1672,61 @@ as sections with their own buttons rather than three tabs and a manage page.
   are unchanged.
 
 
+### The minutes are a DOCUMENT, composed from the record (v9.53.3)
+
+Reported with the current output and a Word file of what was expected: the
+draft was one block of prose with its `**` marks showing, and it had lost the
+motion moved during the President's report, the objective that motion served,
+the votes, and the detail of the actions.
+
+- **A FLAT LIST OF MOTIONS IS WHY THE MODEL GUESSED.** `draft_minutes` handed
+  the model every motion in one list with nothing saying which agenda item each
+  belonged to, so a Premium Sponsorship motion moved under the President's
+  report was written up under Sponsorship & Fundraising, where its subject read
+  as belonging. `_minutes_context` now nests each motion and action UNDER its
+  agenda item, with the objective breadcrumb, the tally and the named votes, and
+  the prompt says to write a motion up under the item it is listed against
+  rather than the one its subject suits.
+- **THE DOCUMENT IS COMPOSED FROM THE RECORD, NOT FROM THE NARRATIVE.**
+  `minutesDoc.buildMinutesDoc` builds the details table, the agenda, a numbered
+  section per item, each item's motions and actions, and the actions table out
+  of the room payload. A figure the club has already entered cannot go missing
+  because a paragraph failed to mention it. The written account is only ever the
+  prose inside a section.
+- **`splitNarrative` returns `loose` as well as `sections`, and that is
+  load-bearing.** The first cut keyed the narrative on its own headings and
+  dropped everything else, so a secretary who typed plain prose into the box
+  lost all of it. Anything not under a heading, plus any heading no agenda item
+  claimed, is kept in a `Record of Discussion` section.
+- **`textDocs` takes BLOCKS now** (title, heading, para, label, bullets, table,
+  spacer), because a details table and an actions table cannot be expressed as
+  lines of text. `body` still works for the plain-text case, which is what the
+  private notes use.
+- **A PDF OP THAT REPORTS NO HEIGHT POISONS THE WHOLE LAYOUT.** The rule under a
+  heading carried no font size, so `op.size * 1.32` was NaN, `room()` was false
+  for everything after it and `y` never recovered: a two-page document came out
+  as **19 pages, half of them blank**, and every content check still passed.
+  `heightOf` is per-kind and falls back to 0. **The suite now asserts the page
+  count and that no page is blank** — the check it was missing.
+- **`push(...tableOps(b))` into a one-argument helper drew ONE ROW PER TABLE**
+  and silently dropped the rest, which a check asking "is a row drawn" passed.
+  `push` is variadic, and the suite counts the rows it expects.
+- **The short table columns are sized against the widest value they actually
+  hold** (a name, a date, a money figure, "Not recorded", "In Progress"), or
+  "Not recorded" breaks as "Not recorde / d" and reads as a fault.
+- **Names are stored "Surname, First", so a list of them is joined with
+  semicolons.** Comma-joining "Hullett, Mark" and "Monument, Darren" reads as
+  four people.
+- **Verified in Chromium** (83 checks: the reported meeting replayed, the motion
+  measured as sitting between the President's report heading and the next one,
+  its objective, tally and named votes, the action's own different objective,
+  every row of both tables read out of the real table cells, the page count, no
+  blank pages, nothing drawn outside the margins, cells tiling with no gap, and
+  the narrative kept when it has no headings) **with a control run**: with the
+  change stashed there is no club heading, no details table, no agenda and no
+  tables at all. The context builder is checked separately in Python against the
+  reported meeting, with no database and no API key.
+
 ## The minutes leave the screen as a document (v9.53.2, Aug 2026)
 
 Asked for directly: two buttons under MINUTES and two under YOUR NOTES, to take

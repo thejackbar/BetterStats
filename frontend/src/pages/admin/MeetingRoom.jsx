@@ -6,6 +6,7 @@ import BetterClubhouseLayout from '../../components/admin/BetterClubhouseLayout'
 import { PbSpinner } from '../../lib/presskit'
 import { ObjectiveSelect, useObjectives, objectiveLabel } from '../../components/admin/clubmanager/governance'
 import { downloadDocx, downloadPdf, docFilename } from '../../lib/textDocs'
+import { buildMinutesDoc } from '../../components/admin/clubmanager/minutesDoc'
 
 // The meeting room — one screen a secretary runs a meeting from.
 //
@@ -755,20 +756,35 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   // file called Minutes.pdf in somebody's downloads folder says nothing about
   // which meeting it came from.
   function downloadField(field, format) {
-    const minutes = field === 'minutes'
-    const text = (minutes ? minutesRef.current?.value : notesRef.current?.value) || ''
+    const isMinutes = field === 'minutes'
+    const text = (isMinutes ? minutesRef.current?.value : notesRef.current?.value) || ''
     if (!text.trim()) return
-    const label = minutes ? 'Minutes' : 'Private notes'
     const when = shortDate(meeting.scheduled_at)
     const title = meeting.title || 'Meeting'
     const write = format === 'pdf' ? downloadPdf : downloadDocx
+
+    if (isMinutes) {
+      // The minutes go out as the club's own document: a details table, the
+      // agenda, a numbered section per item carrying its motions with the
+      // objective each serves and how everyone voted, then the actions table.
+      // Built from the RECORD, so nothing the screen holds can be left out of
+      // it by a paragraph that did not happen to mention it.
+      write({
+        filename: docFilename(title, when, 'Minutes'),
+        ...buildMinutesDoc({
+          club: data.club, meeting, agendaItems: items, motions, actions,
+          attendance, pool, objectives, minutesText: text,
+        }),
+      })
+      return
+    }
     write({
-      filename: docFilename(title, when, minutes ? 'Minutes' : 'Notes'),
+      filename: docFilename(title, when, 'Notes'),
       title,
-      subtitle: [label, when, meeting.location,
+      subtitle: ['Private notes', when, meeting.location,
         // The screen says these are never circulated with the minutes; a file
         // that has left the screen should keep saying it.
-        minutes ? null : 'Not part of the minutes'].filter(Boolean).join(' \u00b7 '),
+        'Not part of the minutes'].filter(Boolean).join(' \u00b7 '),
       body: text,
     })
   }
