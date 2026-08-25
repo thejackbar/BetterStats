@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import { api } from '../../../../../lib/api'
 import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs, StatReadout } from '../ui'
-import { MeetingRoomPanel } from '../../../MeetingRoom'
+import { MeetingRoomPanel, EditableHeading } from '../../../MeetingRoom'
 import { objectiveLabel } from '../../../../../components/admin/clubmanager/planLabels'
 // The Plans, Actions, Documents and Calendar sections are the manage screen's
 // own editors, mounted here rather than copied — two versions of "the club's
@@ -377,6 +377,17 @@ export default function Committee({ st, patch, narrow }) {
   // Deleting a meeting takes its agenda, motions, attendance and minutes with
   // it, so it asks first. A template the meeting was BUILT from is untouched —
   // the items were copied onto the meeting when it was created.
+  // A meeting is renamed where its name is read. One component with the room's
+  // own, so the summary pane and the room cannot behave differently about the
+  // same field.
+  async function renameMeeting(id, title) {
+    setMsg(null)
+    try {
+      await api.committeeUpdateMeeting(id, { title })
+      await refreshMeeting(id)
+    } catch (e) { setMsg(`Could not rename that meeting — ${String(e?.message || e)}`) }
+  }
+
   async function deleteMeeting(m) {
     if (!window.confirm(`Delete “${m.title}”?\n\nIts agenda, motions, attendance and minutes go with it. This cannot be undone.`)) return
     setMsg(null)
@@ -788,7 +799,10 @@ export default function Committee({ st, patch, narrow }) {
           {sel && !room && (
             <div className="pb-scroll" style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '22px 24px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <h2 style={{ fontWeight: 700, fontSize: 21, margin: 0, letterSpacing: '-0.01em' }}>{sel.title}</h2>
+                <h2 style={{ fontWeight: 700, fontSize: 21, margin: 0, letterSpacing: '-0.01em' }}>
+                  <EditableHeading value={sel.title} label="Meeting name"
+                    onSave={v => renameMeeting(sel.id, v)} />
+                </h2>
                 <span style={{ ...chip(meetingStatus(sel).fg, 9), padding: '3px 7px' }}>{meetingStatus(sel).label}</span>
                 <button onClick={() => openRoom(sel.id)}
                   title="Open the meeting room and record this meeting"

@@ -4624,6 +4624,31 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   spacing now; the agenda item is the only full container. The suite asserts it
   on the computed style (no element around a record has four borders, and each
   still has its left one), not on class names.
+- **A MEETING IS RENAMED WHERE ITS NAME IS READ (v9.51.7).** Renaming used to
+  live on the manage screen, and the header link to it was removed in v9.50.4,
+  so there was nowhere left to do it. `EditableHeading` (exported from
+  `MeetingRoom.jsx`) is ONE component mounted twice — the Committee summary
+  pane's `<h2>` and the room's own inline header — so the two cannot behave
+  differently about the same field. Click, type, Enter saves; Escape puts the
+  old name back and sends nothing; **a blank name is refused rather than
+  saved**, since a meeting has to be called something and an accidental
+  select-all-and-delete must not wipe what the minutes are filed under. It is
+  declared at MODULE level, per the never-declare-a-component-inside-a-render
+  rule — a re-declared component is a new element TYPE and the focused input
+  goes down with the old subtree.
+- **`setTitle` rides on `onMeta` beside `setStatus`**, and both reload rather
+  than patching the local copy: the name on screen is the name the server
+  stored, and the host's `onRoomMeta` already carries `title` onto the card in
+  the rail, so a rename in the room shows in the list beside it without waiting
+  for the room to be closed. **The standalone route is deliberately NOT
+  editable** — its title is the MODULE header's, a plain string that also feeds
+  `ModuleLayout`'s bookmark label, so a node there would render as
+  `[object Object]` in the bookmark.
+- **`getByRole`'s `name` is a SUBSTRING match by default**, which is how the
+  first cut of the rename check silently clicked the row's
+  `aria-label="Delete August committee"` instead of the heading and reported
+  "the field never opened". Pass `exact: true` whenever one record's name is a
+  prefix of a control's label for that same record.
 - **A GRID TRACK'S AUTOMATIC MINIMUM IS ITS CONTENT, WHICH IS WHY `1fr` LEAKS
   (v9.51.6).** Reported off a live meeting: the room ran off the right of the
   screen and took the attendance and minutes rail with it. The room is

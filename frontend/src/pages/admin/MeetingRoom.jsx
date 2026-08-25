@@ -84,6 +84,45 @@ function Pill({ tone, children }) {
   )
 }
 
+// A meeting's name is edited where it is read, like everything else in this
+// room. Click the heading, Enter saves, Escape puts it back. A blank name is
+// refused rather than saved: a meeting has to be called something, and an
+// accidental select-all-and-delete must not wipe what the minutes are filed
+// under. Declared here at module level, never inside a render — a component
+// re-declared each render is a new element TYPE, and the browser takes the
+// focused input down with the old subtree.
+export function EditableHeading({ value, onSave, label = 'Name', size = 21 }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(value)
+  const ref = useRef(null)
+  useEffect(() => { if (editing && ref.current) { ref.current.focus(); ref.current.select() } }, [editing])
+  const commit = () => {
+    const next = draft.trim()
+    setEditing(false)
+    if (next && next !== value) onSave(next)
+  }
+  if (!editing) {
+    return (
+      <button type="button" title={`Click to rename. ${label}.`}
+        onClick={() => { setDraft(value); setEditing(true) }}
+        className="text-left decoration-dotted underline-offset-4 decoration-pb-faintest hover:underline">
+        {value}
+      </button>
+    )
+  }
+  return (
+    <input ref={ref} value={draft} aria-label={label}
+      onChange={e => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={e => {
+        if (e.key === 'Enter') { e.preventDefault(); commit() }
+        if (e.key === 'Escape') { e.preventDefault(); setDraft(value); setEditing(false) }
+      }}
+      style={{ fontSize: size }}
+      className="bg-pb-surface2 border pb-hairline rounded px-2 py-0.5 font-display font-bold text-pb-text w-full max-w-[460px] leading-tight" />
+  )
+}
+
 // An explanation belongs on hover, not permanently under the control it
 // explains. Non-interactive on purpose: there is nothing to open.
 function Hint({ text }) {
@@ -630,9 +669,10 @@ function AgendaItem({
 // Everything the meeting room does, with no page chrome of its own.
 //
 //   meetingId    — which meeting to run.
-//   onMeta       — called on every load with { meeting, setStatus, reload }, so
-//                  a host that draws the header elsewhere (the full-page route)
-//                  can show the title, the status select and stay in step.
+//   onMeta       — called on every load with { meeting, setStatus, setTitle,
+//                  reload }, so a host that draws the header elsewhere (the
+//                  full-page route) can show the title, the status select, and
+//                  stay in step with a rename made in the room.
 //   inlineHeader — draw that header inside the pane instead (the embedded case).
 //   onExit       — offered as Close beside the inline header.
 export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onExit }) {
@@ -655,9 +695,18 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   }, [meetingId])
   useEffect(() => { load() }, [load])
 
-  // The one thing about the meeting itself this screen changes.
+  // The two things about the meeting itself this screen changes.
   const setStatus = useCallback(v => {
     api.committeeUpdateMeeting(meetingId, { status: v })
+      .then(load)
+      .catch(e => toast.error(e.message))
+  }, [meetingId, load, toast])
+
+  // Reloads rather than patching the local copy, so the name on screen is the
+  // name the server actually stored, and `onMeta` carries it back to whatever
+  // list is drawn beside the room.
+  const setTitle = useCallback(v => {
+    api.committeeUpdateMeeting(meetingId, { title: v })
       .then(load)
       .catch(e => toast.error(e.message))
   }, [meetingId, load, toast])
@@ -667,7 +716,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   // two functions here are only read, never compared.
   useEffect(() => {
     if (!onMeta) return
-    onMeta(data ? { meeting: data.meeting, setStatus, reload: load } : null)
+    onMeta(data ? { meeting: data.meeting, setStatus, setTitle, reload: load } : null)
   }, [data])   // eslint-disable-line react-hooks/exhaustive-deps
 
   const wrap = fn => async (...args) => {
@@ -827,7 +876,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
         <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
           <div className="min-w-0">
             <h2 className="font-display font-bold text-[21px] text-pb-text leading-tight tracking-[-0.01em] m-0">
-              {meeting.title}
+              <EditableHeading value={meeting.title} onSave={setTitle} label="Meeting name" />
             </h2>
             <div className="font-mono text-[11px] text-pb-faint mt-1">
               {when}{meeting.location ? ` · ${meeting.location}` : ''}
