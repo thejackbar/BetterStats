@@ -62,10 +62,10 @@ export default function ClubhouseToday() {
 
   if (counts.serviceDue > 0) {
     rows.push({
-      key: 'service', tone: 'warn', count: counts.serviceDue, area: 'Club · Stock',
+      key: 'service', tone: 'warn', count: counts.serviceDue, area: 'Club · Facilities & Assets',
       title: `${counts.serviceDue === 1 ? 'A piece of gear is' : `${counts.serviceDue} pieces of gear are`} due for service`,
       detail: 'Equipment with a service or replacement date that has come around.',
-      actions: [{ label: 'Open equipment', to: '/admin/merch/equipment' }],
+      actions: [{ label: 'Open the asset register', to: '/admin/assets' }],
     })
   }
 

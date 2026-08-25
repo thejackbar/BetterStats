@@ -578,22 +578,16 @@ export default function Committee({ st, patch, narrow }) {
       {/* Moving to another section starts a fresh search: a query typed against
           meetings means nothing against documents. */}
       <SegTabs value={tab} onChange={k => patch({ cteTab: k, cteSearch: '' })} tabs={TABS} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginLeft: 'auto', flexWrap: 'wrap' }}>
-        {/* No link out to the manage screen: every one of its editors is
-            mounted here now (Meetings, Actions, Motions, Meeting Templates,
-            Plans, Documents, Calendar, Positions), so the link only ever took
-            a reader to a second copy of what they were already looking at.
-            /admin/clubhouse/committee/manage still exists and still works —
-            it is simply no longer offered as a destination. */}
-        {/* The primary action belongs to whatever is on screen, so the button
-            names the record this view actually makes. */}
-        {data && tab === 'meetings' && meetingsView === 'meetings' && (
-          <button onClick={openNew} style={btnP}>+ New meeting</button>
-        )}
-        {data && tab === 'meetings' && meetingsView === 'templates' && (
-          <button onClick={openNewTemplate} style={btnP}>+ New Meeting Template</button>
-        )}
-      </div>
+      {/* No link out to the manage screen: every one of its editors is mounted
+          here now (Meetings, Actions, Motions, Meeting Templates, Plans,
+          Documents, Calendar, Positions), so the link only ever took a reader
+          to a second copy of what they were already looking at.
+          /admin/clubhouse/committee/manage still exists and still works — it is
+          simply no longer offered as a destination. */}
+      {/* THE STATS ARE THE ONLY THING ON THE RIGHT OF THE TITLE LINE, which is
+          what puts them there: they are the sole child carrying an auto left
+          margin. The primary action moved down to the search row, beside the
+          box that narrows the very list it adds to. */}
       {children}
     </ScreenHeader>
   )
@@ -619,10 +613,18 @@ export default function Committee({ st, patch, narrow }) {
   // one list on screen: a motion, an action or something minuted is inside a
   // meeting, and an action or a motion is inside a plan, so a box that only
   // filtered the visible rows would answer the wrong question. It sits on its
-  // own line, below the section buttons and above any second row of them.
+  // own line BELOW every row of section buttons, so what it searches reads as
+  // everything above it.
   const subBar = () => (searchable ? (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, maxWidth: '100%' }}>
+      {/* The buttons first, then the box. A search typed here reaches the whole
+          section, so it reads as belonging to everything above it rather than
+          to the row of buttons that would otherwise follow it. */}
+      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
+      {/* alignSelf: 'stretch', because the column above sets alignItems to
+          flex-start — without it this row is only as wide as the box and an
+          auto left margin has nothing to push the action against. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'stretch', maxWidth: '100%', flexWrap: 'wrap' }}>
         {/* box-sizing, or the padding is added on top of the cap and the row
             pushes the page sideways on a phone. */}
         <input value={st.cteSearch || ''} onChange={e => patch({ cteSearch: e.target.value })}
@@ -635,8 +637,15 @@ export default function Committee({ st, patch, narrow }) {
             CLEAR
           </button>
         )}
+        {/* The primary action names the record THIS view actually makes, so it
+            follows the section rather than sitting over the whole screen. */}
+        {data && tab === 'meetings' && meetingsView === 'meetings' && (
+          <button onClick={openNew} style={{ ...btnP, marginLeft: 'auto', flexShrink: 0 }}>+ New meeting</button>
+        )}
+        {data && tab === 'meetings' && meetingsView === 'templates' && (
+          <button onClick={openNewTemplate} style={{ ...btnP, marginLeft: 'auto', flexShrink: 0 }}>+ New Meeting Template</button>
+        )}
       </div>
-      {subRows.map((r, i) => <SegTabs key={i} value={r.value} tabs={r.tabs} onChange={r.onChange} />)}
     </div>
   ) : (subRows.length === 0 ? null : (
     <div style={{ borderBottom: `1px solid ${C.hair}`, background: C.surface, padding: '10px 20px', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-start' }}>

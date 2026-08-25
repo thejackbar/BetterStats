@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../../contexts/AuthContext'
 import { MODULE } from '../../../lib/modules'
 import BetterClubhouseLayout from '../../../components/admin/BetterClubhouseLayout'
-import { Button, FilterPill, StatCard, Caption, Empty } from '../../../components/admin/ui'
+import { Button, SegButtons, StatCard, Caption, Empty } from '../../../components/admin/ui'
 import ScreenIntro, { useScreenIntro, INTROS } from './intro'
 import { useClubhouseData, clubhouseModules, money } from './data'
 
@@ -42,12 +42,12 @@ export default function ClubhouseReports() {
       title="Reports"
       caption={data?.season ? data.season.name : 'This season'}
       onHelp={intro.reopen}
-      filters={sources.length > 1 && (
-        <div className="flex items-center gap-2">
-          {sources.map(x => (
-            <FilterPill key={x.key} active={source === x.key} onClick={() => setSource(x.key)}>{x.label}</FilterPill>
-          ))}
-        </div>
+      // Which source you are reading sits on the title line, centred, in
+      // Committee's own segmented control — one source at a time, which is
+      // exactly what that control is for.
+      tabs={sources.length > 1 && (
+        <SegButtons value={source} onChange={setSource}
+          tabs={sources.map(x => ({ key: x.key, label: x.label }))} />
       )}
       actions={current && (
         <Button variant="primary" onClick={() => navigate(current.to, { state: { skipIntro: true } })}>

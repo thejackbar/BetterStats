@@ -13,7 +13,7 @@ from decimal import Decimal
 from sqlalchemy import select, func, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import MerchProduct, MerchVariant, MerchMovement, MerchAsset
+from app.models.db import MerchProduct, MerchVariant, MerchMovement
 
 
 DEFAULT_ALERT_HORIZON_DAYS = 30
@@ -154,38 +154,15 @@ async def merch_alerts(
         for v, p in exp_rows
     ]
 
-    # ── Service / replace due (individual assets) ────────────────────────────
-    asset_q = (
-        select(MerchAsset)
-        .where(
-            MerchAsset.organisation_id == org_id,
-            MerchAsset.is_active.is_(True),
-            MerchAsset.status != "retired",
-            (
-                (MerchAsset.service_due_date.isnot(None) & (MerchAsset.service_due_date <= horizon))
-                | (MerchAsset.replace_due_date.isnot(None) & (MerchAsset.replace_due_date <= horizon))
-            ),
-        )
-        .order_by(func.coalesce(MerchAsset.service_due_date, MerchAsset.replace_due_date).asc())
-    )
-    assets = (await session.execute(asset_q)).scalars().all()
-    service_due = []
-    for a in assets:
-        service_soon = a.service_due_date is not None and a.service_due_date <= horizon
-        replace_soon = a.replace_due_date is not None and a.replace_due_date <= horizon
-        service_due.append(
-            {
-                "asset_id": str(a.id),
-                "name": a.name,
-                "condition": a.condition,
-                "service_due_date": a.service_due_date.isoformat() if a.service_due_date else None,
-                "replace_due_date": a.replace_due_date.isoformat() if a.replace_due_date else None,
-                "service_due": service_soon,
-                "replace_due": replace_soon,
-                "service_overdue": bool(a.service_due_date and a.service_due_date < today),
-                "replace_overdue": bool(a.replace_due_date and a.replace_due_date < today),
-            }
-        )
+    # ── Service / replace due: NOT HERE ANY MORE ─────────────────────────────
+    # Migration 279 made the club's asset register one thing, in core, and
+    # equipment is not inventory. `services/assets.asset_alerts` raises these
+    # now, for every club rather than only the ones holding this module.
+    #
+    # The key stays on the wire as an empty list rather than being removed, so
+    # a browser served an older bundle mid-deploy reads the shape it expects
+    # instead of crashing — the `plan_report.unassigned` rule.
+    service_due: list = []
 
     return {
         "low_stock": low_stock,
@@ -244,12 +221,10 @@ async def stock_summary(session: AsyncSession, org_id) -> dict:
         )
     ) or 0
 
-    asset_count = await session.scalar(
-        select(func.count(MerchAsset.id)).where(
-            MerchAsset.organisation_id == org_id,
-            MerchAsset.is_active.is_(True),
-        )
-    ) or 0
+    # Assets left this module with migration 279 — the register is core now and
+    # equipment was never stock. Kept on the wire at 0 for one release so an
+    # older bundle reads the key it expects.
+    asset_count = 0
 
     return {
         "stock_value_cost": float(cost_value or 0),

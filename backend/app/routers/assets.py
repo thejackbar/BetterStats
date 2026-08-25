@@ -194,6 +194,19 @@ async def delete_booking(booking_id: str, _: User = _require, club: Organisation
 
 # ─── Club assets ──────────────────────────────────────────────────────────────
 
+@router.get("/alerts")
+async def list_asset_alerts(horizon_days: int = 30, _: User = _require,
+                            club: Organisation = Depends(get_current_club), db: AsyncSession = Depends(get_db)):
+    """Assets due for service or replacement.
+
+    CORE. This used to live behind the paid merch module and read the old
+    `merch_assets` register, so a club without BetterMerch had service dates
+    that warned nobody. Migration 279 made the register one thing and the
+    warning follows it.
+    """
+    return await assets_service.asset_alerts(db, club.id, horizon_days=horizon_days)
+
+
 @router.get("/items")
 async def list_assets(include_inactive: bool = False, category: Optional[str] = None, status: Optional[str] = None,
                       facility_id: Optional[str] = None, cost_min: Optional[float] = None, cost_max: Optional[float] = None,

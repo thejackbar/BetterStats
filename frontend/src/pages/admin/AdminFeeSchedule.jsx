@@ -3,7 +3,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import { Link } from 'react-router-dom'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
-import { Button, Select, Caption, INPUT_CLS } from '../../components/admin/ui'
+import { Button, Select, Caption, SegGroup, SegItem, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import { formatSeason } from '../../lib/cricketFormat'
 
@@ -214,7 +214,14 @@ export default function AdminFeeSchedule() {
     <BetterFeesLayout
       title="Membership tiers"
       caption="What each kind of member pays"
-      actions={<Button as={Link} to="/admin/fees/membership-types">Membership types</Button>}
+      // The one button on this title line wears Committee's own control, the
+      // same as every other module screen's. It is a link rather than a filter,
+      // so it sits in the box without an on state.
+      tabs={
+        <SegGroup>
+          <SegItem as={Link} to="/admin/fees/membership-types">Membership types</SegItem>
+        </SegGroup>
+      }
     >
       <div className="max-w-4xl">
         <p className="text-pb-faint text-sm mb-5 leading-relaxed">

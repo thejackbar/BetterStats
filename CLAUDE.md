@@ -157,6 +157,36 @@ been paid.
   save-a-rate-then-read-the-column flow for three reps), and the Chromium run
   is 41.
 
+### Picking a module pill scrolled the page out from under the rep (v9.52.2.1)
+
+Reported off the Sales Workspace: clicking a pill under "Interested in" moved
+the page, taking the club pane and the pill itself away from the cursor.
+
+- **THE QUEUE'S RE-ANCHOR SCROLLS THE WHOLE PAGE, NOT JUST THE RAIL.**
+  `toggleInterest` called `loadClubs()` at its default `anchor: true`, which
+  `scrollIntoView`es the open club's RAIL row once the reload lands. The rail
+  is its own scroll box, so that reads as harmless — but when the row sits
+  above the fold the browser walks up and scrolls the DOCUMENT to reach it.
+  Measured, not eyeballed: with a real-shaped club (14 contacts, a 30-row
+  timeline) the click moved the page **683px**.
+- **THE PILLS SIT BELOW THE RAIL, WHICH IS THE WHOLE REASON THIS BITES.** A
+  first repro with an empty pane proved nothing and PASSED against the broken
+  code — the pills were level with the rail, the row was on screen, and
+  `block: 'nearest'` is a no-op. The contacts and timeline cards are what
+  push the call form past the rail's bottom, so the harness has to carry them
+  or it is testing a club nobody has.
+- **`anchor: false` is right because picking a module is not navigating.** The
+  re-anchor exists for a call/email/assign action, where the rep expects to
+  move on; a pill is a mid-form edit and must leave the view alone. The queue
+  is still refreshed behind it, and a toggle that genuinely drops the club out
+  of the filtered list is unaffected — that branch runs whatever `anchor`
+  says, and advancing to the next club there is still right.
+- **Verified in Chromium** (the interest-pills suite is 11 checks now: the
+  page not moving, the pill holding its position to within 2px, the rail row
+  measured as genuinely off screen first, and the queue still reloading),
+  **with a control run**: with the fix reverted the same two checks fail on
+  exactly the reported behaviour.
+
 ### A `?club=` deep link opened the Workspace on the WRONG club (v9.49.3)
 
 Reported off the commission drill-down: the link built the right URL and the
@@ -400,6 +430,64 @@ Reported off the Sales Workspace: opening Blacktown District Cricket Club sat on
   still usable afterwards, the analytics endpoint degrading to nulls rather than
   raising, and one failed signal card leaving the others alone) with a control
   run that fails on exactly the reported behaviour.
+
+## A quiet week is not an empty book (v9.52.2, Aug 2026)
+
+Reported off Sales Performance on a Monday morning: Contact activity read
+"Nobody has made contact this week yet." while the team had been calling clubs
+for months. Every figure on the screen was correct and every one of them was
+about a window that had barely started.
+
+- **ALL TIME IS NOT A LONGER WINDOW, IT IS NO WINDOW.** `report_windows` gains
+  `'all': None` — a lower bound of None, read by every caller as "do not
+  filter". Deliberately not an early date: an arbitrary epoch would quietly
+  become the start of the club's history, and the first club whose records
+  predate it would be silently short.
+- **A REP IS LISTED AS SOON AS THEY HAVE EVER MADE CONTACT.** The rows come
+  from the same pass, so the table now says something whatever the day. **The
+  ORDER is unchanged** — this week, then today, with all time only as the
+  tiebreaker: the two dated windows are what a working day is managed on, and
+  all time decides the order precisely when they are all zero, which is the
+  morning this exists for.
+- **`REPORT_WINDOWS` is the one list**, and the screen's column groups and KPI
+  rows are drawn from it. A fourth window would be one tuple entry plus one
+  entry in the frontend's `ACTIVITY_WINDOWS`, not a third hand-written column
+  block.
+- **AN ALL-TIME PULL MUST NOT DRAG EVERY SENT EMAIL'S HTML WITH IT.** The
+  dated windows could afford `select(CrmActivity)`; reading every contact row
+  ever written cannot, because an email activity's `meta` holds the whole
+  message body (`routers/sales_workspace.py` stamps subject/html/text onto it).
+  `_contact_rows` selects the six columns a tally reads plus a Twenty flag, and
+  is now the ONE place "the contact rows in scope" is defined — shared by the
+  report, the drill-down and `contacted_deal_ids`, which was already paying
+  that cost unbounded on the same page.
+- **`_IS_TWENTY_IMPORTED_SQL` is derived from the same `_TWENTY_IMPORT_META_KEYS`
+  tuple as `_is_twenty_imported`**, so the SQL and the Python cannot disagree
+  about what an imported row is; the suite asserts they agree row by row. `?`
+  against a NULL meta yields NULL, which is False in Python and correct — a row
+  with no meta has no keys. This is the one place a JSONB key test is safe in
+  SQL here: the trap `list_activities_for_workspace` documents is `NOT (meta ?
+  'k')` in a WHERE, and this is a selected value, not a filter.
+- **`_contact_kind` still takes any row carrying the four fields it reads**, so
+  a full CrmActivity and a lean reporting row are classified by one function.
+  `_row_contact_kind` is the wrapper that always passes the flag, since a lean
+  row deliberately carries no `meta` to read it from.
+- **Verified against a real Postgres** (75 checks through the shipped service
+  and route bodies: the reported case replayed — today and this week zero, six
+  contacts behind them, two reps listed — every contact rule holding all time
+  as well as this week, a Twenty-imported row and a general-outcome call still
+  excluded, clubs_contacted distinct rather than summed, the drill-down for
+  each window/metric adding up to the cell it opens, an unknown window refused,
+  a 'sales' caller pinned to their own work even when naming another rep, the
+  lean row carrying neither `meta` nor `body`, and the SQL and Python Twenty
+  tests agreeing on every seeded row) **with a control run**: with the change
+  stashed the same data reads 0 rows and no all-time window at all, exactly as
+  reported. **Driven in Chromium** (20: the three KPI rows and three column
+  groups in order, a rep listed on a blank week, the twelve figure cells, a
+  zero still not a button, the group rules measured off the computed style,
+  the exact params on the wire for an all-time drill-down and the panel it
+  opens, the totals row matching the KPI card, no page errors, no overflow at
+  390px).
 
 ## Every figure on Sales Performance opens its clubs (v9.48.2, Aug 2026)
 
@@ -918,6 +1006,264 @@ had finished.
 
 
 
+## Committee's buttons are the house control, everywhere in BetterAdmin (v9.52.0, Aug 2026)
+
+Asked for directly: make every module screen's button row look like the
+Committee screen's, centre several of them on the title line, and add a search
+where a section had none. Plus a reported failure: Facilities read "Could not
+load facilities." whatever the club held.
+
+- **"COULD NOT LOAD FACILITIES" WAS A MIS-READ KEY, NOT A BACKEND FAULT.**
+  `GET /club-admin/assets/items` answers `{assets: [...]}` and `Facilities.jsx`
+  read `r?.items || r || []` — so the fallback handed the RESPONSE OBJECT to
+  `.filter`, which threw inside the `.then` and was caught by the outer
+  `.catch` as the load failing. **One wrong key took the entire screen down**,
+  including the availability grid and the requests queue, neither of which
+  reads that endpoint. `rows(res, ...keys)` replaces the `a || b || []` chain
+  and ALWAYS hands back an array, so the next shape change costs one list
+  rather than the page. Reproduced against the real payload shape before
+  fixing it (`AdminAssets.jsx` was reading `d.assets` correctly all along,
+  which is what confirmed which side was wrong).
+- **THE BOX IS EXPORTED SEPARATELY FROM THE TABS, and that is the whole
+  design.** `SegButtons` / `SegTabs` are one row, one value, pick exactly one.
+  Half the rows asked for are not that: Accounts' four filters can each be on
+  at once, the Directory's and Payments' Membership / Role / More are MENUS,
+  and Stock's category narrowing is a real `<select>`. So `SegGroup` (the
+  container) and `SegItem` (the button) are their own exports in BOTH kits, and
+  `SegButtons`/`SegTabs` are now built from them — one definition of the
+  chrome, filled by whatever control the row actually needs. A `seg` prop on
+  `MenuButton` wears the same button styling, which is what lets a dropdown sit
+  in the row without reading as a different kind of thing.
+- **CENTRING TAKES THREE PARTS, NOT ONE.** The title block and the right-hand
+  group each claim an equal share of what is left (`flex: 1 1 0`), so the row
+  between them lands in the middle of the header rather than wherever the title
+  happens to end. `HEAD_SIDE` / `HEAD_CENTRE` / `HEAD_SIDE_END` are that rule
+  named, mirroring what `ModuleLayout`'s own `tabs` prop already did, so a
+  screen on either shell centres the same way. **The right-hand box stays even
+  when it is empty** (the Roster's grid actions on the Hours tab): it has a
+  zero basis so it costs nothing, and dropping it lets the title take the whole
+  row and slides the buttons off centre.
+- **A CENTRING WRAPPER MUST BE ALLOWED TO SHRINK, and getting this wrong is
+  what the 390px check caught.** The first cut gave both `HEAD_CENTRE` and
+  `ModuleLayout`'s `tabs` slot `flex-shrink: 0`, which pushed Areas & Roles
+  68px sideways and made Accounts' existing overflow worse — the same trap the
+  Selection-header note documents, since `flex-wrap` on the row cannot save a
+  child told not to shrink. Both are shrinkable now. It costs nothing at width,
+  because the two sides carry a ZERO basis and therefore give way first: the
+  centre only narrows once there is genuinely nothing left, which is exactly
+  when its own buttons should be wrapping.
+- **`Header` DECLARED INSIDE THE RENDER had to go before a search box could be
+  added to it.** Facilities, Events and Club Diary each wrote
+  `const Header = () => …` in the render body, so React saw a different element
+  TYPE every render and tore the subtree down — which throws the caret out of
+  an input after one character, the bug the Committee screen already documents.
+  All three are plain functions CALLED (`{header()}`) now. The suite types
+  character by character and re-reads `document.activeElement` after each,
+  since `fill()` sets the value in one shot and cannot catch this.
+- **A SEARCH BOX SEARCHES ITS SECTION, NOT THE LIST ON SCREEN.** Facilities
+  keeps a facility whose BOOKING matches ("where is the Doyle engagement" is
+  what a booking grid is asked), and Events keeps an event whose ATTENDEE
+  matches. `EntityManager` and `AreaEditor` gained a `query` prop that narrows
+  what is DRAWN and never what is loaded, so a reorder still renumbers against
+  the whole list — and the drag grip is WITHDRAWN while a query runs, rather
+  than letting a filtered list be dragged into an order nobody can see.
+- **The Directory's own search moved to its own line and the four menus took
+  the title line.** Nothing about what they filter changed; the chips
+  underneath still carry the state, which is what makes hiding options in a
+  menu defensible.
+- **Payments gained the chips it never had.** Its menus moved off the filter
+  row, so the state needed a visible home; Accounts already worked this way.
+  `usePeopleFilters({ seg: true })` is per-call, so Accounts' own copy of those
+  menus is untouched.
+- **Stock's category control is still a real `<select>`.** A club's category
+  tree is as long as the club makes it, which is what a native picker is for —
+  it just wears the same box as the buttons above it now.
+- **Verified in Chromium** (`frontend/verification/verify_clubhouse_buttons_browser.mjs`,
+  63 checks against the real screens with the API stubbed at the network
+  layer): every button row's box read off the COMPUTED style rather than a
+  class name, so a hand-built lookalike fails; each centred row measured as
+  "its midpoint sits within 24px of the header's"; each new search box measured
+  as below the caption and starting at the header's own left edge; the caret
+  held per character in all four; the reported Facilities failure gone and the
+  club's own facilities and gear drawn; and no page errors. **With the change
+  stashed, 41 of the 63 fail**, including the reported one.
+- **Three screens overflow at 390px and that is PRE-EXISTING**, confirmed by
+  re-running the same probe with the change stashed: Accounts 33px, Payments
+  111px ("Import bank CSV") and Stock 12px ("New product"), each an action
+  cluster carrying `shrink-0`, none of them a button row this touched. The
+  suite's budget is those measured numbers, so this can never make one worse or
+  introduce a new one — Accounts in fact comes out at 27px now.
+
+### The pale edge was a class that does not exist (v9.52.1)
+
+- **`border pb-hairline` IS NOT A CLASS, and that is the reported "white
+  border".** `pb-hairline` is a tailwind COLOUR (`colors.pb.hairline`), so the
+  utility is `border-pb-hairline`; the bare form only applies the WIDTH and lets
+  the colour fall through to Tailwind's preflight default of `#e5e7eb`. Measured
+  off the computed style rather than guessed: Committee's own box reads
+  `rgb(29,35,49)` and the Tailwind kit's read `rgb(229,231,235)`. Only
+  `.pb-hairline-t/-b/-r` exist as real classes, which is why the sibling
+  `border-b pb-hairline-b` on the module header was always right.
+- **The same typo appears ~917 times across the app and is DELIBERATELY NOT
+  SWEPT.** One shared definition (`SEG_GROUP_CLS`) is what every reported row
+  reads, so fixing it there fixed all of them; a 900-line sweep of screens
+  nobody mentioned is a different change with a different risk, and belongs to
+  whoever asks for it. The suite asserts the COLOUR now, not "has a border", so
+  a box that regresses to the default fails.
+- **A SEARCH BOX BELONGS BELOW THE BUTTONS THAT NARROW THE SAME LIST.**
+  Committee, Club Diary, Accounts, Payments and Stock all read top to bottom:
+  pick the group, then search what is left. `isAbove` measures it off the real
+  boxes, so "below" is a fact rather than a reading of the source order.
+- **`HeaderSearch` gained a `style` escape hatch, and it is load-bearing.** Its
+  `flex: 1 1 100%` is what forces the line break inside the wrapping header;
+  inside a COLUMN container that basis is read against the HEIGHT instead, so a
+  caller there passes `{ flex: '0 0 auto' }`.
+- **Moving the Club Diary's box down beside its cadence buttons would have left
+  the template library with no search at all** — those buttons only exist on the
+  Season plan tab. The templates tab keeps its own box at the top of the list it
+  narrows.
+- **`SegItem` gained `as`**, mirroring `Button`'s own escape hatch, for a row
+  whose item NAVIGATES rather than toggles. `aria-pressed` is only emitted on a
+  real button, since a link has no pressed state.
+- **Events' and Facilities' Manage links moved INTO their section's box**, in
+  the middle of the row. They were floating on the right on their own, which
+  read as a different kind of control from the buttons beside them. The suite
+  asserts the box's children IN ORDER, so "in between" is measured.
+- **Facilities is `Facilities & Assets`** in the sidebar, on the screen and on
+  its manage screen. The rename is display only: `/admin/assets`,
+  `MANAGE_ASSETS` and every stored row are untouched.
+- **Verified in Chromium**: the suite is 84 checks now, and **31 of them fail
+  against the previous commit** — including the pale border, read back as the
+  measured `rgb(229,231,235)`.
+
+### The primary action moved down beside the search (v9.53.1)
+
+- **NARROWING A LIST AND ADDING TO IT ARE ONE LINE.** `+ Add person`,
+  `Publish week`, `+ New meeting`, `Add member`, `Import bank CSV` and
+  `New product` each sat on the title line while the box that searches the very
+  list they add to sat below. They are on the right of the search row now, on
+  all six screens.
+- **`HeaderSearch` grew a `trailing` slot** rather than each screen hand-rolling
+  the row, so the two kits stay one definition apart: `ModuleLayout`'s `twoRow`
+  block does the same job for the screens on that shell.
+- **`items-start` → `items-end` is the whole `ModuleLayout` change, and it is
+  the right one.** Accounts, Payments and Stock stack their filters (a control
+  row, then the search under it), so top-aligning the action cluster put it
+  beside the CONTROLS. Bottom-aligning lands it beside the search. A screen
+  whose filters are a single row (every Comms screen) is unaffected — both
+  boxes are one line tall either way — which is why this needed no per-screen
+  opt-in.
+- **On Committee the action had to LEAVE the header for the readouts to
+  arrive.** `POSITIONS FILLED` / `OPEN ACTIONS` / `MOTIONS THIS SEASON` are
+  passed in as `header(children)` and carry `marginLeft: 'auto'`; so did the
+  action cluster, and two auto-margin siblings share the space rather than one
+  taking the right edge. Removing the action div is what puts the readouts on
+  the title line — nothing about the readouts themselves changed.
+- **`alignSelf: 'stretch'` on Committee's search row is load-bearing.** The
+  column above it sets `alignItems: 'flex-start'`, so the row is only as wide as
+  its own contents and an auto left margin has nothing to push the button
+  against. Without it the action sits immediately after CLEAR rather than on the
+  right.
+- **A `const` READ BY THE HEADER MUST BE DECLARED ABOVE IT.** Roster's
+  `publish` sat below `header`, which is fine while the header does not read it
+  — but two of the three `header(...)` calls are inside EARLY RETURNS that run
+  before that point in the render body, so putting the button in the header
+  threw on a temporal-dead-zone reference the moment the "no operational areas
+  yet" screen drew. `publish` moved up. A `data &&` guard is not a fix here:
+  that branch runs with `data` truthy.
+- **Verified in Chromium**: `onSearchLine` measures the two real boxes — they
+  must overlap VERTICALLY (genuinely one line, not a wrap) and the action must
+  start after the box ends. A check that only asked "are both in the header"
+  would have passed with the action still up on the title line. The Committee
+  readouts are measured against the `<h1>` for the same reason. The suite is 97
+  checks now, and **all seven of the new ones fail against the previous
+  commit** — each reporting the gap it was measuring (`aTop` 76 against `iTop`
+  133 on the Directory, 173/224 on the Roster, 76/244 on Committee, 127/171 on
+  Accounts and Payments, 119/161 on Stock), and the Committee readouts reading
+  `sameLine: false`.
+
+## ONE asset register: equipment is not inventory (migration 279, v9.53.0, Aug 2026)
+
+Asked for after a question about the accounting shape: treat inventory as one
+thing, and property / facilities / fixed assets / equipment as another.
+
+- **THE SPLIT WAS JUSTIFIED AGAINST THE WRONG TABLE, and that is the whole
+  origin of the duplication.** Migration 177's own docstring says why it did not
+  reuse what existed: general club property "is a different concern from
+  BetterMerch's retail/kit stock tracking (merch_assets, a paid-module table)".
+  `merch_assets` is not retail or kit stock — retail stock is `merch_products` /
+  `merch_variants`, which carry quantity, cost, price and movements. The
+  MerchAsset model's own docstring reads "an individual high-value piece of
+  equipment (bowling machine, covers, sight screen) … quantity is implicitly 1;
+  not stock-counted", which is a fixed-asset register. 177 compared club
+  property against a table it believed was stock and built a second register of
+  the same thing. A mis-description, not a decision, which is why undoing it is
+  safe.
+- **`club_assets` IS THE BASE, and not arbitrarily: `merch_assets` is a strict
+  column SUBSET of it.** All thirteen of its columns have same-named,
+  same-typed, same-defaulted twins among `club_assets`' sixteen; only `category`
+  and `facility_id` are unique to the club side. Nothing is given up, and the
+  club register additionally has maintenance history and lives in core.
+- **`services/asset_register_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule, and it runs AFTER both
+  tables are created in that same lifespan.
+- **`merch_asset_id` MAKES THE CARRY IDEMPOTENT, `source` MAKES IT REVERSIBLE,
+  and conflating the two would have destroyed club data.** A gap-filled row and
+  an inserted row both carry the id, because both have dealt with that merch
+  row and neither must be processed twice. Only an INSERTED row is the
+  migration's to remove, so it is marked `source='merch'`; the first cut's
+  downgrade deleted on the id and took the club's own pre-existing assets with
+  it. **Found by the verification, not by reading the code.**
+- **The carry FILLS, NEVER CLOBBERS.** Every field is `COALESCE(what is here,
+  what is coming)`, so a figure somebody typed always wins. `condition` and
+  `status` are NOT NULL on the club side, so they always have a value and are
+  never touched. Notes are the one field where keeping what is here would lose
+  something, so a merch note not already contained in the club note is
+  appended.
+- **`DISTINCT ON` picks one merch row per club row.** Two merch rows matching
+  one club asset must not silently merge into a single object — the second
+  stays uncarried and step 2 gives it its own row.
+- **Matching is asset tag first, then case-folded name, and NOTHING fuzzier.** A
+  serial number is a real identity. A club really can own a "Line marker" and a
+  "Line marking machine", and folding those would put one object's service
+  history on another.
+- **The two vocabularies are MAPPED, not unioned** (`new`→`excellent`,
+  `retired`→`unserviceable`, `out_for_repair`→`in_repair`), so the register ends
+  up with one vocabulary rather than the sum of two.
+- **`merch_assets` IS LEFT IN PLACE AND READ BY NOTHING**, the call 267 made for
+  `vote_settings`. Its ROUTES are deleted rather than merely unused: a second
+  register still answering writes could only drift from the live one.
+- **THE ALERTS MOVED TO CORE, and that was half the point.** Service and
+  replacement due fired only from the merch copy, so `club_assets.
+  service_due_date` reached no bell, no Today row and no badge — a club without
+  the paid module had a field that warned nobody. `assets.asset_alerts` +
+  `GET /club-admin/assets/alerts` are core, with no module gate.
+- **`replace_due_date` had existed since 177 through the model, DDL, API and
+  serialiser with NO screen reading or writing it.** It is what the merch
+  register raised its replacement alerts from, so it had to become reachable.
+- **Deliberately NOT built: depreciation, useful life, written-down value,
+  disposal proceeds, insurance valuation, or a total asset value.** None of them
+  exists on either register today (`purchase_cost` is stored, filtered, and
+  never summed anywhere), so this is a maintenance and cashflow register, not
+  yet an accounting one. Making it one is a bigger, separate piece of work.
+- **Verified against a real Postgres** (44 checks through the shipped statements
+  and `asset_alerts` itself: the list applied three times to a populated pre-279
+  schema without duplicating, the gap-fill filling and never clobbering, a note
+  appended rather than dropped and an identical note not appended twice, a
+  serial matching where the names differ, the enum mapping, two merch rows on
+  one asset staying two, cross-club isolation, no merch row left behind, the
+  alerts reading the carried dates and ignoring a retired asset, and the
+  downgrade removing only what the carry created) and **driven in Chromium**
+  (the suite is 90 now: the old Stock URL redirecting, Equipment gone from the
+  Stock sidebar, and the service alert still reaching Today through the core
+  endpoint).
+- **A STUB THAT RETURNS THE WRONG SHAPE MEASURES A BROKEN PAGE.** The browser
+  suite had `{seasons: […]}` and `{payments: […]}` where those routers answer
+  bare ARRAYS, so Accounts and Payments threw on `.filter` and drew no table —
+  and the 390px overflow "baseline" recorded from that was 33px / 111px rather
+  than the real 245px / 168px. Check what a router actually returns before
+  recording a measurement against it.
+
 ## BetterClubhouse is BetterAdmin again, and Committee got its button rows (v9.40.0, Aug 2026)
 
 Asked for directly: put the module's name back, and lay the Committee screen out
@@ -1325,6 +1671,167 @@ as sections with their own buttons rather than three tabs and a manage page.
   asserting the MANAGE screen's own Board/Timeline and By plan/All work toggles
   are unchanged.
 
+
+### The PDF's own typography (v9.53.4)
+
+Reported off the generated PDF: the motion and action blocks sat far too deep,
+the page wanted air, and the file should be Arial. The Word file was fine.
+
+- **`indent` IS TWIPS AND THE PDF WAS READING IT AS POINTS.** One number served
+  both writers, so `indent: 200` meant 10pt in Word (right, and why only the PDF
+  looked wrong) and 200pt in the PDF, an indent nearly a third of the page.
+  `pdfIndent` converts, and `indentPt` overrides it where the two formats are
+  deliberately set apart — which they are here, since the Word depth was already
+  what the club wanted and only the PDF was asked to change.
+- **ARIAL IS A REAL FONT OBJECT, not a base-14 alias.** The PDF declares
+  `/Arial` and `/Arial,Bold` as TrueType with a FontDescriptor and their own
+  Widths, and embeds nothing: a reader uses the Arial it has and substitutes a
+  metrically compatible face where it has none. **The declared Widths are the
+  ones the layout measured with**, so the glyphs land where they were placed
+  either way. Word names the face on every run, since its default comes from
+  whatever template the reader opens it in.
+- **HELVETICA-BOLD HAS ITS OWN WIDTH TABLE NOW.** Bold was measured off the
+  regular table times 1.06, which is close on a short heading and wrong across a
+  table header. Arial Bold matches Helvetica-Bold, so one table serves the
+  measurement and the declared widths.
+- **A BARE LINE MATCHING AN AGENDA ITEM'S TITLE IS A HEADING.** The draft heads
+  its sections that way, with no markup at all, so matching only `**bold**` and
+  `## ` found nothing and the entire account fell into one Record of Discussion
+  lump at the end — carrying the model's own title block, which is what read as
+  "APPLECROSS CRICKET CLUBCOMMITTEE MEETING MINUTES10 August 2026" mid-document.
+  `splitNarrative` takes the agenda's titles and treats a bare line matching one
+  as a heading; a short run of short lines ahead of the first heading is the
+  preamble the prompt already forbids and is dropped.
+- **Verified in Chromium** (95 checks: the indent measured off the real draw
+  operations at 200/3 from the margin, a heading still at the margin, the gap
+  before an agenda title, after it and before a MOTION or ACTION block each
+  measured baseline to baseline, both fonts named, the declared width range, the
+  narrative filed under the item it names and no Record of Discussion left over)
+  **with a control run** failing exactly those nine.
+- **A gap is measured PER PAGE.** `y` restarts at the top of each one, so the
+  first element on a page has no meaningful gap above it and the check reads the
+  next occurrence instead of failing on a page break.
+
+### The minutes are a DOCUMENT, composed from the record (v9.53.3)
+
+Reported with the current output and a Word file of what was expected: the
+draft was one block of prose with its `**` marks showing, and it had lost the
+motion moved during the President's report, the objective that motion served,
+the votes, and the detail of the actions.
+
+- **A FLAT LIST OF MOTIONS IS WHY THE MODEL GUESSED.** `draft_minutes` handed
+  the model every motion in one list with nothing saying which agenda item each
+  belonged to, so a Premium Sponsorship motion moved under the President's
+  report was written up under Sponsorship & Fundraising, where its subject read
+  as belonging. `_minutes_context` now nests each motion and action UNDER its
+  agenda item, with the objective breadcrumb, the tally and the named votes, and
+  the prompt says to write a motion up under the item it is listed against
+  rather than the one its subject suits.
+- **THE DOCUMENT IS COMPOSED FROM THE RECORD, NOT FROM THE NARRATIVE.**
+  `minutesDoc.buildMinutesDoc` builds the details table, the agenda, a numbered
+  section per item, each item's motions and actions, and the actions table out
+  of the room payload. A figure the club has already entered cannot go missing
+  because a paragraph failed to mention it. The written account is only ever the
+  prose inside a section.
+- **`splitNarrative` returns `loose` as well as `sections`, and that is
+  load-bearing.** The first cut keyed the narrative on its own headings and
+  dropped everything else, so a secretary who typed plain prose into the box
+  lost all of it. Anything not under a heading, plus any heading no agenda item
+  claimed, is kept in a `Record of Discussion` section.
+- **`textDocs` takes BLOCKS now** (title, heading, para, label, bullets, table,
+  spacer), because a details table and an actions table cannot be expressed as
+  lines of text. `body` still works for the plain-text case, which is what the
+  private notes use.
+- **A PDF OP THAT REPORTS NO HEIGHT POISONS THE WHOLE LAYOUT.** The rule under a
+  heading carried no font size, so `op.size * 1.32` was NaN, `room()` was false
+  for everything after it and `y` never recovered: a two-page document came out
+  as **19 pages, half of them blank**, and every content check still passed.
+  `heightOf` is per-kind and falls back to 0. **The suite now asserts the page
+  count and that no page is blank** — the check it was missing.
+- **`push(...tableOps(b))` into a one-argument helper drew ONE ROW PER TABLE**
+  and silently dropped the rest, which a check asking "is a row drawn" passed.
+  `push` is variadic, and the suite counts the rows it expects.
+- **The short table columns are sized against the widest value they actually
+  hold** (a name, a date, a money figure, "Not recorded", "In Progress"), or
+  "Not recorded" breaks as "Not recorde / d" and reads as a fault.
+- **Names are stored "Surname, First", so a list of them is joined with
+  semicolons.** Comma-joining "Hullett, Mark" and "Monument, Darren" reads as
+  four people.
+- **Verified in Chromium** (83 checks: the reported meeting replayed, the motion
+  measured as sitting between the President's report heading and the next one,
+  its objective, tally and named votes, the action's own different objective,
+  every row of both tables read out of the real table cells, the page count, no
+  blank pages, nothing drawn outside the margins, cells tiling with no gap, and
+  the narrative kept when it has no headings) **with a control run**: with the
+  change stashed there is no club heading, no details table, no agenda and no
+  tables at all. The context builder is checked separately in Python against the
+  reported meeting, with no database and no API key.
+
+## The minutes leave the screen as a document (v9.53.2, Aug 2026)
+
+Asked for directly: two buttons under MINUTES and two under YOUR NOTES, to take
+each away as a Word document or a PDF.
+
+- **BOTH FORMATS ARE WRITTEN IN THE BROWSER FROM THE BOX, NOT FETCHED BACK FROM
+  THE RECORD, and that is the whole reason it is not a download endpoint.** The
+  autosave is a 700ms debounce, so a download taken a second after the last
+  sentence would hand back the version without it. `downloadField` reads the
+  textarea's own ref, so what is on screen is what is in the file. Measured, not
+  assumed: the suite blocks the PATCH entirely and still finds the typed text in
+  all four files.
+- **`lib/textDocs.js` carries no dependency, deliberately.** A `.docx` is a zip
+  of three XML parts and a PDF is a handful of objects and a table of byte
+  offsets; a document toolkit would cost more to ship than the ~250 lines that
+  write both. The zip entries are STORED rather than deflated — Word accepts
+  either and storing them means no compressor to carry.
+- **The PDF wraps against real Helvetica advance widths**, not a guessed
+  character count, which is what puts the line break where the text actually
+  ends. A word too long for a line of its own is broken by character, so a
+  pasted URL cannot overrun the margin silently. Every one of the 150 rows the
+  suite draws is measured: widest 476.88pt against a 483.28pt column.
+- **A PDF is WinAnsi, so it genuinely cannot hold every character.** Curly
+  quotes, dashes and an ellipsis live in WinAnsi's own 0x80–0x9F block rather
+  than at their Unicode code points and are mapped; Latin-1 passes through; a
+  character outside it becomes a question mark rather than a broken glyph. **The
+  .docx is UTF-8 and has no such limit**, which is the honest answer for a club
+  whose minutes carry a name the base-14 fonts cannot draw.
+- **`w:sz` is HALF-points and `w:spacing w:after` is twentieths of a point**, so
+  32 reads as 16pt and 120 as 6pt. A line of the box becomes its own paragraph
+  and a blank line becomes an empty one, so the text reads in Word as it is laid
+  out on screen. A control character is stripped before it reaches the XML —
+  Word refuses the whole document over one, rather than skipping it.
+- **A NULL means "nobody has touched this box".** `minutesTyped`/`notesTyped`
+  start null and the disabled flag falls back to the record; once typed in they
+  follow the box. Without that, a reload after some unrelated action would
+  recompute the flag off minutes the autosave has not sent yet and disable a
+  button over a full field. `draft()` writes straight into the ref, so it sets
+  the flag too.
+- **The buttons are disabled on an empty field rather than hidden**, so the
+  option is visible before there is anything to download, and the title says why
+  it cannot be pressed.
+- **The notes document says on it that it is not part of the minutes.** The
+  screen says they are never circulated; a file that has left the screen should
+  keep saying so.
+- **Verified in Chromium** (`frontend/verification/verify_minutes_download_browser.mjs`,
+  40 checks against the real meeting room with the API stubbed: both rows
+  measured as BELOW their own text box off the real boxes rather than source
+  order, disabled while empty and enabled once not, the four files produced and
+  named for the meeting and its date, the typed text present with the PATCH
+  deliberately blocked, `&` and `<` escaped rather than breaking the XML, the
+  blank line kept, minutes and notes not leaking into each other, each `.docx`
+  unzipping to the OOXML parts a reader expects and each `.pdf` carrying an
+  xref table whose `startxref` points at it, the same two rows with the room
+  EMBEDDED in the Committee screen, the autosave still firing afterwards, no
+  page errors, no overflow at 390px) **with a control run**: with the change
+  stashed the rows are absent and nothing downloads at all.
+- **A stub that returns the wrong SHAPE measures a broken page**, twice over
+  here: `previous_attendance` is an object or null and an empty array is truthy,
+  which crashed the attendance panel; and the single-meeting GET must answer
+  with the MEETING, not the list, or every card on the Committee screen has no
+  id and no OPEN button — which also produced a React key warning that read as a
+  pre-existing app bug and was the stub's own fault.
+- **`page.evaluate` treats a STRING as an expression**, so a probe written as a
+  function-expression string comes back unevaluated rather than called.
 
 ## A club writes its association's rules down once (migration 271, v9.39.0, Aug 2026)
 

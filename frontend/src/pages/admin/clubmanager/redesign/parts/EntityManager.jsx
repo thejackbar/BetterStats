@@ -19,8 +19,11 @@ import { C, MONO } from '../ui'
 //   describe                  (intro paragraph)
 //   addLabel                  (defaults 'Add')
 //   accentOf(item)            (optional dot colour per row)
+//   query                     (a screen's own search box; narrows what is
+//                              DRAWN over the title + subtitle, never what is
+//                              loaded, so reordering still sees the whole list)
 
-export default function EntityManager({ load, fields, onCreate, onUpdate, onDelete, onReorder, onChanged, seed, primaryKey, subtitle, describe, addLabel = 'Add', accentOf, emptyText }) {
+export default function EntityManager({ load, fields, onCreate, onUpdate, onDelete, onReorder, onChanged, seed, primaryKey, subtitle, describe, addLabel = 'Add', accentOf, emptyText, query = '' }) {
   const [items, setItems] = useState(null)
   const [err, setErr] = useState(null)
   const [adding, setAdding] = useState(false)
@@ -140,6 +143,13 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
 
   if (items === null) return <div style={{ fontSize: 13, color: C.faint, padding: '4px 2px' }}>{err ? 'Could not load.' : 'Loading…'}</div>
 
+  // The query narrows what is DRAWN and nothing else — `items` stays whole, so
+  // a drag still renumbers against the real list rather than against whatever
+  // happens to be on screen. Same call the Committee plan tree makes.
+  const q = (query || '').trim().toLowerCase()
+  const hit = (it) => !q || [it[pk], subtitle && subtitle(it)].some(v => v != null && String(v).toLowerCase().includes(q))
+  const shown = q ? items.filter(hit) : items
+
   return (
     <div>
       {describe && <p style={{ fontSize: 13, color: C.dim, margin: '0 0 14px', lineHeight: 1.55, maxWidth: '46rem' }}>{describe}</p>}
@@ -157,23 +167,23 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
             pick up newly-added starter items. Primary when the list is empty,
             secondary once it has items. */}
         {seed && <button onClick={doSeed} disabled={busy} style={{ ...(items.length === 0 ? btnP : btnS), opacity: busy ? 0.6 : 1 }}>{busy ? 'Adding…' : seed.label}</button>}
-        {onReorder && items.length > 1 && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, alignSelf: 'center' }}>DRAG THE GRIP TO REORDER</span>}
+        {onReorder && !q && items.length > 1 && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, alignSelf: 'center' }}>DRAG THE GRIP TO REORDER</span>}
       </div>
 
       {adding && formCard}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        {items.map(it => {
+        {shown.map(it => {
           if (editId === it.id) return <div key={it.id}>{formCard}</div>
           const dragging = dragId === it.id
           const isOver = overId === it.id && dragId && dragId !== it.id
           return (
             <div key={it.id}
-              onDragOver={e => { if (dragId && onReorder) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== it.id) setOverId(it.id) } }}
+              onDragOver={e => { if (dragId && onReorder && !q) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== it.id) setOverId(it.id) } }}
               onDrop={e => { e.preventDefault(); move(dragId, it.id) }}
               style={{ display: 'flex', alignItems: 'center', gap: 10, background: C.surface, borderRadius: 8, padding: '10px 13px',
                 border: `1px solid ${isOver ? C.accent : C.hair}`, boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : undefined, opacity: dragging ? 0.5 : 1 }}>
-              {onReorder && (
+              {onReorder && !q && (
                 <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(it.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }}
                   title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
               )}
@@ -187,7 +197,9 @@ export default function EntityManager({ load, fields, onCreate, onUpdate, onDele
             </div>
           )
         })}
-        {items.length === 0 && !adding && <div style={{ fontSize: 13, color: C.faint }}>{emptyText || 'Nothing set up yet.'}</div>}
+        {shown.length === 0 && !adding && (
+          <div style={{ fontSize: 13, color: C.faint }}>{q ? 'Nothing matches “' + query.trim() + '”.' : (emptyText || 'Nothing set up yet.')}</div>
+        )}
       </div>
     </div>
   )

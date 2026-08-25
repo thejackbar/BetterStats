@@ -17,7 +17,10 @@ const inp = { background: C.surface2, border: `1px solid ${C.hair2}`, borderRadi
 const btnP = { padding: '7px 13px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, border: 'none', background: C.accent, color: '#fff', cursor: 'pointer' }
 const btnS = { padding: '7px 12px', borderRadius: 7, fontSize: 12.5, border: `1px solid ${C.hair2}`, background: 'transparent', color: C.dim, cursor: 'pointer' }
 
-export default function AreaEditor({ focusAreaId = null, onFocused = null }) {
+// `query` narrows what is DRAWN and nothing else — `areas` stays whole, so a
+// drag still renumbers against the real list rather than against whatever
+// happens to be on screen. Same contract EntityManager's own `query` keeps.
+export default function AreaEditor({ focusAreaId = null, onFocused = null, query = '' }) {
   const [areas, setAreas] = useState(null)
   const [roles, setRoles] = useState([])
   const [quals, setQuals] = useState([])
@@ -137,19 +140,23 @@ export default function AreaEditor({ focusAreaId = null, onFocused = null }) {
 
   if (areas === null) return <div style={{ fontSize: 13, color: C.faint }}>Loading operational areas…</div>
 
+  const q = (query || '').trim().toLowerCase()
+  const shown = !q ? areas : areas.filter(a => [a.name, a.department, a.required_role_name, a.required_qualification_name]
+    .some(v => v != null && String(v).toLowerCase().includes(q)))
+
   return (
     <div>
       <p style={{ fontSize: 13, color: C.dim, margin: '0 0 14px', lineHeight: 1.55, maxWidth: '46rem' }}>An operational area is a slice of club work with its own weekly shift pattern, the role that can cover it and the qualification that gates it. Change a pattern here and next week's roster is generated from it.</p>
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         {!adding && editId == null && <button onClick={startAdd} style={btnS}>+ Add area</button>}
         {areas.length === 0 && <button onClick={seed} disabled={busy} style={{ ...btnP, opacity: busy ? 0.6 : 1 }}>{busy ? 'Adding…' : 'Add Operational Areas Starter Pack'}</button>}
-        {areas.length > 1 && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, alignSelf: 'center' }}>DRAG THE GRIP TO REORDER</span>}
+        {!q && areas.length > 1 && <span style={{ fontFamily: MONO, fontSize: 9.5, letterSpacing: '0.08em', color: C.faintest, alignSelf: 'center' }}>DRAG THE GRIP TO REORDER</span>}
       </div>
 
       {adding && formCard}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {areas.map(a => {
+        {shown.map(a => {
           if (editId === a.id) return <div key={a.id}>{formCard}</div>
           const slots = (a.patterns || []).reduce((n, p) => n + (p.headcount || 1), 0)
           const isOver = overId === a.id && dragId && dragId !== a.id
@@ -157,11 +164,11 @@ export default function AreaEditor({ focusAreaId = null, onFocused = null }) {
           const linked = linkedId === a.id
           return (
             <div key={a.id} ref={el => { rowRefs.current[String(a.id)] = el }}
-              onDragOver={e => { if (dragId) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== a.id) setOverId(a.id) } }}
+              onDragOver={e => { if (dragId && !q) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (overId !== a.id) setOverId(a.id) } }}
               onDrop={e => { e.preventDefault(); move(dragId, a.id) }}
               style={{ background: C.surface, border: `1px solid ${isOver || linked ? C.accent : C.hair}`, borderRadius: 9, padding: '13px 15px', boxShadow: isOver ? 'inset 0 2px 0 var(--pb-accent)' : (linked ? '0 0 0 2px color-mix(in srgb, var(--pb-accent) 25%, transparent)' : undefined), opacity: dragId === a.id ? 0.5 : 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(a.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }} title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>
+                {!q && <span draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; setDragId(a.id) }} onDragEnd={() => { setDragId(null); setOverId(null) }} title="Drag to reorder" style={{ cursor: 'grab', color: C.faint, fontSize: 15, lineHeight: 1, flexShrink: 0, userSelect: 'none' }}>⠿</span>}
                 <span style={{ width: 9, height: 9, borderRadius: 3, background: a.color || C.accent, flexShrink: 0 }} />
                 <span style={{ fontSize: 14.5, fontWeight: 600, color: C.text, flex: 1, minWidth: 0 }}>{a.name}{a.department ? <span style={{ fontFamily: MONO, fontSize: 9.5, color: C.faint, marginLeft: 8 }}>{a.department}</span> : null}</span>
                 <span style={{ fontFamily: MONO, fontSize: 10, color: C.dim, flexShrink: 0 }}>{slots} shift{slots === 1 ? '' : 's'} / week</span>
@@ -191,7 +198,9 @@ export default function AreaEditor({ focusAreaId = null, onFocused = null }) {
             </div>
           )
         })}
-        {areas.length === 0 && !adding && <div style={{ fontSize: 13, color: C.faint }}>No operational areas yet.</div>}
+        {shown.length === 0 && !adding && (
+          <div style={{ fontSize: 13, color: C.faint }}>{q ? 'Nothing matches “' + query.trim() + '”.' : 'No operational areas yet.'}</div>
+        )}
       </div>
     </div>
   )

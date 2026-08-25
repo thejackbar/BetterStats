@@ -4,7 +4,7 @@ import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterFeesLayout from '../../components/admin/BetterFeesLayout'
 import {
-  Button, FilterPill, SearchInput, StatCard, StatReadout,
+  Button, FilterPill, SegGroup, SegItem, SearchInput, StatCard, StatReadout,
   Modal, Field, TextInput, Select, TextArea, Checkbox, Note, Badge,
 } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
@@ -309,7 +309,7 @@ function RolloverUndoModal({ seasonId, seasonName, memberCount, onClose, onDone 
 export default function AdminFeesMembers() {
   // The Directory's People filters, matched on the segments that service
   // computes. Fetched once here; this screen's own data layer is untouched.
-  const people = usePeopleFilters()
+  const people = usePeopleFilters({ seg: true })
   const toast = useToast()
   const [seasons, setSeasons] = useState([])
   // The season lives in the URL so it survives a trip into a member and back.
@@ -455,29 +455,38 @@ export default function AdminFeesMembers() {
     // other screen carries them.
     twoRow: true,
     tabs: (
-      <div className="flex items-center gap-2 flex-wrap justify-center">
-        <FilterPill active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
+      <SegGroup>
+        {/* Committee's own segmented control, not a row of loose pills — these
+            four say WHO you are looking at, which is the same job that screen's
+            section buttons do. They are NOT one value though: a person can be
+            looking at who owes money AND who is missing from PlayHQ at once, so
+            each keeps its own on/off rather than becoming a tab. */}
+        <SegItem active={!needsTierOnly && !owesOnly && !playhqMissingOnly}
           onClick={() => { setNeedsTierOnly(false); setOwesOnly(false); setPlayhqMissingOnly(false) }}>
           Everyone
-        </FilterPill>
-        <FilterPill warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
+        </SegItem>
+        <SegItem warn active={owesOnly} onClick={() => setOwesOnly(v => !v)} count={s.non_financial}>
           Owes money
-        </FilterPill>
-        <FilterPill active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
+        </SegItem>
+        <SegItem active={needsTierOnly} onClick={() => setNeedsTierOnly(v => !v)} count={s.needs_tier}>
           Needs tier
-        </FilterPill>
-        <FilterPill warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
+        </SegItem>
+        <SegItem warn active={playhqMissingOnly} onClick={() => setPlayhqMissingOnly(v => !v)} count={s.playhq_missing}>
           Not on PlayHQ
-        </FilterPill>
-      </div>
+        </SegItem>
+      </SegGroup>
     ),
+    // Three lines, reading top to bottom: WHO you are looking at (on the title
+    // line), then WHICH GROUP of them, then the box that searches what is left.
     filters: (
-      <div className="flex items-center gap-2 flex-wrap">
-        <SearchInput wide value={q} onChange={setQ} placeholder="Search name or tier…" />
+      <div className="flex flex-col gap-2 w-full min-w-0">
         {/* The same Membership / Role / More menus the Directory carries, so a
             money job can be scoped to a group of people ("every Junior Player
             who owes") without leaving this screen. */}
-        {people.menus}
+        <div className="flex items-center gap-2 flex-wrap">{people.menus}</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <SearchInput wide value={q} onChange={setQ} placeholder="Search name or tier…" />
+        </div>
         {people.chips}
       </div>
     ),

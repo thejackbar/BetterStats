@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../lib/api'
 import { useToast } from '../../contexts/ToastContext'
 import BetterClubManagerLayout from '../../components/admin/BetterClubManagerLayout'
-import { FilterPill, INPUT_CLS } from '../../components/admin/ui'
+import { SegButtons, INPUT_CLS } from '../../components/admin/ui'
 import { PbSpinner } from '../../lib/presskit'
 import Calendar from '../../components/admin/clubmanager/Calendar'
 import DateTimePicker from '../../components/admin/crm/DateTimePicker'
@@ -35,16 +35,14 @@ const fmtTime = (iso) => {
 }
 const fmtDateTime = (iso) => (iso ? new Date(iso).toLocaleString('en-AU', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '')
 
-function TabBar({ tab, setTab }) {
-  const tabs = [['facilities', 'Facilities'], ['bookings', 'Bookings'], ['assets', 'Assets']]
-  return (
-    <div className="flex flex-wrap gap-1 mb-5">
-      {tabs.map(([k, l]) => (
-        <FilterPill key={k} active={tab === k} onClick={() => setTab(k)}>{l}</FilterPill>
-      ))}
-    </div>
-  )
-}
+// The three sections, in Committee's own segmented control. The shell centres
+// it on the title line (see ModuleLayout's `tabs`), so this is one control in
+// one place rather than a pill row floating above the content.
+const ASSET_TABS = [
+  { key: 'facilities', label: 'Facilities' },
+  { key: 'bookings', label: 'Bookings' },
+  { key: 'assets', label: 'Assets' },
+]
 
 // ── Maintenance log (shared by Facilities and Assets) ───────────────────────
 function MaintenanceLogPanel({ subjectType, subjectId }) {
@@ -499,6 +497,7 @@ function AssetCard({ asset, facilities, onChanged }) {
             {asset.purchase_cost != null && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">PURCHASE COST</span><span className="text-pb-text">${asset.purchase_cost}</span></div>}
             {asset.purchase_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">ACQUIRED</span><span className="text-pb-text">{asset.purchase_date}</span></div>}
             {asset.service_due_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">SERVICE DUE</span><span className="text-pb-text">{asset.service_due_date}</span></div>}
+            {asset.replace_due_date && <div><span className="font-mono text-[9px] text-pb-faintest block mb-1">REPLACE DUE</span><span className="text-pb-text">{asset.replace_due_date}</span></div>}
           </div>
           {asset.notes && <div className="text-pb-faint text-[12px]">{asset.notes}</div>}
           <MaintenanceLogPanel subjectType="asset" subjectId={asset.id} />
@@ -510,7 +509,7 @@ function AssetCard({ asset, facilities, onChanged }) {
 
 function NewAssetForm({ facilities, onCreated, onCancel }) {
   const toast = useToast()
-  const [form, setForm] = useState({ name: '', category: 'other', asset_tag: '', purchase_cost: '', purchase_date: '', condition: 'good', status: 'in_service', service_due_date: '', facility_id: '', notes: '' })
+  const [form, setForm] = useState({ name: '', category: 'other', asset_tag: '', purchase_cost: '', purchase_date: '', condition: 'good', status: 'in_service', service_due_date: '', replace_due_date: '', facility_id: '', notes: '' })
   const [busy, setBusy] = useState(false)
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
   async function submit() {
@@ -527,6 +526,7 @@ function NewAssetForm({ facilities, onCreated, onCancel }) {
         condition: form.condition,
         status: form.status,
         service_due_date: form.service_due_date || null,
+        replace_due_date: form.replace_due_date || null,
         notes: form.notes || null,
       })
       onCreated()
@@ -559,6 +559,14 @@ function NewAssetForm({ facilities, onCreated, onCancel }) {
         <div className="flex flex-col">
           <span className="font-mono text-[8px] text-pb-faintest">SERVICE DUE</span>
           <input type="date" className={`${inp} w-40`} value={form.service_due_date} onChange={e => set('service_due_date', e.target.value)} />
+        </div>
+        {/* `replace_due_date` has existed through the model, DDL, API and
+            serialiser since migration 177 with no screen reading or writing it.
+            It is what the old merch register raised its replacement alerts
+            from, so it has to be reachable now the two registers are one. */}
+        <div className="flex flex-col">
+          <span className="font-mono text-[8px] text-pb-faintest">REPLACE DUE</span>
+          <input type="date" className={`${inp} w-40`} value={form.replace_due_date} onChange={e => set('replace_due_date', e.target.value)} />
         </div>
       </div>
       <input className={`${inp} mt-2`} placeholder="Notes (optional)" value={form.notes} onChange={e => set('notes', e.target.value)} />
@@ -677,9 +685,9 @@ export default function AdminAssets() {
   }, [toast])
 
   return (
-    <BetterClubManagerLayout title="Facilities" caption="Grounds, gear, bookings and service history">
+    <BetterClubManagerLayout title="Facilities & Assets" caption="Grounds, gear, bookings and service history"
+      tabs={<SegButtons value={tab} onChange={setTab} tabs={ASSET_TABS} />}>
       <div className="max-w-4xl">
-        <TabBar tab={tab} setTab={setTab} />
         {tab === 'facilities' && <FacilitiesTab onFacilitiesChanged={loadFacilities} />}
         {tab === 'bookings' && <BookingsTab facilities={facilities} members={members} />}
         {tab === 'assets' && <AssetsTab facilities={facilities} />}

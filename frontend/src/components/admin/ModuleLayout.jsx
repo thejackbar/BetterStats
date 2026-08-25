@@ -281,7 +281,13 @@ export default function ModuleLayout({
               </div>
               {onHelp && <HelpDot onClick={onHelp} />}
             </div>
-            {tabs && <div className="flex items-center justify-center shrink-0">{tabs}</div>}
+            {/* Shrinkable, deliberately: `flex-wrap` on the row cannot save a
+                child told not to shrink, and `shrink-0` here pushed Accounts
+                70px sideways at 390px once its filters wore one box. Both
+                sides carry a zero basis, so they give way first and this only
+                narrows when there is nothing left — which is when the button
+                row should be wrapping anyway. */}
+            {tabs && <div className="flex items-center justify-center min-w-0">{tabs}</div>}
             {!twoRow && filters}
             <div className={`ml-auto flex items-center gap-[26px] ${tabs ? 'flex-1 basis-0 justify-end' : ''}`}>
               {stats}
@@ -291,10 +297,17 @@ export default function ModuleLayout({
           </div>
           {twoRow && (
             // The filters wrap INSIDE their own box and the action cluster does
-            // not shrink, so the search box and the buttons always share the
-            // top of this row. Letting the whole row wrap put the buttons on a
-            // line of their own the moment a screen carried a few filters.
-            <div className="flex items-start gap-3.5">
+            // not shrink, so the search box and the buttons always share this
+            // row. Letting the whole row wrap put the buttons on a line of
+            // their own the moment a screen carried a few filters.
+            //
+            // `items-end`, so where a screen stacks its filters (a control row,
+            // then the search below it) the action lands beside the SEARCH
+            // rather than up beside the controls. Narrowing a list and adding
+            // to it are the two things a person does with what is underneath,
+            // and they belong on one line. A screen whose filters are a single
+            // row is unaffected: both boxes are one line tall either way.
+            <div className="flex items-end gap-3.5">
               <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">{filters}</div>
               <div className="flex items-center gap-[26px] shrink-0">
                 <BookmarkButton pageLabel={bookmarkLabel} variant="bar" />

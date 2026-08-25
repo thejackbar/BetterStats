@@ -801,6 +801,9 @@ export const api = {
   assetsDeleteItem: (id) =>
     request(`/club-admin/assets/items/${id}`, { method: 'DELETE' }),
 
+  // Service and replacement due. Core since migration 279: it used to fire only
+  // from BetterMerch, so a club without that module had dates that warned nobody.
+  assetsAlerts: () => request('/club-admin/assets/alerts'),
   assetsListMaintenanceLogs: (subjectType, subjectId) =>
     request(`/club-admin/assets/maintenance-logs?subject_type=${subjectType}&subject_id=${subjectId}`),
   assetsCreateMaintenanceLog: (data) =>
@@ -1137,14 +1140,8 @@ export const api = {
     request(`/club-admin/merch/movements/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   merchDeleteMovement: (id) =>
     request(`/club-admin/merch/movements/${id}`, { method: 'DELETE' }),
-  merchListAssets: ({ includeInactive } = {}) =>
-    request(`/club-admin/merch/assets${includeInactive ? '?include_inactive=true' : ''}`),
-  merchCreateAsset: (data) =>
-    request('/club-admin/merch/assets', { method: 'POST', body: JSON.stringify(data) }),
-  merchUpdateAsset: (id, data) =>
-    request(`/club-admin/merch/assets/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
-  merchDeleteAsset: (id) =>
-    request(`/club-admin/merch/assets/${id}`, { method: 'DELETE' }),
+  // Equipment left this module with migration 279 — it is an asset, not stock.
+  // The register is `assetsList/Create/Update/DeleteItem` below, in core.
   merchSearchPlayers: (q) =>
     request(`/club-admin/merch/players${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   merchPlayer: (playerId) => request(`/club-admin/merch/players/${playerId}/merch`),

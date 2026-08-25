@@ -515,7 +515,9 @@ async def performance(
 ):
     """Three views of the same book, on one screen.
 
-    * ``summary`` — today/this-week contact activity, the KPI strip.
+    * ``summary`` — today / this-week / all-time contact activity, the KPI
+      strip. All time is every contact ever recorded, so a quiet week still
+      shows what the team has actually done.
     * ``activity`` — the same numbers split per rep, so "who has called whom
       today" is answerable at a glance. Its totals ARE ``summary``, taken
       from one pass over the activity rows rather than counted twice, so the
@@ -530,7 +532,7 @@ async def performance(
     activity = await sw.activity_report(db, owner_user_id=effective_owner)
     breakdown = await sw.stage_breakdown_by_rep(db, owner_user_id=effective_owner)
     return {
-        "summary": {"today": activity["totals"]["today"], "week": activity["totals"]["week"]},
+        "summary": {w: activity["totals"][w] for w in sw.REPORT_WINDOWS},
         "activity": activity["rows"],
         "by_rep": breakdown["rows"],
         "totals": breakdown["totals"],
@@ -552,8 +554,8 @@ async def performance_drilldown(
 ):
     """The clubs behind ONE figure on the Performance screen.
 
-    ``panel='activity'`` takes window/metric/user_id and answers a Contact
-    activity cell; ``panel='pipeline'`` takes owner/cell/contacted_only and
+    ``panel='activity'`` takes window ('today', 'week' or 'all') / metric /
+    user_id and answers a Contact activity cell; ``panel='pipeline'`` takes owner/cell/contacted_only and
     answers a stage-breakdown cell. Both re-run the predicates that produced
     the number rather than a query shaped like them, so the list can never
     disagree with what was clicked.

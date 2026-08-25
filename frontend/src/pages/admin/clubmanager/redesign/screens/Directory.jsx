@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
 import { useAuth } from '../../../../../contexts/AuthContext'
 import { CAP } from '../../../../../lib/capabilities'
-import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, initials, MenuButton, MenuItem, MenuHeading, MenuDivider, FilterChip, SegGroup, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch } from '../ui'
 
 // Directory — one record per person, on REAL club data. The person spine is
 // fee_members (a member's player_id links to a stats player where one exists,
@@ -600,30 +600,24 @@ export default function Directory({ st, patch, narrow }) {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <ScreenHeader>
         <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-        <div>
-          <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Directory</h1>
+        <div style={HEAD_SIDE}>
+          <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Directory</h1>
           <Caption tone={C.faint} style={{ marginTop: 2 }}>
             One record per person · {list.length}{people ? ' of ' + people.length : ''} shown
             {list.length > 0 && emailable < list.length && ` · ${list.length - emailable} with no email`}
           </Caption>
         </div>
-        {/* The search sits on its own line above the filters, left aligned
-            with them, the same place it sits on Committee. box-sizing, or the
-            padding is added on top of the cap and the row pushes the page
-            sideways on a phone. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '1 1 100%', maxWidth: '100%' }}>
-          <input placeholder="Search name or role…" aria-label="Search name or role"
-            value={st.dirQuery || ''} onChange={e => patch({ dirQuery: e.target.value })}
-            style={{ width: 380, maxWidth: '100%', minWidth: 0, boxSizing: 'border-box', background: C.surface2, border: `1px solid ${C.hair2}`, borderRadius: 8, padding: '8px 12px', color: C.text, fontSize: 13.5, outline: 'none' }} />
-        </div>
-        {/* One row: the three axes as menus, then what you can DO, ending in
-            the single primary action. Every option that used to be its own pill
-            still exists — it lives in the menu for its axis, so the number of
-            controls no longer grows with the club's catalogue. Whatever is
-            actually filtered is drawn as chips underneath, so hiding the
-            options never hides the state. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', flex: '1 1 100%' }}>
-          <MenuButton label="Membership" value={membershipLabel} width={260}>
+        {/* The three filter axes and what you can DO with the result, on the
+            title line and centred between the heading and the primary action.
+            They wear Committee's own segmented control, so a person moving
+            between the two screens is looking at the same kind of button.
+            Every option that used to be its own pill still exists — it lives
+            in the menu for its axis, so the number of controls no longer grows
+            with the club's catalogue. Whatever is actually filtered is drawn
+            as chips underneath, so hiding the options never hides the state. */}
+        <div style={HEAD_CENTRE}>
+        <SegGroup>
+          <MenuButton seg label="Membership" value={membershipLabel} width={260}>
             {close => (
               <>
                 <MenuItem on={seg === 'All' && !typeFilter} onClick={() => { patch({ dirSeg: 'All', dirType: '' }); close() }}>Everyone</MenuItem>
@@ -650,7 +644,7 @@ export default function Directory({ st, patch, narrow }) {
             )}
           </MenuButton>
 
-          <MenuButton label="Role" value={roleLabel} width={230}>
+          <MenuButton seg label="Role" value={roleLabel} width={230}>
             {close => (
               <>
                 <MenuItem on={!roleSeg && !roleFilter} onClick={() => { patch({ dirRoleSeg: null, dirRole: null }); close() }}>Any role</MenuItem>
@@ -668,7 +662,7 @@ export default function Directory({ st, patch, narrow }) {
             )}
           </MenuButton>
 
-          <MenuButton label="More" value={moreLabel} width={230}>
+          <MenuButton seg label="More" value={moreLabel} width={230}>
             {close => (
               <>
                 <MenuHeading>HONOURS</MenuHeading>
@@ -718,9 +712,9 @@ export default function Directory({ st, patch, narrow }) {
           {/* Everything that is not a filter. Families, Qualifications and
               Volunteer bulk entry are PAGES, and Import/Create list are
               actions — mixing them in among the filters is what made the row
-              read as one undifferentiated wall. */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-            <MenuButton label="Manage" width={230} align="right">
+              read as one undifferentiated wall. It keeps its place at the end
+              of the same group so the four buttons read as one row. */}
+            <MenuButton seg label="Manage" width={230} align="right">
               {close => (
                 <>
                   <MenuHeading>OPEN</MenuHeading>
@@ -735,9 +729,19 @@ export default function Directory({ st, patch, narrow }) {
                 </>
               )}
             </MenuButton>
-            <button onClick={openAdd} style={btnP}>+ Add person</button>
-          </div>
+        </SegGroup>
         </div>
+        {/* Kept, empty: it has a zero basis so it costs nothing, and dropping it
+            would let the title take the whole row and slide the centred buttons
+            off centre. */}
+        <div style={HEAD_SIDE_END} />
+
+        {/* The search on its own line under the heading, with the one primary
+            action at the right of that same line — narrowing the list and
+            adding to it are the two things done with the list below. */}
+        <HeaderSearch value={st.dirQuery} onChange={v => patch({ dirQuery: v })}
+          placeholder="Search name or role…"
+          trailing={<button onClick={openAdd} style={btnP}>+ Add person</button>} />
 
         {/* What is actually filtered, and how to undo it. Drawn only when
             something is on, so an unfiltered Directory carries no extra row. */}

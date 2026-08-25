@@ -16,6 +16,7 @@ from app.routers.auth import get_current_user, get_current_club
 from app.services.aggregations import get_upcoming_milestones_for_org
 from app.auth.modules import org_entitled_modules
 from app.services.merch import merch_alerts as get_merch_alerts
+from app.services.assets import asset_alerts as get_asset_alerts, count_asset_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -193,11 +194,19 @@ async def _build_notifications_count(
         return (await get_merch_alerts(db, org_id))["total"]
     merch_alert_count = await _safe(db, _merch_count, 0, what="count.merch")
 
+    # Assets due for service or replacement. CORE, with no module gate: since
+    # migration 279 the club's register is one thing and it is not stock, so a
+    # club without BetterMerch no longer has service dates that warn nobody.
+    async def _asset_count():
+        return await count_asset_alerts(db, org_id)
+    asset_alert_count = await _safe(db, _asset_count, 0, what="count.assets")
+
     return {
-        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count + merch_alert_count,
+        "unseen_count": sync_count + milestone_count + pending_count + pending_reports_count + merch_alert_count + asset_alert_count,
         "failed_sync_count": failed_sync_count,
         "pending_reports_count": pending_reports_count,
         "merch_alert_count": merch_alert_count,
+        "asset_alert_count": asset_alert_count,
         "last_seen_version": last_seen_version,
     }
 
@@ -331,7 +340,16 @@ async def _build_notifications_summary(
         return await get_merch_alerts(db, org_id)
     merch = await _safe(db, _merch, _empty_merch, what="summary.merch")
 
-    unseen_count = len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count + (merch.get("total", 0) if isinstance(merch, dict) else 0)
+    # Core, no module gate — see the count above.
+    _empty_assets = {"service_due": [], "total": 0}
+
+    async def _assets():
+        return await get_asset_alerts(db, org_id)
+    assets = await _safe(db, _assets, _empty_assets, what="summary.assets")
+
+    unseen_count = (len(sync_runs) + len(new_milestones) + pending_count + pending_reports_count
+                    + (merch.get("total", 0) if isinstance(merch, dict) else 0)
+                    + (assets.get("total", 0) if isinstance(assets, dict) else 0))
     failed_sync_count = sum(1 for r in sync_runs if r["status"] == "error")
 
     return {
@@ -345,6 +363,7 @@ async def _build_notifications_summary(
         "pending_sync_requests": pending_count,
         "pending_reports_count": pending_reports_count,
         "merch_alerts": merch,
+        "asset_alerts": assets,
     }
 
 

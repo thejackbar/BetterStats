@@ -42,7 +42,6 @@ function buildNav({ modules, counts, storefront }) {
 
     { heading: 'Stock' },
     { to: '/admin/merch/stock', label: 'Inventory', icon: 'list', cap: CAP.MANAGE_MERCH, module: 'merch', badge: counts.reorder },
-    { to: '/admin/merch/equipment', label: 'Equipment', icon: 'settings', cap: CAP.MANAGE_MERCH, module: 'merch' },
     ...(storefront ? [{ to: '/admin/merch/orders', label: 'Online store', icon: 'sheet', cap: CAP.MANAGE_MERCH, module: 'merch' }] : []),
 
     { heading: 'Comms' },
@@ -59,7 +58,7 @@ function buildNav({ modules, counts, storefront }) {
     { heading: 'Club' },
     { to: '/admin/club-diary', label: 'Diary', icon: 'ladders', cap: CAP.MANAGE_CLUB_DIARY },
     { to: '/admin/events', label: 'Events', icon: 'timer', cap: CAP.MANAGE_COMMITTEE },
-    { to: '/admin/assets', label: 'Facilities', icon: 'nets', cap: CAP.MANAGE_ASSETS },
+    { to: '/admin/assets', label: 'Facilities & Assets', icon: 'nets', cap: CAP.MANAGE_ASSETS },
 
     { heading: 'Setup' },
     // The catalogue every other screen reads from: roles (a committee-flagged

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../../../lib/api'
-import { C, MONO, Caption, ScreenHeader, NavToggle, SegTabs , ManageLink } from '../ui'
+import { C, MONO, Caption, ScreenHeader, NavToggle, SegGroup, segItemStyle, HEAD_SIDE, HEAD_CENTRE, HEAD_SIDE_END, HeaderSearch, matchesQuery } from '../ui'
 import EntityManager, { reorderBySortOrder } from '../parts/EntityManager'
 
 // Events — the club's real events (club_events) with their registrations.
@@ -55,22 +56,46 @@ export default function Events({ st, patch, narrow }) {
 
   const cap = { fontFamily: MONO, fontSize: 10, letterSpacing: '0.14em', color: C.faintest, marginBottom: 9 }
 
-  const Header = () => (
+  const q = (st.eventQuery || '').trim()
+
+  // NEVER DECLARE A COMPONENT INSIDE A RENDER. React compares element types by
+  // identity, so a `const Header = () => …` written here is a different type on
+  // every render and its whole subtree is torn down and rebuilt — which throws
+  // the caret out of the search box below after every character typed. A plain
+  // function returning elements, CALLED rather than mounted, keeps the types
+  // stable. Same fix the Committee screen carries.
+  const header = () => (
     <ScreenHeader>
       <NavToggle narrow={narrow} onClick={() => patch({ navOpen: true })} />
-      <div>
-        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em' }}>Events</h1>
+      <div style={HEAD_SIDE}>
+        <h1 style={{ fontWeight: 700, fontSize: 19, margin: 0, letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Events</h1>
         <Caption tone={C.faint} style={{ marginTop: 2 }}>TICKETING, RSVPS AND WHO IS COMING</Caption>
       </div>
-      <SegTabs value={view} onChange={setView} tabs={[{ key: 'events', label: 'Events' }, { key: 'types', label: 'Event types' }]} />
-      <ManageLink to="/admin/clubhouse/events/manage">Manage events &amp; tickets</ManageLink>
+      {/* All three in one centred box: the two views with the editor between
+          them. The Manage link used to float on the right on its own, which
+          read as a different kind of control from the buttons beside it. It
+          navigates rather than toggles, so it carries no on state. */}
+      <div style={HEAD_CENTRE}>
+        <SegGroup>
+          <button type="button" onClick={() => setView('events')} aria-pressed={view === 'events'}
+            style={segItemStyle(view === 'events')}>Events</button>
+          <Link to="/admin/clubhouse/events/manage" style={{ ...segItemStyle(false), textDecoration: 'none' }}>
+            Manage events &amp; tickets
+          </Link>
+          <button type="button" onClick={() => setView('types')} aria-pressed={view === 'types'}
+            style={segItemStyle(view === 'types')}>Event types</button>
+        </SegGroup>
+      </div>
+      <div style={HEAD_SIDE_END} />
+      <HeaderSearch value={st.eventQuery} onChange={v => patch({ eventQuery: v })}
+        placeholder={view === 'types' ? 'Search event types…' : 'Search events, venues and who is coming…'} />
     </ScreenHeader>
   )
 
   if (view === 'types') {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-        <Header />
+        {header()}
         <div className="pb-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, maxWidth: '46rem' }}>
           <EntityManager
             describe="The kinds of event your club runs (Fundraiser, Social, Presentation night…). New events pick from these."
@@ -80,16 +105,24 @@ export default function Events({ st, patch, narrow }) {
             onReorder={reorderBySortOrder(api.eventUpdateType)}
             seed={{ label: 'Add Event Types Starter Pack', fn: () => api.eventSeedTypes(false) }}
             primaryKey="name" subtitle={it => [it.is_committee_only ? 'Committee-only' : null, it.description].filter(Boolean).join(' · ')}
-            addLabel="Add event type" emptyText="No event types yet." />
+            addLabel="Add event type" emptyText="No event types yet." query={q} />
         </div>
       </div>
     )
   }
 
-  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}><Header /><div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load events.' : 'Loading events…'}</div></div>
+  if (!data) return <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>{header()}<div style={{ padding: 24, fontSize: 13, color: C.faint }}>{err ? 'Could not load events.' : 'Loading events…'}</div></div>
 
   const { events, regs } = data
-  const sel = events.find(e => e.id === st.event) || events[0] || null
+  // The search reaches what is INSIDE an event as well as its own fields — an
+  // attendee's name matches the event they are coming to, because "which do I
+  // have the Doyles down for" is a question this screen is actually asked.
+  const shownEvents = !q ? events : events.filter(e =>
+    matchesQuery(q, e.title, e.location, e.event_type)
+    || (regs[e.id]?.registrations || []).some(r => matchesQuery(q, r.full_name, r.notes)))
+  // The open event is kept even when the query no longer reaches it, so typing
+  // never yanks the pane out from under whoever is reading it.
+  const sel = events.find(e => e.id === st.event) || shownEvents[0] || events[0] || null
   const regInfo = sel ? (regs[sel.id] || { registrations: [], registered_count: 0, capacity: sel.capacity }) : null
   const attendees = regInfo?.registrations || []
   const sold = regInfo?.registered_count ?? attendees.reduce((a, r) => a + (r.quantity || 1), 0)
@@ -103,12 +136,12 @@ export default function Events({ st, patch, narrow }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
-      <Header />
+      {header()}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
         <div className="pb-scroll" style={{ width: 290, flex: '0 0 290px', borderRight: `1px solid ${C.hair}`, overflowY: 'auto', padding: 14 }}>
           <div style={cap}>THIS SEASON</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {events.map(e => {
+            {shownEvents.map(e => {
               const s = eventStatus(e)
               const n = regs[e.id]?.registered_count ?? 0
               return (
@@ -122,7 +155,7 @@ export default function Events({ st, patch, narrow }) {
                 </div>
               )
             })}
-            {events.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>No events yet.</div>}
+            {shownEvents.length === 0 && <div style={{ fontSize: 13, color: C.faint }}>{q ? 'No event matches “' + q + '”.' : 'No events yet.'}</div>}
           </div>
         </div>
 
