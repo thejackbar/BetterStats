@@ -99,7 +99,20 @@ const ROOM = {
 
 // What gets typed. Deliberately awkward: XML metacharacters that would break a
 // hand-built document.xml, and punctuation a phone keyboard produces.
-const MINUTES_TEXT = 'Opened 7:32pm. Apologies: J. Smith & R. Jones <away>.\n\nTreasurer\u2019s report \u2014 balance $12,430.55.'
+const MINUTES_TEXT = [
+  // The preamble the model writes despite being told not to: the club, the
+  // document name and the date, all of which the document already heads itself
+  // with. This is what came out mid-page as "APPLECROSS CRICKET CLUBCOMMITTEE
+  // MEETING MINUTES10 August 2026".
+  'APPLECROSS CRICKET CLUB',
+  'COMMITTEE MEETING MINUTES',
+  '10 August 2026',
+  // Bare-line headings, which is how the draft actually writes them.
+  "Welcome & attendance",
+  'Opened 7:32pm. Apologies: J. Smith & R. Jones <away>.',
+  "President's report",
+  'The Chair reported on sponsorship. Balance $12,430.55.',
+].join('\n')
 const NOTES_TEXT = 'Chase the grant form. Ring Bev about the roster.'
 
 const routes = (page, state) => page.route('**/api/**', async (route) => {
@@ -345,6 +358,26 @@ async function run() {
 
   check('the narrative typed into the box is used, autosave or not',
     joined.includes('Opened 7:32pm'), joined.slice(0, 300))
+  // The draft heads its sections with the agenda item's own title on a bare
+  // line. Matching only markdown headings found none of them, so the whole
+  // account landed in one lump under Record of Discussion instead of being
+  // distributed. Measured by position, not by presence.
+  const welcomeIdx = at(/^\d+\. Welcome & attendance$/)
+  const narrativeIdx = at(/Opened 7:32pm/)
+  const apologiesIdx = at(/^\d+\. Apologies$/)
+  check('a bare-line heading files its prose under the matching agenda item',
+    welcomeIdx >= 0 && narrativeIdx > welcomeIdx && narrativeIdx < apologiesIdx,
+    `welcome ${welcomeIdx}, prose ${narrativeIdx}, next ${apologiesIdx}`)
+  check("the President's own prose lands in the President's section",
+    mp.slice(presIdx, nextIdx).join('\n').includes('The Chair reported on sponsorship'))
+  check('nothing is left over in a Record of Discussion lump',
+    at(/^\d+\. Record of Discussion$/) === -1)
+  // The model's own title block repeated the club, the document name and the
+  // date the document already carries.
+  check('the drafted title block is not repeated mid-document',
+    mp.filter(t => t === 'COMMITTEE MEETING MINUTES').length === 0
+      && mp.filter(t => t === 'APPLECROSS CRICKET CLUB').length === 1,
+    JSON.stringify(mp.filter(t => /COMMITTEE MEETING MINUTES|APPLECROSS/.test(t))))
   check('markdown asterisks are not printed literally', !joined.includes('**'))
   check('& and < are escaped rather than breaking the XML',
     minutesXml.includes('J. Smith &amp; R. Jones &lt;away&gt;'))
@@ -368,7 +401,7 @@ async function run() {
           && s.slice(Number(m[1]), Number(m[1]) + 4) === 'xref'
       })())
     check(`${key} .pdf: draws its text with a real font resource`,
-      s.includes('/Helvetica') && s.includes(' Tj'))
+      s.includes('/F1') && s.includes(' Tj'))
   }
   const minutesPdfRaw = fs.readFileSync(files.minutesPdf.path).toString('latin1')
   const pdfText = [...minutesPdfRaw.matchAll(/\((.*?)\) Tj/g)].map(m => m[1]).join(' ')
@@ -378,6 +411,55 @@ async function run() {
       && pdfText.includes('Outcome: Lost') && pdfText.includes('Votes recorded'), pdfText.slice(0, 200))
   check('minutes .pdf draws the tables it needs',
     / re S/.test(minutesPdfRaw) && pdfText.includes('Serves objective'))
+
+  // LAYOUT, measured off the real draw operations. The indent was reported as
+  // far too deep in the PDF and correct in Word: `indent` is twips, and the PDF
+  // was reading the same number as points, so a 10pt Word indent drew at 200pt.
+  const pageStreams = [...minutesPdfRaw.matchAll(/stream\n([\s\S]*?)\nendstream/g)].map(m => m[1])
+  const draws = pageStreams.flatMap((ps, page) =>
+    [...ps.matchAll(/BT (\/F\d) ([\d.]+) Tf ([\d.]+) ([\d.]+) Td \((.*?)\) Tj ET/g)]
+      .map(m => ({ page, font: m[1], size: Number(m[2]), x: Number(m[3]), y: Number(m[4]), text: m[5] })))
+  const MARGIN = 56
+  const motionRow = draws.find(d => d.text === 'MOTION')
+  const headingRow = draws.find(d => /^\d+\. President's report$/.test(d.text))
+  check('minutes .pdf: the motion block is inset about a third of what it was',
+    motionRow && Math.abs((motionRow.x - MARGIN) - 200 / 3) <= 2,
+    motionRow ? `${(motionRow.x - MARGIN).toFixed(1)}pt from the margin` : 'no MOTION drawn')
+  check('minutes .pdf: a section heading still starts at the margin',
+    headingRow && Math.abs(headingRow.x - MARGIN) < 0.5, `${headingRow?.x}`)
+
+  // A blank line in each of the three places asked for, measured as the gap
+  // between one baseline and the next rather than read off the source.
+  // Measured between two baselines ON THE SAME PAGE — y restarts at the top of
+  // each page, so an element that happens to fall first on a page has no
+  // meaningful gap and the next occurrence is used instead.
+  const gapBefore = (pred) => {
+    for (let i = 1; i < draws.length; i++) {
+      if (!pred(draws[i])) continue
+      const prev = draws[i - 1]
+      if (prev.page === draws[i].page && prev.y > draws[i].y) return prev.y - draws[i].y
+    }
+    return null
+  }
+  const bodyStep = 10.5 * 1.32 + 3
+  const beforeHeading = gapBefore(d => /^\d+\. Apologies$/.test(d.text))
+  const afterHeading = gapBefore(d => d.text === 'Discussed.')
+  const beforeMotion = gapBefore(d => d.text === 'MOTION' || d.text === 'ACTION')
+  check('minutes .pdf: a blank line before an agenda item title',
+    beforeHeading !== null && beforeHeading > bodyStep * 1.6, `${beforeHeading?.toFixed(1)}pt`)
+  check('minutes .pdf: a blank line after the title, before the section text',
+    afterHeading !== null && afterHeading > bodyStep * 1.6, `${afterHeading?.toFixed(1)}pt`)
+  check('minutes .pdf: a blank line before a MOTION or ACTION block',
+    beforeMotion !== null && beforeMotion > bodyStep * 1.4, `${beforeMotion?.toFixed(1)}pt`)
+
+  // Arial, named on the font objects the pages actually reference.
+  check('minutes .pdf is set in Arial',
+    /\/BaseFont \/Arial\b/.test(minutesPdfRaw) && /\/BaseFont \/Arial,Bold/.test(minutesPdfRaw)
+      && !/\/Helvetica/.test(minutesPdfRaw))
+  check('minutes .pdf declares the widths its layout measured with',
+    /\/FirstChar 32 \/LastChar 255/.test(minutesPdfRaw) && /\/FontDescriptor/.test(minutesPdfRaw))
+  check('minutes .docx is set in Arial',
+    (minutesXml.match(/w:ascii="Arial"/g) || []).length > 10)
 
   // PAGINATION, which the earlier checks never looked at and should have. A
   // rule under a heading reported no height, so every element after the first

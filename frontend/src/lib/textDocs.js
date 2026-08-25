@@ -132,10 +132,14 @@ const xml = s => String(s)
 
 // `w:sz` is HALF-points, so 32 reads as 16pt. `w:spacing w:after` is twentieths
 // of a point, so 120 is 6pt.
+// Arial throughout, named on every run. Word's own default is whatever the
+// reader's template says, so the face has to be stated rather than assumed.
+const FONT = '<w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>'
+
 function run(text, { bold, size, colour, italic } = {}) {
-  const rPr = (bold || size || colour || italic)
-    ? `<w:rPr>${bold ? '<w:b/>' : ''}${italic ? '<w:i/>' : ''}${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}${colour ? `<w:color w:val="${colour}"/>` : ''}</w:rPr>`
-    : ''
+  const rPr = `<w:rPr>${FONT}${bold ? '<w:b/>' : ''}${italic ? '<w:i/>' : ''}`
+    + `${size ? `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>` : ''}`
+    + `${colour ? `<w:color w:val="${colour}"/>` : ''}</w:rPr>`
   return `<w:r>${rPr}<w:t xml:space="preserve">${xml(text)}</w:t></w:r>`
 }
 
@@ -239,6 +243,18 @@ const HELVETICA = [
   556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
 ]
 
+// Helvetica-Bold, which Arial Bold matches. The bold face is genuinely wider
+// per glyph, so a heading or a table header measured off the regular table and
+// nudged by a flat percentage lands in the wrong place.
+const HELVETICA_BOLD = [
+  278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+  975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+  333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+  611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+]
+
 // The punctuation a person actually types into minutes — curly quotes off a
 // phone keyboard, a dash, an ellipsis — lives in WinAnsi's own 0x80–0x9F block
 // rather than at its Unicode code point. Latin-1 above 160 passes straight
@@ -266,15 +282,14 @@ function winAnsi(ch) {
   return 63
 }
 
+const advance = (code, bold) => (code >= 32 && code <= 126)
+  ? (bold ? HELVETICA_BOLD : HELVETICA)[code - 32]
+  : 556
+
 function textWidth(s, size, bold) {
   let w = 0
-  for (const ch of String(s)) {
-    const c = winAnsi(ch)
-    w += (c >= 32 && c <= 126) ? HELVETICA[c - 32] : 556
-  }
-  // Helvetica-Bold runs a little wider than the table above; used for headings
-  // and table headers, so an approximation is enough to keep them in the column.
-  return (w * size / 1000) * (bold ? 1.06 : 1)
+  for (const ch of String(s)) w += advance(winAnsi(ch), bold)
+  return w * size / 1000
 }
 
 // A line's own leading whitespace is kept and re-applied to every row it wraps
@@ -320,8 +335,31 @@ function pdfString(s) {
 
 const ascii = s => Array.from(enc.encode(s))
 
+// WinAnsi runs 32..255, and a simple font's Widths array must cover the whole
+// range it declares or a reader falls back to guessing.
+function widthsArray(bold) {
+  const out = []
+  for (let c = 32; c <= 255; c++) out.push(advance(c, bold))
+  return out.join(' ')
+}
+
+const fontObj = (name, bold, descriptor) =>
+  `<< /Type /Font /Subtype /TrueType /BaseFont /${name} /FirstChar 32 /LastChar 255 `
+  + `/Widths [${widthsArray(bold)}] /Encoding /WinAnsiEncoding /FontDescriptor ${descriptor} 0 R >>`
+
+// Flags 32 = non-symbolic. The metrics are Arial's own.
+const descriptorObj = (name, stemV) =>
+  `<< /Type /FontDescriptor /FontName /${name} /Flags 32 /FontBBox [-665 -325 2000 1006] `
+  + `/ItalicAngle 0 /Ascent 905 /Descent -212 /CapHeight 716 /StemV ${stemV} >>`
+
 const PAGE_W = 595.28, PAGE_H = 841.89, MARGIN = 56
 const COL = PAGE_W - MARGIN * 2
+
+// `indent` on a block is TWIPS, which is what Word takes. A PDF works in
+// POINTS, and reading the same number as points is what drew a 10pt Word
+// indent as a 200pt one. `indentPt` overrides it where the two formats are
+// deliberately set apart.
+const pdfIndent = b => Number.isFinite(b.indentPt) ? b.indentPt : (b.indent || 0) / 20
 
 // Every block becomes drawing instructions with their own height, so paging is
 // decided once over the whole document rather than per block.
@@ -339,16 +377,21 @@ function layout(blocks) {
         break
       case 'subtitle':
         for (const t of wrapText(b.text, 10, COL, false)) push({ kind: 'text', text: t, size: 10, grey: true, centre: true, gap: 3 })
-        push({ kind: 'gap', height: 8 })
+        push({ kind: 'gap', height: 12 })
         break
       case 'heading':
-        push({ kind: 'gap', height: 6 })
-        for (const t of wrapText(b.text, 13, COL, true)) push({ kind: 'text', text: t, size: 13, bold: true, keepNext: true, gap: 3 })
-        push({ kind: 'rule', gap: 7 })
+        // A blank line ahead of every section heading, and another under it
+        // before the section's own first line.
+        push({ kind: 'gap', height: 16 })
+        for (const t of wrapText(b.text, 13, COL, true)) push({ kind: 'text', text: t, size: 13, bold: true, keepNext: true, gap: 4 })
+        push({ kind: 'rule', gap: 12 })
         break
       case 'label':
-        for (const t of wrapText(b.text, 9, COL - (b.indent || 0), true))
-          push({ kind: 'text', text: t, size: 9, bold: true, grey: true, indent: b.indent || 0, gap: 2 })
+        // MOTION and ACTION each start a block of their own, so each gets a
+        // blank line above it.
+        push({ kind: 'gap', height: 9 })
+        for (const t of wrapText(b.text, 9, COL - pdfIndent(b), true))
+          push({ kind: 'text', text: t, size: 9, bold: true, grey: true, indent: pdfIndent(b), gap: 3 })
         break
       case 'bullets':
         for (const item of (b.items || [])) {
@@ -367,10 +410,10 @@ function layout(blocks) {
         break
       case 'para':
       default: {
-        const indent = b.indent || 0
+        const indent = pdfIndent(b)
         const rows = wrapText(b.text, 10.5, COL - indent, false)
-        for (const t of rows) push({ kind: 'text', text: t, size: 10.5, grey: b.muted, italic: b.italic, indent, gap: 2 })
-        push({ kind: 'gap', height: b.after ?? 5 })
+        for (const t of rows) push({ kind: 'text', text: t, size: 10.5, grey: b.muted, italic: b.italic, indent, gap: 3 })
+        push({ kind: 'gap', height: b.after ?? 7 })
       }
     }
   }
@@ -396,7 +439,7 @@ function tableOps(b) {
   const ops = []
   if (b.header) ops.push({ ...rowOp(b.header, true), repeat: true })
   for (const r of b.rows) ops.push(rowOp(r, false))
-  ops.push({ kind: 'gap', height: 8 })
+  ops.push({ kind: 'gap', height: 12 })
   return ops
 }
 
@@ -492,18 +535,26 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
     return new Uint8Array(s)
   })
 
-  // 1 catalog, 2 pages, 3 Helvetica, 4 Helvetica-Bold, 5 info, then a page
-  // object and a content object per page.
-  const firstPage = 6
+  // 1 catalog, 2 pages, 3 Arial, 4 Arial Bold, 5 info, 7/8 the font
+  // descriptors, then a page object and a content object per page. 6 is
+  // deliberately unused so the pair of descriptors can sit together.
+  const firstPage = 9
   const pageIds = pages.map((_, i) => firstPage + i * 2)
   const bodies = []
   const put = (n, data) => { bodies[n] = data instanceof Uint8Array ? data : enc.encode(data) }
 
   put(1, '<< /Type /Catalog /Pages 2 0 R >>')
   put(2, `<< /Type /Pages /Kids [${pageIds.map(n => `${n} 0 R`).join(' ')}] /Count ${pages.length} >>`)
-  put(3, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>')
-  put(4, '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>')
+  // ARIAL, not one of the base-14 aliases. A TrueType font with a descriptor
+  // and its own Widths but NO embedded file: a reader uses the Arial it has,
+  // and where it has none it substitutes a metrically compatible face. The
+  // Widths declared here are the ones the layout above measured with, so the
+  // glyphs land where they were positioned either way.
+  put(3, fontObj('Arial', false, 7))
+  put(4, fontObj('Arial,Bold', true, 8))
   put(5, new Uint8Array([...ascii('<< /Title '), ...pdfString(title || ''), ...ascii(' /Producer (BetterCricket) >>')]))
+  put(7, descriptorObj('Arial', 88))
+  put(8, descriptorObj('Arial,Bold', 165))
 
   pages.forEach((_, i) => {
     const id = pageIds[i]
@@ -515,6 +566,9 @@ export function downloadPdf({ filename, title, subtitle, body, blocks }) {
     ]))
   })
 
+  // Every slot in the object table must exist: the xref is indexed by number,
+  // so a hole would make every later offset unreadable.
+  if (!bodies[6]) put(6, '<< >>')
   const count = bodies.length - 1
   const chunks = [enc.encode('%PDF-1.4\n')]
   let at = chunks[0].length

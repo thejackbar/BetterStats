@@ -20,6 +20,13 @@ import { objectiveLabel } from './planLabels'
 const BULLET = '•'
 const nameList = xs => xs.filter(Boolean).join('; ')
 
+// A motion or an action sits in from the section's own text. The two formats
+// are set INDEPENDENTLY and on purpose: `indent` is twips, which is what Word
+// takes and where the depth was already right, and `indentPt` is points for the
+// PDF, which had been reading the twips figure as points and drawing an indent
+// twenty times too deep.
+const INSET = { indent: 200, indentPt: 67 }
+
 /* ── formatting ──────────────────────────────────────────────────────────── */
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
@@ -74,7 +81,12 @@ const key = s => String(s || '').toLowerCase()
 // Split on those headings so a section's prose can be put back under the item it
 // belongs to. A heading nothing matches is simply not used — the record decides
 // what sections exist, never the narrative.
-export function splitNarrative(text) {
+export function splitNarrative(text, knownHeadings = []) {
+  // A DRAFT HEADS ITS SECTIONS WITH THE AGENDA ITEM'S OWN TITLE ON A BARE LINE,
+  // with no markup at all, so matching only `**bold**` or `## ` found nothing
+  // and the whole account fell into one lump at the end of the document under
+  // Record of Discussion. The agenda's own titles are therefore headings too.
+  const known = new Set(knownHeadings.map(key).filter(Boolean))
   const sections = new Map()
   const lines = String(text || '').split('\n')
   let head = null, buf = [], loose = []
@@ -90,6 +102,7 @@ export function splitNarrative(text) {
     const m = line.match(/^\*\*(.+?)\*\*:?$/) || line.match(/^#{1,6}\s*(.+?)$/)
       // "3. President's Report" as its own line is a heading too.
       || line.match(/^\d+\.\s+([A-Z][^.]{2,60})$/)
+      || (known.has(key(line)) ? [line, line] : null)
     if (m) { flush(); head = m[1].replace(/^\d+\.\s*/, '').trim(); continue }
     if (head) buf.push(raw)
     else loose.push(raw)
@@ -99,34 +112,46 @@ export function splitNarrative(text) {
   // be dropped. A secretary who types plain prose into the box rather than
   // pressing the draft button has no headings at all, and losing that text
   // would be losing the minutes.
-  return { sections, loose: plain(loose.join('\n')).trim() }
+  // The prompt asks for no preamble and the model writes one anyway: its own
+  // title block, repeating the club, the document name and the date this
+  // document already carries in its heading. A short run of short lines ahead
+  // of the first real heading is that block, and is dropped. Anything longer is
+  // real content and is kept.
+  const preamble = loose.map(l => l.trim()).filter(Boolean)
+  const isTitleBlock = sections.size > 0 && preamble.length > 0
+    && preamble.length <= 4 && preamble.every(l => l.length <= 60)
+  return {
+    sections,
+    loose: isTitleBlock ? '' : plain(loose.join('\n')).trim(),
+  }
 }
 
 /* ── the pieces of a section ─────────────────────────────────────────────── */
 
 const VOTE_LABEL = { for: 'For', against: 'Against', abstain: 'Abstain' }
 
-function motionBlocks(mo, { nameOf, objectiveOf, indent }) {
+function motionBlocks(mo, { nameOf, objectiveOf }) {
+  const inset = { ...INSET }
   const blocks = []
-  blocks.push({ type: 'label', text: 'MOTION', indent })
-  blocks.push({ type: 'para', text: `"${plain(mo.description)}"`, indent, after: 3 })
+  blocks.push({ type: 'label', text: 'MOTION', ...inset })
+  blocks.push({ type: 'para', text: `"${plain(mo.description)}"`, ...inset, after: 4 })
 
   const moved = [
     mo.proposed_by_member_id ? `Moved by ${nameOf(mo.proposed_by_member_id)}` : null,
     mo.seconded_by_member_id ? `seconded by ${nameOf(mo.seconded_by_member_id)}` : null,
   ].filter(Boolean).join(', ')
-  if (moved) blocks.push({ type: 'para', text: `${moved}.`, indent, after: 3 })
+  if (moved) blocks.push({ type: 'para', text: `${moved}.`, ...inset, after: 4 })
 
   // The objective the motion serves. A club that runs a strategic plan needs the
   // minutes to say which part of it a decision was made against.
   const obj = objectiveOf(mo.objective_id)
-  if (obj) blocks.push({ type: 'para', text: `Serves objective: ${obj}`, indent, muted: true, after: 3 })
+  if (obj) blocks.push({ type: 'para', text: `Serves objective: ${obj}`, ...inset, muted: true, after: 4 })
 
   const f = mo.votes_for || 0, a = mo.votes_against || 0, ab = mo.votes_abstain || 0
   const counted = f + a + ab > 0
   const outcome = titleCase(mo.outcome || 'pending')
   blocks.push({
-    type: 'para', indent, after: 3,
+    type: 'para', ...inset, after: 4,
     text: counted
       ? `Outcome: ${outcome}. For ${f}, against ${a}, abstain ${ab}.`
       : `Outcome: ${outcome}.`,
@@ -142,7 +167,7 @@ function motionBlocks(mo, { nameOf, objectiveOf, indent }) {
       .filter(k => by[k] && by[k].length)
       .map(k => `${VOTE_LABEL[k]}: ${nameList(by[k].sort())}`)
       .join('. ')
-    blocks.push({ type: 'para', text: `Votes recorded. ${said}.`, indent, muted: true, after: 5 })
+    blocks.push({ type: 'para', text: `Votes recorded. ${said}.`, ...inset, muted: true, after: 6 })
   }
   return blocks
 }
@@ -175,7 +200,8 @@ export function buildMinutesDoc({
   const objById = new Map(objectives.map(o => [o.id, o]))
   const objectiveOf = id => (id && objById.has(id)) ? objectiveLabel(objById.get(id)) : ''
 
-  const { sections: narrative, loose: looseNarrative } = splitNarrative(minutesText)
+  const { sections: narrative, loose: looseNarrative } =
+    splitNarrative(minutesText, agendaItems.map(i => i.title))
   const blocks = []
   let n = 0
   const section = (label) => { n += 1; blocks.push({ type: 'heading', text: `${n}. ${label}` }) }
@@ -225,13 +251,13 @@ export function buildMinutesDoc({
     else blocks.push({ type: 'para', text: 'Discussed.' })
 
     for (const mo of motions.filter(x => x.agenda_item_id === item.id)) {
-      blocks.push(...motionBlocks(mo, { nameOf, objectiveOf, indent: 200 }))
+      blocks.push(...motionBlocks(mo, { nameOf, objectiveOf }))
     }
     const own = actions.filter(x => x.agenda_item_id === item.id)
     if (own.length) {
-      blocks.push({ type: 'label', text: own.length === 1 ? 'ACTION' : 'ACTIONS', indent: 200 })
+      blocks.push({ type: 'label', text: own.length === 1 ? 'ACTION' : 'ACTIONS', ...INSET })
       for (const t of own) {
-        blocks.push({ type: 'para', text: `${BULLET}  ${actionLine(t, { nameOf, objectiveOf })}`, indent: 200, after: 3 })
+        blocks.push({ type: 'para', text: `${BULLET}  ${actionLine(t, { nameOf, objectiveOf })}`, ...INSET, after: 5 })
       }
     }
   }
@@ -242,7 +268,7 @@ export function buildMinutesDoc({
   if (looseMotions.length) {
     section('Other Motions')
     blocks.push({ type: 'para', text: 'Recorded against the meeting rather than a numbered agenda item.', muted: true })
-    for (const mo of looseMotions) blocks.push(...motionBlocks(mo, { nameOf, objectiveOf, indent: 200 }))
+    for (const mo of looseMotions) blocks.push(...motionBlocks(mo, { nameOf, objectiveOf }))
   }
 
   /* Whatever the narrative said that no agenda item claimed. Kept rather than

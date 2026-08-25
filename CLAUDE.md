@@ -1672,6 +1672,46 @@ as sections with their own buttons rather than three tabs and a manage page.
   are unchanged.
 
 
+### The PDF's own typography (v9.53.4)
+
+Reported off the generated PDF: the motion and action blocks sat far too deep,
+the page wanted air, and the file should be Arial. The Word file was fine.
+
+- **`indent` IS TWIPS AND THE PDF WAS READING IT AS POINTS.** One number served
+  both writers, so `indent: 200` meant 10pt in Word (right, and why only the PDF
+  looked wrong) and 200pt in the PDF, an indent nearly a third of the page.
+  `pdfIndent` converts, and `indentPt` overrides it where the two formats are
+  deliberately set apart — which they are here, since the Word depth was already
+  what the club wanted and only the PDF was asked to change.
+- **ARIAL IS A REAL FONT OBJECT, not a base-14 alias.** The PDF declares
+  `/Arial` and `/Arial,Bold` as TrueType with a FontDescriptor and their own
+  Widths, and embeds nothing: a reader uses the Arial it has and substitutes a
+  metrically compatible face where it has none. **The declared Widths are the
+  ones the layout measured with**, so the glyphs land where they were placed
+  either way. Word names the face on every run, since its default comes from
+  whatever template the reader opens it in.
+- **HELVETICA-BOLD HAS ITS OWN WIDTH TABLE NOW.** Bold was measured off the
+  regular table times 1.06, which is close on a short heading and wrong across a
+  table header. Arial Bold matches Helvetica-Bold, so one table serves the
+  measurement and the declared widths.
+- **A BARE LINE MATCHING AN AGENDA ITEM'S TITLE IS A HEADING.** The draft heads
+  its sections that way, with no markup at all, so matching only `**bold**` and
+  `## ` found nothing and the entire account fell into one Record of Discussion
+  lump at the end — carrying the model's own title block, which is what read as
+  "APPLECROSS CRICKET CLUBCOMMITTEE MEETING MINUTES10 August 2026" mid-document.
+  `splitNarrative` takes the agenda's titles and treats a bare line matching one
+  as a heading; a short run of short lines ahead of the first heading is the
+  preamble the prompt already forbids and is dropped.
+- **Verified in Chromium** (95 checks: the indent measured off the real draw
+  operations at 200/3 from the margin, a heading still at the margin, the gap
+  before an agenda title, after it and before a MOTION or ACTION block each
+  measured baseline to baseline, both fonts named, the declared width range, the
+  narrative filed under the item it names and no Record of Discussion left over)
+  **with a control run** failing exactly those nine.
+- **A gap is measured PER PAGE.** `y` restarts at the top of each one, so the
+  first element on a page has no meaningful gap above it and the check reads the
+  next occurrence instead of failing on a page break.
+
 ### The minutes are a DOCUMENT, composed from the record (v9.53.3)
 
 Reported with the current output and a Word file of what was expected: the
