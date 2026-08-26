@@ -3898,6 +3898,47 @@ handlers matched a full UUID and nothing else, so a PlayHQ link was a dead end.
   still loads with no picker; junk input reports plainly; no page errors, no
   overflow at 390px.
 
+### A swallowed query error, reported as a greenlet crash (v9.53.5.1)
+
+Reported off BetterPosts → Scorecard: pasting a match link returned
+`Scorecard parse error: greenlet_spawn has not been called; can't call
+await_only() here`.
+
+- **THE COLUMN IS `keep_player_id`, NOT `kept_player_id`.** The merge-redirect
+  map `_get_social_scorecard_inner` builds is the only SQL in the tree that
+  spelled it `kept_` — every other reader (`sync.py` ×2, `sync_drift`, the undo
+  log, both backfill scripts) has it right, and `merge_logs`' own DDL in the
+  lifespan settles it. So the query raised `UndefinedColumnError` on EVERY
+  scorecard fetch, for every club, from the day it was written.
+- **THE ERROR ON SCREEN IS THE TIDY-UP, NOT THE FAULT, and that is the whole
+  reason it reads as unrelated.** The failure was swallowed into a
+  best-effort `except` that calls `await db.rollback()` — and **a rollback
+  expires every object the session has loaded, whatever `expire_on_commit`
+  says**. `club` is one of them (`get_current_club` loaded it on this same
+  session), so `_org_for_team`'s first line, two hundred lines later, reads
+  `club.id` on an expired instance, which is a lazy refresh, which in an async
+  request is `greenlet_spawn has not been called`. The real error was in the
+  log the whole time. **Same family as the `audit_logs` and `get_club` traps
+  this file already documents** — an `except` that hides a database error must
+  roll back, and must also hand back objects the rest of the request can read.
+- **`_rollback_keeping(db, *instances)` is that rule named**: roll back, then
+  `await db.refresh(...)` whatever the caller still holds. One awaited query,
+  and the caller's next attribute read is not IO. Both swallowed reads in the
+  scorecard builder go through it; neither calls `db.rollback()` bare any more.
+- **A merged-away player now resolves again.** With the map permanently empty,
+  a participant whose record had been merged fell through to whatever the feed
+  spelled rather than the name the club kept — quieter than the crash, and
+  fixed by the same one-word change.
+- **Verified against a real Postgres** by running the SHIPPED function body
+  (extracted from the router, nothing retyped) over the real Grassroots payload
+  for the reported match: 16 checks — both innings on the right side, 194 each
+  on a tied game, wickets, overs, twelve batters and seven bowlers a side, the
+  result/grade/format/date/venue, each club's own crest and accent, our player
+  matched to their id, a merged participant landing on the kept player, and the
+  club still readable afterwards — plus 11 on the query and the rollback rule,
+  **with a control run**: putting the old column name and the bare rollback
+  back reproduces the reported greenlet error exactly.
+
 ## Junior stats split off career stats (migration 228, v9.18.0, Aug 2026)
 
 An Under-14 season was landing inside a senior career average. `grades.category`
