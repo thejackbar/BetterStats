@@ -13,7 +13,10 @@ import { objectiveTiers, objectiveLabel } from './planLabels'
 // hangs off an action, a motion, a meeting and an objective.
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
-const cap = 'font-mono text-[10px] tracking-wide3 text-pb-faintest'
+// A 10px mono label measures 1.6:1 against this surface at --pb-faintest,
+// which is not a legible value for anything a person has to read. --pb-dim
+// is 5.4:1, comfortably past the 4.5:1 floor.
+const cap = 'font-mono text-[10px] tracking-wide3 text-pb-dim'
 const money = n => `$${Number(n || 0).toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
 
 /* ── Notes ──────────────────────────────────────────────────────────────── */
@@ -1528,10 +1531,10 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
               <span className="block text-pb-text leading-snug">{chosen.title}</span>
             </>
           ) : (
-            <span className="text-pb-faint">— not on the plan —</span>
+            <span className="text-pb-dim">— not on the plan —</span>
           )}
         </span>
-        <span className="text-pb-faint text-[11px] leading-none pt-1">{open ? '▴' : '▾'}</span>
+        <span className="text-pb-dim text-[11px] leading-none pt-1">{open ? '▴' : '▾'}</span>
       </button>
 
       {open && (
@@ -1543,7 +1546,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
           )}
           <div className="max-h-64 overflow-y-auto pb-scroll" role="listbox">
             <button type="button" onClick={() => pick('')}
-              className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface ${value ? 'text-pb-faint' : 'text-pb-text'}`}>
+              className={`w-full text-left px-2.5 py-1.5 text-[12.5px] hover:bg-pb-surface ${value ? 'text-pb-dim' : 'text-pb-text'}`}>
               — not on the plan —
             </button>
             {/* Plan → theme → objective, indented. Only the OBJECTIVES are
@@ -1555,7 +1558,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
             {tree.map((plan, i) => (
               <div key={plan.key} role="group" aria-label={plan.name || 'Not on a plan'}
                 className={i > 0 ? 'border-t pb-hairline mt-1' : ''}>
-                <div className={`${cap} px-2.5 pt-2 pb-1 text-pb-dim`}>
+                <div className={`${cap} px-2.5 pt-2 pb-1`}>
                   {(plan.name || 'NOT ON A PLAN').toUpperCase()}
                 </div>
                 {plan.themes.map(theme => (
@@ -1566,13 +1569,13 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
                   // needs the reading width more than this panel needs depth.
                   <div key={theme.key} role="group" aria-label={theme.name || 'No theme'}
                     className="ml-2.5 pl-2 border-l-2" style={{ borderColor: LEVEL.objective.rail }}>
-                    <div className={`${cap} px-2.5 py-1 text-pb-faintest`}>
+                    <div className={`${cap} px-2.5 py-1`}>
                       {(theme.name || 'NO THEME').toUpperCase()}
                     </div>
                     {theme.rows.map(o => (
                       <button key={o.id} type="button" onClick={() => pick(o.id)} role="option"
                         aria-selected={o.id === value}
-                        className={`w-full text-left pl-5 pr-2.5 py-1.5 text-[12.5px] leading-snug hover:bg-pb-surface ${o.id === value ? 'text-pb-text' : 'text-pb-dim'}`}
+                        className="w-full text-left pl-5 pr-2.5 py-1.5 text-[12.5px] leading-snug hover:bg-pb-surface text-pb-text"
                         style={o.id === value ? { background: 'color-mix(in srgb, var(--pb-accent) 12%, transparent)' } : undefined}>
                         {o.id === value && <span style={{ color: 'var(--pb-accent-ink)' }}>✓ </span>}
                         {o.title}
@@ -1583,7 +1586,7 @@ export function ObjectiveSelect({ objectives, value, onChange, label = 'OBJECTIV
               </div>
             ))}
             {!anyMatch && (
-              <div className="px-2.5 py-3 font-mono text-[10px] text-pb-faintest">Nothing matches that.</div>
+              <div className="px-2.5 py-3 font-mono text-[10px] text-pb-dim">Nothing matches that.</div>
             )}
           </div>
         </div>

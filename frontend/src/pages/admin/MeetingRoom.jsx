@@ -35,8 +35,8 @@ import { buildMinutesDoc } from '../../components/admin/clubmanager/minutesDoc'
 //     with Close in place of the link, since the list is already beside it.
 
 const inp = 'w-full bg-pb-surface2 border pb-hairline rounded px-2.5 py-1.5 text-pb-text text-sm focus:outline-none focus:border-pb-accent'
-const cap = 'font-mono text-[10px] tracking-wide3 text-pb-faintest'
-const btn = 'px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-faint hover:text-pb-text disabled:opacity-40 whitespace-nowrap'
+const cap = 'font-mono text-[10px] tracking-wide3 text-pb-dim'
+const btn = 'px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 border pb-hairline text-pb-dim hover:text-pb-text disabled:opacity-40 whitespace-nowrap'
 const btnAccent = 'px-3 py-1.5 rounded font-mono text-[10px] tracking-wide2 text-pb-bg disabled:opacity-40 whitespace-nowrap'
 
 const AGENDA_STATUSES = ['proposed', 'discussed', 'carried', 'deferred', 'withdrawn']
@@ -55,10 +55,10 @@ const TONE = {
   deferred: 'var(--pb-accent-ink)',
   pending: 'var(--pb-accent-ink)',
   discussed: 'var(--pb-accent-ink)',
-  proposed: 'var(--pb-faint)',
-  withdrawn: 'var(--pb-faint)',
+  proposed: 'var(--pb-dim)',
+  withdrawn: 'var(--pb-dim)',
 }
-const toneOf = v => TONE[v] || 'var(--pb-faint)'
+const toneOf = v => TONE[v] || 'var(--pb-dim)'
 // A tinted left edge, so a glance down the agenda reads as a set of outcomes.
 const edge = v => ({ borderLeft: `2px solid ${toneOf(v)}` })
 const VOTES = [['for', 'For'], ['against', 'Against'], ['abstain', 'Abstain']]
@@ -107,7 +107,7 @@ export function EditableHeading({ value, onSave, label = 'Name', size = 21 }) {
     return (
       <button type="button" title={`Click to rename. ${label}.`}
         onClick={() => { setDraft(value); setEditing(true) }}
-        className="text-left decoration-dotted underline-offset-4 decoration-pb-faintest hover:underline">
+        className="text-left decoration-dotted underline-offset-4 decoration-pb-dim hover:underline">
         {value}
       </button>
     )
@@ -130,7 +130,7 @@ export function EditableHeading({ value, onSave, label = 'Name', size = 21 }) {
 function Hint({ text }) {
   return (
     <span title={text} aria-label={text}
-      className="inline-flex items-center justify-center w-[13px] h-[13px] ml-1 align-middle rounded-full border border-pb-hairline2 text-[8px] leading-none text-pb-faintest cursor-help">?</span>
+      className="inline-flex items-center justify-center w-[13px] h-[13px] ml-1 align-middle rounded-full border border-pb-hairline2 text-[8px] leading-none text-pb-dim cursor-help">?</span>
   )
 }
 
@@ -194,11 +194,11 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
     <div className="pb-card p-4">
       <div className="flex items-center justify-between gap-3 flex-wrap mb-2">
         <div className={cap}>WHO IS HERE</div>
-        <div className="font-mono text-[10px] text-pb-faint">
+        <div className="font-mono text-[10px] text-pb-dim">
           {present} present · {attendance.filter(a => a.status === 'apology').length} apologies
         </div>
       </div>
-      <div className="font-mono text-[10px] mb-2" style={{ color: chair ? 'var(--pb-accent-ink)' : 'var(--pb-faintest)' }}>
+      <div className="font-mono text-[10px] mb-2" style={{ color: chair ? 'var(--pb-accent-ink)' : 'var(--pb-dim)' }}>
         {chair ? `Chaired by ${chair.full_name}` : 'No chair recorded'}
       </div>
       {/* Committee attendance is largely the same people every month. Offered
@@ -214,7 +214,7 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
         value={query} onChange={e => setQuery(e.target.value)} />
       <div className="space-y-1 max-h-[260px] overflow-y-auto pb-scroll">
         {shown.length === 0 && (
-          <div className="font-mono text-[10px] text-pb-faintest py-2">No one matches that.</div>
+          <div className="font-mono text-[10px] text-pb-dim py-2">No one matches that.</div>
         )}
         {/* Two lines per person, not one: a fourth button (Chair) left the name
             column so narrow that "Ali Nunn" truncated and the position under it
@@ -223,14 +223,14 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
           <div key={p.member_id} className="py-0.5">
             <div className="text-[12.5px] text-pb-text truncate leading-tight">{p.full_name}</div>
             <div className="flex items-center justify-between gap-2 mt-0.5">
-              <span className="font-mono text-[9px] text-pb-faintest truncate">
+              <span className="font-mono text-[9px] text-pb-dim truncate">
                 {p.position ? p.position.toUpperCase() : ''}
               </span>
               <div className="flex gap-1 shrink-0">
                 {ATTEND.map(([v, l]) => (
                   <button key={v} onClick={() => onChange(p.member_id, byId[p.member_id] === v ? null : v)}
                     className={`px-2 py-1 rounded font-mono text-[9px] border ${byId[p.member_id] === v
-                      ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                      ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-dim hover:text-pb-text'}`}
                   style={byId[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
                 ))}
               </div>
@@ -239,7 +239,7 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
         ))}
       </div>
       {!q && (
-        <button onClick={() => setShowAll(x => !x)} className="font-mono text-[10px] text-pb-faint hover:text-pb-text mt-2">
+        <button onClick={() => setShowAll(x => !x)} className="font-mono text-[10px] text-pb-dim hover:text-pb-text mt-2">
           {showAll ? 'Show the committee only' : `Show all ${pool.length} members`}
         </button>
       )}
@@ -252,7 +252,7 @@ function Attendance({ pool, attendance, onChange, previous, onCarryOver }) {
 // The same form creates an action and corrects one. An action typed in a hurry
 // at 8pm is exactly the one that needs fixing later, and until now the room
 // could only mark it done or delete it.
-function ActionForm({ agendaItemId, motionId, present, pool, objectives, defaultObjectiveId,
+function ActionForm({ agendaItemId, motionId, present, pool, objectives, defaultObjectiveId, nextMeeting,
                       action, onSave, onCancel, onDelete }) {
   const editing = !!action
   const [form, setForm] = useState({
@@ -301,12 +301,32 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
   return (
     <div className="rounded p-2.5 mt-2 bg-pb-surface2/60">
       <input className={`${inp} mb-2`} placeholder="What was agreed?" autoFocus
-        value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
+        value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); submit() }
+          if (e.key === 'Escape' && !editing) { e.preventDefault(); onCancel?.() }
+        }} />
       <div className="flex gap-2 mb-2 flex-wrap">
         <label className="flex-1 min-w-[8rem]">
           <div className={`${cap} mb-1`}>DUE</div>
           <input type="date" className={inp} value={form.due_date}
             onChange={e => setForm(f => ({ ...f, due_date: e.target.value }))} />
+          {/* A committee gives itself work "by the next meeting" far more often
+              than it names a date. It fills in the REAL date of that meeting
+              rather than storing "next meeting" as an idea: the minutes print a
+              date, the overdue rules read a date, and an action that outlives a
+              rescheduled meeting still says when it was wanted. The button
+              names the date it will set, so there is nothing to guess — and it
+              is not drawn at all when the club has no later meeting scheduled,
+              since it could then only answer "nothing". */}
+          {nextMeeting?.scheduled_at && (
+            <button type="button"
+              onClick={() => setForm(f => ({ ...f, due_date: nextMeeting.scheduled_at.slice(0, 10) }))}
+              className="font-mono text-[9px] text-pb-dim hover:text-pb-text mt-1"
+              title={nextMeeting.title || 'The next meeting'}>
+              Next meeting · {shortDate(nextMeeting.scheduled_at)}
+            </button>
+          )}
         </label>
         <label className="flex-1 min-w-[8rem]">
           <div className={`${cap} mb-1`}>BUDGET</div>
@@ -323,28 +343,30 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
         value={who} onChange={e => setWho(e.target.value)} />
       <div className="flex flex-wrap gap-1 mb-2">
         {options.length === 0 && (
-          <span className="font-mono text-[10px] text-pb-faintest">
+          <span className="font-mono text-[10px] text-pb-dim">
             {q ? 'Nobody matches that.' : 'Mark someone present, or search above.'}
           </span>
         )}
         {options.map(p => (
           <button key={p.member_id} onClick={() => toggle(p.member_id)}
             className={`px-2 py-1 rounded font-mono text-[9px] border ${owners.includes(p.member_id)
-              ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+              ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-dim hover:text-pb-text'}`}
             style={owners.includes(p.member_id) ? { background: 'var(--pb-accent)' } : undefined}>
             {p.full_name}
           </button>
         ))}
       </div>
       <div className="flex gap-2 items-center">
+        {/* Same rule as the motion form: the button that finishes the record
+            must not carry the name of the one that opened it. */}
         <button onClick={submit} disabled={busy || !form.title.trim()} className={btnAccent}
           style={{ background: 'var(--pb-accent)' }}>
-          {busy ? 'SAVING…' : editing ? 'SAVE' : '+ ACTION'}
+          {busy ? 'SAVING…' : editing ? 'SAVE' : 'RECORD ACTION'}
         </button>
         <button onClick={onCancel} className={btn}>Cancel</button>
         {editing && onDelete && (
           <button onClick={onDelete}
-            className="font-mono text-[9px] text-pb-faint hover:text-pb-red ml-auto">Delete action</button>
+            className="font-mono text-[9px] text-pb-dim hover:text-pb-red ml-auto">Delete action</button>
         )}
       </div>
     </div>
@@ -354,14 +376,14 @@ function ActionForm({ agendaItemId, motionId, present, pool, objectives, default
 // AN ACTION IS A RECORD TOO: who is doing it, by when, for how much, and what
 // it serves, on two lines. Marking it done stays on the row because that is the
 // act a committee repeats; everything else opens in the editor.
-function ActionRow({ action, present, pool, objectives, nameOf, objectiveOf, onChange, onDelete }) {
+function ActionRow({ action, present, pool, objectives, nextMeeting, nameOf, objectiveOf, onChange, onDelete }) {
   const [editing, setEditing] = useState(false)
   const owners = (action.assignee_member_ids || []).map(nameOf).filter(Boolean)
   const serves = objectiveOf?.(action.objective_id)
 
   if (editing) {
     return (
-      <ActionForm action={action} present={present} pool={pool} objectives={objectives}
+      <ActionForm action={action} present={present} pool={pool} objectives={objectives} nextMeeting={nextMeeting}
         agendaItemId={action.agenda_item_id} motionId={action.motion_id}
         onSave={async d => { await onChange(d); setEditing(false) }}
         onCancel={() => setEditing(false)}
@@ -372,23 +394,35 @@ function ActionRow({ action, present, pool, objectives, nameOf, objectiveOf, onC
   return (
     <div className="flex items-start justify-between gap-2 pl-2.5 py-1"
       style={edge(ACTION_TONE[action.status] || 'deferred')}>
-      <div className="min-w-0">
+      {/* The record itself opens the editor. Reading it and correcting it are
+          the same act at 8pm, and hunting for a 9px "Edit" is not. The controls
+          beside it stopPropagation, so marking something done never opens a
+          form.
+          DELIBERATELY NOT role="button": that would give one control an
+          accessible name made of the record's whole text, which reads as a
+          giant unlabelled button to a screen reader and swallows every word
+          inside it. The Edit button next to it IS the accessible control; the
+          click on the record is a mouse convenience on top of it. */}
+      <div className="min-w-0 cursor-pointer" title="Open this action"
+        onClick={() => setEditing(true)}>
         <div className="flex items-start gap-2">
           <span className="text-[12.5px] text-pb-text">{action.title}</span>
           <Pill tone={ACTION_TONE[action.status]}>{titleCase(action.status)}</Pill>
         </div>
-        <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5 flex flex-wrap gap-x-2">
+        <div className="font-mono text-[9.5px] text-pb-dim mt-0.5 flex flex-wrap gap-x-2">
           {owners.length > 0 && <span>{owners.join(' + ')}</span>}
           {action.due_date && <span>due {shortDate(action.due_date)}</span>}
           {action.budget_estimate != null && <span>${Number(action.budget_estimate).toLocaleString('en-AU')}</span>}
         </div>
-        {serves && <div className="font-mono text-[9px] text-pb-faintest mt-0.5">serves {serves}</div>}
+        {serves && <div className="font-mono text-[9px] text-pb-dim mt-0.5">serves {serves}</div>}
       </div>
       <div className="flex gap-2 shrink-0">
         {action.status !== 'done' && (
-          <button onClick={() => onChange({ status: 'done' })} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Done</button>
+          <button onClick={e => { e.stopPropagation(); onChange({ status: 'done' }) }}
+            className="font-mono text-[9px] text-pb-dim hover:text-pb-text">Done</button>
         )}
-        <button onClick={() => setEditing(true)} className="font-mono text-[9px] text-pb-faint hover:text-pb-text">Edit</button>
+        <button onClick={e => { e.stopPropagation(); setEditing(true) }}
+          className="font-mono text-[9px] text-pb-dim hover:text-pb-text">Edit</button>
       </div>
     </div>
   )
@@ -485,8 +519,17 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
 
   return (
     <div className="mt-2 rounded bg-pb-surface2/60 p-2.5 space-y-2">
+      {/* Enter records it, the way the one-line box this replaced did — a
+          motion is a sentence, and a third click to finish one was the whole
+          complaint. Shift+Enter is there for the rare motion that needs a
+          second line, and Escape backs out of a new one. */}
       <textarea className={`${inp} min-h-[46px]`} value={form.description}
         placeholder="Motion wording…" autoFocus={!live}
+        onKeyDown={e => {
+          if (live) return
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit() }
+          if (e.key === 'Escape') { e.preventDefault(); onCancel?.() }
+        }}
         onChange={e => set({ description: e.target.value }, { debounce: true })} />
       {/* Who moved it and who seconded it — the two names every set of minutes
           records beside the wording. */}
@@ -520,11 +563,11 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
           </div>
           {present.length > 0 && (
             <button onClick={allPresentFor}
-              className="font-mono text-[9px] text-pb-faint hover:text-pb-text">All present: For</button>
+              className="font-mono text-[9px] text-pb-dim hover:text-pb-text">All present: For</button>
           )}
         </div>
         {present.length === 0 ? (
-          <div className="font-mono text-[10px] text-pb-faintest">
+          <div className="font-mono text-[10px] text-pb-dim">
             Only people marked present can vote. Set attendance first.
           </div>
         ) : (
@@ -536,7 +579,7 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
                   {VOTES.map(([v, l]) => (
                     <button key={v} onClick={() => setVote(p.member_id, votes[p.member_id] === v ? null : v)}
                       className={`px-2 py-0.5 rounded font-mono text-[9px] border ${votes[p.member_id] === v
-                        ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                        ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-dim hover:text-pb-text'}`}
                       style={votes[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
                   ))}
                 </div>
@@ -546,12 +589,16 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
         )}
       </div>
       {live ? (
-        <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">Delete motion</button>
+        <button onClick={onDelete} className="font-mono text-[9px] text-pb-dim hover:text-pb-red">Delete motion</button>
       ) : (
         <div className="flex gap-2 items-center">
+          {/* NOT "+ Motion": that is what the button which OPENED this form
+              says, and two controls a few lines apart under the same name read
+              as the same one pressed twice. This one finishes the record. */}
           <button onClick={submit} disabled={busy || !form.description.trim()} className={btnAccent}
-            style={{ background: 'var(--pb-accent)' }}>{busy ? 'SAVING…' : '+ MOTION'}</button>
+            style={{ background: 'var(--pb-accent)' }}>{busy ? 'SAVING…' : 'RECORD MOTION'}</button>
           <button onClick={onCancel} className={btn}>Cancel</button>
+          <span className="font-mono text-[9px] text-pb-dim">Enter to record</span>
         </div>
       )}
     </div>
@@ -568,7 +615,7 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
 // behind Edit. Everything still saves as it is pressed, as the rest of the room
 // does, so the editor closes with Done rather than pretending to be a
 // save-or-cancel transaction it is not: a vote is written the moment it is cast.
-function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChange, onDelete, onVotes,
+function Motion({ motion, present, pool, nameOf, objectives, nextMeeting, objectiveOf, onChange, onDelete, onVotes,
                  onAddAction, actions, onActionChange, onActionDelete, dragProps, isOver }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
@@ -586,9 +633,14 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       <div className="flex items-start justify-between gap-2">
         {/* Drag to reorder within this item, or onto another agenda item's row
             to move the motion there. */}
-        <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5 shrink-0"
+        <span className="cursor-grab active:cursor-grabbing text-pb-dim select-none pt-0.5 shrink-0"
+          onClick={e => e.stopPropagation()}
           title="Drag to reorder, or onto another agenda item" {...(dragProps?.handle || {})}>⠿</span>
-        <div className="min-w-0 flex-1">
+        {/* The record itself opens the editor — see ActionRow. The outcome
+            select and the drag handle beside it stop the click, so setting an
+            outcome mid-meeting never unfolds a form nobody asked for. */}
+        <div className="min-w-0 flex-1 cursor-pointer" title="Open this motion"
+          onClick={() => setOpen(true)}>
           <div className="text-[12.5px] text-pb-text">{motion.description}</div>
           {/* The tally and the plan link read as metadata under the wording,
               not as controls. Both are the answer to "what happened", which is
@@ -596,25 +648,26 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
           <div className="font-mono text-[9.5px] mt-0.5 flex flex-wrap gap-x-2">
             <span>
               <span style={{ color: TONE.carried }}>{motion.votes_for ?? 0} for</span>
-              <span className="text-pb-faintest"> · </span>
+              <span className="text-pb-dim"> · </span>
               <span style={{ color: TONE.lost }}>{motion.votes_against ?? 0} against</span>
-              <span className="text-pb-faintest"> · {motion.votes_abstain ?? 0} abstain</span>
+              <span className="text-pb-dim"> · {motion.votes_abstain ?? 0} abstain</span>
             </span>
             {/* Wraps rather than truncates: a breadcrumb is PLAN › THEME › OBJECTIVE
                 and the objective's own title is the part on the end, so an ellipsis
                 hides exactly the half that says which objective this is. */}
-            <span className="text-pb-faintest min-w-0">{serves ? `serves ${serves}` : 'not on the plan'}</span>
+            <span className="text-pb-dim min-w-0">{serves ? `serves ${serves}` : 'not on the plan'}</span>
           </div>
-          {movers && <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">{movers}</div>}
+          {movers && <div className="font-mono text-[9.5px] text-pb-dim mt-0.5">{movers}</div>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          <select value={motion.outcome} onChange={e => onChange({ outcome: e.target.value })}
+          <select value={motion.outcome} onClick={e => e.stopPropagation()}
+            onChange={e => onChange({ outcome: e.target.value })}
             style={{ color: toneOf(motion.outcome) }}
             className="bg-pb-surface2 border pb-hairline rounded px-1.5 py-1 font-mono text-[9px]">
             {MOTION_OUTCOMES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
           </select>
-          <button onClick={() => setOpen(o => !o)} aria-expanded={open}
-            className="font-mono text-[9px] text-pb-faint hover:text-pb-text">{open ? 'Done' : 'Edit'}</button>
+          <button onClick={e => { e.stopPropagation(); setOpen(o => !o) }} aria-expanded={open}
+            className="font-mono text-[9px] text-pb-dim hover:text-pb-text">{open ? 'Done' : 'Edit'}</button>
         </div>
       </div>
 
@@ -626,7 +679,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       {actions.length > 0 && (
         <div className="mt-2 space-y-1">
           {actions.map(a => (
-            <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives}
+            <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives} nextMeeting={nextMeeting}
               nameOf={nameOf} objectiveOf={objectiveOf}
               onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
           ))}
@@ -634,11 +687,11 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       )}
       {adding ? (
         <ActionForm motionId={motion.id} agendaItemId={motion.agenda_item_id} present={present} pool={pool}
-          objectives={objectives} defaultObjectiveId={motion.objective_id}
+          objectives={objectives} nextMeeting={nextMeeting} defaultObjectiveId={motion.objective_id}
           onSave={async d => { await onAddAction(d); setAdding(false) }} onCancel={() => setAdding(false)} />
       ) : (
         <button onClick={() => setAdding(true)}
-          className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-1.5">+ Add action</button>
+          className="font-mono text-[9px] text-pb-dim hover:text-pb-text mt-1.5">+ Add action</button>
       )}
     </div>
   )
@@ -649,7 +702,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
 // THE ITEM IS THE PRIMARY CONTAINER, so its ring is the only heavy edge on
 // screen: everything inside it is separated by spacing and tint instead.
 function AgendaItem({
-  item, index, isCurrent, onOpen, dragProps, present, pool, nameOf, objectives, objectiveOf,
+  item, index, isCurrent, onOpen, dragProps, present, pool, nameOf, objectives, nextMeeting, objectiveOf,
   sections, motions, actions, onItemChange, onItemDelete,
   onAddMotion, onMotionChange, onMotionDelete, onMotionVotes,
   onAddAction, onActionChange, onActionDelete,
@@ -671,7 +724,7 @@ function AgendaItem({
       style={{ ...edge(item.status), ...(isCurrent ? { boxShadow: '0 0 0 1px var(--pb-accent)' } : {}) }}
       {...dragProps}>
       <div className="flex items-start gap-2">
-        <span className="cursor-grab active:cursor-grabbing text-pb-faintest select-none pt-0.5" title="Drag to reorder">⠿</span>
+        <span className="cursor-grab active:cursor-grabbing text-pb-dim select-none pt-0.5" title="Drag to reorder">⠿</span>
         <div className="flex-1 min-w-0">
           {editing ? (
             <div className="flex gap-2 flex-wrap">
@@ -692,13 +745,13 @@ function AgendaItem({
             </div>
           ) : (
             <button onClick={onOpen} className="text-left w-full">
-              <span className="font-mono text-[10px] text-pb-faintest mr-2">{index + 1}</span>
+              <span className="font-mono text-[10px] text-pb-dim mr-2">{index + 1}</span>
               <span className="text-[13.5px] text-pb-text">{item.title}</span>
               {/* What is attached, without having to open it. */}
               <div className="font-mono text-[9.5px] mt-0.5 flex flex-wrap gap-x-2">
                 <span style={{ color: toneOf(item.status) }}>{titleCase(item.status)}</span>
                 {motions.length > 0 && (
-                  <span className="text-pb-faintest">
+                  <span className="text-pb-dim">
                     {motions.length} motion{motions.length === 1 ? '' : 's'}
                     {motions.some(m => m.outcome === 'carried') &&
                       <span style={{ color: TONE.carried }}> · {motions.filter(m => m.outcome === 'carried').length} carried</span>}
@@ -707,13 +760,13 @@ function AgendaItem({
                   </span>
                 )}
                 {actions.length > 0 && (
-                  <span className="text-pb-faintest">
+                  <span className="text-pb-dim">
                     {actions.length} action{actions.length === 1 ? '' : 's'}
                     {actions.some(a => a.status !== 'done') &&
                       <span style={{ color: TONE.deferred }}> · {actions.filter(a => a.status !== 'done').length} open</span>}
                   </span>
                 )}
-                {item.outcome_notes && <span className="text-pb-faintest">minuted</span>}
+                {item.outcome_notes && <span className="text-pb-dim">minuted</span>}
               </div>
             </button>
           )}
@@ -724,15 +777,19 @@ function AgendaItem({
           {AGENDA_STATUSES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
         </select>
         <button onClick={() => { setDraft(item.title); setSectionDraft(item.section || ''); setEditing(true) }}
-          className="font-mono text-[9px] text-pb-faint hover:text-pb-text shrink-0">Edit</button>
-        <button onClick={onItemDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red shrink-0">✕</button>
+          className="font-mono text-[9px] text-pb-dim hover:text-pb-text shrink-0">Edit</button>
+        <button onClick={onItemDelete} className="font-mono text-[9px] text-pb-dim hover:text-pb-red shrink-0">✕</button>
       </div>
 
       {isCurrent && (
         <div className="mt-3 pl-6 space-y-3">
           <div>
             <div className={`${cap} mb-1`}>WHAT WAS SAID</div>
-            <textarea className={`${inp} min-h-[60px]`} defaultValue={item.outcome_notes || ''}
+            {/* Ten lines: what was said at an agenda item is the longest thing
+                typed in this room, and a two-line box scrolls away the part
+                already written. `rows` rather than a pixel height, so a club
+                that has picked its own font keeps ten of ITS lines. */}
+            <textarea rows={10} className={inp} defaultValue={item.outcome_notes || ''}
               placeholder="Outcome, discussion, anything worth minuting…"
               onChange={e => saveNotes(e.target.value)} />
           </div>
@@ -742,7 +799,7 @@ function AgendaItem({
             <div className="space-y-2">
               {motions.map((mo, mi) => (
                 <Motion key={mo.id} motion={mo} present={present} pool={pool} nameOf={nameOf}
-                  objectives={objectives} objectiveOf={objectiveOf}
+                  objectives={objectives} nextMeeting={nextMeeting} objectiveOf={objectiveOf}
                   actions={actions.filter(a => a.motion_id === mo.id)}
                   onChange={p => onMotionChange(mo.id, p)} onDelete={() => onMotionDelete(mo.id)}
                   onVotes={v => onMotionVotes(mo.id, v)} onAddAction={onAddAction}
@@ -761,7 +818,7 @@ function AgendaItem({
                 onCancel={() => setMotionOpen(false)} />
             ) : (
               <button onClick={() => setMotionOpen(true)}
-                className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-2">+ Add motion</button>
+                className="font-mono text-[9px] text-pb-dim hover:text-pb-text mt-2">+ Add motion</button>
             )}
           </div>
 
@@ -769,18 +826,18 @@ function AgendaItem({
             <div className={`${cap} mb-1`}>ACTIONS</div>
             <div className="space-y-1">
               {actions.filter(a => !a.motion_id).map(a => (
-                <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives}
+                <ActionRow key={a.id} action={a} present={present} pool={pool} objectives={objectives} nextMeeting={nextMeeting}
                   nameOf={nameOf} objectiveOf={objectiveOf}
                   onChange={p => onActionChange(a.id, p)} onDelete={() => onActionDelete(a.id)} />
               ))}
             </div>
             {addingAction ? (
-              <ActionForm agendaItemId={item.id} present={present} pool={pool} objectives={objectives}
+              <ActionForm agendaItemId={item.id} present={present} pool={pool} objectives={objectives} nextMeeting={nextMeeting}
                 onSave={async d => { await onAddAction(d); setAddingAction(false) }}
                 onCancel={() => setAddingAction(false)} />
             ) : (
               <button onClick={() => setAddingAction(true)}
-                className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-1">+ Add action</button>
+                className="font-mono text-[9px] text-pb-dim hover:text-pb-text mt-1">+ Add action</button>
             )}
           </div>
         </div>
@@ -859,6 +916,10 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
   // The club's plan, so anything raised in the meeting can be pointed at the
   // objective it serves. Fetched once for the room, not per motion.
   const objectives = useObjectives()
+  // A committee gives itself work "by the next meeting" far more often than
+  // it names a date, so the action form offers that. Resolved server-side and
+  // handed over on the room payload, so it costs no extra request.
+  const nextMeeting = data?.next_meeting || null
   const objectiveOf = useCallback(id => {
     const o = objectives.find(x => x.id === id)
     return o ? objectiveLabel(o) : null
@@ -1050,7 +1111,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
             <h2 className="font-display font-bold text-[21px] text-pb-text leading-tight tracking-[-0.01em] m-0">
               <EditableHeading value={meeting.title} onSave={setTitle} label="Meeting name" />
             </h2>
-            <div className="font-mono text-[11px] text-pb-faint mt-1">
+            <div className="font-mono text-[11px] text-pb-dim mt-1">
               {when}{meeting.location ? ` · ${meeting.location}` : ''}
             </div>
           </div>
@@ -1069,7 +1130,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start">
         <div className="space-y-2">
           {isClosed && (
-            <div className="pb-card p-3 font-mono text-[10px] text-pb-faint">
+            <div className="pb-card p-3 font-mono text-[10px] text-pb-dim">
               This meeting is {titleCase(meeting.status).toLowerCase()}. Everything below is still editable —
               minutes are usually finished after the room empties.
             </div>
@@ -1104,7 +1165,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
                 }}
                 motionDrag={motionDrag}
                 present={present} pool={pool} nameOf={nameOf} sections={sections}
-                objectives={objectives} objectiveOf={objectiveOf}
+                objectives={objectives} nextMeeting={nextMeeting} objectiveOf={objectiveOf}
                 motions={motions.filter(m => m.agenda_item_id === item.id)}
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
                 onItemChange={wrap(p => api.committeeUpdateAgendaItem(meetingId, item.id, p))}
@@ -1180,7 +1241,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
                 MINUTES
                 <Hint text="Saves as you type. A draft is written from the agenda, motions, votes and actions above, and replaces what is in the box for you to correct. It is never the record until you say so." />
               </span>
-              <button onClick={draft} disabled={drafting} className="font-mono text-[9px] text-pb-faint hover:text-pb-text disabled:opacity-40">
+              <button onClick={draft} disabled={drafting} className="font-mono text-[9px] text-pb-dim hover:text-pb-text disabled:opacity-40">
                 {drafting ? 'drafting…' : 'draft from the meeting'}
               </button>
             </div>
@@ -1200,7 +1261,7 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
             <DownloadRow label="your notes"
               empty={!(notesTyped ?? meeting.private_notes ?? '').trim()}
               onDownload={f => downloadField('notes', f)} />
-            <div className="font-mono text-[9px] text-pb-faintest mt-2">
+            <div className="font-mono text-[9px] text-pb-dim mt-2">
               Never circulated with the minutes.
             </div>
           </div>

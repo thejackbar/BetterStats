@@ -1949,6 +1949,37 @@ async def previous_meeting_attendance(session: AsyncSession, org_id, meeting: Co
     return None
 
 
+async def next_meeting_after(session: AsyncSession, org_id, meeting: CommitteeMeeting) -> Optional[dict]:
+    """The meeting this one's actions are due back at.
+
+    A committee gives itself work "by the next meeting" far more often than it
+    names a date, so the room offers that as a due date. Prefers the next
+    meeting of the SAME kind — an AGM is not what "the next committee meeting"
+    means to somebody sitting in one — and falls back to the next meeting of
+    any kind when the club has none of that type scheduled. Cancelled meetings
+    are skipped: work is not due back at a meeting that is not happening.
+    """
+    if meeting.scheduled_at is None:
+        return None
+    base = (
+        select(CommitteeMeeting)
+        .where(CommitteeMeeting.organisation_id == org_id,
+               CommitteeMeeting.id != meeting.id,
+               CommitteeMeeting.scheduled_at > meeting.scheduled_at,
+               CommitteeMeeting.status != "cancelled")
+        .order_by(CommitteeMeeting.scheduled_at)
+    )
+    row = (await session.execute(
+        base.where(CommitteeMeeting.meeting_type == meeting.meeting_type).limit(1)
+    )).scalars().first()
+    if row is None:
+        row = (await session.execute(base.limit(1))).scalars().first()
+    if row is None:
+        return None
+    return {"id": str(row.id), "title": row.title, "meeting_type": row.meeting_type,
+            "scheduled_at": row.scheduled_at.isoformat() if row.scheduled_at else None}
+
+
 async def meeting_room(session: AsyncSession, org_id, meeting: CommitteeMeeting) -> dict:
     """Everything the live screen needs, in one fetch."""
     detail = await meeting_detail(session, org_id, meeting.id)
@@ -1964,4 +1995,7 @@ async def meeting_room(session: AsyncSession, org_id, meeting: CommitteeMeeting)
         "actions": [_task_dict(t) for t in tasks],
         "attendee_pool": await meeting_attendee_pool(session, org_id),
         "previous_attendance": await previous_meeting_attendance(session, org_id, meeting),
+        # One fetch, not two: a secretary mid-meeting should not wait on a
+        # second request to answer "when is the next one".
+        "next_meeting": await next_meeting_after(session, org_id, meeting),
     }

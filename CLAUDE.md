@@ -5131,6 +5131,75 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   spacing now; the agenda item is the only full container. The suite asserts it
   on the computed style (no element around a record has four borders, and each
   still has its left one), not on class names.
+- **1.6:1 IS NOT A LEGIBLE COLOUR FOR WORDS, AND THIS WAS MEASURED (v9.53.7).**
+  Reported off a live meeting: the objective picker, the vote list, the member
+  names and the small links were all too pale. `--pb-faintest` computes to
+  **1.64:1** against `--pb-surface2` in dark and 1.70:1 in light; `--pb-faint`
+  is 2.75/2.79, also under the 4.5:1 floor for text this size. `--pb-dim` is
+  **5.40/5.47**. So the meeting room paints nothing at faintest or faint any
+  more, `cap` in both `MeetingRoom.jsx` and `governance.jsx` is `text-pb-dim`,
+  and `ObjectiveSelect`'s plan heading, theme heading and objective rows read at
+  full strength — the tick and the accent tint are what mark the current one,
+  not a dimmer sibling. **The tokens themselves are unchanged**: `faintest` is
+  still right for a rule or a disabled state, and a platform-wide sweep is a
+  different change from the one that was asked for.
+- **The check is "nothing in the room paints at the palest token"**, walked over
+  every element inside the room's own grid and compared against the token as the
+  BROWSER resolves it, not against a class name. Against the previous commit it
+  names **21 to 28 elements** at 1.64:1. A first cut hunted a hand-picked list of
+  labels and passed against the broken code — a contrast check that cannot fail
+  is not a check.
+- **`\d` INSIDE A JS TEMPLATE LITERAL IS JUST `d`.** The probe's own
+  `/[-\d.]+/` silently became `/[-d.]+/`, matched no digits, and every ratio
+  came back NaN — which `JSON.stringify` prints as `null`. Escape it as `\\d`
+  in a probe passed to `page.evaluate` as a string.
+- **CLICKING A RECORD OPENS IT, and it is deliberately NOT a `role="button"`.**
+  Reading a motion and correcting it are the same act at 8pm. But a role on the
+  wrapper gives one control an accessible name made of the record's whole text,
+  which reads as a giant unlabelled button and swallows every word inside it —
+  it also broke `getByRole('button', { name: /not on the plan/ })` in the picker
+  suite, which then matched the record instead of the picker. The Edit button
+  beside it IS the accessible control; the click on the record is a mouse
+  convenience on top of it. The outcome select, the drag handle and Done all
+  `stopPropagation`, so the one act repeated all night opens nothing.
+- **THE BUTTON THAT FINISHES A RECORD MUST NOT CARRY THE NAME OF THE ONE THAT
+  OPENED IT.** Reported as "you say Add motion, type it, then click add motion
+  again": `+ Add motion` opened the form and `+ MOTION` finished it, a few lines
+  apart. They are `RECORD MOTION` and `RECORD ACTION` now, and Enter finishes
+  either (Shift+Enter for a second line of motion wording, Escape backs out).
+- **`WHAT WAS SAID` is `rows={10}`, not a pixel height**, so a club that has
+  picked its own font gets ten of ITS lines.
+- **An action can be due back at the next meeting**, and it fills in that
+  meeting's REAL date rather than storing "next meeting" as an idea: the minutes
+  print a date, the overdue rules read a date, and an action that outlives a
+  rescheduled meeting still says when it was wanted. `next_meeting_after`
+  prefers the next meeting of the SAME kind (an AGM is not what "the next
+  committee meeting" means to somebody sitting in one), falls back to any kind,
+  skips a cancelled one, and rides on the room payload so it costs no second
+  request. The button names the date it will set and is not drawn at all when
+  the club has nothing later scheduled.
+- **THE MINUTES SUMMARISE WHAT WAS RESOLVED.** `Motions arising from this
+  meeting` is a table of #, motion, moved, seconded and result, ahead of the
+  actions table. Motions are numbered `M-01` in the order the DOCUMENT reads
+  them — down the agenda, then anything raised outside it — and the same number
+  is printed on the motion's own block, so "M-02 carried" in a later meeting's
+  business arising resolves to one motion rather than being matched by wording.
+- **A blank line either side of every agenda heading and every MOTION / ACTION
+  label**, in both formats. Word had no gap of its own the way the PDF path
+  does, so `para()` gained `w:spacing w:before`; it is twentieths of a point and
+  the body runs at 10.5pt, so ~240 is one clear line.
+- **A TABLE HEADER REPEATS ON EVERY PAGE IT RUNS ONTO** (`textDocs` marks it
+  `repeat`), so a check counting header-width rows must be `>=`, not `===`.
+  Adding one motion to the fixture lengthened the document, the actions table
+  crossed a page, and an exact count failed on a document that was correct.
+- **Verified against a real Postgres** (11 checks on `next_meeting_after`: the
+  same-kind preference, the AGM skipped between two committee meetings, a
+  cancelled meeting skipped, the fallback to any kind, the last meeting
+  reporting nothing, another club's never offered, and the room payload
+  carrying it) and **driven in Chromium** (the room suite is 90, dark and light;
+  the minutes suite is 107) **with a control run**: 16 of the 90 fail against
+  the previous commit, including the box measuring 2 rows and 21 elements
+  painted at 1.64:1.
 - **A MOTION IS MOVED, SECONDED AND VOTED ON IN ONE BREATH, so it is recorded
   in one (v9.53.6).** Asked for directly: record who moved a motion and who
   seconded it, and take the vote at the moment the motion is created rather
