@@ -477,6 +477,16 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
     return m
   })
   const [busy, setBusy] = useState(false)
+  // A DIVISION IS THE EXCEPTION, NOT THE RULE. Most motions pass on the voices:
+  // moved, seconded, the chair says carried, nobody counts. A counted vote is
+  // for a contested motion, a special resolution that has to clear a majority
+  // threshold, or a declared conflict where somebody must abstain and the
+  // minutes have to show it. So the per-person list is behind a link rather
+  // than costing every motion a hundred pixels of form it will not use.
+  //
+  // Seeded OPEN when the motion already carries names, or a division recorded
+  // last month would be hidden the next time anybody opened the record.
+  const [division, setDivision] = useState(() => (motion?.votes || []).some(v => v.vote))
   // Called on every render so the hook order never changes; only read when the
   // form is editing something that already exists.
   const saveWording = useAutosave(v => onChange?.({ description: v }))
@@ -555,6 +565,13 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
         <ObjectiveSelect objectives={objectives} value={form.objective_id}
           onChange={v => set({ objective_id: v || '' })} label="SERVES OBJECTIVE" />
       </div>
+      {!division ? (
+        <button onClick={() => setDivision(true)}
+          className="font-mono text-[9px] text-pb-dim hover:text-pb-text">
+          + Record a division
+          <Hint text="A counted vote. Most motions pass on the voices and need only an outcome; record names for a contested motion, a special resolution, or where somebody must abstain." />
+        </button>
+      ) : (
       <div>
         <div className="flex items-center justify-between gap-2 mb-1">
           <div className={cap}>
@@ -588,6 +605,7 @@ function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
           </div>
         )}
       </div>
+      )}
       {live ? (
         <button onClick={onDelete} className="font-mono text-[9px] text-pb-dim hover:text-pb-red">Delete motion</button>
       ) : (
