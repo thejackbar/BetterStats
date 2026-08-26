@@ -630,7 +630,7 @@ def page_two(doc):
          "automatically. No spreadsheets to hand over."),
         ("02 · 30 MINUTES", "Tidy it up together",
          "Merge duplicate players, add your awards and fill the gaps with the admin "
-         "tools. Up to two hours of our time is included in year one."),
+         "tools. We work through it with you in your first season."),
         ("03 · LIVE", "Your site goes public",
          "Fully branded and ready for members, parents and sponsors. From here it keeps "
          "itself current every round, with no ongoing data entry."),
