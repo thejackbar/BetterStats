@@ -5131,6 +5131,17 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   spacing now; the agenda item is the only full container. The suite asserts it
   on the computed style (no element around a record has four borders, and each
   still has its left one), not on class names.
+- **A DIVISION IS THE EXCEPTION, NOT THE RULE (v9.53.8).** Most motions pass on
+  the voices: moved, seconded, the chair says carried, nobody counts. A counted
+  vote is for a contested motion, a special resolution that has to clear a
+  majority threshold, or a declared conflict where somebody must abstain and the
+  minutes have to show it. So the per-person list sits behind
+  `+ Record a division` rather than costing every motion ~100px of form it will
+  not use. **Seeded OPEN when the motion already carries names**, or a division
+  recorded last month would be hidden the next time anybody opened the record.
+  Nothing about what is STORED changed: the tallies still derive from the names
+  when a club records them, and an outcome on its own is still a complete record
+  of a voice vote.
 - **1.6:1 IS NOT A LEGIBLE COLOUR FOR WORDS, AND THIS WAS MEASURED (v9.53.7).**
   Reported off a live meeting: the objective picker, the vote list, the member
   names and the small links were all too pale. `--pb-faintest` computes to
