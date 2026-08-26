@@ -40,6 +40,8 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const [note, setNote] = useState('')
   const [noteType, setNoteType] = useState('note')
   const [notesOnly, setNotesOnly] = useState(false)
+  const [notePinned, setNotePinned] = useState(false)
+  const [pinningId, setPinningId] = useState(null)
   const [editingEventId, setEditingEventId] = useState(null)
   const eventsEnabled = !!client.addEvent  // platform (super admin) scope only
   const [lostReason, setLostReason] = useState('')
@@ -163,10 +165,27 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     e.preventDefault()
     if (!note.trim()) return
     try {
-      await client.addActivity(dealId, { type: noteType, body: note.trim() })
+      await client.addActivity(dealId, { type: noteType, body: note.trim(), pinned: noteType === 'note' && notePinned })
       setNote('')
+      setNotePinned(false)
       await refresh()
     } catch (e2) { toast.error(e2.message || 'Could not add note') }
+  }
+
+  // Pinning is what a rep does to keep one note in front of whoever picks the
+  // club up next, and it is the same meta.pinned flag the Sales Workspace
+  // writes — so a note pinned here is pinned there and the other way round.
+  // Not offered when the scope's client has no pin call (nothing else to do
+  // but fail), which is the same shape as the events-only `eventsEnabled`.
+  const pinEnabled = !!client.pinActivity
+  const togglePin = async (a) => {
+    if (!pinEnabled || pinningId) return
+    setPinningId(a.id)
+    try {
+      await client.pinActivity(dealId, a.id, !a.meta?.pinned)
+      await refresh()
+    } catch (e2) { toast.error(e2.message || 'Could not pin this note') }
+    finally { setPinningId(null) }
   }
 
   const contactOptions = contacts.map(c => ({ id: c.id, name: c.full_name }))
@@ -572,7 +591,16 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                 <form onSubmit={addActivity} className="space-y-2">
                   <TextArea placeholder="Log an update…" value={note} onChange={e => setNote(e.target.value)}
                     style={{ minHeight: '110px' }} />
-                  <div className="flex justify-end">
+                  <div className="flex items-center justify-end gap-3">
+                    {/* Only a note can be pinned — a call or an email is a log
+                        of something that happened, not something to keep in
+                        front of the next rep. */}
+                    {pinEnabled && noteType === 'note' && (
+                      <label className="flex items-center gap-1.5 text-[11px] text-pb-faint cursor-pointer">
+                        <input type="checkbox" checked={notePinned} onChange={e => setNotePinned(e.target.checked)} />
+                        Pin to the top
+                      </label>
+                    )}
                     <Btn type="submit" variant="ghost" sm>Add</Btn>
                   </div>
                 </form>
@@ -687,7 +715,15 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2.5 py-2">
                     <div className="flex items-center justify-between gap-2 mb-0.5">
                       <Pill tone="amber">Pinned note</Pill>
-                      <span className="text-pb-faintest text-[10.5px]">{activityByLine(a)}</span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <span className="text-pb-faintest text-[10.5px]">{activityByLine(a)}</span>
+                        {pinEnabled && (
+                          <button type="button" onClick={() => togglePin(a)} disabled={pinningId === a.id}
+                            className="text-[10.5px] text-pb-accent hover:underline disabled:opacity-40">
+                            {pinningId === a.id ? '…' : 'Unpin'}
+                          </button>
+                        )}
+                      </span>
                     </div>
                     <p className="text-pb-text whitespace-pre-wrap">{a.body}</p>
                   </div>
@@ -712,7 +748,15 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
                   {/* pre-wrap because a note is typed prose, not a one-liner —
                       the workspace writes it with its line breaks intact. */}
                   {a.body && <p className="text-pb-text whitespace-pre-wrap">{a.body}</p>}
-                  {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
+                  <div className="flex items-center gap-2">
+                    {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
+                    {pinEnabled && a.type === 'note' && (
+                      <button type="button" onClick={() => togglePin(a)} disabled={pinningId === a.id}
+                        className="text-[10.5px] text-pb-accent hover:underline disabled:opacity-40">
+                        {pinningId === a.id ? '…' : 'Pin'}
+                      </button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

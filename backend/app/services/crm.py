@@ -1869,6 +1869,43 @@ async def log_activity(session: AsyncSession, *, deal_id=None, person_id=None,
     return activity
 
 
+async def edit_note(session: AsyncSession, *, activity: CrmActivity,
+                    body: Optional[str] = None, pinned: Optional[bool] = None) -> CrmActivity:
+    """Rewrites a note's text and/or its pin state in place. A note is a rep's
+    own free-text record and the only activity kind anything here lets anyone
+    rewrite — a call/email/system entry is a log of something that actually
+    happened, not an editable draft.
+
+    Both fields are optional and only a field that is PASSED is touched, so
+    the deal card's one-click pin toggle cannot blank the text and the Sales
+    Workspace's edit form can still save both at once.
+
+    ``meta.edited_at`` (ISO, alongside the existing ``pinned`` flag) is the
+    only audit trail kept — a plain marker rather than a new column, matching
+    how ``pinned`` itself already rides in this JSONB rather than a schema
+    change. It is stamped ONLY when the body actually changes: pinning a note
+    does not rewrite a word of it, and marking it "(edited)" for that would
+    make the marker mean something it doesn't.
+
+    Lives here rather than in the Sales Workspace for the same reason
+    user_names_by_ids does — a note is a CRM record and the workspace is one
+    editor of it, not its owner. ``services.sales_workspace.edit_note``
+    delegates to it."""
+    body_changed = body is not None and body != activity.body
+    if body is not None:
+        activity.body = body
+    meta = {**(activity.meta or {})}
+    if pinned is not None:
+        meta["pinned"] = bool(pinned)
+    if body_changed:
+        meta["edited_at"] = datetime.now(timezone.utc).isoformat()
+    # Reassigned rather than mutated: SQLAlchemy does not track an in-place
+    # change to a JSONB dict.
+    activity.meta = meta
+    await session.flush()
+    return activity
+
+
 async def user_names_by_ids(session: AsyncSession, ids) -> dict:
     """user_id -> display name, batched. Every write on a deal — a call log, a
     note, an email send, an assign, an extend-trial — already stamps

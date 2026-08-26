@@ -18,6 +18,7 @@ const clubClient = {
   archiveDeal: api.crmArchiveDeal,
   listActivities: api.crmListActivities,
   addActivity: api.crmAddActivity,
+  pinActivity: api.crmPinActivity,
   listContacts: api.crmListDealContacts,
   linkContact: api.crmLinkContact,
   unlinkContact: api.crmUnlinkContact,
