@@ -402,24 +402,54 @@ box, not a call outcome — must be visible on the CRM deal's card.
   previous render". `npx vite build` passes on it. Same family as the Roster
   temporal-dead-zone note above: anything a render body reads or registers
   has to sit above every early return.
+- **PINNING FROM THE CARD (asked for straight after): `PATCH
+  /deals/{id}/activities/{activity_id}` on BOTH scopes, taking `pinned`
+  only.** A note is the one activity kind anything here lets a person
+  rewrite — a call/email/system entry is a log of something that actually
+  happened — so `_note_or_404` refuses anything that is not a note ON THIS
+  DEAL, the same rule the workspace's own per-activity write already
+  follows. `ActivityCreate.pinned` lets the card's composer write a note
+  already pinned; `_new_note_meta` refuses it for a call, and an unpinned
+  note still carries a NULL meta rather than `{"pinned": false}` noise.
+- **`edit_note` moved to `services/crm.py` and the workspace delegates**, the
+  same call `user_names_by_ids` made — a note is a CRM record and the
+  workspace is one editor of it, not its owner. Both fields are optional and
+  only a field that is PASSED is touched, so the card's one-click toggle
+  cannot blank the text.
+- **PINNING IS NOT EDITING, and `meta.edited_at` now says so.** The old
+  writer stamped it on every save, so pinning a note would have marked it
+  "(edited)" without a word of it changing. It is stamped only when the body
+  actually differs — which also makes the WORKSPACE's own form honest, since
+  it saves body and pin together and a pin-only save used to lie. Re-saving
+  identical text is not an edit either.
 - **Verified against a real Postgres** (`backend/verification/verify_deal_card_notes.py`,
-  24 checks through the shipped route bodies and writers: the reported case
+  40 checks through the shipped route bodies and writers: the reported case
   replayed, the pin and the line breaks surviving onto the card, the author
   named and falling back to the username, a note still found among 31
   import/audit rows while the drawer still hides them, a call staying a call
   and a General Note staying a note with its outcome, an edit landing, a note
   added ON the card showing in the drawer, the club scope getting the same
   treatment with no platform note leaking into it, and an author-less system
-  row reporting no name rather than breaking) and **driven in Chromium**
-  (`verify_deal_card_notes_browser.mjs`, 26) **with a control run**: with the
-  change stashed, 7 fail on exactly the reported behaviour.
-- **Three checks passed against the broken code on the first cut and had to
+  row reporting no name rather than breaking, plus the pin: the round trip
+  both ways, the pin visible from the drawer, the three refusals, a note born
+  pinned, a call refused one, and neither a pin nor an identical re-save
+  stamping edited_at) and **driven in Chromium**
+  (`verify_deal_card_notes_browser.mjs`, 35: the exact params on the wire for
+  a pin, an unpin and a pinned create, the note moving into and out of the
+  pinned block, and the pin control withdrawn once the composer's type is a
+  call) **with a control run**: with the display change stashed, 7 fail on
+  exactly the reported behaviour, and with the pin stashed the suite cannot
+  find a Pin control at all.
+- **Four checks passed against the broken code on the first cut and had to
   be tightened**: the byline matched the deal's OWNER (also "Sam Rep") through
   a too-wide section locator; the pinned note was dated newest, so a flat
-  chronological feed put it on top anyway; and the stub returned its rows in
+  chronological feed put it on top anyway; the stub returned its rows in
   array order rather than `occurred_at DESC` the way `list_activities` does,
-  so the arrangement was doing the work. A check that cannot fail is not a
-  check.
+  so the arrangement was doing the work; and `Unpin` addressed by `.last()`
+  unpinned whichever of two pinned notes sorted second, leaving the intended
+  one pinned while still reading as a pass. A check that cannot fail is not a
+  check. **The stub also has to MUTATE on a write** — one that answers the
+  same thing every time cannot tell a working toggle from a no-op.
 - **Noticed, NOT fixed**: the deal card modal overflows 360px at 390px.
   Confirmed pre-existing by re-measuring with the change stashed (identical
   either way; the widest element is a 726px `flex items-center gap-2` row this

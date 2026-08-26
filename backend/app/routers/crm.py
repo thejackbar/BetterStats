@@ -26,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.db import Organisation, MarketingClub, CrmStage, CrmPipeline, get_db
+from app.models.db import Organisation, MarketingClub, CrmActivity, CrmStage, CrmPipeline, get_db
 from app.routers.auth import get_current_user, get_current_club, require_super_admin
 from app.auth.capabilities import require_cap, MANAGE_CRM
 from app.services import crm as crm_service
@@ -93,6 +93,13 @@ class CloseBody(BaseModel):
 class ActivityCreate(BaseModel):
     type: str = "note"
     body: Optional[str] = None
+    # Only meaningful for a note — a call/email/system entry is a log of
+    # something that happened, not something a rep keeps in front of them.
+    pinned: bool = False
+
+
+class ActivityPatch(BaseModel):
+    pinned: bool
 
 
 class EventCreate(BaseModel):
@@ -207,6 +214,27 @@ async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: s
     if deal is None:
         raise HTTPException(status_code=404, detail="Deal not found")
     return deal
+
+
+def _new_note_meta(body: ActivityCreate) -> Optional[dict]:
+    """`{"pinned": True}` for a note created pinned, and NOTHING otherwise —
+    an ordinary note has always carried a NULL meta and every reader treats a
+    missing flag as unpinned, so writing `{"pinned": False}` on every row
+    would be noise the timeline has never held."""
+    return {"pinned": True} if body.pinned and body.type == "note" else None
+
+
+async def _note_or_404(db: AsyncSession, deal, activity_id: str) -> CrmActivity:
+    """The one activity a caller is allowed to pin, resolved against THIS
+    deal. A note belongs to exactly one deal and is never anything else's
+    edit target, so an id from another club's timeline — or a call/email/
+    system entry, which nothing here has any business rewriting — 404s rather
+    than silently changing the wrong record. Same rule the Sales Workspace's
+    own per-activity write follows."""
+    activity = await db.get(CrmActivity, _uuid_or_404(activity_id))
+    if activity is None or activity.deal_id != deal.id or activity.type != "note":
+        raise HTTPException(status_code=404, detail="Note not found")
+    return activity
 
 
 async def _activities_payload(db: AsyncSession, deal) -> dict:
@@ -539,7 +567,18 @@ async def club_log_activity(deal_id: str, body: ActivityCreate, club: Organisati
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
     activity = await crm_service.log_activity(
         db, deal_id=deal.id, organisation_id=club.id, type=body.type, body=body.body,
-        created_by_user_id=current_user.id)
+        created_by_user_id=current_user.id, meta=_new_note_meta(body))
+    await db.commit()
+    return crm_service._activity_dict(activity)
+
+
+@router.patch("/deals/{deal_id}/activities/{activity_id}", dependencies=[_require])
+async def club_pin_activity(deal_id: str, activity_id: str, body: ActivityPatch,
+                            club: Organisation = Depends(get_current_club),
+                            db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
+    activity = await _note_or_404(db, deal, activity_id)
+    await crm_service.edit_note(db, activity=activity, pinned=body.pinned)
     await db.commit()
     return crm_service._activity_dict(activity)
 
@@ -1279,7 +1318,18 @@ async def super_log_activity(deal_id: str, body: ActivityCreate, current_user=De
                              db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
     activity = await crm_service.log_activity(
-        db, deal_id=deal.id, type=body.type, body=body.body, created_by_user_id=current_user.id)
+        db, deal_id=deal.id, type=body.type, body=body.body,
+        created_by_user_id=current_user.id, meta=_new_note_meta(body))
+    await db.commit()
+    return crm_service._activity_dict(activity)
+
+
+@super_router.patch("/deals/{deal_id}/activities/{activity_id}", dependencies=[_super])
+async def super_pin_activity(deal_id: str, activity_id: str, body: ActivityPatch,
+                             db: AsyncSession = Depends(get_db)):
+    deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
+    activity = await _note_or_404(db, deal, activity_id)
+    await crm_service.edit_note(db, activity=activity, pinned=body.pinned)
     await db.commit()
     return crm_service._activity_dict(activity)
 

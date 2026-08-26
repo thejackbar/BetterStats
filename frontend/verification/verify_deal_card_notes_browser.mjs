@@ -32,6 +32,13 @@ const deal = {
 // under a pile of Twenty-imported rows. A one-note stub would pass against the
 // broken code, because with nothing to hide behind a note is findable however
 // it is drawn.
+// Mutated by the stubbed PATCH so a pin round-trips through a real refetch,
+// the way it would against the server — a stub that always answers the same
+// thing cannot tell a working toggle from a no-op.
+const pinState = { 'note-pin': true, 'note-plain': false }
+const pinCalls = []
+const addCalls = []
+
 const IMPORTED = Array.from({ length: 24 }, (_, i) => ({
   id: `imp-${i}`, deal_id: DEAL, person_id: null, organisation_id: null, type: 'system',
   body: `Twenty pipeline row ${i + 1}`, outcome: null, next_follow_up_at: null,
@@ -48,12 +55,12 @@ const activities = () => [
     // sorts to the bottom, so it can only appear above the rest if the card
     // genuinely lifts a pinned note out.
     next_follow_up_at: null, follow_up_done_at: null, occurred_at: '2026-07-01T04:00:00Z',
-    created_by_user_id: 'sam', created_by_name: 'Sam Rep', meta: { pinned: true } },
+    created_by_user_id: 'sam', created_by_name: 'Sam Rep', meta: { pinned: pinState['note-pin'] } },
   { id: 'note-plain', deal_id: DEAL, person_id: null, organisation_id: null, type: 'note',
     body: 'Secretary prefers mobile after 5pm', outcome: null, next_follow_up_at: null,
     follow_up_done_at: null, occurred_at: '2026-08-19T04:00:00Z',
     created_by_user_id: 'sam', created_by_name: 'Sam Rep',
-    meta: { pinned: false, edited_at: '2026-08-19T05:00:00Z' } },
+    meta: { pinned: pinState['note-plain'], edited_at: '2026-08-19T05:00:00Z' } },
   { id: 'call-1', deal_id: DEAL, person_id: null, organisation_id: null, type: 'call',
     body: 'Left a message', outcome: 'voicemail', next_follow_up_at: null,
     follow_up_done_at: null, occurred_at: '2026-08-18T04:00:00Z',
@@ -87,6 +94,17 @@ const run = async () => {
     if (url.includes('/auth/me')) {
       return json({ id: 'boss', username: 'boss', display_name: 'Boss', role: 'super_admin',
                     entitlements: { modules: [], status: 'active' } })
+    }
+    if (/\/deals\/[0-9a-z-]+\/activities\/[0-9a-z-]+$/.test(url) && route.request().method() === 'PATCH') {
+      const id = url.split('/').pop()
+      const b = JSON.parse(route.request().postData() || '{}')
+      pinCalls.push({ id, pinned: b.pinned })
+      pinState[id] = !!b.pinned
+      return json({ id, type: 'note', meta: { pinned: pinState[id] } })
+    }
+    if (/\/deals\/[0-9a-z-]+\/activities$/.test(url) && route.request().method() === 'POST') {
+      addCalls.push(JSON.parse(route.request().postData() || '{}'))
+      return json({ id: 'new', type: 'note', meta: null })
     }
     if (/\/deals\/[0-9a-z-]+\/activities/.test(url)) return json({ activities: activities() })
     if (/\/deals\/[0-9a-z-]+\/contacts/.test(url)) return json({ contacts: [] })
@@ -174,6 +192,65 @@ const run = async () => {
   await page.waitForTimeout(250)
   check('switching back to All brings the rest of the timeline back',
         (await section.innerText()).includes('Twenty pipeline row'))
+
+  // ---- pinning, from the card itself ------------------------------------
+  const editedBefore = (await section.innerText()).split('(edited)').length - 1
+  const pinBtn = section.getByRole('button', { name: /^Pin$/ }).first()
+  check('an ordinary note offers a Pin control', await pinBtn.count() > 0)
+  await pinBtn.click()
+  await page.waitForTimeout(500)
+  check('…and pinning sends the note id with pinned true',
+        pinCalls.length === 1 && pinCalls[0].id === 'note-plain' && pinCalls[0].pinned === true,
+        JSON.stringify(pinCalls))
+  check('…and the note moves up into the pinned block after the refetch',
+        await section.getByText('Pinned note', { exact: true }).count() === 2,
+        String(await section.getByText('Pinned note', { exact: true }).count()))
+
+  // The one just pinned, addressed by its own text — `.last()` would take
+  // whichever of the two pinned notes happens to sort second and leave the
+  // other pinned, which is a different assertion than the one intended.
+  // The one just pinned, reached through its own body paragraph's row — a
+  // bare .last() would take whichever of the two pinned notes sorts second
+  // and leave the other pinned, which is a different assertion.
+  const unpinBtn = section.getByText('Secretary prefers mobile after 5pm', { exact: false })
+    .locator('xpath=..').getByRole('button', { name: /^Unpin$/ })
+  await unpinBtn.click()
+  await page.waitForTimeout(500)
+  check('a pinned note offers Unpin, and it unpins THAT note',
+        pinCalls.length === 2 && pinCalls[1].id === 'note-plain' && pinCalls[1].pinned === false,
+        JSON.stringify(pinCalls))
+  check('…and it drops back into the feed',
+        await section.getByText('Pinned note', { exact: true }).count() === 1,
+        String(await section.getByText('Pinned note', { exact: true }).count()))
+
+  // A rep pinning a note has not rewritten it, so the card must not start
+  // claiming they did. Compared against the count taken before the round
+  // trip, not a fixed number — the pinned block draws no edited marker, so
+  // "how many are showing" legitimately depends on where the note is sitting.
+  const editedNow = (await section.innerText()).split('(edited)').length - 1
+  check('pinning never marks the note edited',
+        editedNow === editedBefore, `before=${editedBefore} now=${editedNow}`)
+
+  // ---- and on the way in -------------------------------------------------
+  const composer = page.locator('h3:text-is("Add a note/event")').locator('xpath=..')
+  await composer.locator('textarea').fill('Ring before 9am')
+  const pinCheck = composer.locator('input[type=checkbox]')
+  check('the composer offers a pin for a note', await pinCheck.count() === 1)
+  await pinCheck.check()
+  await composer.getByRole('button', { name: /^Add$/ }).click()
+  await page.waitForTimeout(500)
+  check('a note can be written already pinned',
+        addCalls.length === 1 && addCalls[0].pinned === true && addCalls[0].type === 'note',
+        JSON.stringify(addCalls))
+
+  // A call is a log of something that happened, not something to keep in
+  // front of the next rep.
+  await composer.locator('select').selectOption('call')
+  await page.waitForTimeout(200)
+  check('switching the type to Call withdraws the pin control',
+        await composer.locator('input[type=checkbox]').count() === 0)
+  await composer.locator('select').selectOption('note')
+  await page.waitForTimeout(200)
 
   // ---- the same rows, named the same way, on the other screen -----------
   // activityLabel/activityTone/activityByLine live in crm/ui.jsx and are read

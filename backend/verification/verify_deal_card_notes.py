@@ -158,6 +158,20 @@ async def main():
         check("pinning it in the workspace pins it on the card",
               edited and edited["meta"].get("pinned") is True)
 
+        # The workspace's own edit form saves body and pin together, so a
+        # save that only moves the pin must not claim the text was rewritten
+        # either — same rule, one writer.
+        act2 = next(a for a in await crm_service.list_activities(db, deal_id=deal.id)
+                    if a.body == "Committee meets\nfirst Tuesday")
+        stamp_before = (act2.meta or {}).get("edited_at")
+        await sw.edit_note(db, activity=act2, body=act2.body, pinned=False)
+        await db.commit()
+        check("a workspace save that only moves the pin is not an edit either",
+              (act2.meta or {}).get("edited_at") == stamp_before, act2.meta)
+        check("…and the pin still moved", act2.meta.get("pinned") is False, act2.meta)
+        await sw.edit_note(db, activity=act2, body=act2.body, pinned=True)
+        await db.commit()
+
         print("\n── The other direction: a note added ON the card ──")
         added = await crm_router.super_log_activity(
             str(deal.id), crm_router.ActivityCreate(type="note", body="Rang the president"),
@@ -167,6 +181,79 @@ async def main():
         ws = await sw.list_activities_for_workspace(db, deal_id=deal.id)
         check("and it shows in the Sales Workspace drawer",
               any(a.body == "Rang the president" for a in ws))
+
+        print("\n── Pinning from the card ──")
+        target = next(a for a in await crm_service.list_activities(db, deal_id=deal.id)
+                      if a.body == "Rang the president")
+        before_body = target.body
+        pinned_row = await crm_router.super_pin_activity(
+            str(deal.id), str(target.id), crm_router.ActivityPatch(pinned=True), db=db)
+        check("the card can pin a note", pinned_row["meta"].get("pinned") is True,
+              pinned_row["meta"])
+        check("pinning does not touch a word of the note", pinned_row["body"] == before_body,
+              pinned_row["body"])
+        check("…and does NOT mark it edited — nothing was rewritten",
+              "edited_at" not in (pinned_row["meta"] or {}), pinned_row["meta"])
+
+        ws = await sw.list_activities_for_workspace(db, deal_id=deal.id)
+        ws_row = next(a for a in ws if a.body == "Rang the president")
+        check("a note pinned on the card is pinned in the Sales Workspace",
+              (ws_row.meta or {}).get("pinned") is True, ws_row.meta)
+
+        unpinned = await crm_router.super_pin_activity(
+            str(deal.id), str(target.id), crm_router.ActivityPatch(pinned=False), db=db)
+        check("…and it unpins again", unpinned["meta"].get("pinned") is False, unpinned["meta"])
+
+        # An edit that DOES rewrite the text still stamps the marker, so
+        # "(edited)" keeps meaning what it says.
+        rewritten = await crm_service.edit_note(db, activity=target, body="Rang the president twice")
+        await db.commit()
+        check("rewriting the body still stamps edited_at",
+              rewritten.meta.get("edited_at") is not None, rewritten.meta)
+        check("…and leaves the pin state alone", rewritten.meta.get("pinned") is False,
+              rewritten.meta)
+        # Saving the same text again is not an edit.
+        again = await crm_service.edit_note(db, activity=target, body="Rang the president twice")
+        check("re-saving identical text does not restamp it",
+              again.meta.get("edited_at") == rewritten.meta.get("edited_at"))
+
+        print("\n── What the pin route refuses ──")
+        call_row = next(a for a in await crm_service.list_activities(db, deal_id=deal.id)
+                        if a.type == "call")
+        for label, dz, aid in (
+            ("a call is not a note and cannot be pinned", deal, call_row.id),
+            ("another deal's activity is not this deal's to pin", deal, None),
+            ("an unknown id 404s rather than pinning something else", deal, uuid.uuid4()),
+        ):
+            if aid is None:
+                foreign = await crm_service.log_activity(db, deal_id=club_deal.id, type="note",
+                                                         body="Someone else's note")
+                await db.commit()
+                aid = foreign.id
+            try:
+                await crm_router.super_pin_activity(
+                    str(dz.id), str(aid), crm_router.ActivityPatch(pinned=True), db=db)
+                check(label, False, "no refusal")
+            except Exception as exc:  # HTTPException
+                check(label, getattr(exc, "status_code", None) == 404,
+                      f"{type(exc).__name__} {getattr(exc, 'status_code', '')}")
+
+        print("\n── A note can be written already pinned ──")
+        born = await crm_router.super_log_activity(
+            str(deal.id), crm_router.ActivityCreate(type="note", body="Ring before 9am", pinned=True),
+            current_user=rep, db=db)
+        check("the card's composer can pin on the way in",
+              born["meta"] == {"pinned": True}, born["meta"])
+        plainer = await crm_router.super_log_activity(
+            str(deal.id), crm_router.ActivityCreate(type="note", body="No pin wanted"),
+            current_user=rep, db=db)
+        check("an unpinned note still carries no meta at all", plainer["meta"] is None,
+              plainer["meta"])
+        as_call = await crm_router.super_log_activity(
+            str(deal.id), crm_router.ActivityCreate(type="call", body="Rang", pinned=True),
+            current_user=rep, db=db)
+        check("a CALL cannot be pinned, whatever the request asks for",
+              as_call["meta"] is None, as_call["meta"])
 
         print("\n── The club-scope CRM card gets the same treatment ──")
         await crm_service.log_activity(db, deal_id=club_deal.id, organisation_id=club_org.id,

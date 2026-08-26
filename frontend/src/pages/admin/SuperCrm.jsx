@@ -200,6 +200,7 @@ const superClient = {
   archiveDeal: api.superCrmArchiveDeal,
   listActivities: api.superCrmListActivities,
   addActivity: api.superCrmAddActivity,
+  pinActivity: api.superCrmPinActivity,
   listEvents: api.superCrmListDealEvents,
   addEvent: api.superCrmAddDealEvent,
   updateEvent: api.superCrmUpdateEvent,

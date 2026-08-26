@@ -591,17 +591,12 @@ async def log_note(
 async def edit_note(
     session: AsyncSession, *, activity: CrmActivity, body: str, pinned: bool,
 ) -> CrmActivity:
-    """Rewrites a note's text and/or pin state in place — a note is a rep's
-    own free-text record, unlike a call/email/system entry, which is a log
-    of something that actually happened and stays exactly as it was made.
-    meta.edited_at (ISO, alongside the existing pinned flag) is the only
-    audit trail kept — a plain marker rather than a new column, matching how
-    'pinned' itself already rides in this JSONB rather than its own schema
-    change."""
-    activity.body = body
-    activity.meta = {**(activity.meta or {}), "pinned": bool(pinned), "edited_at": datetime.now(timezone.utc).isoformat()}
-    await session.flush()
-    return activity
+    """Rewrites a note's text and pin state — kept under the name this
+    module's own caller already uses, delegating to the one implementation in
+    services/crm.py, which the CRM deal card's own pin toggle also writes
+    through. Two copies is how the drawer and the card start disagreeing
+    about what editing a note does."""
+    return await crm_service.edit_note(session, activity=activity, body=body, pinned=pinned)
 
 
 async def log_reassignment(session: AsyncSession, *, deal: CrmDeal, owner_name: Optional[str], created_by_user_id) -> None:
