@@ -921,6 +921,14 @@ async def create_motion(session: AsyncSession, meeting_id, **fields) -> MeetingM
         proposed_by_member_id=fields.get("proposed_by_member_id"),
         seconded_by_member_id=fields.get("seconded_by_member_id"),
         objective_id=fields.get("objective_id"),
+        # A motion is moved, seconded and voted on in one breath, so the whole
+        # record can arrive in one write. Left at the column default when the
+        # caller says nothing, so every existing caller is unchanged.
+        outcome=fields.get("outcome") or "pending",
+        votes_for=fields.get("votes_for"),
+        votes_against=fields.get("votes_against"),
+        votes_abstain=fields.get("votes_abstain"),
+        notes=fields.get("notes"),
     )
     session.add(m)
     await session.flush()
