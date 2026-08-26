@@ -80,6 +80,14 @@ const MOTIONS = [
     is_resolution: false, resolution_ref: null, resolved_at: null, objective_id: 'o1',
     votes: [{ member_id: 'm4', vote: 'for' }, { member_id: 'm1', vote: 'against' },
             { member_id: 'm5', vote: 'against' }, { member_id: 'm3', vote: 'abstain' }] },
+  // Raised outside the agenda, so it is written up under "Other Motions" and
+  // numbered AFTER the ones the agenda carries — which is the ordering the
+  // summary table has to agree with.
+  { id: 'mo2', meeting_id: MEETING_ID, agenda_item_id: null, position: 0, motion_type: 'motion',
+    description: 'That the club renew its affiliation for another season',
+    proposed_by_member_id: 'm3', seconded_by_member_id: 'm1',
+    votes_for: 5, votes_against: 0, votes_abstain: 0, outcome: 'carried', notes: null,
+    is_resolution: false, resolution_ref: null, resolved_at: null, objective_id: null, votes: [] },
 ]
 const ACTIONS = [
   { id: 't1', title: 'Prepare plan for Sponsorship packages', description: null, category: null,
@@ -342,6 +350,42 @@ async function run() {
   check('the action names its own objective, which differs from the motion\u2019s',
     inSection.includes('Community & Club Culture'), inSection)
 
+  // WORD CARRIES THE SAME SPACING. It has no gap ops the way the PDF path does,
+  // so a blank line either side of a heading and of a MOTION / ACTION label is
+  // `w:before` plus `w:after` on those paragraphs — measured off the XML rather
+  // than trusted from the source.
+  const headingP = (minutesXml.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*?1F3864[\s\S]*?<\/w:p>/) || [''])[0]
+  check('minutes .docx: an agenda heading has a blank line above and below it',
+    /w:before="(\d+)"/.test(headingP) && Number(RegExp.$1) >= 200
+      && /w:after="(\d+)"/.test(headingP) && Number(RegExp.$1) >= 160, headingP.slice(0, 160))
+  const labelP = (minutesXml.match(/<w:p>(?:(?!<\/w:p>)[\s\S])*?>MOTION[^<]*<[\s\S]*?<\/w:p>/) || [''])[0]
+  check('minutes .docx: a MOTION heading has one too',
+    /w:before="(\d+)"/.test(labelP) && Number(RegExp.$1) >= 200
+      && /w:after="(\d+)"/.test(labelP) && Number(RegExp.$1) >= 120, labelP.slice(0, 160))
+
+  // The motions summary — what the meeting decided, on one page. The motions
+  // are already written up under the item each was moved at; this is the same
+  // record collected, numbered the same way.
+  const motionsTable = tables[tables.length - 2] || ''
+  const motionCells = motionsTable ? cellsOf(motionsTable) : []
+  for (const col of ['#', 'Motion', 'Moved', 'Seconded', 'Result']) {
+    check(`motions table: a ${col} column`, motionCells.includes(col), JSON.stringify(motionCells.slice(0, 8)))
+  }
+  check('motions table: every motion is a row, numbered in the order the document reads them',
+    motionCells.includes('M-01') && motionCells.includes('M-02')
+      // The agenda's own motion is M-01; the one raised outside it comes after.
+      && motionCells.indexOf('That the club should have Premium Sponsorship package')
+         < motionCells.indexOf('That the club renew its affiliation for another season'),
+    JSON.stringify(motionCells.slice(0, 20)))
+  check('motions table: it carries the mover and the seconder',
+    motionCells.includes('Fletcher, Tristram') || motionCells.includes('Hullett, Mark'),
+    JSON.stringify(motionCells.slice(0, 20)))
+  check('motions table: the result is the outcome, in full',
+    motionCells.some(c => /^(CARRIED|LOST|PENDING|WITHDRAWN)$/.test(c)),
+    JSON.stringify(motionCells.slice(0, 20)))
+  check('the motion block carries the same number as its row',
+    joined.includes('MOTION M-01'), joined.slice(0, 400))
+
   // The actions table.
   const actionsTable = tables[tables.length - 1] || ''
   const actionCells = actionsTable ? cellsOf(actionsTable) : []
@@ -420,7 +464,7 @@ async function run() {
     [...ps.matchAll(/BT (\/F\d) ([\d.]+) Tf ([\d.]+) ([\d.]+) Td \((.*?)\) Tj ET/g)]
       .map(m => ({ page, font: m[1], size: Number(m[2]), x: Number(m[3]), y: Number(m[4]), text: m[5] })))
   const MARGIN = 56
-  const motionRow = draws.find(d => d.text === 'MOTION')
+  const motionRow = draws.find(d => /^MOTION( M-\d+)?$/.test(d.text))
   const headingRow = draws.find(d => /^\d+\. President's report$/.test(d.text))
   check('minutes .pdf: the motion block is inset about a third of what it was',
     motionRow && Math.abs((motionRow.x - MARGIN) - 200 / 3) <= 2,
@@ -444,13 +488,26 @@ async function run() {
   const bodyStep = 10.5 * 1.32 + 3
   const beforeHeading = gapBefore(d => /^\d+\. Apologies$/.test(d.text))
   const afterHeading = gapBefore(d => d.text === 'Discussed.')
-  const beforeMotion = gapBefore(d => d.text === 'MOTION' || d.text === 'ACTION')
+  const beforeMotion = gapBefore(d => /^MOTION( M-\d+)?$/.test(d.text) || d.text === 'ACTION')
   check('minutes .pdf: a blank line before an agenda item title',
     beforeHeading !== null && beforeHeading > bodyStep * 1.6, `${beforeHeading?.toFixed(1)}pt`)
   check('minutes .pdf: a blank line after the title, before the section text',
     afterHeading !== null && afterHeading > bodyStep * 1.6, `${afterHeading?.toFixed(1)}pt`)
   check('minutes .pdf: a blank line before a MOTION or ACTION block',
     beforeMotion !== null && beforeMotion > bodyStep * 1.4, `${beforeMotion?.toFixed(1)}pt`)
+  // …and one under it. Measured from the label's own baseline to the first
+  // line of the block it heads.
+  const gapAfter = (pred) => {
+    for (let i = 0; i < draws.length - 1; i++) {
+      if (!pred(draws[i])) continue
+      const next = draws[i + 1]
+      if (next.page === draws[i].page && draws[i].y > next.y) return draws[i].y - next.y
+    }
+    return null
+  }
+  const afterMotion = gapAfter(d => /^MOTION( M-\d+)?$/.test(d.text) || d.text === 'ACTION')
+  check('minutes .pdf: a blank line after a MOTION or ACTION heading',
+    afterMotion !== null && afterMotion > bodyStep * 1.2, `${afterMotion?.toFixed(1)}pt`)
 
   // Arial, named on the font objects the pages actually reference.
   check('minutes .pdf is set in Arial',
@@ -508,8 +565,11 @@ async function run() {
   check('minutes .pdf draws every table row, not just the first',
     drawnRows >= 8 + 1 + ACTIONS.length, `${drawnRows} rows drawn`)
   const wide = [...byRow.values()].filter(c => c.length === 6).length
+  // Every action, plus the header — and a table's header REPEATS on each page
+  // it runs onto (textDocs marks it `repeat`), so a longer document legitimately
+  // draws it more than once. At least, never fewer.
   check('minutes .pdf draws the six-column actions table in full',
-    wide === 1 + ACTIONS.length, `${wide} six-column rows`)
+    wide >= 1 + ACTIONS.length, `${wide} six-column rows`)
   // A short column too narrow for its own placeholder breaks it across lines
   // ("Not recorde / d"), which reads as a fault in the document.
   const runs = [...minutesPdfRaw.matchAll(/\((.*?)\) Tj/g)].map(m => m[1])

@@ -143,9 +143,10 @@ function run(text, { bold, size, colour, italic } = {}) {
   return `<w:r>${rPr}<w:t xml:space="preserve">${xml(text)}</w:t></w:r>`
 }
 
-function para(text, { bold, size, after = 0, colour, italic, indent = 0, align } = {}) {
+function para(text, { bold, size, after = 0, before = 0, colour, italic, indent = 0, align } = {}) {
   const pPr = `<w:pPr>${align ? `<w:jc w:val="${align}"/>` : ''}`
-    + `${indent ? `<w:ind w:left="${indent}"/>` : ''}<w:spacing w:after="${after}"/></w:pPr>`
+    + `${indent ? `<w:ind w:left="${indent}"/>` : ''}`
+    + `<w:spacing${before ? ` w:before="${before}"` : ''} w:after="${after}"/></w:pPr>`
   // An empty paragraph is how a blank line in the box survives the trip.
   return `<w:p>${pPr}${text ? run(text, { bold, size, colour, italic }) : ''}</w:p>`
 }
@@ -188,8 +189,12 @@ function blockToDocx(b) {
     case 'subtitle':
       return String(b.text).split('\n')
         .map(t => para(t, { size: 20, colour: '595959', after: 60, align: 'center' })).join('')
-    case 'heading': return para(b.text, { bold: true, size: 26, after: 80, colour: '1F3864' })
-    case 'label': return para(b.text, { bold: true, size: 19, colour: '595959', after: 40, indent: b.indent || 0 })
+    // A BLANK LINE EITHER SIDE of a heading and of a MOTION / ACTION label.
+    // `w:spacing` is twentieths of a point and the body runs at 10.5pt, so ~240
+    // is one clear line. The PDF path states the same thing as explicit gaps.
+    case 'heading': return para(b.text, { bold: true, size: 26, before: 240, after: 200, colour: '1F3864' })
+    case 'label':
+      return para(b.text, { bold: true, size: 19, colour: '595959', before: 220, after: 160, indent: b.indent || 0 })
     case 'bullets':
       return (b.items || []).map(t => para(`•  ${t}`, { size: 21, after: 20, indent: 340 })).join('')
     case 'table': return table(b)
@@ -382,16 +387,19 @@ function layout(blocks) {
       case 'heading':
         // A blank line ahead of every section heading, and another under it
         // before the section's own first line.
-        push({ kind: 'gap', height: 16 })
+        push({ kind: 'gap', height: 18 })
         for (const t of wrapText(b.text, 13, COL, true)) push({ kind: 'text', text: t, size: 13, bold: true, keepNext: true, gap: 4 })
-        push({ kind: 'rule', gap: 12 })
+        push({ kind: 'rule', gap: 14 })
         break
       case 'label':
         // MOTION and ACTION each start a block of their own, so each gets a
         // blank line above it.
-        push({ kind: 'gap', height: 9 })
+        push({ kind: 'gap', height: 11 })
         for (const t of wrapText(b.text, 9, COL - pdfIndent(b), true))
           push({ kind: 'text', text: t, size: 9, bold: true, grey: true, indent: pdfIndent(b), gap: 3 })
+        // …and another under it, so the block reads as its own thing rather
+        // than as a label stuck to the line beneath.
+        push({ kind: 'gap', height: 5 })
         break
       case 'bullets':
         for (const item of (b.items || [])) {

@@ -130,10 +130,12 @@ export function splitNarrative(text, knownHeadings = []) {
 
 const VOTE_LABEL = { for: 'For', against: 'Against', abstain: 'Abstain' }
 
-function motionBlocks(mo, { nameOf, objectiveOf }) {
+function motionBlocks(mo, { nameOf, objectiveOf, ref }) {
   const inset = { ...INSET }
   const blocks = []
-  blocks.push({ type: 'label', text: 'MOTION', ...inset })
+  // The reference is what ties this block to its row in the summary table, so
+  // "M-02 carried" in a later meeting's business-arising resolves to one motion.
+  blocks.push({ type: 'label', text: ref ? `MOTION ${ref}` : 'MOTION', ...inset })
   blocks.push({ type: 'para', text: `"${plain(mo.description)}"`, ...inset, after: 4 })
 
   const moved = [
@@ -238,6 +240,16 @@ export function buildMinutesDoc({
     items: agendaItems.length ? agendaItems.map(i => plain(i.title)) : ['No agenda items were recorded.'],
   })
 
+  /* Every motion, numbered in the order the document reads them: down the
+     agenda, then anything raised outside it. The number is printed on the
+     motion itself and again in the summary table at the end, so the two are
+     the same record rather than two lists that have to be matched by wording. */
+  const motionOrder = [
+    ...agendaItems.flatMap(i => motions.filter(m => m.agenda_item_id === i.id)),
+    ...motions.filter(m => !m.agenda_item_id || !agendaItems.some(i => i.id === m.agenda_item_id)),
+  ]
+  const motionRef = new Map(motionOrder.map((m, i) => [m.id, `M-${String(i + 1).padStart(2, '0')}`]))
+
   /* 3..N one section per agenda item, in the agenda's own order. */
   const used = new Set()
   for (const item of agendaItems) {
@@ -251,7 +263,7 @@ export function buildMinutesDoc({
     else blocks.push({ type: 'para', text: 'Discussed.' })
 
     for (const mo of motions.filter(x => x.agenda_item_id === item.id)) {
-      blocks.push(...motionBlocks(mo, { nameOf, objectiveOf }))
+      blocks.push(...motionBlocks(mo, { nameOf, objectiveOf, ref: motionRef.get(mo.id) }))
     }
     const own = actions.filter(x => x.agenda_item_id === item.id)
     if (own.length) {
@@ -268,7 +280,9 @@ export function buildMinutesDoc({
   if (looseMotions.length) {
     section('Other Motions')
     blocks.push({ type: 'para', text: 'Recorded against the meeting rather than a numbered agenda item.', muted: true })
-    for (const mo of looseMotions) blocks.push(...motionBlocks(mo, { nameOf, objectiveOf }))
+    for (const mo of looseMotions) {
+      blocks.push(...motionBlocks(mo, { nameOf, objectiveOf, ref: motionRef.get(mo.id) }))
+    }
   }
 
   /* Whatever the narrative said that no agenda item claimed. Kept rather than
@@ -285,6 +299,31 @@ export function buildMinutesDoc({
       blocks.push({ type: 'label', text: String(v.head).toUpperCase() })
       for (const p of v.body.split(/\n{2,}/)) blocks.push({ type: 'para', text: p.trim() })
     }
+  }
+
+  /* WHAT THE MEETING DECIDED, on one page. The motions are already written up
+     under the item each was moved at, which is where the discussion around them
+     lives — but a reader asking "what did we resolve" should not have to walk
+     the whole document to collect them. Same reasoning as the actions table
+     below it, and the same numbers as the blocks above. */
+  section('Motions arising from this meeting')
+  if (motionOrder.length) {
+    blocks.push({
+      type: 'table',
+      header: ['#', 'Motion', 'Moved', 'Seconded', 'Result'],
+      // Sized against the widest value each column actually holds: a reference,
+      // a whole sentence, two stored "Surname, First" names and one word.
+      widths: [0.7, 4.4, 1.7, 1.7, 1.2],
+      rows: motionOrder.map(mo => [
+        motionRef.get(mo.id) || '',
+        plain(mo.description),
+        mo.proposed_by_member_id ? nameOf(mo.proposed_by_member_id) : NOT_RECORDED,
+        mo.seconded_by_member_id ? nameOf(mo.seconded_by_member_id) : NOT_RECORDED,
+        titleCase(mo.outcome || 'pending').toUpperCase(),
+      ]),
+    })
+  } else {
+    blocks.push({ type: 'para', text: 'No motions were moved.' })
   }
 
   /* The actions table, which is what a committee reads first next month. */
