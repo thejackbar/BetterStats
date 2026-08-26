@@ -368,6 +368,36 @@ def eyebrow(doc, text, space_before=14):
               keep_with_next=True)
 
 
+def bullet(container, text, size=7.3, line=10.2, space_before=1.5):
+    """A hanging-indent bullet, so a wrapped line sits under the words above it."""
+    p = para(container, space_before, 0, line)
+    pf = p.paragraph_format
+    pf.left_indent = Pt(8)
+    pf.first_line_indent = Pt(-8)
+    run(p, "·  ", size, ACCENT, bold=True)
+    run(p, text, size, BODY)
+    return p
+
+
+def module_card(cell, name, price, promise, bullets, pill=None, tinted=False):
+    """One module: what it is on the first line, then what you actually get."""
+    card(cell, fill=TINT if tinted else CARD, border=ACCENT if tinted else HAIR,
+         pad=(7, 9, 7, 9))
+    head = grid(cell, [168, 251.3 - 18 - 168 - 6], 6)
+    clear(head[0])
+    p = para(head[0], 0, 0, line=11)
+    run(p, name, 8.5, BRIGHT, bold=True)
+    if pill:
+        run(p, "  ", 8.5, BRIGHT)
+        run(p, "  " + pill + "  ", 6.4, INK, bold=True, track=0.5, highlight=ACCENT)
+    clear(head[1])
+    text_para(head[1], price, 8.1, ACCENT, bold=True, line=11,
+              align=WD_ALIGN_PARAGRAPH.RIGHT)
+    text_para(cell, promise, 7.6, BRIGHT, bold=True, line=10.5, space_before=3)
+    for b in bullets:
+        bullet(cell, b)
+
+
 # ------------------------------------------------------------------ page 1 --
 def page_one(doc):
     masthead(doc, "The platform Australian cricket clubs run on", "betterat.cricket")
@@ -378,15 +408,14 @@ def page_one(doc):
     run(p, "Better.", 26.2, ACCENT, bold=True)
 
     p = para(doc, space_after=12, line=14.2)
-    run(p, "One platform for an Australian cricket club, built so the season takes "
-           "less volunteer time to run. ", 8.9, BODY)
+    run(p, "A club season runs on one volunteer's spreadsheet, a handful of apps "
+           "that don't talk to each other and a group chat. BetterCricket is one "
+           "platform for the lot. ", 8.9, BODY)
     run(p, "Your match history arrives on its own and keeps itself current",
         8.9, BRIGHT, bold=True)
-    run(p, ", so the stats, records, ladders, milestones and the season yearbook all "
-           "update without anyone typing a scorecard. On top of that sit the parts "
-           "that run the rest of the club: availability, selection and best-player "
-           "votes, match-day posts, fees and member emails, and analytics most clubs "
-           "never get near.", 8.9, BODY)
+    run(p, ", and around it sit the parts that run the rest of the club: "
+           "availability and selection, match-day posts, fees and member emails, "
+           "the volunteer roster, and the committee's own paperwork.", 8.9, BODY)
 
     # Four stat cards.
     stats = [
@@ -401,86 +430,74 @@ def page_one(doc):
         text_para(cell, head, 11.6, ACCENT, bold=True, line=13, space_after=3)
         text_para(cell, note, 6.9, DIM, line=9)
 
-    spacer(doc, 10)
+    spacer(doc, 8)
 
-    # Accent-tinted band.
-    band = card(grid(doc, [CONTENT], 0)[0], fill=TINT, border=ACCENT,
-                pad=(8, 10, 8, 10), border_sides=("left",), border_size=11)
-    p = para(band, 0, 0, line=11.5)
-    run(p, "The weekend scores itself.  ", 8.4, ACCENT, bold=True)
-    run(p, "BetterCricket pulls each round overnight, then updates every average, "
-           "record, ladder, leaderboard, milestone and player profile behind it. "
-           "No re-keying a scorecard, and nothing waiting on the one volunteer who "
-           "knows how the spreadsheet works.", 7.4, BODY)
-
-    eyebrow(doc, "WHAT THE CLUB GETS")
-    text_para(doc, "Every club starts with BetterStats. Add only the modules you want, "
-                   "and add them whenever you like.", 8.0, DIM, line=11, space_after=6,
+    eyebrow(doc, "WHAT THE CLUB GETS", space_before=12)
+    text_para(doc, "Every club starts with BetterStats. Add the modules you want, "
+                   "whenever you want them.", 8.0, DIM, line=11, space_after=5,
               keep_with_next=True)
 
-    # BetterStats, the included module.
-    stats_card = card(grid(doc, [CONTENT], 0)[0], fill=TINT, border=ACCENT, pad=(8, 10, 8, 10))
-    head = grid(stats_card, [330, CONTENT - 20 - 330 - 8], 8)
-    clear(head[0])
-    p = para(head[0], 0, 0, line=12)
-    run(p, "BetterStats", 9.1, BRIGHT, bold=True)
-    run(p, "   ", 9.1, BRIGHT)
-    run(p, "  INCLUDED  ", 6.8, INK, bold=True, track=0.6, highlight=ACCENT)
-    clear(head[1])
-    text_para(head[1], "$399 / year", 9.1, ACCENT, bold=True, line=12,
-              align=WD_ALIGN_PARAGRAPH.RIGHT)
-    text_para(stats_card, "Every batting, bowling and fielding stat your club has, "
-              "turned into a public, club-branded website: a profile for every player, "
-              "leaderboards and all-time records, partnership records, the honour board, "
-              "and scorecards going back as far as the records do. Filter any of it by "
-              "grade type (men's, women's, juniors, masters) and match type (Two Day, "
-              "One Day, T20). The season yearbook writes itself, and Club Room Mode puts "
-              "the lot on the TV at the clubhouse.", 7.4, BODY, line=11.2, space_before=4)
-
-    spacer(doc, 6)
-
     modules = [
-        ("BetterSelect", "$149 / yr",
-         "Players set their own availability from a link, with no app and no account. "
-         "Name the XI on a numbered batting order with each player's form beside them, "
-         "run Thursday nets off the rotation timer, and collect 3-2-1 votes through that "
-         "same link. The count keeps itself: podium, race chart, and a presentation mode "
-         "for awards night."),
-        ("BetterSocials", "$149 / yr",
-         "A full-screen post designer of the kind your socials volunteer already knows: "
-         "blocks dragged around a canvas, layers, undo and redo, carousels and a club "
-         "photo library. The difference is the data. Drop in a match link, or a live "
-         "block for fixtures, results or a player's career, and the card fills itself in "
-         "your colours. Plus a real club website."),
-        ("BetterAdmin", "$149 / yr",
-         "One directory for everyone at the club, fed from your player list rather than "
-         "a CSV somebody re-imports. Match fees and memberships settle themselves as "
-         "payments land, bulk email goes to that same list, and there's stock and "
-         "canteen, the volunteer roster with hours logged for grants, and committee "
-         "meetings with minutes and motions."),
-        ("BetterIQ", "$249 / yr",
-         "An opposition dossier for any upcoming opponent, built from your own scorecards "
-         "without anyone requesting it: danger players named before the toss and a "
-         "printable captain's cheat sheet. Plus a best-available XI, player trends and "
-         "milestone forecasts, and team analysis on partnerships, collapses and par "
-         "scores."),
+        ("BetterStats", "$399 / year", "INCLUDED", True,
+         "Every figure your club has ever recorded, public and current.",
+         ["A profile for every player, leaderboards, all-time and partnership "
+          "records, and the honour board",
+          "Scorecards, fixtures and ladders going back as far as your records do",
+          "Filter the lot by grade type and match type, so Under-14s never pad a "
+          "senior average",
+          "Your own club website, Club Room Mode on the clubhouse TV, and a season "
+          "yearbook that writes itself"]),
+        ("BetterSelect", "$149 / yr", None, False,
+         "Pick the side without the Thursday group chat.",
+         ["Players set their own availability from a link. No app, no account, "
+          "nothing to install",
+          "Name the XI on a numbered batting order with each player's form beside "
+          "them",
+          "Your association's rules checked as you pick: age limits, overseas caps, "
+          "junior bowling workloads, finals qualification",
+          "Nets run off a QR check-in and a rotation timer, and 3-2-1 votes come "
+          "back through the same link"]),
+        ("BetterSocials", "$149 / yr", None, False,
+         "Match-day posts that fill themselves in.",
+         ["A full-screen post designer: blocks on a canvas, layers, undo and redo, "
+          "carousels and a club photo library",
+          "Drop in a match link and the card builds itself in your colours",
+          "Live blocks for fixtures, results or a player's career, so a post is "
+          "never out of date"]),
+        ("BetterAdmin", "$149 / yr", None, False,
+         "The back office in one place, off the spreadsheets.",
+         ["One directory for everyone at the club, fed from your player list",
+          "Match fees and memberships settle themselves as payments land, with "
+          "Square and Xero connected",
+          "Bulk email to that same list, plus stock, canteen, events and ticketing",
+          "The volunteer roster with hours logged for grants, and committee "
+          "minutes, motions and the season plan"]),
+        ("BetterIQ", "$249 / yr", None, False,
+         "Know the opposition before the toss.",
+         ["A dossier on any upcoming opponent, built from your own scorecards "
+          "without anyone requesting it",
+          "Their danger players named, with a printable captain's cheat sheet",
+          "A best-available XI, player trends and milestone forecasts",
+          "Team analysis on partnerships, collapses and par scores"]),
+        ("BetterFantasyCricket", "$49 / yr", None, False,
+         "A club fantasy comp, scored off your own games.",
+         ["Salary cap or draft, your choice, off the club's real scorecards across "
+          "every grade",
+          "Squads of 12, the captain scores double, and the best 11 count each round",
+          "A club ladder plus private mini-leagues, and members join from a link",
+          "Free to enter and no money changes hands, so there's nothing to license"]),
     ]
-    # Three rows: cards, a 6pt spacer, cards. A shaded cell fills its padding,
-    # so the gap between card rows has to be a row of its own.
-    module_rows = grid(doc, [251.3, 252], 6, rows=3)
-    for c in module_rows[1]:
-        cell_pad(c, 0, 0, 6, 0)
-    for pair, cells in zip((modules[:2], modules[2:]),
-                           (module_rows[0], module_rows[2])):
-        for cell, (name, price, body) in zip(cells, pair):
-            card(cell, pad=(7, 9, 7, 9))
-            inner = grid(cell, [150, 251.3 - 18 - 150 - 6], 6)
-            clear(inner[0])
-            text_para(inner[0], name, 8.5, BRIGHT, bold=True, line=11)
-            clear(inner[1])
-            text_para(inner[1], price, 8.1, ACCENT, bold=True, line=11,
-                      align=WD_ALIGN_PARAGRAPH.RIGHT)
-            text_para(cell, body, 7.4, BODY, line=11.2, space_before=2)
+
+    # Three rows of two, with a spacer row between: a shaded cell fills its own
+    # padding, so the gap between card rows has to be a row of its own.
+    module_rows = grid(doc, [251.3, 252], 6, rows=5)
+    for r in (1, 3):
+        for c in module_rows[r]:
+            cell_pad(c, 0, 0, 6, 0)
+    for pair, cells in zip((modules[0:2], modules[2:4], modules[4:6]),
+                           (module_rows[0], module_rows[2], module_rows[4])):
+        for cell, (name, price, pill, tinted, promise, bullets) in zip(cells, pair):
+            module_card(cell, name, price, promise, bullets, pill=pill, tinted=tinted)
 
     spacer(doc, 6)
 
@@ -491,33 +508,24 @@ def page_one(doc):
 
     jobs = [
         ("01", "The same player, recorded three times",
-         "Split careers are normal, and BetterCricket goes looking for them rather than "
-         "waiting to be told. It flags the pairs, down to \"Brad K Mant\" against "
-         "\"Bradley Mant\". One click merges them, keeps every innings, spell, catch and "
-         "partnership, and can be undone."),
+         "Split careers are normal. BetterCricket flags the pairs itself, down to "
+         "\"Brad K Mant\" against \"Bradley Mant\", and one click merges them "
+         "without losing an innings."),
         ("02", "Fifty years in a filing cabinet",
-         "Spreadsheets, CSVs, PDFs and photographed scorebook pages all go in. The reader "
-         "lifts the figures off the page, reconciles them against the live feed and lands "
-         "one career per player. No separate migration fee, no cap on seasons."),
-        ("03", "Under-14 seasons flattering senior averages",
-         "Juniors, women's and masters are each their own thing, and so are Two Day, One "
-         "Day and T20. Every stats screen filters on both, so a senior average isn't "
-         "padded by Under-14s and a T20 record only counts T20s."),
+         "Spreadsheets, CSVs and photographed scorebook pages all go in. The reader "
+         "lifts the figures off the page and lands one career per player. No "
+         "migration fee, no cap on seasons."),
+        ("03", "Saturday's \"who's in?\" scramble",
+         "Availability comes in from the players themselves, on a link they open on "
+         "their phone. Selection knows their form and grade, and warns you about a "
+         "side with no keeper."),
         ("04", "Five tools and five bills",
-         "A spreadsheet, a site builder, Canva, Mailchimp and a group chat, none of which "
-         "talk to each other. One subscription and one match feed behind the lot, so the "
-         "season only gets entered once."),
-        ("05", "Saturday's \"who's in?\" scramble",
-         "Availability comes in from the players themselves, on a link they open on their "
-         "phone with nothing to install. Selection already knows their form, grade and "
-         "skills, and it warns you about a side with no keeper or a short attack."),
-        ("06", "The best-player count on an envelope",
-         "3-2-1 votes arrive through the link players already use, and the ladder adds "
-         "itself up round by round. Chase the stragglers with one button, then reveal the "
-         "season on the screen at the awards night."),
+         "A spreadsheet, a site builder, Canva, Mailchimp and a group chat, none of "
+         "which talk to each other. One subscription and one match feed behind the "
+         "lot."),
     ]
-    job_rows = grid(doc, [251, 251], 8, rows=3)
-    for pair, cells in zip((jobs[0:2], jobs[2:4], jobs[4:6]), job_rows):
+    job_rows = grid(doc, [251, 251], 8, rows=2)
+    for pair, cells in zip((jobs[0:2], jobs[2:4]), job_rows):
         for cell, (num, title, body) in zip(cells, pair):
             cell_pad(cell, 0, 0, 5, 0)
             clear(cell)
@@ -553,7 +561,6 @@ def page_two(doc):
         ("BetterSocials", "", "$149", BRIGHT),
         ("BetterAdmin", "", "$149", BRIGHT),
         ("BetterIQ", "", "$249", BRIGHT),
-        ("BetterFantasyCricket", " · optional add-on", "$49", BRIGHT),
         ("Bundle discount on the full set", "", "−$146", ACCENT),
     ]
     price_w = 275.5
@@ -561,7 +568,7 @@ def page_two(doc):
     for (name, note, amount, colour), (label_cell, amount_cell) in zip(rows, body_rows):
         for c in (label_cell, amount_cell):
             cell_borders(c, HAIR, 6, ("bottom",))
-            cell_pad(c, 2, 0, 2, 0)
+            cell_pad(c, 2, 0, 1, 0)
             clear(c)
         p = para(label_cell, 0, 0, line=10)
         run(p, name, 7.9, BODY)
@@ -578,9 +585,28 @@ def page_two(doc):
     text_para(total[1], "$949 / year", 8.9, ACCENT, bold=True, line=12,
               align=WD_ALIGN_PARAGRAPH.RIGHT)
 
+    # BetterFantasyCricket is priced on its own and is deliberately outside the
+    # bundle maths, so it sits below the total rather than in a column that then
+    # would not add up to it.
+    addon = grid(left, [price_w - 90, 90], 0, rows=2)
+    for row in addon:
+        for c in row:
+            cell_pad(c, 3, 0, 0, 0)
+            clear(c)
+    p = para(addon[0][0], 0, 0, line=10.5)
+    run(p, "BetterFantasyCricket", 7.9, BODY)
+    run(p, " · optional add-on", 7.9, DIM)
+    text_para(addon[0][1], "+$49", 7.9, BRIGHT, bold=True, line=10.5,
+              align=WD_ALIGN_PARAGRAPH.RIGHT)
+    text_para(addon[1][0], "Everything BetterCricket does", 8.4, BRIGHT, bold=True,
+              line=11.5)
+    text_para(addon[1][1], "$998 / year", 8.4, ACCENT, bold=True, line=11.5,
+              align=WD_ALIGN_PARAGRAPH.RIGHT)
+
     text_para(left, "Bundling saves $48 on two modules, $97 on three and $146 on all "
-                    "four. Every price covers unlimited players, seasons and teams.",
-              7.2, DIM, line=10.5, space_before=6)
+                    "four. BetterFantasyCricket is priced on its own and sits outside "
+                    "the bundle. Every price covers unlimited players, seasons and "
+                    "teams.", 7.2, DIM, line=10.5, space_before=6)
 
     # Right: the comparison.
     right = card(cells[1], fill=TINT, border=ACCENT, pad=(9, 10, 9, 10))
@@ -611,12 +637,12 @@ def page_two(doc):
     ]
     cells = grid(doc, [164.3, 165, 165], 7.5)
     for cell, (label, title, body) in zip(cells, steps):
-        card(cell, pad=(7, 9, 7, 9))
+        card(cell, pad=(6, 9, 6, 9))
         text_para(cell, label, 7.0, ACCENT, bold=True, line=9.5, track=0.7, space_after=3)
         text_para(cell, title, 8.4, BRIGHT, bold=True, line=11, space_after=3)
         text_para(cell, body, 7.3, BODY, line=10.5)
 
-    spacer(doc, 7)
+    spacer(doc, 6)
 
     # Testimonial.
     quote = card(grid(doc, [CONTENT], 0)[0], fill=BG, border=ACCENT,
@@ -639,42 +665,39 @@ def page_two(doc):
          "on their own."),
         ("How much of it is actually automatic?",
          "Results sync overnight after each round, and averages, records, ladders, "
-         "milestones and profiles follow on their own. Posts, fee allocation and the "
-         "yearbook build off the same data. What's left for a person is the judgement: "
-         "merging a duplicate, approving an award."),
+         "milestones and profiles follow on their own. What is left for a person is "
+         "the judgement: merging a duplicate, approving an award."),
         ("Where does the data come from?",
-         "Your match history imports automatically and stays current after every game. "
-         "Anything not already online comes in through our CSV templates, or by "
-         "photographing the scorebook page."),
+         "Your match history imports automatically and stays current. Anything not "
+         "already online comes in through our CSV templates, or by photographing the "
+         "scorebook page."),
         ("How far back does the history go?",
          "As far back as you can go. We bring across whatever is available, and you layer "
          "your own records on top of that."),
         ("What if our scorers haven't been perfect?",
-         "Duplicate players are found for you and merged in a click, keeping every innings "
-         "and spell. Mis-attributed innings and name changes are handled the same way. "
-         "Minutes of work, not a weekend."),
+         "Duplicate players are found for you and merged in a click, keeping every "
+         "innings and spell. Mis-attributed innings and name changes go the same way."),
         ("Can we keep junior seasons out of senior averages?",
-         "Yes. Every stats page filters by grade type (men's, women's, juniors, masters) "
-         "and match type (Two Day, One Day, T20), and you set what your club's default "
-         "view leaves out."),
+         "Yes. Every stats page filters by grade type and match type, and you set what "
+         "your club's default view leaves out."),
         ("Does the price change with club size?",
          "No. It is a flat rate per club, with no per-team, per-player or per-grade "
          "pricing."),
         ("Do we own the data?",
-         "Always. It belongs to your club, and you can export all of it to CSV whenever "
-         "you want."),
+         "Always. It belongs to your club, and every screen that holds it exports to "
+         "CSV: members, fees, contacts, stock, attendance and records."),
         ("Can we add modules later?",
          "Yes. Add one at any time and it switches on straight away. Each module is an "
          "annual commitment."),
         ("How do we pay?",
          "An annual invoice, paid by card, Apple Pay or Google Pay through Stripe, with "
-         "GST handled at checkout. Bank transfer or PayID still works if your treasurer "
-         "would rather do it that way."),
+         "GST handled at checkout. Add a module mid-year and you are only charged the "
+         "part-year difference up to your renewal date."),
     ]
     faq_rows = grid(doc, [251, 248], 11, rows=(len(faqs) + 1) // 2)
     for pair, cells in zip([faqs[i:i + 2] for i in range(0, len(faqs), 2)], faq_rows):
         for cell, (question, answer) in zip(cells, pair):
-            cell_pad(cell, 0, 0, 3, 0)
+            cell_pad(cell, 0, 0, 2, 0)
             clear(cell)
             text_para(cell, question, 7.9, BRIGHT, bold=True, line=10.5,
                       keep_with_next=True)
