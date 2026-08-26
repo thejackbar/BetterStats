@@ -5,11 +5,12 @@ import { useAuth } from '../../contexts/AuthContext'
 import { useToast } from '../../contexts/ToastContext'
 import AdminLayout from '../../components/admin/AdminLayout'
 import EmailEditorTabs from '../../components/admin/EmailEditorTabs'
-import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER, TOWN_STATE_COLOR } from '../../components/admin/crm/ui'
+import { Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, moduleLabel, MODULE_ORDER, TOWN_STATE_COLOR,
+  activityLabel, activityTone, activityByLine } from '../../components/admin/crm/ui'
 import { TrialHourglassIcon, TRIAL_AMBER } from '../../components/admin/crm/PipelineBoard'
 import SalesEventsView from '../../components/admin/crm/SalesEventsView'
 import ClubLocationMap from '../../components/admin/ClubLocationMap'
-import { groupedOutcomes, outcomeLabel, isGeneralOutcome } from '../../lib/salesOutcomes'
+import { groupedOutcomes, isGeneralOutcome } from '../../lib/salesOutcomes'
 
 const CARD = 'pb-card p-3'
 
@@ -736,22 +737,13 @@ function NoteEditForm({ value, onChange, onSave, onCancel, saving }) {
 }
 
 function ActivityRow({ a, onViewEmail, editing, editValue, onChangeEdit, onStartEdit, onSaveEdit, onCancelEdit, savingEdit }) {
-  // The outcome names the row whenever there is one, whatever type it was
-  // filed under: a General Note is stored as a NOTE (it claims nothing about
-  // the club, so it must not read as a call anywhere) and would otherwise
-  // lose the label the person actually picked.
-  const kindLabel = a.outcome ? outcomeLabel(a.outcome)
-    : a.type === 'call' ? 'Call'
-      : a.type === 'email' ? 'Email' : a.type === 'system' ? 'System' : a.meta?.pinned ? 'Pinned note' : 'Note'
-  const tone = a.type === 'call' ? 'accent' : a.type === 'email' ? 'accent' : a.type === 'system' ? 'faint' : a.meta?.pinned ? 'amber' : 'faint'
-  // Who logged this — a call, note, email, assign or extend-trial all stamp
-  // created_by_user_id, and the drawer resolves it to a name in one batched
-  // lookup (routers/sales_workspace.py::get_club). Absent only for an entry
-  // written before this shipped, or a system action with no attributable
-  // actor.
-  const byLine = a.occurred_at
-    ? `${new Date(a.occurred_at).toLocaleString('en-AU')}${a.created_by_name ? ` · ${a.created_by_name}` : ''}`
-    : (a.created_by_name || '')
+  // How a row names itself, who logged it and how it is toned all come from
+  // crm/ui.jsx — the SAME three functions the CRM deal card's timeline reads,
+  // so a note written here cannot read as one thing in this drawer and
+  // another on the card.
+  const kindLabel = activityLabel(a)
+  const tone = activityTone(a)
+  const byLine = activityByLine(a)
   if (a.type === 'note' && editing) {
     return (
       <div className="border-b border-pb-hairline/50 pb-2 mb-2 text-[12px]">

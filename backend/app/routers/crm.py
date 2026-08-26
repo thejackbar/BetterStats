@@ -209,6 +209,27 @@ async def _deal_or_404(db: AsyncSession, scope: str, organisation_id, deal_id: s
     return deal
 
 
+async def _activities_payload(db: AsyncSession, deal) -> dict:
+    """The deal card's timeline, for BOTH scopes — one builder so the club
+    CRM and the platform Sales Pipeline can never drift about what a deal's
+    activity list holds.
+
+    Deliberately still crm_service.list_activities, i.e. EVERYTHING on the
+    deal: the Sales Workspace drawer filters the Twenty backfill and the
+    reassignment audit rows out of its own feed
+    (sales_workspace.list_activities_for_workspace), the card does not.
+    `created_by_name` is the one addition — a note a rep wrote in the Sales
+    Workspace already stamps created_by_user_id, and the card had no way to
+    say who wrote it. Batched, one query for the whole timeline, same as the
+    drawer's own."""
+    rows = await crm_service.list_activities(db, deal_id=deal.id)
+    out = [crm_service._activity_dict(a) for a in rows]
+    names = await crm_service.user_names_by_ids(db, (a.created_by_user_id for a in rows))
+    for row, a in zip(out, rows):
+        row["created_by_name"] = names.get(a.created_by_user_id)
+    return {"activities": out}
+
+
 async def _serialize_deal(db: AsyncSession, deal) -> dict:
     # move_stage/update_deal/close_deal all set deal.updated_at = func.now() —
     # assigning a raw SQL expression to a mapped column always marks it
@@ -509,8 +530,7 @@ async def club_delete_deal_permanent(deal_id: str, club: Organisation = Depends(
 async def club_list_activities(deal_id: str, club: Organisation = Depends(get_current_club),
                                db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_CLUB, club.id, deal_id)
-    rows = await crm_service.list_activities(db, deal_id=deal.id)
-    return {"activities": [crm_service._activity_dict(a) for a in rows]}
+    return await _activities_payload(db, deal)
 
 
 @router.post("/deals/{deal_id}/activities", dependencies=[_require])
@@ -1251,8 +1271,7 @@ async def super_delete_deal_permanent(deal_id: str, reset_club: bool = False,
 @super_router.get("/deals/{deal_id}/activities", dependencies=[_super])
 async def super_list_activities(deal_id: str, db: AsyncSession = Depends(get_db)):
     deal = await _deal_or_404(db, crm_service.SCOPE_PLATFORM, None, deal_id)
-    rows = await crm_service.list_activities(db, deal_id=deal.id)
-    return {"activities": [crm_service._activity_dict(a) for a in rows]}
+    return await _activities_payload(db, deal)
 
 
 @super_router.post("/deals/{deal_id}/activities", dependencies=[_super])

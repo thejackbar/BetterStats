@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { api } from '../../../lib/api'
 import { useToast } from '../../../contexts/ToastContext'
 import {
   Modal, Field, TextInput, NumberInput, Select, TextArea, Btn, Pill, money, moneyToCents, centsToMoneyInput,
   DEFAULT_CRM_TERMS, moduleLabel, sortModuleKeys, ONBOARDING_METHOD_OPTIONS, LEAD_SOURCE_OPTIONS,
   WebsiteAnalyticsPanel, EngagementBreakdownPanel, ownerEntryId, townStateLabel, associationNames,
+  activityLabel, activityTone, activityByLine,
 } from './ui'
 import { TIER_TONE } from './PipelineBoard'
 import EventForm, { CalendarIcon, eventTypeLabel, alertLabel } from './EventForm'
@@ -38,6 +39,7 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
   const [saving, setSaving] = useState(false)
   const [note, setNote] = useState('')
   const [noteType, setNoteType] = useState('note')
+  const [notesOnly, setNotesOnly] = useState(false)
   const [editingEventId, setEditingEventId] = useState(null)
   const eventsEnabled = !!client.addEvent  // platform (super admin) scope only
   const [lostReason, setLostReason] = useState('')
@@ -77,6 +79,23 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
     setDiscountReason(deal.discount_reason || '')
     setShowDiscount(!!(deal.discount_amount_cents || deal.discount_percent))
   }, [deal])
+
+  // A pinned note is lifted out of the feed and shown above it, exactly as
+  // the Sales Workspace drawer does — one definition of "pinned" (meta.pinned)
+  // across both screens.
+  const pinnedNotes = useMemo(
+    () => activities.filter(a => a.type === 'note' && a.meta?.pinned),
+    [activities]
+  )
+  const feed = useMemo(
+    () => activities.filter(a => !(a.type === 'note' && a.meta?.pinned)),
+    [activities]
+  )
+  const noteCount = useMemo(() => activities.filter(a => a.type === 'note').length, [activities])
+  const shownActivities = useMemo(
+    () => (notesOnly ? feed.filter(a => a.type === 'note') : feed),
+    [feed, notesOnly]
+  )
 
   if (!open) return null
 
@@ -637,16 +656,63 @@ export default function DealDetailModal({ dealId, open, onClose, stages, client,
           <WebsiteAnalyticsPanel marketingClubId={deal.marketing_club_id} />
 
           <div>
-            <h3 className="font-display font-bold text-[13px] mb-2">Notes &amp; activity</h3>
-            <div className="space-y-2 max-h-48 overflow-y-auto">
-              {activities.length === 0 && <p className="text-[12px] text-pb-faintest">No activity logged yet.</p>}
-              {activities.map(a => (
-                <div key={a.id} className="text-[12.5px] pb-card px-2.5 py-2">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <Pill>{a.type}</Pill>
-                    <span className="text-pb-faintest text-[10.5px]">{a.occurred_at ? new Date(a.occurred_at).toLocaleString() : ''}</span>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <h3 className="font-display font-bold text-[13px]">Notes &amp; activity</h3>
+              {/* A rep's own notes are the needle in this haystack: the feed
+                  below is deliberately everything on the deal (the Twenty
+                  pipeline backfill and the reassignment audit rows included,
+                  both of which the Sales Workspace drawer hides from its own
+                  History), so on a long-running club a note typed in the
+                  workspace is rendered but unfindable. This narrows it to the
+                  notes without hiding anything by default. */}
+              {noteCount > 0 && (
+                <div className="flex items-center gap-1">
+                  <Btn sm variant={notesOnly ? 'subtle' : 'primary'} onClick={() => setNotesOnly(false)}>All</Btn>
+                  <Btn sm variant={notesOnly ? 'primary' : 'subtle'} onClick={() => setNotesOnly(true)}>
+                    Notes ({noteCount})
+                  </Btn>
+                </div>
+              )}
+            </div>
+
+            {/* Pinned in the Sales Workspace means "keep this in front of
+                whoever picks this club up next", and the card used to ignore
+                meta.pinned entirely — so the one note a rep marked as
+                mattering read exactly like a system row. Same flag, same amber
+                treatment, so the two screens agree about what is pinned.
+                Shown above the feed whichever filter is on. */}
+            {pinnedNotes.length > 0 && (
+              <div className="mb-2 space-y-1.5">
+                {pinnedNotes.map(a => (
+                  <div key={a.id} className="text-[12px] bg-pb-amber/10 border border-pb-amber/30 rounded px-2.5 py-2">
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <Pill tone="amber">Pinned note</Pill>
+                      <span className="text-pb-faintest text-[10.5px]">{activityByLine(a)}</span>
+                    </div>
+                    <p className="text-pb-text whitespace-pre-wrap">{a.body}</p>
                   </div>
-                  {a.body && <p className="text-pb-text">{a.body}</p>}
+                ))}
+              </div>
+            )}
+
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {shownActivities.length === 0 && (
+                <p className="text-[12px] text-pb-faintest">
+                  {activities.length === 0 ? 'No activity logged yet.'
+                    : notesOnly ? 'No notes on this deal yet.'
+                      : 'Nothing else on this deal yet.'}
+                </p>
+              )}
+              {shownActivities.map(a => (
+                <div key={a.id} className="text-[12.5px] pb-card px-2.5 py-2">
+                  <div className="flex items-center justify-between gap-2 mb-0.5">
+                    <Pill tone={activityTone(a)}>{activityLabel(a)}</Pill>
+                    <span className="text-pb-faintest text-[10.5px]">{activityByLine(a)}</span>
+                  </div>
+                  {/* pre-wrap because a note is typed prose, not a one-liner —
+                      the workspace writes it with its line breaks intact. */}
+                  {a.body && <p className="text-pb-text whitespace-pre-wrap">{a.body}</p>}
+                  {a.meta?.edited_at && <span className="text-[10.5px] text-pb-faintest">(edited)</span>}
                 </div>
               ))}
             </div>

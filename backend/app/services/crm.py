@@ -1869,6 +1869,24 @@ async def log_activity(session: AsyncSession, *, deal_id=None, person_id=None,
     return activity
 
 
+async def user_names_by_ids(session: AsyncSession, ids) -> dict:
+    """user_id -> display name, batched. Every write on a deal — a call log, a
+    note, an email send, an assign, an extend-trial — already stamps
+    ``created_by_user_id`` on its activity row; this is the one place that id
+    becomes a name a timeline can show, without a per-row lookup.
+
+    Lives here rather than in the Sales Workspace because an activity's author
+    is a CRM fact and the workspace is one reader of it, not its owner — the
+    deal card's own timeline (routers/crm.py) names its rows through this same
+    function, so the two screens can never disagree about who wrote a note.
+    ``services.sales_workspace.user_names_by_ids`` delegates to it."""
+    ids = {i for i in ids if i}
+    if not ids:
+        return {}
+    rows = (await session.execute(select(User).where(User.id.in_(ids)))).scalars().all()
+    return {u.id: (u.display_name or u.username) for u in rows}
+
+
 async def list_activities(session: AsyncSession, *, deal_id=None, person_id=None,
                           limit: int = 200) -> list[CrmActivity]:
     stmt = select(CrmActivity).order_by(CrmActivity.occurred_at.desc()).limit(limit)

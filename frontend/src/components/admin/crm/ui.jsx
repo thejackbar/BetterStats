@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { Icon } from '../../../pages/admin/betterselect/ui'
 import { api } from '../../../lib/api'
+import { outcomeLabel } from '../../../lib/salesOutcomes'
 
 // Dollar values everywhere here are cents (matches the backend's value_cents).
 export const money = (cents) =>
@@ -309,6 +310,36 @@ export function Pill({ children, tone = 'faint' }) {
     green: 'bg-emerald-500/12 text-emerald-300',
   }
   return <span className={`inline-flex items-center gap-1 px-1.5 py-px rounded font-mono text-[10px] tracking-wide ${tones[tone] || tones.faint}`}>{children}</span>
+}
+
+// How one activity row names itself. ONE definition, read by both the CRM
+// deal card (DealDetailModal) and the Sales Workspace drawer's ActivityRow —
+// two copies is how the two screens start disagreeing about what a note is.
+// The outcome names the row whenever there is one, whatever type it was
+// filed under: a General Note is stored as a NOTE (it claims nothing about
+// the club) and would otherwise lose the label the rep actually picked.
+export function activityLabel(a) {
+  if (a.outcome) return outcomeLabel(a.outcome)
+  if (a.type === 'call') return 'Call'
+  if (a.type === 'email') return 'Email'
+  if (a.type === 'system') return 'System'
+  return a.meta?.pinned ? 'Pinned note' : 'Note'
+}
+
+export function activityTone(a) {
+  if (a.type === 'call' || a.type === 'email') return 'accent'
+  if (a.type === 'note' && a.meta?.pinned) return 'amber'
+  return 'faint'
+}
+
+// "when · who". created_by_name is stamped on every row by the activities
+// endpoint (routers/crm.py::_activities_payload, and the drawer's own
+// routers/sales_workspace.py::get_club) from the created_by_user_id each
+// writer already sets; absent only for a row written before that shipped, or
+// a system action with no attributable actor.
+export function activityByLine(a) {
+  const when = a.occurred_at ? new Date(a.occurred_at).toLocaleString('en-AU') : ''
+  return [when, a.created_by_name].filter(Boolean).join(' · ')
 }
 
 // How a club came to be onboarded — shown/edited on the deal detail card.

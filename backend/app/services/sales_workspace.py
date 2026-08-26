@@ -388,16 +388,12 @@ async def commission_rep_names(session: AsyncSession, deals) -> dict:
 
 
 async def user_names_by_ids(session: AsyncSession, ids) -> dict:
-    """user_id -> display name, batched. Every write on a deal — a call log,
-    a note, an email send, an assign, a bulk assign, an extend-trial — already
-    stamps `created_by_user_id` on its activity row; this is the one place
-    that id becomes a name for the History feed to show ("logged by …"),
-    without a per-row lookup."""
-    ids = {i for i in ids if i}
-    if not ids:
-        return {}
-    rows = (await session.execute(select(User).where(User.id.in_(ids)))).scalars().all()
-    return {u.id: (u.display_name or u.username) for u in rows}
+    """user_id -> display name, batched — kept under the name this module's
+    own callers already use, delegating to the one implementation in
+    services/crm.py. An activity's author is a CRM fact, and the CRM deal
+    card names its timeline rows through that same function, so the drawer's
+    History feed and the card cannot disagree about who wrote a note."""
+    return await crm_service.user_names_by_ids(session, ids)
 
 
 # ─── Calls ────────────────────────────────────────────────────────────────────
