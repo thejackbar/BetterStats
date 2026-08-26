@@ -5872,8 +5872,13 @@ app.add_middleware(UsageTrackingMiddleware)
 
 app.include_router(auth.router)
 app.include_router(clubs.router)
-app.include_router(website.public_router)   # Front-end Website (public, Core)
-app.include_router(website.admin_router)    # Front-end Website (admin CRUD)
+# The club's public STATS pages (/{slug}) are Core and live in clubs.py et al.
+# These two are the CMS on top of them — news, editable pages, honour rolls,
+# committee and galleries at /{slug}/website — which is BetterSocials. The
+# public half can't take require_module (no session to gate), so it checks the
+# module itself in website._website_org.
+app.include_router(website.public_router)                                                 # BetterSocials (public CMS)
+app.include_router(website.admin_router, dependencies=[Depends(require_module("socials"))])  # BetterSocials (CMS admin)
 app.include_router(club_admin.router)
 app.include_router(billing.router)  # Account page Stripe Checkout (flag-gated — see platform_settings.billing_checkout_enabled)
 app.include_router(discount_coupons.router)  # BetterCricket-managed discount coupons (migration 156)

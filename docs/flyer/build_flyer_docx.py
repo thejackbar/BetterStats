@@ -445,8 +445,8 @@ def page_one(doc):
           "Scorecards, fixtures and ladders going back as far as your records do",
           "Filter the lot by grade type and match type, so Under-14s never pad a "
           "senior average",
-          "Your own club website, Club Room Mode on the clubhouse TV, and a season "
-          "yearbook that writes itself"]),
+          "A public, club-branded site for the lot, Club Room Mode on the clubhouse "
+          "TV, and a season yearbook that writes itself"]),
         ("BetterSelect", "$149 / yr", None, False,
          "Pick the side without the Thursday group chat.",
          ["Players set their own availability from a link. No app, no account, "
@@ -458,12 +458,13 @@ def page_one(doc):
           "Nets run off a QR check-in and a rotation timer, and 3-2-1 votes come "
           "back through the same link"]),
         ("BetterSocials", "$149 / yr", None, False,
-         "Match-day posts that fill themselves in.",
-         ["A full-screen post designer: blocks on a canvas, layers, undo and redo, "
-          "carousels and a club photo library",
-          "Drop in a match link and the card builds itself in your colours",
-          "Live blocks for fixtures, results or a player's career, so a post is "
-          "never out of date"]),
+         "A full club website, and posts that fill themselves in.",
+         ["News, pages, galleries, sponsors and honour boards, on top of the stats "
+          "site every club gets",
+          "A post designer: blocks on a canvas, layers, undo and redo, carousels "
+          "and a club photo library",
+          "Drop in a match link, or a live block for fixtures or a player's career, "
+          "and the card fills itself in your colours"]),
         ("BetterAdmin", "$149 / yr", None, False,
          "The back office in one place, off the spreadsheets.",
          ["One directory for everyone at the club, fed from your player list",

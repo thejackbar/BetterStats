@@ -59,7 +59,7 @@ export default function BetterSocialsHome() {
         <p className="text-pb-faint text-sm mb-6">Your club's outward face — a public website and social posts in one place.</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <SubCard
-            name="BetterWebsite" to="/admin/website" entitled
+            name="BetterWebsite" to="/admin/website" entitled={hasModule(MODULE.SOCIALS)}
             blurb="Build your public club website — news, pages, menus, honours, committee and galleries."
           />
           <SubCard

@@ -96,8 +96,21 @@ async def _public_org(slug: str, db: AsyncSession, request: Request | None = Non
 
 
 async def _website_org(slug: str, db: AsyncSession, request: Request | None = None) -> Organisation:
+    """The club behind a CMS page, or a 404.
+
+    The stats site at /{slug} is Core and every club has it. THIS is the CMS
+    half — news, pages, honours, committee and galleries — and it belongs to
+    BetterSocials. Public routers can't use require_module (there's no session
+    to gate), so the check lives here, the way public_availability checks the
+    select module itself. Every public CMS route resolves through this
+    function, so it's the one place the gate has to hold.
+
+    A club whose module lapses keeps its rows; the pages stop being served
+    until it comes back.
+    """
+    from app.auth.modules import MODULE_SOCIALS, org_has_module
     org = await _public_org(slug, db, request)
-    if not org.website_enabled:
+    if not org.website_enabled or not org_has_module(org, MODULE_SOCIALS):
         raise HTTPException(status_code=404, detail="This club hasn't published a website yet.")
     return org
 

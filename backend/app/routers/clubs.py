@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.db import ClubUnpauseRequest, Organisation, Season, Sponsor, get_db
 from app.routers.organisations import _season_sort_key
-from app.auth.modules import org_core_live
+from app.auth.modules import MODULE_SOCIALS, org_core_live, org_has_module
 from app.services import club_lock, email_service, rate_limit
 from app.services import fonts as font_service
 from app.config.settings import settings
@@ -84,7 +84,11 @@ async def get_club_by_slug(slug: str, request: Request, db: AsyncSession = Depen
         **font_service.public_font_fields(org),
         "contact_email": org.contact_email,
         "player_name_format": org.player_name_format or "last_first",
-        "website_enabled": bool(org.website_enabled),
+        # The CMS half of the public site is BetterSocials, so this flag has to
+        # answer "is there a website to link to" rather than "did they tick the
+        # box" -- the club Navbar draws its Website link straight off it, and a
+        # club without the module gets a 404 from every CMS route.
+        "website_enabled": bool(org.website_enabled) and org_has_module(org, MODULE_SOCIALS),
         "public_header_logo": bool(org.public_header_logo),
     }
 

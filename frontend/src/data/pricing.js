@@ -25,7 +25,7 @@ export const CORE = {
 // brand registry so the calculator looks like the dashboard.
 export const PRICED_MODULES = [
   { key: 'select',  name: 'BetterSelect',  price: 149, icon: '◎', accent: BRAND.select.accent,  logo: BRAND.select.logo,  blurb: 'Player availability, team selection and net manager' },
-  { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Social-post generation and a CRM for your club website' },
+  { key: 'socials', name: 'BetterSocials', price: 149, icon: '◈', accent: BRAND.socials.accent, logo: BRAND.socials.logo, blurb: 'Your club website plus match-day social posts' },
   { key: 'admin',   name: 'BetterAdmin',   price: 149, icon: '⬢', accent: BRAND.admin.accent,   logo: BRAND.admin.logo,   blurb: 'Member fees, bulk emailing and club stock tracking' },
   { key: 'iq',      name: 'BetterIQ',      price: 249, icon: '◇', accent: BRAND.iq.accent,      logo: BRAND.iq.logo,      blurb: 'Deep analytics and opposition scouting' },
 ]

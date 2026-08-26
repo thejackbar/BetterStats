@@ -506,7 +506,7 @@ export default function App() {
               /admin/yearbook: a club leaves this open on a TV, so a refresh must land
               straight back on the stage, not inside the app chrome. */}
           <Route path="/admin/club-room/play" element={<ProtectedRoute requireCore><ClubRoomPlayer /></ProtectedRoute>} />
-          <Route path="/admin/website" element={<ProtectedRoute requireCore><AdminWebsite /></ProtectedRoute>} />
+          <Route path="/admin/website" element={<ProtectedRoute requireModule="socials"><AdminWebsite /></ProtectedRoute>} />
           <Route path="/admin/social-post" element={<ProtectedRoute requireModule="socials"><AdminSocialPost /></ProtectedRoute>} />
           <Route path="/admin/yearbook" element={<ProtectedRoute requireCore><AdminYearbook /></ProtectedRoute>} />
           <Route path="/admin/yearbook/:seasonId" element={<ProtectedRoute requireCore><AdminYearbookDetail /></ProtectedRoute>} />

@@ -38,7 +38,7 @@ export const CORE_MARKETING = {
   highlights: [
     'Your full match history, imported once',
     'Every stat reconciled and kept forever',
-    'A public, club-branded website',
+    'A public, club-branded stats site',
     'Profiles, leaderboards, records and yearbooks',
   ],
   features: [

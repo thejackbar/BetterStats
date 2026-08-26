@@ -98,16 +98,17 @@ export const MODULE_INFO = [
 // presented together as one **BetterAdmin** umbrella tile on the dashboard
 // / sidebar — the club's back office in one place, one sidebar, one accent.
 export const MODULE_GROUPS = {
-  // BetterSocials is an umbrella too: the Post Designer (the socials module)
-  // plus the club Website (Core, every club). alwaysOpen keeps the hub reachable for
-  // every club so the Core website is never gated behind the socials module.
+  // BetterSocials is an umbrella: the Post Designer plus the club Website CMS
+  // (news, pages, honours, committee, galleries). BOTH need the module now, so
+  // the hub is no longer alwaysOpen -- there is nothing behind it for a club
+  // that hasn't bought it. The public STATS site at /{slug} is untouched by
+  // this: it is Core, served by clubs.py and friends, and every club has it.
   socials: {
     key: 'bettersocials',
     billingKey: 'socials',
     name: 'BetterSocials',
-    blurb: 'Your public website plus auto-posts for lineups, scorecards and milestones.',
+    blurb: 'Your club website plus auto-posts for lineups, scorecards and milestones.',
     to: '/admin/bettersocials',
-    alwaysOpen: true,
   },
   // BetterAdmin — the merged back office. Fees, comms, merch and the club
   // tools used to be four surfaces with four sidebars; they are six sections of

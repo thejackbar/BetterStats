@@ -175,7 +175,7 @@ export const COMPARISONS = {
       {
         section: 'Surface & presentation',
         rows: [
-          { feature: 'Public, club-branded website', tip: 'Your own URL, your colours, your crest, your sponsors', values: { clubstats: 'partial', cstatz: false, us: true } },
+          { feature: 'Public, club-branded stats site', tip: 'Your own URL, your colours, your crest, your sponsors', values: { clubstats: 'partial', cstatz: false, us: true } },
           { feature: 'Mobile-first, modern design', values: { clubstats: 'partial', cstatz: false, us: true } },
           { feature: 'Auto-generated season yearbook', values: { clubstats: false, cstatz: false, us: true } },
           { feature: 'Shareable social stat cards', tip: 'One-tap export of branded Instagram / X cards', values: { clubstats: false, cstatz: false, us: true } },
@@ -218,7 +218,7 @@ export const COMPARISONS = {
       {
         section: 'Your club online',
         rows: [
-          { feature: 'Public club website included', values: { canva: false, squarespace: true, us: true } },
+          { feature: 'A full club website on top of it', tip: 'News, pages, galleries, sponsors and honour boards, added to the stats site every club already has', values: { canva: false, squarespace: true, us: true } },
           { feature: 'Live stats, profiles & ladders built in', tip: 'The website is wired to your match data', values: { canva: false, squarespace: false, us: true } },
           { feature: 'News, galleries, sponsors & honour boards', values: { canva: false, squarespace: true, us: true } },
           { feature: 'Per-club cost', textRow: true, values: { canva: '~$165/yr', squarespace: '~$300/yr', us: 'Included in Better' } },
