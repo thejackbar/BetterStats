@@ -1112,6 +1112,15 @@ class MotionCreate(BaseModel):
     description: str
     proposed_by_member_id: Optional[str] = None
     seconded_by_member_id: Optional[str] = None
+    # A motion is moved, seconded and voted on in one breath, so it can be
+    # recorded in one write rather than created and then corrected. The NAMED
+    # votes still need the row to exist first and go through
+    # PUT .../motions/{id}/votes, which re-derives these tallies.
+    outcome: Optional[str] = None
+    votes_for: Optional[int] = None
+    votes_against: Optional[int] = None
+    votes_abstain: Optional[int] = None
+    notes: Optional[str] = None
     # Migration 230 — the objective in the club's plan this motion serves.
     objective_id: Optional[str] = None
 

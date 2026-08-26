@@ -5131,6 +5131,46 @@ runs a meeting from, reached from OPEN MEETING on each row of the meetings list.
   spacing now; the agenda item is the only full container. The suite asserts it
   on the computed style (no element around a record has four borders, and each
   still has its left one), not on class names.
+- **A MOTION IS MOVED, SECONDED AND VOTED ON IN ONE BREATH, so it is recorded
+  in one (v9.53.6).** Asked for directly: record who moved a motion and who
+  seconded it, and take the vote at the moment the motion is created rather
+  than having to reopen it under Edit. **No migration** —
+  `meeting_motions.proposed_by_member_id` / `.seconded_by_member_id` have
+  existed since the table was written, the minutes PDF already prints "moved
+  by X" / "seconded by Y" off them, and the register's own `MotionEditor` has
+  always offered both. Only the MEETING ROOM never did.
+- **`MotionForm` is ONE definition of what a motion record holds**, mounted by
+  `+ Add motion` and by a row's `Edit`, the same call `ActionForm` makes. **The
+  two uses write differently and both are right**: an existing motion saves as
+  it is pressed, the way the rest of the room works, so there is nothing a
+  Cancel could undo; a new one has no row to write to yet and is held until
+  `+ MOTION`. A `live` flag is the whole difference, and `useAutosave` is
+  called on every render either way so the hook order cannot change.
+- **The NAMED votes are a second request, unavoidably.** They key on the
+  motion's own id, so `onAddMotion` creates the motion with everything else
+  (wording, both names, outcome, objective) and then writes the votes against
+  the id that comes back. `MotionCreate` and `create_motion` gained `outcome`,
+  the three tallies and `notes` so the rest lands in ONE write; every field
+  falls back to the column default, so an existing caller is unchanged.
+- **A mover is picked from the people in the room**, since that is who moves
+  and seconds a motion — but a name already recorded stays selectable when that
+  person is no longer marked present, or reopening the record would quietly
+  drop it.
+- **SILENCE WHERE THE CLUB DOES NOT RECORD IT.** The `moved by … seconded by …`
+  line is drawn only when at least one is set. A club that counts a show of
+  hands and never names a mover should not have every motion carrying a "not
+  recorded" reproach — the opposite call to `not on the plan`, which is about a
+  link the club is being encouraged to make.
+- **Verified against a real Postgres** (10 checks through the shipped route
+  body and `create_motion`: the whole record in one create, a bare create still
+  opening as pending with nobody named and no tallies invented, the named votes
+  re-deriving the tallies, a correction landing, and all three coming back on
+  the room payload) and **driven in Chromium** (the room suite is 73 now: both
+  pickers offering the people in the room in attendance order, a vote cast
+  before the motion exists being HELD rather than sent, the exact create
+  payload, the votes following in their own write, the row's mover line, and a
+  motion with neither recorded drawing nothing) **with a control run**: 11 of
+  the 73 fail against the previous commit.
 - **A MEETING IS RENAMED WHERE ITS NAME IS READ (v9.51.7).** Renaming used to
   live on the manage screen, and the header link to it was removed in v9.50.4,
   so there was nowhere left to do it. `EditableHeading` (exported from

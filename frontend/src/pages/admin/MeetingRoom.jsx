@@ -396,6 +396,168 @@ function ActionRow({ action, present, pool, objectives, nameOf, objectiveOf, onC
 
 /* ── Motions ────────────────────────────────────────────────────────────── */
 
+// Moved by / seconded by. The people in the room are who moves and seconds a
+// motion, so the list is the attendance — but a name already recorded stays
+// selectable even when that person is no longer marked present, or reopening
+// the record would quietly drop it.
+function MemberPick({ label, value, present, pool, onChange }) {
+  const off = value && !present.some(p => p.member_id === value)
+    ? (pool || []).find(p => p.member_id === value)
+    : null
+  const options = off ? [...present, off] : present
+  return (
+    <label className="flex-1 min-w-[9rem]">
+      <div className={`${cap} mb-1`}>{label}</div>
+      <select className={inp} value={value || ''} onChange={e => onChange(e.target.value || null)}>
+        <option value="">— nobody recorded —</option>
+        {options.map(p => <option key={p.member_id} value={p.member_id}>{p.full_name}</option>)}
+      </select>
+    </label>
+  )
+}
+
+// THE SAME FORM MOVES A MOTION AND CORRECTS ONE. A motion is moved, seconded
+// and voted on in one breath, so all of that is on screen the moment somebody
+// presses "+ Add motion" — recording the vote used to mean creating the motion
+// first and then reopening it under Edit.
+//
+// The two uses write differently, and both are right. Editing an existing
+// motion saves as it is pressed, the way the rest of this room works: a vote is
+// written the moment it is cast, so there is nothing a Cancel could undo. A new
+// motion has no row to write to yet, so it is held until "+ MOTION" — and the
+// NAMED votes go in a second request after that, since they key on the motion's
+// own id.
+function MotionForm({ motion, present, pool, objectives, defaultObjectiveId,
+                      onChange, onVotes, onSave, onCancel, onDelete }) {
+  const live = !!motion
+  const [form, setForm] = useState({
+    description: motion?.description || '',
+    proposed_by_member_id: motion?.proposed_by_member_id || '',
+    seconded_by_member_id: motion?.seconded_by_member_id || '',
+    objective_id: motion?.objective_id || defaultObjectiveId || '',
+    outcome: motion?.outcome || 'pending',
+  })
+  const [votes, setVotes] = useState(() => {
+    const m = {}
+    ;(motion?.votes || []).forEach(v => { m[v.member_id] = v.vote })
+    return m
+  })
+  const [busy, setBusy] = useState(false)
+  // Called on every render so the hook order never changes; only read when the
+  // form is editing something that already exists.
+  const saveWording = useAutosave(v => onChange?.({ description: v }))
+
+  const set = (patch, { debounce = false } = {}) => {
+    setForm(f => ({ ...f, ...patch }))
+    if (!live) return
+    if (debounce) saveWording(patch.description)
+    else onChange?.(patch)
+  }
+  const voteList = v => Object.entries(v).map(([member_id, vote]) => ({ member_id, vote }))
+  const setVote = (memberId, vote) => {
+    const next = { ...votes }
+    if (vote === null) delete next[memberId]
+    else next[memberId] = vote
+    setVotes(next)
+    if (live) onVotes?.(voteList(next))
+  }
+  const allPresentFor = () => {
+    const next = {}
+    present.forEach(p => { next[p.member_id] = 'for' })
+    setVotes(next)
+    if (live) onVotes?.(voteList(next))
+  }
+
+  async function submit() {
+    if (!form.description.trim()) return
+    setBusy(true)
+    try {
+      await onSave({
+        description: form.description.trim(),
+        proposed_by_member_id: form.proposed_by_member_id || null,
+        seconded_by_member_id: form.seconded_by_member_id || null,
+        objective_id: form.objective_id || null,
+        outcome: form.outcome,
+        votes: voteList(votes),
+      })
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-2 rounded bg-pb-surface2/60 p-2.5 space-y-2">
+      <textarea className={`${inp} min-h-[46px]`} value={form.description}
+        placeholder="Motion wording…" autoFocus={!live}
+        onChange={e => set({ description: e.target.value }, { debounce: true })} />
+      {/* Who moved it and who seconded it — the two names every set of minutes
+          records beside the wording. */}
+      <div className="flex gap-2 flex-wrap">
+        <MemberPick label="MOVED BY" value={form.proposed_by_member_id} present={present} pool={pool}
+          onChange={v => set({ proposed_by_member_id: v })} />
+        <MemberPick label="SECONDED BY" value={form.seconded_by_member_id} present={present} pool={pool}
+          onChange={v => set({ seconded_by_member_id: v })} />
+        {!live && (
+          <label className="flex-1 min-w-[9rem]">
+            <div className={`${cap} mb-1`}>OUTCOME</div>
+            <select className={inp} value={form.outcome} style={{ color: toneOf(form.outcome) }}
+              onChange={e => set({ outcome: e.target.value })}>
+              {MOTION_OUTCOMES.map(o => <option key={o} value={o}>{titleCase(o)}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {/* Which line of the club's plan this decision serves. An action raised
+          under the motion inherits it, so the decision and the work that
+          follows report against the same objective. */}
+      <div className="max-w-md">
+        <ObjectiveSelect objectives={objectives} value={form.objective_id}
+          onChange={v => set({ objective_id: v || '' })} label="SERVES OBJECTIVE" />
+      </div>
+      <div>
+        <div className="flex items-center justify-between gap-2 mb-1">
+          <div className={cap}>
+            VOTES
+            <Hint text="Recording names re-derives the tallies. Leave it empty and a counted show of hands stands." />
+          </div>
+          {present.length > 0 && (
+            <button onClick={allPresentFor}
+              className="font-mono text-[9px] text-pb-faint hover:text-pb-text">All present: For</button>
+          )}
+        </div>
+        {present.length === 0 ? (
+          <div className="font-mono text-[10px] text-pb-faintest">
+            Only people marked present can vote. Set attendance first.
+          </div>
+        ) : (
+          <div className="max-h-[220px] overflow-y-auto pb-scroll">
+            {present.map(p => (
+              <div key={p.member_id} className="flex items-center justify-between gap-2 py-0.5">
+                <span className="text-[12px] text-pb-dim truncate">{p.full_name}</span>
+                <div className="flex gap-1 shrink-0">
+                  {VOTES.map(([v, l]) => (
+                    <button key={v} onClick={() => setVote(p.member_id, votes[p.member_id] === v ? null : v)}
+                      className={`px-2 py-0.5 rounded font-mono text-[9px] border ${votes[p.member_id] === v
+                        ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
+                      style={votes[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {live ? (
+        <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">Delete motion</button>
+      ) : (
+        <div className="flex gap-2 items-center">
+          <button onClick={submit} disabled={busy || !form.description.trim()} className={btnAccent}
+            style={{ background: 'var(--pb-accent)' }}>{busy ? 'SAVING…' : '+ MOTION'}</button>
+          <button onClick={onCancel} className={btn}>Cancel</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // NO BOX INSIDE A BOX: the agenda item is the container, and a motion is
 // separated from its neighbours by its own tinted edge and by spacing. That is
 // one rectangle fewer per record on a screen that had five of them nested.
@@ -410,21 +572,13 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
                  onAddAction, actions, onActionChange, onActionDelete, dragProps, isOver }) {
   const [open, setOpen] = useState(false)
   const [adding, setAdding] = useState(false)
-  const [wording, setWording] = useState(motion.description || '')
-  const saveWording = useAutosave(v => onChange({ description: v }))
   const serves = objectiveOf?.(motion.objective_id)
-  const votes = useMemo(() => {
-    const m = {}
-    ;(motion.votes || []).forEach(v => { m[v.member_id] = v.vote })
-    return m
-  }, [motion.votes])
-
-  const setVote = (memberId, vote) => {
-    const next = { ...votes }
-    if (vote === null) delete next[memberId]
-    else next[memberId] = vote
-    onVotes(Object.entries(next).map(([member_id, v]) => ({ member_id, vote: v })))
-  }
+  // Shown only when the club actually recorded one. A club that counts hands
+  // and never names a mover should not have every motion carrying a reproach.
+  const moved = nameOf?.(motion.proposed_by_member_id)
+  const seconded = nameOf?.(motion.seconded_by_member_id)
+  const movers = [moved && `moved by ${moved}`, seconded && `seconded by ${seconded}`]
+    .filter(Boolean).join(' · ')
 
   return (
     <div className={`pl-2.5 py-1 ${isOver ? 'ring-1 ring-pb-accent/60 rounded' : ''}`}
@@ -451,6 +605,7 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
                 hides exactly the half that says which objective this is. */}
             <span className="text-pb-faintest min-w-0">{serves ? `serves ${serves}` : 'not on the plan'}</span>
           </div>
+          {movers && <div className="font-mono text-[9.5px] text-pb-faintest mt-0.5">{movers}</div>}
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <select value={motion.outcome} onChange={e => onChange({ outcome: e.target.value })}
@@ -464,52 +619,8 @@ function Motion({ motion, present, pool, nameOf, objectives, objectiveOf, onChan
       </div>
 
       {open && (
-        <div className="mt-2 rounded bg-pb-surface2/60 p-2.5 space-y-2">
-          <textarea className={`${inp} min-h-[46px]`} value={wording}
-            placeholder="Motion wording…"
-            onChange={e => { setWording(e.target.value); saveWording(e.target.value) }} />
-          {/* Which line of the club's plan this decision serves. An action
-              raised under the motion inherits it, so the decision and the work
-              that follows report against the same objective. */}
-          <div className="max-w-md">
-            <ObjectiveSelect objectives={objectives} value={motion.objective_id}
-              onChange={v => onChange({ objective_id: v })} label="SERVES OBJECTIVE" />
-          </div>
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <div className={cap}>
-                VOTES
-                <Hint text="Recording names re-derives the tallies. Leave it empty and a counted show of hands stands." />
-              </div>
-              {present.length > 0 && (
-                <button onClick={() => onVotes(present.map(p => ({ member_id: p.member_id, vote: 'for' })))}
-                  className="font-mono text-[9px] text-pb-faint hover:text-pb-text">All present: For</button>
-              )}
-            </div>
-            {present.length === 0 ? (
-              <div className="font-mono text-[10px] text-pb-faintest">
-                Only people marked present can vote. Set attendance first.
-              </div>
-            ) : (
-              <div className="max-h-[220px] overflow-y-auto pb-scroll">
-                {present.map(p => (
-                  <div key={p.member_id} className="flex items-center justify-between gap-2 py-0.5">
-                    <span className="text-[12px] text-pb-dim truncate">{p.full_name}</span>
-                    <div className="flex gap-1 shrink-0">
-                      {VOTES.map(([v, l]) => (
-                        <button key={v} onClick={() => setVote(p.member_id, votes[p.member_id] === v ? null : v)}
-                          className={`px-2 py-0.5 rounded font-mono text-[9px] border ${votes[p.member_id] === v
-                            ? 'text-pb-bg border-transparent' : 'pb-hairline text-pb-faint hover:text-pb-text'}`}
-                          style={votes[p.member_id] === v ? { background: 'var(--pb-accent)' } : undefined}>{l}</button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <button onClick={onDelete} className="font-mono text-[9px] text-pb-faint hover:text-pb-red">Delete motion</button>
-        </div>
+        <MotionForm motion={motion} present={present} pool={pool} objectives={objectives}
+          onChange={onChange} onVotes={onVotes} onDelete={onDelete} />
       )}
 
       {actions.length > 0 && (
@@ -544,7 +655,6 @@ function AgendaItem({
   onAddAction, onActionChange, onActionDelete,
   motionDrag,
 }) {
-  const [addingMotion, setAddingMotion] = useState('')
   const [motionOpen, setMotionOpen] = useState(false)
   const [addingAction, setAddingAction] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -641,22 +751,14 @@ function AgendaItem({
                   dragProps={motionDrag?.propsFor(mo, mi)} />
               ))}
             </div>
-            {/* An empty field is not information. The wording box appears when
-                somebody actually wants to move something. */}
+            {/* An empty form is not information. It appears when somebody
+                actually wants to move something — and then it carries the
+                whole record, so the vote is taken here rather than by
+                creating the motion and reopening it under Edit. */}
             {motionOpen ? (
-              <div className="flex gap-2 mt-2">
-                <input className={`${inp} flex-1`} placeholder="Motion wording…" value={addingMotion} autoFocus
-                  onChange={e => setAddingMotion(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Escape') { setAddingMotion(''); setMotionOpen(false) }
-                    if (e.key === 'Enter' && addingMotion.trim()) {
-                      onAddMotion(addingMotion.trim()); setAddingMotion(''); setMotionOpen(false)
-                    }
-                  }} />
-                <button className={btn} disabled={!addingMotion.trim()}
-                  onClick={() => { onAddMotion(addingMotion.trim()); setAddingMotion(''); setMotionOpen(false) }}>+ Motion</button>
-                <button className={btn} onClick={() => { setAddingMotion(''); setMotionOpen(false) }}>Cancel</button>
-              </div>
+              <MotionForm present={present} pool={pool} objectives={objectives}
+                onSave={async d => { await onAddMotion(d); setMotionOpen(false) }}
+                onCancel={() => setMotionOpen(false)} />
             ) : (
               <button onClick={() => setMotionOpen(true)}
                 className="font-mono text-[9px] text-pb-faint hover:text-pb-text mt-2">+ Add motion</button>
@@ -1007,7 +1109,15 @@ export function MeetingRoomPanel({ meetingId, onMeta, inlineHeader = false, onEx
                 actions={actions.filter(a => a.agenda_item_id === item.id)}
                 onItemChange={wrap(p => api.committeeUpdateAgendaItem(meetingId, item.id, p))}
                 onItemDelete={wrap(() => api.committeeDeleteAgendaItem(meetingId, item.id))}
-                onAddMotion={wrap(desc => api.committeeCreateMotion(meetingId, { description: desc, agenda_item_id: item.id }))}
+                onAddMotion={wrap(async d => {
+                  // The named votes key on the motion's own id, so they can
+                  // only be written once it exists. Everything else — the
+                  // wording, who moved and seconded it, the outcome and the
+                  // objective — goes in the one create.
+                  const { votes, ...fields } = d
+                  const mo = await api.committeeCreateMotion(meetingId, { ...fields, agenda_item_id: item.id })
+                  if (votes?.length && mo?.id) await api.committeeSetMotionVotes(meetingId, mo.id, votes)
+                })}
                 onMotionChange={wrap((id, p) => api.committeeUpdateMotion(meetingId, id, p))}
                 onMotionDelete={wrap(id => api.committeeDeleteMotion(meetingId, id))}
                 onMotionVotes={wrap((id, v) => api.committeeSetMotionVotes(meetingId, id, v))}
