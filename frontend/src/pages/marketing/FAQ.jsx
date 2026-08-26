@@ -139,7 +139,7 @@ const CATEGORIES = [
       },
       {
         q: 'Are there setup fees?',
-        a: "Up to two hours of dedicated support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time. We'll guide you through merging players and grades if needed, and show you how to load all of your club's history into BetterCricket.",
+        a: "No. There is no migration fee, and onboarding support is included in your first year on BetterStats. If all of your club's match history is already uploaded, you should be up and running in no time. We'll guide you through merging players and grades if needed, and show you how to load all of your club's history into BetterCricket.",
       },
       {
         q: 'Do you offer a free trial?',
