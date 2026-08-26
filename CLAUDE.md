@@ -352,6 +352,80 @@ payments.**
   per-rep view of their own clubs. The service still takes a `rep_user_id` pin,
   so opening it to a rep later is a route change rather than a rewrite.
 
+### A Sales Workspace note on the CRM deal card (v9.53.9)
+
+Asked for directly: a note added in the Sales Workspace — the "add a note"
+box, not a call outcome — must be visible on the CRM deal's card.
+
+- **IT WAS ALREADY ON THE WIRE, AND FINDING THAT OUT DECIDED THE WHOLE
+  SHAPE OF THE FIX.** `sw.log_note` writes an ordinary `crm_activities` row
+  against the SAME `crm_deals` row the Sales Pipeline board manages, and
+  `crm_service.list_activities` has no type filter — so the card's endpoint
+  was returning the note all along. Verified against a real Postgres through
+  the shipped route bodies before touching a line of it. There is no sync to
+  build and no missing field; the gap was entirely in how the card drew it.
+- **THE CARD IS THE SHOWS-EVERYTHING SURFACE, WHICH IS EXACTLY WHY THE NOTE
+  WAS LOST.** `list_activities_for_workspace`'s own docstring says the drawer
+  filters the Twenty backfill and the reassignment audit rows and "the CRM
+  Pipeline board still shows everything, by design". That design is kept —
+  but a rep's note sat in a 192px scroll box among two dozen imported rows,
+  under a bare `<Pill>{a.type}</Pill>`, with no author, no pin and no line
+  breaks. Measured on a real-shaped deal: the pinned note rendered **1,785px
+  below** the plain one, at the bottom of the import pile.
+- **A `Notes (n)` filter, not a changed default.** The card still opens on the
+  whole history — narrowing what it shows by default would be a different
+  change from the one that was asked for. The filter is what makes the notes
+  reachable in one click.
+- **PINNED MEANS THE SAME THING ON BOTH SCREENS.** The card read `a.type` and
+  nothing else, so `meta.pinned` — the rep's own "keep this in front of
+  whoever picks this club up next" — was invisible. Pinned notes are lifted
+  above the feed in the same amber the drawer uses, whichever filter is on.
+  Pinning is still a Sales Workspace action; the card reflects it.
+- **`activityLabel` / `activityTone` / `activityByLine` live in
+  `components/admin/crm/ui.jsx` and BOTH screens read them** — the drawer's
+  `ActivityRow` was rewired onto them rather than left as a second copy. The
+  suite asserts the two screens name the same row identically rather than
+  taking the comment's word for it; the drawer is compared on the rows it
+  actually draws through them (a note, a call, a system row), since a pinned
+  note is lifted into its own unlabelled block there.
+- **`user_names_by_ids` moved to `services/crm.py`, and
+  `sales_workspace.user_names_by_ids` delegates.** An activity's author is a
+  CRM fact and the workspace is one reader of it, not its owner. Both
+  activity endpoints (club scope AND platform scope) go through one
+  `_activities_payload` builder, so the two can never drift about what a
+  deal's timeline holds.
+- **A HOOK BELOW `if (!open) return null` IS A HOOK-COUNT BUG, and the
+  browser found it, not the build.** The first cut put the four `useMemo`s
+  next to `contactOptions`, which sits after that early return — the modal
+  renders closed most of the time, so React saw a different hook count
+  between renders and the card died with "Rendered more hooks than during the
+  previous render". `npx vite build` passes on it. Same family as the Roster
+  temporal-dead-zone note above: anything a render body reads or registers
+  has to sit above every early return.
+- **Verified against a real Postgres** (`backend/verification/verify_deal_card_notes.py`,
+  24 checks through the shipped route bodies and writers: the reported case
+  replayed, the pin and the line breaks surviving onto the card, the author
+  named and falling back to the username, a note still found among 31
+  import/audit rows while the drawer still hides them, a call staying a call
+  and a General Note staying a note with its outcome, an edit landing, a note
+  added ON the card showing in the drawer, the club scope getting the same
+  treatment with no platform note leaking into it, and an author-less system
+  row reporting no name rather than breaking) and **driven in Chromium**
+  (`verify_deal_card_notes_browser.mjs`, 26) **with a control run**: with the
+  change stashed, 7 fail on exactly the reported behaviour.
+- **Three checks passed against the broken code on the first cut and had to
+  be tightened**: the byline matched the deal's OWNER (also "Sam Rep") through
+  a too-wide section locator; the pinned note was dated newest, so a flat
+  chronological feed put it on top anyway; and the stub returned its rows in
+  array order rather than `occurred_at DESC` the way `list_activities` does,
+  so the arrangement was doing the work. A check that cannot fail is not a
+  check.
+- **Noticed, NOT fixed**: the deal card modal overflows 360px at 390px.
+  Confirmed pre-existing by re-measuring with the change stashed (identical
+  either way; the widest element is a 726px `flex items-center gap-2` row this
+  change does not touch). The suite budgets the measured number so this can
+  never make it worse.
+
 ### A sales email that reported itself sent, and was not (v9.51.4)
 
 Reported: the club never received the trial-extension email the rep had been
