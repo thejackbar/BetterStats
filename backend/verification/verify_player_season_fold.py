@@ -38,6 +38,7 @@ from _view_ddl import view_statements
 from app.models.db import Base
 from app.services import grade_scope
 from app.routers.players import get_player_captain_stats
+from app.routers.records import get_records
 from app.services import aggregations as agg
 from app.services.player_formats import player_format_splits
 from app.services.aggregations import (
@@ -503,6 +504,25 @@ async def main() -> None:
         venues = await agg.get_player_by_venue(session, str(PLAYER), scope=scope)
         vg = sum((v.get("games") or 0) for v in venues)
         check("by-venue counts our 7 games, not all 11", vg == 7, str(vg))
+
+        print("\n— the grade leaderboard agrees with the player's own page —")
+        # Called directly, so every Query() default must be supplied.
+        recs = await get_records(
+            str(OURS), season_id=None, grade_id=None,
+            grade_name="Men's First Grade", finals_only=False,
+            captain_only=False, gender=None, categories=None, formats=None,
+            db=session, viewer=None)
+        board = {r["name"]: r
+                 for r in ((recs.get("team") or {}).get("most_matches") or [])}
+        me = board.get("Sawatzky, Cameron", {})
+        grid_total = by_grade2.get("Men's First Grade", {}).get("matches")
+        check("the player is on the grade's most-matches board",
+              bool(me), str(list(board)))
+        check("the board reads what the player's own grid reads",
+              me.get("matches") == grid_total,
+              f"board {me.get('matches')} vs grid {grid_total}")
+        check("which is CA's figure less the club's -1 correction (6)",
+              me.get("matches") == 6, str(me.get("matches")))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

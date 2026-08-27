@@ -886,19 +886,78 @@ async def get_records(
         """)
     elif use_psgs_path:
         psgs_season_clause = "AND psgs.season_id = ANY(:season_ids)" if season_ids else ""
+        msa_season_clause = "AND msa.season_id = ANY(:season_ids)" if season_ids else ""
+        gg_season_clause = "AND gr.season_id = ANY(:season_ids)" if season_ids else ""
+        # Same two rules the player profile's own by-grade grid follows
+        # (`aggregations.get_player_team_breakdown`), so a grade's leaderboard
+        # and a player's own page cannot disagree about the same figure:
+        #   - CA's per-grade rows are read for THIS CLUB'S grades only. One
+        #     participant GUID serves every club a person turns out for, so an
+        #     unscoped join adds a second club's matches on top of ours.
+        #   - the club's own corrections (Manual Entries -> Adjustments, entered
+        #     against a season and a grade) are applied on top, clamped at zero.
         most_matches = await q(f"""
+            WITH grade_adj AS (
+                SELECT msa.player_id, SUM(msa.games_played) AS adj
+                FROM manual_season_adjustments msa
+                JOIN grades gr ON gr.id = msa.grade_id
+                WHERE msa.organisation_id = CAST(:org_id AS UUID)
+                  AND {_grade_match}
+                  {msa_season_clause}
+                GROUP BY msa.player_id
+            ),
+            -- Never below the scorecards the club actually holds for the
+            -- grade, which is the other half of the profile's own rule: CA's
+            -- per-grade row is the source of truth but can be short of what we
+            -- hold, and taking its figure alone puts this board below the
+            -- player's own page for the same grade.
+            grade_scoped_games AS (
+                SELECT g.id AS game_id
+                FROM v_effective_games g
+                JOIN grades gr ON gr.id = g.grade_id
+                WHERE {_grade_match}
+                  AND (g.organisation_id = CAST(:org_id AS UUID)
+                       OR g.home_org_id = CAST(:org_id AS UUID)
+                       OR g.away_org_id = CAST(:org_id AS UUID))
+                  {gg_season_clause}
+            ),
+            grade_games AS (
+                SELECT ap.player_id, COUNT(DISTINCT ap.game_id) AS games
+                FROM (
+                    SELECT bi.player_id, bi.game_id FROM v_effective_batting_innings bi
+                    WHERE bi.game_id IN (SELECT game_id FROM grade_scoped_games)
+                    UNION
+                    SELECT bs.player_id, bs.game_id FROM v_effective_bowling_spells bs
+                    WHERE bs.game_id IN (SELECT game_id FROM grade_scoped_games)
+                    UNION
+                    SELECT fs.player_id, fs.game_id FROM v_effective_fielding_stats fs
+                    WHERE fs.game_id IN (SELECT game_id FROM grade_scoped_games)
+                    UNION
+                    SELECT gap.player_id, gap.game_id FROM game_appearances gap
+                    WHERE gap.game_id IN (SELECT game_id FROM grade_scoped_games)
+                ) ap
+                GROUP BY ap.player_id
+            )
             SELECT p.id::text AS player_id,
                    COALESCE(p.display_name_override, p.name) AS name,
-                   COALESCE(SUM(psgs.matches), 0) AS matches,
+                   GREATEST(GREATEST(COALESCE(SUM(psgs.matches), 0),
+                                     COALESCE(MAX(gg.games), 0))
+                            + COALESCE(MAX(ga.adj), 0), 0) AS matches,
                    COUNT(DISTINCT psgs.season_id) AS seasons
             FROM players p
             JOIN player_season_grade_stats psgs ON psgs.player_id = p.id
             JOIN grades gr ON gr.id = psgs.grade_id
+            JOIN seasons s ON s.id = gr.season_id
+                          AND s.organisation_id = CAST(:org_id AS UUID)
+            LEFT JOIN grade_adj ga ON ga.player_id = p.id
+            LEFT JOIN grade_games gg ON gg.player_id = p.id
             WHERE p.organisation_id = :org_id
               AND {_grade_match}
               {psgs_season_clause}{gender_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-            HAVING SUM(psgs.matches) > 0
+            HAVING GREATEST(GREATEST(COALESCE(SUM(psgs.matches), 0),
+                                     COALESCE(MAX(gg.games), 0))
+                            + COALESCE(MAX(ga.adj), 0), 0) > 0
             ORDER BY matches DESC LIMIT :limit
         """)
     elif use_game_level:

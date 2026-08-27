@@ -63,6 +63,39 @@ slice of the real season.
   one synced club. Which of the two readings a club wants is a product decision,
   not a bug this fix should settle on its own.
 
+### The grade leaderboard and the profile under it (v9.53.13)
+
+Reported off Records with a grade picked: the board read 61 where the
+player's own by-grade grid read 60.
+
+- **NEITHER FIGURE WAS THE OLD BUG. The 1 was the club's own correction
+  landing on one surface and not the other.** CA's per-grade figure for this
+  player is 61; the club had entered a -1 against 2022/23 1st Grade, which
+  v9.53.11 made reach the profile grid (60) and nothing had made reach the
+  board. Establishing that first is what stopped this being "chase another
+  missing match".
+- **`use_psgs_path` SUMMED `player_season_grade_stats` WITH NO CLUB SCOPING**,
+  the same leak the grid had: `JOIN grades gr ON gr.id = psgs.grade_id` and
+  nothing about whose season that grade belongs to, so a second club's rows
+  for the same participant GUID were added on top. Scoped through
+  `seasons.organisation_id` now. In the suite the unscoped board reads 9
+  against a true 6.
+- **THE BOARD ALSO HAD TO KEEP THE PROFILE'S OTHER HALF.** `max(held,
+  claimed)` — CA's per-grade row, never below the scorecards the club holds —
+  is what the grid uses; the board took CA's figure alone, so it sat BELOW the
+  player's own page wherever CA is short of what we hold (a shared fixture the
+  other club synced first is exactly that case). `grade_games` supplies the
+  floor, and `grade_scoped_games` narrows the games FIRST so the three
+  per-innings unions are not scanned platform-wide — the shape the
+  `use_game_level` branch beside it already uses.
+- **Measured**: 1,567ms against a 1,528ms baseline for the whole records
+  endpoint at platform scale, on a larger dataset than the baseline run. The
+  added CTEs are not what that endpoint costs.
+- **Verified against a real Postgres** (the suite is 65 checks now: the player
+  on the board, the board reading exactly what the profile's grid reads, and
+  that figure being CA's less the club's correction) **with a control run**:
+  2 fail against the previous commit, the board reading 9 for a true 6.
+
 ### One rule for "this game is ours", on every player read (v9.53.12)
 
 Asked for directly after the grid fix: it should be in effect across all
