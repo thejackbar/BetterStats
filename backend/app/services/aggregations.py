@@ -1483,6 +1483,18 @@ async def get_player_team_breakdown(
     coverage can be incomplete, so we attribute any per-season gap to a grade
     when only one grade has per-game appearances that season (the unambiguous
     case). Truly ambiguous seasons accumulate into ``unattributed``.
+
+    **Every read here is scoped to the club's OWN seasons and grades, and that
+    is load-bearing.** CA issues one participant GUID per person across every
+    club they turn out for, so a player's rows can sit under another club's
+    grade — and both the scorecard counts and CA's own per-grade aggregate
+    (`player_season_grade_stats`) joined `grades` with no organisation filter,
+    so a second club's matches were added on top of this club's. Reported case:
+    a player's 1st Grade read 66 where CA's own figure for the club is 61,
+    with all 24 excess matches across the grid sitting on other clubs' season
+    rows. Scoping both sides keeps `max(held, claimed)` self-healing — a shared
+    fixture the other club synced first drops off the scorecard side but is
+    still claimed by CA's per-grade row, so nothing is lost.
     """
     season_clause_gr = ""
     season_clause_pss = ""
@@ -1520,6 +1532,8 @@ async def get_player_team_breakdown(
             FROM appearances ap
             JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons sc ON sc.id = gr.season_id
+                           AND sc.organisation_id = CAST(:org_id AS UUID)
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -1584,6 +1598,8 @@ async def get_player_team_breakdown(
             FROM appearances ap
             JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
+            JOIN seasons sc ON sc.id = gr.season_id
+                           AND sc.organisation_id = CAST(:org_id AS UUID)
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -1604,14 +1620,37 @@ async def get_player_team_breakdown(
         """),
         params,
     )
-    # Seasons are folded onto their canonical row before anything is counted:
-    # a club's real-world season can be split across several `seasons` rows
-    # (Merge Seasons, or one CA season guid per competition), and a grid drawn
-    # off the raw ids would show that one year as two lines.
+    # Seasons are folded onto ONE row per year before anything is counted. A
+    # club's real-world season is routinely split across several `seasons` rows
+    # — a merge (Merge Seasons), or a second row minted from a competition's own
+    # CA season guid — and a grid drawn off the raw ids shows that one year as
+    # two or three identical lines. Alias first, then the club's own row for the
+    # year, then back through any merge on that row: the same rule
+    # `resolve_season_filter` applies to every season filter in the app.
     alias_rev = await load_reverse_alias_map(session, org_id) if org_id else {}
+    club_seasons = await session.execute(
+        text("SELECT id, year FROM seasons WHERE organisation_id = CAST(:org_id AS UUID)"),
+        {"org_id": org_id},
+    ) if org_id else None
+    year_by_season: dict[str, int] = {}
+    season_by_year: dict[int, str] = {}
+    if club_seasons is not None:
+        for r in club_seasons.mappings():
+            sid, yr = str(r["id"]), r["year"]
+            if yr is None:
+                continue
+            year_by_season[sid] = yr
+            # Deterministic pick, so the row a year folds onto is stable across
+            # requests. Any member works for a deep link — resolve_season_filter
+            # expands whichever one it is back to the whole year.
+            if yr not in season_by_year or sid < season_by_year[yr]:
+                season_by_year[yr] = sid
 
     def _canonical_season(raw) -> str:
-        sid = str(raw)
+        sid = alias_rev.get(str(raw), str(raw))
+        year = year_by_season.get(sid)
+        if year is not None:
+            sid = season_by_year.get(year, sid)
         return alias_rev.get(sid, sid)
 
     season_grade_games: dict = {}  # season_id -> {grade_name: count}
@@ -1628,6 +1667,11 @@ async def get_player_team_breakdown(
             SELECT pss.season_id, COALESCE(pss.matches, 0) AS matches
             FROM v_effective_player_season_stats pss
             WHERE pss.player_id = CAST(:pid AS UUID)
+              -- A correction the club typed against a specific grade is applied
+              -- to that cell below; leaving it in here too would count it twice
+              -- on the gap heuristic. A grade-less one has no cell to go to and
+              -- still belongs to the season as a whole.
+              AND NOT (pss.source = 'manual_aggregate' AND pss.grade_id IS NOT NULL)
               {season_clause_pss}
         """),
         params,
@@ -1646,6 +1690,8 @@ async def get_player_team_breakdown(
                 COALESCE(psgs.matches, 0) AS matches
             FROM player_season_grade_stats psgs
             JOIN grades gr ON gr.id = psgs.grade_id
+            JOIN seasons sc ON sc.id = gr.season_id
+                           AND sc.organisation_id = CAST(:org_id AS UUID)
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -1676,6 +1722,49 @@ async def get_player_team_breakdown(
         by_grade = exact_per_season_grade.setdefault(sid, {})
         by_grade[gn] = by_grade.get(gn, 0) + m
 
+    # The club's own corrections, entered against one season and one grade
+    # (Manual Entries -> Adjustments). Additive, so a -1 takes a match off the
+    # cell — CA counts a player as having played the moment they are named on
+    # the team sheet, so a club correcting for a match nobody actually played
+    # has nowhere else to say so.
+    manual_grade_adj = await session.execute(
+        text(f"""
+            SELECT
+                pss.season_id,
+                COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name)) AS grade_name,
+                SUM(COALESCE(pss.matches, 0)) AS matches
+            FROM v_effective_player_season_stats pss
+            JOIN grades gr ON gr.id = pss.grade_id
+            JOIN seasons sc ON sc.id = gr.season_id
+                           AND sc.organisation_id = CAST(:org_id AS UUID)
+            LEFT JOIN LATERAL (
+                SELECT canonical_name FROM grade_merge_logs gml
+                WHERE gml.org_id = CAST(:org_id AS UUID)
+                  AND gml.alias_name = gr.name
+                  AND gml.undone_at IS NULL
+                LIMIT 1
+            ) am ON TRUE
+            LEFT JOIN LATERAL (
+                SELECT gr2.display_name_override FROM grades gr2
+                JOIN seasons s2 ON s2.id = gr2.season_id
+                WHERE s2.organisation_id = CAST(:org_id AS UUID)
+                  AND gr2.name = COALESCE(am.canonical_name, gr.name)
+                  AND gr2.display_name_override IS NOT NULL
+                LIMIT 1
+            ) gdn ON TRUE
+            WHERE pss.player_id = CAST(:pid AS UUID)
+              AND pss.source = 'manual_aggregate'
+              {season_clause_pss}
+            GROUP BY pss.season_id,
+                     COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
+        """),
+        params,
+    )
+    manual_cells: dict = {}  # (season_id, grade_name) -> matches delta
+    for r in manual_grade_adj.mappings():
+        key = (_canonical_season(r["season_id"]), r["grade_name"])
+        manual_cells[key] = manual_cells.get(key, 0) + int(r["matches"] or 0)
+
     # Attribution runs ONCE, per (season, grade), and everything else is read
     # off the result. Doing it per season rather than per whole career is also
     # what makes a mixed history add up: a player with CA's exact per-grade
@@ -1686,7 +1775,12 @@ async def get_player_team_breakdown(
     cell_unknown: dict = {}       # (season_id, grade_name) -> matches with no scorecard
     season_unattributed: dict = {}  # season_id -> matches we can't place in a grade
 
-    for sid in set(season_grade_games) | set(exact_per_season_grade) | set(season_aggregate):
+    manual_by_season: dict = {}
+    for (msid, mgn), mval in manual_cells.items():
+        manual_by_season.setdefault(msid, {})[mgn] = mval
+
+    for sid in (set(season_grade_games) | set(exact_per_season_grade)
+                | set(season_aggregate) | set(manual_by_season)):
         scorecards = season_grade_games.get(sid, {})
         exact = exact_per_season_grade.get(sid)
         row_cells: dict = {}
@@ -1717,6 +1811,20 @@ async def get_player_team_breakdown(
                     cell_unknown[(sid, gn)] = cell_unknown.get((sid, gn), 0) + gap
                 else:
                     season_unattributed[sid] = gap
+        # The club's own correction lands last, on top of whatever CA and the
+        # scorecards came to. Clamped at zero — a cell cannot hold fewer than no
+        # matches — and a cell corrected away entirely stops being drawn.
+        for gn, delta in manual_by_season.get(sid, {}).items():
+            if not delta:
+                continue
+            row_cells[gn] = max(row_cells.get(gn, 0) + delta, 0)
+            if row_cells[gn] == 0:
+                row_cells.pop(gn)
+                cell_unknown.pop((sid, gn), None)
+            elif delta < 0:
+                # Fewer matches than we hold scorecards for is no longer a gap.
+                cell_unknown[(sid, gn)] = max(
+                    cell_unknown.get((sid, gn), 0) + delta, 0)
         if row_cells or season_unattributed.get(sid):
             cells[sid] = row_cells
 
