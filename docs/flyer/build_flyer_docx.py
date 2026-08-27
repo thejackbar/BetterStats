@@ -369,11 +369,8 @@ def eyebrow(doc, text, space_before=14):
 
 
 def bullet(container, text, size=7.3, line=10.2, space_before=1.5):
-    """A hanging-indent bullet, so a wrapped line sits under the words above it."""
+    """A bullet whose wrapped lines run flush left, not indented under the text."""
     p = para(container, space_before, 0, line)
-    pf = p.paragraph_format
-    pf.left_indent = Pt(8)
-    pf.first_line_indent = Pt(-8)
     run(p, "·  ", size, ACCENT, bold=True)
     run(p, text, size, BODY)
     return p
@@ -397,7 +394,7 @@ def module_card(cell, name, price, promise, bullets, width, pill=None,
     text_para(head[1], price, 8.1, ACCENT, bold=True, line=11,
               align=WD_ALIGN_PARAGRAPH.RIGHT)
     if promise:
-        text_para(cell, promise, 7.6, BRIGHT, bold=True, line=10.5, space_before=3)
+        text_para(cell, promise, 7.6, ACCENT, bold=True, line=10.5, space_before=3)
     if columns == 1:
         for b in bullets:
             bullet(cell, b)
@@ -487,66 +484,35 @@ def page_one(doc):
             text_para(inner[1], body, 7.3, BODY, line=10.4, space_before=2)
 
     eyebrow(doc, "INCLUDED WITH EVERY CLUB", space_before=10)
-    text_para(doc, "BetterStats is the base every club starts on. It is the club's "
-                   "whole record, and the tools that keep the place running.",
+    text_para(doc, "BetterStats is the base every club starts on, and on its own it "
+                   "replaces the spreadsheet, the filing cabinet and the club site.",
               8.0, DIM, line=11, space_after=5, keep_with_next=True)
 
-    included = card(grid(doc, [CONTENT], 0)[0], fill=TINT, border=ACCENT,
-                    pad=(8, 10, 8, 10))
-    head = grid(included, [300, CONTENT - 20 - 300 - 8], 8)
-    clear(head[0])
-    p = para(head[0], 0, 0, line=12)
-    run(p, "BetterStats", 9.1, BRIGHT, bold=True)
-    run(p, "  ", 9.1, BRIGHT)
-    run(p, "  INCLUDED  ", 6.6, INK, bold=True, track=0.5, highlight=ACCENT)
-    clear(head[1])
-    text_para(head[1], "$399 / year", 9.1, ACCENT, bold=True, line=12,
-              align=WD_ALIGN_PARAGRAPH.RIGHT)
-
-    col_w = (CONTENT - 20 - 14) / 2
-    cols = grid(included, [col_w, col_w], 14)
-    left, right = cols
-    clear(left)
-    text_para(left, "THE RECORD", 6.8, ACCENT, bold=True, line=9.5, track=0.9,
-              space_before=4, space_after=2)
-    for b in [
-        "Every batting, bowling and fielding figure the club holds, reconciled "
-        "across decades and kept current on its own",
-        "Scorecards, fixtures and ladders going back as far as your records do",
-        "A profile for every player, leaderboards, all-time and partnership "
-        "records, and the honour board",
-        "Filter any of it by grade type and match type, so Under-14s never pad a "
-        "senior average",
-        "Awards and honours recorded against the player, not a plaque nobody "
-        "photographed",
-        "StatLab, so any question the committee asks gets a real answer and a "
-        "report you can save",
-        "Milestones flagged before they happen, so nobody's 100th game goes "
-        "unmarked",
-        "A season yearbook that writes itself, and Club Room Mode for the TV in "
-        "the clubhouse",
-    ]:
-        bullet(left, b)
-    clear(right)
-    text_para(right, "RUNNING THE PLACE", 6.8, ACCENT, bold=True, line=9.5, track=0.9,
-              space_before=4, space_after=2)
-    for b in [
-        "One directory of everyone at the club: players, parents, volunteers, "
-        "officials and life members",
-        "Committee meetings with agendas, minutes, motions and actions, tied to "
-        "the club's strategic plan",
-        "The volunteer roster, with hours logged and ready for a grant "
-        "application",
-        "Working-with-children, RSA and first-aid tickets tracked, with warnings "
-        "before they lapse",
-        "A club diary for the annual jobs: registrations, insurance, ground "
-        "bookings, the AGM",
-        "Events and ticketing for the presentation night and the fundraiser",
-        "Facilities and assets: bookings, hire, maintenance history and "
-        "replacement dates",
-    ]:
-        bullet(right, b)
-
+    module_card(
+        grid(doc, [CONTENT], 0)[0], "BetterStats", "$399 / year",
+        "Your club's whole history, public, current and finally in one place.",
+        ["Every batting, bowling and fielding figure the club holds, reconciled "
+         "across decades and kept current on its own",
+         "Scorecards, fixtures and ladders going back as far as your records do",
+         "Duplicate players found and merged in a click, keeping every innings, "
+         "spell and catch",
+         "Photograph an old scorebook page and the figures lift off it, checked "
+         "against what you already hold",
+         "No migration fee and no cap on seasons, however far back the club goes",
+         "Your own public site, at your own address, in your colours and crest",
+         "A profile for every player, leaderboards, all-time and partnership "
+         "records, and the honour board",
+         "Head-to-head splits: how a player goes against every club, ground and "
+         "format they have played",
+         "Filter any of it by grade type and match type, so Under-14s never pad a "
+         "senior average",
+         "StatLab, so any question the committee asks gets a real answer and a "
+         "report you can save",
+         "Milestones flagged before they happen, and awards and honours recorded "
+         "against the player",
+         "A season yearbook that writes itself, and Club Room Mode for the TV in "
+         "the clubhouse"],
+        CONTENT, pill="INCLUDED", tinted=True, columns=2)
 
     spacer(doc, 14)
 
@@ -560,6 +526,17 @@ def page_one(doc):
            "form, books the match fee against the right member and turns up in the "
            "yearbook. Nothing is typed twice, nothing drifts out of step, and the "
            "club gets one bill instead of five.", 7.8, BODY)
+
+    spacer(doc, 8)
+
+    quote = card(grid(doc, [CONTENT], 0)[0], fill=BG, border=ACCENT,
+                 pad=(5, 12, 5, 8), border_sides=("left",), border_size=11)
+    text_para(quote, "\"At last we have a complete stats package that lets us view "
+                     "the club's entire history across every statistic imaginable. "
+                     "It's made pretty much every spreadsheet we had redundant, and "
+                     "we had a lot.\"", 8.1, BRIGHT, italic=True, line=12)
+    text_para(quote, "Tristram Fletcher · Secretary, Applecross Cricket Club",
+              7.2, DIM, line=11, space_before=4)
 
 
 # ------------------------------------------------------------------ page 2 --
@@ -591,7 +568,7 @@ def page_two(doc):
         pair_w)
     module_card(
         row[1], "BetterSocials", "$149 / yr",
-        "Your website and your match-day posts, both fed by your cricket.",
+        "Your website and match-day posts, both fed by your scorecards.",
         ["A full club website: news, pages, galleries, sponsors and honour boards, "
          "on top of the stats pages every club gets",
          "No hosting bill, no site-builder subscription, and no waiting on the one "
@@ -609,19 +586,29 @@ def page_two(doc):
     wide = grid(doc, [CONTENT], 0)[0]
     module_card(
         wide, "BetterAdmin", "$149 / yr",
-        "The back office, off the spreadsheets.",
-        ["Subs and match fees that settle themselves as payments land, with what "
-         "every member owes on one screen",
+        "The back office. Say goodbye to spreadsheets, Mailchimp and more.",
+        ["Subs, memberships and match fees that settle themselves as payments land, "
+         "with who is financial and who owes on one screen",
          "Square for card and canteen takings, Xero for the books, so the treasurer "
          "stops re-keying the same figures",
-         "Membership tiers and subscriptions, so who is financial and who is not is "
-         "never a question",
-         "Bulk email to your own member list, with segments and templates, in place "
-         "of a separate mail subscription",
          "Stock, canteen and merch, with low-stock alerts and what each member still "
          "owes on their kit",
          "A sponsor and grant pipeline, so the money conversations don't sit in one "
-         "person's inbox"],
+         "person's inbox",
+         "One directory of everyone at the club: players, parents, volunteers, "
+         "officials and life members",
+         "Bulk email to that same list, with segments and templates, in place of a "
+         "separate mail subscription",
+         "The volunteer roster, with hours logged and ready for a grant application",
+         "Working-with-children, RSA and first-aid tickets tracked, with warnings "
+         "before they lapse",
+         "Committee meetings with agendas, minutes, motions and actions, tied to the "
+         "club's strategic plan",
+         "A club diary for the annual jobs: registrations, insurance, ground "
+         "bookings, the AGM",
+         "Events and ticketing for the presentation night and the fundraiser",
+         "Facilities and assets: bookings, hire, maintenance history and replacement "
+         "dates"],
         CONTENT, columns=2)
 
     spacer(doc, 6)
@@ -629,7 +616,7 @@ def page_two(doc):
     row = grid(doc, [pair_w, pair_w], 6)
     module_card(
         row[0], "BetterIQ", "$249 / yr",
-        "Know the opposition before the toss.",
+        "Know exactly how to beat your opposition before the toss.",
         ["A dossier on any upcoming opponent, built from your own scorecards without "
          "anyone requesting it",
          "Their danger players named, with a printable captain's cheat sheet",
@@ -639,7 +626,7 @@ def page_two(doc):
         pair_w)
     module_card(
         row[1], "BetterFantasyCricket", "$49 / yr",
-        "The comp that gets the whole club watching.",
+        "The comp that gets the whole club talking and engaged.",
         ["Salary cap or draft, scored off your club's real scorecards across every "
          "grade",
          "Squads of 12, the captain scores double, and the best 11 count each round",
@@ -668,22 +655,10 @@ def page_two(doc):
     run(p, ".", 8.4, BODY)
     text_para(money, "An annual licence, billed once and paid by card through "
                      "Stripe. Flat per club: one team or fifty, juniors and seniors, "
-                     "men's and women's, the same price, with unlimited players and "
-                     "seasons. About $955 less than the five separate tools it "
-                     "replaces, and the historical import the nearest rival charges "
-                     "$499 to $1,000 for is included.",
+                     "men's and women's, with unlimited players and seasons. About "
+                     "$955 less than the five tools it replaces, and the historical "
+                     "import a rival charges $499 to $1,000 for is included.",
               7.2, DIM, line=10.5, space_before=5)
-
-    spacer(doc, 8)
-
-    quote = card(grid(doc, [CONTENT], 0)[0], fill=BG, border=ACCENT,
-                 pad=(5, 12, 5, 8), border_sides=("left",), border_size=11)
-    text_para(quote, "\"At last we have a complete stats package that lets us view "
-                     "the club's entire history across every statistic imaginable. "
-                     "It's made pretty much every spreadsheet we had redundant, and "
-                     "we had a lot.\"", 8.1, BRIGHT, italic=True, line=12)
-    text_para(quote, "Tristram Fletcher · Secretary, Applecross Cricket Club",
-              7.2, DIM, line=11, space_before=4)
 
     rule(doc, HAIR, space_before=9, space_after=8)
 
