@@ -379,8 +379,9 @@ def bullet(container, text, size=7.3, line=10.2, space_before=1.5):
 def module_card(cell, name, price, promise, bullets, width, pill=None,
                 tinted=False, columns=1):
     """One module: what it is, then what the club actually gets."""
-    card(cell, fill=TINT if tinted else CARD, border=ACCENT if tinted else HAIR,
-         pad=(7, 9, 7, 9))
+    # Every module wears the accent border. BetterStats is still set apart, by
+    # its tinted fill and its INCLUDED pill rather than by the edge.
+    card(cell, fill=TINT if tinted else CARD, border=ACCENT, pad=(7, 9, 7, 9))
     inner = width - 18
     name_w = min(200, inner - 62)
     head = grid(cell, [name_w, inner - name_w - 6], 6)
