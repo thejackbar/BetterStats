@@ -689,6 +689,52 @@ def page_two(doc):
               space_before=9, align=WD_ALIGN_PARAGRAPH.CENTER)
 
 
+def align_table_edges(doc):
+    """Pull each bordered table right by half its border, so the edge lines up.
+
+    Word centres a cell border ON the cell boundary, so a 0.75pt card border hung
+    0.375pt outside it and a 1.375pt accent bar hung 0.69pt out. Against body
+    text sitting exactly on the margin, every card and every bar started a
+    fraction to the left of everything else, and the thicker bars started
+    further left than the thinner cards.
+
+    Indenting by the FULL border width is what puts the outer edge of the line
+    on the margin: the renderer places the cell box at margin + indent - half,
+    so an indent of two halves leaves the outside of the stroke exactly on the
+    margin whatever its weight. Measured off the rendered PDF, not assumed.
+
+    Done here rather than per call site so a new card cannot forget it. Nested
+    tables have no outer border and are skipped by the same test.
+    """
+    for tbl in doc.element.body.iter(qn("w:tbl")):
+        row = tbl.find(qn("w:tr"))
+        if row is None:
+            continue
+        tc = row.find(qn("w:tc"))
+        if tc is None:
+            continue
+        left = None
+        tcPr = tc.find(qn("w:tcPr"))
+        if tcPr is not None:
+            borders = tcPr.find(qn("w:tcBorders"))
+            if borders is not None:
+                left = borders.find(qn("w:left"))
+        if left is None or left.get(qn("w:val")) in (None, "nil", "none"):
+            continue
+        try:
+            eighths = int(left.get(qn("w:sz")) or 0)
+        except ValueError:
+            continue
+        if eighths <= 0:
+            continue
+        border_pt = eighths / 8
+        tblPr = tbl.find(qn("w:tblPr"))
+        if tblPr is None:
+            continue
+        _ordered_insert(tblPr, _el("w:tblInd", w=round(border_pt * 20), type="dxa"),
+                        TBL_PR_ORDER)
+
+
 def close_cells(doc):
     """A table cell must end with a paragraph.
 
@@ -742,6 +788,7 @@ def build(out_path):
 
     page_one(doc)
     page_two(doc)
+    align_table_edges(doc)
     close_cells(doc)
 
     doc.save(out_path)
