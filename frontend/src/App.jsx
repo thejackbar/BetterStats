@@ -78,6 +78,8 @@ import Privacy from './pages/marketing/Privacy'
 import FAQ from './pages/marketing/FAQ'
 import Blog from './pages/marketing/Blog'
 import BlogPost from './pages/marketing/BlogPost'
+import Videos from './pages/marketing/Videos'
+import VideoDetail from './pages/marketing/VideoDetail'
 
 // Auth
 import Login from './pages/Login'
@@ -327,6 +329,8 @@ export default function App() {
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
+          <Route path="/videos" element={<Videos />} />
+          <Route path="/videos/:slug" element={<VideoDetail />} />
 
           {/* Auth */}
           <Route path="/login" element={<Login />} />

@@ -127,6 +127,7 @@ BetterCricket was built by a club member at **Applecross Cricket Club** in Perth
 - [Compare](https://betterat.cricket/compare): How BetterCricket sits next to the tools clubs already use.
 - [About](https://betterat.cricket/about): The story behind BetterCricket and BetterSports.
 - [Contact](https://betterat.cricket/contact): Request access, ask a question, or email the team at support@bettersports.com.au.
+- [Videos](https://betterat.cricket/videos): Step-by-step instructional walkthroughs for club administrators, each viewable in the browser or downloadable as a file. The library is added to over time.
 
 ## Example Public Club Pages
 

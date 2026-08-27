@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.content import blog as blog_content
+from app.services import instructional_videos as video_svc
 from app.models.db import Player, Organisation, get_db
 
 router = APIRouter(prefix="/og-preview", tags=["og-preview"])
@@ -150,6 +151,12 @@ MARKETING_PAGES: dict[str, tuple[str, str]] = {
         "Cricket team: batting averages, bowling economy, historical data and "
         "more.",
     ),
+    "/videos": (
+        "Videos — How-to walkthroughs for club admins | BetterCricket",
+        "Step-by-step video walkthroughs of BetterCricket: merging duplicate "
+        "players, merging grades, tracking milestones and picking a side. "
+        "Watch online or download.",
+    ),
     "/terms": (
         "Terms of Service — BetterCricket",
         "Terms of service for BetterCricket, the cricket platform for "
@@ -176,7 +183,7 @@ RESERVED_ROOT_SEGMENTS = {
     "login", "admin", "onboard", "club-inactive",
     "games", "match", "scorecards", "players",
     "features", "pricing", "compare", "about", "contact", "faq",
-    "terms", "privacy", "blog", "overview", "modules",
+    "terms", "privacy", "blog", "videos", "overview", "modules",
 }
 
 
@@ -199,6 +206,8 @@ def _parse_route(path: str):
         return {"type": "player", "player_id": segments[1]}
     if segments[0] == "blog" and len(segments) == 2:
         return {"type": "blog", "slug": segments[1]}
+    if segments[0] == "videos" and len(segments) == 2:
+        return {"type": "video", "slug": segments[1]}
     if len(segments) >= 2 and segments[1] in CLUB_SECTIONS:
         return {"type": "club", "slug": segments[0]}
     if len(segments) == 1 and segments[0] not in RESERVED_ROOT_SEGMENTS:
@@ -512,6 +521,71 @@ def _blog_html(slug: str, page_url: str, base: str) -> str | None:
     )
 
 
+
+async def _video_html(slug: str, page_url: str, base: str, db: AsyncSession) -> str | None:
+    """Share card for one instructional video.
+
+    Reads the library table rather than a checked-in list: a Super Admin adds
+    and retitles these from the site itself, so the card has to follow whatever
+    is actually published.
+    """
+    video = await video_svc.get_video(db, slug)
+    if not video:
+        return None
+
+    # A video with no poster uploaded falls back to the branded cover rather
+    # than shipping a card with a broken image on it.
+    poster = _abs_url(video.get("poster"), base) or _abs_url(OG_COVER, base)
+    title = f"{video['title']} | {SITE_NAME}"
+    description = video.get("description") or f"A BetterCricket walkthrough: {video['title']}."
+
+    jsonld = [
+        {
+            "@context": "https://schema.org",
+            "@type": "VideoObject",
+            "name": video["title"],
+            "description": description,
+            "thumbnailUrl": poster,
+            "uploadDate": video.get("date"),
+            "contentUrl": _abs_url(video.get("src"), base),
+            "inLanguage": "en-AU",
+            "publisher": {
+                "@type": "Organization",
+                "name": "BetterSports",
+                "logo": {"@type": "ImageObject", "url": f"{base}/og-image.png"},
+            },
+            "url": page_url,
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base}/"},
+                {"@type": "ListItem", "position": 2, "name": "Videos", "item": f"{base}/videos"},
+                {"@type": "ListItem", "position": 3, "name": video["title"], "item": page_url},
+            ],
+        },
+    ]
+
+    download_url = _abs_url(video.get("src"), base) or ""
+    body_extra = (
+        f"<p>{_esc(description)}</p>"
+        f"<p><a href=\"{_esc(download_url)}?download=1\">Download this video</a> "
+        f"or watch it at <a href=\"{_esc(page_url)}\">{_esc(page_url)}</a>.</p>"
+    )
+
+    return _html(
+        title,
+        description,
+        poster,
+        page_url,
+        jsonld=jsonld,
+        image_alt=video["title"],
+        og_type="video.other",
+        body_extra=body_extra,
+    )
+
+
 async def _player_html(player_id: str, page_url: str, base: str, db: AsyncSession) -> str | None:
     try:
         player = await db.get(Player, uuid.UUID(player_id))
@@ -609,6 +683,8 @@ async def og_preview(
         html = await _player_html(route["player_id"], page_url, base, db)
     elif route and route["type"] == "blog":
         html = _blog_html(route["slug"], page_url, base)
+    elif route and route["type"] == "video":
+        html = await _video_html(route["slug"], page_url, base, db)
     elif route and route["type"] == "club":
         html = await _club_html(route["slug"], page_url, base, db)
 
