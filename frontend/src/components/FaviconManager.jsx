@@ -19,7 +19,7 @@ const CLUB_SECTIONS = new Set([
 const RESERVED_ROOTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive', 'avail', 'games', 'players',
   'overview', 'features', 'pricing', 'compare', 'modules', 'about', 'contact',
-  'faq', 'terms', 'privacy', 'blog', 'betterscout',
+  'faq', 'terms', 'privacy', 'blog', 'videos', 'betterscout',
 ])
 
 // Resolve a pathname to a public club slug, or null when it isn't a club page.

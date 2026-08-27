@@ -1,0 +1,18 @@
+export default {
+  version: 'v9.54.0',
+  date: '2026-08-27',
+  sortKey: '2026-08-27T09:00:00Z',
+  title: 'Instructional videos, managed from the site',
+  items: [
+    'A new Videos section at betterat.cricket/videos: short walkthroughs of the jobs a club admin does, each one playable in the browser or downloadable to keep.',
+    'Linked from the footer, from the menu, and from the mobile menu.',
+    'A Super Admin uploads a video, writes its title and description, and it is live. No deploy, no file dropped on a server.',
+    'The title and description can be edited afterwards, the video file replaced without retyping the text, and an entry deleted along with its file.',
+    'Videos are dragged into whatever order visitors should see them in.',
+    'A thumbnail is taken from the video itself at upload, so a card is never blank. Upload your own image instead if you would rather pick the frame.',
+    'None of the add, edit, delete or reorder controls are shown to anyone who is not a Super Admin, and every one of them is checked again on the server.',
+    'The player seeks properly on a long video: the browser asks for the part it needs rather than the whole file.',
+    'Each video gets its own share card and sitemap entry, so a link posted to Facebook or LinkedIn shows the thumbnail and the description.',
+    'Video files are kept on the server\u2019s media drive rather than in the database, and are deliberately left out of the nightly backup. Titles, descriptions and thumbnails are backed up as usual, so a restore brings the library back and only the video files need re-uploading from the originals.',
+  ],
+}

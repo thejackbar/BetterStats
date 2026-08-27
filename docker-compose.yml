@@ -29,6 +29,11 @@ services:
       KLUBPRO_DATABASE_URL: ${KLUBPRO_DATABASE_URL:-}
     volumes:
       - uploads:/app/uploads
+      # Instructional video files. A bind mount to an explicit host path, NOT a
+      # named volume: a named volume can be orphaned by a compose project
+      # rename, which is what caused the June 2026 outage. Deliberately outside
+      # the regular backup — see ops/backup/backup.sh and config/settings.py.
+      - ${VIDEO_STORAGE_DIR:-/mnt/media/bettercricket/internal/videos}:/mnt/media/bettercricket/internal/videos
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -38,6 +43,11 @@ services:
 
   frontend:
     build: ./frontend
+    volumes:
+      # nginx serves the video bytes itself via X-Accel-Redirect, so it needs
+      # the same directory the backend writes to. Read-only: the frontend only
+      # ever serves these, it never writes one.
+      - ${VIDEO_STORAGE_DIR:-/mnt/media/bettercricket/internal/videos}:/mnt/media/bettercricket/internal/videos:ro
     ports:
       - "3002:80"
     depends_on:

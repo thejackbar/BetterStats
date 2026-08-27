@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config.settings import settings
 from app.auth.modules import require_module
+from app.routers import instructional_videos
 from app.routers import auth, organisations, players, games, webhooks, leaderboard, records, admin, achievements, clubs, club_admin, statlab, yearbooks, award_definitions, images, og_preview, notifications, seo, families, manual_entries, imports, player_import, usage, fees, fixtures, teams, availability, selection, selection_rules, ladders, iq, public_availability, public_net_checkin, net_manager, website, comms, public_comms, public_ses, public_contact, klubpro_migration, bookmarks, merch, public_square, public_xero, fantasy, public_fantasy, marketing, login_attempts, meta_ads, pipeline_gauge, self_serve_trial, public_self_serve, onboarding_wizard, wizard_analytics, billing, public_stripe, discount_coupons, backup_admin, crm, committee, volunteers, qualifications, events, assets, \
     stripe_connect, public_stripe_connect, member_portal_admin, public_member_portal, public_merch_store, \
     club_diary, social_media, votes, public_votes, roles_activities, club_room, roster, facility_requests, directory, \
@@ -4218,6 +4219,14 @@ async def lifespan(app: FastAPI):
         for _stmt in ASSET_REGISTER_SQL:
             await conn.execute(text(_stmt))
 
+        # Migration 280: the instructional video library behind /videos, so a
+        # Super Admin can upload, retitle, replace, reorder and delete a
+        # walkthrough without a deploy. Same one-copy rule — this list and
+        # alembic's 280 both run services/instructional_video_ddl.STATEMENTS.
+        from app.services.instructional_video_ddl import STATEMENTS as _VIDEO_DDL
+        for _stmt in _VIDEO_DDL:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.
@@ -5895,6 +5904,8 @@ app.include_router(og_preview.router)
 app.include_router(notifications.router)
 app.include_router(bookmarks.router)  # per-user admin sidebar favourites
 app.include_router(seo.router)
+app.include_router(instructional_videos.public_router)  # /videos library (public, unauthenticated — the marketing page reads it)
+app.include_router(instructional_videos.admin_router)   # /videos library management (Super Admin only)
 app.include_router(families.router)
 app.include_router(committee.router)     # Committee Administration (core capability, not a paid module)
 app.include_router(volunteers.router)    # Volunteer Management (core capability, not a paid module)

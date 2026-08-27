@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.content.blog import BLOG_SLUGS
+from app.services.instructional_videos import list_videos
 from app.models.db import Organisation, Player, get_db
 
 router = APIRouter(tags=["seo"])
@@ -35,6 +36,7 @@ STATIC_PAGES: list[tuple[str, str, str]] = [
     ("/compare",  "0.8", "monthly"),
     ("/faq",      "0.8", "monthly"),
     ("/blog",     "0.8", "weekly"),
+    ("/videos",   "0.8", "monthly"),
     ("/about",    "0.7", "monthly"),
     ("/contact",  "0.6", "yearly"),
     ("/terms",    "0.2", "yearly"),
@@ -49,6 +51,9 @@ MODULE_PAGES: list[str] = [
 
 # Marketing blog posts at /blog/{slug} come from app.content.blog (BLOG_SLUGS),
 # the shared source the OG-preview cards also read.
+# Instructional videos at /videos/{slug} are read live from the
+# instructional_videos table — a Super Admin manages that library from the site
+# itself, so there is no checked-in list to keep in step.
 
 # Section pages a connected club exposes publicly.
 CLUB_SECTIONS = ["dashboard", "players", "leaderboard", "records", "games", "yearbook", "statlab", "compare"]
@@ -84,6 +89,16 @@ async def sitemap(db: AsyncSession = Depends(get_db)):
 
     for slug in BLOG_SLUGS:
         entries.append(_url_entry(f"{SITE}/blog/{slug}", lastmod=today, changefreq="monthly", priority="0.7"))
+
+    # The video library is Super Admin managed, so the sitemap reads the table
+    # rather than a checked-in list.
+    for video in await list_videos(db):
+        entries.append(_url_entry(
+            f"{SITE}/videos/{video['slug']}",
+            lastmod=(video.get("date") or today),
+            changefreq="monthly",
+            priority="0.7",
+        ))
 
     # Every active club's public section pages.
     club_rows = (await db.execute(

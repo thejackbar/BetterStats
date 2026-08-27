@@ -6,9 +6,15 @@ import SelfServeTrialModal from './admin/SelfServeTrialModal'
 import { CORE_MARKETING, MODULES_MARKETING } from '../data/modules-marketing'
 import { useSelfServeTrialGate } from '../hooks/useSelfServeTrialGate'
 
+// `wide` holds a link out of the desktop row below lg. Measured, not guessed:
+// the row is already 16px over its box at 768px with five links, and a sixth
+// takes that to 91px — the overflow slides under the CTA button rather than
+// wrapping. Videos therefore appears in the row from 1024px (0px over, with
+// room to spare), in the mobile menu below 768px, and in the footer always.
 const LINKS = [
   { to: '/pricing', label: 'Pricing' },
   { to: '/compare', label: 'Compare' },
+  { to: '/videos', label: 'Videos', wide: true },
   { to: '/about', label: 'About' },
   { to: '/faq', label: 'FAQ' },
   { to: '/contact', label: 'Contact' },
@@ -137,8 +143,8 @@ export default function MarketingNav() {
                 key={link.to}
                 to={link.to}
                 className={`px-3 py-2 rounded text-sm font-medium transition-colors whitespace-nowrap ${
-                  active ? 'text-pb-text' : 'text-pb-dim hover:text-pb-text'
-                }`}
+                  link.wide ? 'hidden lg:block' : ''
+                } ${active ? 'text-pb-text' : 'text-pb-dim hover:text-pb-text'}`}
               >
                 {link.label}
               </Link>

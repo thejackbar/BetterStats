@@ -5746,6 +5746,127 @@ rather than the offer.
   tokens surviving the `{base}` substitution, the dropdown order, and each
   built body differing from the one it was copied from).
 
+## Instructional videos, managed from the site (migration 280, v9.54.0, Aug 2026)
+
+Asked for as a Blog-shaped section at `/videos` — thumbnail, intro text, watch
+in a player or download — then, straight after, as something a Super Admin
+runs themselves: upload, edit the title and text, replace the file, delete the
+entry and its file, and drag the order.
+
+- **THE SECOND ASK CHANGED THE ARCHITECTURE, NOT JUST THE UI.** The first cut
+  was a checked-in `data/videos.js` plus `content/videos.py`, mirroring the
+  blog's two-hand-kept-lists arrangement. A managed library cannot work that
+  way, so both files are gone and `instructional_videos` is the record.
+  `og_preview` and `seo` read the TABLE now — a video retitled or deleted by an
+  admin moves its share card and its sitemap entry with it.
+- **THE VIDEO IS A FILE ON THE MEDIA VOLUME, THE POSTER IS A COLUMN, and the
+  split is the whole design.** A video is capped at 512MB against 4-20MB for
+  every other binary in this app, and a bytea that size is re-dumped in full by
+  every `pg_dump` even though the file never changes. A poster is ~100KB, so
+  backing it up is free — and it is what makes a database restored onto a fresh
+  box still draw a recognisable library (titles, descriptions, thumbnails) with
+  only playback missing.
+- **VIDEO FILES ARE DELIBERATELY OUTSIDE THE REGULAR BACKUP** (per direct
+  instruction). `ops/backup/backup.sh` says so at the point where somebody
+  would otherwise be tempted to add them. The consequence is accepted and
+  handled rather than hidden: `file_present` rides on every payload, the page
+  says a video is not on the server instead of drawing a dead player, the
+  download link is withdrawn rather than left to 404, and a super admin gets a
+  count of what needs re-uploading. `orphaned_files()` finds files no row
+  points at, which is what a restore leaves behind.
+- **AN EXPLICIT HOST PATH, NOT A DOCKER NAMED VOLUME.** `/mnt/media/bettercricket/internal/videos`
+  sits under the root the backup agent already uses. A named volume can be
+  orphaned by a compose project rename, which is exactly the June 2026 outage;
+  a bind mount to a real path cannot. This is what the old "the /app/uploads
+  volume isn't guaranteed persistent" comment was really about.
+- **nginx SERVES THE BYTES, NOT PYTHON.** The app checks access and returns
+  `X-Accel-Redirect` at an `internal` location; nginx does Range and caching
+  natively and a 400MB read never blocks a worker. `video_accel_location`
+  empty falls back to serving in-process, which is what local dev does. The
+  frontend container therefore mounts the same directory read-only.
+- **A FILENAME IS NEVER BUILT FROM ANYTHING A PERSON TYPED.** It is
+  `<row uuid>.<ext>` from a fixed map, and `_SAFE_FILENAME` refuses anything
+  else on the way back out, so a row edited by hand to say `../../etc/passwd`
+  resolves to nothing. The uploaded name is kept in a column for the download
+  header only.
+- **The upload streams to disk and is never read into memory.** `_check_size`
+  seeks the SpooledTemporaryFile rather than calling `len()` on 512MB, and
+  `store_upload` writes to a temp file in the same directory then `os.replace`s
+  it, so a half-written file is never served. A failed insert deletes the file
+  it just wrote — nothing would ever point at it or clean it up.
+- **A NEW TOP-LEVEL ROUTE IS A CLUB SLUG UNTIL FOUR SEPARATE LISTS SAY
+  OTHERWISE, and only one of them is in the backend.** `/videos` was being
+  looked up as a club: `og_preview.RESERVED_ROOT_SEGMENTS`,
+  `FaviconManager.RESERVED_ROOTS`, `SponsorFooter.RESERVED_ROOT_SEGMENTS` and
+  `lib/marketingPaths.MARKETING_PATHS` each resolve a slug off the pathname
+  with their own copy. Missing the last one also renders the club Navbar ON TOP
+  of the page's own MarketingNav and drops the forced-dark marketing theme.
+  **Found by watching the network, not by reading the routes** — the page
+  rendered correctly while firing `/api/clubs/videos` on every visit.
+- **THE SLUG IS DERIVED ONCE AND NEVER MOVES.** Retitling a video keeps its
+  URL, because a link handed to a club in an email has to survive somebody
+  fixing a typo in the heading. A duplicate title is suffixed (`-2`) rather
+  than refusing the upload: a re-record of the same walkthrough is ordinary.
+- **A FIELD LEFT OUT OF THE FORM IS LEFT ALONE.** `update_video` writes only
+  what is PRESENT, so the title form cannot blank a description it never
+  loaded and replacing the file cannot reset the text. The api.js helper omits
+  a null rather than sending it empty, which is the half that makes it work.
+- **THE THUMBNAIL IS CAPTURED IN THE BROWSER**, not on the server: the upload
+  is drawn to a canvas at ~1.5s in and posted as a JPEG alongside the video.
+  No ffmpeg dependency in the backend container, and the admin still gets to
+  upload their own frame instead. Best-effort by design — a codec the browser
+  cannot decode resolves to null and the video simply goes without one.
+- **nginx caps `/api/` bodies at 20m**, which is right for a logo and useless
+  for a screen recording. The cap is raised to 512m on a LONGER-PREFIX location
+  for the upload route alone (`/api/club-admin/super/videos`), with
+  `proxy_request_buffering off` so a large upload streams through instead of
+  spooling to nginx's disk first. Raising it globally would widen every
+  endpoint's surface for one route's benefit.
+- **THE GATE IS THE SERVER, THE UI IS PRESENTATION.** Every write is
+  `require_super_admin`; `useVideos.canManage` only decides what is DRAWN. The
+  browser suite asserts both a signed-out visitor AND a signed-in `club_admin`
+  see no add, edit, delete or reorder control anywhere.
+- **A sixth top-level nav link overflowed the bar, and that was measured.**
+  With five links the row is already 16px over its own box at 768px
+  (pre-existing); a sixth took it to **91px** and introduced a new overflow at
+  820px, which slides under the CTA rather than wrapping — the same trap the
+  Selection-header note describes. `Videos` therefore carries a `wide` flag
+  (`hidden lg:block`): in the row from 1024px, in the mobile menu below 768px,
+  and in the footer always. Re-measured after: back to the 16px baseline
+  exactly, 0 everywhere else.
+- **`VIDEO_STORAGE_DIR` MUST BE SET BEFORE THE SERVICE MODULE IS IMPORTED**, not
+  merely before it is called: the module imports `app.config.settings`, and
+  pydantic-settings reads the environment once at instantiation. The first cut
+  of the harness set it further down the file, which looked right and silently
+  wrote eleven test videos into the real `/mnt/media` path. Same family as the
+  Roster temporal-dead-zone note — position in the file is load-bearing.
+- **Verified against a real Postgres** (`backend/verification/verify_instructional_videos.py`,
+  103 checks through the shipped service and route bodies: the DDL applied three
+  times to a populated table, the slug derived and then held still across a
+  retitle, a duplicate title suffixed, a text edit not touching the file and a
+  file replace not touching the text, every Range case incl. a suffix range and
+  a start past the file, reorder renumbering from zero and skipping a foreign
+  id without dropping anyone, delete taking the file with it, every path-
+  traversal refusal, a replaced file removing the old one, a failed insert
+  leaving nothing behind, the missing-file case reporting itself while its
+  thumbnail still draws, orphan detection finding a hand-deleted row's file,
+  every upload refusal, the share card built from the table and a deleted
+  video's card ceasing to resolve, and the downgrade) and **driven in Chromium**
+  (`verify_videos_browser.mjs`, 82: the exact params on the wire for a PATCH, a
+  delete and a drag-reorder, a dismissed delete sending nothing, an upload with
+  no file refused before any request, and the gate from three identities)
+  **with a control run**: with `canManage` forced true, 10 fail on exactly the
+  leakage they exist to catch.
+- **Two checks passed against the broken code first and had to be tightened.**
+  `Super admin` and the form's labels are CSS-`uppercase`, so `innerText`
+  returns them uppercased and a check written in the source's casing could
+  never fail. A check that cannot fail is not a check.
+- **Not built**: no draft/published state (an upload is atomic, so there is
+  nothing to stage), no per-video "what this covers" list (one description is
+  what an admin was asked to write), and no transcoding — an admin uploads
+  something a browser can already play, and a `.mov` is refused with a sentence
+  saying so rather than being stored and failing for every visitor later.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

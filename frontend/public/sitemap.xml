@@ -81,6 +81,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://betterat.cricket/videos</loc>
+    <lastmod>2026-08-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://betterat.cricket/blog/why-your-cricket-club-needs-a-public-stats-page</loc>
     <lastmod>2026-05-26</lastmod>
     <changefreq>monthly</changefreq>

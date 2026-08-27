@@ -130,6 +130,26 @@ function scopeQuery(scope) {
   return qs ? `?${qs}` : ''
 }
 
+// Multipart write for the instructional video library: text fields plus an
+// optional video and/or poster file, over POST (create) or PATCH (update).
+// A field whose value is null/undefined is OMITTED rather than sent empty, so
+// an edit that only changes the title cannot blank the description.
+async function videoUpload(path, method, fields = {}, video = null, poster = null) {
+  const form = new FormData()
+  for (const [k, v] of Object.entries(fields)) {
+    if (v === null || v === undefined) continue
+    form.append(k, v)
+  }
+  if (video) form.append('video', video)
+  if (poster) form.append('poster', poster)
+  const res = await fetch(`${BASE}${path}`, { method, body: form, credentials: 'include' })
+  if (!res.ok) {
+    const e = await res.json().catch(() => ({}))
+    throw new Error(typeof e.detail === 'string' ? e.detail : `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
 export const api = {
   // Set BetterIQ's Grade Type / Match Type filter. Lives on `api` (not just as
   // a bare export) because every caller already holds this object, and the
@@ -2474,6 +2494,26 @@ export const api = {
 
   // Sponsors (public)
   getClubSponsors: (slug) => request(`/clubs/${slug}/sponsors`),
+
+  // ---- Instructional videos (/videos) -------------------------------------
+  // The public reads are unauthenticated; the manage calls are Super Admin
+  // only and re-checked server-side, so the UI gate is presentation alone.
+  // Uploads go through FormData, not JSON — the file is the payload — and a
+  // field left out of the form is left alone by the backend, which is what
+  // lets the title form save without touching the uploaded video.
+  publicVideos: () => request('/public/videos'),
+  publicVideo: (slug) => request(`/public/videos/${slug}`),
+
+  adminVideos: () => request('/club-admin/super/videos'),
+  adminCreateVideo: (fields, video, poster) =>
+    videoUpload('/club-admin/super/videos', 'POST', fields, video, poster),
+  adminUpdateVideo: (id, fields, video, poster) =>
+    videoUpload(`/club-admin/super/videos/${id}`, 'PATCH', fields, video, poster),
+  adminDeleteVideo: (id) =>
+    request(`/club-admin/super/videos/${id}`, { method: 'DELETE' }),
+  adminReorderVideos: (ids) =>
+    request('/club-admin/super/videos/reorder', { method: 'POST', body: JSON.stringify({ ids }) }),
+
 
   // Sponsors (admin)
   adminListSponsors: () => request('/club-admin/sponsors'),

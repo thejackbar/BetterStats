@@ -53,6 +53,23 @@ POSTGRES_USER="${POSTGRES_USER:-cricket}"
 # and override if it doesn't match (this project's volumes so far follow
 # `<project>_betterstats_<name>`, e.g. betterstats_pgdata for the DB).
 UPLOADS_VOLUME="${UPLOADS_VOLUME:-${COMPOSE_PROJECT_NAME}_betterstats_uploads}"
+#
+# DELIBERATELY NOT BACKED UP: /mnt/media/bettercricket/internal/videos
+#
+# The instructional videos behind /videos are excluded from this backup by
+# decision, not by oversight. They are capped at 512MB each, they never change
+# after upload, and the originals live wherever they were recorded — so
+# re-encrypting gigabytes into every dated bundle would buy nothing and would
+# slow every run and every restore.
+#
+# The consequence is accepted and handled: a database restored onto a fresh box
+# has video rows whose files are gone. The library still draws (titles,
+# descriptions and thumbnails are all in Postgres) and each video reports that
+# its file is not on the server, rather than the page breaking. Re-upload from
+# the originals to fill them back in.
+#
+# If you are here to "fix" the omission by adding the directory: don't. Talk to
+# whoever owns the backup policy first.
 # age public key used to encrypt every bundle (age -R recipients file, or a
 # single -r KEY). Generate with `age-keygen`; keep the PRIVATE key offline —
 # it's only needed to restore, never to back up.
