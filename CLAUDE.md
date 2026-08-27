@@ -63,6 +63,57 @@ slice of the real season.
   one synced club. Which of the two readings a club wants is a product decision,
   not a bug this fix should settle on its own.
 
+### One rule for "this game is ours", on every player read (v9.53.12)
+
+Asked for directly after the grid fix: it should be in effect across all
+functions. Until now only the by-grade grid counted the club's own games; the
+career header, the season table and every analysis panel still counted every
+game the player appeared in.
+
+- **`_club_game_clause` IS THE ONE PREDICATE, and it is the one the codebase
+  already had.** `iq_trends._ours_clause` (mirroring `_club_results`) was
+  already right: a game is ours when its own club is us OR **when we are one of
+  the two sides** (`home_org_id`/`away_org_id`, migration 167). The first cut
+  used `organisation_id` alone and the suite caught it — that drops a genuine
+  shared fixture the other club synced first, which is the one thing this must
+  not do. Fold, or keep; never lose a match the club actually played.
+- **A FUNCTION-LEVEL AUDIT, NOT A GREP FOR SQL TEXT.** Searching the SQL
+  strings alone flags `_player_recent`, which is already correct — its filter
+  arrives through an interpolated `extra`. The audit that works reads the whole
+  function body for `:pid` plus a per-game table and no org reference of any
+  kind. It found 13 reads in `aggregations.py`, plus `player_formats` and
+  `get_player_captain_stats`.
+- **`player_formats`'s docstring argued it needed no filter** because a
+  `player_id` is already per-club under the uuid5 scheme. That is true of the
+  PLAYER and says nothing about the GAME, which is the whole bug. Corrected
+  there rather than left to mislead the next reader.
+- **THE CLUB FILTER RIDES ON `scope_clause`**, so each function's existing
+  interpolation points pick it up and no query template needed editing. The two
+  clause-list callers append it as their own entry. `_build_recent_games_cte`
+  and `_build_date_filtered_games_cte` take it as an argument: without it a
+  "last 10 games" window is drawn from another club's matches and then filtered
+  down to fewer than 10.
+- **THE SMOKE PASS IS WHAT MADE THIS SAFE.** Every patched read is executed,
+  scoped and unscoped — 12 functions plus the formats page and captain stats.
+  It caught two real breaks the type checker and `py_compile` cannot see: the
+  captain by-season CTEs reference no games view, so a blanket clause raised
+  "missing FROM-clause entry for table g" (they are already narrowed to
+  `captain_games`, which carries the predicate, so they need none), and it
+  proved the shared-fixture case end to end.
+- **A FIXTURE HAS TO CARRY WHAT THE QUERIES FILTER ON.** Three checks read zero
+  against working code until the games had a `result` (by-venue drops a NULL
+  result by design), a `game_appearances` row (`player_game_ids` reads
+  appearances, not innings) and a `match_format` (everything else lands in
+  `not_recorded`). A check reading zero is not a passing check.
+- **Verified against a real Postgres** (62 checks) **with a control run**: 15
+  fail against the previous commit. Measured at platform scale (4,438 season
+  rows): the grid 17.4 -> 28.4ms, the extra being the year map it now loads for
+  every season rather than the club's own, so a foreign season can fold onto
+  our row for that year.
+- **The career header and the season table now agree with each other and with
+  the grid**, which is the check that keeps this honest: the suite asserts
+  career innings and runs equal the season table's own sums.
+
 ### The same year counted twice, and another club's matches with it (v9.53.11)
 
 Reported straight after the fold above: the season x grade grid still drew the

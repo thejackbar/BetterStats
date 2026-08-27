@@ -37,8 +37,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from _view_ddl import view_statements
 from app.models.db import Base
 from app.services import grade_scope
+from app.routers.players import get_player_captain_stats
+from app.services import aggregations as agg
+from app.services.player_formats import player_format_splits
 from app.services.aggregations import (
-    get_player_team_breakdown, get_season_by_season,
+    get_career_batting_from_innings, get_player_team_breakdown,
+    get_season_by_season, _scoped_games_played,
 )
 
 DB = os.environ["DATABASE_URL"]
@@ -67,17 +71,18 @@ THIRD = uuid.uuid4()     # and a third, for the year drawn three times
 PLAYER = uuid.uuid4()
 
 # Each club has its own `seasons` row for the same real season.
-S_OURS_25 = uuid.uuid4(); S_THEIRS_25 = uuid.uuid4()
+S_OURS_25 = uuid.uuid4(); S_OURS_25B = uuid.uuid4(); S_THEIRS_25 = uuid.uuid4()
 S_OURS_22 = uuid.uuid4(); S_THEIRS_22 = uuid.uuid4(); S_THIRD_22 = uuid.uuid4()
 # A year only another club holds a row for — nothing to fold onto.
 S_THEIRS_10 = uuid.uuid4()
+G_SHARED = uuid.uuid4()   # their grade row, our fixture
 # Two of OUR OWN rows for one year — the split that reaches the unscoped path,
 # which reads CA's season aggregates and so never sees another club's row.
 S_OURS_19A = uuid.uuid4(); S_OURS_19B = uuid.uuid4()
 # CA's pre-migration bundle: a whole career dumped on the earliest season.
 S_OURS_99 = uuid.uuid4()
 
-G_OURS_25 = uuid.uuid4(); G_THEIRS_25 = uuid.uuid4()
+G_OURS_25 = uuid.uuid4(); G_OURS_25B = uuid.uuid4(); G_THEIRS_25 = uuid.uuid4()
 G_OURS_22 = uuid.uuid4(); G_THEIRS_22 = uuid.uuid4(); G_THIRD_22 = uuid.uuid4()
 G_JUNIOR = uuid.uuid4()          # what makes the club's default scope ACTIVE
 G_THEIRS_10 = uuid.uuid4()
@@ -107,6 +112,14 @@ async def build_schema() -> None:
                 org_id UUID NOT NULL,
                 canonical_name TEXT NOT NULL,
                 alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ)
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS org_merge_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                source_org_id UUID, source_org_name TEXT NOT NULL,
+                target_org_id UUID NOT NULL,
+                performed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 undone_at TIMESTAMPTZ)
         """))
         # Raw-SQL tables the effective views read that create_all doesn't make.
@@ -154,6 +167,7 @@ async def seed(session) -> None:
 
     seasons = [
         (S_OURS_25, OURS, "Summer 2025/26", 2025),
+        (S_OURS_25B, OURS, "Summer 2025/26", 2025),
         (S_THEIRS_25, THEIRS, "Summer 2025/26", 2025),
         (S_OURS_22, OURS, "Summer 2022/23", 2022),
         (S_THEIRS_22, THEIRS, "Summer 2022/23", 2022),
@@ -170,12 +184,14 @@ async def seed(session) -> None:
 
     grades = [
         (G_OURS_25, S_OURS_25, "Men's First Grade", "senior"),
+        (G_OURS_25B, S_OURS_25B, "Men's First Grade", "senior"),
         (G_THEIRS_25, S_THEIRS_25, "Men's First Grade", "senior"),
         (G_OURS_22, S_OURS_22, "Men's First Grade", "senior"),
         (G_THEIRS_22, S_THEIRS_22, "Men's First Grade", "senior"),
         (G_THIRD_22, S_THIRD_22, "Men's First Grade", "senior"),
         (G_JUNIOR, S_OURS_25, "Under 14s", "junior"),
         (G_THEIRS_10, S_THEIRS_10, "Men's First Grade", "senior"),
+        (G_SHARED, S_THEIRS_22, "Men's First Grade", "senior"),
         (G_OURS_19A, S_OURS_19A, "Men's First Grade", "senior"),
         (G_OURS_19B, S_OURS_19B, "Men's First Grade", "senior"),
         (G_OURS_99, S_OURS_99, "Men's First Grade", "senior"),
@@ -192,19 +208,39 @@ async def seed(session) -> None:
     # (grade, how many games, runs each) — the club's own season row and the
     # sibling rows another club's sync happened to create.
     plan = [
-        (G_OURS_25, 3, 50), (G_THEIRS_25, 1, 24),
+        (G_OURS_25, 3, 50), (G_OURS_25B, 1, 30), (G_THEIRS_25, 1, 24),
         (G_OURS_22, 2, 100), (G_THEIRS_22, 1, 15), (G_THIRD_22, 1, 12),
         (G_THEIRS_10, 1, 7),
     ]
+    # One shared fixture, sitting on the OTHER club's grade row because they
+    # synced it first, with our club as the home side.
+    shared = uuid.uuid4()
+    await ex(
+        "INSERT INTO games "
+        "(id, grade_id, played_at, venue, result, match_format, home_org_id) "
+        "VALUES (:i, :g, :d, 'Gosnells Oval', 'WIN', 'One Day', :o)",
+        i=shared, g=G_SHARED, d=date(2020, 1, 1), o=OURS)
+    await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)",
+             g=shared, p=PLAYER)
+    await ex(
+        "INSERT INTO batting_innings "
+        "(game_id, player_id, runs, balls, not_out, fours, sixes, "
+        " innings_number, batting_position) "
+        "VALUES (:g, :p, 11, 40, false, 2, 0, 1, 3)", g=shared, p=PLAYER)
+
     n = 0
     for gid, count, runs in plan:
         for _ in range(count):
             n += 1
             g = uuid.uuid4()
             await ex(
-                "INSERT INTO games (id, grade_id, played_at) "
-                "VALUES (:i, :g, :d)",
+                "INSERT INTO games "
+                "(id, grade_id, played_at, venue, result, match_format) "
+                "VALUES (:i, :g, :d, 'Gosnells Oval', 'WIN', 'One Day')",
                 i=g, g=gid, d=date(2020, 1, 1))
+            await ex(
+                "INSERT INTO game_appearances (game_id, player_id) "
+                "VALUES (:g, :p)", g=g, p=PLAYER)
             await ex(
                 "INSERT INTO batting_innings "
                 "(game_id, player_id, runs, balls, not_out, fours, sixes, "
@@ -214,7 +250,8 @@ async def seed(session) -> None:
     # CA's own per-grade aggregate (`player_season_grade_stats`), for OUR
     # club's grades only — which is what CA actually reports for this club.
     for gid, sid, m in (
-        (G_OURS_25, S_OURS_25, 3), (G_OURS_22, S_OURS_22, 2),
+        (G_OURS_25, S_OURS_25, 3), (G_OURS_25B, S_OURS_25B, 1),
+        (G_OURS_22, S_OURS_22, 2),
     ):
         await ex(
             "INSERT INTO player_season_grade_stats "
@@ -294,24 +331,47 @@ async def main() -> None:
 
         if len(g.get("Summer 2025/26", [])) == 1:
             r = g["Summer 2025/26"][0]
-            check("the folded 2025/26 row is filed under OUR OWN season row",
-                  str(r["season_id"]) == str(S_OURS_25), str(r["season_id"]))
-            check("2025/26 holds every innings (3 ours + 1 theirs = 4)",
+            check("the folded 2025/26 row is filed under one of OUR OWN "
+                  "season rows, never another club's",
+                  str(r["season_id"]) in {str(S_OURS_25), str(S_OURS_25B)},
+                  str(r["season_id"]))
+            check("2025/26 folds BOTH our own rows for the year (3 + 1 = 4)",
                   r["batting_innings"] == 4, str(r["batting_innings"]))
-            check("2025/26 runs are the whole season (3×50 + 24 = 174)",
-                  r["total_runs"] == 174, str(r["total_runs"]))
+            check("2025/26 runs are our own two rows (3x50 + 30 = 180), "
+                  "with the other club's 24 left out",
+                  r["total_runs"] == 180, str(r["total_runs"]))
         if len(g.get("Summer 2022/23", [])) == 1:
             r = g["Summer 2022/23"][0]
-            check("2022/23 folds all three clubs' rows (2×100 + 15 + 12 = 227)",
-                  r["total_runs"] == 227, str(r["total_runs"]))
+            check("2022/23 leaves the other clubs' 15 and 12 out",
+                  r["total_runs"] == 211, str(r["total_runs"]))
 
-        print("\n— nothing is dropped —")
-        check("a year only ANOTHER club has a season row for still draws",
-              len(g.get("Summer 2010/11", [])) == 1)
+        print("\n— a shared fixture the other club synced first is still ours —")
+        check("2022/23 keeps the shared fixture (200 + 11 = 211)",
+              (g.get("Summer 2022/23") or [{}])[0].get("total_runs") == 211,
+              str((g.get("Summer 2022/23") or [{}])[0].get("total_runs")))
+
+        print("\n— only the club's own matches are counted —")
+        check("a season row belonging to another club is not drawn at all",
+              not g.get("Summer 2010/11"),
+              str(len(g.get("Summer 2010/11", []))))
         total_inn = sum((r.get("batting_innings") or 0) for r in scoped)
         total_runs = sum((r.get("total_runs") or 0) for r in scoped)
-        check("innings still add up to the career (9)", total_inn == 9, str(total_inn))
-        check("runs still add up to the career (408)", total_runs == 408, str(total_runs))
+        check("innings are the club's own (4 + 3 = 7), not 11",
+              total_inn == 7, str(total_inn))
+        check("runs are the club's own (180 + 211 = 391), not 442",
+              total_runs == 391, str(total_runs))
+
+        print("\n— and the career header agrees with the table under it —")
+        career = await get_career_batting_from_innings(
+            session, str(PLAYER), scope=scope)
+        check("career innings match the season table's",
+              (career or {}).get("innings") == total_inn,
+              f"career {(career or {}).get('innings')} vs table {total_inn}")
+        check("career runs match the season table's",
+              (career or {}).get("total_runs") == total_runs,
+              f"career {(career or {}).get('total_runs')} vs table {total_runs}")
+        played = await _scoped_games_played(session, str(PLAYER), None, scope)
+        check("matches played is the club's own too (7)", played == 7, str(played))
 
         print("\n— the same rule on the unscoped path —")
         unscoped = await rows_for(session, None)
@@ -354,17 +414,17 @@ async def main() -> None:
 
         g25 = grade_total(srows, "Summer 2025/26", "Men's First Grade")
         g22 = grade_total(srows, "Summer 2022/23", "Men's First Grade")
-        check("2025/26 reads CA's own figure for the club (3), not 3 + 1",
-              g25 == 3, str(g25))
-        check("2022/23 reads CA's own figure (2), not 2 + 1 + 1",
-              g22 == 2, str(g22))
+        check("2025/26 reads CA's own figure for the club (4), not 4 + 1",
+              g25 == 4, str(g25))
+        check("2022/23 reads our own games (2 + the shared fixture), not 5",
+              g22 == 3, str(g22))
 
         by_grade = {r["grade_name"]: r for r in tb["rows"]}
         first = by_grade.get("Men's First Grade", {})
-        check("the grade's career total is CA's own (3 + 2 = 5), not 8",
-              first.get("matches") == 5, str(first.get("matches")))
-        check("its scorecard count is the club's own games too (5)",
-              first.get("scorecard_matches") == 5,
+        check("the grade's career total is our own games (4 + 3 = 7), not 10",
+              first.get("matches") == 7, str(first.get("matches")))
+        check("its scorecard count is the club's own games too (7)",
+              first.get("scorecard_matches") == 7,
               str(first.get("scorecard_matches")))
         check("the grid's cells still add up to the grade rows",
               sum(sum(r["grades"].values()) for r in srows)
@@ -383,8 +443,8 @@ async def main() -> None:
         check("a -1 correction takes a match off 2022/23 1st Grade",
               after22 == g22 - 1, f"was {g22}, now {after22}")
         by_grade2 = {r["grade_name"]: r for r in tb2["rows"]}
-        check("and the grade's career total follows it (5 -> 4)",
-              by_grade2.get("Men's First Grade", {}).get("matches") == 4,
+        check("and the grade's career total follows it (7 -> 6)",
+              by_grade2.get("Men's First Grade", {}).get("matches") == 6,
               str(by_grade2.get("Men's First Grade", {}).get("matches")))
         check("the correction is not applied twice",
               sum(sum(r["grades"].values()) for r in tb2["season_rows"])
@@ -392,6 +452,57 @@ async def main() -> None:
         after25 = grade_total(s2, "Summer 2025/26", "Men's First Grade")
         check("2025/26 is untouched by a 2022/23 correction",
               after25 == g25, f"was {g25}, now {after25}")
+
+        print("\n— every per-game player read runs, and counts ours only —")
+        # Each of these interpolates the club clause into its own SQL, so a
+        # broken template only shows up by executing it. Both with the club's
+        # default scope and with none, since they compose differently.
+        per_game = [
+            "get_career_batting_from_innings", "get_career_bowling_from_spells",
+            "get_career_fielding_from_stats", "get_player_batting_innings",
+            "get_player_bowling_spells", "get_dismissal_breakdown",
+            "get_bowling_dismissal_breakdown", "get_bowling_by_batter_position",
+            "get_batting_by_position", "get_player_partnerships",
+            "get_player_by_opposition", "get_player_by_venue",
+        ]
+        for fname in per_game:
+            fn = getattr(agg, fname)
+            for label, sc in (("scoped", scope), ("unscoped", None)):
+                try:
+                    await fn(session, str(PLAYER), scope=sc)
+                    ok, why = True, ""
+                except Exception as exc:  # noqa: BLE001
+                    await session.rollback()
+                    ok, why = False, f"{type(exc).__name__}: {exc}"[:150]
+                check(f"{fname} ({label})", ok, why)
+
+        for label, coro in (
+            ("player_format_splits",
+             player_format_splits(session, str(PLAYER))),
+            ("get_player_captain_stats",
+             get_player_captain_stats(str(PLAYER), db=session)),
+        ):
+            try:
+                await coro
+                ok, why = True, ""
+            except Exception as exc:  # noqa: BLE001
+                await session.rollback()
+                ok, why = False, f"{type(exc).__name__}: {exc}"[:150]
+            check(label, ok, why)
+
+        fmts = await player_format_splits(session, str(PLAYER))
+        fmt_matches = sum((row.get("matches") or 0)
+                          for row in (fmts.get("formats") or []))
+        check("the FORMATS page counts our 7 matches, not all 11",
+              fmt_matches == 7, str(fmt_matches))
+
+        innings = await agg.get_player_batting_innings(
+            session, str(PLAYER), scope=scope)
+        check("get_player_batting_innings returns our 7, not all 11",
+              len(innings) == 7, str(len(innings)))
+        venues = await agg.get_player_by_venue(session, str(PLAYER), scope=scope)
+        vg = sum((v.get("games") or 0) for v in venues)
+        check("by-venue counts our 7 games, not all 11", vg == 7, str(vg))
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

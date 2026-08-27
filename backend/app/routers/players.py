@@ -26,6 +26,7 @@ from app.services.aggregations import (
     get_season_by_season, get_player_milestones, get_player_partnerships,
     get_player_activity, get_upcoming_milestones_for_org,
     get_player_rankings, get_player_by_venue, get_player_by_opposition,
+    _club_game_clause,
 )
 from app.services.milestone_rules import (
     crossed_thresholds, is_displayable, next_threshold, reach_window,
@@ -569,6 +570,12 @@ async def get_player_upcoming_milestones(player_id: str, db: AsyncSession = Depe
 @router.get("/{player_id}/captain-stats")
 async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(get_db)):
     pid = uuid.UUID(player_id)
+    # Captaincy is a club's own record: a shared CA participant GUID means a
+    # player's rows can sit on another club's game, and captaining a side for
+    # one club is not a captaincy record for the other. Same predicate as
+    # aggregations._club_game_clause.
+    params: dict = {"pid": pid}
+    club = await _club_game_clause(db, player_id, params)
 
     summary_res = await db.execute(text("""
         SELECT
@@ -578,8 +585,8 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             SUM(CASE WHEN g.result IS NULL OR g.result NOT IN ('WIN', 'LOSS') THEN 1 ELSE 0 END) AS draws
         FROM game_appearances ga
         JOIN v_effective_games g ON g.id = ga.game_id
-        WHERE ga.player_id = :pid AND ga.is_captain = TRUE
-    """), {"pid": pid})
+        WHERE ga.player_id = :pid AND ga.is_captain = TRUE""" + club + """
+    """), params)
     summary = dict(summary_res.mappings().first() or {})
 
     bat_cap_res = await db.execute(text("""
@@ -591,11 +598,12 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
+        JOIN v_effective_games g ON g.id = bi.game_id
         JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
-        WHERE bi.player_id = :pid
+        WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
-    """), {"pid": pid})
+    """), params)
     bat_cap = dict(bat_cap_res.mappings().first() or {})
 
     bat_not_res = await db.execute(text("""
@@ -607,12 +615,13 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             SUM(CASE WHEN bi.runs >= 50 AND bi.runs < 100 THEN 1 ELSE 0 END) AS fifties,
             SUM(CASE WHEN bi.runs >= 100 THEN 1 ELSE 0 END) AS hundreds
         FROM v_effective_batting_innings bi
+        JOIN v_effective_games g ON g.id = bi.game_id
         LEFT JOIN game_appearances ga ON ga.game_id = bi.game_id AND ga.player_id = bi.player_id AND ga.is_captain = TRUE
-        WHERE bi.player_id = :pid
+        WHERE bi.player_id = :pid""" + club + """
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
           AND ga.game_id IS NULL
-    """), {"pid": pid})
+    """), params)
     bat_not = dict(bat_not_res.mappings().first() or {})
 
     bowl_cap_res = await db.execute(text("""
@@ -622,9 +631,10 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
         FROM v_effective_bowling_spells bs
+        JOIN v_effective_games g ON g.id = bs.game_id
         JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
-        WHERE bs.player_id = :pid
-    """), {"pid": pid})
+        WHERE bs.player_id = :pid""" + club + """
+    """), params)
     bowl_cap = dict(bowl_cap_res.mappings().first() or {})
 
     bowl_not_res = await db.execute(text("""
@@ -634,10 +644,11 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.wickets), 0), 2) AS average,
             ROUND(SUM(bs.runs)::numeric / NULLIF(SUM(bs.overs), 0), 2) AS economy
         FROM v_effective_bowling_spells bs
+        JOIN v_effective_games g ON g.id = bs.game_id
         LEFT JOIN game_appearances ga ON ga.game_id = bs.game_id AND ga.player_id = bs.player_id AND ga.is_captain = TRUE
-        WHERE bs.player_id = :pid
+        WHERE bs.player_id = :pid""" + club + """
           AND ga.game_id IS NULL
-    """), {"pid": pid})
+    """), params)
     bowl_not = dict(bowl_not_res.mappings().first() or {})
 
     by_season_res = await db.execute(text("""
@@ -647,12 +658,14 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
             JOIN v_effective_games g ON g.id = ga.game_id
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
-            WHERE ga.player_id = :pid AND ga.is_captain = TRUE
+            WHERE ga.player_id = :pid AND ga.is_captain = TRUE""" + club + """
         ),
         bat_per_game AS (
             SELECT bi.game_id, SUM(bi.runs) AS runs, COUNT(*) AS innings,
                    SUM(bi.not_out::int) AS not_outs
             FROM v_effective_batting_innings bi
+            -- Already narrowed to captain_games, which carries the club
+            -- predicate, so no games join and no clause is needed here.
             WHERE bi.player_id = :pid
               AND bi.game_id IN (SELECT game_id FROM captain_games)
               AND NOT COALESCE(bi.did_not_bat, FALSE)
@@ -683,7 +696,7 @@ async def get_player_captain_stats(player_id: str, db: AsyncSession = Depends(ge
         LEFT JOIN bowl_per_game bowl ON bowl.game_id = cg.game_id
         GROUP BY cg.season_name, cg.season_year
         ORDER BY cg.season_year DESC NULLS LAST
-    """), {"pid": pid})
+    """), params)
     by_season = [dict(r) for r in by_season_res.mappings()]
     for row in by_season:
         row["season_year"] = row.get("season_year")

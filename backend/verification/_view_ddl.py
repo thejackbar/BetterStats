@@ -14,6 +14,7 @@ VERSIONS = Path(__file__).resolve().parent.parent / "alembic" / "versions"
 FILES = [
     "038_effective_per_game_views.py",
     "075_batting_caught_behind.py",
+    "093_manual_bowler_wickets.py",
     "147_fillin_partnerships_fielding_names.py",
     "252_statlab_residual_grade_label.py",
     "266_game_status_unplayed_matches.py",

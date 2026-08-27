@@ -234,6 +234,53 @@ async def _game_season_clause(session: AsyncSession, season_id, params: dict) ->
     params["career_season_ids"] = season_ids
     return " AND g.season_id = ANY(:career_season_ids)"
 
+async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]:
+    """The club a player belongs to, for `_SEASON_FOLD_CTE`'s `:fold_org`.
+
+    A NULL org is a legitimate state (see the effective view's own org guard),
+    and binds cleanly: no club seasons, so every season folds to itself and the
+    query behaves exactly as it did before folding existed.
+    """
+    row = await session.execute(
+        text("SELECT organisation_id FROM players WHERE id = CAST(:pid AS UUID)"),
+        {"pid": player_id},
+    )
+    org = row.scalar()
+    return str(org) if org else None
+
+
+async def _club_game_clause(
+    session: AsyncSession, player_id: str, params: dict, alias: str = "g"
+) -> str:
+    """Restrict a per-game player read to games the player's OWN club played.
+
+    CA issues one participant GUID per person across every club they turn out
+    for, so a player's per-innings rows can sit on a game whose grade — and so
+    whose season — belongs to another club. Without this, a Gosnells profile
+    counts a match the player played for Willetton as one of its own: the
+    reported case read 1st Grade 66 where CA's own figure for the club is 61.
+
+    The predicate mirrors `iq_trends._ours_clause` and `_club_results`: a game
+    is ours when its own club is us (`organisation_id`, migration 169 — derived
+    through the grade's season for a synced game, stored outright on a manual
+    one) **or when we are one of the two sides** (`home_org_id`/`away_org_id`,
+    migration 167). That second half is what stops this dropping a real match:
+    a fixture between two synced clubs is one `games` row owned by whichever
+    club synced it first, so our own game can carry their season — and it is
+    still ours. What it excludes is a game our club was never in.
+
+    A player with no club binds NULL and the clause matches everything, which
+    is the same answer the query gave before this existed. The comparison is
+    written as a CAST rather than a bare `:param IS NULL` — asyncpg cannot
+    infer a type for that and raises at execute time.
+    """
+    params["club_org"] = await _player_org_id(session, player_id)
+    o = "CAST(:club_org AS UUID)"
+    return (f" AND ({o} IS NULL"
+            f" OR {alias}.organisation_id = {o}"
+            f" OR {alias}.home_org_id = {o}"
+            f" OR {alias}.away_org_id = {o})")
+
 
 async def _career_identity(session: AsyncSession, player_id: str) -> dict:
     """The player columns every career payload carries alongside its figures.
@@ -279,7 +326,9 @@ async def _scoped_games_played(
     """
     params: dict = {"pid": player_id}
     season_clause = await _game_season_clause(session, season_id, params)
-    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    club_clause = await _club_game_clause(session, player_id, params)
+    scope_clause = (scope.clause("g.grade_id") if _scoped(scope) else "") \
+        + club_clause
     if _scoped(scope):
         scope.bind(params)
     sql = f"""
@@ -503,7 +552,9 @@ async def get_career_fielding(
     return dict(row) if row else None
 
 
-def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
+def _build_recent_games_cte(
+    player_id_param: str, n_param: str, club_clause: str = ""
+) -> str:
     # UNION (not UNION ALL) already deduplicates game_ids; the JOIN with games
     # is 1:1 on the PK, so no DISTINCT is needed — and PostgreSQL requires
     # ORDER BY columns to appear in the SELECT list when DISTINCT is used.
@@ -519,12 +570,16 @@ def _build_recent_games_cte(player_id_param: str, n_param: str) -> str:
             SELECT ga.game_id FROM game_appearances ga WHERE ga.player_id = CAST(:{player_id_param} AS UUID)
         ) ap
         JOIN v_effective_games g ON g.id = ap.game_id
+        WHERE TRUE{club_clause}
         ORDER BY g.played_at DESC NULLS LAST
         LIMIT :{n_param}
     )"""
 
 
-def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[str], end_date: Optional[str]) -> str:
+def _build_date_filtered_games_cte(
+    player_id_param: str, start_date: Optional[str], end_date: Optional[str],
+    club_clause: str = "",
+) -> str:
     """CTE: the player's games filtered to a date window.
 
     Uses g.played_at when present; falls back to season-window overlap
@@ -547,7 +602,7 @@ def _build_date_filtered_games_cte(player_id_param: str, start_date: Optional[st
     where_clause = f"""WHERE (
             (g.played_at IS NOT NULL AND {date_clause})
             OR (g.played_at IS NULL AND s.year IS NOT NULL AND {season_clause})
-        )"""
+        ){club_clause}"""
 
     return f"""date_filtered_games AS (
         SELECT g.id AS game_id
@@ -580,20 +635,23 @@ async def get_career_batting_from_innings(
     ctes = []
     game_filter = ""
     season_clause = await _game_season_clause(session, season_id, params)
-    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    club_clause = await _club_game_clause(session, player_id, params)
+    scope_clause = (scope.clause("g.grade_id") if _scoped(scope) else "") \
+        + club_clause
     if _scoped(scope):
         scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
-        ctes.append(_build_recent_games_cte("pid", "n"))
+        ctes.append(_build_recent_games_cte("pid", "n", club_clause))
         game_filter = "AND bi.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
             params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
             params["end_date"] = date_cls.fromisoformat(end_date)
-        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        ctes.append(_build_date_filtered_games_cte(
+            "pid", start_date, end_date, club_clause))
         game_filter = "AND bi.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
@@ -649,20 +707,23 @@ async def get_career_bowling_from_spells(
     ctes = []
     game_filter = ""
     season_clause = await _game_season_clause(session, season_id, params)
-    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    club_clause = await _club_game_clause(session, player_id, params)
+    scope_clause = (scope.clause("g.grade_id") if _scoped(scope) else "") \
+        + club_clause
     if _scoped(scope):
         scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
-        ctes.append(_build_recent_games_cte("pid", "n"))
+        ctes.append(_build_recent_games_cte("pid", "n", club_clause))
         game_filter = "AND bs.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
             params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
             params["end_date"] = date_cls.fromisoformat(end_date)
-        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        ctes.append(_build_date_filtered_games_cte(
+            "pid", start_date, end_date, club_clause))
         game_filter = "AND bs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
@@ -717,20 +778,23 @@ async def get_career_fielding_from_stats(
     ctes = []
     game_filter = ""
     season_clause = await _game_season_clause(session, season_id, params)
-    scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
+    club_clause = await _club_game_clause(session, player_id, params)
+    scope_clause = (scope.clause("g.grade_id") if _scoped(scope) else "") \
+        + club_clause
     if _scoped(scope):
         scope.bind(params)
 
     if last_n_games:
         params["n"] = last_n_games
-        ctes.append(_build_recent_games_cte("pid", "n"))
+        ctes.append(_build_recent_games_cte("pid", "n", club_clause))
         game_filter = "AND fs.game_id IN (SELECT game_id FROM recent_games)"
     elif start_date or end_date:
         if start_date:
             params["start_date"] = date_cls.fromisoformat(start_date)
         if end_date:
             params["end_date"] = date_cls.fromisoformat(end_date)
-        ctes.append(_build_date_filtered_games_cte("pid", start_date, end_date))
+        ctes.append(_build_date_filtered_games_cte(
+            "pid", start_date, end_date, club_clause))
         game_filter = "AND fs.game_id IN (SELECT game_id FROM date_filtered_games)"
 
     ctes.append(f"""qualifying AS (
@@ -1094,6 +1158,9 @@ async def get_player_batting_innings(
     season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
+    clauses.append(
+        (await _club_game_clause(session, player_id, params))
+        .removeprefix(" AND ").strip())
     if _scoped(scope):
         # Leading AND already; strip it, the clause list re-joins them.
         clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
@@ -1148,6 +1215,9 @@ async def get_player_bowling_spells(
     season_ids = await resolve_season_filter_no_org(session, season_id)
     clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
+    clauses.append(
+        (await _club_game_clause(session, player_id, params))
+        .removeprefix(" AND ").strip())
     if _scoped(scope):
         # Leading AND already; strip it, the clause list re-joins them.
         clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
@@ -1195,6 +1265,7 @@ async def get_dismissal_breakdown(
 ) -> list[dict]:
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -1242,6 +1313,7 @@ async def get_bowling_dismissal_breakdown(
     """
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -1277,6 +1349,7 @@ async def get_bowling_by_batter_position(
     """
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -1306,6 +1379,7 @@ async def get_batting_by_position(
 ) -> list[dict]:
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -1499,6 +1573,15 @@ async def get_player_team_breakdown(
     season_clause_gr = ""
     season_clause_pss = ""
     params: dict = {"pid": player_id, "org_id": org_id}
+    # A game is this club's when it owns the fixture or is one of the two sides
+    # — the same predicate `_club_game_clause` and `iq_trends._ours_clause` use,
+    # so a shared fixture the other club synced first is still counted as ours.
+    club_games_clause = ""
+    if org_id:
+        club_games_clause = (
+            " AND (g.organisation_id = CAST(:org_id AS UUID)"
+            " OR g.home_org_id = CAST(:org_id AS UUID)"
+            " OR g.away_org_id = CAST(:org_id AS UUID))")
     season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
     if season_ids:
         season_clause_gr = " AND gr.season_id = ANY(:sids)"
@@ -1532,8 +1615,6 @@ async def get_player_team_breakdown(
             FROM appearances ap
             JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons sc ON sc.id = gr.season_id
-                           AND sc.organisation_id = CAST(:org_id AS UUID)
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -1549,7 +1630,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}
             GROUP BY COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
             ORDER BY matches DESC, grade_name
         """),
@@ -1598,8 +1679,6 @@ async def get_player_team_breakdown(
             FROM appearances ap
             JOIN v_effective_games g  ON g.id = ap.game_id
             JOIN grades gr ON gr.id = g.grade_id
-            JOIN seasons sc ON sc.id = gr.season_id
-                           AND sc.organisation_id = CAST(:org_id AS UUID)
             LEFT JOIN LATERAL (
                 SELECT canonical_name FROM grade_merge_logs gml
                 WHERE gml.org_id = CAST(:org_id AS UUID)
@@ -1615,7 +1694,7 @@ async def get_player_team_breakdown(
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE TRUE {season_clause_gr}
+            WHERE TRUE {club_games_clause}{season_clause_gr}
             GROUP BY gr.season_id, COALESCE(gdn.display_name_override, COALESCE(am.canonical_name, gr.name))
         """),
         params,
@@ -1628,18 +1707,16 @@ async def get_player_team_breakdown(
     # year, then back through any merge on that row: the same rule
     # `resolve_season_filter` applies to every season filter in the app.
     alias_rev = await load_reverse_alias_map(session, org_id) if org_id else {}
-    club_seasons = await session.execute(
-        text("SELECT id, year FROM seasons WHERE organisation_id = CAST(:org_id AS UUID)"),
-        {"org_id": org_id},
-    ) if org_id else None
+    # Years for EVERY season, ours or not: a shared fixture carries the other
+    # club's season, and it still belongs in our row for that year.
+    all_seasons = await session.execute(
+        text("SELECT id, year, organisation_id FROM seasons WHERE year IS NOT NULL"))
     year_by_season: dict[str, int] = {}
     season_by_year: dict[int, str] = {}
-    if club_seasons is not None:
-        for r in club_seasons.mappings():
-            sid, yr = str(r["id"]), r["year"]
-            if yr is None:
-                continue
-            year_by_season[sid] = yr
+    for r in all_seasons.mappings():
+        sid, yr = str(r["id"]), r["year"]
+        year_by_season[sid] = yr
+        if org_id and str(r["organisation_id"]) == str(org_id):
             # Deterministic pick, so the row a year folds onto is stable across
             # requests. Any member works for a deep link — resolve_season_filter
             # expands whichever one it is back to the whole year.
@@ -1945,21 +2022,6 @@ _SEASON_FOLD_CTE = """
 """
 
 
-async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]:
-    """The club a player belongs to, for `_SEASON_FOLD_CTE`'s `:fold_org`.
-
-    A NULL org is a legitimate state (see the effective view's own org guard),
-    and binds cleanly: no club seasons, so every season folds to itself and the
-    query behaves exactly as it did before folding existed.
-    """
-    row = await session.execute(
-        text("SELECT organisation_id FROM players WHERE id = CAST(:pid AS UUID)"),
-        {"pid": player_id},
-    )
-    org = row.scalar()
-    return str(org) if org else None
-
-
 # No player plays anywhere near this many games in one real season. Cricket
 # Australia bundles a club's whole pre-migration history into its earliest season
 # as cumulative career-to-date totals, so that one "season" shows 100+ matches for
@@ -1997,7 +2059,8 @@ async def _season_by_season_scoped(
         "fold_org": await _player_org_id(session, player_id),
     }
     scope.bind(params)
-    clause = scope.clause("g.grade_id")
+    clause = (scope.clause("g.grade_id")
+              + await _club_game_clause(session, player_id, params))
     resid_clause = scope.clause("pss.grade_id", "aggregate")
     fold = _SEASON_FOLD_CTE.rstrip() + ",\n"
     res = await session.execute(
@@ -2360,6 +2423,7 @@ async def get_player_partnerships(
 ) -> list[dict]:
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -3671,6 +3735,7 @@ async def get_player_by_opposition(
 ) -> list[dict]:
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
@@ -3876,6 +3941,7 @@ async def get_player_by_venue(
 ) -> list[dict]:
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
     params: dict = {"pid": player_id}
+    scope_clause += await _club_game_clause(session, player_id, params)
     if _scoped(scope):
         scope.bind(params)
     result = await session.execute(
