@@ -6,13 +6,18 @@ created by services/instructional_video_ddl.py rather than by `create_all`, so
 keeping it out of the ORM graph means nothing here depends on model import
 order.
 
-TWO RULES WORTH KEEPING:
+RULES WORTH KEEPING:
 
-  - `video_data` is never selected unless the caller is actually serving bytes.
-    Every listing and detail read names its columns, so a page of six videos
-    costs six rows of text and not half a gigabyte of blob. `stream_range`
-    slices the column in SQL, so serving a seek costs the slice and not the
-    file.
+  - THE VIDEO IS A FILE, THE POSTER IS A COLUMN. See instructional_video_ddl
+    for why the two are split. Video files are deliberately excluded from the
+    regular backup (settings.py says why), so this module must never be the
+    only thing that knows a file exists — the row is the index, and a row
+    whose file has gone reports that rather than pretending.
+
+  - A FILENAME IS NEVER BUILT FROM ANYTHING A PERSON TYPED. It is
+    `<row uuid>.<ext>` with the extension chosen from a fixed map, so a file
+    called `../../etc/passwd` cannot escape the storage directory. The name
+    the admin uploaded is kept in a column, for the download header only.
 
   - A slug is derived from the title once, at creation, and then left alone.
     Retitling a video does NOT move its URL: a link handed to a club in an
@@ -20,20 +25,28 @@ TWO RULES WORTH KEEPING:
 """
 from __future__ import annotations
 
+import logging
+import os
 import re
+import shutil
+import tempfile
 import uuid
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Fields every read that is not serving bytes selects. Deliberately excludes
-# video_data and poster_data.
+from app.config.settings import settings
+
+logger = logging.getLogger(__name__)
+
+# Fields every read selects. Deliberately excludes poster_data, so listing the
+# library costs rows of text rather than every thumbnail.
 _META_COLUMNS = """
     id, slug, title, description, module_label, sort_order,
-    video_mime, video_size, video_filename,
+    video_path, video_mime, video_size, video_filename,
     (poster_data IS NOT NULL) AS has_poster,
-    (video_data IS NOT NULL) AS has_video,
     created_at, updated_at
 """
 
@@ -49,6 +62,80 @@ ALLOWED_VIDEO_MIMES = {
 ALLOWED_POSTER_MIMES = {"image/jpeg", "image/png", "image/webp"}
 
 _SLUG_STRIP = re.compile(r"[^a-z0-9]+")
+# A stored filename must look exactly like one we wrote. Anything else is not
+# ours and is refused rather than opened.
+_SAFE_FILENAME = re.compile(r"^[0-9a-f-]{36}\.(mp4|webm)$")
+
+
+def storage_dir() -> Path:
+    """The directory video files live in, created on first use."""
+    p = Path(settings.video_storage_dir)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def resolve_path(video_path: str | None) -> Path | None:
+    """Turn a stored filename into a full path, refusing anything that is not
+    one of ours.
+
+    The regex is the guard, not the directory check: only a name this module
+    generated can pass, so a row edited by hand to say `../../secret` resolves
+    to nothing instead of escaping the storage directory.
+    """
+    if not video_path or not _SAFE_FILENAME.match(video_path):
+        return None
+    return storage_dir() / video_path
+
+
+def file_size(video_path: str | None) -> int:
+    """Size on disk, or 0 when the file is missing.
+
+    A missing file is an ordinary state here: these are not backed up, so a
+    restored database legitimately has rows whose files are gone.
+    """
+    p = resolve_path(video_path)
+    try:
+        return p.stat().st_size if p and p.exists() else 0
+    except OSError:
+        return 0
+
+
+def store_upload(fileobj, mime: str, *, video_id: uuid.UUID) -> tuple[str, int]:
+    """Stream an upload to disk and return (filename, bytes written).
+
+    Written to a temp file in the SAME directory and then renamed, so a partly
+    written file is never visible to a reader — rename within one filesystem is
+    atomic. Streamed in chunks rather than read whole, or a 512MB upload would
+    sit in memory first.
+    """
+    directory = storage_dir()
+    name = f"{video_id}{ALLOWED_VIDEO_MIMES.get(mime, '.mp4')}"
+    final = directory / name
+
+    fd, tmp_name = tempfile.mkstemp(dir=str(directory), suffix=".part")
+    written = 0
+    try:
+        with os.fdopen(fd, "wb") as out:
+            shutil.copyfileobj(fileobj, out, length=1024 * 1024)
+            written = out.tell()
+        os.replace(tmp_name, final)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+    return name, written
+
+
+def delete_file(video_path: str | None) -> None:
+    """Best-effort removal. A file already gone is the desired end state, and a
+    filesystem error must never stop the row being deleted — an orphaned file
+    is recoverable, a row pointing at nothing is what the reader sees."""
+    p = resolve_path(video_path)
+    if not p:
+        return
+    try:
+        p.unlink(missing_ok=True)
+    except OSError:
+        logger.warning("Could not remove video file %s", p, exc_info=True)
 
 
 def slugify(value: str) -> str:
@@ -82,8 +169,10 @@ async def _unique_slug(db: AsyncSession, base: str) -> str:
 def _row_to_dict(row: Any) -> dict:
     d = dict(row._mapping)
     d["id"] = str(d["id"])
-    # The public shape the frontend reads. Paths, not blobs — the browser
-    # fetches the bytes from the streaming endpoints on demand.
+    stored = d.pop("video_path", None)
+    # `file_present` is what lets a screen tell "not uploaded yet" from "the
+    # file is gone", which matters precisely because these are not backed up.
+    d["file_present"] = bool(stored) and file_size(stored) > 0
     d["src"] = f"/api/public/videos/{d['slug']}/file"
     d["poster"] = f"/api/public/videos/{d['slug']}/poster" if d.pop("has_poster") else None
     d["date"] = d["created_at"].date().isoformat() if d.get("created_at") else None
@@ -123,25 +212,53 @@ async def get_video_by_id(db: AsyncSession, video_id: str) -> dict | None:
     return _row_to_dict(row) if row else None
 
 
+async def video_file(db: AsyncSession, slug: str) -> tuple[Path, str, int, str] | None:
+    """(path, mime, size, download filename) for a video whose file is present."""
+    row = (await db.execute(text(
+        "SELECT video_path, video_mime, video_filename, slug "
+        "FROM instructional_videos WHERE slug = :s"
+    ), {"s": slug})).first()
+    if not row:
+        return None
+    path = resolve_path(row.video_path)
+    if not path or not path.exists():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    return (path, row.video_mime or "application/octet-stream", size,
+            row.video_filename or row.slug)
+
+
+async def poster_bytes(db: AsyncSession, slug: str) -> tuple[bytes, str] | None:
+    row = (await db.execute(text(
+        "SELECT poster_data, poster_mime FROM instructional_videos WHERE slug = :s"
+    ), {"s": slug})).first()
+    if not row or row.poster_data is None:
+        return None
+    return bytes(row.poster_data), (row.poster_mime or "image/jpeg")
+
+
 async def create_video(
     db: AsyncSession,
     *,
     title: str,
     description: str,
     module_label: str | None,
-    video_bytes: bytes,
+    video_stream,
     video_mime: str,
     video_filename: str | None,
-    poster_bytes: bytes | None,
+    poster_bytes_data: bytes | None,
     poster_mime: str | None,
     created_by_user_id: Any | None,
 ) -> dict:
     """Add a video to the end of the library.
 
-    The id is generated here rather than left to the column default: a table
-    built by `create_all` instead of the DDL module would carry no
-    gen_random_uuid() default, and the insert would fail on a NOT NULL id. The
-    same trap the self-serve-trial note documents.
+    The id is generated here rather than left to the column default: it names
+    the file on disk, so it has to exist before the file is written. It also
+    sidesteps the trap where a table built by `create_all` carries no
+    gen_random_uuid() default and the insert fails on a NOT NULL id.
     """
     slug = await _unique_slug(db, slugify(title))
     next_order = (await db.execute(
@@ -149,32 +266,40 @@ async def create_video(
     )).scalar_one()
 
     new_id = uuid.uuid4()
-    await db.execute(text("""
-        INSERT INTO instructional_videos (
-            id, slug, title, description, module_label, sort_order,
-            video_data, video_mime, video_size, video_filename,
-            poster_data, poster_mime, created_by_user_id
-        ) VALUES (
-            :id, :slug, :title, :description, :module_label, :sort_order,
-            :video_data, :video_mime, :video_size, :video_filename,
-            :poster_data, :poster_mime, :created_by
-        )
-    """), {
-        "id": new_id,
-        "slug": slug,
-        "title": title.strip(),
-        "description": (description or "").strip(),
-        "module_label": (module_label or "").strip() or None,
-        "sort_order": next_order,
-        "video_data": video_bytes,
-        "video_mime": video_mime,
-        "video_size": len(video_bytes),
-        "video_filename": (video_filename or f"{slug}{ALLOWED_VIDEO_MIMES.get(video_mime, '')}")[:300],
-        "poster_data": poster_bytes,
-        "poster_mime": poster_mime,
-        "created_by": created_by_user_id,
-    })
-    await db.commit()
+    stored_name, size = store_upload(video_stream, video_mime, video_id=new_id)
+
+    try:
+        await db.execute(text("""
+            INSERT INTO instructional_videos (
+                id, slug, title, description, module_label, sort_order,
+                video_path, video_mime, video_size, video_filename,
+                poster_data, poster_mime, created_by_user_id
+            ) VALUES (
+                :id, :slug, :title, :description, :module_label, :sort_order,
+                :video_path, :video_mime, :video_size, :video_filename,
+                :poster_data, :poster_mime, :created_by
+            )
+        """), {
+            "id": new_id,
+            "slug": slug,
+            "title": title.strip(),
+            "description": (description or "").strip(),
+            "module_label": (module_label or "").strip() or None,
+            "sort_order": next_order,
+            "video_path": stored_name,
+            "video_mime": video_mime,
+            "video_size": size,
+            "video_filename": (video_filename or stored_name)[:300],
+            "poster_data": poster_bytes_data,
+            "poster_mime": poster_mime,
+            "created_by": created_by_user_id,
+        })
+        await db.commit()
+    except BaseException:
+        # The row is what makes the file reachable, so a failed insert must not
+        # leave the file behind — nothing would ever point at it or clean it up.
+        delete_file(stored_name)
+        raise
     return await get_video_by_id(db, str(new_id))
 
 
@@ -183,10 +308,10 @@ async def update_video(
     video_id: str,
     *,
     fields: dict,
-    video_bytes: bytes | None = None,
+    video_stream=None,
     video_mime: str | None = None,
     video_filename: str | None = None,
-    poster_bytes: bytes | None = None,
+    poster_bytes_data: bytes | None = None,
     poster_mime: str | None = None,
 ) -> dict | None:
     """Update whatever was actually sent.
@@ -200,10 +325,16 @@ async def update_video(
     if not current:
         return None
 
+    old_row = (await db.execute(
+        text("SELECT video_path FROM instructional_videos WHERE id = :i"),
+        {"i": uuid.UUID(str(video_id))},
+    )).first()
+    old_path = old_row.video_path if old_row else None
+
     sets: list[str] = []
     params: dict[str, Any] = {"id": uuid.UUID(str(video_id))}
 
-    for key, column in (("title", "title"), ("description", "description"), ("module_label", "module_label")):
+    for key in ("title", "description", "module_label"):
         if key in fields:
             value = fields[key]
             value = (value or "").strip() if isinstance(value, str) else value
@@ -211,46 +342,66 @@ async def update_video(
                 raise ValueError("A video needs a title.")
             if key == "module_label":
                 value = value or None
-            sets.append(f"{column} = :{key}")
+            sets.append(f"{key} = :{key}")
             params[key] = value
 
-    if video_bytes is not None:
-        sets += ["video_data = :video_data", "video_mime = :video_mime",
+    new_stored = None
+    if video_stream is not None:
+        new_stored, size = store_upload(video_stream, video_mime, video_id=uuid.UUID(str(video_id)))
+        sets += ["video_path = :video_path", "video_mime = :video_mime",
                  "video_size = :video_size", "video_filename = :video_filename"]
-        params["video_data"] = video_bytes
+        params["video_path"] = new_stored
         params["video_mime"] = video_mime
-        params["video_size"] = len(video_bytes)
-        params["video_filename"] = (video_filename or current["slug"])[:300]
+        params["video_size"] = size
+        params["video_filename"] = (video_filename or new_stored)[:300]
 
-    if poster_bytes is not None:
+    if poster_bytes_data is not None:
         sets += ["poster_data = :poster_data", "poster_mime = :poster_mime"]
-        params["poster_data"] = poster_bytes
+        params["poster_data"] = poster_bytes_data
         params["poster_mime"] = poster_mime
 
     if not sets:
         return current
 
     sets.append("updated_at = NOW()")
-    await db.execute(text(
-        f"UPDATE instructional_videos SET {', '.join(sets)} WHERE id = :id"
-    ), params)
-    await db.commit()
+    try:
+        await db.execute(text(
+            f"UPDATE instructional_videos SET {', '.join(sets)} WHERE id = :id"
+        ), params)
+        await db.commit()
+    except BaseException:
+        if new_stored:
+            delete_file(new_stored)
+        raise
+
+    # Only once the row points at the new file is the old one safe to remove,
+    # and only when the name actually changed (mp4 replaced by mp4 reuses it).
+    if new_stored and old_path and old_path != new_stored:
+        delete_file(old_path)
     return await get_video_by_id(db, video_id)
 
 
 async def delete_video(db: AsyncSession, video_id: str) -> bool:
     """Remove the entry and its file together.
 
-    The bytes live in the row, so there is no orphaned file left on a volume
-    afterwards — deleting the entry IS deleting the video.
+    The row goes first: a row with no file shows as unavailable, whereas a file
+    with no row is invisible and never cleaned up.
     """
     try:
         vid = uuid.UUID(str(video_id))
     except (ValueError, AttributeError, TypeError):
         return False
+    row = (await db.execute(
+        text("SELECT video_path FROM instructional_videos WHERE id = :i"), {"i": vid}
+    )).first()
+    if not row:
+        return False
     res = await db.execute(text("DELETE FROM instructional_videos WHERE id = :i"), {"i": vid})
     await db.commit()
-    return (res.rowcount or 0) > 0
+    if (res.rowcount or 0) > 0:
+        delete_file(row.video_path)
+        return True
+    return False
 
 
 async def reorder_videos(db: AsyncSession, ordered_ids: list[str]) -> list[dict]:
@@ -280,37 +431,20 @@ async def reorder_videos(db: AsyncSession, ordered_ids: list[str]) -> list[dict]
     return await list_videos(db)
 
 
-async def video_blob_info(db: AsyncSession, slug: str, *, poster: bool = False) -> tuple[str, int, str] | None:
-    """(mime, byte length, filename) without pulling the blob itself.
+async def orphaned_files(db: AsyncSession) -> list[str]:
+    """Files on disk that no row points at.
 
-    octet_length() reads the stored length rather than the column, so asking
-    "how big is this" costs nothing even for a 400MB video.
+    Worth being able to ask, because these are outside the backup: after a
+    database restore the rows are older than the directory, and this names what
+    is taking up space with nothing referring to it.
     """
-    column = "poster_data" if poster else "video_data"
-    row = (await db.execute(text(f"""
-        SELECT COALESCE({'poster_mime' if poster else 'video_mime'}, '') AS mime,
-               COALESCE(octet_length({column}), 0) AS len,
-               COALESCE(video_filename, slug) AS filename
-        FROM instructional_videos WHERE slug = :s
-    """), {"s": slug})).first()
-    if not row or not row.len:
-        return None
-    return (row.mime or "application/octet-stream", int(row.len), row.filename)
-
-
-async def read_blob_range(
-    db: AsyncSession, slug: str, start: int, length: int, *, poster: bool = False
-) -> bytes | None:
-    """Slice the stored file in SQL.
-
-    This is what makes seeking in a long video cheap: the browser asks for a
-    range, and Postgres returns that range. Loading the whole column to hand
-    back a two-megabyte slice would put the entire file through memory on every
-    scrub. substring() is 1-indexed, hence the +1.
-    """
-    column = "poster_data" if poster else "video_data"
-    row = (await db.execute(text(
-        f"SELECT substring({column} FROM :start FOR :len) AS chunk "
-        f"FROM instructional_videos WHERE slug = :s"
-    ), {"s": slug, "start": start + 1, "len": length})).first()
-    return bytes(row.chunk) if row and row.chunk is not None else None
+    referenced = set(
+        (await db.execute(
+            text("SELECT video_path FROM instructional_videos WHERE video_path IS NOT NULL")
+        )).scalars().all()
+    )
+    try:
+        on_disk = {p.name for p in storage_dir().iterdir() if p.is_file()}
+    except OSError:
+        return []
+    return sorted(n for n in on_disk - referenced if _SAFE_FILENAME.match(n))

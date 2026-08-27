@@ -23,7 +23,11 @@ function formatDate(iso) {
 function Player({ video }) {
   const [failed, setFailed] = useState(false)
 
-  if (failed) {
+  // `file_present` is false when the row is here but the file is not. That is
+  // an ordinary state: video files are deliberately outside the regular
+  // backup, so a database restored onto a fresh box has rows whose files are
+  // gone. Saying so up front beats waiting for the player to fail.
+  if (failed || video.file_present === false) {
     return (
       <div
         className="grid place-items-center rounded-xl border pb-hairline bg-pb-surface2 px-6 text-center"
@@ -32,7 +36,7 @@ function Player({ video }) {
         <div>
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">Not playing</p>
           <p className="text-pb-dim text-sm max-w-sm leading-relaxed">
-            This walkthrough could not be played. Try downloading it instead, or check back shortly.
+            This walkthrough is not available on the server right now. Please check back shortly.
           </p>
         </div>
       </div>
@@ -154,8 +158,14 @@ export default function VideoDetail() {
 
         <Player video={video} />
 
-        {/* Download — the point of hosting the file ourselves rather than embedding it. */}
+        {/* Download — the point of hosting the file ourselves rather than embedding
+            it. Withdrawn when the file is not on the server, since it would
+            only ever hand back a 404. */}
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          {video.file_present === false && (
+            <p className="text-pb-faint text-xs">This video's file is not on the server.</p>
+          )}
+          {video.file_present !== false && (
           <a
             href={`${video.src}?download=1`}
             download
@@ -169,6 +179,7 @@ export default function VideoDetail() {
             </svg>
             DOWNLOAD VIDEO
           </a>
+          )}
           <p className="text-pb-faint text-xs">
             Keep a copy on the club laptop so whoever takes the job on next has it.
           </p>

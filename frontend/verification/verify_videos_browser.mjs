@@ -26,21 +26,21 @@ const VIDEOS = [
     title: 'BetterCricket - Merge Players', description: 'One person, two records.',
     module_label: 'BetterStats', sort_order: 0, date: '2026-08-27',
     src: '/api/public/videos/merge-players/file', poster: '/api/public/videos/merge-players/poster',
-    video_size: 1024, updated_at: '2026-08-27T00:00:00',
+    video_size: 1024, file_present: true, updated_at: '2026-08-27T00:00:00',
   },
   {
     id: '22222222-2222-2222-2222-222222222222', slug: 'merge-grades',
     title: 'BetterCricket - Merge Grades', description: 'Two names, one grade.',
     module_label: 'BetterStats', sort_order: 1, date: '2026-08-27',
     src: '/api/public/videos/merge-grades/file', poster: null,
-    video_size: 900, updated_at: '2026-08-27T00:00:00',
+    video_size: 900, file_present: true, updated_at: '2026-08-27T00:00:00',
   },
   {
     id: '33333333-3333-3333-3333-333333333333', slug: 'selection',
     title: 'BetterCricket - Selection', description: 'Picking a side for the weekend.',
     module_label: 'BetterSelect', sort_order: 2, date: '2026-08-27',
     src: '/api/public/videos/selection/file', poster: null,
-    video_size: 700, updated_at: '2026-08-27T00:00:00',
+    video_size: 700, file_present: false, updated_at: '2026-08-27T00:00:00',
   },
 ]
 
@@ -141,6 +141,19 @@ async function openPage(role) {
   ck('visitor: cards are not draggable', await page.evaluate(
     () => ![...document.querySelectorAll('[data-video-slug]')].some((e) => e.draggable)))
 
+  // A row whose file is gone is an ordinary state: video files are excluded
+  // from the regular backup by design, so a restored database reaches it.
+  ck('visitor: a video with no file on the server offers no download',
+     await page.evaluate(() => {
+       const card = [...document.querySelectorAll('[data-video-slug]')]
+         .find((e) => e.dataset.videoSlug === 'selection')
+       return !!card && !card.querySelector('a[download]')
+     }))
+  ck('visitor: a video WITH a file still offers its download',
+     await page.locator('a[download][href*="merge-players/file"]').count() > 0)
+  ck('visitor: the missing file is not announced to a visitor',
+     !(await page.locator('#main-content').innerText()).toUpperCase().includes('FILE MISSING'))
+
   ck('visitor: "videos" is never looked up as a club slug', clubCalls.length === 0, clubCalls.join(', '))
   ck('visitor: exactly one nav on the page', await page.locator('nav').count() === 1)
   ck('visitor: the marketing site stays dark',
@@ -154,9 +167,12 @@ async function openPage(role) {
      (await page.locator('h1').first().innerText()).trim() === 'BetterCricket - Merge Players')
   ck('visitor: detail description renders',
      (await page.locator('#main-content').innerText()).includes('One person, two records.'))
+  // The stub answers the .mp4 URL with JSON, so the element errors and falls
+  // into the note. Either outcome is acceptable here; the fileless case below
+  // is where the note is asserted properly.
   ck('visitor: detail has a player or a plain note',
      await page.locator('video').count() > 0
-     || (await page.locator('#main-content').innerText()).includes('could not be played'))
+     || (await page.locator('#main-content').innerText()).includes('not available on the server'))
   ck('visitor: detail download button present',
      await page.locator('a[download][href*="download=1"]').count() > 0)
   ck('visitor: detail shows NO edit control',
@@ -166,6 +182,15 @@ async function openPage(role) {
   ck('visitor: rail offers the others and not this one',
      !rail.includes('/videos/merge-players') && rail.length === VIDEOS.length - 1, rail.join(', '))
   ck('visitor: no page errors on the detail page', errors.length === 0, errors.join(' | '))
+
+  await page.goto(`${BASE}/videos/selection`, { waitUntil: 'networkidle' })
+  await page.waitForTimeout(400)
+  const gone = await page.locator('#main-content').innerText()
+  ck('visitor: a fileless video says so rather than showing a dead player',
+     gone.includes('not available on the server'))
+  ck('visitor: a fileless video draws no player at all', await page.locator('video').count() === 0)
+  ck('visitor: a fileless video offers no download button',
+     await page.locator('a[download]').count() === 0)
 
   await page.goto(`${BASE}/videos/not-a-real-video`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(500)
@@ -198,6 +223,9 @@ async function openPage(role) {
   ck('super admin: the management bar renders', text.includes('SUPER ADMIN'))
   ck('super admin: add control renders', text.includes('ADD VIDEO'))
   ck('super admin: reorder control renders', text.includes('REORDER'))
+  ck('super admin: a missing file is flagged on its card', text.includes('FILE MISSING'))
+  ck('super admin: the page says why files can be missing and what to do',
+     (await page.locator('#main-content').innerText()).includes('not part of the regular backup'))
   ck('super admin: each card offers edit and delete',
      await page.getByRole('button', { name: 'EDIT', exact: true }).count() === VIDEOS.length
      && await page.getByRole('button', { name: 'DELETE', exact: true }).count() === VIDEOS.length)

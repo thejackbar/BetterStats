@@ -5696,16 +5696,41 @@ entry and its file, and drag the order.
   way, so both files are gone and `instructional_videos` is the record.
   `og_preview` and `seo` read the TABLE now — a video retitled or deleted by an
   admin moves its share card and its sitemap entry with it.
-- **THE BYTES LIVE IN POSTGRES**, the call `committee_documents` and player
-  photos already make: the upload volume is not guaranteed to persist, and a
-  video an admin uploaded must not go with the container. There is no object
-  storage configured to reach for.
-- **`substring(video_data FROM x FOR n)` IS WHAT MAKES THAT AFFORDABLE.** A
-  `Range` request is answered by slicing the column in SQL, so scrubbing a
-  400MB video costs the slice and not the file. `octet_length()` answers "how
-  big is it" without reading the column at all. A no-Range request for a large
-  video is answered with the first 2MB rather than the lot, and the browser
-  asks for the rest as it plays.
+- **THE VIDEO IS A FILE ON THE MEDIA VOLUME, THE POSTER IS A COLUMN, and the
+  split is the whole design.** A video is capped at 512MB against 4-20MB for
+  every other binary in this app, and a bytea that size is re-dumped in full by
+  every `pg_dump` even though the file never changes. A poster is ~100KB, so
+  backing it up is free — and it is what makes a database restored onto a fresh
+  box still draw a recognisable library (titles, descriptions, thumbnails) with
+  only playback missing.
+- **VIDEO FILES ARE DELIBERATELY OUTSIDE THE REGULAR BACKUP** (per direct
+  instruction). `ops/backup/backup.sh` says so at the point where somebody
+  would otherwise be tempted to add them. The consequence is accepted and
+  handled rather than hidden: `file_present` rides on every payload, the page
+  says a video is not on the server instead of drawing a dead player, the
+  download link is withdrawn rather than left to 404, and a super admin gets a
+  count of what needs re-uploading. `orphaned_files()` finds files no row
+  points at, which is what a restore leaves behind.
+- **AN EXPLICIT HOST PATH, NOT A DOCKER NAMED VOLUME.** `/mnt/media/bettercricket/internal/videos`
+  sits under the root the backup agent already uses. A named volume can be
+  orphaned by a compose project rename, which is exactly the June 2026 outage;
+  a bind mount to a real path cannot. This is what the old "the /app/uploads
+  volume isn't guaranteed persistent" comment was really about.
+- **nginx SERVES THE BYTES, NOT PYTHON.** The app checks access and returns
+  `X-Accel-Redirect` at an `internal` location; nginx does Range and caching
+  natively and a 400MB read never blocks a worker. `video_accel_location`
+  empty falls back to serving in-process, which is what local dev does. The
+  frontend container therefore mounts the same directory read-only.
+- **A FILENAME IS NEVER BUILT FROM ANYTHING A PERSON TYPED.** It is
+  `<row uuid>.<ext>` from a fixed map, and `_SAFE_FILENAME` refuses anything
+  else on the way back out, so a row edited by hand to say `../../etc/passwd`
+  resolves to nothing. The uploaded name is kept in a column for the download
+  header only.
+- **The upload streams to disk and is never read into memory.** `_check_size`
+  seeks the SpooledTemporaryFile rather than calling `len()` on 512MB, and
+  `store_upload` writes to a temp file in the same directory then `os.replace`s
+  it, so a half-written file is never served. A failed insert deletes the file
+  it just wrote — nothing would ever point at it or clean it up.
 - **A NEW TOP-LEVEL ROUTE IS A CLUB SLUG UNTIL FOUR SEPARATE LISTS SAY
   OTHERWISE, and only one of them is in the backend.** `/videos` was being
   looked up as a club: `og_preview.RESERVED_ROOT_SEGMENTS`,
@@ -5746,16 +5771,25 @@ entry and its file, and drag the order.
   (`hidden lg:block`): in the row from 1024px, in the mobile menu below 768px,
   and in the footer always. Re-measured after: back to the 16px baseline
   exactly, 0 everywhere else.
+- **`VIDEO_STORAGE_DIR` MUST BE SET BEFORE THE SERVICE MODULE IS IMPORTED**, not
+  merely before it is called: the module imports `app.config.settings`, and
+  pydantic-settings reads the environment once at instantiation. The first cut
+  of the harness set it further down the file, which looked right and silently
+  wrote eleven test videos into the real `/mnt/media` path. Same family as the
+  Roster temporal-dead-zone note — position in the file is load-bearing.
 - **Verified against a real Postgres** (`backend/verification/verify_instructional_videos.py`,
-  79 checks through the shipped service and route bodies: the DDL applied three
+  103 checks through the shipped service and route bodies: the DDL applied three
   times to a populated table, the slug derived and then held still across a
   retitle, a duplicate title suffixed, a text edit not touching the file and a
   file replace not touching the text, every Range case incl. a suffix range and
   a start past the file, reorder renumbering from zero and skipping a foreign
-  id without dropping anyone, delete taking the file with it, all four upload
-  refusals, the share card built from the table and a deleted video's card
-  ceasing to resolve, and the downgrade) and **driven in Chromium**
-  (`verify_videos_browser.mjs`, 74: the exact params on the wire for a PATCH, a
+  id without dropping anyone, delete taking the file with it, every path-
+  traversal refusal, a replaced file removing the old one, a failed insert
+  leaving nothing behind, the missing-file case reporting itself while its
+  thumbnail still draws, orphan detection finding a hand-deleted row's file,
+  every upload refusal, the share card built from the table and a deleted
+  video's card ceasing to resolve, and the downgrade) and **driven in Chromium**
+  (`verify_videos_browser.mjs`, 82: the exact params on the wire for a PATCH, a
   delete and a drag-reorder, a dismissed delete sending nothing, an upload with
   no file refused before any request, and the gate from three identities)
   **with a control run**: with `canManage` forced true, 10 fail on exactly the

@@ -17,12 +17,14 @@ re-checks on the server, because the page is public and anyone can call these.
 """
 from __future__ import annotations
 
+import os
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.settings import settings
 from app.models.db import User, get_db
 from app.routers.auth import require_super_admin
 from app.services import instructional_videos as svc
@@ -30,10 +32,10 @@ from app.services import instructional_videos as svc
 public_router = APIRouter(prefix="/public/videos", tags=["videos"])
 admin_router = APIRouter(prefix="/club-admin/super/videos", tags=["videos-admin"])
 
-# A range request is served in slices rather than whole, so a browser scrubbing
-# a long video never pulls the entire file. 2MB is a comfortable chunk: big
-# enough that playback is not a request per second, small enough that a seek
-# costs almost nothing.
+# A range request is served in slices when the app is doing the serving. In
+# production it is not: nginx does, via X-Accel-Redirect, which handles Range
+# and caching natively and never puts the file through Python. This path is the
+# local-dev fallback, where there is no nginx in front.
 CHUNK_BYTES = 2 * 1024 * 1024
 _RANGE_RE = re.compile(r"bytes=(\d*)-(\d*)")
 
@@ -77,47 +79,69 @@ def _parse_range(header: str | None, size: int) -> tuple[int, int] | None:
     return (start, min(end, size - 1))
 
 
-async def _serve_blob(
-    db: AsyncSession, slug: str, request: Request, *, poster: bool, download: bool = False
-) -> Response:
-    info = await svc.video_blob_info(db, slug, poster=poster)
-    if not info:
-        raise HTTPException(status_code=404, detail="No such file")
-    mime, size, filename = info
+def _read_slice(path, start: int, length: int) -> bytes:
+    with open(path, "rb") as fh:
+        fh.seek(start)
+        return fh.read(length)
 
-    # Public content that never changes for a given slug once uploaded, so it
-    # is safe to cache hard. Replacing the file bumps updated_at, which the
-    # ETag carries, so a replacement is picked up rather than served stale.
-    video = await svc.get_video(db, slug)
-    etag = f'"{slug}-{(video or {}).get("updated_at", "")}-{size}"'
-    if request.headers.get("if-none-match") == etag:
-        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "public, max-age=3600"})
 
-    base_headers = {
-        "Accept-Ranges": "bytes",
-        "ETag": etag,
-        "Cache-Control": "public, max-age=3600",
-    }
+@public_router.get("/{slug}/file")
+async def stream_video(
+    slug: str, request: Request, download: int = 0, db: AsyncSession = Depends(get_db)
+):
+    """Serve the video, honouring Range so the player can seek.
+
+    ``?download=1`` is what the Download button uses: same bytes, served with a
+    Content-Disposition so the browser saves the file rather than playing it.
+
+    A MISSING FILE IS AN ORDINARY STATE HERE, not an error to be surprised by:
+    video files are deliberately outside the regular backup, so a database
+    restored onto a fresh box has rows whose files are legitimately gone. It
+    reports 404 with a plain reason, and the page draws its "not playing" note.
+    """
+    found = await svc.video_file(db, slug)
+    if not found:
+        exists = await svc.get_video(db, slug)
+        raise HTTPException(
+            status_code=404,
+            detail=("That video's file is not on this server." if exists else "No such video"),
+        )
+    path, mime, size, filename = found
+
+    disposition = None
     if download:
         safe = (filename or slug).replace('"', "")
-        base_headers["Content-Disposition"] = f'attachment; filename="{safe}"'
+        disposition = f'attachment; filename="{safe}"'
+
+    # Production: hand the bytes to nginx. The access check has already run;
+    # nginx serves from disk with native Range support and never blocks a
+    # worker on a 400MB read.
+    accel = (settings.video_accel_location or "").strip()
+    if accel:
+        headers = {
+            "X-Accel-Redirect": f"{accel.rstrip('/')}/{path.name}",
+            "Content-Type": mime,
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "public, max-age=3600",
+        }
+        if disposition:
+            headers["Content-Disposition"] = disposition
+        return Response(status_code=200, headers=headers)
+
+    # Local dev: serve it ourselves.
+    base_headers = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"}
+    if disposition:
+        base_headers["Content-Disposition"] = disposition
 
     rng = _parse_range(request.headers.get("range"), size)
     if rng is None:
-        # No range asked for. A poster is small enough to hand over whole; a
-        # video is not, so the first chunk is served and the browser asks for
-        # the rest as it plays.
-        if poster or size <= CHUNK_BYTES:
-            data = await svc.read_blob_range(db, slug, 0, size, poster=poster)
-            return Response(content=data or b"", media_type=mime,
+        if size <= CHUNK_BYTES:
+            return Response(content=_read_slice(path, 0, size), media_type=mime,
                             headers={**base_headers, "Content-Length": str(size)})
         rng = (0, min(CHUNK_BYTES, size) - 1)
 
     start, end = rng
-    length = end - start + 1
-    data = await svc.read_blob_range(db, slug, start, length, poster=poster)
-    if data is None:
-        raise HTTPException(status_code=404, detail="No such file")
+    data = _read_slice(path, start, end - start + 1)
     return Response(
         content=data,
         status_code=206,
@@ -130,21 +154,16 @@ async def _serve_blob(
     )
 
 
-@public_router.get("/{slug}/file")
-async def stream_video(
-    slug: str, request: Request, download: int = 0, db: AsyncSession = Depends(get_db)
-):
-    """Stream the video, honouring Range so the player can seek.
-
-    ``?download=1`` is what the Download button uses: same bytes, served with a
-    Content-Disposition so the browser saves the file rather than playing it.
-    """
-    return await _serve_blob(db, slug, request, poster=False, download=bool(download))
-
-
 @public_router.get("/{slug}/poster")
-async def stream_poster(slug: str, request: Request, db: AsyncSession = Depends(get_db)):
-    return await _serve_blob(db, slug, request, poster=True)
+async def stream_poster(slug: str, db: AsyncSession = Depends(get_db)):
+    """The thumbnail, which stays in Postgres — small enough to back up, and it
+    keeps a restored library recognisable when the video files are gone."""
+    found = await svc.poster_bytes(db, slug)
+    if not found:
+        raise HTTPException(status_code=404, detail="No poster for that video")
+    data, mime = found
+    return Response(content=data, media_type=mime,
+                    headers={"Cache-Control": "public, max-age=3600"})
 
 
 # -------------------------------------------------------------- admin writes
@@ -153,29 +172,30 @@ class ReorderBody(BaseModel):
     ids: list[str]
 
 
-async def _read_upload(file: UploadFile | None, *, poster: bool) -> tuple[bytes, str] | None:
-    """Read an upload and refuse anything the library will not serve.
+def _check_size(file: UploadFile, cap: int, kind: str) -> int:
+    """Measure an upload without reading it into memory.
 
-    Checked here rather than trusted from the browser: the mime on the wire is
-    whatever the client claims, so an unrecognised one is rejected outright
-    instead of being stored and failing to play for every visitor later.
+    UploadFile wraps a SpooledTemporaryFile, so seeking to the end gives the
+    size directly. Reading a 512MB video just to call len() on it is the thing
+    this exists to avoid.
     """
-    if file is None or not file.filename:
-        return None
-    data = await file.read()
-    if not data:
-        return None
-
-    allowed = svc.ALLOWED_POSTER_MIMES if poster else set(svc.ALLOWED_VIDEO_MIMES)
-    cap = svc.MAX_POSTER_BYTES if poster else svc.MAX_VIDEO_BYTES
-    kind = "Poster image" if poster else "Video"
-
-    if len(data) > cap:
+    fh = file.file
+    fh.seek(0, os.SEEK_END)
+    size = fh.tell()
+    fh.seek(0)
+    if size > cap:
         raise HTTPException(
             status_code=413,
             detail=f"{kind} files are limited to {cap // (1024 * 1024)}MB. That one is "
-                   f"{len(data) // (1024 * 1024)}MB.",
+                   f"{size // (1024 * 1024)}MB.",
         )
+    return size
+
+
+def _check_mime(file: UploadFile, allowed: set[str], kind: str) -> str:
+    """The mime on the wire is whatever the client claims, so an unrecognised
+    one is refused outright rather than stored and left to fail for every
+    visitor later."""
     mime = (file.content_type or "").split(";")[0].strip().lower()
     if mime not in allowed:
         raise HTTPException(
@@ -183,7 +203,31 @@ async def _read_upload(file: UploadFile | None, *, poster: bool) -> tuple[bytes,
             detail=f"{kind} must be one of: {', '.join(sorted(allowed))}. That file says it is "
                    f"'{mime or 'unknown'}'.",
         )
-    return data, mime
+    return mime
+
+
+def _video_upload(file: UploadFile | None):
+    """(stream, mime) for a video upload, or None when nothing was sent.
+
+    The stream is handed to the service to copy to disk in chunks; it is never
+    read into memory here.
+    """
+    if file is None or not file.filename:
+        return None
+    size = _check_size(file, svc.MAX_VIDEO_BYTES, "Video")
+    if size == 0:
+        return None
+    return file.file, _check_mime(file, set(svc.ALLOWED_VIDEO_MIMES), "Video")
+
+
+async def _poster_upload(file: UploadFile | None):
+    """(bytes, mime) for a poster, or None. Small enough to hold in memory."""
+    if file is None or not file.filename:
+        return None
+    _check_size(file, svc.MAX_POSTER_BYTES, "Poster image")
+    mime = _check_mime(file, svc.ALLOWED_POSTER_MIMES, "Poster image")
+    data = await file.read()
+    return (data, mime) if data else None
 
 
 @admin_router.get("")
@@ -207,21 +251,21 @@ async def admin_create_video(
 ):
     if not title.strip():
         raise HTTPException(status_code=422, detail="A video needs a title.")
-    read_video = await _read_upload(video, poster=False)
+    read_video = _video_upload(video)
     if not read_video:
         raise HTTPException(status_code=422, detail="Choose a video file to upload.")
-    video_bytes, video_mime = read_video
-    read_poster = await _read_upload(poster, poster=True)
+    stream, video_mime = read_video
+    read_poster = await _poster_upload(poster)
 
     return await svc.create_video(
         db,
         title=title,
         description=description,
         module_label=module_label,
-        video_bytes=video_bytes,
+        video_stream=stream,
         video_mime=video_mime,
         video_filename=video.filename,
-        poster_bytes=read_poster[0] if read_poster else None,
+        poster_bytes_data=read_poster[0] if read_poster else None,
         poster_mime=read_poster[1] if read_poster else None,
         created_by_user_id=user.id,
     )
@@ -251,17 +295,17 @@ async def admin_update_video(
     if module_label is not None:
         fields["module_label"] = module_label
 
-    read_video = await _read_upload(video, poster=False)
-    read_poster = await _read_upload(poster, poster=True)
+    read_video = _video_upload(video)
+    read_poster = await _poster_upload(poster)
 
     try:
         updated = await svc.update_video(
             db, video_id,
             fields=fields,
-            video_bytes=read_video[0] if read_video else None,
+            video_stream=read_video[0] if read_video else None,
             video_mime=read_video[1] if read_video else None,
             video_filename=video.filename if video else None,
-            poster_bytes=read_poster[0] if read_poster else None,
+            poster_bytes_data=read_poster[0] if read_poster else None,
             poster_mime=read_poster[1] if read_poster else None,
         )
     except ValueError as exc:

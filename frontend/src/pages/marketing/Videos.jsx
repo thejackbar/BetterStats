@@ -56,10 +56,19 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
                 style={{ color: 'var(--pb-accent)' }}>
             WATCH →
           </Link>
-          <a href={`${video.src}?download=1`} download
-             className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
-            DOWNLOAD
-          </a>
+          {/* No file on the server means nothing to download, so the link is
+              withdrawn rather than left to hand back a 404. Video files are
+              deliberately outside the regular backup, so a restored database
+              legitimately reaches this state. */}
+          {video.file_present !== false && (
+            <a href={`${video.src}?download=1`} download
+               className="font-mono text-[10px] tracking-wide2 text-pb-faint hover:text-pb-text transition-colors">
+              DOWNLOAD
+            </a>
+          )}
+          {video.file_present === false && canManage && (
+            <span className="font-mono text-[10px] tracking-wide2 text-pb-faint">FILE MISSING</span>
+          )}
         </div>
       )}
 
@@ -161,6 +170,13 @@ export default function Videos() {
           />
         )}
 
+        {canManage && videos.some((v) => v.file_present === false) && (
+          <p className="mb-6 text-sm text-pb-dim">
+            {videos.filter((v) => v.file_present === false).length} video file(s) are missing from the
+            server. Video files are not part of the regular backup by design, so after a restore they
+            need re-uploading from the originals. Everything else about those entries is intact.
+          </p>
+        )}
         {notice && <p className="mb-6 text-sm text-pb-dim">{notice}</p>}
         {error && <p className="mb-6 text-sm text-pb-dim">{error}</p>}
 

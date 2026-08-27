@@ -75,6 +75,32 @@ class Settings(BaseSettings):
     # nginx strips the /api prefix, so the public route resolves at
     # {public_base_url}/api/public/comms/unsubscribe/{token}.
     public_base_url: str = "https://betterat.cricket"
+
+    # ---- Instructional video storage ---------------------------------------
+    # Video files live on the host's media volume, NOT in Postgres and NOT in
+    # the `uploads` Docker volume. Two reasons, and the second is a deliberate
+    # policy choice:
+    #
+    #   1. Size. Every other binary in this app is capped at 4-20MB; a video is
+    #      capped at 512MB. A bytea column that big is re-dumped in full by
+    #      every pg_dump even though the file never changes after upload.
+    #   2. These are EXCLUDED FROM THE REGULAR BACKUP BY DESIGN. The originals
+    #      live wherever they were recorded, so re-encrypting gigabytes into
+    #      every dated bundle buys nothing. ops/backup/backup.sh says the same
+    #      thing at the point where it would otherwise be tempting to add them.
+    #
+    # An explicit host path rather than a Docker named volume, because a named
+    # volume can be orphaned by a compose project rename — the exact failure
+    # that caused the June 2026 outage. Override in dev, where /mnt/media does
+    # not exist.
+    video_storage_dir: str = "/mnt/media/bettercricket/internal/videos"
+
+    # nginx internal location used to hand byte-serving off to nginx via
+    # X-Accel-Redirect: the app checks access and returns a header, nginx
+    # pushes the file with native Range and caching. Empty disables it, and the
+    # app serves the bytes itself — which is what happens in local dev, where
+    # there is no nginx in front.
+    video_accel_location: str = "/_internal_videos/"
     # SMTP (used when email_provider == "smtp"). SES example:
     #   smtp_host = email-smtp.ap-southeast-2.amazonaws.com  smtp_port = 587
     # Port 465 → implicit TLS; anything else → STARTTLS.

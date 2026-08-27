@@ -7,11 +7,19 @@ vote_medal_ddl rule — two hand-kept copies of a schema drift the first time
 one is edited. Every statement is idempotent, because the lifespan re-runs the
 whole list on every boot.
 
-The video bytes live in Postgres rather than on a volume, the same call
-committee_documents and player photos already make: the upload volume is not
-guaranteed to persist, and a video an admin uploaded must not vanish with the
-container. Reads slice the column with SQL substring() so serving a range of a
-large file never loads the whole blob into memory.
+WHERE THE BYTES LIVE, AND WHY IT IS SPLIT:
+
+  - The VIDEO is a file on the host media volume (settings.video_storage_dir).
+    Only its filename is stored here. Videos are capped at 512MB against
+    4-20MB for every other binary in this app, and a bytea that size is
+    re-dumped in full by every pg_dump even though the file never changes.
+    They are also deliberately OUTSIDE the regular backup — see settings.py.
+
+  - The POSTER stays in Postgres, on purpose. It is ~100KB, so backing it up
+    is free, and it means a database restored onto a fresh box still draws a
+    recognisable library (titles, descriptions, thumbnails) with only playback
+    missing. Splitting a 5MB set of thumbnails out to buy nothing would make
+    that failure mode worse for no saving.
 """
 
 STATEMENTS: list[str] = [
@@ -23,7 +31,7 @@ STATEMENTS: list[str] = [
         description        TEXT NOT NULL DEFAULT '',
         module_label       TEXT,
         sort_order         INTEGER NOT NULL DEFAULT 0,
-        video_data         BYTEA,
+        video_path         TEXT,
         video_mime         TEXT,
         video_size         BIGINT,
         video_filename     TEXT,

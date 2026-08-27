@@ -13,5 +13,6 @@ export default {
     'None of the add, edit, delete or reorder controls are shown to anyone who is not a Super Admin, and every one of them is checked again on the server.',
     'The player seeks properly on a long video: the browser asks for the part it needs rather than the whole file.',
     'Each video gets its own share card and sitemap entry, so a link posted to Facebook or LinkedIn shows the thumbnail and the description.',
+    'Video files are kept on the server\u2019s media drive rather than in the database, and are deliberately left out of the nightly backup. Titles, descriptions and thumbnails are backed up as usual, so a restore brings the library back and only the video files need re-uploading from the originals.',
   ],
 }

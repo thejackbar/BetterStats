@@ -11,6 +11,7 @@ import asyncio
 import io
 import os
 import sys
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -37,6 +38,16 @@ _db_stub.Player = _Model
 _db_stub.Organisation = _Model
 _db_stub.get_db = lambda: None
 sys.modules.setdefault("app.models.db", _db_stub)
+
+# Video files live on disk now, so the suite gets its own scratch directory
+# instead of writing into /mnt/media.
+#
+# THIS MUST RUN BEFORE app.services.instructional_videos IS IMPORTED. That
+# module imports app.config.settings, and pydantic-settings reads the
+# environment once, at instantiation. Setting the variable further down the
+# file looks right and silently writes to the real path.
+_TMP_VIDEOS = tempfile.mkdtemp(prefix="bs-videos-")
+os.environ["VIDEO_STORAGE_DIR"] = _TMP_VIDEOS
 
 from sqlalchemy import text                                    # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
@@ -67,15 +78,22 @@ def ck(name, cond, extra=""):
 
 class FakeUpload:
     """Stands in for FastAPI's UploadFile so the ROUTE bodies can be run
-    directly, rather than re-implementing what they do to an upload."""
+    directly, rather than re-implementing what they do to an upload.
+
+    `file` is the seekable handle the real UploadFile exposes, which is what
+    the size check measures and what the service streams to disk."""
 
     def __init__(self, filename, content_type, data):
         self.filename = filename
         self.content_type = content_type
-        self._f = io.BytesIO(data)
+        self.file = io.BytesIO(data)
 
     async def read(self):
-        return self._f.read()
+        return self.file.read()
+
+
+def stream(data: bytes) -> io.BytesIO:
+    return io.BytesIO(data)
 
 
 async def main():
@@ -105,8 +123,8 @@ async def main():
             async with Session() as db:
                 await svc.create_video(
                     db, title="Idempotency probe", description="", module_label=None,
-                    video_bytes=b"probe-bytes", video_mime="video/mp4",
-                    video_filename="p.mp4", poster_bytes=None, poster_mime=None,
+                    video_stream=stream(b"probe-bytes"), video_mime="video/mp4",
+                    video_filename="p.mp4", poster_bytes_data=None, poster_mime=None,
                     created_by_user_id=user_id,
                 )
     async with Session() as db:
@@ -114,16 +132,29 @@ async def main():
     ck("DDL applied three times to a populated table, nothing duplicated", len(rows) == 1,
        f"{len(rows)} rows")
 
+    # Deleted by hand in SQL, bypassing delete_video — which is exactly the
+    # case orphaned_files() exists to report, so assert it does before cleaning
+    # up. A row removed outside the app leaves its file behind, and these files
+    # are outside the backup, so being able to find them matters.
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM instructional_videos"))
+    async with Session() as db:
+        stranded = await svc.orphaned_files(db)
+    ck("orphan detection: a row deleted outside the app leaves a findable file",
+       len(stranded) == 1, str(stranded))
+    for name in stranded:
+        svc.resolve_path(name).unlink(missing_ok=True)
+    async with Session() as db:
+        ck("orphan detection: reports nothing once cleaned up",
+           await svc.orphaned_files(db) == [])
 
     # -------------------------------------------------------------- creating
     async with Session() as db:
         a = await svc.create_video(
             db, title="BetterCricket - Merge Players",
             description="One person, two records.", module_label="BetterStats",
-            video_bytes=b"A" * 5000, video_mime="video/mp4",
-            video_filename="merge.mp4", poster_bytes=b"POSTERBYTES",
+            video_stream=stream(b"A" * 5000), video_mime="video/mp4",
+            video_filename="merge.mp4", poster_bytes_data=b"POSTERBYTES",
             poster_mime="image/jpeg", created_by_user_id=user_id,
         )
     ck("create: slug derived from the title", a["slug"] == "bettercricket-merge-players", a["slug"])
@@ -140,8 +171,8 @@ async def main():
     async with Session() as db:
         b = await svc.create_video(
             db, title="BetterCricket - Merge Grades", description="Two names, one grade.",
-            module_label="BetterStats", video_bytes=b"B" * 900, video_mime="video/mp4",
-            video_filename="grades.mp4", poster_bytes=None, poster_mime=None,
+            module_label="BetterStats", video_stream=stream(b"B" * 900), video_mime="video/mp4",
+            video_filename="grades.mp4", poster_bytes_data=None, poster_mime=None,
             created_by_user_id=user_id,
         )
     ck("create: a video with no poster reports none", b["poster"] is None)
@@ -151,8 +182,8 @@ async def main():
     async with Session() as db:
         dup = await svc.create_video(
             db, title="BetterCricket - Merge Players", description="A re-record.",
-            module_label=None, video_bytes=b"C" * 10, video_mime="video/mp4",
-            video_filename="again.mp4", poster_bytes=None, poster_mime=None,
+            module_label=None, video_stream=stream(b"C" * 10), video_mime="video/mp4",
+            video_filename="again.mp4", poster_bytes_data=None, poster_mime=None,
             created_by_user_id=user_id,
         )
     ck("create: a duplicate title is suffixed rather than refused",
@@ -177,15 +208,15 @@ async def main():
     async with Session() as db:
         replaced = await svc.update_video(
             db, a["id"], fields={},
-            video_bytes=b"Z" * 7777, video_mime="video/webm", video_filename="new.webm",
+            video_stream=stream(b"Z" * 7777), video_mime="video/webm", video_filename="new.webm",
         )
     ck("update: replacing the file swaps the bytes", replaced["video_size"] == 7777)
     ck("update: replacing the file keeps the title", replaced["title"] == "Merging duplicate players")
     ck("update: replacing the file keeps the description",
        replaced["description"] == "One person, two records.")
     async with Session() as db:
-        info = await svc.video_blob_info(db, a["slug"])
-    ck("update: the served mime follows the new file", info[0] == "video/webm", info[0])
+        info = await svc.video_file(db, a["slug"])
+    ck("update: the served mime follows the new file", info[1] == "video/webm", info[1])
 
     async with Session() as db:
         try:
@@ -199,21 +230,108 @@ async def main():
         missing = await svc.update_video(db, str(uuid.uuid4()), fields={"title": "nope"})
     ck("update: an unknown id reports nothing rather than raising", missing is None)
 
-    # ------------------------------------------------------------- streaming
+    # ------------------------------------------------- files, not blobs
+    from pathlib import Path as _Path
+    store = _Path(_TMP_VIDEOS)
+
     async with Session() as db:
-        whole = await svc.read_blob_range(db, b["slug"], 0, 900)
-        head = await svc.read_blob_range(db, b["slug"], 0, 10)
-        mid = await svc.read_blob_range(db, b["slug"], 100, 50)
-        info_b = await svc.video_blob_info(db, b["slug"])
-    ck("stream: the whole file reads back byte for byte", whole == b"B" * 900)
-    ck("stream: a range returns only that slice", head == b"B" * 10 and len(mid) == 50)
-    ck("stream: size is reported without loading the blob", info_b[1] == 900, str(info_b[1]))
+        found = await svc.video_file(db, b["slug"])
+    ck("file: the video is on disk, not in the row", found is not None)
+    ck("file: it holds exactly what was uploaded",
+       found and found[0].read_bytes() == b"B" * 900)
+    ck("file: size is read from disk", found and found[2] == 900, str(found and found[2]))
+    ck("file: named after the row id, never the upload's filename",
+       found and found[0].name == f"{b['id']}.mp4", found and found[0].name)
+
     async with Session() as db:
-        no_poster = await svc.video_blob_info(db, b["slug"], poster=True)
-        yes_poster = await svc.video_blob_info(db, a["slug"], poster=True)
-    ck("stream: a video with no poster reports no poster file", no_poster is None)
-    ck("stream: a poster is served from its own column", yes_poster and yes_poster[1] == 11,
-       str(yes_poster))
+        row = await svc.get_video(db, b["slug"])
+    ck("file: the payload reports the file is present", row["file_present"])
+    ck("file: the payload carries no path a browser could use",
+       "video_path" not in row and "video_data" not in row)
+
+    # THE COLUMN MUST BE GONE, or pg_dump still carries every video and moving
+    # them to disk bought nothing.
+    async with engine.begin() as conn:
+        cols = set((await conn.execute(text(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'instructional_videos'"
+        ))).scalars().all())
+    ck("file: there is NO video_data column left for pg_dump to carry",
+       "video_data" not in cols, str(sorted(c for c in cols if "video" in c)))
+    ck("file: the poster IS still a column, so a restored library still draws",
+       "poster_data" in cols)
+
+    # A filename is never built from anything a person typed.
+    ck("safety: a traversal path does not resolve",
+       svc.resolve_path("../../etc/passwd") is None)
+    ck("safety: an absolute path does not resolve", svc.resolve_path("/etc/passwd") is None)
+    ck("safety: a plausible-but-foreign name does not resolve",
+       svc.resolve_path("evil.mp4") is None)
+    ck("safety: an unexpected extension does not resolve",
+       svc.resolve_path(f"{b['id']}.sh") is None)
+    ck("safety: our own name does resolve", svc.resolve_path(f"{b['id']}.mp4") is not None)
+
+    # The poster still comes out of Postgres.
+    async with Session() as db:
+        poster = await svc.poster_bytes(db, a["slug"])
+        no_poster = await svc.poster_bytes(db, b["slug"])
+    ck("poster: served from the column", poster and poster[0] == b"POSTERBYTES")
+    ck("poster: a video with none reports none", no_poster is None)
+
+    # A MISSING FILE IS AN ORDINARY STATE — these are outside the backup, so a
+    # restored database legitimately has rows whose files are gone.
+    async with Session() as db:
+        orphan = await svc.create_video(
+            db, title="Restored from a backup", description="", module_label=None,
+            video_stream=stream(b"gone" * 10), video_mime="video/mp4",
+            video_filename="g.mp4", poster_bytes_data=b"IMG", poster_mime="image/jpeg",
+            created_by_user_id=user_id,
+        )
+    svc.resolve_path(f"{orphan['id']}.mp4").unlink()
+    async with Session() as db:
+        after = await svc.get_video(db, orphan["slug"])
+        missing = await svc.video_file(db, orphan["slug"])
+        still_poster = await svc.poster_bytes(db, orphan["slug"])
+    ck("missing file: the row survives and still lists", after is not None)
+    ck("missing file: it reports the file is NOT present", after["file_present"] is False)
+    ck("missing file: serving it reports nothing rather than raising", missing is None)
+    ck("missing file: the title and description are intact",
+       after["title"] == "Restored from a backup")
+    ck("missing file: THE THUMBNAIL STILL DRAWS, because the poster is in Postgres",
+       still_poster is not None and still_poster[0] == b"IMG")
+
+    # Replacing a file removes the old one rather than leaving it behind.
+    async with Session() as db:
+        before_name = f"{b['id']}.mp4"
+        await svc.update_video(db, b["id"], fields={},
+                               video_stream=stream(b"W" * 40), video_mime="video/webm",
+                               video_filename="w.webm")
+        swapped = await svc.video_file(db, b["slug"])
+    ck("replace: the new file is on disk", swapped and swapped[0].read_bytes() == b"W" * 40)
+    ck("replace: the extension follows the new format",
+       swapped and swapped[0].name.endswith(".webm"), swapped and swapped[0].name)
+    ck("replace: THE OLD FILE IS REMOVED, not orphaned",
+       not (store / before_name).exists())
+
+    async with Session() as db:
+        ck("replace: nothing is orphaned afterwards", await svc.orphaned_files(db) == [],
+           str(await svc.orphaned_files(db)))
+
+    # A failed insert must not leave a file nothing points at.
+    files_before = {p.name for p in store.iterdir()}
+    async with Session() as db:
+        try:
+            await svc.create_video(
+                db, title=None, description="", module_label=None,
+                video_stream=stream(b"orphan-me"), video_mime="video/mp4",
+                video_filename="x.mp4", poster_bytes_data=None, poster_mime=None,
+                created_by_user_id=user_id,
+            )
+        except Exception:
+            await db.rollback()
+    ck("failed insert: leaves no file behind",
+       {p.name for p in store.iterdir()} == files_before,
+       str({p.name for p in store.iterdir()} - files_before))
 
     # Range maths, run through the route's own parser.
     from app.routers.instructional_videos import _parse_range
@@ -225,6 +343,11 @@ async def main():
     ck("range: junk is ignored rather than erroring", _parse_range("cheese", 1000) is None)
     ck("range: no header means the whole file", _parse_range(None, 1000) is None)
 
+    # Clear the two extra rows so the ordering checks below see three again.
+    async with Session() as db:
+        await svc.delete_video(db, orphan["id"])
+
+    # -------------------------------------------------------------- ordering
     # -------------------------------------------------------------- ordering
     async with Session() as db:
         listed = await svc.list_videos(db)
@@ -264,41 +387,53 @@ async def main():
     ck("delete: the entry is gone", dup["id"] not in {v["id"] for v in left})
     ck("delete: the others are untouched", len(left) == 2)
     async with Session() as db:
-        blob = await svc.video_blob_info(db, dup["slug"])
-    ck("delete: THE FILE GOES WITH THE ENTRY, no orphan left behind", blob is None)
+        blob = await svc.video_file(db, dup["slug"])
+        orphans = await svc.orphaned_files(db)
+    ck("delete: THE FILE GOES WITH THE ENTRY, no orphan left behind",
+       blob is None and orphans == [], str(orphans))
     async with Session() as db:
         ck("delete: an unknown id reports failure rather than raising",
            not await svc.delete_video(db, str(uuid.uuid4())))
         ck("delete: junk id reports failure", not await svc.delete_video(db, "not-a-uuid"))
 
     # ---------------------------------------------------- route-body guards
-    from app.routers.instructional_videos import _read_upload
+    from app.routers.instructional_videos import _poster_upload, _video_upload
     from fastapi import HTTPException
 
-    async def refuses(upload, poster=False):
+    def refuses_video(upload):
         try:
-            await _read_upload(upload, poster=poster)
+            _video_upload(upload)
+            return None
+        except HTTPException as e:
+            return e.status_code
+
+    async def refuses_poster(upload):
+        try:
+            await _poster_upload(upload)
             return None
         except HTTPException as e:
             return e.status_code
 
     ck("upload: an mp4 is accepted",
-       (await _read_upload(FakeUpload("a.mp4", "video/mp4", b"x"), poster=False))[1] == "video/mp4")
+       _video_upload(FakeUpload("a.mp4", "video/mp4", b"x"))[1] == "video/mp4")
     ck("upload: a webm is accepted",
-       (await _read_upload(FakeUpload("a.webm", "video/webm", b"x"), poster=False))[1] == "video/webm")
+       _video_upload(FakeUpload("a.webm", "video/webm", b"x"))[1] == "video/webm")
     ck("upload: a .mov is refused with 415",
-       await refuses(FakeUpload("a.mov", "video/quicktime", b"x")) == 415)
+       refuses_video(FakeUpload("a.mov", "video/quicktime", b"x")) == 415)
     ck("upload: a mime with a charset suffix still matches",
-       (await _read_upload(FakeUpload("a.mp4", "video/mp4; charset=binary", b"x"), poster=False))[1]
-       == "video/mp4")
+       _video_upload(FakeUpload("a.mp4", "video/mp4; charset=binary", b"x"))[1] == "video/mp4")
     ck("upload: an oversized video is refused with 413",
-       await refuses(FakeUpload("big.mp4", "video/mp4", b"x" * (svc.MAX_VIDEO_BYTES + 1))) == 413)
+       refuses_video(FakeUpload("big.mp4", "video/mp4", b"x" * (svc.MAX_VIDEO_BYTES + 1))) == 413)
+    ck("upload: an oversized POSTER is refused with 413",
+       await refuses_poster(
+           FakeUpload("p.jpg", "image/jpeg", b"x" * (svc.MAX_POSTER_BYTES + 1))) == 413)
     ck("upload: a poster that is not an image is refused",
-       await refuses(FakeUpload("a.mp4", "video/mp4", b"x"), poster=True) == 415)
-    ck("upload: no file at all reads as nothing sent",
-       await _read_upload(None, poster=False) is None)
+       await refuses_poster(FakeUpload("a.mp4", "video/mp4", b"x")) == 415)
+    ck("upload: no file at all reads as nothing sent", _video_upload(None) is None)
     ck("upload: an empty file reads as nothing sent",
-       await _read_upload(FakeUpload("a.mp4", "video/mp4", b""), poster=False) is None)
+       _video_upload(FakeUpload("a.mp4", "video/mp4", b"")) is None)
+    ck("upload: the size check does not consume the stream",
+       _video_upload(FakeUpload("a.mp4", "video/mp4", b"abc"))[0].read() == b"abc")
 
     # --------------------------------------------------- the public payload
     async with Session() as db:
@@ -349,8 +484,8 @@ async def main():
     async with Session() as db:
         bare = await svc.create_video(
             db, title="No poster and no words", description="", module_label=None,
-            video_bytes=b"q" * 10, video_mime="video/mp4", video_filename="q.mp4",
-            poster_bytes=None, poster_mime=None, created_by_user_id=user_id,
+            video_stream=stream(b"q" * 10), video_mime="video/mp4", video_filename="q.mp4",
+            poster_bytes_data=None, poster_mime=None, created_by_user_id=user_id,
         )
         bare_card = await og._video_html(bare["slug"], f"{base}/videos/{bare['slug']}", base, db)
     ck("card: no poster falls back to the branded cover", "/og-cover.png" in bare_card)
