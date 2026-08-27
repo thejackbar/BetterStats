@@ -1,5 +1,68 @@
 # BetterStats — Claude Session Notes
 
+## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
+
+Reported off a live profile: Cameron Sawatzky's season table read "2025/26"
+twice, "2022/23" three times and "2020/21" three times, each row holding a
+slice of the real season.
+
+- **NOTHING WAS DOUBLE-COUNTED, and establishing that first is what stopped
+  this being fixed the wrong way.** The 26 rows summed EXACTLY to the career
+  header above them (125 matches, 117 innings, 1,367 runs), and no two sibling
+  rows carried the same figures. The data was right; it was filed under several
+  headings.
+- **A FIXTURE BETWEEN TWO SYNCED CLUBS IS ONE `games` ROW, AND ITS SEASON
+  BELONGS TO WHICHEVER CLUB SYNCED IT FIRST.** A game's season is read through
+  its grade, a grade belongs to one season, and each club mints its own per-club
+  grade and season rows — so a Gosnells fixture that Willetton happened to sync
+  first carries WILLETTON's "Summer 2025/26". `_season_by_season_scoped` grouped
+  on that raw season id **with no club scoping anywhere in it**, so those
+  matches drew a second, identically-named row beside the club's own.
+- **PROVED AGAINST CRICKET AUSTRALIA, NOT INFERRED.** Season ids are
+  `uuid5(org, ca_season_guid)`, so each row can be attributed by recomputing it:
+  every season in the club's own dropdown derives from one of its 32 CA seasons,
+  and none of the extras do. Walking a grade's match list back to its owning
+  organisation named the club — Willetton Premier Cricket Club — and 9 of the 17
+  extra rows are its season rows exactly. Reading the code alone would have got
+  as far as "duplicate seasons" and no further.
+- **THE FOLD IS THE RULE `resolve_season_filter` ALREADY APPLIES EVERYWHERE
+  ELSE.** Picking "2025/26" from any dropdown has always returned every season
+  row sharing that year, aliases included — the season TABLE was the one surface
+  that disagreed with the filter above it. `_SEASON_FOLD_CTE` folds every season
+  onto the viewing club's own row for that year, then through any active merge,
+  and both paths read it. This is the table catching up, not a second definition
+  of a season.
+- **FOLD, NEVER DROP.** Org-filtering the games instead would have been the
+  other obvious fix and is the wrong one: it removes matches from a career and
+  leaves the table summing to less than the header right above it, which is the
+  exact failure `_season_by_season_scoped`'s own docstring exists to prevent. A
+  year the club has no row of its own for folds to itself and still draws.
+- **A HISTORICAL BUNDLE IS DELIBERATELY LEFT UNFOLDED.** It carries a whole
+  pre-migration career on one season row (`_HISTORICAL_BUNDLE_MATCH_CAP`) and is
+  lifted out into "Prior Seasons & Adjustments" by matching its own season id —
+  folding a real season into it would send that real season into the lump too,
+  which is the one way this change could have lost a row.
+- **`key={s.season_name}` on the season rows was a duplicate React key** for as
+  long as two rows could share a label. Keyed on `season_id` now.
+- **Verified against a real Postgres** (`backend/verification/verify_player_season_fold.py`,
+  17 checks through the shipped `get_season_by_season` over the views pulled
+  straight out of the migrations that define them: the reported case replayed
+  across two and three clubs' season rows, the folded row filed under the club's
+  own season, a year only another club holds a row for still drawn, the innings
+  and runs still adding up to the career, our own year split across two of our
+  rows folded on the unscoped path, and the 256-match bundle still lifted out
+  whole) **with a control run**: with the fix stashed, 4 fail on exactly the
+  reported behaviour — 2 rows for 2025/26 and 3 for 2022/23 — while the bundle
+  checks still pass, so the fold is not what makes them pass.
+- **Measured at platform scale** (4,437 season rows): 9.7 → 13.7ms on the scoped
+  path, 13.5 → 9.3ms on the unscoped one.
+- **NOTICED, NOT FIXED**: `_season_by_season_scoped` still counts every game a
+  player appears in whatever club's fixture it was, while the unscoped path is
+  org-guarded by the effective view (migration 060) — so the two paths can
+  disagree about the size of a career for someone who has played for more than
+  one synced club. Which of the two readings a club wants is a product decision,
+  not a bug this fix should settle on its own.
+
 ## Sales Commissions: forecast on the open book, earned on the won one (migration 277, v9.49.0, Aug 2026)
 
 Asked for as a tile on Sales Management: per rep, clubs attributed, total pipeline

@@ -1792,6 +1792,66 @@ async def get_player_team_breakdown(
     }
 
 
+# ── Folding a real season back into one row ──────────────────────────────────
+# A club's real-world season can be split across several `seasons` rows, and a
+# player's rows can land on ANOTHER CLUB'S row entirely. A fixture between two
+# synced clubs is a single `games` row, and its grade — and therefore its season
+# — belongs to whichever club synced it first. So a Gosnells batter's innings in
+# a Gosnells fixture that Willetton happened to sync first is filed under
+# Willetton's "Summer 2025/26", and the season table draws it as a second,
+# identically-named row beside the club's own. (Reported case: one player's
+# 2022/23 drawn as three "2022/23" rows of 15, 2 and 1 matches.)
+#
+# So fold every season onto the VIEWING CLUB'S OWN row for that year, then
+# through any active merge. This is the rule `resolve_season_filter` already
+# applies to every season FILTER in the app — picking "2025/26" from the
+# dropdown has always returned the whole year — so the table is catching up
+# with the filter rather than inventing a second definition of a season.
+#
+# Nothing is dropped and no figure moves: the same rows are added up, under one
+# heading instead of several. A season the club has no row of its own for (an
+# unknown year, or a year it never played) folds to itself and still draws its
+# own row, so a player's record can never go missing for want of a club season
+# to file it under.
+_SEASON_FOLD_CTE = """
+    club_season_by_year AS (
+        SELECT DISTINCT ON (year) year, id
+        FROM seasons
+        WHERE organisation_id = CAST(:fold_org AS UUID) AND year IS NOT NULL
+        ORDER BY year, id
+    ),
+    season_fold AS (
+        SELECT
+            s.id AS raw_id,
+            COALESCE(sa2.canonical_season_id, base.id) AS fold_id
+        FROM seasons s
+        LEFT JOIN season_aliases sa
+          ON sa.alias_season_id = s.id AND sa.undone_at IS NULL
+        LEFT JOIN club_season_by_year cs ON cs.year = s.year
+        CROSS JOIN LATERAL (
+            SELECT COALESCE(cs.id, sa.canonical_season_id, s.id) AS id
+        ) base
+        LEFT JOIN season_aliases sa2
+          ON sa2.alias_season_id = base.id AND sa2.undone_at IS NULL
+    )
+"""
+
+
+async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]:
+    """The club a player belongs to, for `_SEASON_FOLD_CTE`'s `:fold_org`.
+
+    A NULL org is a legitimate state (see the effective view's own org guard),
+    and binds cleanly: no club seasons, so every season folds to itself and the
+    query behaves exactly as it did before folding existed.
+    """
+    row = await session.execute(
+        text("SELECT organisation_id FROM players WHERE id = CAST(:pid AS UUID)"),
+        {"pid": player_id},
+    )
+    org = row.scalar()
+    return str(org) if org else None
+
+
 # No player plays anywhere near this many games in one real season. Cricket
 # Australia bundles a club's whole pre-migration history into its earliest season
 # as cumulative career-to-date totals, so that one "season" shows 100+ matches for
@@ -1823,18 +1883,23 @@ async def _season_by_season_scoped(
     with the header right above it (the reported 1970/71 case: header says
     338 runs, season table and every chart built from it say nothing).
     """
-    params: dict = {"pid": player_id, "residual_sources": list(_RESIDUAL_SOURCES)}
+    params: dict = {
+        "pid": player_id,
+        "residual_sources": list(_RESIDUAL_SOURCES),
+        "fold_org": await _player_org_id(session, player_id),
+    }
     scope.bind(params)
     clause = scope.clause("g.grade_id")
     resid_clause = scope.clause("pss.grade_id", "aggregate")
+    fold = _SEASON_FOLD_CTE.rstrip() + ",\n"
     res = await session.execute(
         text(f"""
-            WITH scoped_games AS (
+            WITH{fold}
+            scoped_games AS (
                 SELECT g.id AS game_id,
-                       COALESCE(sa.canonical_season_id, g.season_id) AS sid
+                       COALESCE(sf.fold_id, g.season_id) AS sid
                 FROM v_effective_games g
-                LEFT JOIN season_aliases sa
-                  ON sa.alias_season_id = g.season_id AND sa.undone_at IS NULL
+                LEFT JOIN season_fold sf ON sf.raw_id = g.season_id
                 WHERE g.season_id IS NOT NULL{clause}
             ),
             bat AS (
@@ -1907,7 +1972,7 @@ async def _season_by_season_scoped(
             -- season, a manual season adjustment). Filtered by grade_id where
             -- one is set; exclusion semantics keep the usual grade-less rows.
             resid AS (
-                SELECT COALESCE(sa.canonical_season_id, pss.season_id) AS sid,
+                SELECT COALESCE(sf.fold_id, pss.season_id) AS sid,
                     SUM(pss.matches) AS matches,
                     SUM(pss.batting_innings) AS batting_innings,
                     SUM(pss.runs) AS total_runs,
@@ -1935,12 +2000,11 @@ async def _season_by_season_scoped(
                     SUM(pss.run_outs) AS total_run_outs,
                     SUM(pss.stumpings) AS total_stumpings
                 FROM v_effective_player_season_stats pss
-                LEFT JOIN season_aliases sa
-                  ON sa.alias_season_id = pss.season_id AND sa.undone_at IS NULL
+                LEFT JOIN season_fold sf ON sf.raw_id = pss.season_id
                 WHERE pss.player_id = CAST(:pid AS UUID)
                   AND pss.season_id IS NOT NULL
                   AND pss.source = ANY(:residual_sources){resid_clause}
-                GROUP BY COALESCE(sa.canonical_season_id, pss.season_id)
+                GROUP BY COALESCE(sf.fold_id, pss.season_id)
             )
             SELECT
                 s.id AS season_id,
@@ -2014,20 +2078,29 @@ async def get_season_by_season(
         # scoped career header (see _career_residuals), which is where it has
         # always actually mattered.
         return await _season_by_season_scoped(session, player_id, scope)
-    # Merge-aware: if Summer 25/26 + Winter 25/26 are aliased into one canonical
-    # season, sum their stats into a single row keyed on the canonical season.
-    # Non-aliased seasons map to themselves so the GROUP BY collapses to one
-    # row per season either way.
+    # Fold-aware: a merge (Summer 25/26 + Winter 25/26 aliased together) and a
+    # year split across several of the club's own season rows both collapse to
+    # one row here, via `_SEASON_FOLD_CTE`. A season that needs neither maps to
+    # itself, so the GROUP BY yields one row per real season either way.
+    #
+    # A historical bundle is deliberately left UNFOLDED. It carries a whole
+    # pre-migration career (100+ matches) on one season row, and the block below
+    # lifts it out into "Prior Seasons & Adjustments" by matching on its own
+    # season id; folding a real season into it would send that real season into
+    # the lump with it, which is the one way this could lose a row.
     result = await session.execute(
         text("""
-            WITH per_pss AS (
+            WITH""" + _SEASON_FOLD_CTE.rstrip() + """,
+            per_pss AS (
                 SELECT
                     pss.*,
-                    COALESCE(sa.canonical_season_id, pss.season_id) AS canonical_season_id
+                    CASE
+                        WHEN SUM(pss.matches) OVER (PARTITION BY pss.season_id)
+                             > :bundle_cap THEN pss.season_id
+                        ELSE COALESCE(sf.fold_id, pss.season_id)
+                    END AS canonical_season_id
                 FROM v_effective_player_season_stats pss
-                LEFT JOIN season_aliases sa
-                  ON sa.alias_season_id = pss.season_id
-                 AND sa.undone_at IS NULL
+                LEFT JOIN season_fold sf ON sf.raw_id = pss.season_id
                 WHERE pss.player_id = :pid
             )
             SELECT
@@ -2068,7 +2141,11 @@ async def get_season_by_season(
             GROUP BY s.id, s.name, s.year
             ORDER BY s.year DESC NULLS LAST, s.name
         """),
-        {"pid": player_id}
+        {
+            "pid": player_id,
+            "fold_org": await _player_org_id(session, player_id),
+            "bundle_cap": _HISTORICAL_BUNDLE_MATCH_CAP,
+        },
     )
     rows = [dict(r) for r in result.mappings()]
 

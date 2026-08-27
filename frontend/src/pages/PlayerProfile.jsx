@@ -381,7 +381,7 @@ function BattingTab({ batting, seasonStats, seasons }) {
               </thead>
               <tbody>
                 {sorted.map((s, i) => (
-                  <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.batting_innings)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_runs)}</td>
@@ -448,7 +448,7 @@ function BowlingTab({ bowling, seasonStats }) {
               </thead>
               <tbody>
                 {sorted.map((s, i) => (
-                  <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
@@ -510,7 +510,7 @@ function FieldingTab({ fielding, seasonStats }) {
               </thead>
               <tbody>
                 {sorted.map((s, i) => (
-                  <tr key={s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
+                  <tr key={s.season_id || s.season_name || i} className={`${i ? 'pb-hairline-t' : ''} hover:bg-pb-surface2`}>
                     <td className="py-2.5 pl-5 font-mono text-pb-dim text-[12px]">{formatSeason(s.season_name)}</td>
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_catches_non_wk ?? (s.total_catches - (s.total_catches_wk ?? 0)))}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.total_catches_wk)}</td>
