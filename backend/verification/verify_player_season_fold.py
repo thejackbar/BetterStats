@@ -37,7 +37,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from _view_ddl import view_statements
 from app.models.db import Base
 from app.services import grade_scope
-from app.services.aggregations import get_season_by_season
+from app.services.aggregations import (
+    get_player_team_breakdown, get_season_by_season,
+)
 
 DB = os.environ["DATABASE_URL"]
 engine = create_async_engine(DB, echo=False)
@@ -98,6 +100,15 @@ async def build_schema() -> None:
         await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_season_aliases_alias_active "
             "ON season_aliases(alias_season_id) WHERE undone_at IS NULL"))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS grade_merge_logs (
+                id SERIAL PRIMARY KEY,
+                merged_at TIMESTAMPTZ DEFAULT NOW(),
+                org_id UUID NOT NULL,
+                canonical_name TEXT NOT NULL,
+                alias_name TEXT NOT NULL,
+                undone_at TIMESTAMPTZ)
+        """))
         # Raw-SQL tables the effective views read that create_all doesn't make.
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS import_effective_deltas (
@@ -200,6 +211,26 @@ async def seed(session) -> None:
                 " innings_number, batting_position) "
                 "VALUES (:g, :p, :r, 40, false, 2, 0, 1, 3)",
                 g=g, p=PLAYER, r=runs)
+    # CA's own per-grade aggregate (`player_season_grade_stats`), for OUR
+    # club's grades only — which is what CA actually reports for this club.
+    for gid, sid, m in (
+        (G_OURS_25, S_OURS_25, 3), (G_OURS_22, S_OURS_22, 2),
+    ):
+        await ex(
+            "INSERT INTO player_season_grade_stats "
+            "(player_id, season_id, grade_id, matches) "
+            "VALUES (:p, :s, :g, :m)", p=PLAYER, s=sid, g=gid, m=m)
+    # And the other clubs' own rows for the same participant, which must not be
+    # added on top of ours.
+    for gid, sid, m in (
+        (G_THEIRS_25, S_THEIRS_25, 1), (G_THEIRS_22, S_THEIRS_22, 1),
+        (G_THIRD_22, S_THIRD_22, 1),
+    ):
+        await ex(
+            "INSERT INTO player_season_grade_stats "
+            "(player_id, season_id, grade_id, matches) "
+            "VALUES (:p, :s, :g, :m)", p=PLAYER, s=sid, g=gid, m=m)
+
     # The unscoped path reads CA's own season aggregates, so give it rows to
     # read: our own 2019/20 split across two of our season rows, plus a
     # pre-migration bundle (a whole career on one season row).
@@ -219,6 +250,17 @@ async def seed(session) -> None:
 async def rows_for(session, scope):
     return await get_season_by_season(
         session, str(PLAYER), include_prior=True, scope=scope)
+
+
+def grade_total(season_rows, label, grade):
+    """Sum a grade's cells across EVERY row carrying this season label.
+
+    Summing rather than reading one row is deliberate: with the seasons
+    unfolded the label appears several times, and a check that reads whichever
+    row lands last in a dict passes against exactly the bug under test.
+    """
+    return sum((r["grades"].get(grade) or 0)
+               for r in season_rows if r["season_name"] == label)
 
 
 def by_label(rows):
@@ -296,6 +338,60 @@ async def main() -> None:
         if prior:
             check("carrying its own figures, whole (4000 runs)",
                   prior[0]["total_runs"] == 4000, str(prior[0]["total_runs"]))
+
+        print("\n— the season x grade grid (get_player_team_breakdown) —")
+        tb = await get_player_team_breakdown(session, str(PLAYER), str(OURS))
+        srows = tb["season_rows"]
+        labels = [r["season_name"] for r in srows]
+        check("the grid draws 2025/26 once, not twice",
+              labels.count("Summer 2025/26") == 1,
+              str(labels.count("Summer 2025/26")))
+        check("the grid draws 2022/23 once, not three times",
+              labels.count("Summer 2022/23") == 1,
+              str(labels.count("Summer 2022/23")))
+        check("a year only another club has a row for is not drawn as ours",
+              "Summer 2010/11" not in labels, str(labels))
+
+        g25 = grade_total(srows, "Summer 2025/26", "Men's First Grade")
+        g22 = grade_total(srows, "Summer 2022/23", "Men's First Grade")
+        check("2025/26 reads CA's own figure for the club (3), not 3 + 1",
+              g25 == 3, str(g25))
+        check("2022/23 reads CA's own figure (2), not 2 + 1 + 1",
+              g22 == 2, str(g22))
+
+        by_grade = {r["grade_name"]: r for r in tb["rows"]}
+        first = by_grade.get("Men's First Grade", {})
+        check("the grade's career total is CA's own (3 + 2 = 5), not 8",
+              first.get("matches") == 5, str(first.get("matches")))
+        check("its scorecard count is the club's own games too (5)",
+              first.get("scorecard_matches") == 5,
+              str(first.get("scorecard_matches")))
+        check("the grid's cells still add up to the grade rows",
+              sum(sum(r["grades"].values()) for r in srows)
+              == sum(r["matches"] for r in tb["rows"]))
+
+        print("\n— a club's own correction reaches the grid (Manual Entries) —")
+        await session.execute(text(
+            "INSERT INTO manual_season_adjustments "
+            "(organisation_id, player_id, season_id, grade_id, games_played) "
+            "VALUES (:o, :p, :s, :g, -1)"),
+            {"o": OURS, "p": PLAYER, "s": S_OURS_22, "g": G_OURS_22})
+        await session.commit()
+        tb2 = await get_player_team_breakdown(session, str(PLAYER), str(OURS))
+        s2 = tb2["season_rows"]
+        after22 = grade_total(s2, "Summer 2022/23", "Men's First Grade")
+        check("a -1 correction takes a match off 2022/23 1st Grade",
+              after22 == g22 - 1, f"was {g22}, now {after22}")
+        by_grade2 = {r["grade_name"]: r for r in tb2["rows"]}
+        check("and the grade's career total follows it (5 -> 4)",
+              by_grade2.get("Men's First Grade", {}).get("matches") == 4,
+              str(by_grade2.get("Men's First Grade", {}).get("matches")))
+        check("the correction is not applied twice",
+              sum(sum(r["grades"].values()) for r in tb2["season_rows"])
+              == sum(r["matches"] for r in tb2["rows"]))
+        after25 = grade_total(s2, "Summer 2025/26", "Men's First Grade")
+        check("2025/26 is untouched by a 2022/23 correction",
+              after25 == g25, f"was {g25}, now {after25}")
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:
