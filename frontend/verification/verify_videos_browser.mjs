@@ -154,6 +154,17 @@ async function openPage(role) {
   ck('visitor: the missing file is not announced to a visitor',
      !(await page.locator('#main-content').innerText()).toUpperCase().includes('FILE MISSING'))
 
+  // The "tell us" prompt emails support directly rather than routing through
+  // the contact form.
+  const tellUs = page.locator('#main-content a[href^="mailto:"]').first()
+  ck('index: "tell us" is a mailto, not the contact page',
+     await tellUs.count() > 0 && (await tellUs.innerText()).trim() === 'tell us')
+  ck('index: it emails support@bettersports.com.au',
+     (await tellUs.getAttribute('href') || '').startsWith('mailto:support@bettersports.com.au'),
+     await tellUs.getAttribute('href'))
+  ck('index: nothing on the page still points at the contact form',
+     await page.locator('#main-content a[href="/contact"]').count() === 0)
+
   ck('visitor: "videos" is never looked up as a club slug', clubCalls.length === 0, clubCalls.join(', '))
   ck('visitor: exactly one nav on the page', await page.locator('nav').count() === 1)
   ck('visitor: the marketing site stays dark',

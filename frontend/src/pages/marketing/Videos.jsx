@@ -7,6 +7,7 @@ import { VideoAdminBar, VideoCardControls, VideoEditorModal } from '../../compon
 import { usePageMeta } from '../../hooks/usePageMeta'
 import { useVideos } from '../../hooks/useVideos'
 import { VIDEO_EMPTY, VIDEO_INTRO } from '../../data/videos'
+import { SUPPORT_EMAIL } from '../../data/marketing'
 import { api } from '../../lib/api'
 
 const SITE = 'https://betterat.cricket'
@@ -203,7 +204,10 @@ export default function Videos() {
 
         <p className="mt-16 pb-hairline-t pt-8 text-sm text-pb-faint">
           More walkthroughs are added as they are recorded. If there is a job you would like covered,{' '}
-          <Link to="/contact" className="text-pb-dim hover:text-pb-text underline transition-colors">tell us</Link>{' '}
+          <a
+            href={`mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent('Video request')}`}
+            className="text-pb-dim hover:text-pb-text underline transition-colors"
+          >tell us</a>{' '}
           and we will put it on the list.
         </p>
       </div>
