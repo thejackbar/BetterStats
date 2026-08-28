@@ -5932,6 +5932,13 @@ entry and its file, and drag the order.
   literally: `_read_slice` for the full length, so a 96MB video was 96MB of
   memory per viewer. Every 206 is clamped to `CHUNK_BYTES` now; a short 206 is
   legal and the player just asks for the next part.
+- **FastAPI DOES NOT ADD `HEAD` TO A GET ROUTE, THOUGH PLAIN STARLETTE DOES.**
+  A `curl -sI` against the file endpoint came back `405 Method Not Allowed`,
+  and that is not just a curl flag: players and download managers probe a file
+  for `Content-Length` and `Accept-Ranges` before they start streaming, and
+  uptime checks use HEAD by default. Both public file routes are
+  `api_route(..., methods=["GET", "HEAD"])` now, and a HEAD answers with the
+  WHOLE file's size and no body — never a range.
 - **A DOWNLOAD WITH NO RANGE MUST BE THE WHOLE FILE.** The same first cut
   served the first 2MB as a 206 to a `?download=1` with no Range header, which
   hands `curl -O` a truncated file. It is a `FileResponse` now, which streams
@@ -6002,7 +6009,7 @@ entry and its file, and drag the order.
   wrote eleven test videos into the real `/mnt/media` path. Same family as the
   Roster temporal-dead-zone note — position in the file is load-bearing.
 - **Verified against a real Postgres** (`backend/verification/verify_instructional_videos.py`,
-  112 checks through the shipped service and route bodies: the DDL applied three
+  119 checks through the shipped service and route bodies: the DDL applied three
   times to a populated table, the slug derived and then held still across a
   retitle, a duplicate title suffixed, a text edit not touching the file and a
   file replace not touching the text, every Range case incl. a suffix range and

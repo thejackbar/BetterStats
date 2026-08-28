@@ -346,8 +346,14 @@ async def main():
     from app.routers.instructional_videos import CHUNK_BYTES, stream_video
 
     class FakeRequest:
-        def __init__(self, headers):
+        """Stands in for Starlette's Request. Carries `method` as well as
+        headers, because the handler branches on it — a stub that models less
+        than the real object crashes the code under test rather than testing
+        it."""
+
+        def __init__(self, headers, method="GET"):
             self.headers = headers
+            self.method = method
 
     async with Session() as db:
         big = await svc.create_video(
@@ -391,6 +397,30 @@ async def main():
        d.headers.get("content-disposition"))
     ck("serving: the whole-file path streams rather than buffering",
        not hasattr(d, "body") or not d.body)
+
+    # HEAD. FastAPI does not add it to a GET route the way plain Starlette
+    # does, so this 405'd — and players, download managers and uptime checks
+    # all probe with HEAD before they stream.
+    from app.routers.instructional_videos import public_router
+    # The router's prefix is part of the registered path, so match on the end.
+    file_route = next(r for r in public_router.routes
+                      if getattr(r, "path", "").endswith("/{slug}/file"))
+    ck("HEAD: the file endpoint accepts it", "HEAD" in file_route.methods,
+       str(sorted(file_route.methods)))
+    poster_route = next(r for r in public_router.routes
+                        if getattr(r, "path", "").endswith("/{slug}/poster"))
+    ck("HEAD: the poster endpoint accepts it too", "HEAD" in poster_route.methods,
+       str(sorted(poster_route.methods)))
+
+    async with Session() as db:
+        h = await stream_video(big["slug"], FakeRequest({}, method="HEAD"), 0, db)
+    ck("HEAD: answers 200", h.status_code == 200, str(h.status_code))
+    ck("HEAD: reports the WHOLE file size, not a chunk",
+       h.headers.get("content-length") == str(CHUNK_BYTES * 3), h.headers.get("content-length"))
+    ck("HEAD: advertises range support", h.headers.get("accept-ranges") == "bytes")
+    ck("HEAD: carries no body", not (getattr(h, "body", b"") or b""))
+    ck("HEAD: never answers with a partial range",
+       h.status_code != 206 and "content-range" not in {k.lower() for k in h.headers})
 
     # The nginx hand-off is opt-in. On by default is what 404'd in production,
     # because it needs the directory mounted into the frontend container too.

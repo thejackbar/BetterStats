@@ -86,7 +86,12 @@ def _read_slice(path, start: int, length: int) -> bytes:
         return fh.read(length)
 
 
-@public_router.get("/{slug}/file")
+# GET *and* HEAD. FastAPI, unlike plain Starlette, does not add HEAD to a GET
+# route, so this 405'd on a HEAD — and a public file endpoint gets plenty of
+# them: players and download managers probe for Content-Length and
+# Accept-Ranges before they start streaming, and uptime checks use HEAD by
+# default.
+@public_router.api_route("/{slug}/file", methods=["GET", "HEAD"])
 async def stream_video(
     slug: str, request: Request, download: int = 0, db: AsyncSession = Depends(get_db)
 ):
@@ -113,6 +118,18 @@ async def stream_video(
     if download:
         safe = (filename or slug).replace('"', "")
         disposition = f'attachment; filename="{safe}"'
+
+    # A HEAD asks what this file IS, so it answers with the whole file's size
+    # and nothing else — never a range, and never a body.
+    if request.method == "HEAD":
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(size),
+            "Cache-Control": "public, max-age=3600",
+        }
+        if disposition:
+            headers["Content-Disposition"] = disposition
+        return Response(status_code=200, media_type=mime, headers=headers)
 
     # Production: hand the bytes to nginx. The access check has already run;
     # nginx serves from disk with native Range support and never blocks a
@@ -163,7 +180,7 @@ async def stream_video(
     )
 
 
-@public_router.get("/{slug}/poster")
+@public_router.api_route("/{slug}/poster", methods=["GET", "HEAD"])
 async def stream_poster(slug: str, db: AsyncSession = Depends(get_db)):
     """The thumbnail, which stays in Postgres — small enough to back up, and it
     keeps a restored library recognisable when the video files are gone."""
