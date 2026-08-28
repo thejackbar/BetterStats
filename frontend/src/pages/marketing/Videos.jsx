@@ -23,8 +23,13 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
         <h2 className="font-display font-bold text-[18px] text-pb-text leading-snug mb-1.5 group-hover:text-accent transition-colors">
           {video.title}
         </h2>
+        {/* Clamped on the card so one long description cannot make the grid
+            ragged; the video's own page shows it in full. Same call the blog
+            index makes. */}
         {video.description && (
-          <p className="text-pb-dim text-sm leading-relaxed whitespace-pre-line">{video.description}</p>
+          <p className="text-pb-dim text-sm leading-relaxed whitespace-pre-line line-clamp-3">
+            {video.description}
+          </p>
         )}
       </div>
     </>
