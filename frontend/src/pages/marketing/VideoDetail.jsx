@@ -83,6 +83,7 @@ export default function VideoDetail() {
           description: video.description || video.title,
           thumbnailUrl: posterUrl,
           uploadDate: video.date,
+          ...(video.duration_iso ? { duration: video.duration_iso } : {}),
           contentUrl: `${SITE}${video.src}`,
           inLanguage: 'en-AU',
           publisher: {
@@ -153,9 +154,16 @@ export default function VideoDetail() {
               <p className="font-mono text-[10px] tracking-wide3 text-pb-faintest">{video.module_label}</p>
             )}
           </div>
-          <h1 className="font-display font-bold text-[32px] md:text-[40px] tracking-tight text-pb-text leading-tight">
-            {video.title}
-          </h1>
+          <div className="flex items-baseline gap-4">
+            <h1 className="font-display font-bold text-[32px] md:text-[40px] tracking-tight text-pb-text leading-tight">
+              {video.title}
+            </h1>
+            {video.duration && (
+              <span className="ml-auto shrink-0 font-mono text-sm text-pb-faint tabular-nums">
+                {video.duration}
+              </span>
+            )}
+          </div>
         </div>
 
         <Player video={video} />

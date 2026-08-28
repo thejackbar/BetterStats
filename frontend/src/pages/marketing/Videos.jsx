@@ -20,9 +20,20 @@ function VideoCard({ video, canManage, reordering, onEdit, onDeleted, onError, d
         {video.module_label && (
           <p className="font-mono text-[10px] tracking-wide3 text-pb-faint uppercase mb-2">{video.module_label}</p>
         )}
-        <h2 className="font-display font-bold text-[18px] text-pb-text leading-snug mb-1.5 group-hover:text-accent transition-colors">
-          {video.title}
-        </h2>
+        {/* Length sits at the right of the title line, at normal size, so it
+            reads as a property of the video rather than part of its name.
+            items-baseline keeps it sitting on the title's baseline even when
+            the title wraps to two lines. */}
+        <div className="flex items-baseline gap-3 mb-1.5">
+          <h2 className="font-display font-bold text-[18px] text-pb-text leading-snug group-hover:text-accent transition-colors">
+            {video.title}
+          </h2>
+          {video.duration && (
+            <span className="ml-auto shrink-0 font-mono text-[11px] text-pb-faint tabular-nums">
+              {video.duration}
+            </span>
+          )}
+        </div>
         {/* Clamped on the card so one long description cannot make the grid
             ragged; the video's own page shows it in full. Same call the blog
             index makes. */}

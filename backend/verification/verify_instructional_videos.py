@@ -55,6 +55,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 from app.services import instructional_videos as svc          # noqa: E402
 from app.services.instructional_video_ddl import (            # noqa: E402
     DOWNGRADE_STATEMENTS,
+    DURATION_DOWNGRADE,
+    DURATION_STATEMENTS,
     STATEMENTS,
 )
 
@@ -117,7 +119,7 @@ async def main():
     # three times to a populated table has to be a no-op, not an error.
     for run in range(3):
         async with engine.begin() as conn:
-            for stmt in STATEMENTS:
+            for stmt in STATEMENTS + DURATION_STATEMENTS:
                 await conn.execute(text(stmt))
         if run == 0:
             async with Session() as db:
@@ -612,9 +614,68 @@ async def main():
     ck("sitemap: the deleted video is not listed",
        bare["slug"] not in "".join(entries))
 
+    # ------------------------------------------------------------- duration
+    # The length used to be typed into the title by hand. It is a property of
+    # the video, so it is stored as SECONDS and formatted in one place.
+    async with Session() as db:
+        timed = await svc.create_video(
+            db, title="A timed walkthrough", description="", module_label=None,
+            video_stream=stream(b"T" * 40), video_mime="video/mp4",
+            video_filename="t.mp4", duration_seconds="165",
+            poster_bytes_data=None, poster_mime=None, created_by_user_id=user_id,
+        )
+    ck("duration: stored as seconds", timed["duration_seconds"] == 165,
+       str(timed["duration_seconds"]))
+    ck("duration: formatted for a reader", timed["duration"] == "2m 45s", str(timed["duration"]))
+    ck("duration: ISO-8601 for the VideoObject", timed["duration_iso"] == "PT2M45S",
+       str(timed["duration_iso"]))
+
+    async with Session() as db:
+        untimed = await svc.create_video(
+            db, title="An untimed walkthrough", description="", module_label=None,
+            video_stream=stream(b"U" * 40), video_mime="video/mp4",
+            video_filename="u.mp4", poster_bytes_data=None, poster_mime=None,
+            created_by_user_id=user_id,
+        )
+    ck("duration: a video with no length reports none, not a zero",
+       untimed["duration_seconds"] is None and untimed["duration"] is None
+       and untimed["duration_iso"] is None)
+
+    # A field left out of the form must not blank a length already recorded —
+    # the same rule every other field on this record follows.
+    async with Session() as db:
+        kept = await svc.update_video(db, timed["id"], fields={"title": "Renamed, same length"})
+    ck("duration: an edit that does not mention it leaves it alone",
+       kept["duration_seconds"] == 165, str(kept["duration_seconds"]))
+
+    async with Session() as db:
+        recut = await svc.update_video(db, timed["id"], fields={"duration_seconds": "1:02:45"})
+    ck("duration: a clock string is refused rather than half-read",
+       recut["duration_seconds"] is None, str(recut["duration_seconds"]))
+
+    async with Session() as db:
+        fixed = await svc.update_video(db, timed["id"], fields={"duration_seconds": 3765})
+    ck("duration: an hour-long video formats with its minutes",
+       fixed["duration"] == "1h 2m 45s" and fixed["duration_iso"] == "PT1H2M45S",
+       f"{fixed['duration']} / {fixed['duration_iso']}")
+
+    async with Session() as db:
+        cleared = await svc.update_video(db, timed["id"], fields={"duration_seconds": ""})
+    ck("duration: an emptied field clears the value", cleared["duration_seconds"] is None)
+
+    for junk in ("abc", "-5", "0", 86401):
+        async with Session() as db:
+            bad = await svc.update_video(db, timed["id"], fields={"duration_seconds": junk})
+        ck(f"duration: {junk!r} reads as not set rather than being stored",
+           bad["duration_seconds"] is None, str(bad["duration_seconds"]))
+
+    async with Session() as db:
+        for gone in (timed["id"], untimed["id"]):
+            await svc.delete_video(db, gone)
+
     # ------------------------------------------------------------- downgrade
     async with engine.begin() as conn:
-        for stmt in DOWNGRADE_STATEMENTS:
+        for stmt in DURATION_DOWNGRADE + DOWNGRADE_STATEMENTS:
             await conn.execute(text(stmt))
         exists = (await conn.execute(text(
             "SELECT to_regclass('public.instructional_videos') IS NOT NULL"

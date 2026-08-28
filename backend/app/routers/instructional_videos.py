@@ -270,6 +270,9 @@ async def admin_create_video(
     title: str = Form(...),
     description: str = Form(""),
     module_label: str = Form(""),
+    # Seconds. The browser measures it off the uploaded file and lets the admin
+    # correct it, so nothing here has to parse "2m 45s".
+    duration_seconds: str = Form(""),
     video: UploadFile = File(...),
     poster: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
@@ -291,6 +294,7 @@ async def admin_create_video(
         video_stream=stream,
         video_mime=video_mime,
         video_filename=video.filename,
+        duration_seconds=duration_seconds,
         poster_bytes_data=read_poster[0] if read_poster else None,
         poster_mime=read_poster[1] if read_poster else None,
         created_by_user_id=user.id,
@@ -303,6 +307,7 @@ async def admin_update_video(
     title: str | None = Form(None),
     description: str | None = Form(None),
     module_label: str | None = Form(None),
+    duration_seconds: str | None = Form(None),
     video: UploadFile | None = File(None),
     poster: UploadFile | None = File(None),
     db: AsyncSession = Depends(get_db),
@@ -320,6 +325,8 @@ async def admin_update_video(
         fields["description"] = description
     if module_label is not None:
         fields["module_label"] = module_label
+    if duration_seconds is not None:
+        fields["duration_seconds"] = duration_seconds
 
     read_video = _video_upload(video)
     read_poster = await _poster_upload(poster)

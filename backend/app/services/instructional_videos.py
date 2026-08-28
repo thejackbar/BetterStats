@@ -45,7 +45,7 @@ logger = logging.getLogger(__name__)
 # library costs rows of text rather than every thumbnail.
 _META_COLUMNS = """
     id, slug, title, description, module_label, sort_order,
-    video_path, video_mime, video_size, video_filename,
+    video_path, video_mime, video_size, video_filename, duration_seconds,
     (poster_data IS NOT NULL) AS has_poster,
     created_at, updated_at
 """
@@ -146,6 +146,60 @@ def delete_file(video_path: str | None) -> None:
         logger.warning("Could not remove video file %s", p, exc_info=True)
 
 
+def format_duration(seconds: int | None) -> str | None:
+    """"2m 45s" from 165. One definition, so the card, the page and the admin
+    list all read the same. Under a minute drops the minutes entirely."""
+    if not seconds or seconds < 1:
+        return None
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        if not minutes and not secs:
+            return f"{hours}h"
+        # The 0m is kept when there are seconds but no minutes, or "2h 45s"
+        # reads as though the 45 might be minutes.
+        return f"{hours}h {minutes}m" if not secs else f"{hours}h {minutes}m {secs}s"
+    if minutes:
+        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
+    return f"{secs}s"
+
+
+def iso_duration(seconds: int | None) -> str | None:
+    """ISO-8601 for schema.org VideoObject, e.g. PT2M45S. Search engines show
+    a runtime beside a video result when it is given one."""
+    if not seconds or seconds < 1:
+        return None
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    out = "PT"
+    if hours:
+        out += f"{hours}H"
+    if minutes:
+        out += f"{minutes}M"
+    if secs or not (hours or minutes):
+        out += f"{secs}S"
+    return out
+
+
+def clean_duration(value) -> int | None:
+    """Coerce whatever arrived into a sane number of seconds.
+
+    The browser sends a number it either measured off the file or parsed from
+    what the admin typed, but this is a public-facing API shape, so junk, a
+    negative, or something longer than a day reads as "not set" rather than
+    being stored and rendered as nonsense.
+    """
+    if value in (None, ""):
+        return None
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return None
+    if n < 1 or n > 24 * 60 * 60:
+        return None
+    return n
+
+
 def slugify(value: str) -> str:
     """Turn a title into a URL segment. Falls back to 'video' so an all-symbol
     title still produces something addressable rather than an empty path."""
@@ -183,6 +237,8 @@ def _row_to_dict(row: Any) -> dict:
     d["file_present"] = bool(stored) and file_size(stored) > 0
     d["src"] = f"/api/public/videos/{d['slug']}/file"
     d["poster"] = f"/api/public/videos/{d['slug']}/poster" if d.pop("has_poster") else None
+    d["duration"] = format_duration(d.get("duration_seconds"))
+    d["duration_iso"] = iso_duration(d.get("duration_seconds"))
     d["date"] = d["created_at"].date().isoformat() if d.get("created_at") else None
     for k in ("created_at", "updated_at"):
         if d.get(k) is not None:
@@ -257,6 +313,9 @@ async def create_video(
     video_stream,
     video_mime: str,
     video_filename: str | None,
+    # Defaulted because a video legitimately has no recorded length — the
+    # browser could not read the file, or nobody typed one.
+    duration_seconds: int | None = None,
     poster_bytes_data: bytes | None,
     poster_mime: str | None,
     created_by_user_id: Any | None,
@@ -280,11 +339,11 @@ async def create_video(
         await db.execute(text("""
             INSERT INTO instructional_videos (
                 id, slug, title, description, module_label, sort_order,
-                video_path, video_mime, video_size, video_filename,
+                video_path, video_mime, video_size, video_filename, duration_seconds,
                 poster_data, poster_mime, created_by_user_id
             ) VALUES (
                 :id, :slug, :title, :description, :module_label, :sort_order,
-                :video_path, :video_mime, :video_size, :video_filename,
+                :video_path, :video_mime, :video_size, :video_filename, :duration_seconds,
                 :poster_data, :poster_mime, :created_by
             )
         """), {
@@ -298,6 +357,7 @@ async def create_video(
             "video_mime": video_mime,
             "video_size": size,
             "video_filename": (video_filename or stored_name)[:300],
+            "duration_seconds": clean_duration(duration_seconds),
             "poster_data": poster_bytes_data,
             "poster_mime": poster_mime,
             "created_by": created_by_user_id,
@@ -341,6 +401,10 @@ async def update_video(
 
     sets: list[str] = []
     params: dict[str, Any] = {"id": uuid.UUID(str(video_id))}
+
+    if "duration_seconds" in fields:
+        sets.append("duration_seconds = :duration_seconds")
+        params["duration_seconds"] = clean_duration(fields["duration_seconds"])
 
     for key in ("title", "description", "module_label"):
         if key in fields:

@@ -57,7 +57,22 @@ STATEMENTS: list[str] = [
     """,
 ]
 
+# Migration 281: how long the video runs.
+#
+# Its own list because 280 has already been applied in production — a column
+# added to STATEMENTS above would never run on a database that has the table.
+# Stored as SECONDS rather than the "2m 45s" an admin types, so the display
+# format is decided once and the schema.org VideoObject can carry a real
+# ISO-8601 duration for search results.
+DURATION_STATEMENTS: list[str] = [
+    "ALTER TABLE instructional_videos ADD COLUMN IF NOT EXISTS duration_seconds INTEGER",
+]
+
 # Dropped newest-first by the migration's downgrade.
+DURATION_DOWNGRADE: list[str] = [
+    "ALTER TABLE instructional_videos DROP COLUMN IF EXISTS duration_seconds",
+]
+
 DOWNGRADE_STATEMENTS: list[str] = [
     "DROP INDEX IF EXISTS ix_instructional_videos_order",
     "DROP INDEX IF EXISTS uq_instructional_videos_slug",

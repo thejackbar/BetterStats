@@ -4227,6 +4227,11 @@ async def lifespan(app: FastAPI):
         for _stmt in _VIDEO_DDL:
             await conn.execute(text(_stmt))
 
+        # Migration 281: how long the video runs, in seconds.
+        from app.services.instructional_video_ddl import DURATION_STATEMENTS as _VIDEO_DURATION
+        for _stmt in _VIDEO_DURATION:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.

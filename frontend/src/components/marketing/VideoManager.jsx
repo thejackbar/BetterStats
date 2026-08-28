@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
 import { VIDEO_MODULE_OPTIONS } from '../../lib/videoModule'
+import { formatDuration, parseDuration, readDuration } from '../../lib/videoDuration'
 
 /**
  * Super Admin management for the /videos library: upload, edit, replace,
@@ -91,6 +92,7 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
   const [title, setTitle] = useState(video?.title ?? '')
   const [description, setDescription] = useState(video?.description ?? '')
   const [moduleLabel, setModuleLabel] = useState(video?.module_label ?? '')
+  const [duration, setDuration] = useState(formatDuration(video?.duration_seconds) ?? '')
   const [videoFile, setVideoFile] = useState(null)
   const [posterFile, setPosterFile] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -113,6 +115,11 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
     if (file.size > MAX_VIDEO_MB * 1024 * 1024) {
       setError(`That file is ${Math.round(file.size / 1024 / 1024)}MB. The limit is ${MAX_VIDEO_MB}MB.`)
     }
+    // The file knows how long it runs, so the field fills itself in. Only when
+    // it is empty: an admin who has typed a length meant it.
+    readDuration(file).then((secs) => {
+      if (secs) setDuration((current) => current || formatDuration(secs))
+    })
   }
 
   const save = async (e) => {
@@ -120,6 +127,10 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
     if (busy) return
     if (!title.trim()) { setError('Give the video a title.'); return }
     if (!editing && !videoFile) { setError('Choose a video file to upload.'); return }
+    if (duration.trim() && parseDuration(duration) === null) {
+      setError(`Could not read “${duration.trim()}” as a length. Try 2:45 or 2m 45s.`)
+      return
+    }
 
     setBusy(true)
     setError(null)
@@ -133,7 +144,14 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
       }
       setNote(videoFile ? 'Uploading…' : 'Saving…')
 
-      const fields = { title: title.trim(), description, module_label: moduleLabel }
+      // Sent as seconds, so the display format is decided in one place rather
+      // than by whatever each admin typed. Cleared field means cleared value.
+      const fields = {
+        title: title.trim(),
+        description,
+        module_label: moduleLabel,
+        duration_seconds: duration.trim() ? (parseDuration(duration) ?? '') : '',
+      }
       const saved = editing
         ? await api.adminUpdateVideo(video.id, fields, videoFile, poster)
         : await api.adminCreateVideo(fields, videoFile, poster)
@@ -188,6 +206,11 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
               <option value={moduleLabel}>{moduleLabel}</option>
             )}
           </select>
+        </Field>
+
+        <Field label="Length" hint="Filled in from the video. 2:45, 2m 45s and 165 all work.">
+          <input type="text" className={INPUT} value={duration}
+                 onChange={(e) => setDuration(e.target.value)} placeholder="2m 45s" />
         </Field>
 
         <Field
