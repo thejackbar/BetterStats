@@ -118,6 +118,14 @@ def store_upload(fileobj, mime: str, *, video_id: uuid.UUID) -> tuple[str, int]:
         with os.fdopen(fd, "wb") as out:
             shutil.copyfileobj(fileobj, out, length=1024 * 1024)
             written = out.tell()
+        # mkstemp creates 0600 by design and os.replace keeps the mode, which
+        # would leave every video readable by root alone. These are public
+        # marketing files with nothing to protect, and 0600 breaks two real
+        # things: the host user cannot copy their own videos back off without
+        # sudo (they are deliberately outside the backup, so that matters), and
+        # nginx workers could not read them if the X-Accel hand-off is ever
+        # switched on.
+        os.chmod(tmp_name, 0o644)
         os.replace(tmp_name, final)
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)

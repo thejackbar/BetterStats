@@ -240,6 +240,13 @@ async def main():
     ck("file: it holds exactly what was uploaded",
        found and found[0].read_bytes() == b"B" * 900)
     ck("file: size is read from disk", found and found[2] == 900, str(found and found[2]))
+    # mkstemp writes 0600, which leaves a public video readable by root alone:
+    # the host user cannot copy it back off without sudo, and nginx could not
+    # serve it if the hand-off were switched on.
+    import stat as _stat
+    mode = _stat.S_IMODE(found[0].stat().st_mode) if found else 0
+    ck("file: written world-readable, not root-only", mode == 0o644, oct(mode))
+
     ck("file: named after the row id, never the upload's filename",
        found and found[0].name == f"{b['id']}.mp4", found and found[0].name)
 

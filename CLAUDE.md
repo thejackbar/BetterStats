@@ -5943,6 +5943,13 @@ entry and its file, and drag the order.
   else on the way back out, so a row edited by hand to say `../../etc/passwd`
   resolves to nothing. The uploaded name is kept in a column for the download
   header only.
+- **`tempfile.mkstemp` WRITES 0600, AND `os.replace` KEEPS IT.** Every uploaded
+  video landed readable by root alone, which breaks two real things: the host
+  user cannot copy their own videos back off without sudo (they are outside the
+  backup, so that is the recovery path), and nginx workers could not read them
+  if the X-Accel hand-off were switched on. Chmodded to 0644 before the rename
+  — these are public marketing files with nothing to protect. Found by reading
+  a directory listing off the box, not from the code.
 - **The upload streams to disk and is never read into memory.** `_check_size`
   seeks the SpooledTemporaryFile rather than calling `len()` on 512MB, and
   `store_upload` writes to a temp file in the same directory then `os.replace`s
@@ -5995,7 +6002,7 @@ entry and its file, and drag the order.
   wrote eleven test videos into the real `/mnt/media` path. Same family as the
   Roster temporal-dead-zone note — position in the file is load-bearing.
 - **Verified against a real Postgres** (`backend/verification/verify_instructional_videos.py`,
-  111 checks through the shipped service and route bodies: the DDL applied three
+  112 checks through the shipped service and route bodies: the DDL applied three
   times to a populated table, the slug derived and then held still across a
   retitle, a duplicate title suffixed, a text edit not touching the file and a
   file replace not touching the text, every Range case incl. a suffix range and
