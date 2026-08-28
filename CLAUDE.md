@@ -5779,11 +5779,29 @@ entry and its file, and drag the order.
   orphaned by a compose project rename, which is exactly the June 2026 outage;
   a bind mount to a real path cannot. This is what the old "the /app/uploads
   volume isn't guaranteed persistent" comment was really about.
-- **nginx SERVES THE BYTES, NOT PYTHON.** The app checks access and returns
-  `X-Accel-Redirect` at an `internal` location; nginx does Range and caching
-  natively and a 400MB read never blocks a worker. `video_accel_location`
-  empty falls back to serving in-process, which is what local dev does. The
-  frontend container therefore mounts the same directory read-only.
+- **THE nginx HAND-OFF IS OPT-IN, AND THAT DEFAULT WAS BOUGHT THE HARD WAY.**
+  Reported live: every video 404'd while `GET /public/videos` reported
+  `file_present: true` and the poster served fine. The 404 body was nginx's,
+  not the app's — so the backend HAD the file, set `X-Accel-Redirect`, and
+  nginx then could not find it. **nginx is the process that opens the file, so
+  the hand-off needs the directory mounted into the FRONTEND container as well
+  as the backend**, and the second mount was missing. The app serves the bytes
+  itself by default now (one mount, and it is the process that wrote the file);
+  `video_accel_location` switches the hand-off on once both mounts are
+  confirmed. Diagnosed by reading the response headers, not by guessing:
+  `Server: openresty` with the app's own `cache-control` still attached is what
+  says "the app answered and nginx failed the internal redirect".
+- **A RESPONSE MUST NOT CARRY A WHOLE VIDEO, AND `Range: bytes=0-` ASKS IT
+  TO.** That is what Chrome opens a video with, and the first cut honoured it
+  literally: `_read_slice` for the full length, so a 96MB video was 96MB of
+  memory per viewer. Every 206 is clamped to `CHUNK_BYTES` now; a short 206 is
+  legal and the player just asks for the next part.
+- **A DOWNLOAD WITH NO RANGE MUST BE THE WHOLE FILE.** The same first cut
+  served the first 2MB as a 206 to a `?download=1` with no Range header, which
+  hands `curl -O` a truncated file. It is a `FileResponse` now, which streams
+  off disk rather than buffering. Both bugs are covered by checks that fail
+  against the shipped code (6,291,456 bytes in one response, and a `Response`
+  where a `FileResponse` belongs).
 - **A FILENAME IS NEVER BUILT FROM ANYTHING A PERSON TYPED.** It is
   `<row uuid>.<ext>` from a fixed map, and `_SAFE_FILENAME` refuses anything
   else on the way back out, so a row edited by hand to say `../../etc/passwd`
@@ -5841,7 +5859,7 @@ entry and its file, and drag the order.
   wrote eleven test videos into the real `/mnt/media` path. Same family as the
   Roster temporal-dead-zone note — position in the file is load-bearing.
 - **Verified against a real Postgres** (`backend/verification/verify_instructional_videos.py`,
-  103 checks through the shipped service and route bodies: the DDL applied three
+  111 checks through the shipped service and route bodies: the DDL applied three
   times to a populated table, the slug derived and then held still across a
   retitle, a duplicate title suffixed, a text edit not touching the file and a
   file replace not touching the text, every Range case incl. a suffix range and
@@ -5852,7 +5870,7 @@ entry and its file, and drag the order.
   thumbnail still draws, orphan detection finding a hand-deleted row's file,
   every upload refusal, the share card built from the table and a deleted
   video's card ceasing to resolve, and the downgrade) and **driven in Chromium**
-  (`verify_videos_browser.mjs`, 82: the exact params on the wire for a PATCH, a
+  (`verify_videos_browser.mjs`, 91: the exact params on the wire for a PATCH, a
   delete and a drag-reorder, a dismissed delete sending nothing, an upload with
   no file refused before any request, and the gate from three identities)
   **with a control run**: with `canManage` forced true, 10 fail on exactly the
@@ -5861,6 +5879,22 @@ entry and its file, and drag the order.
   `Super admin` and the form's labels are CSS-`uppercase`, so `innerText`
   returns them uppercased and a check written in the source's casing could
   never fail. A check that cannot fail is not a check.
+- **THE CALL TO ACTION FOLLOWS THE VIDEO'S MODULE (v9.54.1).** Reported off
+  the Team Selection walkthrough: it ended by pitching BetterStats and linking
+  `/features`, so a visitor who had just watched selection was sent to the
+  wrong module's page. `lib/videoModule.js` maps the module to its heading,
+  its marketing page and its button label; BetterStats keeps `/features` (the
+  Core feature page, and what the button already pointed at) while the rest go
+  to `/modules/{slug}`. A video filed under nothing, or under a label that
+  matches nothing, gets the generic BetterCricket pitch — **never a guess at
+  which module was meant**.
+- **THE MODULE FIELD IS A PICKER, NOT A TEXT BOX, BECAUSE IT NOW DECIDES A
+  DESTINATION.** While it was only a display label, free text was harmless;
+  the moment it routes a viewer, a typo silently sends a module's audience
+  somewhere else. Matching stays forgiving anyway (case and spacing ignored,
+  so "Better Select" resolves) because the first four videos were typed by
+  hand before the picker existed, and a value the picker does not know is kept
+  as its own option rather than being silently reassigned.
 - **Not built**: no draft/published state (an upload is atomic, so there is
   nothing to stage), no per-video "what this covers" list (one description is
   what an admin was asked to write), and no transcoding — an admin uploads

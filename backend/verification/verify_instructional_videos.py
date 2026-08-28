@@ -333,6 +333,67 @@ async def main():
        {p.name for p in store.iterdir()} == files_before,
        str({p.name for p in store.iterdir()} - files_before))
 
+    # ------------------------------------------------- what one response carries
+    # Reported live: a 96MB video 404'd from nginx while the API said the file
+    # was present. Two separate faults behind it, both covered here.
+    from app.routers.instructional_videos import CHUNK_BYTES, stream_video
+
+    class FakeRequest:
+        def __init__(self, headers):
+            self.headers = headers
+
+    async with Session() as db:
+        big = await svc.create_video(
+            db, title="A big one", description="", module_label=None,
+            video_stream=stream(b"V" * (CHUNK_BYTES * 3)), video_mime="video/mp4",
+            video_filename="big.mp4", poster_bytes_data=None, poster_mime=None,
+            created_by_user_id=user_id,
+        )
+
+    # Chrome opens a video with `Range: bytes=0-`, which asks for the WHOLE
+    # file. One response must not carry all of it, or a 96MB video is 96MB of
+    # memory per viewer.
+    async with Session() as db:
+        r = await stream_video(big["slug"], FakeRequest({"range": "bytes=0-"}), 0, db)
+    ck("serving: an open-ended range is clamped to one chunk, not the whole file",
+       r.status_code == 206 and len(getattr(r, "body", b"") or b"") == CHUNK_BYTES,
+       f"status {r.status_code}, {len(getattr(r, 'body', b'') or b'')} bytes")
+    # .get, not [] — a check that raises takes the whole suite down with it and
+    # tells you less than a plain FAIL does.
+    ck("serving: it reports the partial range honestly",
+       r.headers.get("content-range") == f"bytes 0-{CHUNK_BYTES - 1}/{CHUNK_BYTES * 3}",
+       r.headers.get("content-range"))
+    ck("serving: and says the full size so the player knows what it is getting",
+       (r.headers.get("content-range") or "").endswith(f"/{CHUNK_BYTES * 3}"),
+       r.headers.get("content-range"))
+
+    # A mid-file seek is served from where it was asked for.
+    async with Session() as db:
+        r2 = await stream_video(big["slug"], FakeRequest({"range": "bytes=5000-5099"}), 0, db)
+    ck("serving: a small explicit range is served exactly",
+       r2.status_code == 206 and len(getattr(r2, "body", b"") or b"") == 100,
+       f"status {r2.status_code}, {len(getattr(r2, 'body', b'') or b'')} bytes")
+
+    # A download with no Range must be the COMPLETE file, not a first chunk.
+    async with Session() as db:
+        d = await stream_video(big["slug"], FakeRequest({}), 1, db)
+    ck("serving: a download with no range streams the WHOLE file, not a chunk",
+       d.__class__.__name__ == "FileResponse", d.__class__.__name__)
+    ck("serving: the download is named for the upload",
+       "big.mp4" in d.headers.get("content-disposition", ""),
+       d.headers.get("content-disposition"))
+    ck("serving: the whole-file path streams rather than buffering",
+       not hasattr(d, "body") or not d.body)
+
+    # The nginx hand-off is opt-in. On by default is what 404'd in production,
+    # because it needs the directory mounted into the frontend container too.
+    from app.config.settings import settings as _settings
+    ck("serving: the nginx hand-off is OFF unless explicitly configured",
+       (_settings.video_accel_location or "") == "", _settings.video_accel_location)
+
+    async with Session() as db:
+        await svc.delete_video(db, big["id"])
+
     # Range maths, run through the route's own parser.
     from app.routers.instructional_videos import _parse_range
     ck("range: a plain range parses", _parse_range("bytes=0-99", 1000) == (0, 99))

@@ -96,11 +96,20 @@ class Settings(BaseSettings):
     video_storage_dir: str = "/mnt/media/bettercricket/internal/videos"
 
     # nginx internal location used to hand byte-serving off to nginx via
-    # X-Accel-Redirect: the app checks access and returns a header, nginx
-    # pushes the file with native Range and caching. Empty disables it, and the
-    # app serves the bytes itself — which is what happens in local dev, where
-    # there is no nginx in front.
-    video_accel_location: str = "/_internal_videos/"
+    # X-Accel-Redirect. OFF BY DEFAULT, and that default is deliberate.
+    #
+    # Handing off to nginx requires the video directory to be mounted into the
+    # FRONTEND container as well as the backend, because nginx is the one
+    # opening the file. Miss that second mount and every video 404s from nginx
+    # while the API cheerfully reports file_present: true — which is exactly
+    # what happened on the first deploy, and it is invisible until somebody
+    # presses play. Serving from the backend needs one mount, not two, and the
+    # backend is the process that wrote the file, so it always has it.
+    #
+    # Turn it on (video_accel_location=/_internal_videos/) once BOTH containers
+    # are confirmed to mount the directory. The nginx location already exists
+    # in frontend/nginx.conf.
+    video_accel_location: str = ""
     # SMTP (used when email_provider == "smtp"). SES example:
     #   smtp_host = email-smtp.ap-southeast-2.amazonaws.com  smtp_port = 587
     # Port 465 → implicit TLS; anything else → STARTTLS.

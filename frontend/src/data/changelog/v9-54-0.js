@@ -14,5 +14,8 @@ export default {
     'The player seeks properly on a long video: the browser asks for the part it needs rather than the whole file.',
     'Each video gets its own share card and sitemap entry, so a link posted to Facebook or LinkedIn shows the thumbnail and the description.',
     'Video files are kept on the server\u2019s media drive rather than in the database, and are deliberately left out of the nightly backup. Titles, descriptions and thumbnails are backed up as usual, so a restore brings the library back and only the video files need re-uploading from the originals.',
+    'Fixed after the first upload: videos would not play. The file was on the server the whole time, but the web server had been handed the job of sending it without being able to see it. The site sends the video itself now.',
+    'The “Want this for your club?” panel under a video now points at the module the video is about. A selection walkthrough sends you to BetterSelect, not BetterStats.',
+    'The module is picked from a list when a video is uploaded, rather than typed, so it always matches a real module.',
   ],
 }

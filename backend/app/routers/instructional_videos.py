@@ -21,6 +21,7 @@ import os
 import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,19 +129,27 @@ async def stream_video(
             headers["Content-Disposition"] = disposition
         return Response(status_code=200, headers=headers)
 
-    # Local dev: serve it ourselves.
+    # Serve it ourselves. This is the default path — see settings for why the
+    # nginx hand-off is opt-in rather than assumed.
     base_headers = {"Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600"}
     if disposition:
         base_headers["Content-Disposition"] = disposition
 
     rng = _parse_range(request.headers.get("range"), size)
+
     if rng is None:
-        if size <= CHUNK_BYTES:
-            return Response(content=_read_slice(path, 0, size), media_type=mime,
-                            headers={**base_headers, "Content-Length": str(size)})
-        rng = (0, min(CHUNK_BYTES, size) - 1)
+        # No range asked for. FileResponse streams the file off disk in chunks,
+        # so a 96MB download is a complete file without ever being a 96MB
+        # string in memory. Serving a truncated first chunk here instead would
+        # hand `?download=1` a broken file.
+        return FileResponse(path, media_type=mime, headers=base_headers)
 
     start, end = rng
+    # CLAMP WHAT ONE RESPONSE CARRIES. Chrome opens a video with
+    # `Range: bytes=0-`, which asks for the whole file — reading that into a
+    # single Response is the entire file in memory, per viewer. A short 206 is
+    # legal and expected: the player just asks for the next part.
+    end = min(end, start + CHUNK_BYTES - 1)
     data = _read_slice(path, start, end - start + 1)
     return Response(
         content=data,

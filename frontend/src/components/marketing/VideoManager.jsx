@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../../lib/api'
+import { VIDEO_MODULE_OPTIONS } from '../../lib/videoModule'
 
 /**
  * Super Admin management for the /videos library: upload, edit, replace,
@@ -172,9 +173,21 @@ export function VideoEditorModal({ video, onClose, onSaved }) {
                     placeholder="What this walkthrough covers." />
         </Field>
 
-        <Field label="Module" hint="Optional. The small label above the title, e.g. BetterStats.">
-          <input type="text" className={INPUT} value={moduleLabel} onChange={(e) => setModuleLabel(e.target.value)}
-                 placeholder="BetterStats" />
+        {/* A picker, not a text box. The module decides which page the "Want
+            this for your club?" button sends a viewer to, so a typo would
+            quietly send a BetterSelect walkthrough's audience to BetterStats.
+            A value typed before this was a picker is kept as its own option
+            rather than being silently reassigned. */}
+        <Field label="Module" hint="Sets the label above the title and where the “See features” button goes.">
+          <select className={INPUT} value={moduleLabel} onChange={(e) => setModuleLabel(e.target.value)}>
+            <option value="">No module</option>
+            {VIDEO_MODULE_OPTIONS.map((m) => (
+              <option key={m.slug} value={m.name}>{m.name}</option>
+            ))}
+            {moduleLabel && !VIDEO_MODULE_OPTIONS.some((m) => m.name === moduleLabel) && (
+              <option value={moduleLabel}>{moduleLabel}</option>
+            )}
+          </select>
         </Field>
 
         <Field

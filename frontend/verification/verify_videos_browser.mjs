@@ -179,12 +179,34 @@ async function openPage(role) {
      !(await page.locator('#main-content').innerText()).includes('EDIT THIS VIDEO'))
   const rail = await page.locator('#main-content a[href^="/videos/"]').evaluateAll(
     (els) => [...new Set(els.map((e) => e.getAttribute('href')))])
+  // The CTA must follow the module the video is filed under. A selection
+  // walkthrough that pitches BetterStats sends an interested visitor to the
+  // wrong page — reported live off BetterCricket - Team Selection.
+  const statsCta = page.locator('#main-content a[href="/features"]')
+  ck('visitor: a BetterStats video points its CTA at the Core features page',
+     await statsCta.count() === 1)
+  ck('visitor: a BetterStats video keeps its own heading',
+     (await page.locator('#main-content').innerText()).includes('Get automated stats for your cricket club'))
+
   ck('visitor: rail offers the others and not this one',
      !rail.includes('/videos/merge-players') && rail.length === VIDEOS.length - 1, rail.join(', '))
   ck('visitor: no page errors on the detail page', errors.length === 0, errors.join(' | '))
 
   await page.goto(`${BASE}/videos/selection`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(400)
+
+  // The reported case: a BetterSelect video must not send its viewer to
+  // BetterStats.
+  ck('visitor: a BetterSelect video points its CTA at the BetterSelect page',
+     await page.locator('#main-content a[href="/modules/betterselect"]').count() === 1)
+  ck('visitor: a BetterSelect video does NOT offer the BetterStats page',
+     await page.locator('#main-content a[href="/features"]').count() === 0)
+  const selText = await page.locator('#main-content').innerText()
+  ck('visitor: the CTA heading is about selection, not stats',
+     selText.includes('Sort availability and selection'), selText.slice(-260))
+  ck('visitor: the button names the module it opens',
+     selText.toUpperCase().includes('SEE BETTERSELECT'))
+
   const gone = await page.locator('#main-content').innerText()
   ck('visitor: a fileless video says so rather than showing a dead player',
      gone.includes('not available on the server'))
@@ -240,6 +262,14 @@ async function openPage(role) {
   ck('super admin: the form asks for a description', form.includes('DESCRIPTION'))
   ck('super admin: the form takes a video file', form.includes('VIDEO FILE'))
   ck('super admin: the form offers an optional thumbnail', form.includes('THUMBNAIL'))
+  // A text box here lets a typo send a module's audience to the wrong page.
+  ck('super admin: the module is a picker, not a free-text box',
+     await page.locator('[role="dialog"] select').count() === 1)
+  const moduleOpts = await page.locator('[role="dialog"] select option').allTextContents()
+  ck('super admin: the picker offers every module',
+     ['BetterStats', 'BetterSelect', 'BetterSocials', 'BetterAdmin', 'BetterIQ']
+       .every((n) => moduleOpts.includes(n)), moduleOpts.join(', '))
+  ck('super admin: the picker allows no module at all', moduleOpts.includes('No module'))
   ck('super admin: the form says a frame is taken automatically',
      formRaw.includes('a frame is taken from the video itself'))
   ck('super admin: the form accepts only playable formats',
