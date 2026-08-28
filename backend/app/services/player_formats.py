@@ -28,6 +28,8 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.aggregations import _club_game_clause
+
 from app.services.grade_labels import FORMAT_LABELS, MATCH_FORMATS, format_sql_case
 from app.services.game_status import appearance_counts_as_match
 
@@ -66,16 +68,20 @@ async def player_format_splits(
 ) -> dict:
     """Batting, bowling and fielding per format, plus what could not be placed.
 
-    Anchored on one ``player_id``, which is already per-club under the uuid5
-    scheme, so this needs no organisation filter of its own — the same call
-    ``get_career_batting_from_innings`` makes.
+    Scoped to the games the player's OWN club played, the same call
+    ``get_career_batting_from_innings`` makes. A per-club ``player_id`` is not
+    enough on its own: CA issues one participant GUID per person across every
+    club they turn out for, so their rows can sit on a game belonging to
+    another club and be counted here as one of this club's.
     """
     params: dict = {"pid": player_id}
-    season_clause = ""
+    # The club filter rides along with the season one so every query below
+    # picks both up from the same interpolation point.
+    season_clause = await _club_game_clause(session, player_id, params)
     sids = await _season_ids(session, season_id)
     if sids:
         params["sids"] = sids
-        season_clause = " AND g.season_id = ANY(:sids)"
+        season_clause += " AND g.season_id = ANY(:sids)"
 
     # Matches played, from every source of "they were in this game" — a player
     # who only bowled, only fielded, or was named and never got a knock still
