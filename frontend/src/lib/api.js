@@ -1779,6 +1779,12 @@ export const api = {
   adminListGradesBySeason: () => request('/club-admin/manual-entries/grades'),
   adminCreateManualSeason: (data) =>
     request('/club-admin/manual-entries/seasons', { method: 'POST', body: JSON.stringify(data) }),
+  // Which season a match date belongs to, and whether the club holds it.
+  // Read-only — asked as soon as a card is read, before anyone has decided
+  // to import it. The server owns the Jul-Jun boundary so the upload screen
+  // cannot disagree with the rest of the app about which year a date is in.
+  adminSeasonForDate: (playedAt) =>
+    request(`/club-admin/manual-entries/seasons/for-date?played_at=${encodeURIComponent(playedAt)}`),
   adminUpdateSeason: (id, data) =>
     request(`/club-admin/manual-entries/seasons/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminDeleteManualSeason: (id) =>

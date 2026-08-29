@@ -6132,6 +6132,85 @@ Games list returning `Error: Internal Server Error`.
   manual innings, so an uploaded card draws initials badges rather than crests.
   Pre-existing, and a manual upload has no club GUID to resolve one from.
 
+## A game brings its own season with it (v9.54.2, Aug 2026)
+
+Reported straight after the uploaded-card fix above: the 1974 game is filed
+under **Summer 1999/00**, and the club's season list starts at 1996/97 — so
+there is no filter that finds it.
+
+- **NOTHING WAS BROKEN. THE FORM COULD NOT EXPRESS THE RIGHT ANSWER.**
+  `manual_games.season_id` is NOT NULL and the Upload Scorecard form requires
+  a season, but the dropdown only ever offers seasons the club already holds.
+  A 1974 card at a club whose history starts in 1996 therefore HAD to go in
+  under something wrong. Verified against the live row before touching a line
+  of it: `season_name` reads "Summer 1999/00" for a `played_at` of 1974-11-30.
+- **THE PAGE HAD ITS OWN SEASON BOUNDARY, AND IT DISAGREED WITH THE REST OF
+  THE APP.** `AdminScorecardUpload`'s local `seasonStartYear` used Sep–Dec,
+  while `votes.season_year_for` and `selection_rules`' default `start_month`
+  both count a club year from **July** — so the two answered differently for a
+  July or August fixture. The rule is server-side now
+  (`services/season_resolve.py`) and the page asks rather than deriving.
+- **`season_resolve` IS ONE DEFINITION, NOT A SECOND ONE.** `canonical_name`
+  and `season_start_year` MOVED there out of `scripts/cleanup_seasons`, which
+  imports them back — a tidied season list and a newly uploaded card cannot
+  end up disagreeing about what 1968/69 is called.
+- **A SEASON'S YEAR IS READ OFF ITS NAME FIRST, THEN THE `year` COLUMN.** A
+  manually created season can carry a NULL year (one of the states
+  `cleanup_seasons` exists to repair), so matching on the column alone mints
+  a duplicate beside a season the club already has. The suite seeds a bare
+  "1980/81" with a NULL year and asserts a 1980 game JOINS it.
+- **A YEAR CAN HOLD SEVERAL SEASONS** (Summer and Winter, or a masters comp
+  under its own CA id), so the canonically named one wins, then a synced one,
+  then whatever is left. Picking arbitrarily is how a game lands in the wrong
+  competition.
+- **`season_id` IS OPTIONAL ON THE WIRE NOW, and that is the real fix.** Omit
+  it and `_resolve_game_season` files the game under the season its own date
+  falls in, creating it when the club has none — so any caller gets it right,
+  not just the browser. **An explicit season still wins**: an admin filing a
+  game somewhere deliberate is not something to override.
+- **THE GRADE IS THE OTHER HALF, and forgetting it would have left the fix
+  half-done.** A season minted for a 1974 card has NO grades, so the game
+  would be ungraded and still missing from every grade filter. `grade_name`
+  creates it inside the resolved season — and writes `category` AND
+  `categories`, per the rule that a site setting one must set the other.
+- **THE LOOKUP ENDPOINT IS READ-ONLY ON PURPOSE.** `GET
+  /manual-entries/seasons/for-date` is asked the moment a card is read, long
+  before anybody has decided to import it; minting seasons for cards that are
+  never imported would be worse than the bug. The CREATE happens on the
+  screen's own explicit call, and again server-side at import.
+- **A MISMATCH IS SAID OUT LOUD RATHER THAN REFUSED.** Picking a season the
+  date does not fall in is still allowed — a club may file a game
+  deliberately — but the screen now names both the season picked and the one
+  the date belongs to. Silence there is what let this happen.
+- **The date can be corrected after the read, and the season follows it.**
+  Otherwise fixing a misread year leaves the game filed under the year that
+  was misread.
+- **`python -m app.scripts.refile_manual_game_seasons <org|all>`** moves games
+  already filed wrongly, carrying the grade across BY NAME (pointing at the old
+  grade row would leave the game's grade and season contradicting each other).
+  Dry-run by default: a game an admin deliberately filed outside its date's
+  season is indistinguishable from a mistake by data alone, so a person reads
+  the list first — the `purge_import_only_players` posture.
+- **Verified against a real Postgres** (`backend/verification/verify_season_resolve.py`,
+  42 checks through the shipped route bodies and services: the reported case
+  replayed end to end, the July boundary at both edges, an existing season
+  reused rather than duplicated, a second game joining the season just made,
+  an explicit choice honoured, both refusals, another club's season never
+  offered, the NULL-year name match, the sibling-season preference, and the
+  repair script's dry run / apply / grade carry / idempotent re-run / leave a
+  correctly filed and an undated game alone) **with a control run** that
+  reproduces the report exactly: the old `ManualGameIn` refuses a card with no
+  season, and a 1974-11-30 card then files under "Summer 1999/00".
+- **Driven in Chromium** (`frontend/verification/verify_scorecard_season_browser.mjs`,
+  20 checks: the for-date call on the wire, the exact create payload, the
+  season selected and the note shown, no create for a year the club already
+  has, the mismatch note naming both seasons, the season following a corrected
+  date, and no overflow at 390px) **with a control run**: 10 fail against the
+  previous commit, including the season field reading "— choose —".
+- **`text=Season` ALSO MATCHES THE SIDEBAR'S "2026/27 SEASON"**, which at
+  390px lives inside a closed drawer and never becomes visible — the probe
+  waits on the review form's own date field instead.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

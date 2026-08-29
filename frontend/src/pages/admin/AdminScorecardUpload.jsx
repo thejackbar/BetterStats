@@ -12,14 +12,12 @@ const BTN_SECONDARY = 'inline-flex items-center px-3 py-1.5 border pb-hairline t
 const TH = 'text-left font-mono text-[10px] text-pb-faint font-normal px-2 py-1'
 const TD = 'px-2 py-1 align-top'
 
-// Derive the AU season start year from a match date: a Sep–Dec game belongs to that
-// year's summer, a Jan–Aug game to the previous year's (so 2020-03-14 → 2019/20 → 2019).
-function seasonStartYear(iso) {
-  const d = iso && /^\d{4}-\d{2}-\d{2}/.test(iso) ? new Date(iso) : null
-  if (!d || isNaN(d)) return null
-  const m = d.getMonth() + 1
-  return m >= 9 ? d.getFullYear() : d.getFullYear() - 1
-}
+// Which season a match date belongs to is answered by the SERVER
+// (`api.adminSeasonForDate`), not worked out here. This page used to apply
+// its own Sep–Dec boundary while every other reader counted a club year from
+// July, so the two disagreed about a July or August fixture — and the rule
+// being local was also why a date outside every existing season silently
+// selected nothing at all.
 
 function num(v) {
   if (v === '' || v === null || v === undefined) return null
@@ -526,6 +524,68 @@ export default function AdminScorecardUpload() {
     [grades, form.season_id]
   )
 
+  // ── The season a card's own date belongs to ──────────────────────────────
+  // `dateSeason` is the server's answer for the date currently in the form:
+  // the year, what that year is called, and the club's own season row for it
+  // once there is one. Held in state so the mismatch note below can compare
+  // it against whatever season is actually selected without re-deriving the
+  // Jul-Jun boundary in the browser.
+  const [dateSeason, setDateSeason] = useState(null)
+
+  // Resolve the date's season and select it, creating the season when the
+  // club has no row for that year. Returns the season, or null when the date
+  // is unusable. Never throws: a card is still importable if this fails,
+  // it just needs the season picking by hand as before.
+  const resolveSeason = useCallback(async (iso) => {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) { setDateSeason(null); return null }
+    try {
+      const r = await api.adminSeasonForDate(iso)
+      if (r?.season) {
+        setSeasons(s => (s.some(x => x.id === r.season.id) ? s : [...s, r.season]))
+        setDateSeason({ ...r, for: iso })
+        return r.season
+      }
+      if (!r?.expected_name) { setDateSeason(null); return null }
+      // The club has no season for that year — make it, rather than leaving
+      // the field blank for somebody to fill from a list that cannot answer.
+      const made = await api.adminCreateManualSeason({ name: r.expected_name, year: r.year })
+      setSeasons(s => [...s, made])
+      setDateSeason({ ...r, season: made, season_created: true, for: iso })
+      return made
+    } catch {
+      setDateSeason(null)
+      return null
+    }
+  }, [])
+
+  // The date can also be typed or corrected by hand after the read, and the
+  // season has to follow it — otherwise fixing a misread year leaves the game
+  // filed under the year that was misread.
+  useEffect(() => {
+    if (step !== 'review') return
+    const iso = form.played_at
+    if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return
+    if (dateSeason?.season && form.season_id === dateSeason.season.id
+        && dateSeason.for === iso) return
+    let live = true
+    api.adminSeasonForDate(iso)
+      .then(r => { if (live) setDateSeason(r ? { ...r, for: iso } : null) })
+      .catch(() => {})
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.played_at, step])
+
+  // Said out loud rather than left for somebody to notice: the game is going
+  // into a season its own date does not fall in. Not a block — a club may
+  // deliberately file a game somewhere — but never silent again.
+  const seasonMismatch = useMemo(() => {
+    if (!form.season_id || !dateSeason?.expected_name) return null
+    if (dateSeason.season && dateSeason.season.id === form.season_id) return null
+    const chosen = seasons.find(s => s.id === form.season_id)
+    if (!chosen) return null
+    return { chosen: chosen.name, expected: dateSeason.expected_name }
+  }, [form.season_id, dateSeason, seasons])
+
   function onFiles(list) {
     const arr = Array.from(list || [])
     setFiles(arr)
@@ -581,8 +641,11 @@ export default function AdminScorecardUpload() {
       const oppName = data.match?.our_team
         ? ([data.match?.home_team, data.match?.away_team].find(t => t && t !== data.match.our_team) || '')
         : (data.match?.away_team || '')
-      const yr = seasonStartYear(data.match?.date)
-      const seasonHit = yr != null ? (seasons.find(s => s.year === yr) || null) : null
+      // The season the card belongs to, created if the club hasn't got that
+      // year. A 1974 card at a club whose list starts in 1996 used to leave
+      // this blank, and the game then went in under whatever the dropdown
+      // happened to offer — filed 25 years out and findable by no filter.
+      const picked = await resolveSeason(data.match?.date)
       setForm(f => ({
         ...f,
         played_at: data.match?.date || '',
@@ -590,7 +653,8 @@ export default function AdminScorecardUpload() {
         winning_team: data.match?.winning_team || '',
         result: data.match?.result || '',
         opp_name: oppName,
-        season_id: seasonHit ? seasonHit.id : f.season_id,
+        season_id: picked?.id || f.season_id,
+        grade_id: picked ? '' : f.grade_id,
       }))
       setStep('review')
     } catch (e) {
@@ -995,6 +1059,19 @@ export default function AdminScorecardUpload() {
                     withYear
                     onAdd={createSeason}
                   />
+                  {dateSeason?.season_created && dateSeason.season?.id === form.season_id && (
+                    <p className="mt-1 text-[11px] text-pb-faint" data-testid="season-created-note">
+                      Added {formatSeason(dateSeason.season.name, dateSeason.season.year)} — the club
+                      had no season for this card's date.
+                    </p>
+                  )}
+                  {seasonMismatch && (
+                    <p className="mt-1 text-[11px] text-pb-amber" data-testid="season-mismatch-note">
+                      This date falls in {formatSeason(seasonMismatch.expected)}, not{' '}
+                      {formatSeason(seasonMismatch.chosen)}. Filing it here means it won't show
+                      under its own season.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className={LABEL_CLS}>Grade</label>
