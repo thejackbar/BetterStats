@@ -1,0 +1,1066 @@
+{
+  "id": "96521ab9-e30e-4627-9e2b-751ea6c6b6f5",
+  "home_team": "Stratford Redbacks - 1st XI",
+  "away_team": "Collegians Senior Men First X1",
+  "played_at": "2026-03-21",
+  "result": "LOSS",
+  "winning_team": "Stratford Redbacks - 1st XI",
+  "organisation_id": "c615d93f-87d8-eb11-a7ad-2818780da0cc",
+  "grade": {
+    "id": "601402a9-2406-42f8-af8e-4224f8d8fe08",
+    "name": "1st Grade",
+    "raw_name": "1st Grade"
+  },
+  "season": {
+    "id": "a063193b-afc8-5c2f-999a-c0eb5843b6aa",
+    "name": "Summer 2025/26"
+  },
+  "innings_totals": {
+    "1": {
+      "runs": 30,
+      "wickets": 10,
+      "extras": 1,
+      "batting_team": "Collegians Senior Men First X1",
+      "logo_url": "/api/images/organisations/c615d93f-87d8-eb11-a7ad-2818780da0cc/logo?v=60ba3ef3"
+    },
+    "2": {
+      "runs": 99,
+      "wickets": 10,
+      "extras": 3,
+      "batting_team": "Stratford Redbacks - 1st XI",
+      "logo_url": "https://res.cloudinary.com/playhq/image/upload/h_256,w_256/v1/production/ca/29bf48c1-5475-41cd-a5c3-dd8672c6777e/1686087167574/logo.jpg?_a=BAMAMifg0"
+    },
+    "3": {
+      "runs": 124,
+      "wickets": 10,
+      "extras": 4,
+      "batting_team": "Collegians Senior Men First X1",
+      "logo_url": "/api/images/organisations/c615d93f-87d8-eb11-a7ad-2818780da0cc/logo?v=60ba3ef3"
+    },
+    "4": {
+      "runs": 54,
+      "wickets": 3,
+      "extras": 4,
+      "batting_team": "Stratford Redbacks - 1st XI",
+      "logo_url": "https://res.cloudinary.com/playhq/image/upload/h_256,w_256/v1/production/ca/29bf48c1-5475-41cd-a5c3-dd8672c6777e/1686087167574/logo.jpg?_a=BAMAMifg0"
+    }
+  },
+  "batting": [
+    {
+      "innings_number": 1,
+      "runs": 1,
+      "balls": 22,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 4.54,
+      "dismissal_type": "b: J Tatterson",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 1,
+      "did_not_bat": false,
+      "player_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "player_name": "Hurley, Ben"
+    },
+    {
+      "innings_number": 1,
+      "runs": 4,
+      "balls": 22,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 18.18,
+      "dismissal_type": "c: H Holmes b: B Walker",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 2,
+      "did_not_bat": false,
+      "player_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e",
+      "player_name": "Russell, Zak"
+    },
+    {
+      "innings_number": 1,
+      "runs": 2,
+      "balls": 12,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 16.66,
+      "dismissal_type": "c: L Channing b: J Rietschel",
+      "caught_behind": true,
+      "not_out": false,
+      "batting_position": 3,
+      "did_not_bat": false,
+      "player_id": "a05eb23d-b1ef-42de-8c06-5e3dbb683f93",
+      "player_name": "Morrison, Thomas"
+    },
+    {
+      "innings_number": 1,
+      "runs": 4,
+      "balls": 18,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 22.22,
+      "dismissal_type": "c: B Walker b: J Rietschel",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 4,
+      "did_not_bat": false,
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "player_name": "Hurley, Zac"
+    },
+    {
+      "innings_number": 3,
+      "runs": 6,
+      "balls": 18,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 33.33,
+      "dismissal_type": "lbw: J Tatterson",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 1,
+      "did_not_bat": false,
+      "player_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e",
+      "player_name": "Russell, Zak"
+    },
+    {
+      "innings_number": 3,
+      "runs": 10,
+      "balls": 23,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 43.47,
+      "dismissal_type": "c: B Walker b: J Tatterson",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 2,
+      "did_not_bat": false,
+      "player_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "player_name": "Oreilly, Toby"
+    },
+    {
+      "innings_number": 3,
+      "runs": 12,
+      "balls": 34,
+      "fours": 1,
+      "sixes": 0,
+      "strike_rate": 35.29,
+      "dismissal_type": "c: S Williams b: J Rietschel",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 3,
+      "did_not_bat": false,
+      "player_id": "a05eb23d-b1ef-42de-8c06-5e3dbb683f93",
+      "player_name": "Morrison, Thomas"
+    },
+    {
+      "innings_number": 3,
+      "runs": 21,
+      "balls": 24,
+      "fours": 2,
+      "sixes": 0,
+      "strike_rate": 87.5,
+      "dismissal_type": "c: L Channing b: J Tatterson",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 4,
+      "did_not_bat": false,
+      "player_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "player_name": "Hurley, Ben"
+    }
+  ],
+  "bowling": [
+    {
+      "innings_number": 2,
+      "overs": 17,
+      "maidens": 6,
+      "runs": 38,
+      "wickets": 5,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 2.23,
+      "player_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb",
+      "player_name": "Annear, Mason"
+    },
+    {
+      "innings_number": 2,
+      "overs": 17,
+      "maidens": 3,
+      "runs": 37,
+      "wickets": 2,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 2.17,
+      "player_id": "a05eb23d-b1ef-42de-8c06-5e3dbb683f93",
+      "player_name": "Morrison, Thomas"
+    },
+    {
+      "innings_number": 2,
+      "overs": 9.2,
+      "maidens": 2,
+      "runs": 22,
+      "wickets": 3,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 2.35,
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "player_name": "Hurley, Zac"
+    },
+    {
+      "innings_number": 2,
+      "overs": 2,
+      "maidens": 0,
+      "runs": 3,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 1,
+      "economy": 1.5,
+      "player_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "player_name": "Oreilly, Toby"
+    },
+    {
+      "innings_number": 4,
+      "overs": 5,
+      "maidens": 0,
+      "runs": 18,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 3.6,
+      "player_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb",
+      "player_name": "Annear, Mason"
+    },
+    {
+      "innings_number": 4,
+      "overs": 7,
+      "maidens": 3,
+      "runs": 13,
+      "wickets": 1,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 1.85,
+      "player_id": "a05eb23d-b1ef-42de-8c06-5e3dbb683f93",
+      "player_name": "Morrison, Thomas"
+    },
+    {
+      "innings_number": 4,
+      "overs": 1,
+      "maidens": 0,
+      "runs": 6,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 6.0,
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "player_name": "Hurley, Zac"
+    },
+    {
+      "innings_number": 4,
+      "overs": 4,
+      "maidens": 0,
+      "runs": 12,
+      "wickets": 1,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 3.0,
+      "player_id": "d92dd26e-5a94-4021-8556-4501a8e5995f",
+      "player_name": "May, Shaun"
+    },
+    {
+      "innings_number": 4,
+      "overs": 1.1,
+      "maidens": 0,
+      "runs": 5,
+      "wickets": 1,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 4.28,
+      "player_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "player_name": "Oreilly, Toby"
+    }
+  ],
+  "opp_batting": [
+    {
+      "innings_number": 2,
+      "runs": 16,
+      "balls": 36,
+      "fours": 2,
+      "sixes": 0,
+      "strike_rate": 44.44,
+      "dismissal_type": "c: Z Hurley b: T Morrison",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 1,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "J Tatterson"
+    },
+    {
+      "innings_number": 2,
+      "runs": 12,
+      "balls": 34,
+      "fours": 2,
+      "sixes": 0,
+      "strike_rate": 35.29,
+      "dismissal_type": "c: M Annear b: Z Hurley",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 2,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "E Albrecht"
+    },
+    {
+      "innings_number": 2,
+      "runs": 2,
+      "balls": 7,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 28.57,
+      "dismissal_type": "c: H Tatterson b: Z Hurley",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 3,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "J Wynd"
+    },
+    {
+      "innings_number": 2,
+      "runs": 14,
+      "balls": 28,
+      "fours": 1,
+      "sixes": 0,
+      "strike_rate": 50.0,
+      "dismissal_type": "c: Z Russell b: M Annear",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 4,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "T Tatterson"
+    },
+    {
+      "innings_number": 4,
+      "runs": 8,
+      "balls": 22,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 36.36,
+      "dismissal_type": "c: J Malone b: T Morrison",
+      "caught_behind": true,
+      "not_out": false,
+      "batting_position": 1,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "J Tatterson"
+    },
+    {
+      "innings_number": 4,
+      "runs": 21,
+      "balls": 51,
+      "fours": 3,
+      "sixes": 0,
+      "strike_rate": 41.17,
+      "dismissal_type": "c: Z Hurley b: S May",
+      "caught_behind": false,
+      "not_out": false,
+      "batting_position": 2,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "E Albrecht"
+    },
+    {
+      "innings_number": 4,
+      "runs": 19,
+      "balls": 28,
+      "fours": 1,
+      "sixes": 1,
+      "strike_rate": 67.85,
+      "dismissal_type": "c: J Malone b: T Oreilly",
+      "caught_behind": true,
+      "not_out": false,
+      "batting_position": 3,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "T Tatterson"
+    },
+    {
+      "innings_number": 4,
+      "runs": 4,
+      "balls": 4,
+      "fours": 0,
+      "sixes": 0,
+      "strike_rate": 100.0,
+      "dismissal_type": "not out",
+      "caught_behind": false,
+      "not_out": true,
+      "batting_position": 4,
+      "did_not_bat": false,
+      "player_id": null,
+      "player_name": "B Walker"
+    }
+  ],
+  "opp_bowling": [
+    {
+      "innings_number": 1,
+      "overs": 7,
+      "maidens": 4,
+      "runs": 8,
+      "wickets": 1,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 1.14,
+      "player_id": null,
+      "player_name": "B Walker"
+    },
+    {
+      "innings_number": 1,
+      "overs": 10,
+      "maidens": 5,
+      "runs": 13,
+      "wickets": 3,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 1.3,
+      "player_id": null,
+      "player_name": "J Tatterson"
+    },
+    {
+      "innings_number": 1,
+      "overs": 9.5,
+      "maidens": 3,
+      "runs": 9,
+      "wickets": 6,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 0.91,
+      "player_id": null,
+      "player_name": "J Rietschel"
+    },
+    {
+      "innings_number": 3,
+      "overs": 5.1,
+      "maidens": 0,
+      "runs": 14,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 1,
+      "economy": 2.71,
+      "player_id": null,
+      "player_name": "B Walker"
+    },
+    {
+      "innings_number": 3,
+      "overs": 17,
+      "maidens": 1,
+      "runs": 51,
+      "wickets": 4,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 3.0,
+      "player_id": null,
+      "player_name": "J Tatterson"
+    },
+    {
+      "innings_number": 3,
+      "overs": 20.5,
+      "maidens": 7,
+      "runs": 43,
+      "wickets": 6,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 2.06,
+      "player_id": null,
+      "player_name": "J Rietschel"
+    },
+    {
+      "innings_number": 3,
+      "overs": 1.5,
+      "maidens": 0,
+      "runs": 6,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 3.27,
+      "player_id": null,
+      "player_name": "D Bolton"
+    },
+    {
+      "innings_number": 3,
+      "overs": 2,
+      "maidens": 0,
+      "runs": 11,
+      "wickets": 0,
+      "wides": 0,
+      "no_balls": 0,
+      "economy": 5.5,
+      "player_id": null,
+      "player_name": "E Albrecht"
+    }
+  ],
+  "fielding": [
+    {
+      "player_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e",
+      "player_name": "Russell, Zak",
+      "catches": 2,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc",
+      "player_name": "Tatterson, Harry",
+      "catches": 1,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb",
+      "player_name": "Annear, Mason",
+      "catches": 2,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "player_name": "Demun hewage, Susantha Pradeep",
+      "catches": 1,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "player_name": "Hurley, Zac",
+      "catches": 1,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "d92dd26e-5a94-4021-8556-4501a8e5995f",
+      "player_name": "May, Shaun",
+      "catches": 1,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "player_name": "Hurley, Zac",
+      "catches": 1,
+      "run_outs": 0,
+      "stumpings": 0
+    },
+    {
+      "player_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "player_name": "Malone, Jed",
+      "catches": 2,
+      "run_outs": 0,
+      "stumpings": 0
+    }
+  ],
+  "fall_of_wickets": [
+    {
+      "wicket_number": 1,
+      "innings_number": 1,
+      "score_at_fall": 5,
+      "overs_at_fall": null,
+      "player_name": "Russell, Zak",
+      "player_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e"
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 1,
+      "score_at_fall": 5,
+      "overs_at_fall": null,
+      "player_name": "Hurley, Ben",
+      "player_id": "657a179e-438d-4b09-a8f7-a0bb5835b655"
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 1,
+      "score_at_fall": 11,
+      "overs_at_fall": null,
+      "player_name": "Morrison, Tom",
+      "player_id": "275d2c37-7699-4db3-8f30-c5a677f7e330"
+    },
+    {
+      "wicket_number": 4,
+      "innings_number": 1,
+      "score_at_fall": 12,
+      "overs_at_fall": null,
+      "player_name": "Hurley, Zac",
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714"
+    },
+    {
+      "wicket_number": 5,
+      "innings_number": 1,
+      "score_at_fall": 15,
+      "overs_at_fall": null,
+      "player_name": "Demun hewage, Susantha Pradeep",
+      "player_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7"
+    },
+    {
+      "wicket_number": 6,
+      "innings_number": 1,
+      "score_at_fall": 21,
+      "overs_at_fall": null,
+      "player_name": "Tatterson, Harry",
+      "player_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc"
+    },
+    {
+      "wicket_number": 7,
+      "innings_number": 1,
+      "score_at_fall": 30,
+      "overs_at_fall": null,
+      "player_name": "Oreilly, Toby",
+      "player_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45"
+    },
+    {
+      "wicket_number": 8,
+      "innings_number": 1,
+      "score_at_fall": 30,
+      "overs_at_fall": null,
+      "player_name": "Nicholls, Mark",
+      "player_id": "245ee83b-0c61-438e-b96a-615268b67d0c"
+    },
+    {
+      "wicket_number": 9,
+      "innings_number": 1,
+      "score_at_fall": 31,
+      "overs_at_fall": null,
+      "player_name": "Annear, Mason",
+      "player_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb"
+    },
+    {
+      "wicket_number": 10,
+      "innings_number": 1,
+      "score_at_fall": 31,
+      "overs_at_fall": null,
+      "player_name": "Hare, Joe",
+      "player_id": "ad96b762-806c-4b7c-95da-d52c0db379df"
+    },
+    {
+      "wicket_number": 1,
+      "innings_number": 2,
+      "score_at_fall": 24,
+      "overs_at_fall": null,
+      "player_name": "E Albrecht",
+      "player_id": null
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 2,
+      "score_at_fall": 32,
+      "overs_at_fall": null,
+      "player_name": "J Tatterson",
+      "player_id": null
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 2,
+      "score_at_fall": 32,
+      "overs_at_fall": null,
+      "player_name": "J Wynd",
+      "player_id": null
+    },
+    {
+      "wicket_number": 4,
+      "innings_number": 2,
+      "score_at_fall": 53,
+      "overs_at_fall": null,
+      "player_name": "T Tatterson",
+      "player_id": null
+    },
+    {
+      "wicket_number": 5,
+      "innings_number": 2,
+      "score_at_fall": 54,
+      "overs_at_fall": null,
+      "player_name": "J Rietschel",
+      "player_id": null
+    },
+    {
+      "wicket_number": 6,
+      "innings_number": 2,
+      "score_at_fall": 69,
+      "overs_at_fall": null,
+      "player_name": "D Bolton",
+      "player_id": null
+    },
+    {
+      "wicket_number": 7,
+      "innings_number": 2,
+      "score_at_fall": 72,
+      "overs_at_fall": null,
+      "player_name": "L Channing",
+      "player_id": null
+    },
+    {
+      "wicket_number": 8,
+      "innings_number": 2,
+      "score_at_fall": 74,
+      "overs_at_fall": null,
+      "player_name": "C Aurisch",
+      "player_id": null
+    },
+    {
+      "wicket_number": 9,
+      "innings_number": 2,
+      "score_at_fall": 74,
+      "overs_at_fall": null,
+      "player_name": "S Williams",
+      "player_id": null
+    },
+    {
+      "wicket_number": 10,
+      "innings_number": 2,
+      "score_at_fall": 102,
+      "overs_at_fall": null,
+      "player_name": "B Walker",
+      "player_id": null
+    },
+    {
+      "wicket_number": 1,
+      "innings_number": 3,
+      "score_at_fall": 8,
+      "overs_at_fall": null,
+      "player_name": "Russell, Zak",
+      "player_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e"
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 3,
+      "score_at_fall": 27,
+      "overs_at_fall": null,
+      "player_name": "Oreilly, Toby",
+      "player_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45"
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 3,
+      "score_at_fall": 31,
+      "overs_at_fall": null,
+      "player_name": "Morrison, Tom",
+      "player_id": "275d2c37-7699-4db3-8f30-c5a677f7e330"
+    },
+    {
+      "wicket_number": 4,
+      "innings_number": 3,
+      "score_at_fall": 53,
+      "overs_at_fall": null,
+      "player_name": "Hurley, Zac",
+      "player_id": "5c446891-7cd6-4850-ba18-e9276f9e6714"
+    },
+    {
+      "wicket_number": 5,
+      "innings_number": 3,
+      "score_at_fall": 55,
+      "overs_at_fall": null,
+      "player_name": "Hurley, Ben",
+      "player_id": "657a179e-438d-4b09-a8f7-a0bb5835b655"
+    },
+    {
+      "wicket_number": 6,
+      "innings_number": 3,
+      "score_at_fall": 55,
+      "overs_at_fall": null,
+      "player_name": "Malone, Jed",
+      "player_id": "1d176d77-6289-459f-84cc-21d3bccd71f5"
+    },
+    {
+      "wicket_number": 7,
+      "innings_number": 3,
+      "score_at_fall": 55,
+      "overs_at_fall": null,
+      "player_name": "Demun hewage, Susantha Pradeep",
+      "player_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7"
+    },
+    {
+      "wicket_number": 8,
+      "innings_number": 3,
+      "score_at_fall": 71,
+      "overs_at_fall": null,
+      "player_name": "Annear, Mason",
+      "player_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb"
+    },
+    {
+      "wicket_number": 9,
+      "innings_number": 3,
+      "score_at_fall": 120,
+      "overs_at_fall": null,
+      "player_name": "Tatterson, Harry",
+      "player_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc"
+    },
+    {
+      "wicket_number": 10,
+      "innings_number": 3,
+      "score_at_fall": 128,
+      "overs_at_fall": null,
+      "player_name": "Hare, Joe",
+      "player_id": "ad96b762-806c-4b7c-95da-d52c0db379df"
+    },
+    {
+      "wicket_number": 1,
+      "innings_number": 4,
+      "score_at_fall": 13,
+      "overs_at_fall": null,
+      "player_name": "J Tatterson",
+      "player_id": null
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 4,
+      "score_at_fall": 52,
+      "overs_at_fall": null,
+      "player_name": "T Tatterson",
+      "player_id": null
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 4,
+      "score_at_fall": 54,
+      "overs_at_fall": null,
+      "player_name": "E Albrecht",
+      "player_id": null
+    }
+  ],
+  "partnerships": [
+    {
+      "wicket_number": 1,
+      "innings_number": 1,
+      "runs": 5,
+      "balls": null,
+      "batter1_runs": 1,
+      "batter2_runs": 4,
+      "batter1_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "batter2_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e",
+      "batter1_name": "Hurley, Ben",
+      "batter2_name": "Russell, Zak"
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 1,
+      "runs": 0,
+      "balls": null,
+      "batter1_runs": 1,
+      "batter2_runs": 2,
+      "batter1_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "batter2_id": "275d2c37-7699-4db3-8f30-c5a677f7e330",
+      "batter1_name": "Hurley, Ben",
+      "batter2_name": "Morrison, Tom"
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 1,
+      "runs": 6,
+      "balls": null,
+      "batter1_runs": 2,
+      "batter2_runs": 4,
+      "batter1_id": "275d2c37-7699-4db3-8f30-c5a677f7e330",
+      "batter2_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "batter1_name": "Morrison, Tom",
+      "batter2_name": "Hurley, Zac"
+    },
+    {
+      "wicket_number": 4,
+      "innings_number": 1,
+      "runs": 1,
+      "balls": null,
+      "batter1_runs": 4,
+      "batter2_runs": 4,
+      "batter1_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "batter2_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "batter1_name": "Hurley, Zac",
+      "batter2_name": "Demun hewage, Susantha Pradeep"
+    },
+    {
+      "wicket_number": 5,
+      "innings_number": 1,
+      "runs": 3,
+      "balls": null,
+      "batter1_runs": 4,
+      "batter2_runs": 12,
+      "batter1_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "batter2_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter1_name": "Demun hewage, Susantha Pradeep",
+      "batter2_name": "Malone, Jed"
+    },
+    {
+      "wicket_number": 6,
+      "innings_number": 1,
+      "runs": 6,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 0,
+      "batter1_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter2_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc",
+      "batter1_name": "Malone, Jed",
+      "batter2_name": "Tatterson, Harry"
+    },
+    {
+      "wicket_number": 7,
+      "innings_number": 1,
+      "runs": 9,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 3,
+      "batter1_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter2_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "batter1_name": "Malone, Jed",
+      "batter2_name": "Oreilly, Toby"
+    },
+    {
+      "wicket_number": 8,
+      "innings_number": 1,
+      "runs": 0,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 0,
+      "batter1_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter2_id": "245ee83b-0c61-438e-b96a-615268b67d0c",
+      "batter1_name": "Malone, Jed",
+      "batter2_name": "Nicholls, Mark"
+    },
+    {
+      "wicket_number": 9,
+      "innings_number": 1,
+      "runs": 1,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 0,
+      "batter1_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter2_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb",
+      "batter1_name": "Malone, Jed",
+      "batter2_name": "Annear, Mason"
+    },
+    {
+      "wicket_number": 10,
+      "innings_number": 1,
+      "runs": 0,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 0,
+      "batter1_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter2_id": "ad96b762-806c-4b7c-95da-d52c0db379df",
+      "batter1_name": "Malone, Jed",
+      "batter2_name": "Hare, Joe"
+    },
+    {
+      "wicket_number": 1,
+      "innings_number": 3,
+      "runs": 8,
+      "balls": null,
+      "batter1_runs": 6,
+      "batter2_runs": 10,
+      "batter1_id": "b66f871d-f47f-4906-b8bc-055bfb0a264e",
+      "batter2_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "batter1_name": "Russell, Zak",
+      "batter2_name": "Oreilly, Toby"
+    },
+    {
+      "wicket_number": 2,
+      "innings_number": 3,
+      "runs": 19,
+      "balls": null,
+      "batter1_runs": 10,
+      "batter2_runs": 12,
+      "batter1_id": "ddcfde57-4dda-45a8-92b3-e381ca8b0b45",
+      "batter2_id": "275d2c37-7699-4db3-8f30-c5a677f7e330",
+      "batter1_name": "Oreilly, Toby",
+      "batter2_name": "Morrison, Tom"
+    },
+    {
+      "wicket_number": 3,
+      "innings_number": 3,
+      "runs": 4,
+      "balls": null,
+      "batter1_runs": 12,
+      "batter2_runs": 21,
+      "batter1_id": "275d2c37-7699-4db3-8f30-c5a677f7e330",
+      "batter2_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "batter1_name": "Morrison, Tom",
+      "batter2_name": "Hurley, Ben"
+    },
+    {
+      "wicket_number": 4,
+      "innings_number": 3,
+      "runs": 22,
+      "balls": null,
+      "batter1_runs": 21,
+      "batter2_runs": 3,
+      "batter1_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "batter2_id": "5c446891-7cd6-4850-ba18-e9276f9e6714",
+      "batter1_name": "Hurley, Ben",
+      "batter2_name": "Hurley, Zac"
+    },
+    {
+      "wicket_number": 5,
+      "innings_number": 3,
+      "runs": 2,
+      "balls": null,
+      "batter1_runs": 21,
+      "batter2_runs": 0,
+      "batter1_id": "657a179e-438d-4b09-a8f7-a0bb5835b655",
+      "batter2_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "batter1_name": "Hurley, Ben",
+      "batter2_name": "Demun hewage, Susantha Pradeep"
+    },
+    {
+      "wicket_number": 6,
+      "innings_number": 3,
+      "runs": 0,
+      "balls": null,
+      "batter1_runs": 0,
+      "batter2_runs": 0,
+      "batter1_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "batter2_id": "1d176d77-6289-459f-84cc-21d3bccd71f5",
+      "batter1_name": "Demun hewage, Susantha Pradeep",
+      "batter2_name": "Malone, Jed"
+    },
+    {
+      "wicket_number": 7,
+      "innings_number": 3,
+      "runs": 0,
+      "balls": null,
+      "batter1_runs": 0,
+      "batter2_runs": 44,
+      "batter1_id": "7c9649fd-afaf-4f83-9e51-96c278d0f6e7",
+      "batter2_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc",
+      "batter1_name": "Demun hewage, Susantha Pradeep",
+      "batter2_name": "Tatterson, Harry"
+    },
+    {
+      "wicket_number": 8,
+      "innings_number": 3,
+      "runs": 16,
+      "balls": null,
+      "batter1_runs": 44,
+      "batter2_runs": 9,
+      "batter1_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc",
+      "batter2_id": "a6f6be02-ce3e-4aea-bfb7-af42dbb0abbb",
+      "batter1_name": "Tatterson, Harry",
+      "batter2_name": "Annear, Mason"
+    },
+    {
+      "wicket_number": 9,
+      "innings_number": 3,
+      "runs": 49,
+      "balls": null,
+      "batter1_runs": 44,
+      "batter2_runs": 18,
+      "batter1_id": "f2e0fed9-26f7-43ce-8b07-2dafa1e560bc",
+      "batter2_id": "245ee83b-0c61-438e-b96a-615268b67d0c",
+      "batter1_name": "Tatterson, Harry",
+      "batter2_name": "Nicholls, Mark"
+    },
+    {
+      "wicket_number": 10,
+      "innings_number": 3,
+      "runs": 8,
+      "balls": null,
+      "batter1_runs": 18,
+      "batter2_runs": 1,
+      "batter1_id": "245ee83b-0c61-438e-b96a-615268b67d0c",
+      "batter2_id": "ad96b762-806c-4b7c-95da-d52c0db379df",
+      "batter1_name": "Nicholls, Mark",
+      "batter2_name": "Hare, Joe"
+    }
+  ]
+}

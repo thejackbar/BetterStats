@@ -6051,6 +6051,87 @@ entry and its file, and drag the order.
   something a browser can already play, and a `.mov` is refused with a sentence
   saying so rather than being stored and failing for every visitor later.
 
+## A two-day match's other two innings, and a card that would not open (v9.54.1, Aug 2026)
+
+Reported by a club trialling the platform, off one email: a 2025/26 first-grade
+grand final showed no second innings, and a game uploaded from a PDF sat in the
+Games list returning `Error: Internal Server Error`.
+
+- **THE BACKEND HAD BEEN RETURNING ALL FOUR INNINGS THE WHOLE TIME, and
+  establishing that first is what stopped this being chased as a sync bug.**
+  `GET /games/{id}/scorecard` answers with `innings_totals` keyed 1-4 and
+  batting/bowling rows against each. `MatchScorecard.jsx` took `innings[0]` and
+  `innings[1]` and dropped the rest, so each side's SECOND innings was gone.
+  Nothing needed re-syncing.
+- **THE MARGIN WAS ALSO WRONG, and only the control run surfaced it.** With
+  half the match missing, `marginText` compared innings 1 against innings 2 and
+  printed **"won by 71 runs"** for a game actually won by 7 wickets. It works
+  off each side's AGGREGATE now, so an innings victory ("by an innings and N
+  runs"), a chase (wickets in hand, read off the LAST innings) and a defence
+  (runs) all fall out of the same function.
+- **`splitSides` FILES AN INNINGS UNDER WHOEVER BATTED, NOT BY ODD/EVEN
+  POSITION.** A follow-on has one side batting twice in a row, so alternating
+  is wrong exactly when it matters; the batting team's own name decides it, and
+  alternating is only the fallback for an innings with no name recorded.
+- **THE WON BADGE IS DECIDED ONCE PER MATCH, from the same split**, so a team's
+  two innings can never disagree about it — the trap `winnerSide`'s own comment
+  already documents for the two-card case, which now has four cards to keep
+  honest.
+- **Two columns means one column per team**, since innings 1 and 3 stack in the
+  first and 2 and 4 in the second. Falls out of the existing `lg:grid-cols-2`
+  rather than being arranged.
+- **Fall of wickets and partnerships needed nothing** — both already grouped on
+  `innings_number`, which the control run confirms (they pass against the
+  broken code).
+
+### `manual_batting_innings` has no `caught_behind`, and the scorecard read it anyway
+
+- **EVERY manually uploaded card 500'd, on every club, from the day photo
+  upload shipped.** `get_scorecard` shares one row-building path between the
+  synced and manual tables (`BI = ManualBattingInnings if is_manual else
+  BattingInnings`) and read `bi.caught_behind` unconditionally. That column is
+  SYNCED-ONLY (migration 075); the manual table never had it, so the row build
+  raised `AttributeError` before the response was assembled.
+- **NULL, not False, and not a new column.** The AI scorecard reader
+  transcribes a dismissal exactly as the card writes it and never judges
+  whether the catcher was the keeper, so there is nothing to store. NULL is the
+  honest answer and every reader already treats it as a plain catch — the same
+  call migration 075's own manual branch made for the effective view.
+- **THIS ONLY BECAME REACHABLE IN v8.76.1's WAKE.** An uploaded card was
+  invisible on the public Games page until the grade-less season-filter fix
+  listed it; the moment it could be clicked, it 500'd. The two are one story,
+  a year apart.
+- **The blast radius was confirmed, not assumed**: probing all 332 of the
+  reporting club's pre-2010 games returned exactly one non-200, the reported
+  game — so the club has one manual card and it is the one that failed.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_manual_scorecard.py`, 24 checks through the
+  SHIPPED route body over a manual game seeded the way the upload commit
+  writes one: the card opening at all, both teams and their totals, the
+  opposition half read out of `extracted_payload` and never linked to one of
+  our players, an untracked boundary count still NULL, and the session usable
+  afterwards) **with a control run**: with the fix stashed the suite dies at
+  check 1 on exactly the reported `AttributeError`.
+- **A CHECK THAT MEASURES THE HARNESS IS NOT A CHECK.** The untracked-boundary
+  check failed on the first cut because setting `fours=None` on the model does
+  NOT store NULL — SQLAlchemy reads an explicit None as "unset" and lets the
+  `server_default="0"` apply. The seed forces it in SQL now.
+- **Driven in Chromium**
+  (`frontend/verification/verify_scorecard_innings_browser.mjs`, 28 checks
+  against the REPORTED MATCH's own live payload: all four innings drawn and
+  labelled in batting order, each carrying its own score, the winner marked on
+  both its cards and neither of the other side's, the header's "31 & 128", the
+  7-wicket margin, and an ordinary one-day game reading exactly as it did)
+  **with a control run**: 12 fail against the previous commit, including the
+  reported "got 2" innings and the wrong margin.
+- **`font-display` alone matches the CREST as well as the team name** —
+  `TeamBadge`'s initials fall back to the same face, so the first cut of the
+  probe read "CS" where the card says "Collegians…". Address the name by its
+  own `.truncate`.
+- **Noticed, NOT fixed**: `_manual_opp_from_payload` sets no `logo_url` on a
+  manual innings, so an uploaded card draws initials badges rather than crests.
+  Pre-existing, and a manual upload has no club GUID to resolve one from.
+
 ## Writing Voice — always run prose through the humanizer
 
 Any user-facing prose you write or edit (marketing copy, changelog entries, UI

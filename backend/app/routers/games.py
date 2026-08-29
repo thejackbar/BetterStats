@@ -557,7 +557,15 @@ async def get_scorecard(
             "sixes": bi.sixes,
             "strike_rate": float(bi.strike_rate) if bi.strike_rate is not None else None,
             "dismissal_type": bi.dismissal_type,
-            "caught_behind": bi.caught_behind,
+            # `caught_behind` is a SYNCED-only column (migration 075) —
+            # `manual_batting_innings` has no equivalent, because the AI
+            # scorecard reader transcribes a dismissal exactly as the card
+            # writes it and never judges whether the catcher was the keeper.
+            # Reading it off a manual row raised AttributeError and took the
+            # whole endpoint down with a 500, so an uploaded card could be
+            # listed on the Games page and never opened. NULL is the honest
+            # answer and every reader already treats it as a plain catch.
+            "caught_behind": None if is_manual else bi.caught_behind,
             "not_out": bi.not_out,
             "batting_position": bi.batting_position,
             "did_not_bat": bool(bi.did_not_bat),
