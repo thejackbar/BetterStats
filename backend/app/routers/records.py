@@ -11,6 +11,7 @@ from app.routers.auth import get_optional_user, user_can_view_org_private
 from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
+from app.services import club_records
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
 
@@ -1595,3 +1596,87 @@ async def get_records_milestones(
         "achieved": player_visibility.drop_hidden(achieved, hidden),
         "scope": "grade" if grade_name else "career",
     }
+
+
+@router.get("/{org_id}/club")
+async def get_club_records(
+    org_id: str,
+    season_id: str | None = Query(None),
+    grade_id: str | None = Query(None),
+    grade_name: str | None = Query(None),
+    finals_only: bool = Query(False),
+    categories: str | None = Query(
+        None,
+        description=(
+            "Comma-separated grade categories to count — senior, junior, womens, "
+            "masters, mixed, or 'all'. Omitted uses the club's own default, which "
+            "leaves junior out. Ignored when an explicit grade is picked."
+        ),
+    ),
+    formats: str | None = Query(
+        None,
+        description=(
+            "Comma-separated match formats to count — two_day, one_day, t20, or "
+            "'all'. Matched per FIXTURE against each game's own match_format."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+):
+    """The CLUB's own records — team totals, margins, streaks, seasons.
+
+    Deliberately its own endpoint rather than another key on `get_records`.
+    That handler runs ~40 per-player rankings; this one needs a single
+    per-game pull and nothing else, and a reader who opens the Club tab
+    shouldn't pay for every batting and bowling board to be computed first.
+
+    No `player_visibility` pass and no `viewer`: nothing here names a player,
+    so there is no hidden player to prune. `gender` and `captain_only` are
+    absent for the same reason — both are attributes of a person, and a team
+    total has neither.
+    """
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    if grade_id or grade_name:
+        # An explicitly picked grade beats the CATEGORY default and keeps the
+        # FORMAT half — the same rule get_records applies above.
+        scope = scope.formats_only()
+    scope_active = bool(scope is not None and scope.active)
+    scope_clause = scope.clause("g.grade_id") if scope_active else ""
+
+    from app.services.season_aliases import resolve_season_filter
+    season_ids = await resolve_season_filter(db, org_id, season_id)
+
+    params: dict = {}
+    if scope_active:
+        scope.bind(params)
+
+    # The merge-aware grade match is the SAME fragment get_records builds, so
+    # a renamed or merged grade covers the same games on both surfaces.
+    grade_name_clause = ""
+    if grade_name:
+        grade_name_clause = (
+            " AND (COALESCE(gr.display_name_override, gr.name) = :grade_name"
+            " OR EXISTS (SELECT 1 FROM grade_merge_logs gml"
+            " WHERE gml.org_id = CAST(:org AS UUID)"
+            " AND gml.alias_name = gr.name AND gml.undone_at IS NULL"
+            " AND (gml.canonical_name = :grade_name"
+            " OR EXISTS (SELECT 1 FROM grades gr2 JOIN seasons s2 ON s2.id = gr2.season_id"
+            " WHERE gr2.name = gml.canonical_name AND s2.organisation_id = CAST(:org AS UUID)"
+            " AND gr2.display_name_override = :grade_name))))"
+        )
+        params["grade_name"] = grade_name
+
+    payload = await club_records.club_records(
+        db, org_id,
+        season_ids=season_ids,
+        grade_id=grade_id,
+        grade_name_clause=grade_name_clause,
+        finals_only=finals_only,
+        scope_clause=scope_clause,
+        extra_params=params,
+    )
+    payload["grade_scope"] = {
+        **scope.as_meta(),
+        "available": await grade_scope.org_available_categories(db, org_id),
+        "available_formats": await grade_scope.org_available_formats(db, org_id),
+    }
+    return payload

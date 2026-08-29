@@ -2695,6 +2695,19 @@ export const api = {
     if (formats) params.set('formats', formats)
     return request(`/records/${orgId}?${params}`)
   },
+  // The CLUB's own record book — team totals, margins, streaks, seasons.
+  // No `gender` or `captainOnly`: both are attributes of a person, and a team
+  // total has neither.
+  getClubRecords: (orgId, { seasonId, gradeId, gradeName, finalsOnly, categories, formats } = {}) => {
+    const params = new URLSearchParams()
+    if (seasonId) params.set('season_id', seasonId)
+    if (gradeId) params.set('grade_id', gradeId)
+    if (gradeName) params.set('grade_name', gradeName)
+    if (finalsOnly) params.set('finals_only', 'true')
+    if (categories) params.set('categories', categories)
+    if (formats) params.set('formats', formats)
+    return request(`/records/${orgId}/club?${params}`)
+  },
   getRecordsGrades: (orgId, seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)
