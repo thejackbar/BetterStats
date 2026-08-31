@@ -9566,6 +9566,73 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## A club's trial, as an audience and as a number in the email (v9.55.0, Aug 2026)
+
+Asked for on BetterComms → Segments: reach the contacts whose club is in a trial
+finishing within N days, and the ones whose club's trial has already run out, and
+be able to splice the day count into the template.
+
+- **DIRECTORY SCOPE ONLY, and that is not a judgement call.** In the club scope
+  every contact belongs to the ONE sending club, so "is the club in a trial" is
+  all-or-nothing and answers nothing; a prospect's trial state is also
+  BetterCricket's own sales data. `DIR_TRIAL_FIELDS` sits with the other
+  outreach fields and the suite asserts the club field set carries none of them,
+  per the hard scope rule in `PROJECT_RULES.md`.
+- **`services/club_trial_window.py` IS THE ONE DEFINITION, and that is the whole
+  point of the feature.** The segment picks the audience and the merge variable
+  writes the number into the body, so an email saying "9 days" inside an
+  audience built as "at most 7 days" would be the failure. The segment SQL and
+  the merge vars read the same subquery and the same day arithmetic; the suite
+  asserts the printed figure is EXACTLY the segment boundary (in at `<= n`, out
+  at `<= n-1`) rather than merely close.
+- **AN EXPIRED TRIAL'S ROW STAYS `status='trial'` WITH A PAST END** — that is
+  what `module_subscriptions.sweep_expired_trials` deliberately leaves behind, so
+  a past `trial_ends_at` on a `trial` row IS the expired state. A converted club
+  has no `trial` rows and correctly reads as neither.
+- **THE WINDOW IS `MAX(trial_ends_at)` ACROSS THE CLUB'S MODULES.** A club is
+  still trialing while any one module is live, and has expired only once every
+  one has run out. Verified both ways: a club with one finished and one live
+  module reads as in a trial off the live one's countdown.
+- **`ends_at` CANNOT ANSWER "HAS A TRIAL", which is why the subquery carries a
+  `has_trial` marker.** It is NULL both for a club with no trial and for one
+  whose only trial has no end date — opposite answers. The first cut used it as
+  the test and an open-ended trial fell out of every option including "no trial
+  on record"; the verification caught it.
+- **AN OPEN-ENDED TRIAL ANSWERS NEITHER QUESTION.** It reads as running, never
+  as expired, and carries no day count — telling a club whose trial is still
+  going that it has finished is the one thing this must not do. Silence where
+  the data cannot answer, the same discipline the selection rules keep.
+- **DAYS-SINCE HAS ITS OWN FLOOR, NEVER THE NEGATION OF DAYS-LEFT.** Both count
+  whole days elapsed, so each floors towards its own end: a trial that finished
+  3.2 days ago has been over for 3 whole days, and negating `days_left` (which
+  floors to -4) reports 4. Caught by the suite, not by reading the code. Note
+  `crm.trial_days_remaining_by_club` still negates its signed figure for the CRM
+  card's expired badge and carries that off-by-one; it was left alone rather
+  than widened into this change.
+- **A FIGURE THAT DOES NOT APPLY RENDERS BLANK, NEVER `0`.** "0 days left" to a
+  club that is not on a trial is a lie. Every directory club gets an entry in
+  the batched lookup — including one never onboarded — so the token resolves to
+  empty rather than going out as a literal `{{trial_days_left}}`.
+- **THE TRIAL FIGURES ARE NOT IN `EDITABLE_MERGE_KEYS`.** They are computed
+  facts, and a hand-typed override would print a number the audience disagrees
+  with. `_apply_overrides` is the one place that rule lives now, and
+  `_contact_vars` is the one per-recipient builder the preview, the test send
+  and the real send all call — the send's only difference is fetching the whole
+  batch's windows in one query, which the suite asserts agrees contact for
+  contact with the one-at-a-time path.
+- **`{{trial_end_date}}` rides along free from the same lookup** because a
+  countdown written at send time is wrong by the next morning, and an email is
+  routinely read days later.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_club_trial_segments.py`, 61 checks through the
+  shipped segment engine and route bodies: both scenarios, every boundary, a
+  multi-module club either side of the line, the open-ended cases, a converted
+  club, an un-onboarded prospect, the send gate still excluding an unsubscribed
+  contact on a live trial, another club's contacts never reached, the SQL and
+  Python day counts agreeing row by row, and the figures rendered into a real
+  email) **with a control run**: with the segment engine reverted every trial
+  rule is silently dropped and the audience comes back as all 12 contacts.
+
 ## Comms has no sync step: it reads the live Directory (v9.12.0, Aug 2026)
 
 Reported from a club with 1,576 players: the Directory showed 1,578 people,

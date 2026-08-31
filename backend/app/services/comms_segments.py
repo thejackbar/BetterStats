@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from sqlalchemy import select, func, exists, or_, text, cast, String, Integer, column, false
+from sqlalchemy import select, func, exists, and_, or_, text, cast, String, Integer, column, false
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +28,7 @@ from app.models.db import (
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
 )
 from app.services.club_directory import _RESOLVED_VISITS
+from app.services import club_trial_window
 
 # Field groups decide which joins a definition needs.
 CONTACT_FIELDS = {"tag", "source"}
@@ -56,17 +57,25 @@ DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                    "is_trialing", "requested_trial", "had_demo", "visited_page"}
+# Where the club's own trial actually stands, read off its subscription rows via
+# services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
+# {{trial_days_since_expiry}} merge variables resolve from, so the number an
+# email prints is the number the audience was picked on. `trial_status` answers
+# in-a-trial / expired outright; the two numeric fields narrow it ("ends within
+# 7 days", "expired in the last month"). A club with no tracked trial has no
+# number, so it can never be swept into either by a bound alone.
+DIR_TRIAL_FIELDS = {"trial_status", "trial_days_left", "trial_days_since_expiry"}
 # Numeric club-level metrics: page views / distinct visitors (from the same
 # UTM-resolved usage_events attribution the Club Directory + engagement score
 # use) and the cached Twenty engagement score. gte/lte only (no strict < / >
 # — mirrors the Club Directory's own engagement-score filter).
 DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
-DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
+DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_trialing", "requested_trial", "had_demo", "visited_page"} | DIR_METRIC_FIELDS
+                  "is_trialing", "requested_trial", "had_demo", "visited_page"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -220,14 +229,81 @@ def _visit_stats_subquery():
     ).subquery()
 
 
-def _directory_condition(rule: dict, cust, visits=None):
+def _trial_condition(rule: dict, trials):
+    """A WHERE clause for one club-trial field, off the joined trial window.
+
+    ``trials`` is the outer-joined per-org window (see
+    club_trial_window.trial_window_subquery), so a contact whose club has no
+    tracked trial reads NULL in every column here.
+
+    The day count is FLOORed exactly as ``club_trial_window.days_left`` floors
+    it in Python, so "at most 7 days left" matches precisely the clubs whose
+    email will print ``{{trial_days_left}}`` as 7 or fewer.
+
+    An OPEN-ENDED trial (a trial row with no end date) is excluded from both
+    numeric answers and never reads as expired — it has no countdown, and
+    telling a club whose trial is still running that it has finished is the one
+    thing this must not do.
+    """
+    field = (rule or {}).get("field")
+    val = (rule or {}).get("value")
+    if trials is None:
+        return None
+
+    ends = trials.c.ends_at
+    open_ended = func.coalesce(trials.c.open_ended, false())
+    # Non-NULL for every club the subquery emitted. ``ends_at`` cannot stand in
+    # for this: it is NULL both for a club with no trial and for one whose only
+    # trial has no end date, and those are opposite answers.
+    has_trial = trials.c.has_trial.isnot(None)
+    days = club_trial_window.days_left_sql(ends)
+    # A live, dated trial: an end date that has not passed, with no open-ended
+    # row alongside it to muddy the countdown.
+    live = and_(has_trial, ends.isnot(None), ~open_ended, days >= 0)
+    # Expired: every trial row the club holds has run out.
+    gone = and_(has_trial, ends.isnot(None), ~open_ended, days < 0)
+
+    if field == "trial_status":
+        v = str(val or "").strip()
+        if v == "in_trial":
+            # Open-ended counts as in a trial; it just has no countdown.
+            return and_(has_trial, or_(open_ended, days >= 0))
+        if v == "expired":
+            return gone
+        if v == "none":
+            # No trial row at all (never onboarded, or converted / removed).
+            return ~has_trial
+        return None
+
+    n = _num(val)
+    if n is None:
+        return None
+    if field == "trial_days_left":
+        # "at most N" is the scenario this exists for: the trial finishes within
+        # N days. "at least N" is the mirror, for holding fire on a club that has
+        # only just started.
+        cmp = days <= n if (rule or {}).get("op") == "lte" else days >= n
+        return and_(live, cmp)
+    if field == "trial_days_since_expiry":
+        # Its own FLOOR, never the negation of days-left — see
+        # club_trial_window.days_since for why that is off by one.
+        since = club_trial_window.days_since_sql(ends)
+        cmp = since <= n if (rule or {}).get("op") == "lte" else since >= n
+        return and_(gone, cmp)
+    return None
+
+
+def _directory_condition(rule: dict, cust, visits=None, trials=None):
     """A WHERE clause for one directory (outreach) field. ``cust`` is the aliased
     customer Organisation (joined via the marketing club's existing_org_id), only
     set when a customer_status rule is present. ``visits`` is the joined
     per-club page-view/visitor subquery, only set when a page_views /
-    distinct_visitors rule is present."""
+    distinct_visitors rule is present. ``trials`` is the joined per-org trial
+    window, only set when a trial_* rule is present."""
     field = (rule or {}).get("field")
     val = (rule or {}).get("value")
+    if field in DIR_TRIAL_FIELDS:
+        return _trial_condition(rule, trials)
 
     if field == "exported":
         return CommsContact.marketing_club_id.isnot(None) if _yes(val) else CommsContact.marketing_club_id.is_(None)
@@ -383,6 +459,14 @@ async def build_query(session: AsyncSession, club, definition: dict):
     if any(r["field"] in _DIR_VISIT_FIELDS for r in rules):
         visits = _visit_stats_subquery()
         q = q.outerjoin(visits, visits.c.cid == cast(MarketingClub.id, String))
+    # The club's trial window, keyed on the org the prospect was onboarded into.
+    # OUTER joined: a directory club that never became an org still has to reach
+    # the WHERE, so "no tracked trial" can be answered rather than silently
+    # dropping the contact.
+    trials = None
+    if any(r["field"] in DIR_TRIAL_FIELDS for r in rules):
+        trials = club_trial_window.trial_window_subquery()
+        q = q.outerjoin(trials, trials.c.org_id == MarketingClub.existing_org_id)
 
     # Who owes, resolved once against the club's newest season.
     owing_ids = None
@@ -412,7 +496,7 @@ async def build_query(session: AsyncSession, club, definition: dict):
 
     for rule in rules:
         if rule["field"] in DIRECTORY_FIELDS:
-            cond = _directory_condition(rule, cust, visits)
+            cond = _directory_condition(rule, cust, visits, trials)
         else:
             cond = _condition(rule, stats, club.id, owing_ids)
         if cond is not None:

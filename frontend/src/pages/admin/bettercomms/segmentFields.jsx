@@ -89,6 +89,17 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
   },
+  // Where the club's own trial stands, read off its subscription rows. The same
+  // definition resolves {{trial_days_left}} / {{trial_days_since_expiry}} /
+  // {{trial_end_date}}, so the number the email prints is the number the
+  // audience was picked on. A club with no tracked trial has no day count and
+  // so can never be caught by a bound on its own.
+  trial_status: {
+    label: 'Club trial', input: 'select', ops: IS_OP,
+    options: [['in_trial', 'is running now'], ['expired', 'has expired'], ['none', 'no trial on record']],
+  },
+  trial_days_left: { label: 'Days left in trial', input: 'number', ops: STAT_OPS },
+  trial_days_since_expiry: { label: 'Days since trial expired', input: 'number', ops: STAT_OPS },
   directory_status: {
     label: 'Directory status', input: 'select', ops: IS_OP,
     options: [['new', 'new'], ['enriched', 'enriched'], ['contacted', 'contacted'], ['onboarded', 'onboarded'], ['suppressed', 'suppressed']],

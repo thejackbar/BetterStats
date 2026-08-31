@@ -51,6 +51,7 @@ from app.routers.auth import get_current_user, get_current_club, require_super_a
 from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
+from app.services import club_trial_window
 from app.services import comms_lists
 from app.services import directory
 from app.services import comms_limits
@@ -501,6 +502,9 @@ MERGE_VARIABLES = [
     {"name": "utm_code", "desc": "The recipient club's unique UTM code, for link tracking", "marketing_only": True},
     {"name": "state", "desc": "The recipient club's state", "marketing_only": True},
     {"name": "website", "desc": "The recipient club's website", "marketing_only": True},
+    {"name": "trial_days_left", "desc": "Days until the recipient club's trial ends (blank if it isn't on a trial)", "marketing_only": True},
+    {"name": "trial_days_since_expiry", "desc": "Days since the recipient club's trial expired (blank if it hasn't)", "marketing_only": True},
+    {"name": "trial_end_date", "desc": "The date the recipient club's trial ends or ended, e.g. 14 September 2026", "marketing_only": True},
     {"name": "utm_source", "desc": "Source from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_medium", "desc": "Medium from this email's UTM section (place inside a link)", "marketing_only": True},
     {"name": "utm_campaign", "desc": "Campaign from this email's UTM section (place inside a link)", "marketing_only": True},
@@ -512,15 +516,46 @@ MERGE_VARIABLES = [
 EDITABLE_MERGE_KEYS = ("first_name", "club", "association", "utm_code", "state", "website")
 
 
-def _send_vars(c: "CommsContact", mc: "Optional[MarketingClub]") -> dict:
-    """The per-contact extra merge vars used at send time: the linked directory
-    club's vars plus the contact's own merge_vars overrides. Mirrors the build in
-    _run_send so a preview matches the real send exactly."""
-    merged = dict(_marketing_vars(mc))
-    for k, v in (c.merge_vars or {}).items():
+def _apply_overrides(base: dict, overrides: "Optional[dict]") -> dict:
+    """Lay a contact's own merge_vars on top of the club-derived defaults. The ONE
+    place that rule lives, so the preview, the test send and the real send can't
+    drift apart. Only EDITABLE_MERGE_KEYS may be overridden — the trial figures are
+    computed facts about the club's subscription, and a hand-typed "days left"
+    would print a number the segment behind the audience disagrees with."""
+    merged = dict(base)
+    for k, v in (overrides or {}).items():
         if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
             merged[k] = v
     return merged
+
+
+async def _trial_vars(db: AsyncSession, mc: "Optional[MarketingClub]") -> dict:
+    """The recipient club's trial countdown / expiry figures, or nothing at all
+    for a contact with no directory club (a club emailing its own members has no
+    prospect trial to report, so the variables simply don't apply there)."""
+    if mc is None:
+        return {}
+    return await club_trial_window.vars_for_marketing_club(db, mc)
+
+
+def _contact_vars(mc: "Optional[MarketingClub]", overrides: "Optional[dict]",
+                  trial_vars: "Optional[dict]" = None) -> dict:
+    """The per-recipient extra merge vars: the linked directory club's fields and
+    its trial window, with the contact's own overrides laid on top.
+
+    THE one definition — the preview, the test send and the real send all call it,
+    so a preview cannot show a different email from the one that goes out. The
+    only thing the send does differently is fetch the trial figures for the whole
+    batch at once instead of one at a time.
+    """
+    return _apply_overrides({**_marketing_vars(mc), **(trial_vars or {})}, overrides)
+
+
+async def _send_vars(db: AsyncSession, c: "CommsContact",
+                     mc: "Optional[MarketingClub]") -> dict:
+    """:func:`_contact_vars` for a single contact, fetching its club's trial
+    window itself. Used by the preview and the test send."""
+    return _contact_vars(mc, c.merge_vars, await _trial_vars(db, mc))
 
 
 async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict]:
@@ -535,9 +570,13 @@ async def _sample_dir_vars(db: AsyncSession, org: Organisation) -> Optional[dict
         select(MarketingClub).where(MarketingClub.detail_fetched_at.isnot(None))
         .order_by(MarketingClub.name).limit(1))).scalars().first()
     if mc:
-        return _marketing_vars(mc)
+        return {**_marketing_vars(mc), **await _trial_vars(db, mc)}
+    # A made-up club has no real trial, and the sample must not imply one — the
+    # figures render blank here exactly as they will for a recipient not on a
+    # trial, so the preview shows the honest worst case rather than a number.
     return {"club": "Sample Cricket Club", "association": "Sample Association",
-            "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com"}
+            "utm_code": "sample-cricket-club", "state": "WA", "website": "https://example.com",
+            **club_trial_window.BLANK_TRIAL_VARS}
 
 
 def _context_var_keys(org: Organisation) -> list:
@@ -546,12 +585,14 @@ def _context_var_keys(org: Organisation) -> list:
     outreach, so a normal club just sees the universal ones."""
     keys = ["first_name", "name", "email", "club"]
     if org_is_outreach(org):
-        keys += ["association", "utm_code", "state", "website"]
+        keys += ["association", "utm_code", "state", "website",
+                 "trial_days_left", "trial_days_since_expiry", "trial_end_date"]
     keys.append("unsubscribe_url")
     return keys
 
 
-def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisation) -> dict:
+def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisation,
+                   trial_vars: Optional[dict] = None) -> dict:
     """Every merge variable resolved for one contact: a per-contact override wins,
     then the linked directory club, then a sensible default. Used by both the
     contact-detail view and the actual send, so they always agree — regardless of
@@ -578,6 +619,9 @@ def _resolved_vars(c: CommsContact, mc: Optional[MarketingClub], org: Organisati
         "utm_code": pick("utm_code", mv.get("utm_code", "")),
         "state": pick("state", mv.get("state", "")),
         "website": pick("website", mv.get("website", "")),
+        # Computed from the club's subscription rows, never overridable per
+        # contact — see _apply_overrides.
+        **(trial_vars if mc is not None else {}),
     }
 
 
@@ -1211,7 +1255,7 @@ async def preview_campaign(
     subject, html, _ = _render_parts(
         club, subject=c.subject or "", body_html=c.body_html or "", utm=c.utm or {},
         email=ct.email, name=ct.name, unsub_url=unsub, footer=footer,
-        extra_vars=_send_vars(ct, mc))
+        extra_vars=await _send_vars(db, ct, mc))
     return {"total": total, "index": idx, "html": html, "subject": subject,
             "contact": {"name": ct.name, "email": ct.email}}
 
@@ -1498,7 +1542,7 @@ async def send_test(
         if audience:
             first = audience[0]
             mc = await db.get(MarketingClub, first.marketing_club_id) if first.marketing_club_id else None
-            extra = _send_vars(first, mc)
+            extra = await _send_vars(db, first, mc)
         if not extra:
             extra = await _sample_dir_vars(db, club)
     msg = _render(club, c, email=email, name=None, unsub_url=unsub, footer=footer, extra_vars=extra)
@@ -1633,15 +1677,22 @@ async def _run_send(campaign_id: str, org_id: str) -> None:
             if cids:
                 # Outer join so a contact with no directory club still gets its own
                 # per-contact merge_vars overrides applied.
-                for cid, ov, mc in (await s.execute(
+                rows_v = (await s.execute(
                     select(CommsContact.id, CommsContact.merge_vars, MarketingClub)
                     .outerjoin(MarketingClub, MarketingClub.id == CommsContact.marketing_club_id)
                     .where(CommsContact.id.in_(cids))
-                )).all():
-                    merged = dict(_marketing_vars(mc))
-                    for k, v in (ov or {}).items():
-                        if k in EDITABLE_MERGE_KEYS and v is not None and str(v).strip() != "":
-                            merged[k] = v
+                )).all()
+                # One batched read of every recipient club's trial window, rather
+                # than a query per recipient. A directory club with no trial (or
+                # never onboarded) still gets an entry, so {{trial_days_left}}
+                # renders blank instead of going out as a raw token.
+                trial_by_club = await club_trial_window.vars_by_marketing_club(
+                    s, [mc for _, _, mc in rows_v if mc is not None])
+                for cid, ov, mc in rows_v:
+                    merged = _contact_vars(
+                        mc, ov,
+                        trial_by_club.get(mc.id, club_trial_window.BLANK_TRIAL_VARS)
+                        if mc is not None else None)
                     if merged:
                         mc_vars[cid] = merged
             # Snapshot to plain data so the network phase touches no ORM objects.
@@ -2225,7 +2276,7 @@ async def get_contact(
         raise HTTPException(status_code=404, detail="Contact not found")
     mc = await db.get(MarketingClub, c.marketing_club_id) if c.marketing_club_id else None
     mvars = _marketing_vars(mc)
-    resolved = _resolved_vars(c, mc, club)
+    resolved = _resolved_vars(c, mc, club, await _trial_vars(db, mc))
     keys = _context_var_keys(club)
     # The full org-context set, resolved (possibly blank) for THIS contact — shown
     # the same way no matter how the contact was added.
