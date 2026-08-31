@@ -2355,6 +2355,22 @@ class SegmentIn(BaseModel):
     definition: dict = {}
 
 
+def _reject_foreign_rules(club: Organisation, definition: dict) -> None:
+    """Refuse to STORE a segment built on the directory fields outside the
+    BetterCricket outreach org. The engine already fails such a segment closed on
+    read, but a write is where a person is present to be told why — and it stops a
+    segment that can only ever resolve to nobody from being saved and sent."""
+    rules = (definition or {}).get("rules") or []
+    if comms_segments.directory_rules_allowed(club):
+        return
+    bad = sorted({str(r.get("field")) for r in rules
+                  if isinstance(r, dict) and r.get("field") in comms_segments.DIRECTORY_FIELDS})
+    if bad:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Not available for this club: {', '.join(bad)}")
+
+
 @router.post("/segments")
 async def create_segment(
     data: SegmentIn,
@@ -2365,6 +2381,7 @@ async def create_segment(
     name = (data.name or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="A segment name is required")
+    _reject_foreign_rules(club, data.definition or {})
     seg = CommsSegment(organisation_id=club.id, name=name, definition=data.definition or {})
     db.add(seg)
     try:
@@ -2396,6 +2413,7 @@ async def update_segment(
     db: AsyncSession = Depends(get_db),
 ):
     seg = await _segment_or_404(db, club, segment_id)
+    _reject_foreign_rules(club, data.definition or {})
     name = (data.name or "").strip()
     if name:
         seg.name = name

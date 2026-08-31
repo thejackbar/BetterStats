@@ -385,6 +385,62 @@ async def main() -> int:
         check("but cannot rewrite the trial figure the audience was picked on",
               merged["trial_days_left"] == "5", merged)
 
+        print("\n── Super-admin only, enforced on the server ───────────────────")
+        # A club officer's own Segments screen cannot build these rules, so a
+        # request carrying one is hand-made. It must FAIL CLOSED — dropping the
+        # rule would widen the audience to the club's whole list.
+        club_org = orgs["ends-in-5"]
+        db.add(CommsContact(id=uuid.uuid4(), organisation_id=club_org.id,
+                            email="member2@example.com", source="player"))
+        await db.commit()
+        own = await emails_for(db, club_org, [])
+        check("the club has an audience of its own to widen to", len(own) == 2, sorted(own))
+        for field, op, value in [("trial_days_left", "lte", 7),
+                                 ("trial_status", "eq", "expired"),
+                                 ("trial_days_since_expiry", "gte", 0)]:
+            got = await emails_for(db, club_org, [{"field": field, "op": op, "value": value}])
+            check(f"a club naming {field} reaches nobody, not everybody", got == set(), sorted(got))
+        got = await emails_for(db, club_org, [
+            {"field": "source", "op": "eq", "value": "player"},
+            {"field": "trial_status", "op": "eq", "value": "in_trial"},
+        ])
+        check("one directory rule fails the whole segment closed", got == set(), sorted(got))
+        n = await comms_segments.count(db, club_org, {"match": "all", "rules": [
+            {"field": "trial_days_left", "op": "lte", "value": 7}]})
+        check("the club's live count says nobody too", n == 0, n)
+        got = await emails_for(db, club_org, [{"field": "source", "op": "eq", "value": "player"}])
+        check("...while the club's OWN rules keep working untouched",
+              got == {"member@example.com", "member2@example.com"}, sorted(got))
+        # The trial fields would already resolve to nobody for a club, because
+        # their MarketingClub join is empty — so those checks alone cannot tell a
+        # deliberate guard from an accident. `emailed` has no such join and DOES
+        # evaluate in a club context, so it is the one that proves the guard is
+        # load-bearing rather than redundant.
+        got = await emails_for(db, club_org, [{"field": "emailed", "op": "eq", "value": "no"}])
+        check("a directory field that WOULD have evaluated for a club is stopped too",
+              got == set(), sorted(got))
+
+        check("only the outreach org may build on the directory fields",
+              comms_segments.directory_rules_allowed(outreach)
+              and not comms_segments.directory_rules_allowed(club_org))
+
+        from app.routers.comms import SegmentIn, create_segment, _reject_foreign_rules
+        from fastapi import HTTPException as _HTTPException
+        trial_def = {"match": "all", "rules": [{"field": "trial_days_left", "op": "lte", "value": 7}]}
+        try:
+            await create_segment(SegmentIn(name="Ending soon", definition=trial_def),
+                                 None, club_org, db)
+            check("a club cannot SAVE a segment built on a trial rule", False, "it saved")
+        except _HTTPException as e:
+            check("a club cannot SAVE a segment built on a trial rule",
+                  e.status_code == 422 and "trial_days_left" in str(e.detail), e.detail)
+        saved = await create_segment(SegmentIn(name="Ending soon", definition=trial_def),
+                                     None, outreach, db)
+        check("...and the outreach org still can", saved["definition"] == trial_def, saved)
+        _reject_foreign_rules(club_org, {"match": "all", "rules": [
+            {"field": "source", "op": "eq", "value": "player"}]})
+        check("a club's own rules are never refused", True)
+
         print("\n── The club scope never sees any of this ──────────────────────")
         # The hard scope rule (PROJECT_RULES.md): the directory field set must
         # never be reachable from a club build, so the trial fields belong to it

@@ -9623,15 +9623,43 @@ be able to splice the day count into the template.
 - **`{{trial_end_date}}` rides along free from the same lookup** because a
   countdown written at send time is wrong by the next morning, and an email is
   routinely read days later.
+- **SUPER-ADMIN ONLY, AND NOW ENFORCED ON THE SERVER RATHER THAN JUST IN THE
+  SCREEN.** The frontend gate was already sound (`SegmentsRoute.jsx` mounts
+  `InternalSegments`, the only importer of `DIRECTORY_FIELD_DEFS`, on
+  `can_switch_clubs && is_marketing_org`) — but the ENGINE refused nothing: a
+  hand-made request from a club admin returned nothing only because the
+  `MarketingClub` join happens to be empty for a club's own contacts.
+  `directory_rules_allowed` is that boundary named, reading the same
+  `org_is_outreach` that `/auth/me`'s `is_marketing_org` does, so the screen and
+  the engine cannot disagree about who may ask.
+- **IT FAILS CLOSED, AND THAT DIRECTION IS THE WHOLE POINT.** A directory rule in
+  a club context empties the audience (`where(false())`) rather than being
+  dropped — dropping it would WIDEN the segment to the club's entire list, and
+  silently emailing everyone is far worse than reaching nobody. The write paths
+  refuse with a 422 as well, so a club gets a sentence rather than a segment that
+  can only ever resolve to nobody. The guard logs when it fires: an empty
+  audience nobody can explain is the worst way to find out.
+- **THE FIVE JOIN-LESS DIRECTORY FIELDS ARE A REAL BEHAVIOUR CHANGE.**
+  `exported` / `emailed` / `opened` / `clicked` / `enquired` add no
+  `MarketingClub` join, so they genuinely DID evaluate against a club's own
+  contacts before this — the control run has a club naming `emailed` getting its
+  whole list back. No club-facing screen can build one, and the terms are
+  defined against outreach sends and prospect enquiries so they mean nothing for
+  a club's own members; a segment saved before the two field sets were split
+  apart is the only way one could exist, and it now reads as nobody instead.
+  **The trial fields alone could not have proved the guard works** — their join
+  already emptied them, so those checks pass against the unguarded code too.
 - **Verified against a real Postgres**
-  (`backend/verification/verify_club_trial_segments.py`, 61 checks through the
+  (`backend/verification/verify_club_trial_segments.py`, 73 checks through the
   shipped segment engine and route bodies: both scenarios, every boundary, a
   multi-module club either side of the line, the open-ended cases, a converted
   club, an un-onboarded prospect, the send gate still excluding an unsubscribed
   contact on a live trial, another club's contacts never reached, the SQL and
   Python day counts agreeing row by row, and the figures rendered into a real
-  email) **with a control run**: with the segment engine reverted every trial
-  rule is silently dropped and the audience comes back as all 12 contacts.
+  email, plus the super-admin boundary from both sides) **with two control
+  runs**: with the segment engine reverted every trial rule is silently dropped
+  and the audience comes back as all 12 contacts; with only the scope guard
+  removed, a club naming `emailed` gets its whole list.
 
 ## Comms has no sync step: it reads the live Directory (v9.12.0, Aug 2026)
 

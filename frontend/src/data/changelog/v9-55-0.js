@@ -10,5 +10,6 @@ export default {
     'The figure the email prints is the figure the audience was picked on — both come from one definition, so a segment built as "at most 7 days" cannot send an email that says 9.',
     'A club that is not on a trial renders the figures blank, never as 0.',
     'A trial with no end date reads as running and never as expired, so a club still using the product is never told its trial has finished.',
+    'Internal only: these rules are BetterCricket super-admin, on the Clubs Directory audience. The server now refuses them outright for a club rather than relying on the query returning nothing.',
   ],
 }

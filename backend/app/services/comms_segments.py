@@ -16,6 +16,7 @@ See docs/bettercomms-architecture.md.
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Optional
 
@@ -29,6 +30,9 @@ from app.models.db import (
 )
 from app.services.club_directory import _RESOLVED_VISITS
 from app.services import club_trial_window
+from app.services.marketing_org import org_is_outreach
+
+logger = logging.getLogger(__name__)
 
 # Field groups decide which joins a definition needs.
 CONTACT_FIELDS = {"tag", "source"}
@@ -439,10 +443,40 @@ async def _current_year(session: AsyncSession, org_id) -> Optional[int]:
             Season.organisation_id == org_id, Season.year.isnot(None)))
 
 
+def directory_rules_allowed(club) -> bool:
+    """Only BetterCricket's own outreach org may build on the directory fields.
+
+    They describe a PROSPECT club and its trial / pipeline state — BetterCricket's
+    sales data, not a club's own — and in a club's context they answer nothing
+    anyway, since every one of its contacts belongs to the single sending club.
+    This is the same boundary SegmentsRoute.jsx picks the internal builder on
+    (``org_is_outreach``, via /auth/me's ``is_marketing_org``), so the screen and
+    the engine cannot disagree about who may ask.
+    """
+    return org_is_outreach(club)
+
+
 async def build_query(session: AsyncSession, club, definition: dict):
     """A SELECT of the matching, sendable CommsContact rows for this club."""
     rules = [r for r in ((definition or {}).get("rules") or []) if r and r.get("field") in ALL_FIELDS]
     q = select(CommsContact).where(*sendable_where(club.id))
+
+    # A directory rule reaching a club's own audience can only be a hand-made
+    # request — no club-facing screen can build one. FAIL CLOSED rather than
+    # dropping the rule: dropping it would WIDEN the audience to everyone, and
+    # silently emailing a club's whole list is the worse direction by far. It
+    # returns nothing today because the MarketingClub join is empty for a club's
+    # own contacts, but that is incidental; this makes it deliberate and
+    # independent of how the joins happen to be built.
+    foreign = sorted({r["field"] for r in rules if r["field"] in DIRECTORY_FIELDS})
+    if foreign and not directory_rules_allowed(club):
+        # Logged rather than swallowed: an empty audience nobody can explain is
+        # the worst way to find out this fired, and only a hand-made request (or
+        # a segment saved before the two field sets were split apart) can reach
+        # it at all.
+        logger.warning("BetterComms: dropping segment for club %s — directory-only "
+                       "rules in a club context: %s", club.id, ", ".join(foreign))
+        return q.where(false())
 
     if any(r["field"] in (PLAYER_FIELDS | STAT_FIELDS) for r in rules):
         q = q.join(Player, Player.id == CommsContact.player_id)
