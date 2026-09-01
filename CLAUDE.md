@@ -9566,6 +9566,63 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## Naming a club or a contact outright (v9.58.3, Sep 2026)
+
+Asked for on the internal Segments screen straight after the rules above:
+explicitly include or exclude every contact at a specific club, or specific
+contacts.
+
+- **THEY ARE ORDINARY ANDed RULES, NOT UNION-STYLE OVERRIDES, and that is the
+  one design decision here.** `is any of` NARROWS the audience to what is
+  picked; it does not add those people on top of what the other rules matched.
+  The exclude half — the one this was really asked for — is identical either
+  way, and a union INCLUDE could send to somebody an earlier rule had
+  deliberately left out, which is the worse direction to be wrong in. The suite
+  asserts the narrowing against a second rule rather than checking the field in
+  isolation.
+- **NEITHER JOINS THE MARKETING CLUB, and that is what makes the exclusion
+  correct.** `marketing_club_id NOT IN (…)` is NULL for a contact with no
+  directory club, which SQL reads as not-matching — so a naive "is none of club
+  X" silently drops every hand-added contact as well. `_pick_clause`'s
+  `nullable` argument ORs `IS NULL` back in on the exclude side, and an inner
+  join would have thrown them away before the clause was even reached. The
+  suite pins both: the excluded club's contacts gone, the club-less ones kept.
+- **A JUNK ID IS DROPPED, BUT AN ALL-JUNK VALUE MUST NOT THEN READ AS "NO
+  FILTER" any more loosely than an empty one does.** An empty selection drops
+  the rule, the same as every other multi-value field — a picker nobody has
+  chosen from yet must not empty the audience. Unlike the `_DIR_MC_FIELDS`
+  rules, an unpicked rule here does not narrow to directory-linked contacts
+  either, since there is no join to do it.
+- **THE SERVER SEARCHES; THE DIRECTORY IS NEVER SHIPPED TO THE BROWSER.**
+  `GET /segments/entities?kind=club|contact&q=&ids=` is the same call
+  `PersonSearch` makes, and it does two jobs in one because they answer one
+  question — what is this id called. `ids` is answered WHATEVER `q` is, so a
+  saved rule renders its chosen names before anybody types and a chosen row can
+  still be un-picked once the search box has moved on. Everything is scoped to
+  the acting org's own contacts, so a club id off a browser can only ever name
+  a club this org actually holds contacts for.
+- **A response is DROPPED if the box has moved on**, per the `PersonSearch`
+  rule — a slow search for "sm" must not land on top of the results for
+  "smith".
+- **The endpoint carries the same scope guard as the engine** — a club build is
+  refused outright rather than being handed a searchable list it could never
+  build a rule from.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_primary_admin_segment.py` is 74 checks now:
+  naming one club and two, the exclusion keeping the club-less contacts, one
+  contact both ways, the narrowing composed with another rule, a junk id
+  dropped while the real one still applies, an empty and an all-junk value
+  filtering nobody, and the endpoint searching, hydrating a chosen id under a
+  non-matching query, never offering another org's contacts, and refusing an
+  unknown kind and a club build) **with a control run**: 17 fail against the
+  previous commit, every naming rule matching the WHOLE audience rather than
+  narrowing it — which is the failing-open direction the checks exist to catch.
+- **A CHECK THAT COMPARES TWO WIDENED SETS CANNOT FAIL.** "a junk id is
+  dropped, the real one still applies" passed against the broken code on the
+  first cut, because both sides came back as everybody; it asserts the narrowed
+  set is genuinely narrower now. The endpoint import is guarded so a control
+  run reports it absent rather than crashing the rest of the suite.
+
 ## Targeting the clubs nobody at the club ever ran (v9.58.0, Sep 2026)
 
 Asked for on the internal Segments screen: a rule for whether a club's Primary

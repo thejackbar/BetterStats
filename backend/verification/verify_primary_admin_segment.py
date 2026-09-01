@@ -3,7 +3,9 @@
 Asked for on BetterCricket's internal BetterComms → Segments: a rule for
 whether a club's Primary Club Admin is blank, so the contacts at a club a
 super admin created or synced and no real person ever took over — in practice
-a test club — can be included or left out of a List or Segment.
+a test club — can be included or left out of a List or Segment. Then a rule for
+whether BetterCricket's own sales pipeline has that club at Won, and finally
+rules that NAME a club or a contact outright rather than describing them.
 
 Runs the SHIPPED segment engine against a real Postgres.
 
@@ -353,6 +355,136 @@ async def main() -> int:
               bool(entry) and all(f"['{k}'," in entry
                                   for k in ("assigned", "unassigned", "not_onboarded")),
               "the field is not in the picker" if not entry else "")
+
+        print("\n── Naming a club or a contact outright ────────────────────────")
+        emails = {}
+        for row in (await db.execute(text(
+                "SELECT id, email FROM comms_contacts WHERE organisation_id = :o"),
+                {"o": outreach.id})).all():
+            emails[row[1]] = row[0]
+        everyone = set(emails)
+
+        async def picked(field, op, value):
+            rows = await comms_segments.resolve_contacts(db, outreach, {
+                "match": "all", "rules": [{"field": field, "op": op, "value": value}]})
+            return {c.email for c in rows}
+
+        got = await picked("club_is", "in", [str(mcs["live"].id)])
+        check("naming a club reaches exactly its contacts",
+              got == {"live@example.com"}, sorted(got))
+        got = await picked("club_is", "in", [str(mcs["live"].id), str(mcs["testclub"].id)])
+        check("two clubs at once reach both",
+              got == {"live@example.com", "testclub@example.com"}, sorted(got))
+
+        got = await picked("club_is", "not_in", [str(mcs["testclub"].id)])
+        check("excluding a club takes its contacts out and leaves everyone else",
+              got == everyone - {"testclub@example.com"}, sorted(got))
+        # The half that would go wrong on its own: NOT IN is NULL for a contact
+        # with no directory club, which SQL reads as not-matching, so a naive
+        # exclusion silently drops every hand-added contact too.
+        check("...including the contacts that have no directory club at all",
+              "loose@example.com" in got, sorted(got))
+
+        got = await picked("contact_is", "in", [str(emails["live@example.com"])])
+        check("naming one contact reaches exactly them",
+              got == {"live@example.com"}, sorted(got))
+        got = await picked("contact_is", "not_in", [str(emails["live@example.com"])])
+        check("excluding one contact leaves everybody else",
+              got == everyone - {"live@example.com"}, sorted(got))
+
+        # A rule that names rows is ANDed like any other, so "is any of" NARROWS
+        # rather than adding on top. Asserted, because the other reading — a
+        # union that ADDS people back — is the one that could send to somebody an
+        # earlier rule had deliberately excluded.
+        rows = await comms_segments.resolve_contacts(db, outreach, {"match": "all", "rules": [
+            {"field": "primary_admin", "op": "eq", "value": ["unassigned"]},
+            {"field": "club_is", "op": "in", "value": [str(mcs["live"].id),
+                                                       str(mcs["testclub"].id)]}]})
+        got = {c.email for c in rows}
+        check("'is any of' narrows an existing audience rather than adding to it",
+              got == {"testclub@example.com"}, sorted(got))
+        rows = await comms_segments.resolve_contacts(db, outreach, {"match": "all", "rules": [
+            {"field": "primary_admin", "op": "eq", "value": ["unassigned"]},
+            {"field": "club_is", "op": "not_in", "value": [str(mcs["testclub"].id)]}]})
+        got = {c.email for c in rows}
+        check("'is none of' composes with another rule",
+              got == {"adminonly@example.com", "memberonly@example.com"}, sorted(got))
+
+        print("\n── What a junk or empty value does ────────────────────────────")
+        one = await picked("club_is", "in", [str(mcs["live"].id)])
+        got = await picked("club_is", "in", [str(mcs["live"].id), "not-a-uuid", None])
+        # Compared against the narrowed set AND asserted narrow, or this passes
+        # on code that has dropped the rule and matched everybody both times.
+        check("a junk id is dropped, the real one still applies",
+              got == one and one != everyone, sorted(got))
+        for label, value in [("an empty selection", []), ("an all-junk value", ["nope"])]:
+            got = await picked("club_is", "in", value)
+            check(f"{label} filters nobody out", got == everyone, sorted(got))
+            got = await picked("contact_is", "not_in", value)
+            check(f"{label} filters nobody out on the exclude side too",
+                  got == everyone, sorted(got))
+        # Unlike the fields that read MarketingClub columns, these two read the
+        # contact's own id / club link — so an unpicked rule must not quietly
+        # narrow the audience to directory-linked contacts either.
+        check("...and an unpicked rule does not narrow to directory-linked contacts",
+              "loose@example.com" in (await picked("club_is", "in", [])))
+
+        print("\n── The picker's own endpoint ──────────────────────────────────")
+        # Reported as absent rather than crashing the run, so a control run
+        # against code without the endpoint still finishes and says so.
+        try:
+            from app.routers.comms import segment_entities  # noqa: E402
+        except ImportError:
+            segment_entities = None
+        check("the picker has an endpoint to search from", segment_entities is not None,
+              "segment_entities is not in the router")
+
+        if segment_entities is not None:
+            res = await segment_entities(kind="club", q="live", _=None, club=outreach, db=db)
+            check("searching names a club by name",
+                  [r["label"] for r in res["options"]] == ["live CC"], res["options"])
+            res = await segment_entities(kind="club", q="", ids=str(mcs["other"].id),
+                                         _=None, club=outreach, db=db)
+            check("a chosen id is hydrated so a saved rule can render its name",
+                  [r["id"] for r in res["chosen"]] == [str(mcs["other"].id)], res["chosen"])
+            res = await segment_entities(kind="club", q="zzzz", ids=str(mcs["other"].id),
+                                         _=None, club=outreach, db=db)
+            check("...even when the search box has moved on to something else",
+                  [r["id"] for r in res["chosen"]] == [str(mcs["other"].id)]
+                  and res["options"] == [], res)
+            res = await segment_entities(kind="contact", q="testclub@", _=None, club=outreach, db=db)
+            check("a contact is searchable by email",
+                  [r["hint"] for r in res["options"]] == ["testclub@example.com"], res["options"])
+            res = await segment_entities(kind="contact", q="", _=None, club=outreach, db=db)
+            check("another org's contacts are never offered",
+                  "member@example.com" not in [r["hint"] for r in res["options"]],
+                  [r["hint"] for r in res["options"]])
+            try:
+                await segment_entities(kind="player", q="", _=None, club=outreach, db=db)
+                check("an unknown kind is refused", False, "no error raised")
+            except Exception as e:
+                check("an unknown kind is refused", getattr(e, "status_code", None) == 422, repr(e))
+            try:
+                await segment_entities(kind="club", q="", _=None, club=own, db=db)
+                check("a club build cannot use the picker at all", False, "no error raised")
+            except Exception as e:
+                check("a club build cannot use the picker at all",
+                      getattr(e, "status_code", None) == 422, repr(e))
+
+        for field, kind in (("club_is", "club"), ("contact_is", "contact")):
+            entry = (dir_block.split(f"{field}:")[1].split("},")[0]
+                     if f"  {field}:" in dir_block else "")
+            check(f"the picker offers {field}", bool(entry),
+                  "the field is not in the picker")
+            check(f"...as a searched picker for {kind}s",
+                  "'search'" in entry and f"'{kind}'" in entry, entry[:80])
+            check(f"...offering both directions for {field}",
+                  "['in'," in entry and "['not_in'," in entry, entry[:80])
+            check(f"{field} is a directory field, so a club build cannot reach it",
+                  field in comms_segments.DIRECTORY_FIELDS and field not in club_block)
+        check("neither joins the directory club, or an exclusion would lose the "
+              "contacts that have none",
+              not ({"club_is", "contact_is"} & comms_segments._DIR_MC_FIELDS))
 
     await engine.dispose()
     print(f"\n{len(PASS)} passed, {len(FAIL)} failed")

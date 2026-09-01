@@ -2564,6 +2564,84 @@ async def segment_options(
     }
 
 
+ENTITY_SEARCH_LIMIT = 30
+
+
+@router.get("/segments/entities")
+async def segment_entities(
+    kind: str,
+    q: str = "",
+    ids: str = "",
+    _: User = _require,
+    club: Organisation = Depends(get_current_club),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search for the clubs / contacts a `club_is` or `contact_is` rule names,
+    and hydrate the ones a saved rule already holds.
+
+    Two jobs in one endpoint because they answer the same question — what is this
+    id called — and a saved segment has to render its chosen names before anybody
+    types. `ids` is answered whatever `q` is, so a chosen row never disappears
+    from the picker just because the search box has moved on.
+
+    Everything is scoped to the acting club's own contacts, so a club id from a
+    browser can only ever name a club this org actually holds contacts for.
+    """
+    if not comms_segments.directory_rules_allowed(club):
+        raise HTTPException(status_code=422, detail="Not available for this club")
+    if kind not in ("club", "contact"):
+        raise HTTPException(status_code=422, detail="Unknown kind")
+
+    picked = []
+    for raw in (ids or "").split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            picked.append(uuid.UUID(raw))
+        except ValueError:
+            continue
+    term = (q or "").strip()
+
+    def _rows(res):
+        return [{"id": str(r[0]), "label": r[1], "hint": r[2] or ""} for r in res]
+
+    if kind == "club":
+        base = (
+            select(MarketingClub.id, MarketingClub.name, MarketingClub.association_name)
+            .join(CommsContact, CommsContact.marketing_club_id == MarketingClub.id)
+            .where(CommsContact.organisation_id == club.id)
+            .distinct()
+        )
+        chosen = _rows((await db.execute(
+            base.where(MarketingClub.id.in_(picked)).order_by(MarketingClub.name)
+        )).all()) if picked else []
+        found = base.order_by(MarketingClub.name).limit(ENTITY_SEARCH_LIMIT)
+        if term:
+            found = found.where(MarketingClub.name.ilike(f"%{term}%"))
+        options = _rows((await db.execute(found)).all())
+    else:
+        base = (
+            select(CommsContact.id, CommsContact.name, CommsContact.email)
+            .where(CommsContact.organisation_id == club.id)
+        )
+        chosen = _rows((await db.execute(
+            base.where(CommsContact.id.in_(picked)).order_by(CommsContact.email)
+        )).all()) if picked else []
+        found = base.order_by(CommsContact.email).limit(ENTITY_SEARCH_LIMIT)
+        if term:
+            like = f"%{term}%"
+            found = found.where(or_(CommsContact.name.ilike(like),
+                                    CommsContact.email.ilike(like)))
+        options = _rows((await db.execute(found)).all())
+
+    for row in options:
+        row["label"] = row["label"] or row["hint"] or "(unnamed)"
+    for row in chosen:
+        row["label"] = row["label"] or row["hint"] or "(unnamed)"
+    return {"options": options, "chosen": chosen}
+
+
 # ─── Static lists (Phase 2) ──────────────────────────────────────────────────
 
 async def _list_or_404(db: AsyncSession, club: Organisation, lid: str) -> CommsList:

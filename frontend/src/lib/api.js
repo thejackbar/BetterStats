@@ -3362,6 +3362,15 @@ export const api = {
     request('/club-admin/comms/segments/resolve', { method: 'POST', body: JSON.stringify({ name: '', definition }) }),
   commsSegmentExportCsvUrl: (id) => `${BASE}/club-admin/comms/segments/${id}/export.csv`,
   commsSegmentOptions: () => request('/club-admin/comms/segments/options'),
+  // Search for (and hydrate already-chosen) clubs/contacts for the
+  // "is any of / is none of" segment rules. `ids` is answered whatever the
+  // search term is, so a saved rule keeps rendering its chosen names.
+  commsSegmentEntities: (kind, q = '', ids = []) => {
+    const p = new URLSearchParams({ kind })
+    if (q) p.set('q', q)
+    if (ids.length) p.set('ids', ids.join(','))
+    return request(`/club-admin/comms/segments/entities?${p}`)
+  },
   // Static lists (Phase 2): curated sets of contacts.
   commsListLists: () => request('/club-admin/comms/lists'),
   commsCreateList: (name) => request('/club-admin/comms/lists', { method: 'POST', body: JSON.stringify({ name }) }),

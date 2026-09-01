@@ -63,6 +63,17 @@ DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 # directions: pick Won to reach the clubs that bought, pick the other to reach
 # everyone else.
 DIR_DEAL_FIELDS = {"deal_won"}
+# Naming a club or a person outright, rather than describing them. Both are
+# ORDINARY RULES and are ANDed with everything else like any other, so "is any
+# of" NARROWS the audience to those clubs/people — it does not add them on top
+# of what the other rules matched. "is none of" is the counterpart and is what
+# takes a test club or one person out of a send.
+#
+# Neither needs the MarketingClub join: the club rule reads the contact's own
+# ``marketing_club_id`` and the contact rule its id. That is not a shortcut — an
+# inner join would drop every contact with no directory club, so "is none of
+# club X" would quietly lose the hand-added contacts too.
+DIR_PICK_FIELDS = {"club_is", "contact_is"}
 # Multi-value (the rule value is a list of keys; match = ANY).
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
                     "primary_admin"}
@@ -82,7 +93,8 @@ DIR_TRIAL_FIELDS = {"trial_status", "trial_days_left", "trial_days_since_expiry"
 # use) and the cached Twenty engagement score. gte/lte only (no strict < / >
 # — mirrors the Club Directory's own engagement-score filter).
 DIR_METRIC_FIELDS = {"page_views", "distinct_visitors", "engagement_score"}
-DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
+DIRECTORY_FIELDS = (DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS
+                    | DIR_TRIAL_FIELDS | DIR_PICK_FIELDS)
 # Directory fields that need the linked MarketingClub joined in (visited_page
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
@@ -140,6 +152,40 @@ def _has_primary_admin_clause():
         ClubMembership.role == "club_admin",
         ClubMembership.is_primary_admin.is_(True),
     )
+
+
+def _uuid_list(val) -> list:
+    """The ids in a rule value, junk dropped. A rule can arrive from a saved
+    segment or a hand-made request, so a value that is not a uuid is ignored
+    rather than raising — but see _pick_clause for why an ALL-junk value must
+    not then read as "no filter"."""
+    out = []
+    for raw in _as_list(val):
+        try:
+            out.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError, AttributeError):
+            continue
+    return out
+
+
+def _pick_clause(col, val, op, *, nullable: bool):
+    """``col IN (ids)`` / ``col NOT IN (ids)`` for a rule that names rows outright.
+
+    An empty selection drops the rule, the same as every other multi-value field
+    — a picker nobody has chosen from yet must not empty the audience.
+
+    ``nullable`` matters for the exclude side: ``marketing_club_id NOT IN (…)``
+    is NULL for a contact that has no club, which SQL treats as not-matching, so
+    "is none of club X" would silently drop every contact with no directory club
+    at all. They are exactly the people an exclusion should LEAVE ALONE.
+    """
+    ids = _uuid_list(val)
+    if not ids:
+        return None
+    if op == "not_in":
+        clause = ~col.in_(ids)
+        return or_(col.is_(None), clause) if nullable else clause
+    return col.in_(ids)
 
 
 def _won_deal_clause():
@@ -408,6 +454,7 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
     window, only set when a trial_* rule is present."""
     field = (rule or {}).get("field")
     val = (rule or {}).get("value")
+    op = (rule or {}).get("op")
     if field in DIR_TRIAL_FIELDS:
         return _trial_condition(rule, trials)
 
@@ -445,6 +492,10 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
     if field == "requested_trial":
         keys = _as_list(val)
         return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "club_is":
+        return _pick_clause(CommsContact.marketing_club_id, val, op, nullable=True)
+    if field == "contact_is":
+        return _pick_clause(CommsContact.id, val, op, nullable=False)
     if field == "deal_won":
         v = _vocab(val)
         if v == "won":
