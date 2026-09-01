@@ -190,6 +190,10 @@ async def onboard_organisation(
         from app.services.memberships import ensure_primary_admin
         await ensure_primary_admin(db, org.id)
         await db.commit()
+        # ...and belongs on BetterCricket's internal club-admin list. After the
+        # commit, on its own session — never inside this transaction.
+        from app.services.admin_contact_list import queue_sync as queue_admin_contact_sync
+        queue_admin_contact_sync(org.id)
 
     return {
         "status": "sync_started",

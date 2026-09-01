@@ -745,6 +745,12 @@ async def submit(data: SubmitRequest, background_tasks: BackgroundTasks, db: Asy
         ))
         await db.commit()
 
+        # The registering admin is this club's primary admin, so they belong on
+        # BetterCricket's internal club-admin list. After the commit, on its own
+        # session — a marketing-list hiccup must not undo a registration.
+        from app.services.admin_contact_list import queue_sync as queue_admin_contact_sync
+        queue_admin_contact_sync(org.id)
+
         # Best-effort, backgrounded: land the club + registering admin in
         # Twenty as a Company/Contact/Lead/Opportunity immediately (per the
         # user's explicit call — a self-serve registration is the strongest

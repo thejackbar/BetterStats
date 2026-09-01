@@ -9566,6 +9566,91 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## Every club admin, on one internal list (v9.56.0, Sep 2026)
+
+Asked for: a club admin should land on BetterCricket's own contact list the
+moment they become one — a self-serve registration, a super admin creating a
+club and naming its primary admin, a primary admin being reassigned — plus a
+script that backfills everyone who is already one.
+
+- **THE PRIMARY ADMIN IS NOT A ROLE, IT IS A FLAG.** `club_memberships.role` is
+  `club_admin` and `is_primary_admin` rides on top, so "Club Admin or Primary
+  Club Admin" is one query. The ongoing sync therefore covers every
+  `club_admin`, not only the primary — otherwise the backfill seeds ordinary
+  club admins once and nothing ever maintains them, and the list drifts the
+  first time a club adds a second admin.
+- **`services/admin_contact_list.py::sync` IS THE WHOLE JOB, and the live hooks
+  and the backfill script are the same code over different scopes** — one club
+  or the platform. That is what makes it idempotent enough to run on every
+  membership write, and what stops the script and the hooks disagreeing about
+  who belongs.
+- **IT RUNS ON ITS OWN SESSION, AFTER THE CALLER'S COMMIT, AND NEVER RAISES.**
+  A marketing-list failure must not take down a club registration — and it must
+  not share the caller's transaction either, which is the trap this file already
+  documents twice: a swallowed database error leaves the transaction aborted and
+  the commit that actually matters fails behind it. `run_sync` is that rule
+  named; `queue_sync` fires it where the caller has its own post-commit point,
+  and `background_tasks.add_task(run_sync, …)` where the commit happens after the
+  code returns (`sales_workspace._nominate_primary_admin`, whose caller commits).
+- **CALL IT AFTER THE COMMIT.** The task reads its own session, so a hook fired
+  mid-transaction finds no membership and quietly does nothing — the one way
+  this can silently fail at its job. The suite asserts it structurally: every
+  hook line must have a `commit()` between it and the top of its own enclosing
+  function. A 12-line lookback passed `create_club`, whose commit sits 20 lines
+  up behind a long `except` block.
+- **UPSERT ONLY — nothing here removes anybody.** Losing the role does not take
+  a person off the list; that is a decision for a person on the Lists screen.
+- **AN OPT-OUT IS NEVER OVERRIDDEN, and that is not the same as skipping the
+  contact.** An unsubscribed / bounced / complained / globally-suppressed admin
+  still has their contact row kept current, but is NOT put back on the list —
+  `comms_lists` drops a suppressed contact from every list, and re-adding them
+  here would fight it on every run. `comms_segments.sendable_where` is the one
+  definition of "can be sent to" and is what decides, so "on this list" can
+  never mean something different from "reachable by a send".
+- **`services/comms_contacts.py` is now the ONE copy of the upsert**, moved out
+  of `routers/comms.py` (which delegates) because it is called from outside a
+  request too. It carries the rule that must never be relaxed: a suppressed
+  address is never resurrected. Everything else FILLS rather than clobbers, so a
+  name a super admin typed always wins over one derived here.
+- **THE CONTACT IS LINKED TO THE CLUB'S DIRECTORY ROW**, which is what makes
+  `{{club}}`, `{{association}}` and — the reason it matters — `{{trial_days_left}}`
+  resolve for these recipients. An email to club admins about their trial is
+  exactly what this list is for, and without the link every one of those tokens
+  renders blank. A club with no directory row leaves it NULL rather than guessing.
+- **AN ARCHIVED CLUB'S ADMINS ARE LEFT OUT**, the house rule `auto_sync`
+  eligibility and the Twenty pushes already follow. Anyone already on the list
+  stays — nothing removes — they just stop being added by a later run.
+- **AN ADMIN WITH NO EMAIL IS REPORTED, NOT DROPPED.** `users.email` is nullable
+  and `UserCreate` carries no email field at all, so a super admin's newly
+  created club_admin genuinely has none until `patch_user` sets one — which is
+  hooked too. That count is what says the list is short of the roster.
+- **AN EXISTING LIST OF THAT NAME IS ADOPTED, NEVER DUPLICATED**, and its
+  `source`/`origin` are left alone: a list a person made by hand is theirs and
+  this only fills it. `comms_lists` is unique on (organisation_id, name), so
+  matching by name is exact.
+- **THE DRY RUN HAS TO PROJECT A CONTACT THAT DOES NOT EXIST YET.** The first
+  cut counted list additions by querying `comms_contacts`, so a run that would
+  add everybody reported "0 to add" and read as nothing to do. It now counts the
+  rows it would create (subscribed by construction, unless the ADDRESS itself is
+  globally suppressed) and the suite asserts the dry run's figures are exactly
+  what applying does. Found by running the script, not by reading it.
+- **`python -m app.scripts.sync_admin_contact_list [<org-id-or-slug>] [--apply]`**
+  is the backfill, dry-run by default per the house rule.
+- **The AFL silo is deliberately untouched.** `routers/afl/users_admin.py` and
+  `afl/super_clubs.py` write the same shared columns, but that backend runs on
+  its own database where the cricket outreach org does not exist.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_admin_contact_list.py`, 56 checks through the
+  shipped service, script logic and route bodies: who lands on the list and who
+  does not, the club_member / super_admin / sales / archived exclusions, the
+  list adopted rather than duplicated, a re-run creating nothing twice, all four
+  suppression states kept off and their rows kept current, resubscribing putting
+  them back, the directory link making the trial countdown resolve, a hand-typed
+  name surviving, per-club scoping, two admins sharing one address, the dry run
+  matching the apply, and `super_set_primary_admin` / `create_user` / `patch_user`
+  driven as real route bodies) **with a control run**: with the router hooks
+  reverted, 8 fail — the route bodies add nobody at all.
+
 ## A club's trial, as an audience and as a number in the email (v9.55.0, Aug 2026)
 
 Asked for on BetterComms → Segments: reach the contacts whose club is in a trial

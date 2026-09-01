@@ -52,6 +52,7 @@ from app.services.marketing_org import get_outreach_org, org_is_outreach
 from app.services import email_suppression as suppress
 from app.services import comms_segments
 from app.services import club_trial_window
+from app.services import comms_contacts
 from app.services import comms_lists
 from app.services import directory
 from app.services import comms_limits
@@ -935,24 +936,10 @@ class ContactCreate(BaseModel):
 async def _upsert_contact(db: AsyncSession, club: Organisation, email: str, name: Optional[str],
                           source: str, player_id=None, member_id=None) -> str:
     """Insert or update a contact by (org, email). Returns 'added' | 'updated'.
-    Never resurrects a suppressed address — subscribed/bounced are left as-is."""
-    existing = (await db.execute(select(CommsContact).where(
-        CommsContact.organisation_id == club.id, CommsContact.email == email
-    ))).scalar_one_or_none()
-    if existing:
-        if name and not existing.name:
-            existing.name = name
-        if player_id and not existing.player_id:
-            existing.player_id = player_id
-        if member_id and not existing.member_id:
-            existing.member_id = member_id
-        existing.updated_at = datetime.now(timezone.utc)
-        return "updated"
-    db.add(CommsContact(
-        organisation_id=club.id, email=email, name=name, source=source,
-        player_id=player_id, member_id=member_id,
-    ))
-    return "added"
+    Never resurrects a suppressed address — see services/comms_contacts, which is
+    the one copy of that rule now it is called from outside a request too."""
+    return await comms_contacts.upsert_contact(
+        db, club.id, email, name, source, player_id=player_id, member_id=member_id)
 
 
 @router.post("/contacts")

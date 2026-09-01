@@ -162,6 +162,17 @@ def _push_club_to_twenty(org_id, force_hot: bool = False, crm_trigger: Optional[
     task.add_done_callback(_background_tasks.discard)
 
 
+def _queue_admin_contact_sync(club_id) -> None:
+    """Put this club's admins on BetterCricket's internal club-admin list.
+
+    Fire-and-forget on its own session, so it can never fail the request that
+    created the admin. CALL IT AFTER THE COMMIT — the task reads its own session
+    and would not see an uncommitted membership. Imported lazily to keep the
+    router's import graph as it is."""
+    from app.services.admin_contact_list import queue_sync
+    queue_sync(club_id)
+
+
 router = APIRouter(prefix="/club-admin", tags=["club-admin"])
 
 
@@ -2748,6 +2759,10 @@ async def create_club(
             ),
         )
 
+    # The Primary Club Admin this club was just created with belongs on
+    # BetterCricket's internal club-admin list.
+    _queue_admin_contact_sync(org.id)
+
     # Provision the club's SES tenant in the background (best-effort, no-op when
     # tenant provisioning isn't configured). Never blocks club creation.
     from app.services import ses_tenants
@@ -3303,6 +3318,7 @@ async def super_set_primary_admin(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    _queue_admin_contact_sync(uuid.UUID(club_id))
     return {"ok": True}
 
 
@@ -3349,6 +3365,7 @@ async def transfer_primary_admin(
     db: AsyncSession = Depends(get_db),
 ):
     """The current primary admin hands the role to another club_admin in their club."""
+
     m = (await db.execute(
         select(ClubMembership).where(ClubMembership.user_id == current_user.id)
     )).scalar_one_or_none()
@@ -3361,6 +3378,7 @@ async def transfer_primary_admin(
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     await db.commit()
+    _queue_admin_contact_sync(club.id)
     return {"ok": True}
 
 
@@ -4304,6 +4322,8 @@ async def create_user(
         from app.services.memberships import ensure_primary_admin
         await ensure_primary_admin(db, club.id)
     await db.commit()
+    if membership.role == "club_admin":
+        _queue_admin_contact_sync(club.id)
 
     return {"id": str(user.id), "username": user.username, "club_id": str(club.id), "role": membership.role}
 
@@ -4440,6 +4460,11 @@ async def patch_user(
         membership.role = new_role
 
     await db.commit()
+    # A role change is one of the ways someone BECOMES a club admin, so it syncs
+    # too — without this the list would only ever pick up admins created as
+    # admins, and quietly miss anyone promoted from club_member.
+    if membership and membership.role == "club_admin":
+        _queue_admin_contact_sync(membership.club_id)
     return {
         "id": str(user.id),
         "username": user.username,
