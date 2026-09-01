@@ -63,10 +63,20 @@ async def batting_leaderboard(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
@@ -102,10 +112,20 @@ async def bowling_leaderboard(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
@@ -139,10 +159,20 @@ async def fielding_leaderboard(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     rows = await get_fielding_leaderboard(db, org_id, season_id, grade_id, sort_by, limit, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
@@ -174,10 +204,20 @@ async def sirs_batting(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     return await _visible(db, org_id, viewer, await get_sirs_batting(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -208,10 +248,20 @@ async def sirs_bowling_innings(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_innings(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))
 
 
@@ -242,8 +292,18 @@ async def sirs_bowling_match(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     return await _visible(db, org_id, viewer, await get_sirs_bowling_match(db, org_id, season_id, grade_name, finals_only, limit, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope))

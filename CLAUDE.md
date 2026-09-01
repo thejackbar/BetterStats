@@ -9566,6 +9566,148 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## Stats by competition, and the association that runs a grade (migration 282, v9.59.0, Sep 2026)
+
+Asked for off two PlayHQ screenshots: Applecross plays Summer 2025/26 across
+THREE associations at once, and Hamilton Veterans field one side in several
+competitions of the SAME association in one season. Neither could be
+separated — the stats layer scoped to a season, a grade, a grade CATEGORY and
+a match FORMAT, and to nothing about who ran the competition.
+
+- **THE COMPETITION IS NOT IN THE GRASSROOTS FEED, AND ESTABLISHING THAT IS
+  WHAT DECIDED THE WHOLE DESIGN.** Checked live before a line was written, not
+  inferred: it is absent from `/fixturesladders/organisations/{org}/seasons`,
+  from `/teams`, from `/fixturesladders/grades/{id}`, from
+  `/scores/grades/{id}/matches` and from the full `/scores/matches/{id}`
+  record; six plausible competition endpoints on the proxy all answer 403
+  ("The API key you provided does not have access"), and PlayHQ's own
+  `api.playhq.com/graphql`, where "Border Cup" lives, is CloudFront-403 from
+  this environment — the thing this file already says never to hang a
+  club-facing button on. **A CA season GUID is also GLOBAL, not per
+  competition**: `Summer 2024/25` is `fc1465b6…` for Hamilton AND for Veterans
+  Cricket Victoria, so the season list cannot carry it either.
+- **THE ASSOCIATION IS EXACT, FREE, AND WAS ALREADY ON THE WIRE.**
+  `grade.owningOrganisation` rides on the teams payload `sync` ALREADY fetches
+  to seed its grades, and it was reading only `id` and `name` from it.
+  Verified back to **Summer 1975/76**, so a club's whole history is reachable
+  for ONE call per season. Applecross's 2025/26 resolves to WASTCA, the Perth
+  Scorchers Women's League and the WA Integrated Cricket League with no
+  guessing at all.
+- **SO A COMPETITION IS THE CLUB'S OWN NAMED GROUP OF GRADES, SEEDED ONE PER
+  ASSOCIATION.** The seed alone answers Applecross. It cannot answer Hamilton —
+  Veterans Cricket Victoria runs the Border Cup, an Over 60s competition and
+  the Echuca divisions, so the association is one bucket for three — which is
+  exactly why a club-owned split has to exist and why association-only was
+  rejected. `is_seeded` is cleared the moment a person edits a competition,
+  which is what stops the next sync putting our naming back over theirs.
+- **A GRADE BELONGS TO AT MOST ONE COMPETITION, and that is what makes this
+  expressible at all.** A team plays several (Hamilton's Over 60 Men are in
+  two in one season; Applecross's 7th XI plays One Day Grade 2 AND Grade 3),
+  but each is a DIFFERENT grade row — so grouping by grade separates them with
+  no per-game decision to make.
+- **THE FILTER IS AN INCLUSION, WHERE THE CATEGORY AXIS IS AN EXCLUSION, and
+  the asymmetry is deliberate.** A category filter has a club-wide DEFAULT, so
+  it must be "leave these out" or a club with nothing to exclude would still
+  get a clause. A competition filter is only ever asked for, so "show me only
+  these" is what it means — which also settles the two cases an exclusion
+  could not: a grade in NO competition drops out, and a career residual with
+  no grade drops out, the same call the format axis makes. Counting an import
+  residual towards a competition would invent a figure rather than filter one.
+- **It rides on `GradeScope`, so adding it changed NO query** — all ~35 call
+  sites already route through `clause()`/`bind()`, exactly as the format axis
+  did in v9.26.0. It survives `formats_only()` for the same reason format
+  does: it is never a default, so it can only be there because somebody asked.
+- **EXPRESSED AS A SUBQUERY ON `grades.competition_id`, not a resolved list of
+  grade ids.** An established club has hundreds of grade rows against a handful
+  of competitions, so this binds 1-5 uuids and reads `ix_grades_competition`.
+  **Measured at platform scale** (848 grade rows, 25,440 games, 76,320
+  innings): a competition-filtered leaderboard is **53ms against the existing
+  match-type filter's 292ms** on the same data — the subquery narrows the games
+  by index before the per-innings unions are scanned, where the format CASE has
+  to be evaluated per row.
+- **IT FAILS CLOSED.** An id that is junk, not a uuid, or another club's is
+  dropped in `resolve_scope` before it reaches SQL — and an all-junk selection
+  is then an ACTIVE filter matching NOTHING, never an inactive one matching
+  everything. Failing open on an id a browser got wrong would hand a club
+  figures it never asked for, which is the worse direction (the same lesson
+  v9.58.2's case-folding fix records).
+- **THE COMPETITION HALF REACHES A GRADE-LESS MANUAL GAME AND THE OTHER TWO
+  DELIBERATELY DO NOT.** `_fetch_manual_games_as_list` takes the scope now: a
+  manual game with no grade is rightly KEPT by a category or format filter ("a
+  row we cannot classify is not a row we know to be junior") and must DROP
+  under a competition one, or a club filtering to the Border Cup finds an
+  uploaded scorecard from another competition in the list. Resolving the scope
+  had to move ABOVE the manual fetch in `list_games` for that.
+- **A FILTER AND A BREAKDOWN ARE BOTH WANTED, AND THEY ARE DIFFERENT
+  QUESTIONS.** `services/competition_stats.py` enumerates: the club's record
+  per competition, every grade under its own competition (the TEAM half), and
+  a player's batting/bowling/fielding/appearances per competition. Every
+  average is recomputed from that competition's own counts, never an average
+  of averages, and overs are converted to balls before anything is divided.
+- **`unattributed` is on every player payload, and the screen says it out
+  loud.** A competition figure comes from the scorecards, so a BetterImport
+  career carries rows with no grade that belong to no competition — reported,
+  never folded into one, and the panel explains why the rows do not add up to
+  the career total.
+- **The un-grouped bucket is SHOWN, never dropped** ("Other grades"), the same
+  rule the `unattributed` column on the by-grade grid follows.
+- **`services/competition_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule.
+  `grades.competition_id` is **ON DELETE SET NULL**: deleting a competition
+  un-groups its grades and never deletes a grade or a game, and the confirm
+  says so rather than warning about a loss that cannot happen.
+- **The filter row is NOT drawn for a club with fewer than two competitions** —
+  a control that can only ever answer "everything" is worse than none, the same
+  call `ageFilterOptions` and the Fees/Training notes make. Most of the
+  platform therefore never sees it.
+- **`python -m app.scripts.backfill_grade_associations <org|all> [--apply]`**
+  fills in the history an incremental sync no longer scans — ONE call per
+  season, not per grade. Dry-run by default. **Run against the live CA feed for
+  both reported clubs**: Applecross 19 grades across its three associations,
+  Hamilton 6 across its one, and an idempotent re-run writes nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_stats_by_competition.py`, 89 checks through the
+  shipped services and route bodies: migration 282 applied three times to a
+  populated pre-282 schema, the FK's referential action read out of
+  `pg_constraint`, the association written by the shipped `_resolve_org_grade`
+  on a new AND an existing grade and never erased by a blank, the seeding's
+  skip-don't-replace at both levels, the reported Hamilton split, every figure
+  of the club and player breakdowns, the filter on the leaderboard / games list
+  / player profile, two competitions at once, an import residual counted
+  unfiltered and in no competition, all four fail-closed cases, cross-club
+  refusal from both sides, and every admin route body) **with a control run**
+  reporting the feature absent, and **driven in Chromium**
+  (`frontend/verification/verify_competitions_browser.mjs`, 41: the row on all
+  five screens with the exact params on the wire, a single-competition club
+  offered no row at all, the profile's lazy COMPETITIONS panel and its
+  unattributed note, the Manage Grades panel's assign/rename/create/delete
+  payloads, a dismissed delete sending nothing, no page errors, no overflow at
+  390px) **with a control run**: 19 of the 41 fail against the previous commit.
+- **A HARNESS TABLE THAT MERELY LOOKS RIGHT IS WORSE THAN NONE.** The suite's
+  first `audit_logs` used `organisation_id` where the lifespan uses `org_id`;
+  `audit_log` swallows its own failure, so the caller's transaction was left
+  ABORTED and the competition it had just created silently vanished — three
+  unrelated checks failed with no hint why. Copy the lifespan's DDL column for
+  column.
+- **Also caught by running it**: `games` has no `organisation_id` of its own
+  (the effective view derives it), `manual_batting_innings` keys on
+  `manual_game_id`, and a manual game cannot have a `game_appearances` row.
+- **Two checks were measuring the harness rather than the code and had to be
+  fixed**: the control club was used as the OPPOSITION on every fixture, which
+  by the app's own `home_org_id`/`away_org_id` rule made all 15 genuinely its
+  own; and a `document.querySelectorAll('div')` row locator matched an ancestor
+  and drove the first `<select>` on the screen instead of the intended grade's.
+- **NOTICED, NOT FIXED**: `get_player_team_breakdown` (the season x grade grid)
+  is not grouped by competition — it is its own attribution pass with the
+  `max(held, claimed)` reconciliation against CA's per-grade rows, and threading
+  a third dimension through it is a bigger change than this. The grid's grades
+  are already separated per competition by the FILTER, and the new
+  Analysis -> Competitions panel answers the enumeration.
+- **Not built**: nothing reads PlayHQ's own competition name, and nothing
+  should until that API is reachable without a WAF in the way. The AFL silo is
+  untouched — `services/afl/grade_labels.py` has its own vocabulary and would
+  need its own pass.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

@@ -141,6 +141,7 @@ async def _resolve_org_grade(
     grassroots_guid: str,
     name: str,
     season_id: uuid.UUID,
+    association: Optional[dict] = None,
 ) -> Optional[uuid.UUID]:
     """Resolve a CA grade GUID to this org's grade id, creating a per-club grade
     (id = uuid5(org, guid)) the first time the org sees that GUID.
@@ -156,9 +157,21 @@ async def _resolve_org_grade(
 
     ``org_grade_map`` is a ``grassroots_id -> grade_id`` cache for the org, updated
     in place; a re-sync finds the existing row here and returns it unchanged.
+
+    ``association`` is CA's own ``grade.owningOrganisation`` — the association
+    that RUNS this grade (migration 282). It rides on the teams payload this
+    function is already called from, so it costs no extra request. It is
+    written on an EXISTING grade too, not only a new one, which is what lets a
+    plain Sync Now fill in a club's current seasons without a Full Rebuild;
+    ``scripts/backfill_grade_associations.py`` covers the history an
+    incremental run no longer scans. An association we were not told is never
+    written over one we hold — CA occasionally omits it, and a blank must not
+    erase a real answer.
     """
     gid = org_grade_map.get(grassroots_guid)
     if gid is not None:
+        if association:
+            await _apply_grade_association(session, gid, association)
         return gid
     guid_uuid = _parse_uuid(grassroots_guid)
     if guid_uuid is None:
@@ -175,9 +188,34 @@ async def _resolve_org_grade(
         # the derive-from-games step live so it self-corrects as they arrive.
         category=suggest_category(name),
         categories=list(suggest_categories(name)),
+        association_id=(association or {}).get("id") or None,
+        association_name=(association or {}).get("name") or None,
+        association_short_name=(association or {}).get("shortName") or None,
     ))
     org_grade_map[grassroots_guid] = new_id
     return new_id
+
+
+async def _apply_grade_association(
+    session: AsyncSession, grade_id: uuid.UUID, association: dict
+) -> None:
+    """Fill in an existing grade's association, without clobbering what we hold.
+
+    Only ever writes a field CA actually gave us, and only when the stored
+    value differs — so a grade already carrying its association costs one
+    cached attribute read and no UPDATE.
+    """
+    grade = await session.get(Grade, grade_id)
+    if grade is None:
+        return
+    for column, key in (
+        ("association_id", "id"),
+        ("association_name", "name"),
+        ("association_short_name", "shortName"),
+    ):
+        value = (association.get(key) or "").strip() or None
+        if value and getattr(grade, column, None) != value:
+            setattr(grade, column, value)
 
 
 async def find_matching_organisation(
@@ -859,9 +897,13 @@ async def _sync_organisation_impl(
                     # raw GUID. Replaces the old global session.get(Grade, guid)
                     # skip that left shared grades attached to whichever club
                     # synced first.
+                    # `owningOrganisation` is the ASSOCIATION that runs the
+                    # grade — the one competition-shaped fact CA does publish,
+                    # and it has been sitting in this payload unread.
                     await _resolve_org_grade(
                         session, org_id, org_grade_map, raw_grade_id,
                         gd.get("name", "Unknown Grade"), season_id,
+                        association=(gd or {}).get("owningOrganisation"),
                     )
             await session.commit()
 
@@ -1116,6 +1158,20 @@ async def _sync_organisation_impl(
                 import traceback as _tbg
                 logger.error(f"Per-grade aggregate sync failed for season {raw_season_id}: {e}\n{_tbg.format_exc()}")
                 await session.rollback()
+
+        # Group any newly-discovered grade into a competition (migration 282).
+        # Seeds one competition per association and is SKIP-DON'T-REPLACE, so a
+        # club that has split or renamed its own keeps them — which is what
+        # makes it safe to run on every sync rather than behind a button. Its
+        # own try/except: a grouping failure must never take a sync down.
+        try:
+            from app.services.competitions import seed_competitions_for_org
+            seeded = await seed_competitions_for_org(session, org_id)
+            await session.commit()
+            stats.update(seeded)
+        except Exception as e:
+            logger.warning(f"Competition seeding failed for {org_id_str}: {e}")
+            await session.rollback()
 
         # Recompute milestones. _compute_milestones runs a query per player, so
         # a full run over an established club is a loop over ~1,500 of them —

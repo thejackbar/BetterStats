@@ -119,7 +119,8 @@ export default function GamesPage() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = useGradeFilters(orgId)
 
   // Deep-link support: ?season=<id>&grade=<gradeId> (e.g. from the Ladders page).
@@ -150,11 +151,11 @@ export default function GamesPage() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly, categories: categoriesParam, formats: formatsParam })
+    api.getOrgResults(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, finalsOnly, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(setGames)
       .catch(() => setGames([]))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
 
   // Group by grade_name, preserving played_at DESC order within each group
   const byGrade = useMemo(() => {
@@ -207,9 +208,13 @@ export default function GamesPage() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

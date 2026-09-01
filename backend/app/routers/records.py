@@ -123,13 +123,23 @@ async def get_records(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
     # clause below sees an inactive scope and emits no SQL.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     if grade_id or grade_name:
         scope = scope.formats_only()
     scope_active = bool(scope is not None and scope.active)

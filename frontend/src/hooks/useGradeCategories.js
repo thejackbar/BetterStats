@@ -17,16 +17,20 @@ import { categoriesParam } from '../lib/gradeCategories'
 export function useGradeCategories(orgId) {
   const [available, setAvailable] = useState([])
   const [availableFormats, setAvailableFormats] = useState([])
+  const [availableCompetitions, setAvailableCompetitions] = useState([])
   const [categories, setCategories] = useState(null)
+  const [competition, setCompetition] = useState(null)
 
   useEffect(() => {
     if (!orgId) return
     let cancelled = false
     api.orgGradeCategories(orgId)
-      .then(({ available: av, default: def, available_formats: fmts }) => {
+      .then(({ available: av, default: def, available_formats: fmts,
+              available_competitions: comps }) => {
         if (cancelled) return
         setAvailable(av || [])
         setAvailableFormats(fmts || [])
+        setAvailableCompetitions(comps || [])
         setCategories(def || [])
       })
       .catch(() => {
@@ -35,6 +39,7 @@ export function useGradeCategories(orgId) {
         // outcome as a club with only senior grades — a safe place to fail to.
         setAvailable([])
         setAvailableFormats([])
+        setAvailableCompetitions([])
         setCategories([])
       })
     return () => { cancelled = true }
@@ -43,8 +48,12 @@ export function useGradeCategories(orgId) {
   return {
     available,
     availableFormats,
+    availableCompetitions,
     categories,
     setCategories,
+    competition,
+    setCompetition,
+    competitionsParam: competition || null,
     param: categories == null ? null : categoriesParam(categories),
     ready: categories != null,
   }
@@ -63,24 +72,29 @@ export function useGradeCategories(orgId) {
 export function useGradeFilters(orgId) {
   const [available, setAvailable] = useState([])
   const [availableFormats, setAvailableFormats] = useState([])
+  const [availableCompetitions, setAvailableCompetitions] = useState([])
   const [defaultCategories, setDefaultCategories] = useState(null)
   const [gradeType, setGradeType] = useState(null)
   const [matchFormat, setMatchFormat] = useState(null)
+  const [competition, setCompetition] = useState(null)
 
   useEffect(() => {
     if (!orgId) return
     let cancelled = false
     api.orgGradeCategories(orgId)
-      .then(({ available: av, default: def, available_formats: fmts }) => {
+      .then(({ available: av, default: def, available_formats: fmts,
+              available_competitions: comps }) => {
         if (cancelled) return
         setAvailable(av || [])
         setAvailableFormats(fmts || [])
+        setAvailableCompetitions(comps || [])
         setDefaultCategories(def || [])
       })
       .catch(() => {
         if (cancelled) return
         setAvailable([])
         setAvailableFormats([])
+        setAvailableCompetitions([])
         setDefaultCategories(null)
       })
     return () => { cancelled = true }
@@ -89,15 +103,20 @@ export function useGradeFilters(orgId) {
   return {
     available,
     availableFormats,
+    availableCompetitions,
     defaultCategories,
     gradeType,
     setGradeType,
     matchFormat,
     setMatchFormat,
-    // Both go on the wire as the same comma-separated params every stats
+    competition,
+    setCompetition,
+    // All three go on the wire as the same comma-separated params every stats
     // endpoint already takes; null means "no filter", which for categories is
-    // the club's own default and for formats is every format.
+    // the club's own default, for formats every format, and for competitions
+    // every competition.
     categoriesParam: gradeType || null,
     formatsParam: matchFormat || null,
+    competitionsParam: competition || null,
   }
 }

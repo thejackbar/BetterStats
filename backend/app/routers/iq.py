@@ -51,6 +51,16 @@ async def apply_grade_scope(
             "applies no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     club: Organisation = Depends(get_current_club),
 ):
@@ -64,7 +74,7 @@ async def apply_grade_scope(
     note at the top of services/iq_filters.py for why it is delivered
     inlined rather than as bind parameters.
     """
-    scope = await grade_scope.resolve_scope(db, str(club.id), categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, str(club.id), categories, formats=formats, competitions=competitions)
     token = iq_filters.set_scope(scope)
     try:
         yield scope

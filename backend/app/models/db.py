@@ -1147,6 +1147,40 @@ class Season(Base):
     player_stats = relationship("PlayerSeasonStats", back_populates="season")
 
 
+class ClubCompetition(Base):
+    """A named group of a club's grades — the competition they were played in.
+
+    Cricket Australia's feed has no competition level (see
+    services/competition_ddl.py for what was checked), so this is the club's
+    own. Seeded one per association by
+    ``services/competitions.seed_competitions_for_org`` so a club that plays
+    one association's grades needs to do nothing, and editable for the club
+    the association alone cannot separate: Veterans Cricket Victoria runs the
+    Border Cup, an Over 60s competition and the Echuca divisions, and reading
+    all three as one competition is the bug this exists to fix.
+    """
+
+    # Case-folded uniqueness on (organisation_id, lower(name)) lives in a unique
+    # INDEX created by services/competition_ddl — Postgres cannot express
+    # lower(name) in a UniqueConstraint, so there is no __table_args__ here.
+    __tablename__ = "club_competitions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    organisation_id = Column(
+        UUID(as_uuid=True), ForeignKey("organisations.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(Text, nullable=False)
+    # The association this competition sits under, where it has one. NULL for a
+    # competition a club invented that spans associations.
+    association_id = Column(Text, nullable=True)
+    association_name = Column(Text, nullable=True)
+    display_order = Column(Integer, nullable=True)
+    # True on a row this app seeded, cleared the moment a person edits it, so a
+    # later re-seed can never overwrite a club's own naming.
+    is_seeded = Column(Boolean, nullable=False, server_default="false", default=False)
+    created_at = Column(TIMESTAMP(timezone=True), server_default=func.now())
+
+
 class Grade(Base):
     __tablename__ = "grades"
 
@@ -1198,6 +1232,26 @@ class Grade(Base):
     # than a scramble. Set across a whole grade name at once by the admin,
     # like display_name_override and category.
     display_order = Column(Integer, nullable=True)
+    # The association that runs this grade (migration 282), straight from CA's
+    # `grade.owningOrganisation`. `association_id` is the association's own CA
+    # organisation GUID, which is what makes two clubs' spellings of one
+    # association resolve to the same thing. NULL for a grade synced before
+    # this shipped (filled by scripts/backfill_grade_associations.py) or for a
+    # grade created by hand, which has no association at all.
+    association_id = Column(Text, nullable=True)
+    association_name = Column(Text, nullable=True)
+    association_short_name = Column(Text, nullable=True)
+    # The club's own competition this grade belongs to (migration 282).
+    # Cricket Australia does not publish a competition level, so this is a
+    # named group of grades the club owns — seeded one per association, split
+    # and renamed by the club where one association runs several competitions.
+    # ON DELETE SET NULL: deleting a competition un-groups its grades, it never
+    # deletes a grade or a game.
+    competition_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("club_competitions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     season = relationship("Season", back_populates="grades")
     games = relationship("Game", back_populates="grade")

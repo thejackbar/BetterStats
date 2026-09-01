@@ -31,8 +31,40 @@ already use), and it may be an unconfirmed suggestion rather than a stored
 column — so it cannot go straight into a WHERE clause. We resolve names to
 categories in Python and hand SQL a plain list of grade ids, which is the same
 approach the public lineups endpoint takes for its own category filter.
+
+A THIRD AXIS: THE COMPETITION (migration 282)
+---------------------------------------------
+A club does not play one competition. Applecross's 2025/26 spans three
+associations at once (WASTCA, Perth Scorchers Women's League, WA Integrated
+Cricket League), and Hamilton Veterans field one side in several competitions
+of the SAME association in one season. ``services/competitions.py`` owns what a
+competition is; this module only turns a selection of them into SQL.
+
+It rides on the same object as the other two, so adding it changed no query —
+every call site already routes through :meth:`GradeScope.clause` and
+:meth:`GradeScope.bind`.
+
+**It is an INCLUSION, not an exclusion, and that is the one place it differs
+from the category axis.** A category filter has a club-wide DEFAULT, so it has
+to be expressed as "leave these out" or a club with nothing to exclude would
+still get a clause. A competition filter is only ever something a person asked
+for, so "show me only these" is what it means — which also settles the two
+cases an exclusion could not:
+
+  * a grade in NO competition drops out, because it is not in the one asked
+    for; and
+  * a career residual with no grade at all drops out for the same reason,
+    which is the same call the format axis makes. Counting an import residual
+    towards a competition would invent a figure rather than filter one, and
+    the per-competition figures would then not add up to the career total.
+
+It is expressed as a subquery on ``grades.competition_id`` rather than a list
+of grade ids: an established club has hundreds of grade rows and only a
+handful of competitions, so this binds 1-5 uuids instead of 800 and reads the
+``ix_grades_competition`` index.
 """
 from typing import Iterable, Optional, Sequence
+from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +113,43 @@ def normalise_categories(value) -> Optional[tuple[str, ...]]:
     if ALL in {str(v).strip().lower() for v in raw}:
         return tuple(GRADE_CATEGORIES)
     return tuple(sorted({c for c in (normalise_category(v) for v in raw) if c}))
+
+
+def normalise_competitions(value) -> Optional[tuple[str, ...]]:
+    """Coerce a competition selection to a tuple of uuid strings.
+
+    Accepts the comma-separated string the API takes on the wire, a list, or
+    None. Returns None for "no competition filter", which is the default —
+    a competition is something a person asks for, never something applied on
+    their behalf. ``"all"`` also means no filter, matching the category axis.
+
+    Junk is DROPPED here and the survivors are then checked against the club's
+    own competitions in :func:`resolve_scope`. An all-junk selection therefore
+    comes back as an empty tuple, which is an ACTIVE filter matching nothing —
+    never an inactive one matching everything. Failing open on a bad id would
+    quietly hand back figures nobody asked for.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        raw: Iterable = value.split(",")
+    elif isinstance(value, (list, tuple, set)):
+        raw = list(value)
+    else:
+        return None
+    cleaned = [str(v).strip() for v in raw]
+    if any(v.lower() == ALL for v in cleaned):
+        return None
+    out: list[str] = []
+    for item in cleaned:
+        if not item:
+            continue
+        try:
+            out.append(str(UUID(item)))
+        except (ValueError, AttributeError, TypeError):
+            continue
+    # Order-stable de-dup: a doubled id must not bind twice.
+    return tuple(dict.fromkeys(out))
 
 
 def primary_category(categories) -> str:
@@ -133,7 +202,7 @@ class GradeScope:
 
     __slots__ = (
         "categories", "formats", "excluded_ids", "excluded_categories",
-        "format_fallback_ids", "param",
+        "format_fallback_ids", "param", "competitions", "competition_names",
     )
 
     def __init__(
@@ -144,6 +213,8 @@ class GradeScope:
         param: str = "gs_excluded_grade_ids",
         formats: Optional[Sequence[str]] = None,
         format_fallback_ids: Sequence = (),
+        competitions: Optional[Sequence] = None,
+        competition_names: Sequence[str] = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
@@ -153,6 +224,14 @@ class GradeScope:
         # was never recorded. See :meth:`format_clause`.
         self.format_fallback_ids = list(format_fallback_ids)
         self.param = param
+        # The club's own competition ids to narrow to, already validated as
+        # this club's. None means no competition filter at all; an EMPTY tuple
+        # is a real (if empty-handed) filter — someone asked for competitions
+        # and none of them resolved — and matches nothing rather than
+        # everything. Failing open on an id a browser got wrong would silently
+        # show a club figures it did not ask for.
+        self.competitions = tuple(competitions) if competitions is not None else None
+        self.competition_names = tuple(competition_names)
 
     @property
     def category_active(self) -> bool:
@@ -163,14 +242,20 @@ class GradeScope:
         return self.formats is not None
 
     @property
+    def competition_active(self) -> bool:
+        return self.competitions is not None
+
+    @property
     def active(self) -> bool:
         """Is this scope doing anything at all?
 
-        Includes the format axis, which emits no grade exclusions of its own —
-        every caller gates the switch to per-game sources on this, and a format
-        filter is only answerable from per-game rows.
+        Includes the format and competition axes, neither of which emits grade
+        exclusions of its own — every caller gates the switch to per-game
+        sources on this, and both are only answerable from per-game rows
+        (Cricket Australia's season aggregates carry no grade, so they can say
+        nothing about which competition a run was scored in).
         """
-        return self.category_active or self.format_active
+        return self.category_active or self.format_active or self.competition_active
 
     @property
     def _fmt_param(self) -> str:
@@ -179,6 +264,10 @@ class GradeScope:
     @property
     def _fmt_fallback_param(self) -> str:
         return f"{self.param}_fmt_grades"
+
+    @property
+    def _comp_param(self) -> str:
+        return f"{self.param}_competitions"
 
     def clause(
         self,
@@ -212,8 +301,14 @@ class GradeScope:
           Do NOT use this for a per-innings query that merely joins grades: it
           would let every innings in a grade that sometimes plays two-day cricket
           count as two-day, which is the whole bug this design exists to avoid.
+
+        The COMPETITION half is appended for every ``kind``, because unlike a
+        format it is a property of the GRADE and so is answerable wherever a
+        grade column is. A row with no grade — a career-scope import residual,
+        a grade-less manual game — carries no competition and drops out; see
+        the module docstring for why that is the right way round.
         """
-        out = ""
+        out = self.competition_clause(column)
         if self.category_active:
             out += f" AND ({column} IS NULL OR NOT ({column} = ANY(:{self.param})))"
         if not self.format_active:
@@ -254,6 +349,29 @@ class GradeScope:
             )
         return f" AND ({cond})"
 
+    def competition_clause(self, column: str = "g.grade_id") -> str:
+        """The competition condition for a grade column (leading AND).
+
+        A plain inclusion with NO ``IS NULL`` tolerance, which is the opposite
+        of the category clause above and deliberate: a grade in no competition,
+        or a row with no grade at all, is not in the competition being asked
+        for. See the module docstring.
+
+        A subquery rather than a resolved list of grade ids — an established
+        club has hundreds of grade rows against a handful of competitions, so
+        this binds a few uuids and reads ``ix_grades_competition``.
+        """
+        if not self.competition_active:
+            return ""
+        if not self.competitions:
+            # Competitions were asked for and none of them are this club's.
+            # Nothing matches — never everything.
+            return " AND FALSE"
+        return (
+            f" AND {column} IN (SELECT gsc.id FROM grades gsc"
+            f" WHERE gsc.competition_id = ANY(:{self._comp_param}))"
+        )
+
     def bind(self, params: dict) -> dict:
         """Add this scope's bind parameters to a params dict, in place."""
         if self.category_active:
@@ -262,6 +380,8 @@ class GradeScope:
             params[self._fmt_param] = list(self.formats)
             if self.format_fallback_ids:
                 params[self._fmt_fallback_param] = self.format_fallback_ids
+        if self.competitions:
+            params[self._comp_param] = list(self.competitions)
         return params
 
     def formats_only(self) -> "GradeScope":
@@ -274,10 +394,15 @@ class GradeScope:
         combination this filter has, and a grade that plays both formats is
         exactly the case it exists for. Dropping both is what left the Match Type
         pills doing nothing whenever a grade was selected.
+
+        The COMPETITION filter is kept for the same reason as the format one:
+        it is never a default, so it can only be there because somebody asked
+        for it, and a grade picked inside a competition is not a contradiction.
         """
         return GradeScope(
             self.categories, [], (), self.param,
             formats=self.formats, format_fallback_ids=self.format_fallback_ids,
+            competitions=self.competitions, competition_names=self.competition_names,
         )
 
     def as_meta(self) -> dict:
@@ -286,10 +411,35 @@ class GradeScope:
             "categories": list(self.categories),
             "excluded_categories": list(self.excluded_categories),
             "formats": list(self.formats) if self.formats is not None else None,
+            "competitions": list(self.competitions) if self.competitions is not None else None,
+            "competition_names": list(self.competition_names),
             "active": self.active,
             "category_active": self.category_active,
             "format_active": self.format_active,
+            "competition_active": self.competition_active,
         }
+
+
+async def _resolve_competitions(session: AsyncSession, org_id, wanted):
+    """Narrow a competition selection to the ones this club actually holds.
+
+    The ids arrive from a browser, so an id belonging to another club is
+    dropped here rather than being allowed anywhere near a WHERE clause. The
+    names come back with them so a page can label a filtered figure without a
+    second request.
+    """
+    if not wanted:
+        return tuple(wanted or ()), ()
+    res = await session.execute(
+        text(
+            "SELECT id, name FROM club_competitions"
+            " WHERE organisation_id = CAST(:org AS UUID) AND id = ANY(:ids)"
+        ),
+        {"org": str(org_id), "ids": [str(w) for w in wanted]},
+    )
+    rows = {str(row[0]): row[1] for row in res.fetchall()}
+    kept = tuple(w for w in wanted if w in rows)
+    return kept, tuple(rows[w] for w in kept)
 
 
 async def resolve_scope(
@@ -298,6 +448,7 @@ async def resolve_scope(
     categories=None,
     *,
     formats=None,
+    competitions=None,
     param: str = "gs_excluded_grade_ids",
 ) -> GradeScope:
     """Turn a category and/or format selection into the grade ids it leaves out.
@@ -308,7 +459,8 @@ async def resolve_scope(
 
     ``formats`` None means no format filter at all, which is the default — a
     format is something someone asks for, never something applied on their
-    behalf.
+    behalf. ``competitions`` behaves the same way, and its ids are checked
+    against the club's own rows before they reach any SQL.
 
     **The two axes work at different granularities, and that is deliberate.**
     A CATEGORY belongs to a grade: every game in "Under 14s" is junior cricket,
@@ -337,9 +489,22 @@ async def resolve_scope(
         # it as a filter would needlessly drop the grades we can't classify.
         wanted_formats = None
 
+    wanted_competitions = normalise_competitions(competitions)
+    comp_ids: Optional[tuple] = None
+    comp_names: tuple = ()
+    if wanted_competitions is not None and org_id:
+        comp_ids, comp_names = await _resolve_competitions(
+            session, org_id, wanted_competitions
+        )
+    elif wanted_competitions is not None:
+        comp_ids = ()
+
     category_filter = set(wanted) < set(GRADE_CATEGORIES)
     if not org_id or (not category_filter and wanted_formats is None):
-        return GradeScope(wanted, [], [], param, formats=wanted_formats)
+        return GradeScope(
+            wanted, [], [], param, formats=wanted_formats,
+            competitions=comp_ids, competition_names=comp_names,
+        )
 
     name_categories = await org_grade_category_sets(session, org_id)
     name_formats = (
@@ -383,6 +548,8 @@ async def resolve_scope(
         param,
         formats=wanted_formats,
         format_fallback_ids=fallback_ids,
+        competitions=comp_ids,
+        competition_names=comp_names,
     )
 
 
@@ -440,6 +607,7 @@ async def resolve_scope_for_player(
     categories=None,
     *,
     formats=None,
+    competitions=None,
     auto_widen: bool = True,
     param: str = "gs_excluded_grade_ids",
 ) -> tuple[GradeScope, bool]:
@@ -459,11 +627,16 @@ async def resolve_scope_for_player(
     **Widening is a CATEGORY question only.** A format filter is never widened:
     a player with no T20 matches asking for T20 should see an empty T20 page,
     because that IS the answer. Widening it would quietly show them their two-day
-    record under a T20 heading. The `scope.category_active` gate is what keeps
-    the two apart — a format-only scope is `active` but has nothing to widen.
+    record under a T20 heading. The same holds for a COMPETITION — a player who
+    never turned out in the Border Cup asking for the Border Cup is being told
+    something true. The `scope.category_active` gate is what keeps them apart:
+    a format-only or competition-only scope is `active` but has nothing to widen.
     """
     explicit = normalise_categories(categories) is not None
-    scope = await resolve_scope(session, org_id, categories, formats=formats, param=param)
+    scope = await resolve_scope(
+        session, org_id, categories, formats=formats,
+        competitions=competitions, param=param,
+    )
     if explicit or not auto_widen or not scope.category_active:
         return scope, False
     played = await player_categories(session, player_id, org_id)
@@ -471,7 +644,7 @@ async def resolve_scope_for_player(
         return scope, False
     widened = await resolve_scope(
         session, org_id, sorted(set(scope.categories) | played),
-        formats=formats, param=param,
+        formats=formats, competitions=competitions, param=param,
     )
     return widened, True
 
@@ -489,6 +662,21 @@ async def org_available_categories(session: AsyncSession, org_id) -> list[str]:
     for cats in name_categories.values():
         present |= cats
     return [c for c in GRADE_CATEGORIES if c in present]
+
+
+async def org_available_competitions(session: AsyncSession, org_id) -> list[dict]:
+    """The competitions this club can actually be filtered by, in its own order.
+
+    Only competitions that hold at least one grade: a club should not be
+    offered a filter that can only ever answer "nobody", which is the same call
+    :func:`org_available_categories` and ``ageFilterOptions`` make. A club with
+    fewer than two is offered none at all by the callers — a single-competition
+    club filtering to its only competition is a control that does nothing.
+    """
+    if not org_id:
+        return []
+    from app.services.competitions import list_competitions
+    return [c for c in await list_competitions(session, org_id) if c["grade_count"]]
 
 
 async def org_available_formats(session: AsyncSession, org_id) -> list[str]:
