@@ -9566,6 +9566,52 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## Targeting the clubs nobody at the club ever ran (v9.58.0, Sep 2026)
+
+Asked for on the internal Segments screen: a rule for whether a club's Primary
+Club Admin is blank, so the contacts at a club a super admin created or synced
+and no real person ever took over — in practice a test club — can be included
+in a List or Segment, or left out of one.
+
+- **THREE STATES, NOT A YES/NO, AND THAT IS THE WHOLE DESIGN.** "No primary
+  admin" is true of two completely different things: a club on the platform
+  that nobody ever took over (the test club) and an ordinary PROSPECT, which
+  has no club record to have an admin at all. A yes/no would fold them
+  together, and "exclude the clubs with no primary admin" would then quietly
+  drop every prospect in the directory — almost the entire outreach audience.
+  `assigned` / `unassigned` / `not_onboarded` keep them apart.
+- **A MULTI-SELECT IS WHAT MAKES *EXCLUDE* EXPRESSIBLE.** Rules are ANDed and
+  there is no NOT, so a single-select could only ever include. The three states
+  PARTITION every directory club, so picking `unassigned` targets the test
+  clubs and picking the other two leaves them out. The suite asserts the
+  partition — the union of the three equals the whole audience with no overlap —
+  rather than checking each in isolation. Same `input: 'multi'` shape
+  `had_demo` and `is_trialing` already use.
+- **`unassigned` IS "NOBODY IS THE PRIMARY", NOT "NOBODY IS AN ADMIN".** A club
+  with a `club_admin` who was never made primary still reads as unassigned,
+  because the question is who owns the club relationship. A `club_member`
+  membership can never be the primary at all.
+- **The predicate is the two conditions `trial_engagement.org_has_primary_admin`
+  already uses** (`role='club_admin'` AND `is_primary_admin`), expressed as a
+  correlated EXISTS. The suite runs both over every seeded club and asserts they
+  classify it the same way, rather than taking the mirroring on trust.
+- **`existing_org_id` is `ON DELETE SET NULL`**, so "not NULL" reliably means an
+  org row exists and `not_onboarded` needs no second EXISTS to confirm it.
+- **A selection that resolves to nothing behaves exactly as the existing club
+  rules do** — the condition is dropped but the MarketingClub join still
+  applies, so the audience narrows to directory-linked contacts and no further.
+  The check compares it against `had_demo` on the same data rather than
+  asserting a rule of its own.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_primary_admin_segment.py`, 19 checks through the
+  shipped segment engine: each state on its own, the reported case found, the
+  prospects NOT swept in with it, the exclude built from the other two, the
+  partition, an admin who is not primary, a plain member, another club's primary
+  not counting for this one, a contact with no directory club matched by no
+  state, and the scope guard still refusing a club that names it) **with a
+  control run**: with the change reverted, 16 fail — the unknown field is
+  dropped entirely, so every rule matches the whole audience.
+
 ## How many clubs an audience reaches (v9.57.0, Sep 2026)
 
 Asked for on BetterCricket's internal BetterComms: the live readout under a

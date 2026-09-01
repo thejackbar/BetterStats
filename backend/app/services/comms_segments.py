@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (
     CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
+    ClubMembership,
 )
 from app.services.club_directory import _RESOLVED_VISITS
 from app.services import club_trial_window
@@ -58,9 +59,10 @@ SPECIAL_FIELDS = {"availability", "owes_money"}
 # the club is already a customer). All read data we already hold — no new tracking.
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
 # Multi-value (the rule value is a list of keys; match = ANY).
-DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page"}
+DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
+                    "primary_admin"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                   "is_trialing", "requested_trial", "had_demo", "visited_page"}
+                   "is_trialing", "requested_trial", "had_demo", "visited_page", "primary_admin"}
 # Where the club's own trial actually stands, read off its subscription rows via
 # services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
 # {{trial_days_since_expiry}} merge variables resolve from, so the number an
@@ -79,7 +81,8 @@ DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS | DIR_
 # correlates a usage_events row on marketing_clubs.utm_code; the trial/demo
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                  "is_trialing", "requested_trial", "had_demo", "visited_page"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
+                  "is_trialing", "requested_trial", "had_demo", "visited_page",
+                  "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -102,6 +105,51 @@ _VISIT_PATH_SQL = {
     "contact": "split_part(ue.path, '?', 1) ~* '^/contact(/|$)'",
 }
 _DEMO_STATUSES = ("in_trial", "trial_expired", "customer")
+
+# Where a club stands on having somebody at the club actually running it. The
+# three states PARTITION every directory row, which is what lets one rule both
+# include and exclude: picking `unassigned` targets the test clubs, picking the
+# other two leaves them out.
+#
+#   assigned       — somebody at the club is its Primary Club Admin
+#   unassigned     — the club is on the platform, but nobody ever was. A super
+#                    admin created or synced it and no real contact took it
+#                    over: in practice, a test club.
+#   not_onboarded  — there is no club record at all, so there is nobody to be
+#                    its admin. An ordinary prospect, NOT a test club — which is
+#                    the whole reason this is three states and not a yes/no.
+#                    Lumping these in with `unassigned` would make "exclude the
+#                    clubs with no primary admin" quietly drop every prospect in
+#                    the directory, i.e. almost the entire audience.
+_PRIMARY_ADMIN_STATES = ("assigned", "unassigned", "not_onboarded")
+
+
+def _has_primary_admin_clause():
+    """Correlated EXISTS: this directory club's org has a Primary Club Admin.
+    The same two conditions ``trial_engagement.org_has_primary_admin`` uses —
+    the primary flag is only ever set on a club_admin, and the suite asserts the
+    two agree row for row rather than taking that on trust."""
+    return exists().where(
+        ClubMembership.club_id == MarketingClub.existing_org_id,
+        ClubMembership.role == "club_admin",
+        ClubMembership.is_primary_admin.is_(True),
+    )
+
+
+def _primary_admin_clause(val):
+    states = [v for v in _as_list(val) if v in _PRIMARY_ADMIN_STATES]
+    if not states:
+        return None
+    onboarded = MarketingClub.existing_org_id.isnot(None)
+    has_admin = _has_primary_admin_clause()
+    parts = []
+    if "assigned" in states:
+        parts.append(and_(onboarded, has_admin))
+    if "unassigned" in states:
+        parts.append(and_(onboarded, ~has_admin))
+    if "not_onboarded" in states:
+        parts.append(MarketingClub.existing_org_id.is_(None))
+    return or_(*parts) if len(parts) > 1 else parts[0]
 
 
 def _as_list(val):
@@ -343,6 +391,8 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
     if field == "requested_trial":
         keys = _as_list(val)
         return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "primary_admin":
+        return _primary_admin_clause(val)
     if field == "had_demo":
         states = [s for s in _as_list(val) if s in _DEMO_STATUSES]
         return MarketingClub.demo_status.in_(states) if states else None

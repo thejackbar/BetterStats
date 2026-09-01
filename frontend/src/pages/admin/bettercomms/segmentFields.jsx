@@ -85,6 +85,22 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Had a demo', input: 'multi', ops: [['eq', 'is any of']],
     options: [['in_trial', 'In a trial'], ['trial_expired', 'Trial has expired'], ['customer', 'Is now a customer']],
   },
+  // Whether anybody at the club actually runs it. The three states partition
+  // every directory club, which is what lets one rule both include and exclude:
+  // pick "Nobody assigned" to target the clubs a super admin set up that no real
+  // contact ever took over (in practice, test clubs), or pick the other two to
+  // leave them out. A club that was never onboarded is deliberately its OWN
+  // state rather than being lumped in with the unassigned — it has no club
+  // record to have an admin, and folding it in would make "exclude the clubs
+  // with no primary admin" quietly drop every prospect in the directory.
+  primary_admin: {
+    label: 'Club primary admin', input: 'multi', ops: [['eq', 'is any of']],
+    options: [
+      ['assigned', 'Someone is assigned'],
+      ['unassigned', 'Nobody assigned (club is on the platform)'],
+      ['not_onboarded', 'Club is not on the platform'],
+    ],
+  },
   customer_status: {
     label: 'Customer status', input: 'select', ops: IS_OP,
     options: [['none', 'not a customer'], ['trial', 'on a trial'], ['active', 'active customer'], ['lapsed', 'lapsed / paused']],
