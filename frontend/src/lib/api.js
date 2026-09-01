@@ -2713,7 +2713,7 @@ export const api = {
   },
 
   // Leaderboard
-  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
+  battingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minRuns, minRateInnings, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2721,6 +2721,7 @@ export const api = {
     if (sortBy) params.set('sort_by', sortBy)
     if (limit) params.set('limit', limit)
     if (minRuns != null) params.set('min_runs', minRuns)
+    if (minRateInnings != null) params.set('min_rate_innings', minRateInnings)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)
@@ -2729,7 +2730,7 @@ export const api = {
     if (formats) params.set('formats', formats)
     return request(`/leaderboard/batting?${params}`)
   },
-  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
+  bowlingLeaderboard: (orgId, { seasonId, gradeId, gradeName, sortBy, limit, minOvers, minWickets, minRateSpells, finalsOnly, captainOnly, gender, overseas, categories, formats } = {}) => {
     const params = new URLSearchParams({ org_id: orgId })
     if (seasonId) params.set('season_id', seasonId)
     if (gradeId) params.set('grade_id', gradeId)
@@ -2738,6 +2739,7 @@ export const api = {
     if (limit) params.set('limit', limit)
     if (minOvers != null) params.set('min_overs', minOvers)
     if (minWickets != null) params.set('min_wickets', minWickets)
+    if (minRateSpells != null) params.set('min_rate_spells', minRateSpells)
     if (finalsOnly) params.set('finals_only', 'true')
     if (captainOnly) params.set('captain_only', 'true')
     if (gender) params.set('gender', gender)

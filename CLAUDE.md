@@ -1,5 +1,105 @@
 # BetterStats — Claude Session Notes
 
+## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
+
+Reported: a season scored partly on an iPad and partly in a written book gives
+CA a runs total covering every innings and a balls total covering only the ones
+somebody typed in. 500 runs, 150 balls, and the app printed a strike rate of
+**333.33**.
+
+- **RUNS AND BALLS MUST COME FROM THE SAME INNINGS, and that is the whole
+  rule.** Every rate in the app was `SUM(runs) / SUM(balls)` across a season or
+  career, which divides one population by another: the runs from the un-balled
+  innings land in the numerator with nothing behind them in the denominator.
+  `services/rate_coverage.py` is the one definition, mirroring `game_status` and
+  `grade_scope`. **This is the rule `sync._derive_partnerships_grassroots`
+  already applies to stands** — when the inputs do not reconcile, refuse to
+  derive a figure from them rather than publishing a wrong one.
+- **A ZERO BALL COUNT BEHIND REAL RUNS IS NOT A BALL COUNT, and that half is
+  load-bearing rather than defensive.** `sync.py` wrote
+  `balls=row.get("ballsFaced") or 0`, so a missing count from CA has ALWAYS
+  landed in the database as a zero rather than a NULL. Testing `balls IS NOT
+  NULL` alone would therefore read every one of those innings as covered and
+  reproduce the reported bug one level down. Covered is `balls IS NOT NULL AND
+  (balls > 0 OR runs = 0)`; the sync preserves NULL going forward, and the
+  zero-with-runs test is what covers the history already stored. **Found by
+  reading the writer, not the reader.**
+- **A GENUINE 0 OFF 0 IS COVERED.** A batter run out backing up without facing
+  is a real innings that contributes nothing to either half, and calling it
+  uncovered would understate the coverage fraction on every scorecard that
+  holds one.
+- **THE RATE CHANGES SOURCE; NOTHING ELSE DOES.** Runs, innings, wickets and
+  every average still come from wherever they came from before, so a career
+  header still reads 500 runs. Only the ratio is re-derived, from the
+  scorecards, where the two halves stay together. That is what lets the answer
+  be "500 runs, strike rate 100, from 3 of 10 innings" rather than a smaller
+  career.
+- **WHERE THERE ARE NO SCORECARDS THE AGGREGATE STANDS AND SAYS SO.** A
+  BetterImport season carries a runs total and a balls total and nothing that
+  can separate them, so `basis: "aggregate"` is reported instead of a fraction.
+  Withholding every historical club's strike rate would be a worse answer than
+  naming where the figure came from. Withholding is reserved for what genuinely
+  cannot be worked out.
+- **`_with_rate_coverage` IS PRESENCE-AWARE**, so a query that never asked for
+  coverage keeps its exact payload shape. That is what let one helper serve the
+  career header, both season paths, all twelve leaderboard branches, the
+  yearbook boards and the record book without any of them growing keys they do
+  not use.
+- **THE MINIMUM IS COUNTED ON COVERED INNINGS, NEVER ON INNINGS PLAYED.** Ten
+  innings with three ball counts is a three-innings strike rate, and letting
+  that clear a ten-innings bar is exactly what the bar exists to stop. The
+  suite asserts both directions (clears 3, fails 4) on every board branch.
+- **THE PLATFORM DEFAULT IS 0, DELIBERATELY.** Nothing has ever qualified these
+  boards, so switching a number on for every club would drop players off their
+  own leaderboard the day it deployed without anybody choosing it — and a
+  number we invented would be quoted back at us. Migration 282 gives a club its
+  own (`organisations.stats_min_rate_innings` / `.stats_min_rate_spells`, NULL
+  = no preference), read through `services/stats_display.py`, with viewer pills
+  above the board for a one-off look. **A viewer's explicit 0 is a real answer**
+  — it switches the bar off — so the resolver tests for None, not falsiness.
+- **A STRIKE RATE RECORD IS SEASON BY SEASON AND NEVER ALL TIME.** How much was
+  written down changed from one era to the next, so a career figure blends
+  decades of differently scored cricket into one number nobody can check. A
+  season was scored one way. The record book already sets its own qualification
+  floors (20 wickets for a bowling average, 50 overs for an economy) and these
+  are their siblings; the screen points at StatLab, which already takes several
+  seasons at once, for a range.
+- **THE NOTE ONLY APPEARS WHERE THE FIGURE IS SHORT, AND ONLY WHERE THE FIGURE
+  IS DRAWN.** A note on every rate in the app is noise that trains people to
+  stop reading it. `RateFootnote`'s `when` is what stops a leaderboard sorted by
+  runs carrying a footnote about a mark nobody can see — caught by the browser
+  suite, not by reading the code. The mark is a **dagger, not an asterisk**: an
+  asterisk already means "not out" on every scorecard in the world.
+- **Fixed while here**: the per-spell economy boards divided by `SUM(overs)` in
+  cricket notation, so 10.2 + 10.2 summed to 20.4 rather than 20 overs 4 balls.
+  Every economy now converts to balls first, the conversion `player_formats`
+  already documented.
+- **Verified against a real Postgres** (`backend/verification/verify_rate_coverage.py`,
+  105 checks through the shipped functions and route bodies: the reported case
+  replayed on the career header, both season paths, all five leaderboard
+  branches, the formats page, StatLab's fast and live paths, the yearbook and
+  the record book; the flattened zero excluded and the genuine 0(0) kept; the
+  scorecard-less season keeping its own figure; the minimum counted on covered
+  innings both ways; and the SQL and Python covered tests agreeing row by row)
+  **with a control run**: 42 fail against the previous commit, reporting 333.33
+  on every surface. **Driven in Chromium** (`verify_rate_coverage_browser.mjs`,
+  36: the new strike-rate board, the exact params on the wire for a pill and for
+  the club default, the marked and unmarked rows read off the rows themselves,
+  the explainer and Escape closing it, both season records and the StatLab link,
+  no footnote where nothing is short, and no overflow at 390px) **with a control
+  run**: 11 fail against the previous commit.
+- **A CHECK THAT COUNTS MARKS ON A PAGE CANNOT FAIL PROPERLY.** The first cut of
+  "the covered leader is not marked, the partial one is" counted daggers in the
+  whole document, which passes with BOTH marked. It reads the two rows.
+- **NOTICED, NOT FIXED**: StatLab's family targets (`family_career`,
+  `family_season`) still divide the season totals, and say so in a comment where
+  the rate is built. They already ignore every other match-context filter (the
+  pre-existing gap this file documents), so half-fixing them would have been
+  worse than leaving them named. A club's history that predates the sync also
+  needs a Full Rebuild before its ball counts read as NULL rather than zero;
+  until then the zero-with-runs test is what carries it, which is why that test
+  exists rather than being tidied away.
+
 ## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
 
 Reported off a live profile: Cameron Sawatzky's season table read "2025/26"
