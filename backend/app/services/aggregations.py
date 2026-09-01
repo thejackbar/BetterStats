@@ -4,7 +4,7 @@ from typing import Optional
 from datetime import date as date_cls
 import uuid
 
-from app.services.milestone_rules import next_threshold, reach_window
+from app.services import milestone_scan
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
 
@@ -2510,87 +2510,43 @@ async def get_upcoming_milestones_for_org(
     org_id: str,
     limit: int = 20,
 ) -> list[dict]:
-    result = await session.execute(
-        text("""
-            WITH recent_seasons AS (
-                SELECT s.id
-                FROM seasons s
-                JOIN v_effective_player_season_stats pss ON pss.season_id = s.id
-                JOIN players p ON p.id = pss.player_id
-                WHERE p.organisation_id = :org_id
-                GROUP BY s.id, s.year, s.name
-                ORDER BY s.year DESC NULLS LAST, s.name DESC
-                LIMIT 3
-            ),
-            active_players AS (
-                SELECT DISTINCT pss.player_id
-                FROM v_effective_player_season_stats pss
-                WHERE pss.season_id IN (SELECT id FROM recent_seasons)
-            )
-            SELECT
-                p.id AS player_id,
-                COALESCE(p.display_name_override, p.name) AS name,
-                COALESCE(SUM(pss.runs), 0) AS career_runs,
-                COALESCE(SUM(pss.wickets), 0) AS career_wickets,
-                COALESCE(SUM(pss.matches), 0) AS career_matches,
-                COALESCE(SUM(pss.catches), 0) AS career_catches
-            FROM players p
-            LEFT JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
-            WHERE p.organisation_id = :org_id
-              AND p.id IN (SELECT player_id FROM active_players)
-            GROUP BY p.id, p.name, p.display_name_override
-            HAVING COALESCE(SUM(pss.runs), 0) > 0 OR COALESCE(SUM(pss.wickets), 0) > 0
-        """),
-        {"org_id": org_id}
-    )
-    rows = [dict(r) for r in result.mappings()]
+    """The club's in-reach career milestones, biggest-milestone first.
+
+    Reads ``milestone_scan``, the one definition the Records page and the
+    admin report also read, so the three surfaces cannot disagree about who
+    is close to what. This used to run its own query over
+    ``v_effective_player_season_stats`` joined on ``player_id`` alone, which
+    built the whole five-branch view on every request and timed out at
+    nginx's 60s ``/api/`` limit for at least one club — where the panel then
+    rendered "No upcoming milestones" rather than an error. See that module.
+    """
+    rows = await milestone_scan.upcoming_career_milestones(session, org_id)
 
     # Score formula: milestone_value² / needed.
     # Heavily weights milestone size so 500-from-9000 beats 1-from-100.
     def importance_score(target, needed):
         return (target ** 2) / (needed + 1)
 
-    CATEGORY_MAP = {
-        "runs": "batting",
-        "wickets": "bowling",
-        "matches": "matches",
-        "catches": "fielding",
-    }
-
-    upcoming = []
-    for row in rows:
-        player_id = str(row["player_id"])
-        name = row["name"]
-        totals = {
-            "runs":    int(row["career_runs"]    or 0),
-            "wickets": int(row["career_wickets"] or 0),
-            "matches": int(row["career_matches"] or 0),
-            "catches": int(row["career_catches"] or 0),
+    upcoming = [
+        {
+            "player_id": r["player_id"],
+            # This payload has always named the player ``name``; the reports
+            # call the same field ``player_name``. Renaming it here would
+            # blank the dashboard rows and the notification bell.
+            "name": r["player_name"],
+            "type": r["type"],
+            "category": r["category"],
+            "current": r["current"],
+            "target": r["target"],
+            "needed": r["needed"],
+            "score": importance_score(r["target"], r["needed"]),
         }
-
-        for stat, current in totals.items():
-            target = next_threshold(stat, current)
-            if target is None:
-                continue
-            needed = target - current
-            # Same in-reach window as the player profile — dashboard only
-            # surfaces milestones that are genuinely imminent.
-            if needed > reach_window(stat, target):
-                continue
-            upcoming.append({
-                "player_id": player_id,
-                "name": name,
-                "type": stat,
-                "category": CATEGORY_MAP[stat],
-                "current": current,
-                "target": target,
-                "needed": needed,
-                "score": importance_score(target, needed),
-            })
-
+        for r in rows
+    ]
     upcoming.sort(key=lambda x: x["score"], reverse=True)
 
-    # Return top 50 per category — frontend handles pagination
+    # Cap per category so one busy category can't crowd the others out of a
+    # column-per-category layout, then honour the caller's own limit.
     per_cat = 50
     counts: dict = {}
     result = []
@@ -2599,7 +2555,7 @@ async def get_upcoming_milestones_for_org(
         if counts.get(cat, 0) < per_cat:
             result.append(item)
             counts[cat] = counts.get(cat, 0) + 1
-    return result
+    return result[:limit] if limit and limit > 0 else result
 
 
 async def get_recently_achieved_milestones_for_org(
