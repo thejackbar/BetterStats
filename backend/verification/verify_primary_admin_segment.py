@@ -13,6 +13,7 @@ Runs the SHIPPED segment engine against a real Postgres.
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import os
 import sys
 import uuid
@@ -29,13 +30,18 @@ from sqlalchemy import text  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
 from app.models.db import (  # noqa: E402
-    Base, ClubMembership, CommsContact, MarketingClub, Organisation, User,
+    Base, ClubMembership, CommsContact, CrmDeal, CrmPipeline, CrmStage,
+    MarketingClub, Organisation, User,
 )
 from app.services import comms_segments  # noqa: E402
 from app.services.trial_engagement import org_has_primary_admin  # noqa: E402
 
 PASS: list[str] = []
 FAIL: list[str] = []
+def dt_now():
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -44,9 +50,9 @@ def check(name: str, ok: bool, detail: str = "") -> None:
     print(f"  {'PASS' if ok else 'FAIL'}  {name}{'' if ok else f'  ({detail})'}")
 
 
-async def emails_for(db, org, value) -> set:
+async def emails_for(db, org, value, field="primary_admin") -> set:
     rows = await comms_segments.resolve_contacts(db, org, {"match": "all", "rules": [
-        {"field": "primary_admin", "op": "eq", "value": value}]})
+        {"field": field, "op": "eq", "value": value}]})
     return {c.email for c in rows}
 
 
@@ -64,7 +70,7 @@ async def main() -> int:
         db.add(outreach)
         await db.flush()
 
-        orgs = {}
+        orgs, mcs = {}, {}
 
         async def club(label, *, onboarded=True, admin=None):
             """admin: None = no membership at all, 'primary', 'plain' (a club
@@ -90,6 +96,7 @@ async def main() -> int:
                                existing_org_id=(org.id if org else None))
             db.add(mc)
             await db.flush()
+            mcs[label] = mc
             db.add(CommsContact(id=uuid.uuid4(), organisation_id=outreach.id,
                                 email=f"{label}@example.com", source="directory",
                                 marketing_club_id=mc.id))
@@ -188,7 +195,94 @@ async def main() -> int:
         check("every onboarded club is classified the same way by both",
               not disagreed and len(orgs) == 5, disagreed or len(orgs))
 
+        print("\n── Won, and anything but Won ──────────────────────────────────")
+        # BetterCricket's own pipeline, plus a club's own CRM pipeline that must
+        # never be mistaken for it.
+        platform = CrmPipeline(id=uuid.uuid4(), scope="platform", name="BetterCricket Sales",
+                               is_default=True)
+        club_own = CrmPipeline(id=uuid.uuid4(), scope="club", organisation_id=orgs["live"].id,
+                               name="Applecross sponsors", is_default=True)
+        db.add_all([platform, club_own])
+        await db.flush()
+        stages = {}
+        for pipe, key, won, lost in [
+            (platform, "target", False, False), (platform, "trial", False, False),
+            (platform, "won", True, False), (platform, "lost", False, True),
+            (club_own, "won", True, False),
+        ]:
+            st = CrmStage(id=uuid.uuid4(), pipeline_id=pipe.id, key=key, name=key.title(),
+                          is_won=won, is_lost=lost)
+            db.add(st)
+            await db.flush()
+            stages[(pipe.id, key)] = st
+
+        async def deal(mc_label, stage, *, archived=False, status=None, pipe=None):
+            mc = mcs[mc_label]
+            pipe = pipe or platform
+            db.add(CrmDeal(
+                id=uuid.uuid4(), scope=pipe.scope, marketing_club_id=mc.id,
+                pipeline_id=pipe.id, stage_id=stages[(pipe.id, stage)].id,
+                title=f"{mc_label} deal", status=status or "open",
+                archived_at=(dt_now() if archived else None)))
+            await db.flush()
+
+        await deal("live", "won", status="won")           # bought
+        await deal("testclub", "trial")                   # still being worked
+        await deal("adminonly", "lost", status="lost")    # went away
+        # A won deal on the CLUB'S OWN pipeline — a sponsorship they closed.
+        # BetterCricket has not sold them anything.
+        await deal("memberonly", "won", status="won", pipe=club_own)
+        # A won deal that was archived: off the board, so off this rule too.
+        await deal("other", "won", status="won", archived=True)
+        # "prospect" is left with no deal at all.
+        await db.commit()
+
+        got = await emails_for(db, outreach, "won", field="deal_won")
+        check("Won finds the club that actually bought",
+              got == {"live@example.com"}, sorted(got))
+        check("a club's OWN won deal is not BetterCricket winning them",
+              "memberonly@example.com" not in got, sorted(got))
+        check("an archived won deal is off the pipeline, so off this rule",
+              "other@example.com" not in got, sorted(got))
+
+        got = await emails_for(db, outreach, "not_won", field="deal_won")
+        check("anything but Won covers an open deal, a lost one and no deal at all",
+              got == {"testclub@example.com", "adminonly@example.com",
+                      "memberonly@example.com", "other@example.com",
+                      "prospect@example.com"}, sorted(got))
+
+        won = await emails_for(db, outreach, "won", field="deal_won")
+        not_won = await emails_for(db, outreach, "not_won", field="deal_won")
+        check("the two states partition every directory club — no overlap, no gap",
+              not (won & not_won) and len(won | not_won) == 6, f"{len(won)}+{len(not_won)}")
+
+        # Won-ness comes from the STAGE, not crm_deals.status. The live data has
+        # rows where the two disagree, and the stage is what a reader sees.
+        await deal("prospect", "trial", status="won")
+        await db.commit()
+        got = await emails_for(db, outreach, "won", field="deal_won")
+        check("a deal whose status says won but sits in Trial is NOT won",
+              "prospect@example.com" not in got, sorted(got))
+        await db.execute(text(
+            "UPDATE crm_deals SET status = 'open' WHERE title = 'prospect deal'"))
+        await db.execute(text(
+            "UPDATE crm_deals SET stage_id = :s WHERE title = 'prospect deal'"),
+            {"s": stages[(platform.id, "won")].id})
+        await db.commit()
+        got = await emails_for(db, outreach, "won", field="deal_won")
+        # Asserted as the exact set: "is prospect in it" alone passes on code
+        # that has dropped the rule and matched everybody.
+        check("...and one sitting in Won IS, whatever its status column says",
+              got == {"live@example.com", "prospect@example.com"}, sorted(got))
+
+        got = await emails_for(db, outreach, "", field="deal_won")
+        check("an unknown value filters nobody out", len(got) == 6, len(got))
+
         print("\n── Scope and wiring ───────────────────────────────────────────")
+        check("the deal rule is a directory field too",
+              "deal_won" in comms_segments.DIRECTORY_FIELDS)
+        got = await emails_for(db, outreach, "won", field="deal_won")
+        check("it composes with the primary-admin rule", bool(got), sorted(got))
         check("it is a directory field, so a club build can never reach it",
               "primary_admin" in comms_segments.DIRECTORY_FIELDS
               and "primary_admin" not in (
@@ -210,6 +304,15 @@ async def main() -> int:
             "export const DIRECTORY_FIELD_DEFS")[0]
         check("the picker offers it in the directory field set",
               "  primary_admin:" in dir_block)
+        check("...and offers the deal rule too", "  deal_won:" in dir_block)
+        deal_entry = (dir_block.split("deal_won:")[1].split("},")[0]
+                      if "  deal_won:" in dir_block else "")
+        check("won / not won is a single select — a clean partition needs no multi",
+              "'select'" in deal_entry and "'multi'" not in deal_entry,
+              "the field is not in the picker" if not deal_entry else deal_entry[:60])
+        check("both directions are offered",
+              "['won'," in deal_entry and "['not_won'," in deal_entry)
+        check("the deal rule is not in the club field set", "deal_won" not in club_block)
         check("...and not in the club field set", "primary_admin" not in club_block)
         # Reported as absent rather than crashing the run, so a control run
         # against code without the field still finishes and says which checks fail.

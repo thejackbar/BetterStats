@@ -85,6 +85,16 @@ export const DIRECTORY_FIELD_DEFS = {
     label: 'Had a demo', input: 'multi', ops: [['eq', 'is any of']],
     options: [['in_trial', 'In a trial'], ['trial_expired', 'Trial has expired'], ['customer', 'Is now a customer']],
   },
+  // Where the club sits on BetterCricket's OWN sales pipeline. Won / not won
+  // partitions every directory club, so a single select answers both directions
+  // — no need for the multi-select the primary-admin rule below needs. Won-ness
+  // is read from the deal's STAGE, not its status field, the same rule the
+  // commission report follows; an archived deal is off the pipeline and does
+  // not count.
+  deal_won: {
+    label: 'Sales pipeline stage', input: 'select', ops: IS_OP,
+    options: [['won', 'Won'], ['not_won', 'Anything but Won']],
+  },
   // Whether anybody at the club actually runs it. The three states partition
   // every directory club, which is what lets one rule both include and exclude:
   // pick "Nobody assigned" to target the clubs a super admin set up that no real

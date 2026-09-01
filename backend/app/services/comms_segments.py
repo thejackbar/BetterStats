@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.db import (
     CommsContact, EmailSuppression, Player, PlayerSeasonStats, PlayerAvailability, Season,
     MarketingClub, Organisation, CommsRecipient, EmailEvent, ClubOnboardingRequest,
-    ClubMembership,
+    ClubMembership, CrmDeal, CrmPipeline, CrmStage,
 )
 from app.services.club_directory import _RESOLVED_VISITS
 from app.services import club_trial_window
@@ -58,11 +58,17 @@ SPECIAL_FIELDS = {"availability", "owes_money"}
 # the club sits (its state, association, our outreach pipeline status, and whether
 # the club is already a customer). All read data we already hold — no new tracking.
 DIR_YESNO_FIELDS = {"exported", "emailed", "opened", "clicked", "enquired"}
+# Where the club sits on BetterCricket's OWN sales pipeline. Won / not won is a
+# clean partition of every directory club, so one single-select answers both
+# directions: pick Won to reach the clubs that bought, pick the other to reach
+# everyone else.
+DIR_DEAL_FIELDS = {"deal_won"}
 # Multi-value (the rule value is a list of keys; match = ANY).
 DIR_MULTI_FIELDS = {"is_trialing", "requested_trial", "had_demo", "visited_page",
                     "primary_admin"}
 DIR_CLUB_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
-                   "is_trialing", "requested_trial", "had_demo", "visited_page", "primary_admin"}
+                   "is_trialing", "requested_trial", "had_demo", "visited_page",
+                   "primary_admin"} | DIR_DEAL_FIELDS
 # Where the club's own trial actually stands, read off its subscription rows via
 # services/club_trial_window.py — the SAME definition the {{trial_days_left}} /
 # {{trial_days_since_expiry}} merge variables resolve from, so the number an
@@ -82,7 +88,7 @@ DIRECTORY_FIELDS = DIR_YESNO_FIELDS | DIR_CLUB_FIELDS | DIR_METRIC_FIELDS | DIR_
 # fields read marketing_clubs columns; the metric fields read/join off it too).
 _DIR_MC_FIELDS = {"club_state", "association", "country", "directory_status", "customer_status",
                   "is_trialing", "requested_trial", "had_demo", "visited_page",
-                  "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS
+                  "primary_admin"} | DIR_METRIC_FIELDS | DIR_TRIAL_FIELDS | DIR_DEAL_FIELDS
 # The two visit-count fields need the extra usage_events aggregate join;
 # engagement_score reads straight off marketing_clubs.engagement_score.
 _DIR_VISIT_FIELDS = {"page_views", "distinct_visitors"}
@@ -133,6 +139,37 @@ def _has_primary_admin_clause():
         ClubMembership.club_id == MarketingClub.existing_org_id,
         ClubMembership.role == "club_admin",
         ClubMembership.is_primary_admin.is_(True),
+    )
+
+
+def _won_deal_clause():
+    """Correlated EXISTS: this directory club has a deal sitting in a WON stage
+    on BetterCricket's own sales pipeline.
+
+    WON-NESS COMES FROM THE STAGE, not ``crm_deals.status`` — the same rule
+    ``sales_commissions.deal_state`` follows, and for the same reason: the two
+    normally agree because every writer derives status from the stage, but the
+    live data has rows where they disagree, and the stage is what a reader sees
+    on the board.
+
+    Scoped through the STAGE'S OWN PIPELINE rather than ``crm_deals.scope``, so
+    a club's own CRM deal (a sponsorship renewal, a grant) can never read as
+    BetterCricket having sold them something. Archived deals are excluded, which
+    is what every other CRM read does (the commission report included): the
+    question is where the club sits on the pipeline, and an archived deal is off
+    it.
+    """
+    return (
+        select(CrmDeal.id)
+        .join(CrmStage, CrmStage.id == CrmDeal.stage_id)
+        .join(CrmPipeline, CrmPipeline.id == CrmStage.pipeline_id)
+        .where(
+            CrmDeal.marketing_club_id == MarketingClub.id,
+            CrmDeal.archived_at.is_(None),
+            CrmPipeline.scope == "platform",
+            CrmStage.is_won.is_(True),
+        )
+        .exists()
     )
 
 
@@ -391,6 +428,16 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
     if field == "requested_trial":
         keys = _as_list(val)
         return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
+    if field == "deal_won":
+        v = str(val or "").strip()
+        if v == "won":
+            return _won_deal_clause()
+        if v == "not_won":
+            # Everything else: an open deal, a lost one, or no deal at all. The
+            # two states partition every directory club, so this one select
+            # answers both "who bought" and "who hasn't".
+            return ~_won_deal_clause()
+        return None
     if field == "primary_admin":
         return _primary_admin_clause(val)
     if field == "had_demo":

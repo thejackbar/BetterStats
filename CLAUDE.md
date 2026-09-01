@@ -9602,15 +9602,39 @@ in a List or Segment, or left out of one.
   applies, so the audience narrows to directory-linked contacts and no further.
   The check compares it against `had_demo` on the same data rather than
   asserting a rule of its own.
+- **WON, AND ANYTHING BUT WON (v9.58.1), asked for straight after.** Won / not
+  won is a clean PARTITION of every directory club, so unlike the three-state
+  rule above it needs no multi-select: one single select answers both
+  directions.
+- **WON-NESS COMES FROM THE STAGE, not `crm_deals.status`** — the same rule
+  `sales_commissions.deal_state` follows, and for the same reason: every writer
+  derives status from the stage so the two normally agree, but the live data has
+  rows where they disagree and the stage is what a reader sees on the board. The
+  suite seeds both contradictions and asserts the stage wins each way.
+- **SCOPED THROUGH THE STAGE'S OWN PIPELINE, never `crm_deals.scope`.** A club's
+  own CRM deal — a sponsorship renewal, a grant — must never read as
+  BetterCricket having sold them something, and the pipeline is the authority on
+  whose board a stage belongs to.
+- **AN ARCHIVED DEAL IS OFF THE PIPELINE, so off this rule**, which is what
+  every other CRM read does, the commission report included. The one documented
+  exception (`_last_attributed_deal_for_club`, which keeps archived deals so an
+  upsell inherits its rep) is about who EARNED a club, a different question from
+  where the club sits now.
+- **Deliberately only two options.** `crm_stages` also carries `is_lost`, so
+  open / lost / no-deal could each be their own state — but that is not what was
+  asked, and "anything but Won" is the useful counterpart to "Won".
 - **Verified against a real Postgres**
-  (`backend/verification/verify_primary_admin_segment.py`, 19 checks through the
+  (`backend/verification/verify_primary_admin_segment.py`, 33 checks through the
   shipped segment engine: each state on its own, the reported case found, the
   prospects NOT swept in with it, the exclude built from the other two, the
   partition, an admin who is not primary, a plain member, another club's primary
   not counting for this one, a contact with no directory club matched by no
-  state, and the scope guard still refusing a club that names it) **with a
-  control run**: with the change reverted, 16 fail — the unknown field is
-  dropped entirely, so every rule matches the whole audience.
+  state, and the scope guard still refusing a club that names it; plus Won
+  finding only the club that bought, a club's own won deal not counting, an
+  archived one not counting, "anything but Won" covering open / lost / no deal
+  at all, the two states partitioning, and a status/stage contradiction resolved
+  by the stage both ways) **with a control run**: with the change reverted the
+  unknown field is dropped entirely, so every rule matches the whole audience.
 
 ## How many clubs an audience reaches (v9.57.0, Sep 2026)
 
