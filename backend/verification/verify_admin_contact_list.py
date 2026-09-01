@@ -72,6 +72,8 @@ async def main() -> int:
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.run_sync(Base.metadata.create_all)
 
+    root0 = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # backend/
+    repo0 = os.path.dirname(root0)                                        # the repo
     Session = async_sessionmaker(engine, expire_on_commit=False)
     async with Session() as db:
         print("\n── No outreach org is a configuration state, not a failure ────")
@@ -358,8 +360,88 @@ async def main() -> int:
         check("promoting a club_member to club admin puts them on the list",
               "member@example.com" in got, sorted(got))
 
+        print("\n── Add New User takes an email and a mobile ───────────────────")
+        from fastapi import HTTPException as _HTTPException
+        made = await create_user(
+            UserCreate(username="withemail", password="Sup3rSecret!", role="club_admin",
+                       club_id=str(wycombe.id), display_name="With Email",
+                       email="  With.Email@Example.COM  ", mobile_number="0412 345 678"),
+            users["staff"], db)
+        await asyncio.gather(*list(acl._tasks))
+        async with Session() as db6:
+            u = (await db6.execute(select(User).where(
+                User.username == "withemail"))).scalars().one()
+            got = await listed_emails(db6, outreach.id)
+        check("the address is stored, trimmed and folded",
+              u.email == "with.email@example.com", u.email)
+        check("the mobile is stored as typed", u.mobile_number == "0412 345 678", u.mobile_number)
+        check("the response carries both back",
+              made.get("email") == "with.email@example.com"
+              and made.get("mobile_number") == "0412 345 678", made)
+        check("a club admin created WITH an address lands on the list straight away — "
+              "no follow-up edit needed", "with.email@example.com" in got, sorted(got))
+
+        before = await db.scalar(select(func.count()).select_from(User))
+        for label, kwargs, code in [
+            ("a malformed email", {"email": "not-an-address"}, 422),
+            ("a malformed mobile", {"mobile_number": "12"}, 400),
+        ]:
+            try:
+                await create_user(
+                    UserCreate(username=f"bad{code}", password="Sup3rSecret!",
+                               role="club_admin", club_id=str(wycombe.id), **kwargs),
+                    users["staff"], db)
+                check(f"{label} is refused", False, "it was accepted")
+            except _HTTPException as e:
+                check(f"{label} is refused", e.status_code == code, e.status_code)
+        check("...and a refused form creates no account at all",
+              (await db.scalar(select(func.count()).select_from(User))) == before, before)
+
+        # Both fields stay optional: an account created before this existed has
+        # neither, and a super admin naming someone often has neither yet.
+        await create_user(
+            UserCreate(username="noneither", password="Sup3rSecret!", role="super_admin",
+                       club_id=str(wycombe.id)),
+            users["staff"], db)
+        await asyncio.gather(*list(acl._tasks))
+        async with Session() as db7:
+            u2 = (await db7.execute(select(User).where(
+                User.username == "noneither"))).scalars().one()
+        check("neither field is required", u2.email is None and u2.mobile_number is None,
+              f"{u2.email!r}/{u2.mobile_number!r}")
+
+        # users.email stopped being DB-unique at migration 145, and patch_user
+        # does not check it either — so this must not start refusing one.
+        await create_user(
+            UserCreate(username="sameaddress", password="Sup3rSecret!", role="club_admin",
+                       club_id=str(wycombe.id), email="with.email@example.com"),
+            users["staff"], db)
+        await asyncio.gather(*list(acl._tasks))
+        n = await db.scalar(select(func.count()).select_from(User).where(
+            User.email == "with.email@example.com"))
+        check("a second account on one address is allowed, as it is on the edit form",
+              n == 2, n)
+
+        form = open(os.path.join(repo0, "frontend/src/pages/admin/SuperUsers.jsx")).read()
+        create_block = form.split("const createUser")[1].split("const resetPassword")[0]
+        check("the form validates both before submitting",
+              "isValidEmail(form.email)" in create_block
+              and "isValidMobile(form.mobile_number)" in create_block)
+        check("...and does so before the saving flag, or the button sticks",
+              create_block.index("isValidEmail") < create_block.index("setSaving(true)"))
+        markup = form.split("Create New User")[1].split("</form>")[0]
+        check("both fields are rendered on the create form, bound to its own state",
+              "value={form.email}" in markup and "value={form.mobile_number}" in markup,
+              f"{len(markup)} chars of markup")
+        # Scoped to createUser's OWN reset: the edit form already carried a
+        # mobile_number reset, so a file-wide count passes against code that
+        # never touched the create form at all.
+        reset = create_block.split("setForm(")[1].split(")")[0] if "setForm(" in create_block else ""
+        check("the create form clears both fields after a save",
+              "email: ''" in reset and "mobile_number: ''" in reset, reset[:120])
+
         print("\n── The hooks are wired where they were asked for ──────────────")
-        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        root = root0
         src = {f: open(os.path.join(root, "app/routers", f)).read() for f in (
             "self_serve_trial.py", "club_admin.py", "organisations.py", "sales_workspace.py")}
         check("self-serve registration syncs", "queue_admin_contact_sync(org.id)" in src["self_serve_trial.py"])

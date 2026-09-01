@@ -4078,6 +4078,15 @@ class UserCreate(BaseModel):
     username: str
     password: str
     display_name: Optional[str] = None
+    # Both optional: a super admin creating an account on someone's behalf
+    # often has neither yet, and login is by username regardless. An email is
+    # what puts a club admin on BetterCricket's internal admin contact list
+    # (services/admin_contact_list.py), so an account created without one waits
+    # for a later edit to get there. Validated the same way patch_user does —
+    # format only, never checked for uniqueness (users.email stopped being
+    # DB-unique at migration 145).
+    email: Optional[str] = None
+    mobile_number: Optional[str] = None
     club_id: str
     role: str = "club_admin"
 
@@ -4284,6 +4293,11 @@ async def create_user(
     if len(data.password) < 10:
         raise HTTPException(status_code=422, detail="Password must be at least 10 characters")
 
+    email = (data.email or "").strip().lower()
+    if email and not _INVITE_EMAIL_RE.match(email):
+        raise HTTPException(status_code=422, detail="That doesn't look like a valid email address")
+    mobile = _clean_mobile(data.mobile_number)
+
     role = data.role if data.role in ("super_admin", "club_admin", "sales") else "club_admin"
 
     if role == "sales":
@@ -4310,6 +4324,8 @@ async def create_user(
         username=username,
         password_hash=_hash_password(data.password),
         display_name=data.display_name,
+        email=email or None,
+        mobile_number=mobile,
     )
     db.add(user)
     await db.flush()
@@ -4325,7 +4341,9 @@ async def create_user(
     if membership.role == "club_admin":
         _queue_admin_contact_sync(club.id)
 
-    return {"id": str(user.id), "username": user.username, "club_id": str(club.id), "role": membership.role}
+    return {"id": str(user.id), "username": user.username, "email": user.email,
+            "mobile_number": user.mobile_number, "club_id": str(club.id),
+            "role": membership.role}
 
 
 class PasswordReset(BaseModel):
@@ -4398,8 +4416,8 @@ async def patch_user(
 
     if "email" in fields:
         email = (fields["email"] or "").strip().lower()
-        # Optional here (unlike the per-club Users page) — this router's own
-        # create_user doesn't collect an email, so some accounts have none.
+        # Optional, and stays that way: create_user collects an email now, but
+        # it doesn't demand one, and every account made before it did has none.
         if email and not _INVITE_EMAIL_RE.match(email):
             raise HTTPException(status_code=422, detail="That doesn't look like a valid email address")
         user.email = email or None

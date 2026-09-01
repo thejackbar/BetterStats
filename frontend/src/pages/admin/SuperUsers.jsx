@@ -17,9 +17,10 @@ const clubHasLiveModule = (club, key) =>
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 const MOBILE_STRIP_RE = /[\s\-()]/g
 const MOBILE_DIGITS_RE = /^\+?\d{7,15}$/
-// Email/mobile are both optional here (unlike the per-club Users page —
-// this create form doesn't collect an email, so some accounts have none) —
-// blank is fine, but a non-blank value must be well-formed.
+// Email/mobile are optional on both forms — a super admin creating an account
+// on someone's behalf often has neither yet, and login is by username — but a
+// non-blank value must be well-formed. Filling the email in matters for a club
+// admin: it is what puts them on BetterCricket's internal admin contact list.
 const isValidEmail = (v) => !(v || '').trim() || EMAIL_RE.test((v || '').trim())
 const isValidMobile = (v) => !(v || '').trim() || MOBILE_DIGITS_RE.test((v || '').replace(MOBILE_STRIP_RE, ''))
 
@@ -28,7 +29,7 @@ export default function SuperUsers() {
   const [users, setUsers] = useState([])
   const [clubs, setClubs] = useState([])
   const [showCreate, setShowCreate] = useState(false)
-  const [form, setForm] = useState({ username: '', password: '', display_name: '', club_id: '', role: 'club_admin' })
+  const [form, setForm] = useState({ username: '', password: '', display_name: '', email: '', mobile_number: '', club_id: '', role: 'club_admin' })
   const [resetTarget, setResetTarget] = useState(null)
   const [newPassword, setNewPassword] = useState('')
   const [msg, setMsg] = useState('')
@@ -80,13 +81,17 @@ export default function SuperUsers() {
 
   const createUser = async (e) => {
     e.preventDefault()
+    // Checked before setSaving, or a rejected form leaves the button stuck.
+    // Same two rules the edit form uses, and the same two the server enforces.
+    if (!isValidEmail(form.email)) { setMsg('Enter a valid email address'); return }
+    if (!isValidMobile(form.mobile_number)) { setMsg('Enter a valid mobile number'); return }
     setSaving(true)
     setMsg('')
     try {
       await api.superCreateUser(form)
       setMsg('User created')
       setShowCreate(false)
-      setForm({ username: '', password: '', display_name: '', club_id: '', role: 'club_admin' })
+      setForm({ username: '', password: '', display_name: '', email: '', mobile_number: '', club_id: '', role: 'club_admin' })
       load()
     } catch (err) {
       setMsg(err.message)
@@ -195,6 +200,25 @@ export default function SuperUsers() {
                 <label className="font-mono text-[10px] text-pb-faint block mb-1">Display name</label>
                 <input type="text" value={form.display_name}
                   onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))}
+                  className={INPUT_CLS} />
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Email</label>
+                <input type="email" value={form.email}
+                  onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
+                  placeholder="name@club.com.au"
+                  className={INPUT_CLS} />
+                {form.role === 'club_admin' && (
+                  <p className="font-mono text-[9px] text-pb-dim mt-1">
+                    Adds them to the internal admin contact list.
+                  </p>
+                )}
+              </div>
+              <div>
+                <label className="font-mono text-[10px] text-pb-faint block mb-1">Mobile</label>
+                <input type="tel" value={form.mobile_number}
+                  onChange={e => setForm(f => ({ ...f, mobile_number: e.target.value }))}
+                  placeholder="0412 345 678"
                   className={INPUT_CLS} />
               </div>
               <div>

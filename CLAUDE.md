@@ -9639,8 +9639,26 @@ script that backfills everyone who is already one.
 - **The AFL silo is deliberately untouched.** `routers/afl/users_admin.py` and
   `afl/super_clubs.py` write the same shared columns, but that backend runs on
   its own database where the cricket outreach org does not exist.
+- **ADD NEW USER TAKES AN EMAIL AND A MOBILE (v9.56.1), which is what makes the
+  create-time hook actually land somebody.** `UserCreate` carried neither, so a
+  super admin's newly created club_admin had no address and could only reach the
+  list once someone edited them afterwards. Both are OPTIONAL — a super admin
+  naming an account on someone's behalf often has neither yet, and login is by
+  username — and validated exactly as `patch_user` validates them: format only,
+  never for uniqueness, since `users.email` stopped being DB-unique at migration
+  145 and the edit form allows a repeat. `_INVITE_EMAIL_RE` and `_clean_mobile`
+  are the same two the rest of that router uses, so the create and edit forms
+  cannot disagree about what a valid address is.
+- **A COMMENT THAT JUSTIFIES ITSELF BY ANOTHER FORM'S GAP GOES STALE WITH IT.**
+  Both `patch_user` and `SuperUsers.jsx` explained their optional email with
+  "this create form doesn't collect one" — true until it did. Corrected in place
+  rather than left to mislead the next reader; the field stays optional, for the
+  reason above.
+- **The form validates BEFORE `setSaving(true)`**, or a rejected form leaves the
+  button disabled with no way out. The suite asserts the ordering, not just the
+  presence of the check.
 - **Verified against a real Postgres**
-  (`backend/verification/verify_admin_contact_list.py`, 56 checks through the
+  (`backend/verification/verify_admin_contact_list.py`, 69 checks through the
   shipped service, script logic and route bodies: who lands on the list and who
   does not, the club_member / super_admin / sales / archived exclusions, the
   list adopted rather than duplicated, a re-run creating nothing twice, all four
@@ -9648,8 +9666,12 @@ script that backfills everyone who is already one.
   them back, the directory link making the trial countdown resolve, a hand-typed
   name surviving, per-club scoping, two admins sharing one address, the dry run
   matching the apply, and `super_set_primary_admin` / `create_user` / `patch_user`
-  driven as real route bodies) **with a control run**: with the router hooks
-  reverted, 8 fail — the route bodies add nobody at all.
+  driven as real route bodies, plus the address stored folded and trimmed, the
+  two refusals creating no account at all, neither field required, a repeat
+  address allowed, and a club admin created WITH an address landing on the list
+  with no follow-up edit) **with control runs**: with the router hooks reverted,
+  8 fail — the route bodies add nobody at all; with the create form reverted,
+  12 fail.
 
 ## A club's trial, as an audience and as a number in the email (v9.55.0, Aug 2026)
 
