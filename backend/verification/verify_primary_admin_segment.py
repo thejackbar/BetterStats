@@ -141,6 +141,11 @@ async def main() -> int:
         got = await emails_for(db, outreach, ["not_onboarded"])
         check("not_onboarded finds the ordinary prospect",
               got == {"prospect@example.com"}, sorted(got))
+        for spelling in (["Unassigned"], ["UNASSIGNED"]):
+            got = await emails_for(db, outreach, spelling)
+            check(f"{spelling[0]!r} means the same as 'unassigned'",
+                  got == {"testclub@example.com", "adminonly@example.com",
+                          "memberonly@example.com"}, sorted(got))
 
         print("\n── Include and exclude, from one rule ─────────────────────────")
         got = await emails_for(db, outreach, ["assigned", "not_onboarded"])
@@ -277,6 +282,30 @@ async def main() -> int:
 
         got = await emails_for(db, outreach, "", field="deal_won")
         check("an unknown value filters nobody out", len(got) == 6, len(got))
+
+        # A vocabulary value is matched case-insensitively. It matters more than
+        # it looks: an unrecognised value drops the CONDITION, which widens the
+        # segment to everyone rather than narrowing it — failing open on a typo
+        # is the worst direction for an email audience.
+        expect_won = await emails_for(db, outreach, "won", field="deal_won")
+        for spelling in ("Won", "WON", " won ", "wOn"):
+            got = await emails_for(db, outreach, spelling, field="deal_won")
+            check(f"{spelling!r} means the same as 'won'", got == expect_won, sorted(got))
+        expect_not = await emails_for(db, outreach, "not_won", field="deal_won")
+        for spelling in ("Not_Won", "NOT_WON"):
+            got = await emails_for(db, outreach, spelling, field="deal_won")
+            check(f"{spelling!r} means the same as 'not_won'", got == expect_not, sorted(got))
+        check("...and the two are genuinely different sets, so this can fail",
+              expect_won != expect_not and expect_won and expect_not)
+        # The stage's NAME and KEY never enter the test — is_won is a boolean
+        # column — so a stage called "WON" or "Closed Won" behaves identically.
+        await db.execute(text("UPDATE crm_stages SET key = 'WON', name = 'Closed Won' "
+                              "WHERE key = 'won' AND pipeline_id = :p"),
+                         {"p": platform.id})
+        await db.commit()
+        got = await emails_for(db, outreach, "won", field="deal_won")
+        check("renaming the stage to 'Closed Won' changes nothing — the flag is what counts",
+              got == expect_won, sorted(got))
 
         print("\n── Scope and wiring ───────────────────────────────────────────")
         check("the deal rule is a directory field too",

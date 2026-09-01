@@ -9620,6 +9620,17 @@ in a List or Segment, or left out of one.
   exception (`_last_attributed_deal_for_club`, which keeps archived deals so an
   upsell inherits its rep) is about who EARNED a club, a different question from
   where the club sits now.
+- **A VOCABULARY VALUE IS MATCHED CASE-INSENSITIVELY (v9.58.2), and the failure
+  mode is why it matters.** An unrecognised value drops the CONDITION, so a rule
+  saying `WON` did not narrow to the won clubs — it WIDENED the segment to
+  everyone. Failing open on a capital letter is the worst direction there is for
+  an email audience. `_vocab` / `_vocab_list` fold the case for `deal_won`,
+  `primary_admin` and `trial_status`; the picker only ever writes the lowercase
+  key, but a saved segment or a hand-made request can carry anything.
+- **THE STAGE'S NAME AND KEY NEVER ENTER THE TEST.** Won-ness reads
+  `crm_stages.is_won`, a boolean, so a stage called "won", "WON" or "Closed Won"
+  behaves identically — that half was never case-sensitive, and the suite pins
+  it by renaming the stage mid-run.
 - **Deliberately only two options.** `crm_stages` also carries `is_lost`, so
   open / lost / no-deal could each be their own state — but that is not what was
   asked, and "anything but Won" is the useful counterpart to "Won".
@@ -9634,7 +9645,9 @@ in a List or Segment, or left out of one.
   archived one not counting, "anything but Won" covering open / lost / no deal
   at all, the two states partitioning, and a status/stage contradiction resolved
   by the stage both ways) **with a control run**: with the change reverted the
-  unknown field is dropped entirely, so every rule matches the whole audience.
+  unknown field is dropped entirely, so every rule matches the whole audience,
+  and with only the case folding reverted `"Won"` matches all six seeded clubs
+  against `"won"`'s one.
 
 ## How many clubs an audience reaches (v9.57.0, Sep 2026)
 

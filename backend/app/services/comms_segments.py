@@ -174,7 +174,7 @@ def _won_deal_clause():
 
 
 def _primary_admin_clause(val):
-    states = [v for v in _as_list(val) if v in _PRIMARY_ADMIN_STATES]
+    states = [v for v in _vocab_list(val) if v in _PRIMARY_ADMIN_STATES]
     if not states:
         return None
     onboarded = MarketingClub.existing_org_id.isnot(None)
@@ -187,6 +187,23 @@ def _primary_admin_clause(val):
     if "not_onboarded" in states:
         parts.append(MarketingClub.existing_org_id.is_(None))
     return or_(*parts) if len(parts) > 1 else parts[0]
+
+
+def _vocab(val) -> str:
+    """One value from a fixed vocabulary, matched case-insensitively.
+
+    The picker only ever writes the lowercase key, but a rule can also arrive
+    from a saved segment or a hand-made request, and "WON" meaning something
+    different from "won" is a trap: an unrecognised value drops the CONDITION,
+    which WIDENS the segment to everyone rather than narrowing it. Failing open
+    on a typo is the worst direction for an email audience.
+    """
+    return str(val or "").strip().lower()
+
+
+def _vocab_list(val) -> list:
+    """:func:`_vocab` over a multi-select's list of values."""
+    return [v.strip().lower() for v in _as_list(val)]
 
 
 def _as_list(val):
@@ -353,7 +370,7 @@ def _trial_condition(rule: dict, trials):
     gone = and_(has_trial, ends.isnot(None), ~open_ended, days < 0)
 
     if field == "trial_status":
-        v = str(val or "").strip()
+        v = _vocab(val)
         if v == "in_trial":
             # Open-ended counts as in a trial; it just has no countdown.
             return and_(has_trial, or_(open_ended, days >= 0))
@@ -429,7 +446,7 @@ def _directory_condition(rule: dict, cust, visits=None, trials=None):
         keys = _as_list(val)
         return or_(*[MarketingClub.requested_trial_modules.contains([k]) for k in keys]) if keys else None
     if field == "deal_won":
-        v = str(val or "").strip()
+        v = _vocab(val)
         if v == "won":
             return _won_deal_clause()
         if v == "not_won":
