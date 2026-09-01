@@ -9566,6 +9566,55 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
 
+## How many clubs an audience reaches (v9.57.0, Sep 2026)
+
+Asked for on BetterCricket's internal BetterComms: the live readout under a
+List and under a Segment says "79 contacts match · 79 reachable by email" —
+add the number of distinct clubs behind it.
+
+- **A CLUB IS THE CONTACT'S LINKED DIRECTORY ROW, so the figure SELF-GATES.**
+  Only a BetterCricket outreach contact carries a `marketing_club_id`; a club's
+  own members have none, so the count is 0 there and the readout simply does not
+  draw it. That is why no context flag had to be threaded anywhere — the same
+  call `ageFilterOptions` and the Fees/Training notes make, that a control which
+  can only ever answer one thing is worse than none.
+- **COUNTED AMONG THE REACHABLE CONTACTS, per the ask.** The question is how many
+  clubs an email would actually land at, not how many are represented in the
+  match.
+- **`/segments/resolve` CAPS ITS CONTACT LIST AT 5000 AND ITS COUNT IS EXACT**,
+  so deriving the figure in the browser from that slice would stop at the cap and
+  contradict the count beside it in the same sentence. `audience_figures`
+  computes it server-side over the WHOLE audience. **`reachable` and
+  `other_route` moved there too** — they were derived from the capped slice and
+  had the same silent under-report; three numbers in one sentence have to be
+  measured the same way. The browser prefers the server's figures and keeps the
+  old client-side derivation only as a fallback for an older server mid-deploy.
+- **THE LISTS SCREEN NEEDS NO SERVER FIGURE**, because
+  `GET /lists/{id}/members` returns every member uncapped and each row already
+  carries its club link. `clubCount` in `crudShell.jsx` is that one rule, used
+  there and as the segment fallback; `routers/comms.py::audience_figures` mirrors
+  it, and the suite runs the REAL JavaScript function (lifted out of the file and
+  evaluated in node) against the Python one on the same rows rather than checking
+  the source for a phrase — a structural check would pass on a rule that behaved
+  differently.
+- **A blank address is matched but not reachable, and so contributes no club.**
+  `comms_contacts.email` is NOT NULL but a blank one is storable, and it is not a
+  person an email reaches.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_audience_clubs.py`, 19 checks through the shipped
+  route bodies: three officers at one club counting once, a club whose only
+  contact is unreachable not counted, a contact belonging to no club inventing
+  none, a club's own audience reporting 0, 6001 contacts across 6000 clubs all
+  counted so the cap is proved not to apply, the list endpoint returning
+  everything uncapped, and the two languages agreeing on the awkward cases)
+  **with a control run**: with the frontend reverted, 7 fail and the JS rule is
+  reported absent rather than crashing the suite.
+- **A LIFESPAN-ONLY COLUMN OR TABLE BREAKS A `create_all` HARNESS**, and this
+  route body reaches three of them through `reconcile_contacts_from_directory`:
+  `fee_members.member_category`, `member_membership_types` and
+  `player_achievements`. The suite creates them by hand, per the note this file
+  already carries about raw-SQL tables being invisible to the ORM.
+
 ## Every club admin, on one internal list (v9.56.0, Sep 2026)
 
 Asked for: a club admin should land on BetterCricket's own contact list the

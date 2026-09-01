@@ -2442,6 +2442,30 @@ async def preview_segment(
     }
 
 
+def audience_figures(contacts) -> dict:
+    """The readout under a segment or a list: how many match, how many can
+    actually be emailed, and how many distinct clubs that reaches.
+
+    Computed over the WHOLE audience, never the capped preview slice — the three
+    numbers appear in one sentence, so a figure that silently stops at the cap
+    would contradict the count beside it.
+
+    A club is a contact's linked Clubs Directory row (``marketing_club_id``),
+    which only a BetterCricket outreach contact has; a club's own members carry
+    none, so the figure is 0 there and the screen simply doesn't draw it. Counted
+    among the REACHABLE contacts only — the question is how many clubs an email
+    would actually land at. Mirrors ``clubCount`` in
+    frontend/src/pages/admin/clubhouse/crudShell.jsx, which is what the Lists
+    screen computes from its own (uncapped) membership rows.
+    """
+    reachable = [c for c in contacts if (c.email or "").strip()]
+    return {
+        "reachable": len(reachable),
+        "other_route": 0,   # a comms contact always has an address; kept for shape
+        "clubs": len({c.marketing_club_id for c in reachable if c.marketing_club_id}),
+    }
+
+
 @router.post("/segments/resolve")
 async def resolve_segment(
     data: SegmentIn,
@@ -2451,13 +2475,15 @@ async def resolve_segment(
 ):
     """The full matching audience for a definition, enriched with each contact's
     Clubs Directory fields — powers the searchable/filterable audience preview and
-    its CSV export. Capped for safety; the count is exact."""
+    its CSV export. The CONTACT LIST is capped for safety; every figure is exact,
+    computed before the cap (see audience_figures)."""
     await reconcile_contacts_from_directory(db, club)
     contacts = await comms_segments.resolve_contacts(db, club, data.definition or {})
     rows = contacts[:5000]
     mc_map = await _mc_map(db, rows)
     return {
         "count": len(contacts),
+        **audience_figures(contacts),
         "contacts": [_contact_out(c, mc_map.get(c.marketing_club_id)) for c in rows],
     }
 
