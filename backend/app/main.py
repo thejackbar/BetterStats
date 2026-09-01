@@ -4232,6 +4232,13 @@ async def lifespan(app: FastAPI):
         for _stmt in _VIDEO_DURATION:
             await conn.execute(text(_stmt))
 
+        # Migration 282: a club's own minimum before a strike rate or an economy
+        # is published on a leaderboard. Same one-copy rule — this list and
+        # alembic's 282 both run services/rate_qualification_ddl.
+        from app.services.rate_qualification_ddl import RATE_MINIMUM_STATEMENTS as _RATE_MIN
+        for _stmt in _RATE_MIN:
+            await conn.execute(text(_stmt))
+
     # Migration 178: Member self-service portal, Stripe Connect fee payments,
     # reminder automation. See services/member_portal_auth.py,
     # services/stripe_connect_client.py, services/member_reminders.py.

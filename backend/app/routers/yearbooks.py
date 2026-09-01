@@ -8,6 +8,8 @@ import logging
 from pathlib import Path
 
 from app.models.db import get_db
+from app.services import rate_coverage as rc
+from app.services.aggregations import _with_rate_coverage
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -388,6 +390,22 @@ async def get_batting_stats(
 
     rows = await db.execute(
         text(f"""
+            WITH covered_bat AS (
+                -- The season row carries every run and only the balls somebody
+                -- typed in; the rate is re-derived from the scorecards, where
+                -- the two halves stay together. See services/rate_coverage.py.
+                SELECT bi.player_id,
+                    """ + rc.batting_rate_columns("bi") + f"""
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id
+                                      FROM season_aliases
+                                      WHERE canonical_season_id = CAST(:s AS UUID)
+                                        AND undone_at IS NULL)
+                  AND NOT COALESCE(bi.did_not_bat, FALSE)
+                  AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
+                GROUP BY bi.player_id
+            )
             SELECT
                 p.id AS player_id,
                 COALESCE(p.display_name_override, p.name) AS name,
@@ -398,7 +416,14 @@ async def get_batting_stats(
                 MAX(pss.high_score) AS high_score,
                 BOOL_OR(pss.is_hs_not_out) AS hs_not_out,
                 ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS average,
-                ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2) AS strike_rate,
+                CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+                     THEN ROUND(MAX(cb.covered_runs)::numeric
+                                / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+                     ELSE ROUND(SUM(pss.runs)::numeric
+                                / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)
+                END AS strike_rate,
+                COALESCE(MAX(cb.covered_innings), 0) AS sr_counted,
+                SUM(pss.batting_innings) AS sr_of,
                 SUM(pss.fifties) AS fifties,
                 SUM(pss.hundreds) AS hundreds,
                 SUM(pss.ducks) AS ducks,
@@ -406,6 +431,7 @@ async def get_batting_stats(
                 SUM(pss.sixes) AS sixes
             FROM player_season_stats pss
             JOIN players p ON p.id = pss.player_id
+            LEFT JOIN covered_bat cb ON cb.player_id = p.id
             WHERE pss.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
               AND p.organisation_id = :o
               {grade_where}
@@ -416,7 +442,7 @@ async def get_batting_stats(
         """),
         params,
     )
-    return [dict(r) for r in rows.mappings().all()]
+    return [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
 
 
 # ─── Stats: bowling leaderboard ───────────────────────────────────────────────
@@ -438,6 +464,17 @@ async def get_bowling_stats(
 
     rows = await db.execute(
         text(f"""
+            WITH covered_bowl AS (
+                SELECT bs.player_id,
+                    """ + rc.bowling_rate_columns("bs") + f"""
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                WHERE g.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id
+                                      FROM season_aliases
+                                      WHERE canonical_season_id = CAST(:s AS UUID)
+                                        AND undone_at IS NULL)
+                GROUP BY bs.player_id
+            )
             SELECT
                 p.id AS player_id,
                 COALESCE(p.display_name_override, p.name) AS name,
@@ -448,8 +485,20 @@ async def get_bowling_stats(
                 SUM(pss.runs_conceded) AS runs_conceded,
                 SUM(pss.maidens) AS maidens,
                 ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2) AS average,
-                ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS economy,
-                ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 1) AS strike_rate,
+                CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                     THEN ROUND(MAX(cw.covered_conceded)::numeric
+                                / NULLIF(MAX(cw.covered_bowl_balls), 0) * 6, 2)
+                     ELSE ROUND(SUM(pss.runs_conceded)::numeric
+                                / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)
+                END AS economy,
+                COALESCE(MAX(cw.covered_spells), 0) AS econ_counted,
+                SUM(pss.bowling_innings) AS econ_of,
+                CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                     THEN ROUND(MAX(cw.covered_bowl_balls)::numeric
+                                / NULLIF(MAX(cw.covered_wickets), 0), 1)
+                     ELSE ROUND(SUM(pss.bowling_balls)::numeric
+                                / NULLIF(SUM(pss.wickets), 0), 1)
+                END AS strike_rate,
                 (ARRAY_AGG(pss.best_bowling_figures
                     ORDER BY pss.best_bowling_wickets DESC NULLS LAST,
                              NULLIF(SPLIT_PART(pss.best_bowling_figures, '-', 2), '')::integer ASC NULLS LAST
@@ -458,6 +507,7 @@ async def get_bowling_stats(
                 SUM(pss.five_wicket_innings) AS five_fors
             FROM player_season_stats pss
             JOIN players p ON p.id = pss.player_id
+            LEFT JOIN covered_bowl cw ON cw.player_id = p.id
             WHERE pss.season_id IN (SELECT CAST(:s AS UUID) UNION SELECT alias_season_id FROM season_aliases WHERE canonical_season_id = CAST(:s AS UUID) AND undone_at IS NULL)
               AND p.organisation_id = :o
               {grade_where}
@@ -468,7 +518,7 @@ async def get_bowling_stats(
         """),
         params,
     )
-    return [dict(r) for r in rows.mappings().all()]
+    return [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
 
 
 # ─── Stats: fielding leaderboard ──────────────────────────────────────────────

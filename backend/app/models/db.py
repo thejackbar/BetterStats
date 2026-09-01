@@ -331,6 +331,16 @@ class Organisation(Base):
     # of zeroes (migration 229). Only ever affects the default, never an explicit
     # pick. See services/grade_scope.resolve_scope_for_player.
     stats_auto_show_played_grades = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Fewest COVERED innings/spells a player needs before a strike rate or an
+    # economy is published for them on a leaderboard (migration 282). Covered
+    # means the innings carries a ball count that can carry its runs — see
+    # services/rate_coverage.py. NULL means no club preference and the platform
+    # default applies, which is 0: nothing has ever qualified these boards, and
+    # switching a number on for every club would drop players off their own
+    # leaderboard without anybody choosing it. Read through
+    # services/stats_display.py, never directly.
+    stats_min_rate_innings = Column(Integer, nullable=True)
+    stats_min_rate_spells = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —

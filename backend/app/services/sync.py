@@ -2382,7 +2382,12 @@ async def sync_grassroots_game_level_data(
                             game_id=match_uuid, player_id=pid, innings_number=inn_num,
                             batting_position=row.get("batOrder"),
                             runs=row.get("runsScored") or 0,
-                            balls=row.get("ballsFaced") or 0,
+                            # NULL, not 0, when CA sends no ball count. A zero
+                            # here is indistinguishable from "faced none", and
+                            # rate_coverage cannot tell a real 0(0) from a
+                            # 50-off-nothing once the count has been flattened.
+                            # See services/rate_coverage.py.
+                            balls=row.get("ballsFaced"),
                             fours=row.get("foursScored") or 0,
                             sixes=row.get("sixesScored") or 0,
                             not_out=not_out,
