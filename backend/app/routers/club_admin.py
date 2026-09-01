@@ -5706,6 +5706,7 @@ async def list_milestones_report(
     from app.services.milestone_rules import (
         next_threshold, reach_window, crossed_thresholds, is_displayable,
     )
+    from app.services import milestone_scan
 
     org_id = str(club.id)
     _CAT = {
@@ -5805,70 +5806,15 @@ async def list_milestones_report(
             })
 
     # ------------------------------------------------------------------
-    # Upcoming: active players only (stats in last 3 seasons)
+    # Upcoming: active players only (stats in last 3 seasons).
+    # milestone_scan is the one definition of this — shared with the public
+    # Records page and the club dashboard, so the three surfaces cannot
+    # disagree about who is close to what.
     # ------------------------------------------------------------------
     current_year = datetime.date.today().year
     cutoff = current_year - 2
 
-    totals_rows = await db.execute(
-        _text("""
-            WITH active_ids AS (
-                SELECT DISTINCT pss.player_id
-                FROM player_season_stats pss
-                JOIN seasons s ON s.id = pss.season_id
-                WHERE s.organisation_id = :org_id
-                  AND (s.year IS NULL OR s.year >= :cutoff)
-            )
-            SELECT
-                p.id::text AS player_id,
-                COALESCE(p.display_name_override, p.name) AS player_name,
-                p.gender AS gender,
-                COALESCE(SUM(pss.runs), 0)    AS total_runs,
-                COALESCE(SUM(pss.wickets), 0) AS total_wickets,
-                COALESCE(SUM(pss.matches), 0) AS total_matches,
-                COALESCE(SUM(pss.catches), 0) AS total_catches
-            FROM players p
-            JOIN active_ids ai ON ai.player_id = p.id
-            JOIN player_season_stats pss ON pss.player_id = p.id
-                -- Only this org's seasons (shared cross-club GUID guard, migration 060)
-                AND EXISTS (
-                    SELECT 1 FROM seasons s2
-                    WHERE s2.id = pss.season_id AND s2.organisation_id = :org_id
-                )
-            WHERE p.organisation_id = :org_id AND p.is_player = TRUE
-            GROUP BY p.id, COALESCE(p.display_name_override, p.name), p.gender
-            ORDER BY COALESCE(p.display_name_override, p.name)
-        """),
-        {"org_id": org_id, "cutoff": cutoff},
-    )
-
-    upcoming = []
-    stat_defs = [
-        ("runs",    "batting",  "total_runs"),
-        ("wickets", "bowling",  "total_wickets"),
-        ("matches", "matches",  "total_matches"),
-        ("catches", "fielding", "total_catches"),
-    ]
-    for r in totals_rows.mappings().all():
-        for mt, cat, col in stat_defs:
-            current = int(r[col] or 0)
-            target = next_threshold(mt, current)
-            if target is None:
-                continue
-            needed = target - current
-            if needed > reach_window(mt, target):
-                continue
-            upcoming.append({
-                "player_id": r["player_id"],
-                "player_name": r["player_name"],
-                "gender": r["gender"],
-                "type": mt,
-                "category": cat,
-                "current": current,
-                "target": target,
-                "needed": needed,
-                "detail": None,
-            })
+    upcoming = list(await milestone_scan.upcoming_career_milestones(db, org_id))
 
     # Upcoming: grade milestones for active players
     gu_rows = await db.execute(
