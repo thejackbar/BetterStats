@@ -1,9 +1,15 @@
 """Verification for strike rate and economy over partially-scored seasons.
 
-Reported: a season scored partly on an iPad and partly in a written book gives
-CA a runs total covering every innings and a balls total covering only the ones
-somebody typed in. 500 runs, 150 balls, and the app printed a strike rate of
-333.33.
+Asked for as a RULE to set, not off a live report. A season scored partly on an
+iPad and partly in a written book gives CA a runs total covering every innings
+and a balls total covering only the ones somebody typed in, and the old
+`SUM(runs) / SUM(balls)` divides one population by the other.
+
+The 500 runs / 150 balls / 333.33 seeded below is a WORKED EXAMPLE chosen to
+make the arithmetic obvious, not a case anybody hit. Nobody has measured how
+far a real club's figures move; what was established before building this is
+that the mechanism is real — every rate summed the two halves separately, and
+`sync.py` wrote a missing ball count as a zero.
 
 The rule under test: runs and balls must come from the SAME innings. Every rate
 is worked out from the innings that carry a ball count, and the figure rides
@@ -171,8 +177,8 @@ async def seed(session) -> None:
     ):
         await ex("INSERT INTO grades (id, season_id, name, category) "
                  "VALUES (:i, :s, :n, :c)", i=gid, s=sid, n=nm, c=cat)
-    for pid, nm in ((BAT, "Barendse, Jack"), (BOWL, "Mant, Brad"),
-                (ZERO, "Cole, Graeme"), (RECORD, "Watt, Matthew")):
+    for pid, nm in ((BAT, "Partial, Ballcount"), (BOWL, "Partial, Overs"),
+                (ZERO, "Flattened, Zero"), (RECORD, "Covered, Fully")):
         await ex("INSERT INTO players (id, organisation_id, name) VALUES (:i, :o, :n)",
                  i=pid, o=ORG, n=nm)
 

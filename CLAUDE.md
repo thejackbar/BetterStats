@@ -2,10 +2,16 @@
 
 ## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
 
-Reported: a season scored partly on an iPad and partly in a written book gives
-CA a runs total covering every innings and a balls total covering only the ones
-somebody typed in. 500 runs, 150 balls, and the app printed a strike rate of
-**333.33**.
+**Asked for as a RULE to set, not off a live report** — the 500 runs / 150 balls
+/ 333.33 below is a worked example chosen to make the arithmetic obvious, and
+nobody has measured how far a real club's figures move. What WAS established
+before building is that the mechanism is real: a season scored partly on an iPad
+and partly in a written book gives CA a runs total covering every innings and a
+balls total covering only the ones somebody typed in, every rate in the app
+summed those two halves separately, and `sync.py` wrote a missing ball count as
+a zero. **How much any club's figures actually shift is still unmeasured** —
+`SELECT` the innings where `balls = 0 AND runs > 0` against a real database to
+find out.
 
 - **RUNS AND BALLS MUST COME FROM THE SAME INNINGS, and that is the whole
   rule.** Every rate in the app was `SUM(runs) / SUM(balls)` across a season or

@@ -8,6 +8,8 @@
 // run and only some of the ball counts. The figure is worked out from the
 // innings that carry a ball count, and these screens have to say so — a rate
 // nobody can check is worse than no rate.
+//
+// The figures below are a worked example, not a case anybody reported.
 import { existsSync } from 'node:fs'
 import { chromium } from 'playwright'
 
@@ -27,22 +29,22 @@ const CLUB = {
 }
 const SEASONS = [{ id: 's-2025', name: 'Summer 2025/26', year: 2025 }]
 
-// The reported player: 500 runs, ball counts for three of ten innings.
+// A player with 500 runs and ball counts for three of his ten innings.
 const PARTIAL = {
-  player_id: 'p-1', name: 'Barendse, Jack', games: 10, innings: 10,
+  player_id: 'p-1', name: 'Partial, Ballcount', games: 10, innings: 10,
   total_runs: 500, average: 50.0, strike_rate: 100.0, high_score: 50,
   fifties: 10, hundreds: 0, total_fours: 0, total_sixes: 0, ducks: 0,
   strike_rate_coverage: { counted: 3, of: 10, complete: false, none: false, basis: 'innings' },
 }
 // A team-mate whose season was scored on the iPad throughout.
 const COMPLETE = {
-  player_id: 'p-2', name: 'Mant, Brad', games: 12, innings: 12,
+  player_id: 'p-2', name: 'Covered, Fully', games: 12, innings: 12,
   total_runs: 600, average: 50.0, strike_rate: 125.0, high_score: 80,
   fifties: 6, hundreds: 0, total_fours: 0, total_sixes: 0, ducks: 0,
   strike_rate_coverage: { counted: 12, of: 12, complete: true, none: false, basis: 'innings' },
 }
 const BOWLER_PARTIAL = {
-  player_id: 'p-3', name: 'Cole, Graeme', games: 4, total_wickets: 6,
+  player_id: 'p-3', name: 'Partial, Overs', games: 4, total_wickets: 6,
   average: 20.83, economy: 3.0, total_maidens: 0, total_overs: 20, five_fors: 0,
   best_bowling_figures: '2-30', best_figures_wickets: 2,
   economy_coverage: { counted: 2, of: 4, complete: false, none: false, basis: 'innings' },
@@ -54,10 +56,10 @@ const RECORDS = {
     top_career_runs: [], top_high_scores: [], top_batting_avg: [],
     most_fifties: [], most_hundreds: [], most_ducks: [], most_runs_season: [],
     best_strike_rate_season: [
-      { player_id: 'p-1', name: 'Barendse, Jack', strike_rate: 150.0, runs: 720,
+      { player_id: 'p-1', name: 'Partial, Ballcount', strike_rate: 150.0, runs: 720,
         season_name: 'Summer 2025/26', season_year: 2025,
         strike_rate_coverage: { counted: 12, of: 12, complete: true, none: false, basis: 'innings' } },
-      { player_id: 'p-2', name: 'Mant, Brad', strike_rate: 118.5, runs: 430,
+      { player_id: 'p-2', name: 'Covered, Fully', strike_rate: 118.5, runs: 430,
         season_name: 'Summer 2024/25', season_year: 2024,
         strike_rate_coverage: { counted: 10, of: 14, complete: false, none: false, basis: 'innings' } },
     ],
@@ -66,7 +68,7 @@ const RECORDS = {
     top_career_wickets: [], best_innings_figures: [], top_bowling_avg: [],
     top_economy: [], most_five_fors: [], most_wickets_season: [],
     best_economy_season: [
-      { player_id: 'p-3', name: 'Cole, Graeme', economy: 2.85, wickets: 24, overs: 96,
+      { player_id: 'p-3', name: 'Partial, Overs', economy: 2.85, wickets: 24, overs: 96,
         season_name: 'Summer 2025/26', season_year: 2025,
         economy_coverage: { counted: 10, of: 12, complete: false, none: false, basis: 'innings' } },
     ],
@@ -169,8 +171,8 @@ const text = (page) => page.evaluate(() => document.body.innerText.replace(/\s+/
        JSON.stringify(board?.params))
     const body = await text(page)
     ck('the 3-of-10 player drops off, though he played ten innings',
-       !body.includes('Barendse'), body.slice(0, 300))
-    ck('the 12-of-12 player stays', body.includes('Mant'), body.slice(0, 300))
+       !body.includes('Partial, Ballcount'), body.slice(0, 300))
+    ck('the 12-of-12 player stays', body.includes('Covered, Fully'), body.slice(0, 300))
   }
   const anyPill = page.getByRole('button', { name: 'Any', exact: true })
   if (await anyPill.count()) {
