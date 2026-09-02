@@ -205,8 +205,8 @@ BLOG_POSTS: list[dict] = [
                         "href": "/blog/what-is-a-good-batting-average-in-club-cricket",
                     },
                     {
-                        "label": "What to look for in a historical stats import",
-                        "href": "/blog/merging-historical-cricket-stats-with-playhq",
+                        "label": "5 reasons your cricket club is losing its stats history",
+                        "href": "/blog/5-reasons-your-cricket-club-is-losing-its-stats-history",
                     },
                     {
                         "label": "Start your free trial",
