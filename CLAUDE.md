@@ -9817,6 +9817,119 @@ a match FORMAT, and to nothing about who ran the competition.
   untouched — `services/afl/grade_labels.py` has its own vocabulary and would
   need its own pass.
 
+### The club groups its own older seasons, and reads them back (v9.61.0)
+
+Asked for straight after the filter shipped: a club admin should be able to run
+`backfill_grade_associations` themselves when the app notices a competition has
+been renamed or added, watch it happen, and come back later if they would
+rather. Plus the club-level breakdown, which existed as an endpoint nothing
+called.
+
+- **THE GAP IS REAL AND NOTHING SAID SO.** A competition can only hold a grade
+  Cricket Australia has told us the association for, and an incremental sync
+  only scans the seasons that could still have been in play — so an established
+  club's older seasons sit outside every competition it has just finished
+  naming, showing under "Other grades" with no explanation. Nothing was wrong
+  with those matches; they simply could not be found.
+- **`services/competition_grouping.run_grouping` IS THE ONE IMPLEMENTATION, and
+  the script now calls it rather than owning it.** Two copies of "fill in the
+  associations and re-seed" is how the button and the command line start
+  disagreeing about what grouping means. The script keeps its own reasons to
+  exist: it takes `all`, it has a dry run, and it needs nobody logged in.
+- **IT REUSES `sync_runs` UNDER A NEW KIND, `competition_grouping`, WHICH IS
+  DELIBERATELY NOT ONE OF THE TWO THE PLATFORM RESUMES.** `_FULL_SYNC_KINDS`
+  (`org_full`, `org_hard_refresh`) is an allowlist the Setup Wizard, All Clubs
+  and `wizard_analytics` all read as "this club's history has been pulled", so
+  a new kind can never be mistaken for it; and `main.py`'s restart self-heal
+  only resumes those two, so a run cut off by a deploy is finalised as errored
+  and started again rather than resumed behind an admin's back. That is right
+  here precisely because the job is cheap and idempotent. **No migration** —
+  progress rides in the run's own `stats` JSONB, which `update_sync_run`
+  merges rather than replaces.
+- **SAFE TO RUN TWICE, AND THAT IS WHAT LETS THE BUTTON CARRY NO WARNING.** Only
+  a grade with NO association is written, an association CA omits never erases
+  one we hold, and the seeder is skip-don't-replace — so a competition the club
+  has renamed or split keeps its own naming and a second run over a finished
+  club writes nothing at all.
+- **ONE RUN PER CLUB.** Two would fetch the same seasons twice and race each
+  other's writes for nothing, so `POST /admin/competitions/grouping` hands back
+  the IN-FLIGHT run rather than starting a second — which is also what lets a
+  screen reloading mid-job rejoin the same bar instead of launching another.
+- **ONE SEASON'S UPSTREAM HICCUP IS NOT THE JOB.** That season is counted as
+  failed and the rest of the club is still grouped, which beats an
+  all-or-nothing pass a flaky upstream can stop halfway. The result says how
+  many could not be read, so running it again later is an obvious next step
+  rather than a mystery.
+- **`needs_grouping` IS THE ONLY FIELD A SCREEN READS, and it is seasons the
+  job can ACT on, never grades left un-grouped.** An admin may have deliberately
+  left a grade out; a button that would write nothing is worse than no button.
+  `grades_ungrouped` is reported beside it for context and is never the trigger.
+- **DISMISSED, NEVER GONE.** "Not now" is a per-user, per-club localStorage flag
+  read in the state initialiser (never an effect, or the prompt renders for one
+  frame before snapping shut), and what it leaves behind is one quiet line
+  still offering the job. `useDismissed` is a local four-line twin of the
+  Clubhouse kit's `usePref` rather than an import, per the nets rule — that
+  module is a different bundle and a remembered dismissal should not pull it
+  into this page's first paint.
+- **CLUB ADMIN AND SUPER ADMIN ARE ONE PATH, not two.** The endpoints carry
+  `MANAGE_MERGES` — the capability Manage Grades already runs on, since
+  grouping a grade is the same kind of act as merging one — and a super admin
+  implies every capability, so acting as a club gives them the same button on
+  the same screen with no super-admin-only surface to keep in step. The command
+  line stays the operator's way in for the platform-wide sweep (`all`) and for
+  a club nobody is logged in to. There is deliberately NO Better HQ screen for
+  it: the club that has just named its competitions is the one who knows
+  whether the older seasons matter, and a sweep run for them from outside would
+  arrive with no explanation attached.
+- **`--no-group` WAS A SILENT NO-OP** in the first cut of the refactor (a
+  ternary whose branches were identical), so the flag is a real `group=False`
+  parameter on `run_grouping` now: fill the associations in and stop, for an
+  operator who does not want to touch a club's own naming. The button never
+  passes it.
+- **THE CLUB PAGE OPENS ON THE WHOLE HISTORY, not the newest season.** The
+  question it answers is which competitions the club plays in, and a club that
+  has moved between them has most of that answer outside the current year. It
+  draws a season picker and NO grade picker — the page IS the grade breakdown,
+  so a grade filter above it would be filtering the answer out.
+- **`/{slug}/competitions` is a club section, so four lists had to learn it**:
+  the Navbar's own `CLUB_SECTIONS` and `statsActive`, `SponsorFooter`'s copy and
+  `FaviconManager`'s. None is a reserved ROOT segment question — the route is
+  two segments deep — but a club page whose crest and sponsor footer go missing
+  is the same class of bug the `/videos` note records.
+- **Verified against a real Postgres** (the suite is 117 checks now: both team
+  payload shapes and a grade with no owning organisation skipped, the gap and
+  its `needs_grouping` trigger, the association and its short name stored,
+  `group=False` leaving the competitions alone, grouping then placing the
+  newly-filled grade, a second run writing nothing, a blank association not
+  erasing one held, a failed season counted rather than raised, a dry run
+  writing nothing, the two route bodies, one background task queued, a second
+  press handed the same run, a screen rejoining it, and another club's run never
+  picked up as this club's) **with a control run**: the grouping half reports
+  itself missing against the previous commit while all 89 earlier checks still
+  pass.
+- **A `check` FOR `triggered_by_user_id` NEEDS A REAL `users` ROW.** `sync_runs`
+  has a foreign key on it, so the stand-in object with an invented id every
+  other route check in this suite uses cannot start a run.
+- **Driven in Chromium** (the suite is 70 checks now: the prompt and the number
+  it names, "Not now" and the quiet line it leaves, the dismissal surviving a
+  reload and clearing bringing it back, the POST on the wire, the bar carrying
+  a real percentage and MOVING between two reads, the season it is on, the
+  result naming what it did, no prompt at all for a club with nothing to fetch,
+  and the public page's competitions, records and grades at 1440 and 390 with a
+  grade measured as sitting inside its own competition's card) **with a control
+  run**: 23 of the 70 fail against the previous commit.
+- **THE FINISHED JOB'S OWN RESULT WENT MISSING, AND ONLY THE BROWSER FOUND
+  IT.** `CompetitionManager.load()` put the whole section back into its loading
+  state on every refresh, so the panel's `onDone` unmounted the very component
+  that was about to report. The spinner belongs to the FIRST load; a refresh
+  after an edit swaps the data in place, which also stops every assign, rename
+  and delete blanking the section on its way through.
+- **A CONTROL RUN MUST REPORT, NOT CRASH.** The first cut clicked "Not now"
+  unguarded, so the control run died on a missing button after two failures and
+  said nothing about the other twenty-one. Every interaction in that block is
+  behind a presence check now, and "the bar moved" treats a locator that finds
+  nothing from the start as a failure rather than as an unchanged bar.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

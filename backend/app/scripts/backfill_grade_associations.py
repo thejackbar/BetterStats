@@ -16,6 +16,13 @@ This script is the retroactive half, for the history an incremental run no
 longer reaches — and it is cheap: ONE call per season, not per grade, because
 the teams payload carries every grade the club played that year.
 
+**A club admin can now run this themselves**, from the Competitions panel on
+Manage Grades, and the work is the same function either way
+(``services/competition_grouping.run_grouping``). This script stays as the
+operator's way in: it takes ``all``, it has a dry run, and it needs nobody
+logged in. Do not reimplement the walk here — a second copy is how the button
+and the command line start disagreeing about what grouping means.
+
 Verified live against Applecross's oldest season (Summer 1975/76), so a club's
 whole history is reachable. A club onboarded after this shipped has nothing to
 fix; its grades get the association at creation.
@@ -43,13 +50,11 @@ from __future__ import annotations
 import asyncio
 import sys
 import uuid
-from collections import Counter
 
 from sqlalchemy import text
 
 from app.models.db import async_session_maker
-from app.services import playhq_client
-from app.services.competitions import seed_competitions_for_org
+from app.services import competition_grouping as grouping
 
 
 async def _orgs(db, org_ref: str) -> list[dict]:
@@ -72,92 +77,37 @@ async def _backfill_org(db, org, apply: bool, group: bool) -> dict:
     org_id = str(org["id"])
     print(f"\nClub: {org['name']} ({org_id})")
 
-    seasons = (await db.execute(
-        text(
-            """
-            SELECT s.id, s.name, COALESCE(s.grassroots_id, CAST(s.id AS TEXT)) AS guid,
-                   COUNT(gr.id) FILTER (WHERE gr.association_id IS NULL) AS unfilled
-              FROM seasons s
-              LEFT JOIN grades gr ON gr.season_id = s.id
-             WHERE s.organisation_id = CAST(:org AS UUID)
-             GROUP BY s.id
-            HAVING COUNT(gr.id) FILTER (WHERE gr.association_id IS NULL) > 0
-             ORDER BY s.year DESC NULLS LAST
-            """
-        ),
-        {"org": org_id},
-    )).mappings().all()
-
-    if not seasons:
-        print("  Every grade already carries its association. Nothing to do.")
-        filled = 0
-    else:
-        print(f"  {len(seasons)} season(s) hold a grade with no association.")
-        # The CA organisation GUID the API is keyed on. A club's own row id IS
-        # that GUID (organisations.id is the CA org id), so no lookup is needed.
-        filled = 0
-        by_assoc: Counter = Counter()
-        for season in seasons:
-            teams = await playhq_client.get_teams(org_id, season["guid"])
-            # grade GUID -> owningOrganisation, from every grade shape the
-            # payload uses (a team carries `grade` and/or `grades`).
-            found: dict[str, dict] = {}
-            for team in teams:
-                candidates = list(team.get("grades") or [])
-                if team.get("grade"):
-                    candidates.append(team["grade"])
-                for grade in candidates:
-                    guid = ((grade or {}).get("id") or "").strip()
-                    owner = (grade or {}).get("owningOrganisation") or {}
-                    if guid and owner.get("id"):
-                        found[guid] = owner
-            if not found:
-                print(f"    {season['name']}: CA reported no association. Left alone.")
-                continue
-            for guid, owner in found.items():
-                by_assoc[owner.get("name") or owner["id"]] += 1
-                if not apply:
-                    continue
-                res = await db.execute(
-                    text(
-                        """
-                        UPDATE grades gr
-                           SET association_id = :aid,
-                               association_name = COALESCE(:aname, gr.association_name),
-                               association_short_name = COALESCE(:ashort, gr.association_short_name)
-                          FROM seasons s
-                         WHERE s.id = gr.season_id
-                           AND s.organisation_id = CAST(:org AS UUID)
-                           AND gr.grassroots_id = :guid
-                           AND gr.association_id IS DISTINCT FROM :aid
-                        """
-                    ),
-                    {
-                        "aid": owner["id"],
-                        "aname": (owner.get("name") or "").strip() or None,
-                        "ashort": (owner.get("shortName") or "").strip() or None,
-                        "org": org_id,
-                        "guid": guid,
-                    },
-                )
-                filled += res.rowcount or 0
-        for name, count in by_assoc.most_common():
-            print(f"    {count:4d} grade(s)  {name}")
-
-    grouped = {}
-    if apply:
-        await db.commit()
-        if group:
-            grouped = await seed_competitions_for_org(db, org["id"])
-            await db.commit()
-            print(
-                f"  Grouped: {grouped.get('competitions_created', 0)} competition(s) created, "
-                f"{grouped.get('grades_assigned', 0)} grade(s) assigned."
-            )
-        print(f"  Applied: {filled} grade row(s) updated.")
-    else:
+    if not apply:
+        # A dry run reports the same gap the admin screen reads, so the two
+        # can never disagree about how much there is to do.
+        gap = await grouping.grouping_gap(db, org["id"])
+        print(f"  {gap['seasons_missing']} season(s) hold a grade with no association.")
+        print(f"  {gap['grades_ungrouped']} grade name(s) are in no competition.")
         print("  DRY RUN — nothing written. Re-run with --apply.")
-    return {"filled": filled, **grouped}
+        return {"filled": 0}
+
+    async def progress(done: int, total: int, phase: str) -> None:
+        if total:
+            print(f"  [{done:>3}/{total}] {phase}")
+
+    result = await grouping.run_grouping(
+        org["id"], progress=progress, apply=True, group=group,
+    )
+    print(
+        f"  Applied: {result['grades_filled']} grade row(s) updated across "
+        f"{result['seasons_checked']} season(s), "
+        f"{result['associations_found']} association(s) found."
+    )
+    if result["seasons_failed"]:
+        print(f"  {result['seasons_failed']} season(s) could not be read from CA.")
+    if group:
+        print(
+            f"  Grouped: {result['competitions_created']} competition(s) created, "
+            f"{result['grades_assigned']} grade(s) assigned."
+        )
+    else:
+        print("  Grouping skipped (--no-group).")
+    return {"filled": result["grades_filled"]}
 
 
 async def run(org_ref: str, apply: bool, group: bool) -> int:

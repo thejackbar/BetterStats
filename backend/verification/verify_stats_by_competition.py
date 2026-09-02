@@ -82,6 +82,20 @@ except ImportError as exc:  # pragma: no cover - control run only
     comp_svc = None
     DOWNGRADE = STATEMENTS = []
 
+# The in-app grouping job is its own guard, so a control run against the
+# commit that shipped the filter but not the button still runs every check
+# above and reports only this half as missing.
+try:
+    from app.services import competition_grouping as grouping
+    from app.routers.admin import (
+        competition_grouping_state, start_competition_grouping,
+    )
+    HAVE_GROUPING = True
+except ImportError as exc:  # pragma: no cover - control run only
+    HAVE_GROUPING = False
+    MISSING.append(str(exc))
+    grouping = None
+
 DB = os.environ["DATABASE_URL"]
 engine = create_async_engine(DB, echo=False)
 Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -937,6 +951,207 @@ async def main() -> None:
         empty = await get_org_grade_categories(str(uuid.uuid4()), session)
         check("a club with no competitions is offered no filter at all",
               empty["available_competitions"] == [], str(empty))
+
+    # ------------------------------------------------------------------
+    # The in-app grouping job.
+    #
+    # An incremental sync only scans the seasons that could still have been in
+    # play, so an established club's older seasons carry grades with no
+    # association at all — and a grade with no association cannot be put in a
+    # competition. This is the club's own way to close that, and the command
+    # line runs the same function, so both are checked here at once.
+    # ------------------------------------------------------------------
+    print("\n-- the in-app grouping job --")
+    if not HAVE_GROUPING:
+        check("the grouping job is built at all", False, "; ".join(MISSING))
+    else:
+        # A team carries its grade as `grade` and/or `grades`, so both shapes
+        # are read. A grade CA reports with no owning organisation is skipped
+        # rather than stored blank.
+        found = grouping._associations_from_teams([
+            {"grade": {"id": "g1", "owningOrganisation": {"id": A_WASTCA, "name": "WASTCA"}}},
+            {"grades": [{"id": "g2", "owningOrganisation": {"id": A_PSWL, "name": "PSWL"}}]},
+            {"grade": {"id": "g3"}},
+            {"grade": None},
+            {},
+        ])
+        check("a team's association is read from `grade` and from `grades`",
+              found.get("g1", {}).get("id") == A_WASTCA
+              and found.get("g2", {}).get("id") == A_PSWL, str(found))
+        check("a grade CA gives no owning organisation for is skipped, not blanked",
+              "g3" not in found, str(found))
+
+        # The kind this job writes must never read as the full historical sync
+        # the Setup Wizard waits on, and must not be resumed behind an admin's
+        # back by the restart self-heal.
+        root = Path(__file__).resolve().parent.parent
+        ca_py = (root / "app" / "routers" / "club_admin.py").read_text()
+        main_py = (root / "app" / "main.py").read_text()
+        check("its sync_runs kind is not one the Setup Wizard reads as a full sync",
+              f'"{grouping.RUN_KIND}"' not in ca_py.split("_FULL_SYNC_KINDS = ")[1].split(")")[0])
+        check("and the restart self-heal never resumes it",
+              grouping.RUN_KIND not in main_py)
+
+        async with Session() as session:
+            # Put the club back where a real one is: one grade Cricket
+            # Australia has never told us the association for.
+            await session.execute(text(
+                "UPDATE grades SET association_id = NULL, association_name = NULL,"
+                " competition_id = NULL WHERE id = :g"), {"g": G_UNGROUPED})
+            await session.commit()
+
+            gap = await grouping.grouping_gap(session, ACC)
+            check("the gap names the season holding a grade with no association",
+                  gap["seasons_missing"] >= 1, str(gap))
+            check("so the club is offered the job",
+                  gap["needs_grouping"] is True, str(gap))
+            check("and the wider un-grouped grade count is reported for context",
+                  gap["grades_ungrouped"] >= 1, str(gap))
+            check("no run in flight reads as none",
+                  await grouping.running_run_id(session, ACC) is None)
+
+        # Cricket Australia, stubbed. The real call is one per season; what
+        # matters here is what the walk does with what comes back.
+        real_get_teams = grouping.playhq_client.get_teams
+        guid = str(G_UNGROUPED)
+        async with Session() as session:
+            guid = (await session.execute(text(
+                "SELECT COALESCE(grassroots_id, CAST(id AS TEXT)) FROM grades WHERE id = :g"
+            ), {"g": G_UNGROUPED})).scalar()
+
+        async def teams_ok(org_id, season_guid):
+            return [{"grade": {"id": guid, "owningOrganisation": {
+                "id": A_WASTCA, "name": "WA Suburban Turf Cricket Association",
+                "shortName": "WASTCA"}}}]
+
+        calls: list[tuple] = []
+
+        async def progress(done, total, phase):
+            calls.append((done, total, phase))
+
+        grouping.playhq_client.get_teams = teams_ok
+        try:
+            # --no-group / group=False: fill the associations in and stop, for
+            # an operator who does not want to touch a club's own naming.
+            res = await grouping.run_grouping(ACC, progress=progress, group=False)
+            check("the association is fetched and filled in",
+                  res["grades_filled"] == 1, str(res))
+            check("group=False leaves the club's competitions alone",
+                  res["competitions_created"] == 0 and res["grades_assigned"] == 0,
+                  str(res))
+            check("the progress callback starts at 0 and ends at the total",
+                  calls and calls[0][0] == 0 and calls[-1][0] == calls[-1][1],
+                  str(calls))
+            async with Session() as session:
+                row = (await session.execute(text(
+                    "SELECT association_id, association_short_name, competition_id"
+                    " FROM grades WHERE id = :g"), {"g": G_UNGROUPED})).mappings().first()
+                check("the association and its short name are both stored",
+                      row["association_id"] == A_WASTCA
+                      and row["association_short_name"] == "WASTCA", str(dict(row)))
+                check("and the grade is still in no competition, as asked",
+                      row["competition_id"] is None, str(dict(row)))
+
+            # The button's own path: fill, then group what that unlocks.
+            res = await grouping.run_grouping(ACC)
+            check("grouping then puts the newly-filled grade in a competition",
+                  res["grades_assigned"] >= 1, str(res))
+            async with Session() as session:
+                after = await grouping.grouping_gap(session, ACC)
+                check("and the club is no longer offered the job",
+                      after["needs_grouping"] is False, str(after))
+
+            # Safe to run twice, which is what lets the button carry no warning.
+            again = await grouping.run_grouping(ACC)
+            check("a second run over a finished club writes nothing at all",
+                  again["grades_filled"] == 0
+                  and again["competitions_created"] == 0
+                  and again["grades_assigned"] == 0, str(again))
+
+            # An association CA omits must never erase one we already hold.
+            async def teams_blank(org_id, season_guid):
+                return [{"grade": {"id": guid, "owningOrganisation": {}}}]
+
+            async with Session() as session:
+                await session.execute(text(
+                    "UPDATE grades SET association_id = NULL WHERE id = :g"),
+                    {"g": G_UNGROUPED})
+                await session.commit()
+            grouping.playhq_client.get_teams = teams_blank
+            res = await grouping.run_grouping(ACC)
+            check("an association CA omits is skipped rather than stored blank",
+                  res["grades_filled"] == 0, str(res))
+
+            # One season's upstream hiccup is not the job.
+            async def teams_fail(org_id, season_guid):
+                raise RuntimeError("CA said no")
+
+            grouping.playhq_client.get_teams = teams_fail
+            res = await grouping.run_grouping(ACC)
+            check("a season Cricket Australia will not answer for is counted, not raised",
+                  res["seasons_failed"] == res["seasons_checked"] >= 1, str(res))
+
+            # A dry run reads the same gap the screen does and writes nothing.
+            grouping.playhq_client.get_teams = teams_ok
+            res = await grouping.run_grouping(ACC, apply=False)
+            check("a dry run reports the seasons and writes nothing",
+                  res["seasons_checked"] >= 1 and res["grades_filled"] == 0, str(res))
+            async with Session() as session:
+                still = (await session.execute(text(
+                    "SELECT association_id FROM grades WHERE id = :g"),
+                    {"g": G_UNGROUPED})).scalar()
+                check("so the grade is still exactly where the dry run found it",
+                      still is None, str(still))
+
+            # ---- the two route bodies -------------------------------------
+            async with Session() as session:
+                club = await session.get(Organisation, ACC)
+                # A real row: sync_runs.triggered_by_user_id is a foreign key,
+                # so a stand-in object with an invented id cannot start a run.
+                admin_id = uuid.uuid4()
+                await session.execute(text(
+                    "INSERT INTO users (id, username, failed_login_count)"
+                    " VALUES (:i, :u, 0)"),
+                    {"i": admin_id, "u": f"grouping-{admin_id.hex[:8]}"})
+                await session.commit()
+                user = type("U", (), {"id": admin_id})()
+                state = await competition_grouping_state(session, user, club)
+                check("the state endpoint carries the gap and the live run together",
+                      "needs_grouping" in state and "running_run_id" in state,
+                      str(state))
+                check("and says there is work again, now the association is gone",
+                      state["needs_grouping"] is True, str(state))
+
+                from fastapi import BackgroundTasks
+                bg = BackgroundTasks()
+                started = await start_competition_grouping(bg, session, user, club)
+                check("starting the job hands back a run id to poll",
+                      started["status"] == "started" and started["run_id"],
+                      str(started))
+                check("and queues exactly one background task to do it",
+                      len(bg.tasks) == 1, str(bg.tasks))
+
+                second = await start_competition_grouping(BackgroundTasks(), session, user, club)
+                check("a club with one in flight is handed THAT run, never a second",
+                      second["status"] == "already_running"
+                      and second["run_id"] == started["run_id"], str(second))
+
+                live = await competition_grouping_state(session, user, club)
+                check("so a screen reloading mid-run rejoins the same job",
+                      live["running_run_id"] == started["run_id"], str(live))
+
+                await session.execute(text(
+                    "UPDATE sync_runs SET status = 'success' WHERE id = CAST(:r AS UUID)"),
+                    {"r": started["run_id"]})
+                await session.commit()
+                check("and a finished run stops being offered as live",
+                      await grouping.running_run_id(session, ACC) is None)
+
+                other_club = await session.get(Organisation, OTHER)
+                check("another club's run is never picked up as this club's",
+                      await grouping.running_run_id(session, other_club.id) is None)
+        finally:
+            grouping.playhq_client.get_teams = real_get_teams
 
     print(f"\n{PASS} passed, {FAIL} failed")
     for f in FAILURES:

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, text
 from sqlalchemy.exc import IntegrityError
@@ -1395,6 +1395,59 @@ async def reorder_club_competitions(
     await comp_svc.reorder_competitions(db, club.id, req.competition_ids)
     await db.commit()
     return {"status": "reordered"}
+
+
+@router.get("/competitions/grouping")
+async def competition_grouping_state(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+    club: Organisation = Depends(get_current_club),
+):
+    """Is anything still outside this club's competitions, and is a job running.
+
+    Read on every visit to Manage Grades, which is what turns the prompt on
+    the moment an admin finishes naming their competitions. A club with
+    nothing to fetch reports `needs_grouping: false` and the screen offers
+    nothing, because a button that would write nothing is worse than no
+    button.
+    """
+    from app.services import competition_grouping as grouping
+    state = await grouping.grouping_gap(db, club.id)
+    state["running_run_id"] = await grouping.running_run_id(db, club.id)
+    return state
+
+
+@router.post("/competitions/grouping")
+async def start_competition_grouping(
+    background: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_cap(MANAGE_MERGES)),
+    club: Organisation = Depends(get_current_club),
+):
+    """Fetch the missing associations and group what that unlocks.
+
+    One Cricket Australia call per season, so it runs in the background and
+    the screen polls `GET /club-admin/sync-runs/{id}` for the bar. Returns the
+    run id either way: a club that already has one in flight is handed THAT
+    run rather than a second one, so two admins pressing the button at the
+    same moment watch the same job instead of racing each other's writes.
+
+    Safe to run twice by construction, so there is no confirm on it: only a
+    grade with no association is written, and the seeder never renames or
+    re-points a competition the club has edited.
+    """
+    from app.services import competition_grouping as grouping
+    from app.services.sync import start_sync_run
+
+    existing = await grouping.running_run_id(db, club.id)
+    if existing:
+        return {"run_id": existing, "status": "already_running"}
+
+    run_id = await start_sync_run(
+        club.id, grouping.RUN_KIND, triggered_by_user_id=current_user.id,
+    )
+    background.add_task(grouping.run_grouping_job, club.id, run_id)
+    return {"run_id": str(run_id), "status": "started"}
 
 
 @router.post("/competitions/seed")

@@ -240,6 +240,14 @@ export const api = {
     }),
   adminSeedCompetitions: () =>
     request('/admin/competitions/seed', { method: 'POST' }),
+  // Is anything still outside the club's competitions, and is a job running.
+  // Read on every visit to Manage Grades, so the prompt appears the moment an
+  // admin finishes naming their competitions.
+  adminCompetitionGrouping: () => request('/admin/competitions/grouping'),
+  // Starts the background job and hands back a run id to poll through
+  // adminGetSyncRun. A club that already has one in flight gets THAT run.
+  adminStartCompetitionGrouping: () =>
+    request('/admin/competitions/grouping', { method: 'POST' }),
   getOrgGrades: (orgId, seasonId) => {
     const params = new URLSearchParams()
     if (seasonId) params.set('season_id', seasonId)

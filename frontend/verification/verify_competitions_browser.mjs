@@ -321,6 +321,13 @@ for (const [name, path] of [
       return json({ id: 'u1', username: 'admin', role: 'club_admin', club_id: CLUB.id,
         capabilities: ['*'], entitlements: { modules: ['stats'], status: 'active' } })
     }
+    if (/^\/admin\/competitions\/grouping$/.test(p)) {
+      // Nothing to fetch. This block's own check asserts the prompt is
+      // therefore not drawn at all.
+      return json({ needs_grouping: false, seasons_missing: 0, grades_ungrouped: 1,
+                    competitions: comps.length, competitions_edited: false,
+                    running_run_id: null })
+    }
     if (/^\/admin\/competitions$/.test(p) && method === 'GET') {
       return json({ competitions: comps, grades,
                     associations: comps.map(c => ({ association_id: c.id, name: c.association_name, short_name: '', grade_count: c.grade_count })) })
@@ -359,6 +366,10 @@ for (const [name, path] of [
     /Suburban Turf/.test(await body()) && /Scorchers/.test(await body()))
   ck('and the grades that are in no competition, rather than hiding them',
     /Not in a competition/i.test(await body()) && /Old Colts Cup/.test(await body()))
+  // A button that would write nothing is worse than no button.
+  ck('a club with nothing left to fetch is offered no grouping prompt',
+    await page.locator('[data-testid="grouping-prompt"]').count() === 0
+    && await page.locator('[data-testid="grouping-quiet"]').count() === 0)
 
   const hasManager = /Not in a competition/i.test(await body())
 
@@ -427,6 +438,199 @@ for (const [name, path] of [
   ck('and accepting sends the delete',
     calls.some(c => c.method === 'DELETE'), JSON.stringify(calls))
   ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ------------------------------- grouping the seasons a sync no longer reaches
+
+{
+  console.log('\nManage Grades -> the grouping prompt and its progress bar')
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1600 } })
+  const page = await ctx.newPage()
+  const errors = []
+  const calls = []
+  page.on('pageerror', (e) => errors.push(String(e)))
+
+  // The run MUTATES as it is polled, because a stub that answers the same
+  // thing every time cannot tell a working progress bar from a frozen one.
+  let started = false
+  let polls = 0
+  let seasonsMissing = 12
+
+  await page.route('**/api/**', async (route) => {
+    const req = route.request()
+    const url = new URL(req.url())
+    const p = url.pathname.replace(/^\/api/, '')
+    const method = req.method()
+    calls.push({ path: p, method })
+    const json = (b) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(b) })
+
+    if (/^\/auth\/me/.test(p)) {
+      return json({ id: 'u1', username: 'admin', role: 'club_admin', club_id: CLUB.id,
+        capabilities: ['*'], entitlements: { modules: ['stats'], status: 'active' } })
+    }
+    if (/^\/admin\/competitions\/grouping$/.test(p) && method === 'POST') {
+      started = true
+      return json({ run_id: 'run-1', status: 'started' })
+    }
+    if (/^\/admin\/competitions\/grouping$/.test(p)) {
+      return json({ needs_grouping: seasonsMissing > 0, seasons_missing: seasonsMissing,
+                    grades_ungrouped: 3, competitions: 3, competitions_edited: true,
+                    running_run_id: null })
+    }
+    if (/sync-runs\//.test(p)) {
+      polls += 1
+      // Two polls running, then done — enough to prove the bar moves and then
+      // gives way to the result, without the check waiting on a real job.
+      if (polls <= 2) {
+        seasonsMissing = 12
+        return json({ id: 'run-1', kind: 'competition_grouping', status: 'running',
+                      stats: { progress_pct: polls === 1 ? 25 : 75, progress_done: polls * 3,
+                               progress_total: 12, progress_phase: 'Season Summer 2014/15' },
+                      error: null })
+      }
+      seasonsMissing = 0
+      return json({ id: 'run-1', kind: 'competition_grouping', status: 'success',
+                    stats: { seasons_checked: 12, seasons_failed: 0, grades_filled: 9,
+                             associations_found: 2, competitions_created: 1, grades_assigned: 4 },
+                    error: null })
+    }
+    if (/^\/admin\/competitions$/.test(p)) {
+      return json({ competitions: COMPETITIONS, grades: [], associations: [] })
+    }
+    if (/grades-with-stats/.test(p)) return json([])
+    if (/settings/.test(p)) return json({ id: CLUB.id, name: CLUB.name })
+    return json([])
+  })
+
+  await page.goto(`${BASE}/admin/grades`, { waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1600)
+  const body = () => page.locator('body').innerText()
+
+  const prompt = page.locator('[data-testid="grouping-prompt"]')
+  ck('the club is told its older seasons sit outside its competitions',
+    await prompt.count() > 0)
+  ck('and the number is the seasons the job can actually act on',
+    /12 seasons sit outside your competitions/i.test(await body()),
+    (await body()).slice(0, 300))
+
+  // Every interaction below is guarded, so a CONTROL RUN against the previous
+  // commit reports each check as failed rather than dying on a locator for a
+  // control that does not exist yet.
+  const built = await prompt.count() > 0
+
+  // "Come back later" — the offer is dismissed, never gone.
+  if (built) {
+    await page.locator('button', { hasText: /^Not now$/ }).first().click()
+    await page.waitForTimeout(400)
+  }
+  ck('"Not now" puts the prompt away',
+    built && await page.locator('[data-testid="grouping-prompt"]').count() === 0)
+  ck('but the offer stays as one quiet line, so it can be said yes to later',
+    await page.locator('[data-testid="grouping-quiet"]').count() > 0)
+
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1400)
+  ck('and the dismissal survives a reload, per person',
+    built
+    && await page.locator('[data-testid="grouping-prompt"]').count() === 0
+    && await page.locator('[data-testid="grouping-quiet"]').count() > 0)
+
+  // Clear it back so the rest of the checks drive the full prompt.
+  await page.evaluate(() => {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('bs_pref_competition_grouping_dismissed')) localStorage.removeItem(k)
+    }
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(1400)
+  ck('clearing the dismissal brings the prompt back',
+    built && await page.locator('[data-testid="grouping-prompt"]').count() > 0)
+
+  calls.length = 0
+  if (await page.locator('button', { hasText: /Group them now/i }).count()) {
+    await page.locator('button', { hasText: /Group them now/i }).first().click()
+    await page.waitForTimeout(600)
+  }
+  const post = calls.find(c => c.method === 'POST' && /grouping$/.test(c.path))
+  ck('pressing it starts the job on the wire', !!post && started, JSON.stringify(post))
+
+  const bar = page.locator('[role="progressbar"]')
+  ck('a progress bar is drawn while it runs', await bar.count() > 0)
+  const firstPct = await bar.count()
+    ? await bar.first().getAttribute('aria-valuenow') : null
+  ck('carrying the real percentage, not a spinner',
+    firstPct === '25' || firstPct === '75', String(firstPct))
+  // A locator that finds nothing must read as a failure, never as a pass on
+  // an unchanged bar.
+  const moved = (a, b) => a !== null && b !== null && Number(b) > Number(a)
+  ck('and it names the season it is on, so a long job is not a blank wait',
+    /Season Summer/i.test(await body()), (await body()).slice(0, 400))
+
+  // The bar has to MOVE. A check that reads it once cannot tell a live job
+  // from a frozen one.
+  await page.waitForTimeout(2400)
+  const secondPct = await page.locator('[role="progressbar"]').first()
+    .getAttribute('aria-valuenow').catch(() => null)
+  ck('the bar moves as the job polls',
+    // Gone entirely is the job having finished between the two reads, which
+    // is the bar having moved all the way. Absent from the start is not.
+    moved(firstPct, secondPct) || (firstPct !== null && secondPct === null),
+    `${firstPct} -> ${secondPct}`)
+
+  await page.waitForTimeout(3000)
+  ck('and when it finishes it says what it actually did',
+    await page.locator('[data-testid="grouping-result"]').count() > 0)
+  ck('naming the grades filled in and the grades grouped',
+    /9 grades filled in/i.test(await body()) && /4 grades grouped/i.test(await body()),
+    (await body()).slice(0, 500))
+  ck('the prompt is gone once there is nothing left to fetch',
+    await page.locator('[data-testid="grouping-prompt"]').count() === 0)
+  ck('no page errors', errors.length === 0, errors.join(' | '))
+  await ctx.close()
+}
+
+// ---------------------------------------------- the public Competitions page
+
+for (const width of [1440, 390]) {
+  console.log(`\nThe club's Competitions page at ${width}px`)
+  const { page, ctx, errors, calls } = await open('/applecross/competitions', { width })
+  const body = await page.locator('body').innerText()
+
+  ck(`${width}: the page asks for the club's own breakdown`,
+    calls.some(c => /organisations\/[^/]+\/competitions$/.test(c.path)),
+    JSON.stringify(calls.map(c => c.path).slice(0, 6)))
+  ck(`${width}: every competition the club plays is drawn`,
+    /Suburban Turf/.test(body) && /Scorchers/.test(body) && /Integrated/.test(body))
+  ck(`${width}: with the club's record in each`,
+    /70/.test(body) && /53\.8%/.test(body), body.slice(0, 400))
+  // The TEAM half: a grade under its own competition is what separates a side
+  // playing in more than one inside a single season.
+  ck(`${width}: and every grade listed under its own competition`,
+    /1st Grade/.test(body) && /One Day Grade 2/.test(body) && /PSWL South A/.test(body))
+  ck(`${width}: no page errors`, errors.length === 0, errors.join(' | '))
+
+  if (width === 390) {
+    const overflow = await page.evaluate(() =>
+      document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    ck('no horizontal overflow at 390px', overflow <= 0, `${overflow}px`)
+  } else {
+    // A grade must land under the competition it belongs to, not merely
+    // somewhere on the page — measured off the two real boxes.
+    const placed = await page.evaluate(() => {
+      const cards = [...document.querySelectorAll('table')]
+      const owner = cards.find(t => /PSWL South A/.test(t.innerText))
+      if (!owner) return null
+      const card = owner.closest('div')?.parentElement
+      return card ? /Scorchers/.test(card.innerText) && !/1st Grade/.test(owner.innerText) : null
+    })
+    ck('a grade sits inside its own competition\'s card, not just on the page',
+      placed === true, String(placed))
+    // The Stats menu is where a reader would look for it.
+    ck('and the Stats menu offers it',
+      await page.locator('a[href="/applecross/competitions"]').count() > 0
+      || /Competitions/.test(body))
+  }
   await ctx.close()
 }
 

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
 import { api } from '../lib/api'
 
-const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'yearbook', 'yearbooks', 'games', 'website']
+const CLUB_SECTIONS = ['dashboard', 'players', 'leaderboard', 'records', 'compare', 'statlab', 'competitions', 'yearbook', 'yearbooks', 'games', 'website']
 // Single-segment paths that are NOT club slugs (must stay in sync with App.jsx routes)
 const RESERVED_ROOT_SEGMENTS = new Set([
   'login', 'admin', 'onboard', 'club-inactive',

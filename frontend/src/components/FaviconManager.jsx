@@ -13,7 +13,7 @@ import { setClubFavicon, setDefaultFavicon } from '../lib/favicon'
 // /:clubSlug/* routes in App.jsx).
 const CLUB_SECTIONS = new Set([
   'players', 'compare', 'leaderboard', 'records', 'ladders',
-  'statlab', 'games', 'yearbook', 'website',
+  'statlab', 'competitions', 'games', 'yearbook', 'website',
 ])
 // Single-segment paths that are NOT club slugs (marketing + app routes).
 const RESERVED_ROOTS = new Set([
