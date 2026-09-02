@@ -343,7 +343,7 @@ BLOG_POSTS: list[dict] = [
         ],
         "faq": [
             {"q": "Is BetterCricket a replacement for PlayHQ?", "a": "No. PlayHQ is the official competition platform for registration, fixtures and scoring. BetterCricket sits on top of it and adds the club website, history, stats and analytics."},
-            {"q": "Can BetterCricket read my PlayHQ data?", "a": "BetterCricket brings your club's match history in and keeps it current automatically, so you never have to enter anything twice."},
+            {"q": "I already record everything in PlayHQ. Do I have to do it again?", "a": "No. BetterCricket always keeps all of your match data, player profiles, leaderboards and your yearbooks current."},
             {"q": "How much does each one cost?", "a": "PlayHQ has no mandatory club setup fee and is funded through registration and small transaction fees, including a National Registration Fee. BetterCricket is a flat annual rate per club, from $399 for the Core, the same for one team or fifty."},
             {"q": "Do I still score in PlayHQ?", "a": "Yes. Nothing about your match day changes. BetterCricket reads the finished scorecards and updates your stats after every game."},
         ],
