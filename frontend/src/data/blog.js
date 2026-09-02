@@ -1,5 +1,214 @@
 export const POSTS = [
   {
+    slug: `strike-rates-when-balls-faced-data-is-incomplete`,
+    title: `Strike Rates, Economy Rates and Incomplete Balls Faced Data`,
+    date: `2026-09-02`,
+    image: `/marketing/blog/batting-average.jpg`,
+    description: `Most clubs only started counting balls faced in the last decade or two. Here is what that does to a career strike rate, why a partial figure is worse than none, and how BetterCricket handles it.`,
+    readTime: `6 min read`,
+    content: [
+      {
+        type: `p`,
+        text: `Balls faced is a recent habit in club cricket. It was never part of the traditional scorecard line, and most competitions only began asking for it per batter in the last decade or two. One club we work with counts it from 2013, and only in some of the grades they played that season. That leaves a real question for anyone building a records page: what do you do with a strike rate when you hold every run a player ever scored, but only some of the balls?`,
+      },
+      {
+        type: `h2`,
+        text: `What a strike rate needs that an average does not`,
+      },
+      {
+        type: `p`,
+        text: `A batting average needs runs scored and times dismissed. Both are on every scorecard a club has ever kept, so averages hold good as far back as the records go.`,
+      },
+      {
+        type: `p`,
+        text: `A strike rate needs runs and balls faced. An economy rate needs runs conceded and overs bowled. Bowling is usually in better shape, because overs have always been part of the O-M-R-W line. Batting has a genuine hole in it: the older scorebook says what a player made and how he got out, and nothing about how long he took over it.`,
+      },
+      {
+        type: `h2`,
+        text: `What happens if you divide anyway`,
+      },
+      {
+        type: `p`,
+        text: `Add up every run and divide by every ball on file, and the top of the sum covers a whole career while the bottom covers only part of it.`,
+      },
+      {
+        type: `p`,
+        text: `Take a player with 5,000 club runs, 2,000 of which came after his competition started counting balls, off 2,500 balls. Divide 5,000 by 2,500 and the strike rate reads 200. His actual rate across the recorded period is 80. No grade cricketer has produced 200 over a career, and the longer the career the more absurd the figure gets. The players a club's honour board exists for come out worst of all.`,
+      },
+      {
+        type: `h2`,
+        text: `The obvious fix, and why it does not hold`,
+      },
+      {
+        type: `p`,
+        text: `The tempting answer is to work the rate out from only the covered seasons and put a note underneath it. We have thought about that carefully and we do not do it, for five reasons.`,
+      },
+      {
+        type: `ul`,
+        items: [
+          `It is not his strike rate. It is the rate across whichever slice of his career fell after the scorers changed their habits, and that slice was chosen by bookkeeping rather than by cricket.`,
+          `It does not simply lose precision, it leans one way. A long-serving player's covered window is his late career, when he was slower. A young player's window is all of it.`,
+          `Two figures under one heading look comparable when they are not. A rate covering four seasons sits in a list beside one covering twenty and reads as the same measurement.`,
+          `The caveat does not travel with the number. The figure ends up on the club Facebook page, in the yearbook and read out at presentation night. The footnote stays behind on the web page.`,
+          `There is no single clean date to caveat. Coverage varies by season, by grade, and by whether a given card was ever fully entered, so the note would itself be an approximation of a mess.`,
+        ],
+      },
+      {
+        type: `p`,
+        text: `The second one is what catches clubs out. Balls faced started being recorded around the time limited-overs and Twenty20 cricket grew and scoring rates rose generally, so the covered window is not a neutral sample of a long career. It is the slow end of it.`,
+      },
+      {
+        type: `h2`,
+        text: `But surely it can be worked around`,
+      },
+      {
+        type: `p`,
+        text: `This is the first thing every club asks, and it deserves a straight answer rather than a shrug. We are not being precious. There is a real line, and it runs between recovering a figure and inventing one. Anything we can reach by arithmetic on a number somebody actually wrote down at the time, we will use. Anything that needs an assumption about how a player batted, we will not.`,
+      },
+      {
+        type: `p`,
+        text: `These are the suggestions that come up, and where each one falls down.`,
+      },
+      {
+        type: `table`,
+        headers: [
+          `Suggested workaround`,
+          `Why we do not do it`,
+        ],
+        rows: [
+          [
+            `Estimate balls faced from time at the crease`,
+            `Minutes and balls are related but not convertible. Two batters can face very different numbers of balls in the same forty minutes, depending on who was at the other end and whether spin or pace was on.`,
+          ],
+          [
+            `Divide up the team's total overs`,
+            `The team's balls are known. How they were shared between eleven batters is the entire question, and it is the part the scorebook does not answer.`,
+          ],
+          [
+            `Apply a typical strike rate for the era or the grade`,
+            `The figure would describe the era, not the player. A record book exists to say what this bloke did.`,
+          ],
+          [
+            `Carry the recorded years back across the rest`,
+            `That assumes he batted at 22 the way he batted at 41. If that held, the data would not be needed in the first place.`,
+          ],
+          [
+            `Publish it with an asterisk, or label it indicative`,
+            `In cricket an asterisk already means not out, so it is the worst available mark. It is also the footnote problem again: the mark stays put and the number travels.`,
+          ],
+          [
+            `Rank only the players we can calculate`,
+            `That produces an all-time list containing only recent players, with nothing on the page to say who is missing.`,
+          ],
+        ],
+      },
+      {
+        type: `h2`,
+        text: `Where we draw the line`,
+      },
+      {
+        type: `p`,
+        text: `BetterCricket publishes a rate wherever both halves of it are present for the whole of what the figure describes.`,
+      },
+      {
+        type: `ul`,
+        items: [
+          `A single innings with balls faced recorded shows its own strike rate, because that scorecard is complete.`,
+          `A season with balls faced recorded throughout shows a season strike rate.`,
+          `A career or all-time figure shows a strike rate only when the balls are there for all of it.`,
+        ],
+      },
+      {
+        type: `p`,
+        text: `So a club in this position sees strike rates on recent seasons and on individual scorecards, and a blank in the career column for players whose records reach back before the counting started. A blank says we do not know. A number says we do, and that is the thing that cannot be taken back once it is on the honour board.`,
+      },
+      {
+        type: `h2`,
+        text: `What this does not affect`,
+      },
+      {
+        type: `p`,
+        text: `The gap is narrower than it first sounds. Everything below is complete for as far back as a club's records go.`,
+      },
+      {
+        type: `ul`,
+        items: [
+          `Runs, batting average, high score, fifties, hundreds and ducks`,
+          `Wickets, bowling average, best figures and five-wicket hauls`,
+          `Catches, stumpings, run-outs and games played`,
+          `Every season total and career total, however far back the club can reach`,
+        ],
+      },
+      {
+        type: `p`,
+        text: `That is the bulk of a club record book and none of it is in question here. This is one column, not the page.`,
+      },
+      {
+        type: `h2`,
+        text: `How to get the figure back`,
+      },
+      {
+        type: `p`,
+        text: `The gap closes the moment the balls exist somewhere. Two routes work, and both are recovery rather than estimation.`,
+      },
+      {
+        type: `ul`,
+        items: [
+          `Annual reports or yearbooks that printed a season strike rate per player. Balls faced can be worked straight back out of that, exactly, because it is arithmetic on a figure the club published at the time.`,
+          `Scorebooks with the balls faced column filled in but never typed up. BetterCricket's scorecard reader takes a photograph or scan of a handwritten scorebook and pulls the batting, bowling and fielding figures off it directly.`,
+        ],
+      },
+      {
+        type: `p`,
+        text: `Hand over either one and the career figure appears. Until then the field stays empty, which is the only answer we can stand behind.`,
+      },
+      {
+        type: `callout`,
+        text: `BetterCricket imports a club's full history and shows every figure it can vouch for, with nothing invented to fill a gap. Search for your club at betterat.cricket/trial to see what your own records hold.`,
+      },
+      {
+        type: `links`,
+        heading: `Related`,
+        items: [
+          {
+            label: `Understanding bowling economy rate in club cricket`,
+            href: `/blog/understanding-bowling-economy-rate-in-club-cricket`,
+          },
+          {
+            label: `What is a good batting average in club cricket?`,
+            href: `/blog/what-is-a-good-batting-average-in-club-cricket`,
+          },
+          {
+            label: `What to look for in a historical stats import`,
+            href: `/blog/merging-historical-cricket-stats-with-playhq`,
+          },
+          {
+            label: `Start your free trial`,
+            href: `/trial`,
+          },
+        ],
+      },
+    ],
+    faq: [
+      {
+        q: `Why is my club's career strike rate column empty?`,
+        a: `Because the balls faced are not on file for the whole of that player's career. Most competitions only started recording balls faced per batter in the last decade or two, so a long-serving player has runs on record from seasons where nobody counted the balls. Dividing all of his runs by only some of his balls produces a figure several times too high, so the field is left empty instead.`,
+      },
+      {
+        q: `Can BetterCricket estimate the missing balls faced?`,
+        a: `No. We will recover a figure from anything a person actually wrote down at the time, including a season strike rate printed in an old annual report, which balls faced can be derived from exactly. We will not estimate one from time at the crease, from the team's total overs, or by assuming a player batted the same way earlier in his career. A record book containing estimates stops being a record book, and once they are mixed in nobody can tell later which is which.`,
+      },
+      {
+        q: `Do bowling economy rates have the same problem?`,
+        a: `Usually not. Overs bowled have always been part of the standard O-M-R-W figures line, so wherever runs conceded are on file the overs generally are too. Where a card recorded wickets and runs but no overs, the same rule applies and the economy rate is left blank rather than calculated from a partial denominator.`,
+      },
+      {
+        q: `What can my club do to get career strike rates showing?`,
+        a: `Find the balls. Old annual reports and yearbooks that printed a per-player season strike rate are the quickest route, because the balls faced can be recovered from them exactly. Scorebooks with a balls faced column that was filled in but never entered anywhere are the other. BetterCricket's scorecard reader can take those straight from a photograph or scan.`,
+      },
+    ],
+  },
+  {
     slug: '100-years-of-cricket-history-in-one-spreadsheet',
     title: '100 Years of Club History, Sitting in One Spreadsheet',
     date: '2026-08-12',
