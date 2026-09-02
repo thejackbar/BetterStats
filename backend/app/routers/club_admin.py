@@ -37,6 +37,7 @@ from app.services import module_subscriptions as mod_subs
 from app.services import comms_limits
 from app.services import club_requests
 from app.services import club_lock
+from app.services import stats_display
 from app.services import stripe_client
 from stripe import error as stripe_error
 from datetime import date as _date, datetime as _datetime, timezone as _timezone, timedelta as _timedelta
@@ -835,6 +836,12 @@ class SettingsPatch(BaseModel):
     # When the default would leave a player with nothing (a junior who has never
     # played a senior game), show them the grades they did play (migration 229).
     stats_auto_show_played_grades: Optional[bool] = None
+    # Fewest COVERED innings/spells before a rate is published on a board.
+    # A genuine tri-state on the wire: null clears the club's preference back to
+    # the platform default, 0 switches the qualification off. So this is read
+    # through model_fields_set, not `is not None` — see patch_settings.
+    stats_min_rate_innings: Optional[int] = None
+    stats_min_rate_spells: Optional[int] = None
     # Club crest beside the club name in public page headers (migration 226).
     public_header_logo: Optional[bool] = None
     # Who may open a committee document the club uploaded (migration 218).
@@ -986,6 +993,9 @@ async def get_settings(
         ),
         "available_grade_categories": await grade_scope.org_available_categories(db, club.id),
         "stats_auto_show_played_grades": bool(club.stats_auto_show_played_grades),
+        "stats_min_rate_innings": club.stats_min_rate_innings,
+        "stats_min_rate_spells": club.stats_min_rate_spells,
+        "effective_rate_minimums": await stats_display.club_rate_minimums(db, club.id),
         "public_header_logo": bool(club.public_header_logo),
         "committee_docs_office_bearer_only": bool(club.committee_docs_office_bearer_only),
         "diary_start_month": club.diary_start_month or 7,
@@ -1059,6 +1069,11 @@ async def patch_settings(
         club.stats_grade_categories = list(picked) if picked else None
     if data.stats_auto_show_played_grades is not None:
         club.stats_auto_show_played_grades = bool(data.stats_auto_show_played_grades)
+    # Present-but-null means "back to the platform default", which `is not None`
+    # could never express — the same tri-state select_show_age_under needs.
+    for _field in ("stats_min_rate_innings", "stats_min_rate_spells"):
+        if _field in data.model_fields_set:
+            setattr(club, _field, stats_display.clean_minimum(getattr(data, _field)))
     if data.public_header_logo is not None:
         club.public_header_logo = bool(data.public_header_logo)
     if data.committee_docs_office_bearer_only is not None:

@@ -13,6 +13,14 @@ from app.services import playhq_client
 from app.services import grade_scope
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
+from app.services import rate_coverage as rc
+from app.services.aggregations import _with_rate_coverage
+
+# This record book has always set its own qualification floors (20 wickets for
+# a bowling average, 50 overs for an economy). These two are their siblings: a
+# strike rate off three innings is a real figure and not a club record.
+MIN_SEASON_SR_INNINGS = 10
+MIN_SEASON_ECON_BALLS = 300  # 50 overs, matching the all-time economy floor
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -270,7 +278,11 @@ async def get_records(
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
         rows = await db.execute(text(sql), params or p)
-        return [dict(r) for r in rows.mappings().all()]
+        # A row carrying sr_counted / econ_counted has its coverage folded into
+        # the pair every rate rides with; every other row passes through
+        # untouched, so nothing in this book changes shape for a query that
+        # never asked. See services/rate_coverage.py.
+        return [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
 
     # Whether to use per-game queries (required for grade_name or finals_only)
     # A category exclusion forces the per-game path for the same reason a
@@ -510,6 +522,46 @@ async def get_records(
             ORDER BY pss.runs DESC LIMIT :limit
         """)
 
+    # A strike rate record is SEASON by season, never all time, and it is
+    # deliberately built from per-innings rows on both paths rather than from a
+    # season aggregate. CA's season row carries every run and only the balls
+    # somebody typed in, so an all-time figure blends decades of differently
+    # scored seasons into one number nobody can check. A range of seasons is a
+    # real question and StatLab is where it gets answered — the screen says so.
+    #
+    # The floor is this record book's own, set alongside its neighbours (20
+    # wickets for a bowling average, 50 overs for an economy): a strike rate
+    # off three innings is a real figure and not a club record.
+    best_strike_rate_season = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               {rc.strike_rate_sql('bi')} AS strike_rate,
+               {rc.batting_covered_count_sql('bi')} AS sr_counted,
+               COUNT(*) AS sr_of,
+               SUM(bi.runs) FILTER (WHERE {rc.batting_covered_sql('bi')}) AS runs,
+               s.name AS season_name, s.year AS season_year
+        FROM players p {_eff_bat_join}
+        {_eff_bat_where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+        HAVING {rc.batting_covered_count_sql('bi')} >= {MIN_SEASON_SR_INNINGS}
+        ORDER BY strike_rate DESC NULLS LAST LIMIT :limit
+    """)
+
+    best_economy_season = await q(f"""
+        SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
+               {rc.economy_sql('bs')} AS economy,
+               {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+               COUNT(*) AS econ_of,
+               SUM(bs.wickets) FILTER (WHERE {rc.bowling_covered_sql('bs')}) AS wickets,
+               ROUND(SUM(bs.overs) FILTER (WHERE {rc.bowling_covered_sql('bs')}), 1) AS overs,
+               s.name AS season_name, s.year AS season_year
+        FROM players p {_eff_bowl_join}
+        {_eff_bowl_where}
+        GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
+        HAVING SUM({rc.overs_to_balls_sql('bs.overs')}) FILTER (WHERE {rc.bowling_covered_sql('bs')})
+               >= {MIN_SEASON_ECON_BALLS}
+        ORDER BY economy ASC NULLS LAST LIMIT :limit
+    """)
+
     # ── Bowling ────────────────────────────────────────────────────────────────────────
 
     if use_game_level:
@@ -590,14 +642,15 @@ async def get_records(
     if use_game_level:
         top_economy = await q(f"""
             SELECT p.id::text AS player_id, COALESCE(p.display_name_override, p.name) AS name,
-                   ROUND(SUM(bs.runs)::numeric /
-                       NULLIF(SUM(bs.overs), 0), 2) AS economy,
+                   {rc.economy_sql('bs')} AS economy,
+                   {rc.bowling_covered_count_sql('bs')} AS econ_counted,
+                   COUNT(*) AS econ_of,
                    COALESCE(SUM(bs.wickets), 0) AS wickets,
                    ROUND(SUM(bs.overs), 1) AS overs
             FROM players p {_eff_bowl_join}
             {_eff_bowl_where}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
-            HAVING SUM(bs.overs) >= 50
+            HAVING SUM(bs.overs) FILTER (WHERE {rc.bowling_covered_sql('bs')}) >= 50
             ORDER BY economy ASC LIMIT :limit
         """)
     else:
@@ -1320,6 +1373,7 @@ async def get_records(
             "most_hundreds":     most_hundreds,
             "most_ducks":        most_ducks,
             "most_runs_season":  most_runs_season,
+            "best_strike_rate_season": best_strike_rate_season,
         },
         "bowling": {
             "top_career_wickets":   top_career_wickets,
@@ -1328,6 +1382,7 @@ async def get_records(
             "top_economy":          top_economy,
             "most_five_fors":       most_five_fors,
             "most_wickets_season":  most_wickets_season,
+            "best_economy_season":  best_economy_season,
         },
         "partnerships": partnerships_flat,
         "team": {

@@ -159,7 +159,7 @@ async def _resolve_org_grade(
     in place; a re-sync finds the existing row here and returns it unchanged.
 
     ``association`` is CA's own ``grade.owningOrganisation`` — the association
-    that RUNS this grade (migration 282). It rides on the teams payload this
+    that RUNS this grade (migration 283). It rides on the teams payload this
     function is already called from, so it costs no extra request. It is
     written on an EXISTING grade too, not only a new one, which is what lets a
     plain Sync Now fill in a club's current seasons without a Full Rebuild;
@@ -1159,7 +1159,7 @@ async def _sync_organisation_impl(
                 logger.error(f"Per-grade aggregate sync failed for season {raw_season_id}: {e}\n{_tbg.format_exc()}")
                 await session.rollback()
 
-        # Group any newly-discovered grade into a competition (migration 282).
+        # Group any newly-discovered grade into a competition (migration 283).
         # Seeds one competition per association and is SKIP-DON'T-REPLACE, so a
         # club that has split or renamed its own keeps them — which is what
         # makes it safe to run on every sync rather than behind a button. Its
@@ -2438,7 +2438,12 @@ async def sync_grassroots_game_level_data(
                             game_id=match_uuid, player_id=pid, innings_number=inn_num,
                             batting_position=row.get("batOrder"),
                             runs=row.get("runsScored") or 0,
-                            balls=row.get("ballsFaced") or 0,
+                            # NULL, not 0, when CA sends no ball count. A zero
+                            # here is indistinguishable from "faced none", and
+                            # rate_coverage cannot tell a real 0(0) from a
+                            # 50-off-nothing once the count has been flattened.
+                            # See services/rate_coverage.py.
+                            balls=row.get("ballsFaced"),
                             fours=row.get("foursScored") or 0,
                             sixes=row.get("sixesScored") or 0,
                             not_out=not_out,

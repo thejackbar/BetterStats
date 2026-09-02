@@ -331,6 +331,16 @@ class Organisation(Base):
     # of zeroes (migration 229). Only ever affects the default, never an explicit
     # pick. See services/grade_scope.resolve_scope_for_player.
     stats_auto_show_played_grades = Column(Boolean, nullable=False, server_default="true", default=True)
+    # Fewest COVERED innings/spells a player needs before a strike rate or an
+    # economy is published for them on a leaderboard (migration 282). Covered
+    # means the innings carries a ball count that can carry its runs — see
+    # services/rate_coverage.py. NULL means no club preference and the platform
+    # default applies, which is 0: nothing has ever qualified these boards, and
+    # switching a number on for every club would drop players off their own
+    # leaderboard without anybody choosing it. Read through
+    # services/stats_display.py, never directly.
+    stats_min_rate_innings = Column(Integer, nullable=True)
+    stats_min_rate_spells = Column(Integer, nullable=True)
     # ─── AFL — optional public leaderboard categories (migration 217) ────────
     # Games and Goals are always shown; a club decides whether Best on Ground
     # and its two vote-tally leaderboards (Club/Competition Best & Fairest —
@@ -1232,7 +1242,7 @@ class Grade(Base):
     # than a scramble. Set across a whole grade name at once by the admin,
     # like display_name_override and category.
     display_order = Column(Integer, nullable=True)
-    # The association that runs this grade (migration 282), straight from CA's
+    # The association that runs this grade (migration 283), straight from CA's
     # `grade.owningOrganisation`. `association_id` is the association's own CA
     # organisation GUID, which is what makes two clubs' spellings of one
     # association resolve to the same thing. NULL for a grade synced before
@@ -1241,7 +1251,7 @@ class Grade(Base):
     association_id = Column(Text, nullable=True)
     association_name = Column(Text, nullable=True)
     association_short_name = Column(Text, nullable=True)
-    # The club's own competition this grade belongs to (migration 282).
+    # The club's own competition this grade belongs to (migration 283).
     # Cricket Australia does not publish a competition level, so this is a
     # named group of grades the club owns — seeded one per association, split
     # and renamed by the club where one association runs several competitions.

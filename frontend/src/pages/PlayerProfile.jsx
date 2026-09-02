@@ -1,3 +1,4 @@
+import { RateMark, RateFootnote, RateNote, isPartial } from '../components/RateCoverage'
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
@@ -453,7 +454,7 @@ function BowlingTab({ bowling, seasonStats }) {
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}<RateMark coverage={s.economy_coverage} unit="spells" /></td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_fors)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
                       {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets} wickets` : '—')}
@@ -1016,6 +1017,7 @@ function FormatCompareTable({ rows, cols, title, note }) {
                   return (
                     <td key={c.key ?? c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
                       {v == null || v === '' ? '—' : v}
+                      {r.coverage && <RateMark coverage={r.coverage(c)} unit={r.unit || 'innings'} />}
                     </td>
                   )
                 })}
@@ -1024,6 +1026,12 @@ function FormatCompareTable({ rows, cols, title, note }) {
           </tbody>
         </table>
       </div>
+      {rows.some(r => r.coverage && shown.some(c => isPartial(r.coverage(c)))) && (
+        <RateFootnote
+          rows={shown.flatMap(c => rows.filter(r => r.coverage).map(r => ({ cov: r.coverage(c) })))}
+          field="cov"
+        />
+      )}
     </Card>
   )
 }
@@ -1236,7 +1244,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'INNINGS', value: c => c.batting.innings || null },
           { label: 'RUNS', value: c => fmtNum(c.batting.runs), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.batting.average), strong: true },
-          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate) },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate), coverage: c => c.batting.strike_rate_coverage },
           { label: 'HIGH SCORE', value: c => fmtNum(c.batting.high_score) },
           { label: 'NOT OUTS', value: c => c.batting.not_outs || null },
           { label: '50s', value: c => c.batting.fifties || null },
@@ -1255,7 +1263,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'OVERS', value: c => fmtDec(c.bowling.overs, 1) },
           { label: 'WICKETS', value: c => fmtNum(c.bowling.wickets), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.bowling.average), strong: true },
-          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy) },
+          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy), coverage: c => c.bowling.economy_coverage, unit: 'spells' },
           { label: 'STRIKE RATE', value: c => fmtDec(c.bowling.strike_rate, 1) },
           { label: 'BEST', value: c => (c.bowling.best_wickets ? `${c.bowling.best_wickets}w` : null) },
           { label: '5 WICKETS', value: c => c.bowling.five_fors || null },

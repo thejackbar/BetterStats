@@ -143,13 +143,13 @@ STRANGER = uuid.uuid4()       # the control club's own player
 
 
 async def build_schema() -> None:
-    """The pre-282 schema, exactly as a live database would hold it."""
+    """The pre-283 schema, exactly as a live database would hold it."""
     async with engine.begin() as conn:
         await conn.execute(text("DROP SCHEMA public CASCADE"))
         await conn.execute(text("CREATE SCHEMA public"))
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
         await conn.run_sync(Base.metadata.create_all)
-        # Roll the schema BACK to pre-282 so the migration has real work to do
+        # Roll the schema BACK to pre-283 so the migration has real work to do
         # against a populated table, which is the state production is in.
         for stmt in DOWNGRADE:
             await conn.execute(text(stmt))
@@ -221,7 +221,7 @@ async def build_schema() -> None:
                 await conn.execute(text(sql.replace("OR REPLACE ", "")))
 
 
-async def seed_pre_282(session) -> None:
+async def seed_pre_283(session) -> None:
     async def ex(sql, **kw):
         await session.execute(text(sql), kw)
 
@@ -376,9 +376,9 @@ async def main() -> None:
 
     print("\n-- one copy of the DDL, run by both alembic and the lifespan --")
     root = Path(__file__).resolve().parent.parent
-    mig = (root / "alembic" / "versions" / "282_stats_by_competition.py").read_text()
+    mig = (root / "alembic" / "versions" / "283_stats_by_competition.py").read_text()
     main_py = (root / "app" / "main.py").read_text()
-    check("alembic's 282 imports the shared list rather than retyping it",
+    check("alembic's 283 imports the shared list rather than retyping it",
           "from app.services.competition_ddl import" in mig
           and "STATEMENTS" in mig and "CREATE TABLE" not in mig)
     check("and the lifespan mirror runs that same list",
@@ -386,15 +386,15 @@ async def main() -> None:
     check("the downgrade drops the table the upgrade created",
           "club_competitions" in " ".join(DOWNGRADE))
 
-    print("\n-- migration 282, against a populated pre-282 schema --")
+    print("\n-- migration 283, against a populated pre-283 schema --")
     async with Session() as session:
-        await seed_pre_282(session)
+        await seed_pre_283(session)
         await session.commit()
     async with engine.begin() as conn:
         cols = (await conn.execute(text(
             "SELECT column_name FROM information_schema.columns "
             "WHERE table_name = 'grades' AND column_name = 'competition_id'"))).all()
-        check("pre-282: grades has no competition_id", not cols)
+        check("pre-283: grades has no competition_id", not cols)
         # Applied three times, the way the lifespan re-runs it on every boot.
         for _ in range(3):
             for stmt in STATEMENTS:
@@ -404,7 +404,7 @@ async def main() -> None:
             "WHERE table_name = 'grades'"))).all()}
         for col in ("association_id", "association_name",
                     "association_short_name", "competition_id"):
-            check(f"282 added grades.{col}", col in cols)
+            check(f"283 added grades.{col}", col in cols)
         n = (await conn.execute(text("SELECT COUNT(*) FROM club_competitions"))).scalar()
         check("applied three times, club_competitions is not duplicated", n == 0, str(n))
         grades = (await conn.execute(text("SELECT COUNT(*) FROM grades"))).scalar()

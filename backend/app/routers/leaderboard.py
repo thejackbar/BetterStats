@@ -7,6 +7,7 @@ from app.models.db import User, get_db
 from app.routers.auth import get_optional_user, user_can_view_org_private
 from app.services import grade_scope
 from app.services import player_visibility
+from app.services import stats_display
 from app.services.aggregations import (
     get_batting_leaderboard, get_bowling_leaderboard, get_fielding_leaderboard,
     get_batting_leaderboard_extended, get_bowling_leaderboard_extended,
@@ -42,6 +43,15 @@ async def batting_leaderboard(
     sort_by: str = Query("total_runs"),
     limit: int = Query(20, le=5000),
     min_runs: int = Query(0),
+    min_rate_innings: Optional[int] = Query(
+        None,
+        description=(
+            "Fewest innings WITH A BALL COUNT a player must have before a strike "
+            "rate is published for them. Counted on covered innings, not innings "
+            "played — see services/rate_coverage.py. Omitted uses the club's own "
+            "default; 0 turns the qualification off."
+        ),
+    ),
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
     gender: Optional[str] = Query(None),
@@ -77,7 +87,12 @@ async def batting_leaderboard(
     viewer: User | None = Depends(get_optional_user),
 ):
     scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
-    rows = await get_batting_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_runs, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
+    rows = await get_batting_leaderboard_extended(
+        db, org_id, season_id, grade_id, sort_by, limit,
+        min_runs=min_runs,
+        min_rate_innings=await stats_display.resolve_min_rate_innings(db, org_id, min_rate_innings),
+        grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
+        gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
 
@@ -91,6 +106,14 @@ async def bowling_leaderboard(
     limit: int = Query(20, le=5000),
     min_overs: int = Query(0),
     min_wickets: int = Query(0),
+    min_rate_spells: Optional[int] = Query(
+        None,
+        description=(
+            "Fewest spells WITH AN OVERS FIGURE a player must have before an "
+            "economy is published for them. Omitted uses the club's own default; "
+            "0 turns the qualification off."
+        ),
+    ),
     finals_only: Optional[bool] = Query(None),
     captain_only: Optional[bool] = Query(None),
     gender: Optional[str] = Query(None),
@@ -126,7 +149,12 @@ async def bowling_leaderboard(
     viewer: User | None = Depends(get_optional_user),
 ):
     scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
-    rows = await get_bowling_leaderboard_extended(db, org_id, season_id, grade_id, sort_by, limit, min_overs, min_wickets, grade_name, finals_only=finals_only, captain_only=captain_only, gender=gender, overseas=overseas, scope=scope)
+    rows = await get_bowling_leaderboard_extended(
+        db, org_id, season_id, grade_id, sort_by, limit,
+        min_overs=min_overs, min_wickets=min_wickets,
+        min_rate_spells=await stats_display.resolve_min_rate_spells(db, org_id, min_rate_spells),
+        grade_name=grade_name, finals_only=finals_only, captain_only=captain_only,
+        gender=gender, overseas=overseas, scope=scope)
     return _stringify(await _visible(db, org_id, viewer, rows))
 
 

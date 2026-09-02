@@ -1,7 +1,7 @@
 """
-DDL for competitions and the association a grade is played under (migration 282).
+DDL for competitions and the association a grade is played under (migration 283).
 
-THE ONE COPY. Both alembic (versions/282_stats_by_competition.py) and the
+THE ONE COPY. Both alembic (versions/283_stats_by_competition.py) and the
 lifespan mirror in main.py run this same list, in this order, per the
 vote_medal_ddl rule. Every statement is idempotent, because the lifespan
 re-runs the whole list on every boot.

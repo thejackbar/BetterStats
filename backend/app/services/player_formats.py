@@ -32,6 +32,7 @@ from app.services.aggregations import _club_game_clause
 
 from app.services.grade_labels import FORMAT_LABELS, MATCH_FORMATS, format_sql_case
 from app.services.game_status import appearance_counts_as_match
+from app.services import rate_coverage as rc
 
 # Same rule as everywhere else: a fixture the player was named in but that
 # was called off is not a match played. See services/game_status.py.
@@ -115,6 +116,7 @@ async def player_format_splits(
                    MAX(bi.runs) AS high_score,
                    COALESCE(SUM(bi.not_out::int), 0) AS not_outs,
                    SUM(bi.balls) AS balls,
+                   {rc.batting_rate_columns('bi')},
                    SUM(bi.fours) AS fours,
                    SUM(bi.sixes) AS sixes,
                    COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100) AS fifties,
@@ -147,6 +149,7 @@ async def player_format_splits(
                        + ROUND((COALESCE(bs.overs, 0) - FLOOR(COALESCE(bs.overs, 0))) * 10)::int
                    ), 0) AS balls,
                    COALESCE(SUM(bs.maidens), 0) AS maidens,
+                   {rc.bowling_rate_columns('bs')},
                    MAX(bs.wickets) AS best_wickets,
                    COUNT(*) FILTER (WHERE bs.wickets >= 5) AS five_fors
             FROM v_effective_bowling_spells bs
@@ -192,6 +195,13 @@ async def player_format_splits(
         catches_wk = int((f or {}).get("catches_wk") or 0)
         run_outs = int((f or {}).get("run_outs") or 0)
         stumpings = int((f or {}).get("stumpings") or 0)
+        cov_runs = int((b or {}).get("covered_runs") or 0)
+        cov_balls = int((b or {}).get("covered_balls") or 0)
+        cov_inns = int((b or {}).get("covered_innings") or 0)
+        cov_conceded = int((w or {}).get("covered_conceded") or 0)
+        cov_bowl_balls = int((w or {}).get("covered_bowl_balls") or 0)
+        cov_wickets = int((w or {}).get("covered_wickets") or 0)
+        cov_spells = int((w or {}).get("covered_spells") or 0)
         return {
             "format": key,
             "label": FORMAT_LABELS.get(key, "Not recorded"),
@@ -205,7 +215,10 @@ async def player_format_splits(
                 # denominator, and blending formats is exactly what this page
                 # exists to stop, so each column recomputes from its own counts.
                 "average": _avg(runs, innings - not_outs),
-                "strike_rate": _rate(runs * 100, balls) if balls else None,
+                # Only the innings that carry a ball count, so a format scored
+                # partly on paper reports the rate it can actually stand behind.
+                "strike_rate": rc.strike_rate(cov_runs, cov_balls),
+                "strike_rate_coverage": rc.coverage(cov_inns, innings),
                 "high_score": (b or {}).get("high_score"),
                 "balls": int(balls) if balls is not None else None,
                 "fours": (b or {}).get("fours"),
@@ -221,8 +234,9 @@ async def player_format_splits(
                 "balls": bowl_balls,
                 "overs": _rate(bowl_balls, 6, 1) if bowl_balls else None,
                 "average": _avg(conceded, wickets),
-                "economy": _rate(conceded * 6, bowl_balls) if bowl_balls else None,
-                "strike_rate": _rate(bowl_balls, wickets, 1) if wickets else None,
+                "economy": rc.economy(cov_conceded, cov_bowl_balls),
+                "economy_coverage": rc.coverage(cov_spells, int((w or {}).get("spells") or 0)),
+                "strike_rate": _rate(cov_bowl_balls, cov_wickets, 1) if cov_wickets else None,
                 "maidens": int((w or {}).get("maidens") or 0),
                 "best_wickets": (w or {}).get("best_wickets"),
                 "five_fors": int((w or {}).get("five_fors") or 0),

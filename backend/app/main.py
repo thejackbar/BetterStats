@@ -4232,11 +4232,18 @@ async def lifespan(app: FastAPI):
         for _stmt in _VIDEO_DURATION:
             await conn.execute(text(_stmt))
 
-        # Migration 282: which competition a grade is played in, and which
+        # Migration 282: a club's own minimum before a strike rate or an economy
+        # is published on a leaderboard. Same one-copy rule — this list and
+        # alembic's 282 both run services/rate_qualification_ddl.
+        from app.services.rate_qualification_ddl import RATE_MINIMUM_STATEMENTS as _RATE_MIN
+        for _stmt in _RATE_MIN:
+            await conn.execute(text(_stmt))
+
+        # Migration 283: which competition a grade is played in, and which
         # association runs it. The association is synced from CA (it rides on
         # the teams payload sync already fetches); a competition is the club's
         # own named group of grades, seeded from the association. Same one-copy
-        # rule — this list and alembic's 282 both run
+        # rule — this list and alembic's 283 both run
         # services/competition_ddl.STATEMENTS.
         from app.services.competition_ddl import STATEMENTS as _COMPETITION_DDL
         for _stmt in _COMPETITION_DDL:

@@ -11,16 +11,16 @@ The association comes straight from Cricket Australia and costs no extra
 call. The competition is the club's own named group of grades, because CA
 does not publish one — see services/competition_ddl.py for the evidence.
 
-Revision ID: 282
-Revises: 281
+Revision ID: 283
+Revises: 282
 Create Date: 2026-09-01
 """
 from alembic import op
 
 from app.services.competition_ddl import DOWNGRADE, STATEMENTS  # noqa: E402
 
-revision = "282"
-down_revision = "281"
+revision = "283"
+down_revision = "282"
 branch_labels = None
 depends_on = None
 

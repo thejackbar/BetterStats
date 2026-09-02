@@ -32,7 +32,7 @@ column — so it cannot go straight into a WHERE clause. We resolve names to
 categories in Python and hand SQL a plain list of grade ids, which is the same
 approach the public lineups endpoint takes for its own category filter.
 
-A THIRD AXIS: THE COMPETITION (migration 282)
+A THIRD AXIS: THE COMPETITION (migration 283)
 ---------------------------------------------
 A club does not play one competition. Applecross's 2025/26 spans three
 associations at once (WASTCA, Perth Scorchers Women's League, WA Integrated
