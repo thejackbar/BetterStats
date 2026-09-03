@@ -1,6 +1,10 @@
 import asyncio
 import datetime
+import linecache
+import logging
 import re
+import sys
+import time
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
@@ -21,6 +25,44 @@ from app.services.aggregations import _with_rate_coverage
 # strike rate off three innings is a real figure and not a club record.
 MIN_SEASON_SR_INNINGS = 10
 MIN_SEASON_ECON_BALLS = 300  # 50 overs, matching the all-time economy floor
+
+logger = logging.getLogger(__name__)
+
+# One request to this endpoint runs ~40 separate aggregations, each awaited in
+# turn, and an all-time board scans a club's whole history. When the page is
+# slow the question is always WHICH of the forty, and the answer has never been
+# knowable from outside: it is one HTTP request either way.
+#
+# So `q` times every query it runs and names it after the variable the result
+# lands in, which is what the boards are called on the payload anyway. A slow
+# request logs the worst offenders; nothing is logged for an ordinary one, or
+# a public page would write a line per visit.
+SLOW_RECORDS_LOG_MS = 2000.0
+SLOW_RECORDS_LOG_TOP = 8
+
+_ASSIGN_RE = re.compile(r"^\s*(\w+)\s*=\s*await\s+q\(")
+
+
+def _query_label(depth: int = 2) -> str:
+    """The name of the variable the awaited query is being assigned to.
+
+    A multi-line call reports its line differently across Python versions (the
+    statement's first line before 3.11, the exact position after), so this
+    scans BACK from wherever the frame says it is to the nearest
+    ``name = await q(``. Falls back to the line number, which still identifies
+    the query, just less readably.
+    """
+    try:
+        frame = sys._getframe(depth)
+        path, lineno = frame.f_code.co_filename, frame.f_lineno
+        for n in range(lineno, max(lineno - 200, 0), -1):
+            m = _ASSIGN_RE.match(linecache.getline(path, n))
+            if m:
+                return m.group(1)
+        return f"line:{lineno}"
+    except Exception:  # a label is a diagnostic, never a reason to fail a request
+        return "unknown"
+
 
 router = APIRouter(prefix="/records", tags=["records"])
 
@@ -141,13 +183,44 @@ async def get_records(
             "association from the next. Omitted applies no competition filter."
         ),
     ),
+    debug_timing: bool = Query(
+        False,
+        description=(
+            "Return a per-query timing breakdown as `_query_timings`, slowest "
+            "first. Diagnostic: this endpoint runs ~40 aggregations in one "
+            "request, and this is how to see which of them a slow page is "
+            "waiting on. Only answered for a viewer who may already see the "
+            "club's private data (its own admins and Better staff); everyone "
+            "else gets the ordinary payload."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
+    request_started = time.perf_counter()
+    # Every query this request runs, in the order it ran, as
+    # {label, ms, rows}. Filled by `q` below.
+    timings: list[dict] = []
+
+    async def _timed(label: str, coro):
+        """Run an awaitable and record what it cost, under a given name."""
+        started = time.perf_counter()
+        try:
+            return await coro
+        finally:
+            timings.append({
+                "label": label,
+                "ms": round((time.perf_counter() - started) * 1000, 1),
+                "rows": None,
+            })
+
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
     # clause below sees an inactive scope and emits no SQL.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
+    scope = await _timed(
+        "resolve_scope",
+        grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions),
+    )
     if grade_id or grade_name:
         scope = scope.formats_only()
     scope_active = bool(scope is not None and scope.active)
@@ -176,7 +249,9 @@ async def get_records(
 
     # Expand canonical season to include any merged-in alias seasons.
     from app.services.season_aliases import resolve_season_filter
-    season_ids = await resolve_season_filter(db, org_id, season_id)
+    season_ids = await _timed(
+        "resolve_season_filter", resolve_season_filter(db, org_id, season_id)
+    )
 
     p = {"org_id": org_id, "limit": _LIMIT}
     if season_ids:
@@ -277,12 +352,20 @@ async def get_records(
     )
 
     async def q(sql: str, params: dict | None = None) -> list[dict]:
+        label = _query_label()
+        started = time.perf_counter()
         rows = await db.execute(text(sql), params or p)
         # A row carrying sr_counted / econ_counted has its coverage folded into
         # the pair every rate rides with; every other row passes through
         # untouched, so nothing in this book changes shape for a query that
         # never asked. See services/rate_coverage.py.
-        return [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
+        out = [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
+        timings.append({
+            "label": label,
+            "ms": round((time.perf_counter() - started) * 1000, 1),
+            "rows": len(out),
+        })
+        return out
 
     # Whether to use per-game queries (required for grade_name or finals_only)
     # A category exclusion forces the per-game path for the same reason a
@@ -877,7 +960,9 @@ async def get_records(
         if manual_grade_name:
             manual_stmt = manual_stmt.where(ManualPartnershipRecord.grade_name == manual_grade_name)
         manual_stmt = manual_stmt.order_by(ManualPartnershipRecord.runs.desc())
-        manual_res = await db.execute(manual_stmt)
+        manual_res = await _timed(
+            "manual_partnership_records", db.execute(manual_stmt)
+        )
         for r in manual_res.scalars().all():
             manual_rows.append({
                 "batter1_id": str(r.batter1_id) if r.batter1_id else None,
@@ -1350,11 +1435,14 @@ async def get_records(
     # here in one pass. Done on the payload rather than inside the ~40
     # builders above so a board added later is covered without anyone
     # remembering; see services/player_visibility.py.
-    hidden = (
-        set() if await user_can_view_org_private(db, viewer, org_id)
-        else await player_visibility.hidden_player_ids(db, org_id)
+    can_view_private = await _timed(
+        "user_can_view_org_private", user_can_view_org_private(db, viewer, org_id)
     )
-    return player_visibility.prune_hidden({
+    hidden = (
+        set() if can_view_private
+        else await _timed("hidden_player_ids", player_visibility.hidden_player_ids(db, org_id))
+    )
+    payload = player_visibility.prune_hidden({
         # What these figures actually cover, plus the categories this club's
         # grades justify offering a toggle for.
         "grade_scope": {
@@ -1362,8 +1450,12 @@ async def get_records(
                 "categories": [], "excluded_categories": [],
                 "formats": None, "excluded_formats": [], "active": False,
             }),
-            "available": await grade_scope.org_available_categories(db, org_id),
-            "available_formats": await grade_scope.org_available_formats(db, org_id),
+            "available": await _timed(
+                "org_available_categories", grade_scope.org_available_categories(db, org_id)
+            ),
+            "available_formats": await _timed(
+                "org_available_formats", grade_scope.org_available_formats(db, org_id)
+            ),
         },
         "batting": {
             "top_career_runs":   top_career_runs,
@@ -1393,6 +1485,33 @@ async def get_records(
             "top_allrounders": top_allrounders,
         },
     }, hidden)
+
+    # What the request actually spent, and on what. Attached only for a viewer
+    # who may already see this club's private data, and logged only when the
+    # request was slow — a public page must not write a line per visit, and the
+    # ordinary payload must not grow a key for everybody else.
+    query_ms = sum(t["ms"] for t in timings)
+    total_ms = (time.perf_counter() - request_started) * 1000
+    if total_ms >= SLOW_RECORDS_LOG_MS:
+        worst = sorted(timings, key=lambda t: t["ms"], reverse=True)[:SLOW_RECORDS_LOG_TOP]
+        logger.warning(
+            "slow records request org=%s season=%s grade=%s scope_active=%s "
+            "total=%.0fms queries=%d query_time=%.0fms slowest=[%s]",
+            org_id, season_id, grade_name or grade_id, scope_active,
+            total_ms, len(timings), query_ms,
+            ", ".join(f"{t['label']} {t['ms']:.0f}ms" for t in worst),
+        )
+    if debug_timing and can_view_private:
+        payload["_query_timings"] = {
+            "total_ms": round(total_ms, 1),
+            "query_ms": round(query_ms, 1),
+            # Whatever is left is Python: assembling, de-duplicating and
+            # pruning the boards rather than waiting on the database.
+            "other_ms": round(total_ms - query_ms, 1),
+            "query_count": len(timings),
+            "queries": sorted(timings, key=lambda t: t["ms"], reverse=True),
+        }
+    return payload
 
 
 @router.get("/{org_id}/milestones")

@@ -9930,6 +9930,75 @@ called.
   behind a presence check now, and "the bar moved" treats a locator that finds
   nothing from the start as a failure rather than as an unchanged bar.
 
+### Which of the forty queries the record book is waiting on (Sep 2026)
+
+Reported off Hamilton Veterans' Records page with Competition set to All, and
+asked as "do the new grade-to-competition linkages need more indexes".
+
+- **THEY DO NOT, AND THE MEASUREMENT SAYS THE OPPOSITE.** With Competition set
+  to All the frontend omits the param, `competition_active` is false and
+  `competition_clause` returns an empty string, so the SQL is byte-for-byte
+  what it was before migration 283 — which is also all that commit did to
+  `records.py`, thread one parameter into `resolve_scope`. Timed against the
+  live site: **unfiltered 15.0/15.1/15.7s, the same request narrowed to one
+  competition 2.4/2.2s**, a season 2.7s, a match type 3.4s. A filter makes it
+  six times FASTER, because the clause narrows the games through
+  `ix_grades_competition` before the per-innings unions are scanned.
+- **AND IT IS NOT THIS CLUB.** Applecross unfiltered is **16.6/16.8s** on the
+  same measurement, so it is not Hamilton's imported history either. All-time
+  records is slow for everybody.
+- **ONE REQUEST RUNS ~40 AGGREGATIONS, EACH AWAITED IN TURN**, and the round
+  trips are not the cost: a season filter cuts every one of them down and the
+  whole thing drops under two seconds. The scans are the cost.
+- **SO `q` TIMES EVERY QUERY AND NAMES IT AFTER THE BOARD IT BUILDS.**
+  `_query_label` reads the caller's frame and scans BACK to the nearest
+  `name = await q(` — a multi-line call reports its line differently across
+  Python versions (the statement's first line before 3.11, the exact position
+  after), so scanning back is what makes the label right either way. Zero edits
+  at 40 call sites, and the label is what the board is called on the payload
+  anyway. It costs **10.3us per query, 0.4ms for a whole request**, against the
+  15,000ms being diagnosed.
+- **`_timed` WRAPS THE READS THAT ARE NOT BOARDS**, or the report would not add
+  up to the request: `resolve_scope` (which does its own reads for the club
+  default categories, its grade formats and now its competitions),
+  `resolve_season_filter`, the manual partnership records, the hidden-players
+  check and the two `org_available_*` calls in the payload builder.
+- **IT IS DECLARED WITH `timings`, ABOVE ITS FIRST USE.** The first cut put it
+  where `q` is defined, three hundred lines below the `resolve_scope` call that
+  uses it — the temporal-dead-zone trap the Roster note already documents. A
+  closure defined further down the body does not exist yet when an earlier line
+  runs.
+- **THE BREAKDOWN IS SERVED ONLY TO A VIEWER WHO MAY ALREADY SEE THE CLUB'S
+  PRIVATE DATA.** `?debug_timing=1` returns `_query_timings` (total, query
+  time, the remainder that is Python, and every query slowest first) for the
+  club's own admins and Better staff, reusing the `user_can_view_org_private`
+  call the endpoint already makes for hidden players. Everyone else gets the
+  ordinary payload with no extra key.
+- **A SLOW REQUEST LOGS ITS WORST OFFENDERS; AN ORDINARY ONE LOGS NOTHING.**
+  `SLOW_RECORDS_LOG_MS` (2000) is the gate — this is a public page, and a line
+  per visit is how a log stops being read. That is also why the log exists
+  alongside the payload: a signed-out visitor's slow load is the one nobody can
+  ask for a breakdown of.
+- **A SIGNED-OUT VISITOR PAYS FOR ONE QUERY AN ADMIN DOES NOT** — working out
+  which players the club has hidden, which an admin may see anyway. Found by a
+  check that compared the logged count against the payload's and disagreed by
+  one; it asserts the asymmetry now rather than being loosened.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_records_timing.py`, 35 checks through the
+  SHIPPED route body: the ordinary payload unchanged and carrying no extra key,
+  the breakdown withheld from a signed-out visitor and from a user with no
+  membership here, every query named rather than reported as a line number, the
+  six boards and three non-board reads named individually, slowest first, the
+  parts summing to the total, the log firing once when slow and not at all when
+  not, and a season-filtered request timed the same way) **with a control run**:
+  it reports the instrumentation absent rather than 35 identical errors.
+- **NOT DONE, and this only measures**: nothing is cached and nothing runs
+  concurrently yet. The two obvious fixes once the log names the culprits are
+  caching an unfiltered board on the club's last successful sync, and running
+  the independent queries on their own sessions — an `AsyncSession` is not
+  concurrency-safe, so `asyncio.gather` over the existing one is not the move.
+
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:
