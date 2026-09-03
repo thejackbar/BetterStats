@@ -10512,6 +10512,50 @@ asked as "do the new grade-to-competition linkages need more indexes".
   concurrency-safe, so `asyncio.gather` over the existing one is not the move.
 
 
+### And what the timing said: a compiler and a platform-wide scan (Sep 2026)
+
+The log came back flat — 28 queries, 13,287ms of query time, the eight slowest
+between 900 and 1,027ms with nothing dominant. `EXPLAIN (ANALYZE, BUFFERS)` on
+production (`ops/diagnostics/records_slow_board.sql`) named both halves, and
+the hypothesis that led there was WRONG.
+
+- **THE `unplayed` SUBQUERY IS 15ms, NOT THE PROBLEM.** It reads as the
+  suspect — an uncorrelated derived table aggregating every abandoned fixture
+  platform-wide, recomputed per reference — and it is genuinely cheap:
+  `ix_games_status_not_played` narrows it to 488 games and the three anti-joins
+  are index-only scans. **Measured before it was believed.**
+- **HALF OF EVERY BOARD IS THE JIT COMPILER.** A board reading
+  `v_effective_player_season_stats` plans at **cost 5,340,376**, past
+  `jit_above_cost` (100k) and both `jit_optimize_above_cost` and
+  `jit_inline_above_cost` (500k) — so Postgres compiles **177 functions in
+  505ms** (238ms optimising, 210ms emitting) to run a query that then takes
+  ~580ms. Fourteen references to that view is **~7s of the 13.3s spent
+  compiling**. `get_records` now runs `SET LOCAL jit = off` FIRST: transaction
+  -scoped, so no pooled connection carries it away, and there is nothing here
+  JIT can win back — these are sub-second queries over a wide UNION view, not
+  the minute-long scans it exists for.
+- **THE OTHER HALF IS MIGRATION 060'S ORG SCOPING, RUN ONCE PER ROW OF THE
+  PLATFORM.** Its `WHERE EXISTS (players JOIN seasons ...)` is planned as a
+  correlated SubPlan, so the `api` branch is a **Seq Scan over all 315,288
+  `player_season_stats` rows with the subplan executed 315,288 times** — 2.2
+  MILLION buffer hits, 483ms — and the club filter is applied only afterwards,
+  by a hash join to the 101 players who were wanted all along. The same board
+  reading the base table instead of the view is **2.1ms**.
+- **A VIEW IS WHERE A RULE BELONGS AND ALSO WHERE A PREDICATE GOES TO DIE.**
+  Both halves are the price of one-place correctness: the 060 scoping and the
+  266 washout correction both live in the view so every reader moves together,
+  and both are therefore paid per reference, uncapped by the club being asked
+  about. Keep the rule there; the fix is to give the planner something
+  selective on the view's own `player_id` up front, not to scatter the rule.
+- **`ops/diagnostics/records_pushdown_test.sql` tests exactly that** — the
+  board as it is, against the same board with the club's players bound as an
+  array, plus an EXCEPT both ways proving the two return identical rows, and
+  the JIT cost measured by switching it back on. Not yet run.
+- **`_query_timings` entries carry `n`**, where in the request each query ran,
+  which is what makes "the JIT setting is issued FIRST" assertable rather than
+  a check that cannot fail.
+
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

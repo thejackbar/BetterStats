@@ -249,6 +249,26 @@ async def main() -> None:
     for expected in ("resolve_scope", "user_can_view_org_private",
                      "org_available_categories"):
         check(f"the non-board read `{expected}` is timed too", expected in labels)
+
+    print("\n-- the JIT compiler is switched off for this transaction --")
+    # Measured on production: a board reading v_effective_player_season_stats
+    # plans at ~5.3M, so Postgres compiles 177 functions at 505ms to run a
+    # query that then takes ~580ms — half the cost of every one of the
+    # fourteen boards that read it.
+    check("the request switches JIT off before running a board",
+          "SET LOCAL jit = off" in labels)
+    first = min(queries, key=lambda x: x["n"])
+    check("and does it FIRST, so every board that follows is covered",
+          first["label"] == "SET LOCAL jit = off", f"first was {first['label']}")
+    check("every entry says where in the request it ran",
+          sorted(q["n"] for q in queries) == list(range(len(queries))))
+    check("the setting itself costs almost nothing",
+          next(q["ms"] for q in queries if q["label"] == "SET LOCAL jit = off") < 25,
+          str(next(q["ms"] for q in queries if q["label"] == "SET LOCAL jit = off")))
+    async with Session() as session:
+        jit_state = (await session.execute(text("SHOW jit"))).scalar()
+    check("and it is transaction-scoped, so a pooled connection never keeps it",
+          jit_state == "on", f"a fresh session reports jit={jit_state}")
     check("slowest first", labels == [q["label"] for q in
                                       sorted(queries, key=lambda x: x["ms"], reverse=True)])
     check("every query reports a duration",

@@ -221,6 +221,7 @@ async def get_records(
             return await coro
         finally:
             timings.append({
+                "n": len(timings),          # where in the request it ran
                 "label": label,
                 "ms": round((time.perf_counter() - started) * 1000, 1),
                 "rows": None,
@@ -229,6 +230,16 @@ async def get_records(
     # An explicitly picked grade beats the category default: someone who chose
     # "Under 14s" wants the juniors. Resolved to nothing in that case, so every
     # clause below sees an inactive scope and emits no SQL.
+    # Postgres JIT-compiles any statement it costs above `jit_above_cost`, and
+    # every board that reads `v_effective_player_season_stats` plans at ~5.3M —
+    # past the inline and optimise thresholds too. Measured on production: 177
+    # functions, 505ms to COMPILE a board that then runs in ~580ms, and this
+    # endpoint reads that view fourteen times. There is nothing here JIT can win
+    # back: these are sub-second analytical queries over a wide UNION view, not
+    # the minutes-long scans it exists to speed up. SET LOCAL, so it lasts
+    # exactly this transaction and no pooled connection carries it away.
+    await _timed("SET LOCAL jit = off", db.execute(text("SET LOCAL jit = off")))
+
     scope = await _timed(
         "resolve_scope",
         grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions),
@@ -374,6 +385,7 @@ async def get_records(
         # never asked. See services/rate_coverage.py.
         out = [_with_rate_coverage(dict(r)) for r in rows.mappings().all()]
         timings.append({
+            "n": len(timings),
             "label": label,
             "ms": round((time.perf_counter() - started) * 1000, 1),
             "rows": len(out),
