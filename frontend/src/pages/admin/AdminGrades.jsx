@@ -768,8 +768,9 @@ function GroupingPanel({ clubId, onDone }) {
       <p className="text-pb-faint text-sm mb-3 leading-relaxed">
         Cricket Australia has not told us which association ran those grades, so
         they cannot be put in a competition yet. Those matches still count in
-        every unfiltered figure. Fetching the missing associations takes a
-        minute or two and runs in the background.
+        every unfiltered figure. Your next sync fetches the missing
+        associations and groups them on its own — this does it now instead. It
+        takes a minute or two and runs in the background.
       </p>
       {error && <p className="text-pb-red text-sm mb-3">{error}</p>}
       <div className="flex items-center gap-3 flex-wrap">
@@ -870,7 +871,7 @@ function CompetitionManager({ clubId }) {
           <p className="text-sm text-pb-dim mb-3">
             {associations.length
               ? `Nothing grouped yet. Your grades come from ${associations.length} ${associations.length === 1 ? 'association' : 'associations'}.`
-              : 'No association recorded on your grades yet. A sync fills this in; the seasons before that need the association backfill run.'}
+              : 'No association recorded on your grades yet. Your next sync fetches them and groups your grades automatically; the button above does it now.'}
           </p>
           {associations.length > 0 && (
             <button

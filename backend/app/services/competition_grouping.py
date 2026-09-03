@@ -254,9 +254,17 @@ async def run_grouping(
             grouped = await seed_competitions_for_org(db, org_id)
             await db.commit()
 
+        # What is STILL outside a competition once this run has done all it
+        # can. Cricket Australia genuinely has no association for some old
+        # seasons, and those seasons must not be re-fetched on every sync
+        # forever — see :func:`maybe_group_after_sync`, which compares against
+        # this number rather than against zero.
+        unresolved = (await grouping_gap(db, org_id))["seasons_missing"]
+
     return {
         "seasons_checked": total,
         "seasons_failed": failed,
+        "seasons_unresolved": unresolved,
         "grades_filled": filled,
         "associations_found": len(seen_associations),
         **grouped,
@@ -289,3 +297,65 @@ async def run_grouping_job(org_id, run_id: uuid.UUID) -> None:
     except Exception as e:
         logger.exception("Competition grouping failed for %s", org_id)
         await finish_sync_run(run_id, {}, error=str(e)[:500])
+
+
+async def _last_unresolved(db: AsyncSession, org_id) -> Optional[int]:
+    """What the club's last completed grouping run could not resolve.
+
+    None means it has never run to completion, so there is nothing to compare
+    against and the job is due. A run that predates ``seasons_unresolved``
+    being recorded reads as None too, which re-runs it once and then settles.
+    """
+    row = (await db.execute(
+        text(
+            "SELECT stats FROM sync_runs WHERE org_id = CAST(:org AS UUID)"
+            " AND kind = :kind AND status = 'success'"
+            " ORDER BY started_at DESC LIMIT 1"
+        ),
+        {"org": str(org_id), "kind": RUN_KIND},
+    )).first()
+    if not row or not isinstance(row[0], dict):
+        return None
+    value = row[0].get("seasons_unresolved")
+    return int(value) if isinstance(value, int) else None
+
+
+async def maybe_group_club(org_id) -> dict:
+    """Group a club's older seasons automatically, once.
+
+    THE BUTTON IS THE ESCAPE HATCH, NOT THE MECHANISM. An established club
+    opening Manage Grades for the first time was shown every grade it has ever
+    played under "not in a competition", and asked to press something to fix
+    it. That is work we can do ourselves: the sync already fills the
+    association in for the seasons it scans, and this covers the rest.
+
+    **It is a job that finishes.** Running it on every pass would re-fetch, for
+    the life of the club, the seasons Cricket Australia simply has no
+    association for. So it runs when the number of seasons it could act on is
+    GREATER than what the last completed run was left with — which is true the
+    first time, true again when a new season turns up without an association,
+    and false forever after on a club whose remaining gap is CA's own.
+
+    Never raises: one club's grouping failure must not stop the pass.
+    """
+    from app.services.sync import finish_sync_run, start_sync_run
+
+    async with async_session_maker() as db:
+        gap = await grouping_gap(db, org_id)
+        if not gap["needs_grouping"]:
+            return {"ran": False, "reason": "nothing_missing"}
+        if await running_run_id(db, org_id):
+            return {"ran": False, "reason": "already_running"}
+        previous = await _last_unresolved(db, org_id)
+        if previous is not None and gap["seasons_missing"] <= previous:
+            return {"ran": False, "reason": "no_new_seasons"}
+
+    run_id = await start_sync_run(org_id, RUN_KIND)
+    try:
+        stats = await run_grouping(org_id, run_id)
+        await finish_sync_run(run_id, stats)
+        return {"ran": True, **stats}
+    except Exception as e:
+        logger.exception("Automatic competition grouping failed for %s", org_id)
+        await finish_sync_run(run_id, {}, error=str(e)[:500])
+        return {"ran": False, "reason": "error"}
