@@ -256,6 +256,48 @@ def strip_sponsor_suffix(name) -> str:
     return _SPONSOR_SUFFIX.sub("", str(name or "")).strip()
 
 
+def grade_key(name) -> str:
+    """The key a grade name is matched on: sponsor suffix off, lowercased."""
+    return strip_sponsor_suffix(name).lower()
+
+
+async def grade_alias_map(db, org_id) -> dict[str, str]:
+    """``{alias key: canonical key}`` from the club's active grade merges.
+
+    Single hop, matching ``aggregations._GRADE_MATCH``: a merge is re-targeted
+    onto the final canonical name when it is made, so there is no chain to
+    walk. Keyed on :func:`grade_key` at both ends, so a sponsor suffix on one
+    side cannot stop a merge resolving.
+    """
+    if not org_id:
+        return {}
+    from sqlalchemy import text
+    res = await db.execute(
+        text(
+            "SELECT alias_name, canonical_name FROM grade_merge_logs"
+            " WHERE org_id = CAST(:org AS UUID) AND undone_at IS NULL"
+        ),
+        {"org": str(org_id)},
+    )
+    return {grade_key(a): grade_key(c) for a, c in res.fetchall()}
+
+
+def _apply_alias_fold(confirmed: dict, all_names: set, aliases: dict) -> None:
+    """Let a merged-away grade name read the answer given to the one it kept.
+
+    A club classifies "B Grade McIntosh Cup" on the Grades screen; the rows CA
+    once called "B Grade: McIntosh Cup" were merged into it and never carried
+    an answer of their own. Both keys have to resolve to the same category, or
+    the same real grade reads two ways depending on which season's spelling a
+    row happens to carry — and a shared fixture, whose grade row belongs to the
+    other club, is exactly where the older spelling turns up.
+    """
+    for alias, canonical in aliases.items():
+        all_names.add(alias)
+        if alias not in confirmed and canonical in confirmed:
+            confirmed[alias] = set(confirmed[canonical])
+
+
 async def org_grade_categories(db, org_id) -> dict[str, str]:
     """Every distinct grade name in the org, mapped to its EFFECTIVE category —
     confirmed (any season's row sharing that name has `category` set) else the
@@ -282,6 +324,10 @@ async def org_grade_categories(db, org_id) -> dict[str, str]:
         cat = normalise_category(category)
         if cat:
             confirmed[key] = cat
+    for alias, canonical in (await grade_alias_map(db, org_id)).items():
+        all_names.add(alias)
+        if alias not in confirmed and canonical in confirmed:
+            confirmed[alias] = confirmed[canonical]
     return {name: confirmed.get(name) or suggest_category(name) for name in all_names}
 
 
@@ -318,6 +364,7 @@ async def org_grade_category_sets(db, org_id) -> dict[str, frozenset]:
             # last-wins, so a club that classified this season's row and left an
             # older one blank keeps the answer they actually gave.
             confirmed.setdefault(key, set()).update(picked)
+    _apply_alias_fold(confirmed, all_names, await grade_alias_map(db, org_id))
     return {
         name: frozenset(confirmed.get(name) or suggest_categories(name))
         for name in all_names
@@ -378,6 +425,9 @@ async def org_grade_format_sets(db, org_id) -> dict[str, frozenset]:
             f = format_from_match_type(raw)
             if f:
                 observed.setdefault(key, set()).add(f)
+    aliases = await grade_alias_map(db, org_id)
+    _apply_alias_fold(confirmed, all_names, aliases)
+    _apply_alias_fold(observed, all_names, aliases)
     return {
         name: frozenset(
             confirmed.get(name) or observed.get(name) or suggest_formats(name)

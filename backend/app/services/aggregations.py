@@ -5,6 +5,7 @@ from datetime import date as date_cls
 import uuid
 
 from app.services import milestone_scan
+from app.services.club_grades import club_game_sql
 from app.services.grade_scope import GradeScope
 from app.services.game_status import NOT_PLAYED_SQL_LIST, appearance_counts_as_match
 from app.services import rate_coverage as rc
@@ -161,7 +162,7 @@ async def _career_residuals(
     `kind='aggregate'` clause says so in SQL.
     """
     params: dict = {"pid": player_id, "sources": list(_RESIDUAL_SOURCES)}
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     # Matches the unscoped career query's own behaviour: naming a season excludes
     # the NULL-season career lump, because a NULL never matches a season filter.
     season_clause = " AND pss.season_id = ANY(:sids)" if season_ids else ""
@@ -231,7 +232,7 @@ async def _game_season_clause(session: AsyncSession, season_id, params: dict) ->
     """
     if not season_id:
         return ""
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     if not season_ids:
         return ""
     params["career_season_ids"] = season_ids
@@ -250,6 +251,17 @@ async def _player_org_id(session: AsyncSession, player_id: str) -> Optional[str]
     )
     org = row.scalar()
     return str(org) if org else None
+
+
+# "This game is our club's", for a query that already binds :org_id.
+#
+# A fixture between two synced clubs is ONE `games` row, and its grade — and so
+# its season — belongs to whichever club synced it first. NEITHER club owns it:
+# both played it and both hold scorecards against it. Testing
+# `seasons.organisation_id` therefore hands the whole match to one club and
+# hides it from the other, which is why every board here asks whether we were
+# one of the two SIDES instead. See services/club_grades.py.
+_OURS_GAMES = club_game_sql("g", "org_id")
 
 
 async def _club_game_clause(
@@ -971,7 +983,7 @@ async def get_fielding_leaderboard(
     if grade_id or grade_name:
         scope = scope.formats_only() if scope is not None else None
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     finals_clause = " AND g.is_final = TRUE" if finals_only else ""
     scope_clause = scope.clause("g.grade_id") if _scoped(scope) else ""
@@ -1133,7 +1145,7 @@ async def get_fielding_leaderboard(
             -- synced clubs is a single `games` row carrying BOTH clubs' fielding
             -- rows, so scoping the game alone puts the opposition on our board.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND g.is_final = TRUE{season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
@@ -1161,7 +1173,7 @@ async def get_fielding_leaderboard(
             JOIN game_appearances gap ON gap.game_id = fs.game_id AND gap.player_id = fs.player_id AND gap.is_captain = TRUE
             -- Player-scoped for the same reason as the finals branch above.
             JOIN players p ON p.id = fs.player_id AND p.organisation_id = CAST(:org_id AS UUID)
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}{gender_clause}{overseas_clause}
+            WHERE {_OURS_GAMES}{season_clause}{scope_clause}{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             ORDER BY {sort_by} DESC NULLS LAST LIMIT :limit
         """
@@ -1180,7 +1192,7 @@ async def get_fielding_leaderboard(
                 FROM v_effective_fielding_stats fs
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
             )
             SELECT * FROM (
                 SELECT
@@ -1247,7 +1259,7 @@ async def get_player_batting_innings(
     grade_id: Optional[str] = None,
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     clauses = ["bi.player_id = :pid"]
     params: dict = {"pid": player_id}
     clauses.append(
@@ -1304,7 +1316,7 @@ async def get_player_bowling_spells(
     grade_id: Optional[str] = None,
     scope: Optional[GradeScope] = None,
 ) -> list[dict]:
-    season_ids = await resolve_season_filter_no_org(session, season_id)
+    season_ids = await resolve_season_filter_no_org(session, season_id, include_shared=True)
     clauses = ["bs.player_id = :pid"]
     params: dict = {"pid": player_id}
     clauses.append(
@@ -1674,7 +1686,7 @@ async def get_player_team_breakdown(
             " AND (g.organisation_id = CAST(:org_id AS UUID)"
             " OR g.home_org_id = CAST(:org_id AS UUID)"
             " OR g.away_org_id = CAST(:org_id AS UUID))")
-    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True) if season_id else None
     if season_ids:
         season_clause_gr = " AND gr.season_id = ANY(:sids)"
         season_clause_pss = " AND pss.season_id = ANY(:sids)"
@@ -3005,7 +3017,7 @@ async def get_batting_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_runs"
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # A grade the viewer picked by name beats the CATEGORY default. Someone who
     # has chosen "Under 14s" from the grade dropdown plainly wants the juniors,
@@ -3207,7 +3219,7 @@ async def get_batting_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   AND g.is_final = TRUE{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
@@ -3251,7 +3263,7 @@ async def get_batting_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bi.game_id AND gap.player_id = bi.player_id AND gap.is_captain = TRUE
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             )
@@ -3299,7 +3311,7 @@ async def get_batting_leaderboard_extended(
                 FROM v_effective_batting_innings bi
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
                   AND NOT COALESCE(bi.did_not_bat, FALSE)
                   AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb')
             ), {residual_cte}
@@ -3453,7 +3465,7 @@ async def get_bowling_leaderboard_extended(
     if sort_by not in ALLOWED_SORTS:
         sort_by = "total_wickets"
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # An explicitly picked grade beats the category default, format half kept —
     # see the note in get_batting_leaderboard_extended.
@@ -3700,7 +3712,7 @@ async def get_bowling_leaderboard_extended(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id{captain_join}
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   AND g.is_final = TRUE{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
@@ -3725,7 +3737,7 @@ async def get_bowling_leaderboard_extended(
             JOIN seasons s ON s.id = gr.season_id{captain_join}
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND g.is_final = TRUE{season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
@@ -3761,7 +3773,7 @@ async def get_bowling_leaderboard_extended(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+                WHERE {_OURS_GAMES}{season_clause}
                 ORDER BY bs.player_id, bs.wickets DESC, bs.runs ASC
             )
             SELECT
@@ -3786,7 +3798,7 @@ async def get_bowling_leaderboard_extended(
             JOIN game_appearances gap ON gap.game_id = bs.game_id AND gap.player_id = bs.player_id AND gap.is_captain = TRUE
             JOIN players p ON p.id = bs.player_id
             LEFT JOIN best_spell bsf ON bsf.player_id = p.id
-            WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}
+            WHERE {_OURS_GAMES}{season_clause}
               AND p.organisation_id = :org_id{gender_clause}{overseas_clause}
             GROUP BY p.id, COALESCE(p.display_name_override, p.name), bsf.best_figures_wickets, bsf.best_figures_runs, bsf.best_bowling_figures
         """
@@ -3818,7 +3830,7 @@ async def get_bowling_leaderboard_extended(
                 FROM v_effective_bowling_spells bs
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN seasons s ON s.id = g.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID){season_clause}{scope_clause}
+                WHERE {_OURS_GAMES}{season_clause}{scope_clause}
             )
             SELECT * FROM (
                 SELECT
@@ -4531,7 +4543,7 @@ async def get_club_summary(
         base.update(await _club_results(session, org_id, grade_id=grade_id, scope=fmt_scope))
         return base
 
-    season_ids = await resolve_season_filter(session, org_id, season_id)
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True)
 
     # A grade-type or match-type filter is only answerable from the per-innings
     # scorecards: CA's season aggregates carry no grade at all (the `api` branch
@@ -4759,7 +4771,7 @@ async def _sirs_base_clauses(session, org_id, season_id, grade_name, finals_only
     over the category default, same rule as the leaderboards.
     """
     season_clause = ""
-    season_ids = await resolve_season_filter(session, org_id, season_id) if season_id else None
+    season_ids = await resolve_season_filter(session, org_id, season_id, include_shared=True) if season_id else None
     if season_ids:
         params["season_ids"] = season_ids
         season_clause = " AND s.id = ANY(:season_ids)"
@@ -4823,7 +4835,7 @@ async def get_sirs_batting(
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bi.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
-          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND {_OURS_GAMES}
           AND bi.runs >= 100
           AND NOT COALESCE(bi.did_not_bat, FALSE)
           AND LOWER(COALESCE(bi.dismissal_type, '')) NOT IN ('absent', 'did not bat', 'dnb'){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
@@ -4872,7 +4884,7 @@ async def get_sirs_bowling_innings(
         JOIN seasons s ON s.id = gr.season_id
         JOIN players p ON p.id = bs.player_id{captain_join}
         WHERE p.organisation_id = CAST(:org_id AS UUID)
-          AND s.organisation_id = CAST(:org_id AS UUID)
+          AND {_OURS_GAMES}
           AND bs.wickets >= 7{season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
         GROUP BY p.id, COALESCE(p.display_name_override, p.name)
         ORDER BY haul_count DESC NULLS LAST
@@ -4912,7 +4924,7 @@ async def get_sirs_bowling_match(
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = bs.player_id{captain_join}
             WHERE p.organisation_id = CAST(:org_id AS UUID)
-              AND s.organisation_id = CAST(:org_id AS UUID){season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
+              AND {_OURS_GAMES}{season_clause}{finals_clause}{grade_clause}{gender_clause}{overseas_clause}
             GROUP BY bs.player_id, bs.game_id
             HAVING SUM(bs.wickets) >= 10
         )

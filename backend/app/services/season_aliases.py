@@ -67,8 +67,19 @@ async def resolve_season_filter(
     session: AsyncSession,
     org_id,
     season_id: Optional[str],
+    include_shared: bool = False,
 ) -> Optional[list[str]]:
     """Expand a season_id filter to canonical + aliases.
+
+    ``include_shared`` also pulls in the season rows OTHER clubs hold for the
+    same year. A fixture between two synced clubs is one `games` row whose
+    season belongs to whichever club synced it first, so without this a club's
+    own match drops out of its own season the moment a season is picked — the
+    same match its all-time figures count. It is opt-in rather than the default
+    because a query whose ONLY club guard is this list (a grade listing, a
+    season dropdown) would then reach another club's rows: pass it only where
+    the read is also guarded by the club's own players or by
+    ``club_grades.club_game_clause``.
 
     Returns:
         None  — caller passed no season_id, no filter should be applied.
@@ -105,6 +116,40 @@ async def resolve_season_filter(
             {"org": str(_as_uuid(org_id)), "year": year},
         )
         ids |= {str(r[0]) for r in siblings.all()}
+
+    if include_shared:
+        # Every club's row for the same real-world season, three ways:
+        #
+        #   1. the same CA season GUID. Exact — a CA season id is global, not
+        #      per club, so two clubs in one competition hold the same
+        #      `grassroots_id` under their own per-club row ids. This is the
+        #      key `iq_filters.season_ids_cross_club` already matches on.
+        #   2. the same year, for two clubs whose competitions report under
+        #      different CA season ids for the one summer.
+        #   3. the same name, because `year` is nullable — it is only set when
+        #      CA returns a start date (see the sync's season upsert), and a
+        #      hand-created season row can have neither of the above.
+        meta = await session.execute(
+            text("SELECT name, grassroots_id FROM seasons"
+                 " WHERE id = ANY(:ids)"),
+            {"ids": list(ids)},
+        )
+        names, guids = set(), set()
+        for nm, guid in meta.all():
+            if nm:
+                names.add(nm.lower())
+            if guid:
+                guids.add(guid)
+        shared = await session.execute(
+            text(
+                "SELECT id FROM seasons"
+                " WHERE (grassroots_id IS NOT NULL AND grassroots_id = ANY(:guids))"
+                "    OR (CAST(:year AS INT) IS NOT NULL AND year = CAST(:year AS INT))"
+                "    OR LOWER(name) = ANY(:names)"
+            ),
+            {"guids": list(guids), "year": year, "names": list(names)},
+        )
+        ids |= {str(r[0]) for r in shared.all()}
     return list(ids)
 
 
@@ -124,6 +169,7 @@ async def org_id_for_season(session: AsyncSession, season_id: str) -> Optional[s
 async def resolve_season_filter_no_org(
     session: AsyncSession,
     season_id: Optional[str],
+    include_shared: bool = False,
 ) -> Optional[list[str]]:
     """Same as resolve_season_filter but for callers that only have
     season_id (no org_id). Looks up org_id from the season first."""
@@ -132,4 +178,4 @@ async def resolve_season_filter_no_org(
     org_id = await org_id_for_season(session, season_id)
     if not org_id:
         return [str(season_id)]
-    return await resolve_season_filter(session, org_id, season_id)
+    return await resolve_season_filter(session, org_id, season_id, include_shared)
