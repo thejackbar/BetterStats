@@ -10602,11 +10602,15 @@ the hypothesis that led there was WRONG.
   scorers still on it, a rival club's bigger scorer on no board, and a club
   with no players answering with empty boards rather than raising) **with a
   control run** reporting the instrumentation absent.
-- **Still to measure**: section F of the diagnostic prepares the board with a
-  BOUND `uuid[]` and runs it six times, because Postgres builds a custom plan
-  for the first five and only then weighs a generic one — a generic plan that
-  discarded the array's selectivity would put the seq scan back for a warmed-up
-  connection. Not yet run.
+- **THE BOUND FORM SURVIVES PLAN CACHING, WHICH IS THE ONE THING THAT COULD
+  HAVE UNDONE THIS.** asyncpg prepares its statements, and Postgres builds a
+  custom plan for the first five executions before weighing a generic one — a
+  generic plan that discarded the array's selectivity would put the seq scan
+  straight back for every warmed-up connection, which is exactly the state a
+  live pool is in. Section F of the diagnostic prepares the board with a bound
+  `uuid[]` and runs it six times: **0.957, 0.602, 0.513, 0.654, 0.589, 1.070ms**.
+  The sixth is the one that matters and it holds. No `plan_cache_mode` needed.
+  An empty array (section G) is 0.017ms.
 
 
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
