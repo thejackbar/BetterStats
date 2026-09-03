@@ -10613,6 +10613,59 @@ the hypothesis that led there was WRONG.
   An empty array (section G) is 0.017ms.
 
 
+### A career has two match counts, and a filter switches between them (Sep 2026)
+
+Reported off Rob Wilton's profile: **333 matches with Competition set to All,
+337 with one competition picked**. A filter that INCREASES a total is
+incoherent however it is explained.
+
+- **NEITHER FIGURE IS WRONG. THEY ARE DIFFERENT SOURCES.** With no filter the
+  header reads `SUM(player_season_stats.matches)`, Cricket Australia's own
+  season totals. CA's aggregates carry no grade (the `api` branch of
+  `v_effective_player_season_stats` hardcodes `grade_id` NULL), so they can say
+  nothing about a competition, a grade type or a format — the moment any scope
+  is active every figure is recomputed from the per-innings scorecards instead.
+  `?categories=senior` gives the identical 337, so this predates competitions
+  entirely and has been there since the grade-category filter (migration 228).
+- **THE FOUR EXTRA GAMES ARE ALL REAL, and naming them is what stopped this
+  being fixed the obvious way.** Every one is `source=api`, `status=COMPLETED`,
+  with a real grade, date and opponent: a one-off appearance in a second grade
+  that season (10th Grade, 9th Grade, One Day 4), an intra-club Applecross Red
+  v Applecross Black fixture, and games with no result recorded. No manual
+  upload, no duplicate, no other club's game. **1993/94 runs the other way** —
+  CA counts 14 where we hold 13 — which is a genuinely missing scorecard.
+- **SO THE OBVIOUS FIX WAS `max(held, claimed)`, THE RULE THE BY-GRADE GRID
+  ALREADY USES, AND THE PLATFORM MEASUREMENT KILLED IT.**
+  `ops/diagnostics/career_matches_sources.sql` over all 95,151 players:
+
+  | | players | |
+  |---|---|---|
+  | the two sources agree | 38,795 | 41% |
+  | we hold MORE than CA counts | 19,439 | 20%, worst **+221** |
+  | CA claims MORE than we hold | 36,917 | 39%, worst **-484** |
+
+  Adopting the higher figure would rewrite the headline career match count for
+  **19,439 players**, one of them by 221 — a mass rewrite, not a correction.
+  And it would do nothing for the 36,917 whose filtered view already DROPS,
+  which is the LARGER half of the same problem: a club whose old seasons
+  arrived as totals has few scorecards to filter, so any filter reads far
+  lower. **The grid can apply `max(held, claimed)` because it compares per
+  season AND grade against CA's own per-grade rows (`player_season_grade_stats`)
+  and carries an `attributed_unknown` column for what it cannot place. The
+  career header has neither.**
+- **THE DUPLICATE HYPOTHESIS IS RULED OUT**: no manual upload duplicates a
+  synced game on the same club, date and grade, anywhere on the platform (0
+  rows). The extra held games are genuinely held.
+- **SO THE NUMBERS MUST NOT MOVE. The page has to say which source it used**,
+  the way `RateFootnote` marks a strike rate drawn from fewer innings than the
+  figure beside it. Same rule as that one: only where the figure is short, and
+  never on every number in the app.
+- **Worth a look separately, NOT part of this**: Nairne's Sam Morgan reads CA
+  127 against 348 held, and Sunrise's Jackey Patel CA **0** against 98 held. A
+  player with a hundred games and no season aggregate at all is its own
+  question.
+
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:
