@@ -241,6 +241,16 @@ async def seed(session) -> None:
     # A shared fixture in a grade NEITHER club has grouped into a competition.
     await game(G_THEIRS_E, home_org=THEIRS, away_org=OURS, day=10,
                players=[(US_PLAYER, 5)])
+    # Picked for a senior match and never got a bat: counted as a match played,
+    # never as an innings. This is the gap between the two figures.
+    dnb = uuid.uuid4()
+    await ex(
+        "INSERT INTO games (id, grade_id, played_at, venue, result, match_format,"
+        " home_org_id, away_org_id, status) VALUES (:i, :g, :d, 'Shoalwater Oval',"
+        " 'WIN', 'One Day', :h, :a, 'COMPLETED')",
+        i=dnb, g=G_OURS_F, d=date(2026, 1, 11), h=OURS, a=THEIRS)
+    await ex("INSERT INTO game_appearances (game_id, player_id) VALUES (:g, :p)",
+             g=dnb, p=US_PLAYER)
     # A match in their grade that we were NOT in: never ours, on any reading.
     await game(G_THEIRS_F, day=8, players=[(THEIR_PLAYER, 77)])
     # A T20 in their grade that we played, for the format axis.
@@ -254,7 +264,7 @@ async def seed(session) -> None:
         "INSERT INTO player_season_stats (player_id, season_id, matches,"
         " batting_innings, runs, not_outs, balls_faced, fifties, hundreds,"
         " ducks, fours, sixes, wickets)"
-        " VALUES (:p, :s, 9, 9, 216, 0, 360, 0, 0, 0, 18, 0, 9)",
+        " VALUES (:p, :s, 10, 9, 216, 0, 360, 0, 0, 0, 18, 0, 9)",
         p=US_PLAYER, s=S_OURS)
     await session.commit()
 
@@ -301,16 +311,21 @@ async def main() -> None:
         check("the Players list and the profile agree on runs",
               me.get("total_runs") == bat_d["total_runs"],
               f"{me.get('total_runs')} vs {bat_d['total_runs']}")
+        check("and the M column means matches PLAYED, as the profile's does",
+              me.get("games") == bat_d["games"],
+              f"board {me.get('games')} vs profile {bat_d['games']}")
+        check("which counts the match he was picked for and did not bat in",
+              me.get("games") == 8, str(me.get("games")))
 
         bowl = await agg.get_bowling_leaderboard_extended(
             session, str(OURS), scope=await grade_scope.resolve_scope(session, OURS))
-        check("the bowling board counts the shared fixtures too",
-              _row(bowl, "Hind, Darren").get("games") == 7,
+        check("the bowling board's M is matches played, not matches bowled in",
+              _row(bowl, "Hind, Darren").get("games") == 8,
               str(_row(bowl, "Hind, Darren").get("games")))
         field = await agg.get_fielding_leaderboard(
             session, str(OURS), scope=await grade_scope.resolve_scope(session, OURS))
-        check("the fielding board counts the shared fixtures too",
-              _row(field, "Hind, Darren").get("games") == 7,
+        check("and the fielding board's says the same",
+              _row(field, "Hind, Darren").get("games") == 8,
               str(_row(field, "Hind, Darren").get("games")))
 
         print("\n— and for the club that DID sync it, unchanged —")
@@ -382,8 +397,8 @@ async def main() -> None:
                       if r["competition_name"] == "Other grades"), None)
         jnr = next((r for r in comp["rows"]
                     if r["competition_name"] == "Peel Junior Cricket Association"), {})
-        check("the six grouped senior matches are filed under our Peel competition",
-              peel.get("matches") == 6, str(peel.get("matches")))
+        check("every grouped senior match is filed under our Peel competition",
+              peel.get("matches") == 7, str(peel.get("matches")))
         check("both junior matches are filed under our junior competition",
               jnr.get("matches") == 2, str(jnr.get("matches")))
         check("the ungrouped grade stays ungrouped rather than being guessed",
@@ -400,7 +415,7 @@ async def main() -> None:
         cpeel = next((r for r in club["rows"]
                       if r["competition_name"] == "Peel Cricket Association Inc."), {})
         check("the club's own competition record counts them as well",
-              cpeel.get("matches") == 6, str(cpeel.get("matches")))
+              cpeel.get("matches") == 7, str(cpeel.get("matches")))
 
         print("\n— the competitions page reads the club's own grades —")
         grades = await competition_stats.competition_grade_breakdown(session, OURS)
@@ -410,7 +425,7 @@ async def main() -> None:
         check("the merged-away spelling is not drawn as a grade of its own",
               names == ["F Grade"], str(names))
         check("and that one row holds every match played in it",
-              peel_grades and peel_grades[0]["matches"] == 6,
+              peel_grades and peel_grades[0]["matches"] == 7,
               str(peel_grades and peel_grades[0]["matches"]))
         check("its season count is the real season, not one row per club",
               peel_grades and peel_grades[0]["seasons"] == 1,
@@ -428,16 +443,16 @@ async def main() -> None:
             finals_only=False, captain_only=False, gender=None,
             categories=None, formats=None, db=session, viewer=None)
         mm = _row((recs.get("team") or {}).get("most_matches") or [], "Hind, Darren")
-        check("most matches counts the shared fixtures (7 senior)",
-              mm.get("matches") == 7, str(mm.get("matches")))
+        check("most matches counts the shared fixtures, and the one he did not bat in",
+              mm.get("matches") == 8, str(mm.get("matches")))
         recs_all = await get_records(
             str(OURS), season_id=None, grade_id=None, grade_name=None,
             finals_only=False, captain_only=False, gender=None,
             categories="all", formats=None, db=session, viewer=None)
         mm_all = _row((recs_all.get("team") or {}).get("most_matches") or [],
                       "Hind, Darren")
-        check("and every category counts all nine, from CA's own totals",
-              mm_all.get("matches") == 9, str(mm_all.get("matches")))
+        check("and every category counts all ten, from CA's own totals",
+              mm_all.get("matches") == 10, str(mm_all.get("matches")))
         check("the filtered senior runs plus the junior ones equal CA's total",
               bat_d["total_runs"] + bat_j["total_runs"] == 216,
               f"{bat_d['total_runs']} + {bat_j['total_runs']}")

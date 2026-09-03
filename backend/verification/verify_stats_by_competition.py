@@ -1159,9 +1159,9 @@ async def main() -> None:
             async def _auto(org):
                 # Reported, never crashed: a control run against code without
                 # the automatic path must say so and keep going.
-                fn = getattr(grouping, "maybe_group_after_sync", None)
+                fn = getattr(grouping, "maybe_group_club", None)
                 if fn is None:
-                    return {"ran": None, "reason": "maybe_group_after_sync is absent"}
+                    return {"ran": None, "reason": "maybe_group_club is absent"}
                 return await fn(org)
 
             async def reset(clear_runs=True):
@@ -1249,11 +1249,20 @@ async def main() -> None:
                     " AND kind = :k AND status = 'running'"),
                     {"o": ACC, "k": grouping.RUN_KIND})
                 await session.commit()
-            src = (Path(__file__).resolve().parent.parent
-                   / "app" / "services" / "sync.py").read_text()
-            body = src[src.index("async def sync_organisation("):]
-            check("and it is the SYNC that calls it, not only the button",
-                  "maybe_group_after_sync" in body)
+            # It must be a job of its own, NOT part of the sync: a club that
+            # played nothing in the window never reaches sync_organisation, so
+            # an off-season club would never be grouped.
+            sched = (Path(__file__).resolve().parent.parent
+                     / "app" / "jobs" / "scheduler.py").read_text()
+            check("a scheduled pass calls it, so no club waits on a sync",
+                  "maybe_group_club" in sched
+                  and "group_all_organisations" in sched)
+            check("and it is registered as its own nightly job",
+                  "nightly_competition_grouping" in sched)
+            sync_src = (Path(__file__).resolve().parent.parent
+                        / "app" / "services" / "sync.py").read_text()
+            check("the sync itself does not carry it",
+                  "maybe_group_club" not in sync_src)
         finally:
             grouping.playhq_client.get_teams = real_get_teams
 

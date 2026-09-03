@@ -285,6 +285,46 @@ slice of the real season.
   one synced club. Which of the two readings a club wants is a product decision,
   not a bug this fix should settle on its own.
 
+### M IS MATCHES PLAYED. INN IS INNINGS. They are different numbers (v9.62.2)
+
+Reported straight after the fix above: the Players list read **M 127** where
+the same player's profile read **MATCHES 150**. Both were "right" and they
+measured different things.
+
+- **A BOARD'S GAMES FIGURE WAS COUNTED FROM ITS OWN PER-INNINGS ROWS**, so the
+  batting board's M was matches he BATTED in, the bowling board's was matches
+  he bowled in, and the fielding board's was matches a ball came to him. Beside
+  an INN column that already means innings, M can only mean matches — and
+  `aggregations._scoped_games_played` (the profile's own figure) already said
+  so in its docstring. The 23 in the gap were matches he was picked for and
+  never got a bat in.
+- **WORSE, THE DEFINITION MOVED WITH THE FILTER.** With no grade-type filter
+  the same column reads `SUM(player_season_stats.matches)` — Cricket
+  Australia's own matches PLAYED — so one column meant two things depending on
+  whether a pill was on. That is what made 106 / 142 / 150 three plausible
+  answers to one question.
+- **`_matches_played_cte` is the one definition**, unioning the same four
+  sources `_scoped_games_played` unions (a batting innings, a bowling spell, a
+  fielding row, a bare `game_appearances` row). It **narrows the games FIRST**
+  so the three per-innings tables are not scanned platform-wide, the shape
+  `records.py`'s `grade_scoped_games` already uses.
+- **IT SUPPLIES THE FIGURE, NEVER THE QUALIFICATION.** A player is still listed
+  on the batting board because he has a batting innings or a residual; the
+  matches CTE is LEFT JOINed for its number alone. Joining on it would fill a
+  batting leaderboard with players who never batted.
+- **`records.most_matches` had the same hole** and it is the board literally
+  called most matches: its `use_game_level` branch unioned the three
+  per-innings tables and not `game_appearances`, so a player named in a side
+  and dismissed for nothing measurable was short a match against his own
+  profile. The fourth arm is added.
+- **Measured** (25,000 games, 1,260 grades, 75,000 innings): the scoped batting
+  leaderboard 160 → 188ms. The union is the cost, and it buys the column
+  meaning one thing on every screen.
+- **NOTICED, NOT FIXED**: the grade-scoped, finals-only and captain-only
+  branches of the same boards still count their own per-innings rows. Each is a
+  narrowed subset where "matches" wants its own reading (finals played, matches
+  captained), and each needs its own look rather than the same CTE pasted in.
+
 ### Grouping is a job the platform does, not a button a club must find (v9.62.1)
 
 Reported off Applecross: Manage Grades showed **0 competitions** and every

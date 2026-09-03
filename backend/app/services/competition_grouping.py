@@ -320,8 +320,8 @@ async def _last_unresolved(db: AsyncSession, org_id) -> Optional[int]:
     return int(value) if isinstance(value, int) else None
 
 
-async def maybe_group_after_sync(org_id) -> dict:
-    """Group a club's older seasons automatically, once, after a sync.
+async def maybe_group_club(org_id) -> dict:
+    """Group a club's older seasons automatically, once.
 
     THE BUTTON IS THE ESCAPE HATCH, NOT THE MECHANISM. An established club
     opening Manage Grades for the first time was shown every grade it has ever
@@ -329,14 +329,14 @@ async def maybe_group_after_sync(org_id) -> dict:
     it. That is work we can do ourselves: the sync already fills the
     association in for the seasons it scans, and this covers the rest.
 
-    **It is a job that finishes.** Running it on every sync would re-fetch, for
+    **It is a job that finishes.** Running it on every pass would re-fetch, for
     the life of the club, the seasons Cricket Australia simply has no
     association for. So it runs when the number of seasons it could act on is
     GREATER than what the last completed run was left with — which is true the
     first time, true again when a new season turns up without an association,
     and false forever after on a club whose remaining gap is CA's own.
 
-    Never raises: a grouping failure must not fail the sync that triggered it.
+    Never raises: one club's grouping failure must not stop the pass.
     """
     from app.services.sync import finish_sync_run, start_sync_run
 

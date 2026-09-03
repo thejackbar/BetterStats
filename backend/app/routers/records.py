@@ -12,6 +12,7 @@ from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
 from app.services.club_grades import club_game_sql
+from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
 from app.services import rate_coverage as rc
@@ -25,6 +26,7 @@ from app.services.aggregations import _with_rate_coverage
 # one of them, so the other club's own record innings simply never appeared on
 # its own records page. See services/club_grades.py.
 _OURS_GAMES = club_game_sql("g", "org_id")
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 
 # This record book has always set its own qualification floors (20 wickets for
 # a bowling average, 50 overs for an economy). These two are their siblings: a
@@ -1062,6 +1064,21 @@ async def get_records(
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
                 WHERE {_OURS_GAMES}
+                  {_match_grade_filter}
+                  {_gw_season}
+                  {finals_clause}
+                UNION
+                -- Named in the side and did nothing measurable in it: still a
+                -- match played, which is what this board counts. Without this
+                -- arm "most matches" reads as "most matches you did something
+                -- in", and disagrees with the same player's own MATCHES.
+                SELECT ga.player_id, ga.game_id, gr.season_id
+                FROM game_appearances ga
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE {_OURS_GAMES}
+                  AND {_APPEARANCE_PLAYED}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}

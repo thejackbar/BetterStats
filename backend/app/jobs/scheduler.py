@@ -20,6 +20,64 @@ PERTH = ZoneInfo("Australia/Perth")
 
 scheduler = AsyncIOScheduler()
 
+# How many clubs the nightly competition-grouping pass will work through. Each
+# one costs a cheap Cricket Australia call per season it has never resolved an
+# association for, so an established club is ~50 calls ONCE. Capped so the
+# platform's one-off backlog is spread over a couple of weeks instead of
+# arriving as a single burst; a club that wants it now has the button.
+GROUP_CLUBS_PER_RUN = 10
+
+
+async def group_all_organisations():
+    """Fill in the missing grade associations and group them, club by club.
+
+    A competition is a named group of a club's grades, and a grade can only be
+    put in one once Cricket Australia has told us which association ran it.
+    The sync writes that as it goes, but an incremental run only scans the
+    seasons that could still have been in play — so an ESTABLISHED club opens
+    Manage Grades and finds fifty seasons of its own history sitting outside
+    every competition, with a button as the only way to close it.
+
+    **Deliberately NOT part of the sync.** A club that played nothing in the
+    window never reaches ``sync_organisation`` (the scheduler records an idle
+    run instead, see ``_record_idle_run``), so an off-season club would never
+    be reached. It is also not a re-sync of anything: it pulls one cheap teams
+    payload per un-associated season and touches no game, scorecard or player
+    row.
+
+    ``maybe_group_club`` owns the decision, and the reason this can be a plain
+    nightly pass is that it settles: a club whose remaining gap is CA's own is
+    skipped from then on. ``GROUP_CLUBS_PER_RUN`` caps how many clubs are
+    worked through in one night so the platform's backlog is spread over a
+    couple of weeks rather than arriving as one burst of upstream calls.
+    """
+    from app.services import auto_sync, competition_grouping
+
+    async with async_session_maker() as session:
+        orgs, _skipped = await auto_sync.eligible_clubs(session)
+
+    done = 0
+    for org in orgs:
+        if done >= GROUP_CLUBS_PER_RUN:
+            logger.info(
+                "Competition grouping: reached the %d-club cap for this run",
+                GROUP_CLUBS_PER_RUN)
+            break
+        try:
+            result = await competition_grouping.maybe_group_club(org.id)
+        except Exception as e:  # one club is never the whole pass
+            logger.warning("Competition grouping failed for %s: %s", org.name, e)
+            continue
+        if result.get("ran"):
+            done += 1
+            logger.info(
+                "Competition grouping: %s — %d season(s) checked, %d grade(s) "
+                "filled, %d still unresolved",
+                org.name, result.get("seasons_checked", 0),
+                result.get("grades_filled", 0),
+                result.get("seasons_unresolved", 0))
+    logger.info("Competition grouping: grouped %d club(s) this run", done)
+
 
 async def sync_all_organisations():
     """Pull each eligible club's recent results.
@@ -568,6 +626,20 @@ def start_scheduler():
         minute=0,
         timezone=PERTH,
         id="monthly_drift_check",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+    # Group each club's grades into the competitions they were played in.
+    # Nightly, and it settles: a club with nothing left to resolve is skipped,
+    # so this costs one cheap query per club once the platform has caught up.
+    scheduler.add_job(
+        group_all_organisations,
+        trigger="cron",
+        hour=2,
+        minute=30,
+        timezone=PERTH,
+        id="nightly_competition_grouping",
         replace_existing=True,
         max_instances=1,
         coalesce=True,
