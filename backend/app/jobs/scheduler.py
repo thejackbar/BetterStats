@@ -20,12 +20,16 @@ PERTH = ZoneInfo("Australia/Perth")
 
 scheduler = AsyncIOScheduler()
 
-# How many clubs the nightly competition-grouping pass will work through. Each
-# one costs a cheap Cricket Australia call per season it has never resolved an
-# association for, so an established club is ~50 calls ONCE. Capped so the
-# platform's one-off backlog is spread over a couple of weeks instead of
-# arriving as a single burst; a club that wants it now has the button.
-GROUP_CLUBS_PER_RUN = 10
+# How many clubs the nightly competition-grouping pass will work through.
+#
+# THE PLATFORM'S BACKLOG IS NOT THIS JOB'S TO DRAIN — that is what
+# `app.scripts.backfill_all_associations` is for, and it clears it in one run
+# because it fills most associations from our own database rather than from
+# Cricket Australia. So this pass is the ongoing trickle: a season that has
+# just started, or a club that has just onboarded. A club whose remaining gap
+# is CA's own is skipped BEFORE any call is made, so a settled platform costs
+# nothing here. The cap is only a bound on a burst.
+GROUP_CLUBS_PER_RUN = 40
 
 
 async def group_all_organisations():
@@ -47,9 +51,9 @@ async def group_all_organisations():
 
     ``maybe_group_club`` owns the decision, and the reason this can be a plain
     nightly pass is that it settles: a club whose remaining gap is CA's own is
-    skipped from then on. ``GROUP_CLUBS_PER_RUN`` caps how many clubs are
-    worked through in one night so the platform's backlog is spread over a
-    couple of weeks rather than arriving as one burst of upstream calls.
+    skipped from then on. The platform's existing backlog is cleared in one go
+    by ``app.scripts.backfill_all_associations``, so what reaches this job is
+    the trickle — a new season, or a club that has just onboarded.
     """
     from app.services import auto_sync, competition_grouping
 

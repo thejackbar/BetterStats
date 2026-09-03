@@ -12,6 +12,7 @@ export default {
     'Competitions also reads grades the way Manage Grades does: a grade you have merged shows as one row rather than one per old name, and the season count is the number of seasons played rather than one per club involved.',
     'A player’s season-by-season table opens in season order again. A winter season was sorting to the top of the list.',
     'The M column on the Players list and the leaderboards now means matches played, the same as MATCHES on a player’s own profile. It used to count only the matches a player batted, bowled or took a catch in, so the two screens disagreed by every game somebody was picked for and did not get a bat in.',
-    'Grades are now grouped into competitions by a nightly job rather than by a nightly job rather than by the sync itself. An established club used to find its older seasons sitting outside every competition until someone pressed the button on Manage Grades; that happens on its own now, once, and the button stays for anyone who wants it done immediately.',
+    'Grades are now grouped into competitions on their own, by a nightly job. An established club used to find its older seasons sitting outside every competition until someone pressed the button on Manage Grades; that happens without anyone asking now, once, and the button stays for anyone who wants it done immediately.',
+    'Every club’s existing seasons have been grouped in one pass rather than a few clubs a night, so Manage Grades and the Competitions panel show your full history straight away.',
   ],
 }

@@ -336,9 +336,15 @@ to fix it. A club should not have to know that button exists.
   a fresh club that syncs its whole history (Shoalwater Bay) comes out fully
   grouped. An ESTABLISHED club syncs incrementally, so only the current season
   is reached and the other fifty are not. That is the entire gap.
-- **`competition_grouping.maybe_group_after_sync` is called from
-  `sync_organisation`**, beside the seeding that was already there. Its own
-  try/except and its own session: a grouping failure must never fail a sync.
+- **IT IS NOT HOOKED TO THE SYNC, and the first cut's mistake is worth
+  keeping.** Hanging it off `sync_organisation` reads as the obvious place and
+  is wrong: a club that played nothing in the period never reaches that
+  function at all (`_record_idle_run` short-circuits it), so every off-season
+  and every quiet club would sit un-grouped indefinitely — exactly the clubs
+  most likely to be carrying a whole history of it. `competition_grouping
+  .maybe_group_club` is called from a standalone nightly job instead
+  (`jobs/scheduler.group_all_organisations`, 02:30 Perth), over
+  `auto_sync.eligible_clubs`. Its own try/except and its own session.
 - **IT IS A JOB THAT FINISHES, and that is the whole design problem.** Running
   it every sync would re-fetch, for the life of the club, the seasons CA simply
   has no association for. So `run_grouping` now reports **`seasons_unresolved`**
@@ -350,6 +356,77 @@ to fix it. A club should not have to know that button exists.
   while an admin has pressed the button joins nothing and starts nothing.
 - **The button stays as the escape hatch**, for a club that wants it now rather
   than after the next sync, and the copy says which is which.
+
+### The association is already in our own database — ask it, don't re-fetch (v9.62.3)
+
+Asked for directly, after the nightly job above was costed out: a fortnight to
+work through the platform's backlog is not acceptable, and the fix should come
+from the data BetterCricket already holds rather than from Cricket Australia.
+
+- **`games.raw_payload` IS A DEAD COLUMN — nothing writes it**, so the
+  association cannot be recovered from stored match payloads. Checked before
+  designing anything; the only reference left is `clone_demo_club.py`. That
+  ruled out the obvious route and forced the two below, which are better.
+- **A CA GRADE GUID IS COMPETITION-WIDE, so one club's answer is every club's.**
+  The whole competition shares the guid (migration 067's own note: ten clubs
+  share High Wycombe's "1st Grade"), so an association ANY club holds against a
+  guid is the association for every club's row carrying it. That is what makes
+  a single recently-synced club resolve the same grade for everybody who plays
+  in it, with no call at all.
+- **A CLUB'S OWN GRADE NAME IS ITS OWN COMPETITION, so one recent season
+  resolves twenty-five old ones.** Folded through `grade_merge_logs` and the
+  sponsor-suffix strip, so CA's older spelling and "A Grade (Solo Energy)"
+  land on the same key — the same two rules `club_grade_rows` already applies,
+  because a name resolved one way for the filter and another way for the
+  backfill is how the two start disagreeing.
+- **BOTH PHASES REFUSE TO GUESS, and that half is load-bearing.** Each is
+  guarded by `HAVING COUNT(DISTINCT association_id) = 1`, so a club that MOVED
+  association under one grade name has its unknown years left unknown rather
+  than being filed under whichever era won. A wrong association is worse than a
+  missing one: it puts a club's matches under a competition it never played in,
+  which is the reported bug wearing a different hat.
+- **THEY FEED EACH OTHER, so `propagate_all` loops until neither writes.** A
+  guid filled from another club unlocks that club's other seasons of the same
+  name, which carry a guid a third club is waiting on. Bounded at five passes
+  so a pathological cycle cannot spin.
+- **NOTHING IS EVER OVERWRITTEN.** Every statement is `WHERE association_id IS
+  NULL`, so a run is idempotent and a second one writes nothing.
+- **THE API PHASE COLLAPSES AS IT GOES.** What our own data cannot answer is
+  fetched once per season, and each answer is applied across EVERY club holding
+  that guid immediately — so the first club processed in an association drops
+  the others' seasons off the list before they are ever called. Each season is
+  re-checked right before its call for exactly that reason.
+- **Measured at platform scale** (110 clubs, 23,381 grades, 2,750 seasons, with
+  a sixth of the clubs having moved association and a third carrying a defunct
+  competition that appears in no recent season): **96.4% of the gap closed from
+  our own data in 6.5 seconds**, and the remainder needing a CA call falls from
+  2,750 seasons to 407. `--apply --no-api` including the grouping of all 110
+  clubs runs in 1.7s.
+- **`python -m app.scripts.backfill_all_associations`** is the one-shot batch,
+  dry-run by default per the house rule.
+- **A DRY RUN MUST MEASURE BEFORE IT ROLLS BACK.** The first cut ran each phase
+  once and measured the residual gap AFTER the rollback, so it reported the gap
+  it started with — telling an operator nothing would be resolved by a run that
+  in fact resolves 96% of it. `propagate_all(commit=False)` is the fix, and it
+  exists so the dry run reuses the REAL loop rather than keeping a second copy
+  that could drift. Found by running the script, not by reading it.
+- **THE NIGHTLY JOB IS NO LONGER DRAINING A BACKLOG**, which is what its cap
+  was for, so `GROUP_CLUBS_PER_RUN` went 10 → 40 and its comment says the batch
+  owns the backlog. A settled club is skipped before any call is made, so the
+  steady state costs nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_association_backfill.py`, 24 checks through the
+  shipped functions: a club inheriting a shared grade's association across
+  every season, a club's own earlier seasons inheriting from a later one
+  including CA's merged-away spelling and a sponsor-suffixed one, both
+  refusals — the club that moved and the club sharing nothing — the gap closing
+  from 11 to the 4 nobody can answer, a second run writing nothing and never
+  overwriting, `outstanding_seasons` naming only the two clubs left, one
+  fetched answer resolving every club holding that guid, the grouping it
+  unlocks, and the dry run reporting the real figures while leaving the
+  database untouched) **with control runs**: with the service absent the suite
+  reports it rather than crashing; with the two propagation phases neutered 11
+  of the 24 fail; with the `commit` flag ignored, 3.
 - **Verified**: the competitions suite is 126 checks now — the club grouped
   with nothing pressed, the residual recorded, a second sync skipping, a later
   season bringing it back, the club settling once CA answers, the in-flight
