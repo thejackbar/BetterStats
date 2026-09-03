@@ -184,7 +184,7 @@ BLOG_POSTS: list[dict] = [
     },
     {
         "slug": "merging-historical-cricket-stats-with-playhq",
-        "title": "What to Look for When Merging Historical Cricket Stats into PlayHQ",
+        "title": "What to Look for When Merging Historical Cricket Stats in BetterCricket",
         "date": "2026-08-11",
         "image": "/marketing/blog/stats-history.jpg",
         "description": (
@@ -232,7 +232,7 @@ BLOG_POSTS: list[dict] = [
     },
     {
         "slug": "how-to-merge-players-in-playhq-cricket",
-        "title": "How to Merge Duplicate Players in PlayHQ Cricket",
+        "title": "How to Merge Duplicate Players in BetterCricket",
         "date": "2026-06-21",
         "image": "/marketing/blog/merge-duplicate-players.jpg",
         "description": (

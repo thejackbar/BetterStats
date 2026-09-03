@@ -209,7 +209,7 @@ export const POSTS = [
   },
   {
     slug: 'merging-historical-cricket-stats-with-playhq',
-    title: 'What to Look for When Merging Historical Cricket Stats into PlayHQ',
+    title: 'What to Look for When Merging Historical Cricket Stats in BetterCricket',
     date: '2026-08-11',
     image: '/marketing/blog/stats-history.jpg',
     description: 'A practical checklist for bringing decades of club cricket history online: what a genuine historical import should include, and the questions worth asking before you commit.',
@@ -254,7 +254,7 @@ export const POSTS = [
   },
   {
     slug: 'how-to-merge-players-in-playhq-cricket',
-    title: 'How to Merge Duplicate Players in PlayHQ Cricket',
+    title: 'How to Merge Duplicate Players in BetterCricket',
     date: '2026-06-21',
     image: '/marketing/blog/merge-duplicate-players.jpg',
     description: 'How merging duplicate players works in PlayHQ cricket, who is allowed to do it, and how BetterCricket merges a club\'s duplicate stats reversibly.',
