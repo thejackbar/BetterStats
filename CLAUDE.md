@@ -1226,14 +1226,22 @@ somebody leaving at seven had to be walked up the queue by hand.
   marks the new arrival as having batted when they never went in. `netsBusy`
   covers the turn-over-but-not-yet-rotated state for the same reason. Dragging
   is exempt: that is the coach saying "swap them", explicitly.
-- **A LEG PAD WOULD NOT READ, so the glyph is a HELMET.** Rendered side by side
-  at 16/22/40/72px, every pad — outlined or solid, straps inside or out —
-  collapses at 16px into a pill, a pair of curly braces or a stack of blocks;
-  the strap tabs that make it a pad at 72px are the first thing to go. The first
-  cut shipped as `{}` on the row and was caught by screenshotting the real
-  screen, not by reading the code. A helmet survives because its silhouette is a
-  shape nothing else in the set has, and it is the more literal answer anyway.
-  **The shell is filled**: a 1.8px outline at 16px leaves nothing inside it.
+- **THE PAD GLYPH IS A PAIR, AND THE PAIR IS THE WHOLE POINT.** A SINGLE pad at
+  16px is a blob: rendered side by side at 16/22/40/72, every one — outlined or
+  solid, straps inside or out — collapses into a pill, a pair of curly braces or
+  a stack of blocks, and the strap tabs that make it a pad at 72px are the first
+  thing to go. The first cut shipped as `{}` on the row, and a helmet drawn to
+  replace it read as a mushroom; both were caught by screenshotting the real
+  screen, not by reading the code. Two pads side by side is a silhouette
+  nothing else in the set has — domed tops, a strap band, scalloped feet — and
+  it survives all the way down. **Filled, with the strap cut as an EVEN-ODD
+  hole**: a 1.8px outline at 16px leaves nothing inside it, and a notch drawn in
+  the background colour is wrong on the light theme and wrong again over the
+  tinted button, where a hole shows what is actually behind.
+- **THE STRAP BAND IS WHAT STOPS IT READING AS PAUSE**, which is two rounded
+  bars and sits on this very screen a few inches above. Without the band the two
+  swap at 16px — measured by rendering them in the same sheet, which is the only
+  way that kind of collision shows up.
 - **EVERY STATE IS A WORD AS WELL AS A TINT** (`NET n` / `PADDING UP` /
   `PRIORITY`), the rule this file already records — the green and amber here
   separate by ΔE 7.2 under protanopia. A row can legitimately be two states at
