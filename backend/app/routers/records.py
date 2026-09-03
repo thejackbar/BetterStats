@@ -333,6 +333,35 @@ async def get_records(
     # Inline WHERE additions for player_season_stats aggregate queries
     pss_season_clause  = "AND pss.season_id = ANY(:season_ids) " if season_ids else ""
     pss_gender_clause  = "AND p.gender = :gender " if gender else ""
+
+    # THE CLUB HAS TO REACH THE VIEW, NOT JUST THE PLAYERS TABLE BESIDE IT.
+    # Every board below joins `players p` and filters `p.organisation_id`, and
+    # that lands too late: the planner builds the whole of
+    # v_effective_player_season_stats for every club on the platform — a seq
+    # scan of all 315,288 player_season_stats rows with migration 060's
+    # org-scoping EXISTS run as a correlated subplan once per row, 2.2 MILLION
+    # buffer hits, ~480ms — and only then hash-joins the 101 players that were
+    # wanted all along. Naming those players up front is a plain restriction on
+    # the view's OWN player_id, which pushes into each UNION ALL branch and
+    # reads idx_pss_player. Measured on production: one board 514ms -> 0.9ms,
+    # returning the same 54 rows either way.
+    #
+    # IT MUST BE A BOUND ARRAY AND NEVER A SUBQUERY. The same board written
+    # `pss.player_id = ANY (SELECT id FROM players WHERE organisation_id = ...)`
+    # is planned as a semi-join against the un-narrowed view and takes 49.8
+    # SECONDS — 57,000x worse than the array and 97x worse than doing nothing
+    # at all. Do not "tidy" this back into a subquery.
+    #
+    # CAST, because a club with no players binds an EMPTY list and asyncpg
+    # cannot infer an array's type from one: the same trap the vote-medals note
+    # in CLAUDE.md documents for a bare `:param IS NULL`. An empty array
+    # correctly matches nothing, which is what a club with no players holds.
+    club_ids_res = await _timed("club_player_ids", db.execute(
+        text("SELECT id FROM players WHERE organisation_id = :org_id"),
+        {"org_id": org_id},
+    ))
+    p["club_player_ids"] = [str(r[0]) for r in club_ids_res]
+    pss_club_clause = "AND pss.player_id = ANY(CAST(:club_player_ids AS uuid[])) "
     gender_clause      = f" AND p.gender = :gender" if gender else ""
 
     # When grade_name active: game-level join/where templates for batting and bowling
@@ -478,7 +507,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.runs) > 0
             ORDER BY runs DESC LIMIT :limit
@@ -520,7 +549,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING (SUM(pss.batting_innings) - SUM(pss.not_outs)) >= 10
             ORDER BY average DESC LIMIT :limit
@@ -547,7 +576,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.fifties) > 0
             ORDER BY fifties DESC LIMIT :limit
@@ -574,7 +603,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.hundreds) > 0
             ORDER BY hundreds DESC LIMIT :limit
@@ -599,7 +628,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.ducks) > 0
             ORDER BY ducks DESC LIMIT :limit
@@ -626,7 +655,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.runs > 0
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_club_clause + pss_gender_clause + """
             ORDER BY pss.runs DESC LIMIT :limit
         """)
 
@@ -701,7 +730,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.wickets) > 0
             ORDER BY wickets DESC LIMIT :limit
@@ -741,7 +770,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.wickets) >= 20
             ORDER BY average ASC LIMIT :limit
@@ -771,7 +800,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.bowling_balls) >= 300
             ORDER BY economy ASC LIMIT :limit
@@ -796,7 +825,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.five_wicket_innings) > 0
             ORDER BY five_fors DESC LIMIT :limit
@@ -823,7 +852,7 @@ async def get_records(
             JOIN players p ON p.id = pss.player_id
             JOIN seasons s ON s.id = pss.season_id
             WHERE p.organisation_id = :org_id AND pss.wickets > 0
-              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_gender_clause + """
+              """ + ("AND pss.season_id = ANY(:season_ids) " if season_ids else "") + pss_club_clause + pss_gender_clause + """
             ORDER BY pss.wickets DESC LIMIT :limit
         """)
 
@@ -1199,7 +1228,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.matches) > 0
             ORDER BY matches DESC LIMIT :limit
@@ -1294,7 +1323,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING COUNT(DISTINCT pss.season_id) > 0
             ORDER BY seasons DESC LIMIT :limit
@@ -1363,7 +1392,7 @@ async def get_records(
             FROM players p
             JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
             WHERE p.organisation_id = :org_id
-              """ + pss_season_clause + pss_gender_clause + """
+              """ + pss_season_clause + pss_club_clause + pss_gender_clause + """
             GROUP BY p.id, COALESCE(p.display_name_override, p.name)
             HAVING SUM(pss.runs) >= 1000 AND SUM(pss.wickets) >= 100
             ORDER BY index_score DESC LIMIT :limit

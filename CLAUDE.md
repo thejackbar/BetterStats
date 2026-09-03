@@ -10556,6 +10556,59 @@ the hypothesis that led there was WRONG.
   a check that cannot fail.
 
 
+### Name the club's players, and the record book stops reading the platform (Sep 2026)
+
+`EXPLAIN (ANALYZE)` on production, through
+`ops/diagnostics/records_pushdown_test.sql`, on one board of the record book:
+
+| | Execution |
+|---|---|
+| A. today: join `players`, filter the club, JIT off | **514ms** |
+| B. `pss.player_id = ANY (SELECT id FROM players WHERE org = ...)` | **49,815ms** |
+| C. `pss.player_id = ANY (ARRAY(SELECT ...))` | **0.877ms** |
+| D. do A and C agree | 54 rows each, **0 differences either way** |
+| E. A again with JIT back on | 769ms |
+
+- **A BOUND ARRAY AND A SUBQUERY ARE NOT THE SAME THING, AND THE GAP IS
+  57,000x.** `= ANY (SELECT ...)` is planned as a semi-join against the
+  un-narrowed view — 49.8 SECONDS, ninety-seven times WORSE than doing nothing
+  at all. `= ANY (array)` is a plain restriction on the view's own column,
+  pushed into each UNION ALL branch, reading `idx_pss_player`. **Never "tidy"
+  the array back into a subquery**; the comment above `pss_club_clause` says so
+  where somebody would be tempted.
+- **THE NEW CLAUSE IS LOGICALLY REDUNDANT, WHICH IS WHY IT IS SAFE.** Every
+  board already joins `players p ON pss.player_id = p.id` and filters
+  `p.organisation_id`, so `pss.player_id = ANY(the club's players)` cannot
+  change a row — it only tells the planner something it could not work out for
+  itself. D proves it empirically rather than by reading the SQL, and the suite
+  seeds a rival club's bigger scorer and asserts he appears on no board of
+  ours.
+- **ONE CHEAP LOOKUP FEEDS ALL FOURTEEN.** `club_player_ids` is resolved once
+  per request (an index-only scan of `uq_players_org_id`, 101 rows) and bound
+  into every board.
+- **CAST, BECAUSE A CLUB WITH NO PLAYERS BINDS AN EMPTY LIST** and asyncpg
+  cannot infer an array's type from one — the same trap the vote-medals note
+  records for a bare `:param IS NULL`. An empty array correctly matches
+  nothing.
+- **THE CLAUSE RIDES WITH `pss_gender_clause`, which appears at exactly the
+  fourteen sites that read the view and nowhere else**, so threading it was one
+  substitution rather than fourteen hand edits. The suite asserts it
+  STRUCTURALLY — every `+ pss_gender_clause + ` must be preceded by
+  `pss_club_clause` — so a board added later cannot quietly put the
+  platform-wide scan back. Checked by breaking one on purpose: it reports
+  "13 of 14".
+- **Verified against a real Postgres** (the suite is 47 checks now: the club's
+  players resolved once, its own top scorer leading its board, both its
+  scorers still on it, a rival club's bigger scorer on no board, and a club
+  with no players answering with empty boards rather than raising) **with a
+  control run** reporting the instrumentation absent.
+- **Still to measure**: section F of the diagnostic prepares the board with a
+  BOUND `uuid[]` and runs it six times, because Postgres builds a custom plan
+  for the first five and only then weighs a generic one — a generic plan that
+  discarded the array's selectivity would put the seq scan back for a warmed-up
+  connection. Not yet run.
+
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

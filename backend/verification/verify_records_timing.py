@@ -82,6 +82,8 @@ GRADE = uuid.UUID("44444444-4444-4444-4444-444444444444")
 PLAYER = uuid.UUID("55555555-5555-5555-5555-555555555555")
 MATE = uuid.UUID("66666666-6666-6666-6666-666666666666")
 ADMIN = uuid.UUID("77777777-7777-7777-7777-777777777777")
+RIVAL_PLAYER = uuid.UUID("88888888-8888-8888-8888-888888888888")
+EMPTY_ORG = uuid.UUID("99999999-9999-9999-9999-999999999999")
 
 
 class Viewer:
@@ -132,7 +134,8 @@ async def seed(session) -> None:
     async def ex(sql, **kw):
         await session.execute(text(sql), kw)
 
-    for oid, name, slug in ((ORG, "Timing CC", "timing"), (OPPONENT, "Rivals CC", "rivals")):
+    for oid, name, slug in ((ORG, "Timing CC", "timing"), (OPPONENT, "Rivals CC", "rivals"),
+                            (EMPTY_ORG, "Nobody CC", "nobody")):
         await ex("INSERT INTO organisations (id, name, slug, is_active) "
                  "VALUES (:i, :n, :s, true)", i=oid, n=name, s=slug)
     await ex("INSERT INTO seasons (id, organisation_id, name, year) "
@@ -176,6 +179,21 @@ async def seed(session) -> None:
             " batter1_id, batter2_id, is_club_innings) "
             "VALUES (:g, 1, 2, :r, :a, :b, true)",
             g=gid, r=runs + 20, a=PLAYER, b=MATE)
+    # A rival club's player, outscoring everyone here. The club clause is
+    # logically implied by the join and filter already in every board, so it
+    # cannot change a row — this is what proves that empirically rather than
+    # by reading the SQL.
+    rival_season = uuid.uuid4()
+    await ex("INSERT INTO seasons (id, organisation_id, name, year) "
+             "VALUES (:i, :o, 'Summer 2025/26', 2025)", i=rival_season, o=OPPONENT)
+    await ex("INSERT INTO players (id, organisation_id, name, grassroots_id, status) "
+             "VALUES (:i, :o, 'Bradman, Don', :g, 'active')",
+             i=RIVAL_PLAYER, o=OPPONENT, g=str(RIVAL_PLAYER))
+    await ex("INSERT INTO player_season_stats (player_id, season_id, matches, "
+             " batting_innings, runs, not_outs, wickets, source) "
+             "VALUES (:p, :s, 52, 80, 6996, 10, 2, 'api')",
+             p=RIVAL_PLAYER, s=rival_season)
+
     for pid, runs in ((PLAYER, 85), (MATE, 66)):
         await ex(
             "INSERT INTO player_season_stats (player_id, season_id, matches, "
@@ -283,6 +301,40 @@ async def main() -> None:
     check("the timings do not disturb the boards",
           all(k in timed for k in BOARD_KEYS)
           and timed["batting"]["top_career_runs"] == plain["batting"]["top_career_runs"])
+
+    print("\n-- naming the club's players narrows the view without moving a row --")
+    check("the club's players are resolved once, up front",
+          "club_player_ids" in labels)
+    runs_board = timed["batting"]["top_career_runs"]
+    check("the club's own top scorer leads its board",
+          runs_board and runs_board[0]["player_id"] == str(PLAYER),
+          str(runs_board[:1]))
+    everyone = str(timed)
+    check("a rival club's bigger scorer appears on no board of ours",
+          str(RIVAL_PLAYER) not in everyone and "Bradman" not in everyone)
+    check("and both of this club's scorers are still on it",
+          {r["player_id"] for r in runs_board} == {str(PLAYER), str(MATE)},
+          str([r["player_id"] for r in runs_board]))
+    # Structural, so a board added later cannot quietly skip the narrowing and
+    # put the platform-wide scan back. Every board that reads the view carries
+    # the gender clause too, so the two must appear together, always.
+    src = (Path(__file__).resolve().parent.parent
+           / "app" / "routers" / "records.py").read_text()
+    with_club = src.count("+ pss_club_clause + pss_gender_clause + ")
+    total = src.count("+ pss_gender_clause + ")
+    check("every board that reads the view carries the club clause",
+          with_club == total and total >= 14, f"{with_club} of {total}")
+    async with Session() as session:
+        empty = await get_records(
+            str(EMPTY_ORG), season_id=None, grade_id=None, grade_name=None,
+            finals_only=False, captain_only=False, gender=None, categories=None,
+            formats=None, competitions=None, debug_timing=False, db=session, viewer=None)
+    # A club with no players binds an EMPTY array, which asyncpg cannot type
+    # without the CAST. Empty correctly matches nothing.
+    check("a club with no players answers rather than raising",
+          all(k in empty for k in BOARD_KEYS))
+    check("and its boards are empty",
+          not empty["batting"]["top_career_runs"] and not empty["bowling"]["top_career_wickets"])
 
     print("\n-- a slow request says so in the log, an ordinary one stays quiet --")
     records_logger = logging.getLogger("app.routers.records")

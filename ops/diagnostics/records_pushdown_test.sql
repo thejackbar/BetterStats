@@ -92,3 +92,39 @@ SELECT p.id::text AS player_id, COALESCE(SUM(pss.runs), 0) AS runs
  GROUP BY p.id HAVING SUM(pss.runs) > 0
  ORDER BY runs DESC LIMIT 25;
 SET jit = off;
+
+\echo ''
+\echo '=== F. the form the app actually sends: a BOUND array parameter ==='
+\echo '    C proved a literal array pushes down. This proves the bound one'
+\echo '    does too, which is what asyncpg sends for a Python list.'
+PREPARE board_bound (uuid[]) AS
+SELECT p.id::text AS player_id, COALESCE(SUM(pss.runs), 0) AS runs
+  FROM players p
+  JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
+ WHERE p.organisation_id = 'efb7cc9a-4a33-4ac6-aa8a-b21d33c01ce1'
+   AND pss.player_id = ANY(CAST($1 AS uuid[]))
+ GROUP BY p.id HAVING SUM(pss.runs) > 0
+ ORDER BY runs DESC LIMIT 25;
+
+-- EXECUTE cannot take a subquery, so the ids are collected into a psql
+-- variable first. Six runs: Postgres builds a custom plan for the first five
+-- and only then weighs a generic one, so the sixth says what a warmed-up
+-- connection actually runs.
+SELECT COALESCE(array_agg(id), ARRAY[]::uuid[])::text AS club_ids FROM players
+ WHERE organisation_id = 'efb7cc9a-4a33-4ac6-aa8a-b21d33c01ce1' \gset
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+EXPLAIN (ANALYZE) EXECUTE board_bound (:'club_ids');
+DEALLOCATE board_bound;
+
+\echo ''
+\echo '=== G. an empty array, which is what a club with no players binds ==='
+EXPLAIN (ANALYZE)
+SELECT p.id::text, COALESCE(SUM(pss.runs), 0) AS runs
+  FROM players p
+  JOIN v_effective_player_season_stats pss ON pss.player_id = p.id
+ WHERE pss.player_id = ANY(CAST(ARRAY[]::uuid[] AS uuid[]))
+ GROUP BY p.id;
