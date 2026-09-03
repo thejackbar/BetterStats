@@ -106,12 +106,29 @@ async def main() -> None:
             # the rollback would report the gap we started with.
             sql = await ab.propagate_all(db, commit=False)
             mid, _ = await _gap(db, org_id)
-            await db.rollback()
+            # NOT rolled back here: the plan below has to be measured while the
+            # fill is still visible, or it counts calls for seasons our own
+            # data has already answered.
+
         print(f"  from another club's row for the same CA grade: "
               f"{sql['filled_by_grade_guid']}")
         print(f"  from the club's own other seasons of that grade: "
               f"{sql['filled_by_club_grade_name']}")
         print(f"  still missing after our own data: {mid}")
+
+        # THE NUMBER THAT DECIDES HOW LONG THIS TAKES is not the grade rows
+        # left, it is how many Cricket Australia calls they cost — and one
+        # fetched season resolves grades other clubs share, so the two are a
+        # long way apart. Worked out from our own data, no request made.
+        if not args.apply or args.no_api:
+            plan = await ab.plan_api_phase(db, org_id)
+            print(f"  seasons still holding one: {plan['seasons_outstanding']}")
+            print(f"  Cricket Australia calls that would need: "
+                  f"~{plan['projected_calls']} "
+                  f"({plan['resolved_by_another_club']} season(s) resolved by "
+                  f"another club's answer before being asked)")
+            if not args.apply:
+                await db.rollback()
 
     if args.no_api or not args.apply:
         if not args.apply:

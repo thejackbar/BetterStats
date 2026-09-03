@@ -178,6 +178,100 @@ async def outstanding_seasons(db: AsyncSession, org_id=None) -> list[dict]:
     return [dict(r) for r in res.mappings()]
 
 
+async def plan_api_phase(db: AsyncSession, org_id=None) -> dict:
+    """How many Cricket Australia calls the API phase would actually make.
+
+    THE CALL COUNT IS NOT THE OUTSTANDING SEASON COUNT, and the gap between
+    them is the whole reason this exists. One fetched season resolves grade
+    guids that other clubs share, and each answer then propagates backwards
+    across every season of that club's own grade names — so seasons drop off
+    the list before they are ever called.
+
+    This works it out from data we already hold, with no request made. Grades
+    are unioned into components by the two things the propagation phases
+    spread along: a shared CA grade guid, and one club's own grade name. A
+    fetched season resolves every component it touches, so walking the seasons
+    in the order the API phase walks them gives the real number.
+
+    It is an ESTIMATE of the call count in one direction only: it assumes CA
+    answers every season it is asked, so a season CA has no association for is
+    counted as a call that resolves something. That makes the projected calls a
+    LOWER bound and the projected residual optimistic; the real run reports
+    both exactly.
+    """
+    clause = " AND s.organisation_id = CAST(:org AS UUID)" if org_id else ""
+    rows = (await db.execute(text(
+        f"""
+        SELECT gr.id, s.organisation_id AS org_id,
+               COALESCE(s.grassroots_id, CAST(s.id AS TEXT)) AS season_guid,
+               gr.grassroots_id AS guid,
+               {_GRADE_KEY} AS gkey,
+               gr.association_id IS NOT NULL AS known,
+               s.year
+          FROM grades gr
+          JOIN seasons s ON s.id = gr.season_id
+          LEFT JOIN grade_merge_logs gml
+                 ON gml.org_id = s.organisation_id
+                AND gml.undone_at IS NULL
+                AND LOWER(gml.alias_name) = LOWER(gr.name)
+         WHERE TRUE{clause}
+        """), {"org": str(org_id)} if org_id else {})).mappings().all()
+
+    parent: dict = {}
+
+    def find(x):
+        parent.setdefault(x, x)
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a, b):
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[ra] = rb
+
+    # A grade is linked to every other grade it can be resolved from.
+    for r in rows:
+        gid = ("g", r["id"])
+        find(gid)
+        if r["guid"]:
+            union(gid, ("guid", r["guid"]))
+        if r["gkey"]:
+            union(gid, ("name", str(r["org_id"]), r["gkey"]))
+
+    resolved = {find(("g", r["id"])) for r in rows if r["known"]}
+
+    # The seasons still holding an unresolved grade, newest first — the order
+    # `outstanding_seasons` itself returns them in.
+    seasons: dict = {}
+    for r in rows:
+        if r["known"]:
+            continue
+        seasons.setdefault((r["org_id"], r["season_guid"]), {"year": r["year"], "comps": set()})
+        seasons[(r["org_id"], r["season_guid"])]["comps"].add(find(("g", r["id"])))
+
+    order = sorted(seasons.items(),
+                   key=lambda kv: (kv[1]["year"] is None, -(kv[1]["year"] or 0)))
+
+    calls = skipped = 0
+    for _key, info in order:
+        if info["comps"] <= resolved:
+            skipped += 1      # another club's answer got there first
+            continue
+        calls += 1
+        resolved |= info["comps"]
+
+    unresolved_rows = sum(
+        1 for r in rows if not r["known"] and find(("g", r["id"])) not in resolved)
+    return {
+        "seasons_outstanding": len(seasons),
+        "projected_calls": calls,
+        "resolved_by_another_club": skipped,
+        "projected_rows_left": unresolved_rows,
+    }
+
+
 async def apply_associations(db: AsyncSession, found: dict) -> int:
     """Write ``{grade guid: owningOrganisation}`` across EVERY club at once.
 
