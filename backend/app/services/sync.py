@@ -1173,6 +1173,12 @@ async def _sync_organisation_impl(
             logger.warning(f"Competition seeding failed for {org_id_str}: {e}")
             await session.rollback()
 
+        # Fetching the associations for the seasons this run did NOT scan is a
+        # job of its own (`jobs/scheduler.group_all_organisations`), not part
+        # of a sync: a club that played nothing this week never reaches this
+        # function at all — the scheduler records an idle run instead — so an
+        # off-season club would never be grouped if this were the trigger.
+
         # Recompute milestones. _compute_milestones runs a query per player, so
         # a full run over an established club is a loop over ~1,500 of them —
         # fine once a week, wasteful twice a week for a club where only this

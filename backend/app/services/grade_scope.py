@@ -69,6 +69,7 @@ from uuid import UUID
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.club_grades import club_grade_rows
 from app.services.grade_labels import (
     GRADE_CATEGORIES,
     MATCH_FORMATS,
@@ -203,6 +204,7 @@ class GradeScope:
     __slots__ = (
         "categories", "formats", "excluded_ids", "excluded_categories",
         "format_fallback_ids", "param", "competitions", "competition_names",
+        "competition_extra_ids",
     )
 
     def __init__(
@@ -215,6 +217,7 @@ class GradeScope:
         format_fallback_ids: Sequence = (),
         competitions: Optional[Sequence] = None,
         competition_names: Sequence[str] = (),
+        competition_extra_ids: Sequence = (),
     ):
         self.categories = tuple(categories)
         self.formats = tuple(formats) if formats is not None else None
@@ -232,6 +235,13 @@ class GradeScope:
         # show a club figures it did not ask for.
         self.competitions = tuple(competitions) if competitions is not None else None
         self.competition_names = tuple(competition_names)
+        # Grade rows belonging to ANOTHER club that our own games sit in and
+        # that resolve into one of the wanted competitions. They cannot be
+        # reached by the subquery below (their own `competition_id` is that
+        # club's, never ours), so a shared fixture would otherwise drop out of
+        # its own competition. Kept as an explicit list because there are only
+        # ever a handful, which is what lets the main test stay a subquery.
+        self.competition_extra_ids = list(competition_extra_ids)
 
     @property
     def category_active(self) -> bool:
@@ -268,6 +278,10 @@ class GradeScope:
     @property
     def _comp_param(self) -> str:
         return f"{self.param}_competitions"
+
+    @property
+    def _comp_extra_param(self) -> str:
+        return f"{self.param}_comp_grades"
 
     def clause(
         self,
@@ -367,9 +381,11 @@ class GradeScope:
             # Competitions were asked for and none of them are this club's.
             # Nothing matches — never everything.
             return " AND FALSE"
+        extra = (f" OR {column} = ANY(:{self._comp_extra_param})"
+                 if self.competition_extra_ids else "")
         return (
-            f" AND {column} IN (SELECT gsc.id FROM grades gsc"
-            f" WHERE gsc.competition_id = ANY(:{self._comp_param}))"
+            f" AND ({column} IN (SELECT gsc.id FROM grades gsc"
+            f" WHERE gsc.competition_id = ANY(:{self._comp_param})){extra})"
         )
 
     def bind(self, params: dict) -> dict:
@@ -382,6 +398,8 @@ class GradeScope:
                 params[self._fmt_fallback_param] = self.format_fallback_ids
         if self.competitions:
             params[self._comp_param] = list(self.competitions)
+            if self.competition_extra_ids:
+                params[self._comp_extra_param] = self.competition_extra_ids
         return params
 
     def formats_only(self) -> "GradeScope":
@@ -403,6 +421,7 @@ class GradeScope:
             self.categories, [], (), self.param,
             formats=self.formats, format_fallback_ids=self.format_fallback_ids,
             competitions=self.competitions, competition_names=self.competition_names,
+            competition_extra_ids=self.competition_extra_ids,
         )
 
     def as_meta(self) -> dict:
@@ -500,29 +519,43 @@ async def resolve_scope(
         comp_ids = ()
 
     category_filter = set(wanted) < set(GRADE_CATEGORIES)
-    if not org_id or (not category_filter and wanted_formats is None):
+    # The grade walk below is also what finds the shared fixtures a competition
+    # filter has to reach, so a competition-only scope runs it too.
+    if not org_id or (not category_filter and wanted_formats is None
+                      and not comp_ids):
         return GradeScope(
             wanted, [], [], param, formats=wanted_formats,
             competitions=comp_ids, competition_names=comp_names,
         )
 
-    name_categories = await org_grade_category_sets(session, org_id)
+    name_categories = (
+        await org_grade_category_sets(session, org_id)
+        if category_filter else {}
+    )
     name_formats = (
         await org_grade_format_sets(session, org_id)
         if wanted_formats is not None else {}
     )
-    res = await session.execute(
-        text(
-            "SELECT gr.id, gr.name FROM grades gr "
-            "JOIN seasons s ON s.id = gr.season_id "
-            "WHERE s.organisation_id = CAST(:org AS UUID)"
-        ),
-        {"org": str(org_id)},
-    )
+    # EVERY grade this club's games can land in, not just the ones it owns.
+    # A fixture between two synced clubs is one `games` row pointing at
+    # whichever club synced it first, so our own match can sit in THEIR grade
+    # row — and a grade missing from this list is a grade the exclusion below
+    # can never name, which (the filter being an exclusion) means it is KEPT by
+    # every category at once. That is how 28 senior matches read as juniors as
+    # well as seniors. See services/club_grades.py.
+    grades = await club_grade_rows(session, org_id)
     excluded_ids = []
     excluded_categories = set()
     fallback_ids = []
-    for grade_id, name in res.fetchall():
+    comp_ids_set = set(comp_ids or ())
+    comp_grade_ids = []
+    for row in grades:
+        grade_id, name = row.id, row.name
+        if (comp_ids and not row.is_own and row.competition_id is not None
+                and str(row.competition_id) in comp_ids_set):
+            comp_grade_ids.append(grade_id)
+        if not category_filter and wanted_formats is None:
+            continue
         cats = categories_for_name(name_categories, name)
         # A grade carrying several categories is in scope if ANY of them is
         # wanted: a Girls Under 14 grade belongs to a club's juniors AND to its
@@ -550,6 +583,7 @@ async def resolve_scope(
         format_fallback_ids=fallback_ids,
         competitions=comp_ids,
         competition_names=comp_names,
+        competition_extra_ids=comp_grade_ids,
     )
 
 

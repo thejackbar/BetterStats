@@ -15,10 +15,22 @@ from app.routers.auth import get_optional_user, user_can_view_org_private
 from sqlalchemy import select as sa_select
 from app.services import playhq_client
 from app.services import grade_scope
+from app.services.club_grades import club_game_sql
+from app.services.game_status import appearance_counts_as_match
 from app.services.grade_labels import suggest_category
 from app.services import player_visibility
 from app.services import rate_coverage as rc
 from app.services.aggregations import _with_rate_coverage
+
+# "This game is our club's", for the per-game record boards.
+#
+# A fixture between two synced clubs is ONE `games` row whose grade — and so
+# whose season — belongs to whichever club synced it first. Neither club owns
+# it: both played it. Testing `seasons.organisation_id` gave the whole match to
+# one of them, so the other club's own record innings simply never appeared on
+# its own records page. See services/club_grades.py.
+_OURS_GAMES = club_game_sql("g", "org_id")
+_APPEARANCE_PLAYED = appearance_counts_as_match("ga")
 
 # This record book has always set its own qualification floors (20 wickets for
 # a bowling average, 50 overs for an economy). These two are their siblings: a
@@ -250,7 +262,8 @@ async def get_records(
     # Expand canonical season to include any merged-in alias seasons.
     from app.services.season_aliases import resolve_season_filter
     season_ids = await _timed(
-        "resolve_season_filter", resolve_season_filter(db, org_id, season_id)
+        "resolve_season_filter",
+        resolve_season_filter(db, org_id, season_id, include_shared=True),
     )
 
     p = {"org_id": org_id, "limit": _LIMIT}
@@ -1021,7 +1034,7 @@ async def get_records(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND ga.is_captain = TRUE
               AND p.organisation_id = :org_id
               {_gw_season}
@@ -1116,7 +1129,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1126,7 +1139,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1136,7 +1149,22 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
+                  {_match_grade_filter}
+                  {_gw_season}
+                  {finals_clause}
+                UNION
+                -- Named in the side and did nothing measurable in it: still a
+                -- match played, which is what this board counts. Without this
+                -- arm "most matches" reads as "most matches you did something
+                -- in", and disagrees with the same player's own MATCHES.
+                SELECT ga.player_id, ga.game_id, gr.season_id
+                FROM game_appearances ga
+                JOIN v_effective_games g ON g.id = ga.game_id
+                JOIN grades gr ON gr.id = g.grade_id
+                JOIN seasons s ON s.id = gr.season_id
+                WHERE {_OURS_GAMES}
+                  AND {_APPEARANCE_PLAYED}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1175,7 +1203,7 @@ async def get_records(
             JOIN grades gr ON gr.id = g.grade_id
             JOIN seasons s ON s.id = gr.season_id
             JOIN players p ON p.id = ga.player_id
-            WHERE s.organisation_id = CAST(:org_id AS UUID)
+            WHERE {_OURS_GAMES}
               AND ga.is_captain = TRUE
               AND p.organisation_id = :org_id
               {_gw_season}
@@ -1211,7 +1239,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1221,7 +1249,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1231,7 +1259,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = fs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1272,7 +1300,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bi.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}
@@ -1289,7 +1317,7 @@ async def get_records(
                 JOIN v_effective_games g ON g.id = bs.game_id
                 JOIN grades gr ON gr.id = g.grade_id
                 JOIN seasons s ON s.id = gr.season_id
-                WHERE s.organisation_id = CAST(:org_id AS UUID)
+                WHERE {_OURS_GAMES}
                   {_match_grade_filter}
                   {_gw_season}
                   {finals_clause}

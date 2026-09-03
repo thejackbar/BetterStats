@@ -1103,7 +1103,16 @@ def _game_universe_sql(ctx_clauses: list[str]) -> str:
                   AND gr2.display_name_override IS NOT NULL
                 LIMIT 1
             ) gdn ON TRUE
-            WHERE s.organisation_id = :org_id
+            -- A fixture between two synced clubs is ONE `games` row whose
+            -- season belongs to whichever club synced it first, and neither
+            -- club owns it. Asking whether we were one of the two SIDES is
+            -- what stops the other club's own matches falling out of its own
+            -- StatLab. Every per-player read below is separately guarded by
+            -- `p.organisation_id`, so widening the game universe cannot reach
+            -- another club's players. See services/club_grades.py.
+            WHERE (s.organisation_id = :org_id
+                   OR g.home_org_id = CAST(:org_id AS UUID)
+                   OR g.away_org_id = CAST(:org_id AS UUID))
               {ctx_where}
         )
     """
