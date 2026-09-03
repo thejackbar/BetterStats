@@ -31,6 +31,7 @@ from typing import Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.club_grades import club_grade_competitions
 from app.services.competitions import UNGROUPED_LABEL
 from app.services.game_status import appearance_counts_as_match
 from app.services.season_aliases import resolve_season_filter
@@ -67,10 +68,33 @@ _APPEARANCES_CTE = f"""
 # grade in no competition still produces a row — it lands under UNGROUPED_LABEL
 # rather than disappearing, the same call the "unattributed" column on the
 # by-grade grid makes.
+#
+# THE COMPETITION IS READ FROM THE CLUB'S OWN MAP, NEVER FROM
+# `grades.competition_id`. A shared fixture's grade row belongs to the OTHER
+# club, so its own competition_id is either NULL (the match falls into "Other
+# grades" — the reported Shoalwater Bay case, 28 Peel matches sitting outside
+# the Peel competition) or, once that club has grouped its own grades, is that
+# club's competition and would put their label on our figures.
+# `club_grade_competitions` resolves it to ours instead. See
+# services/club_grades.py.
 _COMP_JOIN = """
     JOIN grades gr ON gr.id = g.grade_id
-    LEFT JOIN club_competitions c ON c.id = gr.competition_id
+    LEFT JOIN LATERAL (
+        SELECT ovc.comp FROM unnest(
+            CAST(:cg_grade_ids AS uuid[]), CAST(:cg_comp_ids AS uuid[])
+        ) AS ovc(gid, comp)
+        WHERE ovc.gid = gr.id
+        LIMIT 1
+    ) ov ON TRUE
+    LEFT JOIN club_competitions c ON c.id = ov.comp
 """
+
+
+async def _bind_comp_map(session: AsyncSession, org_id, params: dict) -> None:
+    """Bind the club's grade -> competition map for :data:`_COMP_JOIN`."""
+    mapping = await club_grade_competitions(session, org_id)
+    params["cg_grade_ids"] = [str(k) for k in mapping]
+    params["cg_comp_ids"] = [str(v) if v else None for v in mapping.values()]
 
 
 def _label(name) -> str:
@@ -87,7 +111,7 @@ async def _season_clause(session: AsyncSession, org_id, season_id, params: dict)
     """
     if not season_id:
         return ""
-    ids = await resolve_season_filter(session, str(org_id), str(season_id))
+    ids = await resolve_season_filter(session, str(org_id), str(season_id), include_shared=True)
     if not ids:
         return ""
     params["sids"] = ids
@@ -104,6 +128,7 @@ async def club_competition_breakdown(
     in the club's own competition order.
     """
     params: dict = {"org": str(org_id)}
+    await _bind_comp_map(session, org_id, params)
     season_clause = await _season_clause(session, org_id, season_id, params)
 
     res = await session.execute(
@@ -210,6 +235,7 @@ async def competition_grade_breakdown(
     flat grade list could not express.
     """
     params: dict = {"org": str(org_id)}
+    await _bind_comp_map(session, org_id, params)
     season_clause = await _season_clause(session, org_id, season_id, params)
     res = await session.execute(
         text(f"""
@@ -263,6 +289,7 @@ async def player_competition_breakdown(
     not be attributed to a competition anyway.
     """
     params: dict = {"pid": str(player_id), "org": str(org_id)}
+    await _bind_comp_map(session, org_id, params)
     season_clause = await _season_clause(session, org_id, season_id, params)
 
     appearances = await session.execute(
@@ -455,7 +482,7 @@ async def _unattributed_matches(
     params: dict = {"pid": str(player_id), "org": str(org_id)}
     season_clause = ""
     if season_id:
-        ids = await resolve_season_filter(session, str(org_id), str(season_id))
+        ids = await resolve_season_filter(session, str(org_id), str(season_id), include_shared=True)
         if ids:
             params["sids"] = ids
             # A game with no grade has no season to compare either, so under a

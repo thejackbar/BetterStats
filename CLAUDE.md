@@ -1,5 +1,121 @@
 # BetterStats — Claude Session Notes
 
+## A FIXTURE BELONGS TO BOTH CLUBS. Read it that way, every time (v9.62.0, Sep 2026)
+
+**THIS HAS NOW BEEN REPORTED FOUR TIMES** — the second club's Games list
+(migration 167), a player's own club as their opposition (167), a season table
+drawn two and three times over (v9.53.10), a career counting another club's
+matches (v9.53.12), and now Shoalwater Bay. Every one is the same sentence
+written a different way, so it is written here once, at the top, as a rule:
+
+> **A CA match between two clubs that both sync BetterCricket is a SINGLE
+> `games` row. Its `grade_id` — and so its `season_id` — points at whichever
+> club synced it FIRST. That club does not own the fixture. Both sides played
+> it, both sides' scorecards hang off it, and both sides' statistics have to
+> count it and classify it.**
+
+**NEVER decide "is this game ours" with `seasons.organisation_id`, and never
+decide "what kind of grade is this" from a `grades` row your own club owns.**
+Both are the same mistake at two ends of the query.
+
+- **Ownership is `services/club_grades.club_game_sql`** — the game's own club is
+  us (`v_effective_games.organisation_id`, migration 169) **or we are one of the
+  two sides** (`home_org_id`/`away_org_id`, migration 167, both indexed).
+  `aggregations._OURS_GAMES` and `records._OURS_GAMES` are that one string;
+  `_club_game_clause` is the player-scoped sibling. A per-game read guarded by
+  `players.organisation_id` and this predicate is correct; one guarded by the
+  season's org is not.
+- **Classification is `services/club_grades.club_grade_rows`**, which enumerates
+  the club's own grades PLUS every grade row its own games sit in, and resolves
+  each to the club's own answer by NAME (folded through `grade_merge_logs`).
+- **A season filter needs `resolve_season_filter(..., include_shared=True)`**,
+  which reaches the other club's row for the same real season: the CA season
+  GUID both rows carry first (a CA season id is global, not per club — the key
+  `iq_filters.season_ids_cross_club` already matched on), then the year, then
+  the name for a row that has neither. **Opt-in, and that matters**: a query
+  whose only club guard is the season list (a grade listing, a season dropdown)
+  would otherwise reach another club's rows. Pass it only where the read is
+  ALSO guarded by the club's own players or by the ownership predicate above.
+
+### What Shoalwater Bay reported, and why it read as two unrelated bugs
+
+Darren Hind's Players-list row said **106 matches**, his own profile said
+**150**, and asking that profile for **Juniors** returned **28 senior Peel
+Cricket Association matches** — the same matches the Men's filter returned.
+
+- **THE CATEGORY FILTER IS AN EXCLUSION, SO A GRADE IT CANNOT NAME IS KEPT.**
+  That is deliberate and still right (a manual game with no grade, or an import
+  residual, is not a row we know to be junior). But `resolve_scope` built its
+  exclusion list from `grades JOIN seasons WHERE s.organisation_id = us`, so
+  the other club's grade row was never in the list and could not be excluded by
+  anything. The fixture therefore passed Men's AND Juniors AND every other
+  category at once. **An exclusion-based filter is only as good as its
+  enumeration** — widen the enumeration, never relax the exclusion.
+- **THE SAME FIXTURE WAS BEING DROPPED ELSEWHERE, WHICH IS WHY THE TWO SCREENS
+  DISAGREED.** The leaderboards, the SIRS boards and the record boards all
+  scoped `s.organisation_id = :org_id`, so the 21 innings the profile counted
+  never reached the Players list. 127 − 21 = 106, exactly.
+- **AND THE SEASON FILTER DROPPED THEM A THIRD TIME.** `resolve_season_filter`
+  expanded a year to sibling rows **of the same club only**, so picking 2025/26
+  lost the very matches the all-time figure counted.
+- **150 IS THE RIGHT ANSWER OF THE TWO.** Shoalwater played those matches. The
+  fix brings the boards up to the profile, never the profile down to the boards.
+- **THE COMPETITION PANEL READ THE FOREIGN GRADE'S OWN `competition_id`**, which
+  is NULL until the other club groups its grades and is THEIR competition after
+  that. So 122 sat under Peel and 28 under "Other grades", and a club that had
+  grouped its own grades would have had another club's competition name
+  labelling its figures. `club_grade_competitions` resolves it to ours instead.
+- **THE ASSOCIATION FALLBACK IS ONLY FOR A NAME WE HAVE NEVER HELD.** The first
+  cut matched any ungrouped foreign grade to our competition running the same
+  association, and the verification caught it: our own ungrouped "Under 14s" sat
+  in "Other grades" while THEIR identically-named row was swept into Peel. A
+  grade we hold under that name gets the answer we gave it, ungrouped included.
+- **A MERGED-AWAY SPELLING MUST READ AS THE GRADE THAT WAS KEPT.** A shared
+  fixture is exactly where CA's older name turns up, and the club has usually
+  merged that name away. `_apply_alias_fold` registers the canonical's confirmed
+  answer under the alias key in all three of `grade_labels`' name maps, so
+  "F Grade Colts Cup" reads as the senior "F Grade" it was merged into rather
+  than as the juniors its own name suggests.
+- **StatLab's `game_universe` was one line** (`WHERE s.organisation_id`), and
+  every per-player read below it is separately guarded by `p.organisation_id`,
+  so widening the game universe there cannot reach another club's players.
+  BetterIQ's team analysis was ALREADY cross-club aware (`_ours_clause`,
+  `season_ids_cross_club`) and needed nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_shared_fixture_stats.py`, 31 checks through the
+  shipped services and route bodies: the reported case replayed, the Juniors
+  filter returning only real junior matches, the Players list and the profile
+  agreeing, batting/bowling/fielding boards all counting the shared fixtures,
+  the club that DID sync the fixture unchanged and its own player never leaking
+  onto our board, a match we were not in still not ours, the season filter
+  reaching the other club's row on the CA season GUID and on the year, their
+  junior grade still excluded while their senior one is not, the merged
+  spelling read as ours, the format axis on a grade we do not own, the
+  competition panel filing every shared fixture under our own competition while
+  an ungrouped grade stays ungrouped, and the filtered senior and junior runs
+  adding back up to CA's own season total) **with a control run**: 22 of the 31
+  fail against the previous commit, the Juniors filter returning 126 runs of
+  senior cricket and the boards reading 3 where the profile reads 7.
+- **Measured at platform scale** (25,000 games, 1,260 grades, 75,000 innings):
+  `resolve_scope` 3.5 → 7.5ms, the scoped batting leaderboard 132 → 160ms. The
+  leaderboard's extra 28ms is **the 11% more innings it now correctly counts**,
+  not the predicate: the same query with only the WHERE swapped is 36.2 → 38.1ms
+  and returns 75,000 rows against 67,500. Writing the ownership test as
+  `s.organisation_id OR the two sides` measured SLOWER (42.1ms), so the plain
+  form stands.
+- **A CHECK THAT PASSES AGAINST THE BROKEN CODE IS NOT A CHECK.** The first cut
+  of "their older spelling reads as our merged grade's category" used a name
+  that suggests senior anyway, so an unclassified grade falling through passed
+  it. It is a junior-suggesting name now, and its sibling asserts the Juniors
+  filter does not claim it either — that pair fails both ways.
+- **NOTICED, NOT FIXED**: the same `seasons.organisation_id` shape still appears
+  in the yearbook generator, the fantasy engine and several admin tools. None is
+  a club-facing stats figure, and each needs its own look. The repeatable audit:
+  extract every triple-quoted SQL block, keep those with a per-game table after
+  `FROM`/`JOIN`, and flag any that tests a seasons alias' `organisation_id`
+  without also naming `home_org_id`. It reported 89 blocks; this change covers
+  the club-facing stats reads.
+
 ## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
 
 **Asked for as a RULE to set, not off a live report** — the 500 runs / 150 balls

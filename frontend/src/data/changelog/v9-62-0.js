@@ -1,0 +1,13 @@
+export default {
+  version: 'v9.62.0',
+  date: '2026-09-03',
+  sortKey: '2026-09-03T10:00:00Z',
+  title: 'Matches against another BetterCricket club now count for both clubs',
+  items: [
+    'When two clubs on BetterCricket play each other, that match is one shared record. It is now counted and classified the same way for both of them, instead of following whichever club happened to load it first.',
+    'Those matches were being left out of the Players list, the leaderboards, the record boards and StatLab for the other club, so a player could see one number on the Players list and a higher one on their own profile. Both now read the same.',
+    'They were also landing in the wrong grade type, so a senior match could turn up under the Juniors filter as well as under Men’s. Each match now sits in one grade type only.',
+    'Picking a season no longer drops them either — a shared match shows under the season it was played in.',
+    'On the Competitions panel they are filed under the club’s own competition rather than reading as "Other grades".',
+  ],
+}
