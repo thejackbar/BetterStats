@@ -74,167 +74,25 @@ BLOG_POSTS: list[dict] = [
         "image": "/marketing/blog/batting-average.jpg",
         "description": "Plenty of clubs only started counting balls faced recently, and a single season can be part iPad and part written book. Here is why that used to print a strike rate of 333, and how BetterCricket works one out now.",
         "body": [
-            {
-                "type": "p",
-                "text": "Balls faced is a recent habit in club cricket. It was never part of the traditional scorecard line, and plenty of competitions only began asking for it per batter in the last decade or two. Even now a single season can be part iPad and part written book, which leaves every run recorded and a ball count against only some of the innings. So what do you do with a strike rate when you hold all of one half and some of the other?",
-            },
-            {
-                "type": "h2",
-                "text": "Both halves have to come from the same innings",
-            },
-            {
-                "type": "p",
-                "text": "A batting average needs runs scored and times dismissed. Both are on every scorecard a club has ever kept, so averages hold good as far back as the records go.",
-            },
-            {
-                "type": "p",
-                "text": "A strike rate is different. It is runs divided by balls faced, and a ratio only means something when its top and bottom describe the same innings. Add up every run in a season and divide by every ball on file and you break that rule without noticing.",
-            },
-            {
-                "type": "p",
-                "text": "Take a season of 500 runs across 10 innings, where only 3 of those innings carry a ball count, totalling 150 balls. Divide 500 by 150 and the strike rate reads 333. The runs from the seven un-counted innings land on top of the sum with nothing underneath them to answer for. Those figures are an illustration of the arithmetic rather than a real player, but the shape of the error is what clubs were seeing.",
-            },
-            {
-                "type": "h2",
-                "text": "What BetterCricket does instead",
-            },
-            {
-                "type": "p",
-                "text": "The rate is worked out from the innings that recorded both halves. In that example it reads 100, which is what those three innings actually say, rather than 333, which is what nothing says.",
-            },
-            {
-                "type": "p",
-                "text": "The figure then tells you what answered it. Where a rate covers less than the whole of what it describes, the number carries a mark and a line beside it reading \"Data may be incomplete\" with the count, as in \"from 3 of 10 innings\". An (i) beside it opens the longer explanation for anyone who wants it.",
-            },
-            {
-                "type": "h2",
-                "text": "What counts as an innings that can answer",
-            },
-            {
-                "type": "p",
-                "text": "Withholding is reserved for what genuinely cannot be worked out. The rules are narrow and worth knowing:",
-            },
-            {
-                "type": "ul",
-                "items": [
-                    "A ball count recorded and greater than zero. This is the ordinary case and it counts.",
-                    "A ball count of zero against a score of zero. A batter run out at the non-striker's end without facing is a real innings that contributes nothing to either half, so it counts and keeps the fraction honest.",
-                    "A ball count of zero against runs on the board. This is a dropped count rather than a real zero, because a batter cannot score without facing, so the innings is left out of the rate.",
-                    "No ball count at all, which is what an older card or an untracked column gives us. Left out of the rate.",
-                ],
-            },
-            {
-                "type": "p",
-                "text": "Where a club has no scorecards at all for a season and only a season total, the figure still stands and says it was worked out from season totals. A club whose history arrived as annual figures rather than card by card does not lose its strike rates over a technicality.",
-            },
-            {
-                "type": "h2",
-                "text": "Why the mark sits on the figure, not in a footnote",
-            },
-            {
-                "type": "p",
-                "text": "A caveat at the bottom of a page does not travel with the number. Figures get screenshotted for the club Facebook page, typed into the yearbook and read out at presentation night, and a note left behind on the website is no use to any of that. So the mark rides on the figure itself, in the table, next to the digits.",
-            },
-            {
-                "type": "p",
-                "text": "It is a dagger rather than an asterisk. An asterisk already means not out on every cricket scorecard in the world, and a batting table is the last place to give it a second job.",
-            },
-            {
-                "type": "p",
-                "text": "Nothing is drawn at all where the rate covers everything. A note on every figure in the app is noise that teaches people to stop reading notes, and then the one that matters gets skipped with the rest.",
-            },
-            {
-                "type": "h2",
-                "text": "Leaderboards and record books",
-            },
-            {
-                "type": "p",
-                "text": "A strike rate from three innings and one from thirty are both real figures, and they are not the same kind of figure. Ranking them against each other on one board is the thing worth guarding against.",
-            },
-            {
-                "type": "p",
-                "text": "So a club can set its own minimum before a rate is published on a leaderboard, under Club Settings. It is counted on the innings that answered the rate, not the innings played, so ten played and three counted cannot clear a ten-innings bar. There is no minimum by default, because switching one on for every club would drop players off their own leaderboard without anybody choosing it. A viewer can also raise the bar for one look using the pills above the board.",
-            },
-            {
-                "type": "p",
-                "text": "In the record book, best strike rate and best economy are kept season by season rather than all time. Coverage varies too much across a long career for an all-time list to compare like with like, and a record that cannot be compared fairly is not much of a record.",
-            },
-            {
-                "type": "h2",
-                "text": "What this does not touch",
-            },
-            {
-                "type": "p",
-                "text": "Only the rates read the covered innings. Everything below counts every innings, for as far back as a club's records go.",
-            },
-            {
-                "type": "ul",
-                "items": [
-                    "Runs, batting average, high score, fifties, hundreds and ducks",
-                    "Wickets, bowling average, best figures and five-wicket hauls",
-                    "Catches, stumpings, run-outs and games played",
-                    "Every season total and career total, however far back the club can reach",
-                ],
-            },
-            {
-                "type": "p",
-                "text": "Bowling is usually in better shape than batting anyway. A scorer who writes nothing else still writes the overs, so most clubs will find their economy fully covered and no note drawn. Where a spell did reach us without an overs figure, it is left out of the rate rather than having its runs counted against somebody else's overs.",
-            },
-            {
-                "type": "h2",
-                "text": "What we will not do",
-            },
-            {
-                "type": "p",
-                "text": "There is a line here, and it runs between recovering a figure and inventing one. Anything reachable by arithmetic on a number somebody wrote down at the time, we will use. Anything that needs an assumption about how a player batted, we will not.",
-            },
-            {
-                "type": "table",
-                "headers": [
-                    "Suggested workaround",
-                    "Why we do not do it",
-                ],
-                "rows": [
-                    [
-                        "Estimate balls faced from time at the crease",
-                        "Minutes and balls are related but not convertible. Two batters can face very different numbers of balls in the same forty minutes, depending on who was at the other end and whether spin or pace was on.",
-                    ],
-                    [
-                        "Divide up the team's total overs",
-                        "The team's balls are known. How they were shared between eleven batters is the entire question, and it is the part the scorebook does not answer.",
-                    ],
-                    [
-                        "Apply a typical strike rate for the era or the grade",
-                        "The figure would describe the era, not the player. A record book exists to say what this bloke did.",
-                    ],
-                    [
-                        "Carry the recorded innings back across the rest",
-                        "That assumes he batted at 22 the way he batted at 41. If that held, the ball counts would not be needed in the first place.",
-                    ],
-                ],
-            },
-            {
-                "type": "h2",
-                "text": "How to improve your club's coverage",
-            },
-            {
-                "type": "p",
-                "text": "More covered innings means a rate that speaks for more of a career. Two routes work, and both are recovery rather than estimation.",
-            },
-            {
-                "type": "ul",
-                "items": [
-                    "Annual reports or yearbooks that printed a season strike rate per player. Balls faced can be worked straight back out of that, exactly, because it is arithmetic on a figure the club published at the time.",
-                    "Scorebooks with the balls faced column filled in but never typed up. BetterCricket's scorecard reader takes a photograph or scan of a handwritten scorebook and pulls the batting, bowling and fielding figures off it directly.",
-                ],
-            },
-            {
-                "type": "p",
-                "text": "Hand over either and the coverage on the affected seasons rises, the note recedes, and the figure starts speaking for more of the player.",
-            },
+            {"type": "p", "text": "Recording balls faced is a relatively recent development in club cricket. It was never part of the traditional scorecard line, and plenty of competitions only began asking for it per batter in the last decade or two. Even now a single season can be made up of part iPad scoring and part scorebook results, which can leave you with different levels of detail recorded. So how do you deal with strike rates when you don't have all of the information about balls faced across all of the innings in question?"},
+            {"type": "h2", "text": "Strike rates only make sense for fully recorded innings"},
+            {"type": "p", "text": "A batting average needs runs scored and times dismissed. Both are on every scorecard a club has ever kept, so averages hold good as far back as the records go."},
+            {"type": "p", "text": "A strike rate is different. It is runs divided by balls faced, and a ratio only makes sense when you have that detail for all of the innings in question. If you apply simple maths and add up every run in a season and divide it by the balls faced that were recorded, and balls faced was only recorded for some of those innings, it breaks down."},
+            {"type": "p", "text": "Take a season of 500 runs across 10 innings, where only 3 of those innings carry a balls faced count, totalling 150 balls. Divide 500 by 150 and the strike rate reads 333. The runs from the other seven un-counted innings cause an obvious problem. Those figures are an illustration of the arithmetic rather than a real player strike rate."},
+            {"type": "h2", "text": "What BetterCricket does instead"},
+            {"type": "p", "text": "If BetterCricket detects that not all of the innings in the range you are viewing have balls faced recorded, it highlights the issue with \"Data may be incomplete\". Click the (i) beside it and you get a longer, more detailed explanation."},
+            {"type": "p", "text": "Where a club has no scorecards at all for a season and only a season total, the figure still stands, but BetterCricket will note that it is based on season totals only. If a club's history was imported as annual figures alone, that is fine, and BetterCricket keeps track of it."},
+            {"type": "h2", "text": "Leaderboards and record books"},
+            {"type": "p", "text": "A strike rate from three innings and a strike rate from thirty innings are both valid stats, but you may view them differently. Ranking those two against each other on a leaderboard may not be a fair comparison."},
+            {"type": "p", "text": "So under Club Settings, BetterCricket lets a club admin set their club's own minimum number of qualifying innings before a strike rate is published on a leaderboard. There is no minimum by default. A viewer can also raise the bar in their own reporting criteria."},
+            {"type": "p", "text": "In the record book, best strike rate and best economy are kept season by season rather than all time. Coverage varies too much across a long career for an all-time list to compare like with like, and a record that cannot be compared fairly is not a valuable statistical record."},
+            {"type": "h2", "text": "What this does not touch"},
+            {"type": "p", "text": "Generally speaking, bowling stats are usually in better shape than batting stats. A scorer almost always records the overs bowled, so most clubs will find their economy rates fully covered. Where a spell was recorded without an overs figure, it is left out of the economy rate calculation rather than having its runs counted against somebody else's overs."},
+            {"type": "h2", "text": "What BetterCricket doesn't do"},
+            {"type": "p", "text": "There is a line here, and it runs between recovering a figure and inventing one. Anything reachable by arithmetic on a number somebody actually recorded, we will use. Anything that needs an assumption, such as what a player's strike rate might have been, we will not."},
             {
                 "type": "callout",
-                "text": "BetterCricket works every strike rate and economy out from the innings that can answer it, and says on the figure itself where that is less than the whole story. Search for your club at betterat.cricket/trial to see what your own records hold.",
+                "text": "BetterCricket only calculates a strike rate and economy rate if the innings recorded provides the data, and will tell you if the information is missing. Search for your club at betterat.cricket/trial to discover your club's records.",
             },
             {
                 "type": "links",
