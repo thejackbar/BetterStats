@@ -43,7 +43,7 @@ export const POSTS = [
       { q: 'Does the fixture data say which competition a grade belongs to?', a: `A fixture tells us about the season, grade, match and scorecard information, but it doesn't tell us about the competition. It does name the association that runs each grade, so BetterCricket groups on that automatically and lets a club split it further where one association runs several competitions.` },
       { q: 'Will grouping grades into competitions change my club stats?', a: `No. Grouping only changes how figures can be filtered and compared. Creating, renaming or deleting a competition never touches a game, a run or a wicket, and unfiltered totals stay exactly as they were.` },
       { q: 'What happens to imported history that has no grade recorded against it?', a: `It is reported separately with a count rather than being filed under a competition it might not belong to. Those matches still count in every unfiltered figure on the site.` },
-      { q: 'What about seasons from before we joined?', a: `Manage Grades tells you how many older seasons sit outside your competitions and offers to fetch what it needs to group them. It runs in the background with a progress bar, takes one lookup per season, and needs no rebuild of your data. You can leave it for another day and take it up later.` },
+      { q: 'What about the historical records imported into BetterCricket that aren\'t associated with competitions?', a: `Manage Grades tells you how many older seasons sit outside your competitions and offers to fetch what it needs to group them. It runs in the background with a progress bar, takes one lookup per season, and needs no rebuild of your data. You can leave it for another day and take it up later.` },
     ],
   },
   {
