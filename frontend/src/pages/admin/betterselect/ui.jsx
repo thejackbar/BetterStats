@@ -82,6 +82,27 @@ const ICON_PATHS = {
     <path d="M5.4 18.6L11.6 12.4" strokeWidth="5.6" /><path d="M12.9 11.1L18.4 5.6" strokeWidth="1.9" />
     <path d="M15.1 17.2l2.4 2.4 4.2-5.4" stroke="var(--pb-accent)" strokeWidth="1.9" />
   </>,
+  // Getting ready, rather than batting — so deliberately NOT a fourth bat.
+  // Three bats on one row already ask a lot of a glance.
+  //
+  // A HELMET, AFTER A LEG PAD WOULD NOT READ. Rendered side by side at
+  // 16/22/40/72px, every pad — outlined or solid, straps inside or out —
+  // collapses at 16px into a pill, a pair of curly braces or a stack of
+  // blocks; the strap tabs that make it a pad at 72px are the first thing to
+  // go. A helmet survives because its silhouette is a shape nothing else in
+  // this set has: a solid shell over a grille. It is also the more literal
+  // answer to "pad up" on a net night, since the helmet is what goes on last.
+  //
+  // The shell is FILLED rather than outlined for the same reason — a 1.8px
+  // outline at 16px leaves almost nothing inside it, and the glyph has to
+  // still read when the button is tinted green.
+  padUp: <>
+    <path d="M4.6 14.2a7.4 7.4 0 0 1 14.8 0v1.2H4.6z" fill="currentColor" stroke="none" />
+    <path d="M8.4 15.4v3.4M12 15.4v3.4M15.6 15.4v3.4M6.4 18.8h11.2" />
+  </>,
+  // Flagged, in the club's own word for it. A star would have collided with
+  // the Selection nav icon, which is already one.
+  flag: <><path d="M6 21V3.8" /><path d="M6 4.5h11l-2.3 4.2L17 13H6z" /></>,
 }
 
 /* ── A per-person, per-browser screen preference ──────────────────────────────

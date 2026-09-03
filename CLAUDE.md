@@ -1163,6 +1163,128 @@ or correct a player's totals, season blank for a career-only one.
   season create, the delete and undo requests, the deep-linked tab, no page
   errors, no overflow at 390px).
 
+## The batting order is dragged, and two flags a coach sets during the night (migration 284, v9.62.0, Sep 2026)
+
+Reported off a club's Thursday nets, run from an iPad: getting the right people
+into the batting spots after finding them in the check-in list was slow; there
+was no way to say who was padding up; and a captain on selection night or
+somebody leaving at seven had to be walked up the queue by hand.
+
+- **POINTER EVENTS, NEVER THE HTML5 DRAG API, and that is not a preference.**
+  iOS Safari fires no `dragstart`, `dragover` or `drop` at all, so on the device
+  this screen is actually run from a `draggable` attribute gives nothing and the
+  list cannot be reordered. `dragOrder.js` is pointer-based, which covers a
+  finger, an Apple Pencil and a mouse with one code path.
+- **`touch-action: none` ON THE HANDLE IS WHAT MAKES A TOUCH DRAG START.**
+  Without it the browser claims the gesture as a page scroll before the first
+  `pointermove` ever arrives. It is on the GRIP rather than the row on purpose —
+  the rest of the row keeps its ordinary scrolling, so a thumb can still flick
+  past a twenty-name queue. Playwright cannot simulate that arbitration, so the
+  suite MEASURES it off the computed style rather than inferring it from a mouse
+  drag working.
+- **THE THRESHOLDS ARE SNAPSHOTTED AT PICK-UP, IN PAGE COORDINATES.**
+  Re-measuring after each swap moves the very threshold that caused it and the
+  row oscillates between two slots; and a client-space snapshot shifts under the
+  auto-scroll that a queue taller than an iPad needs, so the row stops advancing
+  the moment the edge scroll takes over.
+- **THE ROWS REORDER UNDER THE FINGER — there is no lifted ghost following it.**
+  One thing moves instead of two, there is no copy to keep in step with a
+  re-render, and the row that has just landed is the row under the finger.
+- **A DRAG HOLDS THE POLL OFF, on the same in-flight counter a write uses.** A
+  poll landing mid-drag adopts the server's older order and pulls the row out
+  from under the finger. The preview is also held until the write comes back, or
+  the row snaps to where it started and forward again a moment later, which
+  reads as the drag having failed.
+- **ONE LIST FROM THE NETS DOWN, which is what makes the drag worth having.**
+  The separate "On now" card and "Up next" list are one "Batting order" now, the
+  first `nets` rows tinted and badged `NET n` — so putting the right player in a
+  batting spot is the same gesture as moving them up the queue, rather than a
+  separate act on a separate card. Who is in, and who is padding up, moved up
+  beside the clock where a player reads them from the nets.
+- **THE ARROW KEYS MOVE A FOCUSED GRIP.** Dragging is a pointer gesture and a
+  screen reader has no pointer; without this the order would be unreachable for
+  anyone not using one. That is also what let the two chevron buttons go.
+- **PADDING UP IS AN EXPLICIT FLAG, NOT THE NEXT N IN THE QUEUE.** The person who
+  pads up is whoever the coach actually spoke to, which on a real night is
+  routinely somebody further down the list. It is SPENT BY A ROTATION at both
+  ends — the group coming out have batted, the group going in have walked to the
+  nets — and cleared when somebody is marked batted or leaves the rotation.
+  Without that it slowly becomes a list of everyone the coach has ever spoken
+  to; somebody further down must keep theirs through the same rotation, or the
+  flag could never be set ahead.
+- **PRIORITY RECORDS A FACT AND MOVES NOBODY.** A tick that silently re-sorted
+  would undo the order the coach had just dragged into place, and with three
+  captains flagged on a selection night nobody could say who was really first.
+  So ticking it ASKS — move them up now, or mark the row — every time. The
+  reason goes into the existing `note`, the field that already holds what
+  somebody said on the way in, pre-filled so a "bowling only" typed at check-in
+  can't be written over. Unlike padding up it survives a turn and a spell out of
+  the rotation, because "leaving at seven" is still true afterwards.
+- **"BAT NEXT" IS THE FRONT OF THE LINE FOR THE NEXT TURN, NOT THE FRONT OF THE
+  LIST.** While a turn is under way the top `nets` names are IN, and dropping
+  somebody above them swaps out a batter mid-knock — worse, the next rotation
+  marks the new arrival as having batted when they never went in. `netsBusy`
+  covers the turn-over-but-not-yet-rotated state for the same reason. Dragging
+  is exempt: that is the coach saying "swap them", explicitly.
+- **A LEG PAD WOULD NOT READ, so the glyph is a HELMET.** Rendered side by side
+  at 16/22/40/72px, every pad — outlined or solid, straps inside or out —
+  collapses at 16px into a pill, a pair of curly braces or a stack of blocks;
+  the strap tabs that make it a pad at 72px are the first thing to go. The first
+  cut shipped as `{}` on the row and was caught by screenshotting the real
+  screen, not by reading the code. A helmet survives because its silhouette is a
+  shape nothing else in the set has, and it is the more literal answer anyway.
+  **The shell is filled**: a 1.8px outline at 16px leaves nothing inside it.
+- **EVERY STATE IS A WORD AS WELL AS A TINT** (`NET n` / `PADDING UP` /
+  `PRIORITY`), the rule this file already records — the green and amber here
+  separate by ΔE 7.2 under protanopia. A row can legitimately be two states at
+  once, which no single colour can say, so the pills are always drawn and only
+  the LEFT EDGE takes a precedence (in a net, then padding up, then priority).
+- **The row action group WRAPS onto its own line** rather than squeezing the
+  name: seven 34px targets plus a name do not fit on one 390px line, and this is
+  run from a tablet in portrait as often as a laptop. Row numbers and the grip
+  read at `--pb-dim`, never `--pb-faintest` (1.64:1).
+- **Verified against a real Postgres** (`backend/verification/verify_net_batting_order.py`,
+  46 checks through the shipped route bodies: migration 284 applied three times
+  to a populated pre-284 table and the lifespan mirror landing on the same
+  schema, both statements read out of the real sources rather than retyped,
+  every pre-284 row reading false, the flag cleared by a batted mark and by
+  leaving the rotation and not resurrected by either coming back, a rotation
+  spending it at both ends while somebody further down keeps theirs, priority
+  surviving both and moving nobody, an over-long reason capped, the drag's own
+  write landing whole, a foreign id ignored without losing anybody, a name the
+  sending device never knew about keeping its place, and every cross-club
+  refusal) **with a control run**: 20 fail against the previous commit.
+- **Driven in Chromium** (`frontend/verification/verify_net_batting_order_browser.mjs`,
+  58: the drag with real mouse-generated pointer events AND with synthetic
+  touch ones, `touch-action` measured off the computed style, the exact order on
+  the wire, no poll running while the finger is down and the poll returning
+  after, the arrow keys, the exact params for every flag, a person in a net not
+  also reading as padding up, the dialog writing NOTHING until answered, a
+  dismissal sending nothing, both bat-next rules, and no overflow at 390px)
+  **with a control run**: it reports the six missing parts by name rather than
+  dying on the first absent locator.
+- **A CONTROL RUN THAT CRASHES IS NOT A CONTROL RUN.** Both suites read the new
+  keys through `.get`/presence checks so an absent feature is REPORTED rather
+  than raising on the first `KeyError` or missing locator — otherwise the other
+  forty checks say nothing.
+- **PLAYWRIGHT'S `**` GLOB DOES NOT CROSS A `?`.** A glob route for the live
+  poll silently loses `…/live?since=3` to the catch-all, which hands the screen
+  `{}` and takes it down — a page crash a long way from the route that caused
+  it. The suite routes by REGEX throughout.
+- **Three of the first cut's checks were measuring the harness rather than the
+  code**: `NAMES.map(att)` passes `(value, index)` and the stub had them the
+  other way round, so every name was a NUMBER and the screen died inside
+  `Avatar`; an index hardcoded from the original order, after an earlier drag
+  had already moved the list; and "the padding-up line does not name them"
+  scoped to the whole hero, where the in-the-nets line right above legitimately
+  does — that one passed with the bug and failed without it.
+- **NOTICED, NOT FIXED**: `adopt` will take any payload, so a malformed one from
+  a server mid-deploy takes the screen down rather than leaving the last good
+  state on it. Pre-existing, and swallowing it could hide a real fault. The
+  session-register CSV is also unchanged — neither flag is in it, since padding
+  up is transient and the reason behind priority already rides in the note
+  column the register carries.
+
 ## The nets check-in list was hiding players, and turning up isn't batting (migration 273, v9.42.2, Aug 2026)
 
 Reported from a club's Thursday nets, alongside the QR check-in the note below

@@ -1219,6 +1219,17 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS note TEXT"
         ))
+        # Migration 284: who has been told to pad up for the next turn, and who
+        # needs to bat early tonight. Neither is derivable from the queue order
+        # — see the model's own note for why priority does not re-sort it.
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS "
+            "padding_up BOOLEAN NOT NULL DEFAULT false"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE net_attendance ADD COLUMN IF NOT EXISTS "
+            "priority BOOLEAN NOT NULL DEFAULT false"
+        ))
         await conn.execute(text(
             "ALTER TABLE grades ADD COLUMN IF NOT EXISTS playhq_id TEXT"
         ))

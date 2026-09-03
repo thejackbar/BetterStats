@@ -1817,8 +1817,29 @@ class NetAttendance(Base):
     # it means a net stands empty when their turn comes round (migration 273).
     bats = Column(Boolean, nullable=False, server_default="true")
     # What they said on the way in ("bowling only", "sore back"). Never required.
+    # Doubles as the reason behind `priority` — a coach ticking someone up the
+    # order is answering the same question ("leaving at 7", "captain, selection
+    # night"), and two free-text fields for one sentence is how they drift.
     note = Column(Text, nullable=True)
     position = Column(Integer, nullable=True)
+    # Migration 284. Two flags a coach sets during the night, both about the
+    # batting order and neither derivable from it:
+    #
+    #   padding_up — told to get their gear on for the next turn. Deliberately
+    #     NOT "the next N in the queue": the person who pads up is whoever the
+    #     coach actually spoke to, and on a Thursday night that is routinely not
+    #     the next name on the list. It is transient — cleared the moment they
+    #     go into a net, are marked as batted, or drop out of the rotation.
+    #
+    #   priority — needs to bat early tonight (a captain on selection night,
+    #     someone leaving at seven). It says nothing about where they SIT: the
+    #     coach chooses between moving them up and simply flagging it, because a
+    #     flag that silently re-sorted the order would fight the order the coach
+    #     had just set, and several of them would leave nobody able to say who
+    #     is genuinely first. It outlives a turn, since it is a fact about their
+    #     night rather than about one rotation.
+    padding_up = Column(Boolean, nullable=False, server_default="false")
+    priority = Column(Boolean, nullable=False, server_default="false")
     # 'admin' (a manager tapped the name) or 'self' (the player scanned the QR
     # code or tapped the NFC tag on the way in). Mirrors
     # player_availability.source and exists for the same reason: a self
