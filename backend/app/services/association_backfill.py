@@ -383,24 +383,33 @@ async def apply_associations(db: AsyncSession, found: dict) -> int:
     Not just the club whose call returned it — the guid is competition-wide, so
     one answer resolves every club's row for that grade. This is what makes the
     API phase collapse as it goes.
+
+    ONE STATEMENT, not a loop of one UPDATE per guid. Found running the real
+    API phase at concurrency: several workers each writing their own batch of
+    guids in whatever order a dict happened to iterate produced a Postgres
+    deadlock — two transactions locking the same two rows in opposite orders.
+    A single UPDATE takes every row lock it needs in ONE scan of the table,
+    which cannot deadlock against itself, and removes the per-caller ordering
+    that could still cross another concurrent call's.
     """
-    filled = 0
-    for guid, owner in (found or {}).items():
-        if not guid or not (owner or {}).get("id"):
-            continue
-        res = await db.execute(text(
-            """
-            UPDATE grades
-               SET association_id = :aid,
-                   association_name = COALESCE(association_name, :aname),
-                   association_short_name = COALESCE(association_short_name, :ashort)
-             WHERE grassroots_id = :guid AND association_id IS NULL
-            """
-        ), {
-            "aid": owner["id"],
-            "aname": (owner.get("name") or "").strip() or None,
-            "ashort": (owner.get("shortName") or "").strip() or None,
-            "guid": guid,
-        })
-        filled += res.rowcount or 0
-    return filled
+    items = [(g, o) for g, o in (found or {}).items() if g and (o or {}).get("id")]
+    if not items:
+        return 0
+    guids = [g for g, _ in items]
+    aids = [o["id"] for _, o in items]
+    anames = [(o.get("name") or "").strip() or None for _, o in items]
+    ashorts = [(o.get("shortName") or "").strip() or None for _, o in items]
+    res = await db.execute(text(
+        """
+        UPDATE grades gr
+           SET association_id = v.aid,
+               association_name = COALESCE(gr.association_name, v.aname),
+               association_short_name = COALESCE(gr.association_short_name, v.ashort)
+          FROM unnest(CAST(:guids AS text[]), CAST(:aids AS text[]),
+                      CAST(:anames AS text[]), CAST(:ashorts AS text[]))
+               AS v(guid, aid, aname, ashort)
+         WHERE gr.grassroots_id = v.guid
+           AND gr.association_id IS NULL
+        """
+    ), {"guids": guids, "aids": aids, "anames": anames, "ashorts": ashorts})
+    return res.rowcount or 0

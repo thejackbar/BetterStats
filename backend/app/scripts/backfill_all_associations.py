@@ -38,10 +38,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import random
 import sys
 import time
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.models.db import async_session_maker
 from app.services import association_backfill as ab
@@ -162,6 +164,12 @@ async def main() -> None:
                 if not any(j["season_guid"] == job["season_guid"] for j in still):
                     skipped += 1
                     return
+            # THE WRITE IS INSIDE THE SAME SEMAPHORE AS THE FETCH. The old code
+            # only capped concurrent Cricket Australia calls, so once past that
+            # gate every worker's write could still land at once, with no bound
+            # at all on how many concurrent transactions were touching the
+            # grades table. That is how two of them deadlocked in production —
+            # capping the write alongside the fetch bounds it to `concurrency`.
             async with sem:
                 try:
                     teams = await playhq_client.get_teams(
@@ -171,13 +179,26 @@ async def main() -> None:
                     logging.warning("teams failed for %s / %s: %s",
                                     job["org_id"], job["season_name"], e)
                     return
-            calls += 1
-            found = _associations_from_teams(teams)
-            if not found:
-                return
-            async with async_session_maker() as db:
-                fetched += await ab.apply_associations(db, found)
-                await db.commit()
+                calls += 1
+                found = _associations_from_teams(teams)
+                if not found:
+                    return
+                # A deadlock here is two concurrent writers' row locks
+                # crossing, not a data problem — Postgres's own remedy is
+                # "retry one of them", so a bounded retry in a FRESH session
+                # (the failed one is unusable once the driver has raised) is
+                # the right response, not a crash that abandons the run with
+                # calls already spent and answers already fetched.
+                for attempt in range(3):
+                    try:
+                        async with async_session_maker() as db:
+                            fetched += await ab.apply_associations(db, found)
+                            await db.commit()
+                        break
+                    except DBAPIError as e:
+                        if "deadlock detected" not in str(e).lower() or attempt == 2:
+                            raise
+                        await asyncio.sleep(0.05 * (attempt + 1) + random.random() * 0.05)
 
         await asyncio.gather(*(one(j) for j in todo))
         # One pass only: everything the calls could resolve is resolved, and a

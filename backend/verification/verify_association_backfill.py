@@ -333,6 +333,27 @@ async def main() -> None:
         check("and the club's other seasons follow from our own data next pass",
               (await ab.propagate_all(db))["filled_by_club_grade_name"] == 2)
 
+        print("\n— several fetched answers are written in ONE statement —")
+        # Two API workers can each return several guids in one payload; this
+        # is what a real concurrent run actually sends. A single batched write
+        # is what makes it impossible for two callers to lock two rows in
+        # opposite orders, which is the shape a real deadlock took in
+        # production once the API phase started writing under concurrency.
+        batch = await ab.apply_associations(db, {
+            "dirambig-2024": {"id": A_PEEL, "name": "Ambiguous League"},
+            "dirambig-2025": {"id": A_PEEL, "name": "Ambiguous League"},
+            "dirmulti-2024": {"id": A_WASTCA, "name": "WASTCA"},
+        })
+        await db.commit()
+        check("one call fills every guid it was given", batch == 3, str(batch))
+        check("and each row got its own association, not just the first",
+              await assoc_of(db, "dirambig-2024") == [A_PEEL]
+              and await assoc_of(db, "dirmulti-2024") == [A_WASTCA])
+        check("an already-known row is left alone, never overwritten",
+              (await db.execute(text(
+                  "SELECT association_id FROM grades WHERE grassroots_id ="
+                  " 'lone-2023'"))).scalar() == A_PEEL)
+
         print("\n— the grouping it unlocks —")
         out2 = await seed_competitions_for_org(db, OLD)
         await db.commit()

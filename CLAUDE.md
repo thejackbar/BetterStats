@@ -512,6 +512,46 @@ things that decide whether it can.
   club it touched. Fixed by casting to `text[]`, which is what the column
   actually is.
 
+### A live run at concurrency deadlocked writing the answers back (v9.62.6)
+
+Found running `--apply` for real, against the live database, not offline: the
+SQL phases committed (15,838 rows, safe — `propagate_all` commits before the
+API phase ever starts), then several concurrent workers into the API phase the
+run crashed on `DeadlockDetectedError`.
+
+- **`apply_associations` WROTE ONE GUID AT A TIME, IN A LOOP, IN WHATEVER
+  ORDER A DICT ITERATED.** Two concurrent workers each writing several guids
+  from their own team payload could lock the same two rows in opposite
+  orders — the textbook two-transaction deadlock, and something no offline
+  suite running single-threaded could ever exercise. It is now ONE UPDATE via
+  `unnest`, the same shape `propagate_from_directory` already uses: a single
+  statement takes every lock it needs in one scan and cannot deadlock against
+  itself, which is what removes the ordering freedom that let two callers'
+  writes cross.
+- **THE SEMAPHORE ONLY CAPPED THE FETCH, NOT THE WRITE.** Once past the
+  concurrency gate on `get_teams`, every worker's write could still land at
+  once with no bound at all on how many concurrent transactions were touching
+  `grades`. The write now happens INSIDE the same semaphore as the fetch, so
+  total concurrency — fetch and write together — is bounded to the configured
+  number rather than only the network half of it.
+- **A DEADLOCK IS STILL A BACKSTOP AWAY FROM A CRASH.** Postgres's own remedy
+  for a deadlock is "retry one of the two transactions" — it is not a data
+  problem, so a bounded retry in a FRESH session (the failed one is unusable
+  once the driver has raised) is the right response rather than losing a run
+  that has already spent its Cricket Australia calls and fetched its answers.
+- **THIS COULD NOT BE FOUND OFFLINE.** The verification suite runs one
+  statement at a time against a real Postgres; a deadlock needs two
+  transactions racing for the same rows in opposite orders, which is a timing
+  condition no single-threaded check reproduces. What the suite CAN and does
+  pin is the structural fix: one call to `apply_associations` with several
+  guids writes every one of them, not just the first, and never re-races
+  against itself.
+- **Verified against a real Postgres** (the suite is 33 checks now: a single
+  call filling several guids at once, each landing its own association rather
+  than the call stopping after the first, and an already-known row still never
+  overwritten) **with a control run**: a version that only ever applies the
+  first guid in the dict fails both new checks, at 1 filled instead of 3.
+
 ### The grade leaderboard and the profile under it (v9.53.13)
 
 Reported off Records with a grade picked: the board read 61 where the
