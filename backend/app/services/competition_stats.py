@@ -90,6 +90,40 @@ _COMP_JOIN = """
 """
 
 
+# A grade's name as THIS CLUB reads it: folded through its own grade merges,
+# then through any display-name override it set on the name it kept.
+#
+# Without the fold one real grade reads as several rows. Shoalwater Bay merged
+# CA's three spellings of its A Grade ("A Grade", "A Grade: Wyllie Cup",
+# "A Grade Wyllie Cup") and this page still drew all three, which is the same
+# grade's record split three ways. It is also what folds a shared fixture's
+# grade row — the other club's spelling of the same competition — onto ours.
+_GRADE_LABEL_JOIN = """
+    LEFT JOIN LATERAL (
+        SELECT canonical_name FROM grade_merge_logs gml
+        WHERE gml.org_id = CAST(:org AS UUID)
+          AND gml.alias_name = gr.name
+          AND gml.undone_at IS NULL
+        LIMIT 1
+    ) am ON TRUE
+    LEFT JOIN LATERAL (
+        SELECT gr2.display_name_override FROM grades gr2
+        JOIN seasons s2 ON s2.id = gr2.season_id
+        WHERE s2.organisation_id = CAST(:org AS UUID)
+          AND gr2.name = COALESCE(am.canonical_name, gr.name)
+          AND gr2.display_name_override IS NOT NULL
+        LIMIT 1
+    ) gdn ON TRUE
+"""
+_GRADE_LABEL = "COALESCE(gdn.display_name_override, am.canonical_name, gr.name)"
+
+# One real season, not one season ROW. Every club mints its own `seasons` row
+# for the same summer, so counting rows made a 26-season club read as 80. The
+# year is the identity; a row with no year (CA returns no start date for some)
+# falls back to its own name.
+_SEASON_KEY = "COALESCE(s.year::text, LOWER(s.name))"
+
+
 async def _bind_comp_map(session: AsyncSession, org_id, params: dict) -> None:
     """Bind the club's grade -> competition map for :data:`_COMP_JOIN`."""
     mapping = await club_grade_competitions(session, org_id)
@@ -141,13 +175,14 @@ async def club_competition_breakdown(
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result = 'WIN') AS won,
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result = 'LOSS') AS lost,
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn,
-                   COUNT(DISTINCT gr.season_id) AS seasons,
-                   COUNT(DISTINCT gr.name) AS grades,
+                   COUNT(DISTINCT {_SEASON_KEY}) AS seasons,
+                   COUNT(DISTINCT {_GRADE_LABEL}) AS grades,
                    MIN(s.year) AS first_year,
                    MAX(s.year) AS last_year
               FROM v_effective_games g
               {_COMP_JOIN}
               JOIN seasons s ON s.id = gr.season_id
+              {_GRADE_LABEL_JOIN}
              WHERE TRUE {_OURS}{season_clause}
              GROUP BY c.id, c.name, c.association_name
              ORDER BY MIN(c.display_order) NULLS LAST, COUNT(DISTINCT g.id) DESC
@@ -242,19 +277,20 @@ async def competition_grade_breakdown(
             SELECT c.id AS competition_id,
                    c.name AS competition_name,
                    MIN(c.display_order) AS comp_order,
-                   COALESCE(gr.display_name_override, gr.name) AS grade_name,
+                   {_GRADE_LABEL} AS grade_name,
                    MIN(gr.display_order) AS grade_order,
                    COUNT(DISTINCT g.id) AS matches,
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result = 'WIN') AS won,
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result = 'LOSS') AS lost,
                    COUNT(DISTINCT g.id) FILTER (WHERE g.result IN ('DRAW', 'TIE')) AS drawn,
-                   COUNT(DISTINCT gr.season_id) AS seasons,
+                   COUNT(DISTINCT {_SEASON_KEY}) AS seasons,
                    MAX(s.year) AS last_year
               FROM v_effective_games g
               {_COMP_JOIN}
               JOIN seasons s ON s.id = gr.season_id
+              {_GRADE_LABEL_JOIN}
              WHERE TRUE {_OURS}{season_clause}
-             GROUP BY c.id, c.name, COALESCE(gr.display_name_override, gr.name)
+             GROUP BY c.id, c.name, {_GRADE_LABEL}
              ORDER BY MIN(c.display_order) NULLS LAST, c.name,
                       MIN(gr.display_order) NULLS LAST,
                       COUNT(DISTINCT g.id) DESC
@@ -300,14 +336,15 @@ async def player_competition_breakdown(
                    c.association_name,
                    MIN(c.display_order) AS display_order,
                    COUNT(DISTINCT g.id) AS matches,
-                   COUNT(DISTINCT gr.season_id) AS seasons,
-                   COUNT(DISTINCT gr.name) AS grades,
+                   COUNT(DISTINCT {_SEASON_KEY}) AS seasons,
+                   COUNT(DISTINCT {_GRADE_LABEL}) AS grades,
                    MIN(s.year) AS first_year,
                    MAX(s.year) AS last_year
               FROM appearances ap
               JOIN v_effective_games g ON g.id = ap.game_id
               {_COMP_JOIN}
               JOIN seasons s ON s.id = gr.season_id
+              {_GRADE_LABEL_JOIN}
              WHERE TRUE {_OURS}{season_clause}
              GROUP BY c.id, c.name, c.association_name
              ORDER BY MIN(c.display_order) NULLS LAST, COUNT(DISTINCT g.id) DESC

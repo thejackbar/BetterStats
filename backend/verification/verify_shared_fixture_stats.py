@@ -402,6 +402,26 @@ async def main() -> None:
         check("the club's own competition record counts them as well",
               cpeel.get("matches") == 6, str(cpeel.get("matches")))
 
+        print("\n— the competitions page reads the club's own grades —")
+        grades = await competition_stats.competition_grade_breakdown(session, OURS)
+        peel_grades = [r for r in grades
+                       if r["competition_name"] == "Peel Cricket Association Inc."]
+        names = sorted(r["grade_name"] for r in peel_grades)
+        check("the merged-away spelling is not drawn as a grade of its own",
+              names == ["F Grade"], str(names))
+        check("and that one row holds every match played in it",
+              peel_grades and peel_grades[0]["matches"] == 6,
+              str(peel_grades and peel_grades[0]["matches"]))
+        check("its season count is the real season, not one row per club",
+              peel_grades and peel_grades[0]["seasons"] == 1,
+              str(peel_grades and peel_grades[0]["seasons"]))
+        check("the competition header counts one season and one grade",
+              cpeel.get("seasons") == 1 and cpeel.get("grades") == 1,
+              f"seasons {cpeel.get('seasons')} grades {cpeel.get('grades')}")
+        check("and the player's own row says the same",
+              peel.get("seasons") == 1 and peel.get("grades") == 1,
+              f"seasons {peel.get('seasons')} grades {peel.get('grades')}")
+
         print("\n— the club's records —")
         recs = await get_records(
             str(OURS), season_id=None, grade_id=None, grade_name=None,
