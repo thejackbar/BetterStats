@@ -434,6 +434,84 @@ from the data BetterCricket already holds rather than from Cricket Australia.
   control run**: all 9 fail against the previous commit, reported rather than
   crashed.
 
+### A live dry run needs the real cost, not the residual row count (v9.62.4)
+
+Asked for directly: a dry run against a real database reported "22,862 rows
+still missing" and read as the wall this feature was meant to remove — that
+figure is grade ROWS, not Cricket Australia CALLS, and the gap between the two
+is the whole reason the propagation phases exist.
+
+- **`plan_api_phase` works out the real call count from data already held,
+  with no request made.** It unions grades into the same components the two
+  propagation phases spread along — a shared CA grade guid, one club's own
+  grade name — and walks the outstanding seasons in the order the API phase
+  would, counting a call only when it touches a component nothing has resolved
+  yet. One fetched season can settle several components at once, which is
+  exactly what collapses 2,750 outstanding seasons into ~33 real calls on the
+  live data.
+- **It is a lower bound, and says so.** It assumes CA answers every season it
+  is asked, so a season CA genuinely has no association for is still counted
+  as a call that resolves something. The real run reports the exact figures;
+  this is what an operator reads before deciding to run it at all.
+- **The dry run prints it after the SQL phases, not before** — it has to run
+  against the state those phases leave behind (rolled back at the very end,
+  not before), or it counts calls for seasons our own data has already
+  answered and inflates the very number it exists to shrink.
+
+### The Club Directory closes what the sync alone cannot (v9.62.5)
+
+Asked directly, on seeing a live dry run: "the club directory displays all of
+the associations linked to every club — why can't this information be used?"
+Good instinct, and it works — but only after checking, not assuming, the two
+things that decide whether it can.
+
+- **`scripts/inspect_association_sources.py` is the check, and it is
+  read-only.** No write, no upstream call. It answers the two questions that
+  decide whether the Directory can be trusted here: do the two id spaces
+  agree, and how many clubs does the Directory show playing in exactly one
+  association (the only case where its answer is exact rather than a guess).
+  Run against the live database it found **0 of 3** association ids shared
+  between `grades.association_id` and `marketing_clubs.associations`, and all
+  3 **names** shared — confirming this repo's own history of PlayHQ-main-graph
+  ids disagreeing with Grassroots-proxy ids, and that the fix has to match on
+  name, never on the Directory's own id.
+- **`propagate_from_directory` is the third phase, and it never writes the
+  Directory's id.** For a club the Directory shows playing in EXACTLY one
+  association, every grade with no association becomes answerable in one
+  step — not by propagating from a known row, but because the WHOLE club is
+  known to mean one thing. A club in several associations says nothing about
+  which one ran a given grade, so it is left untouched, same as the API phase
+  would have to ask it directly.
+- **The target id is resolved by NAME, reused if anything already calls it
+  that, minted only if nothing does.** `HAVING COUNT(DISTINCT association_id)`
+  the same refuse-to-guess guard the other two phases use: a name that already
+  means two different real ids somewhere (two associations sharing a common
+  word) is left alone rather than picking a side. Where nothing anywhere has
+  ever called it that, a deterministic id is minted from the normalised name
+  (`uuid5` in a namespace of its own, never a real CA guid), so two
+  Directory-only clubs naming the same association land on one value even
+  though neither has a synced grade to agree through.
+- **It runs inside the same `propagate_all` loop as the other two, feeding
+  and fed by them** — a whole club filled from the Directory can be the first
+  known row for a guid or a name that unlocks a DIFFERENT club sharing it,
+  exactly the way a synced club's answer already does.
+- **Verified against a real Postgres** (the suite is 30 checks now: a
+  Directory name that already means something reusing that id rather than
+  minting a second one, a name nobody has ever synced being minted once and
+  never colliding with a real id, the ambiguous-name refusal, the
+  more-than-one-association club left for the API, and the gap closing from
+  23 to the 10 nobody can answer with the three new clubs folded into the
+  fixture) **with control runs**: with the phase neutered, 7 of the 30 fail;
+  with the ambiguity guard removed, the refusal check catches it picking a
+  side rather than declining.
+- **Found by running it, not by reading it**: the first cut cast the minted
+  and reused association ids to `uuid[]` in the batch UPDATE, matching the
+  shape of every other id in this feature. `grades.association_id` is `TEXT`,
+  because a real CA/PlayHQ association id is an arbitrary routing code, not
+  guaranteed to be a UUID — the cast crashed on the very first Directory-linked
+  club it touched. Fixed by casting to `text[]`, which is what the column
+  actually is.
+
 ### The grade leaderboard and the profile under it (v9.53.13)
 
 Reported off Records with a grade picked: the board read 61 where the

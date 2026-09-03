@@ -31,11 +31,24 @@ to run repeatedly and safe to run before the API phase.
 from __future__ import annotations
 
 import logging
+import re
+import uuid
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
+
+# A stable per-name id for an association we only know from the Club
+# Directory, so two Directory-only clubs that name the same association land
+# on one value even though neither has ever synced a real grade guid for it.
+# Deterministic and namespaced so it can never collide with a real CA guid.
+_DIRECTORY_ASSOC_NS = uuid.uuid5(uuid.NAMESPACE_URL,
+                                  "bettercricket.com/directory-association")
+
+
+def _directory_assoc_key(name: str) -> str:
+    return re.sub(r"\s+", " ", (name or "").strip()).lower()
 
 # The sponsor-suffix strip, as SQL. Mirrors `grade_labels.strip_sponsor_suffix`
 # and `iq_filters.grade_base`: CA decorates a grade's name with the season's
@@ -128,30 +141,122 @@ async def propagate_by_club_grade_name(db: AsyncSession) -> int:
     return res.rowcount or 0
 
 
+async def propagate_from_directory(db: AsyncSession) -> int:
+    """Fill a whole club's gap from the Club Directory, where it can only mean
+    one thing: a club that plays in EXACTLY one association, per the Directory's
+    own ``marketing_clubs.associations``.
+
+    THE TWO ID SPACES DO NOT MATCH, so this never writes the Directory's own
+    id. `grades.association_id` is written from the GRASSROOTS proxy's
+    ``owningOrganisation.id``; the Directory's comes from PlayHQ's main graph,
+    a routing code. Checked against the live database before writing this, not
+    assumed — the two overlap on NAME, not on id. So the match is by name:
+    reuse whatever id we already hold for that name (a real one, once any club
+    has synced it, or an earlier directory-minted one), and only mint a fresh
+    deterministic id keyed on the normalised name when nothing anywhere has
+    called it that yet. Two Directory-only clubs naming the same association
+    land on one value for the same reason `propagate_by_grade_guid` does.
+
+    Refuses exactly like the other two phases: a name that already means more
+    than one distinct association_id somewhere is left alone rather than
+    picking one, which is the shape of two real associations sharing a common
+    word ("Metropolitan Cricket Association") rather than the same body.
+    """
+    rows = (await db.execute(text(
+        """
+        SELECT o.id AS org_id,
+               BTRIM(mc.associations->0->>'name') AS assoc_name,
+               (SELECT MIN(g2.association_id) FROM grades g2
+                 WHERE g2.association_id IS NOT NULL
+                   AND LOWER(BTRIM(g2.association_name)) =
+                       LOWER(BTRIM(mc.associations->0->>'name'))) AS known_id,
+               (SELECT MIN(g2.association_short_name) FROM grades g2
+                 WHERE g2.association_id IS NOT NULL
+                   AND LOWER(BTRIM(g2.association_name)) =
+                       LOWER(BTRIM(mc.associations->0->>'name'))) AS known_short,
+               (SELECT COUNT(DISTINCT g2.association_id) FROM grades g2
+                 WHERE g2.association_id IS NOT NULL
+                   AND LOWER(BTRIM(g2.association_name)) =
+                       LOWER(BTRIM(mc.associations->0->>'name'))) AS distinct_ids
+          FROM organisations o
+          JOIN marketing_clubs mc ON mc.existing_org_id = o.id AND mc.kind = 'club'
+         WHERE o.archived_at IS NULL
+           AND jsonb_typeof(mc.associations) = 'array'
+           AND jsonb_array_length(mc.associations) = 1
+           AND COALESCE(BTRIM(mc.associations->0->>'name'), '') <> ''
+           AND EXISTS (
+               SELECT 1 FROM seasons s JOIN grades gr ON gr.season_id = s.id
+                WHERE s.organisation_id = o.id AND gr.association_id IS NULL)
+        """
+    ))).mappings().all()
+
+    org_ids, assoc_ids, assoc_names, assoc_shorts = [], [], [], []
+    for r in rows:
+        if r["distinct_ids"] and r["distinct_ids"] > 1:
+            continue  # this name already means more than one thing — refuse
+        if r["known_id"]:
+            assoc_id, assoc_short = r["known_id"], r["known_short"]
+        else:
+            assoc_id = str(uuid.uuid5(
+                _DIRECTORY_ASSOC_NS, _directory_assoc_key(r["assoc_name"])))
+            assoc_short = None
+        org_ids.append(str(r["org_id"]))
+        assoc_ids.append(assoc_id)
+        assoc_names.append(r["assoc_name"])
+        assoc_shorts.append(assoc_short)
+
+    if not org_ids:
+        return 0
+
+    res = await db.execute(text(
+        """
+        UPDATE grades gr
+           SET association_id = v.assoc_id,
+               association_name = COALESCE(gr.association_name, v.assoc_name),
+               association_short_name =
+                   COALESCE(gr.association_short_name, v.assoc_short)
+          FROM unnest(CAST(:org_ids AS uuid[]), CAST(:assoc_ids AS text[]),
+                      CAST(:assoc_names AS text[]), CAST(:assoc_shorts AS text[]))
+               AS v(org_id, assoc_id, assoc_name, assoc_short)
+          JOIN seasons s ON s.organisation_id = v.org_id
+         WHERE gr.season_id = s.id
+           AND gr.association_id IS NULL
+        """
+    ), {
+        "org_ids": org_ids, "assoc_ids": assoc_ids,
+        "assoc_names": assoc_names, "assoc_shorts": assoc_shorts,
+    })
+    return res.rowcount or 0
+
+
 async def propagate_all(db: AsyncSession, commit: bool = True) -> dict:
-    """Both SQL phases, run until neither writes anything.
+    """All three SQL phases, run until none of them writes anything.
 
     They feed each other: a guid filled from another club unlocks that club's
     other seasons of the same name, which in turn carry a guid another club is
-    waiting on. Two or three passes settle it; the loop is bounded so a
-    pathological cycle cannot spin.
+    waiting on; a whole club filled from the Directory can be the FIRST known
+    row for a guid or a name that unlocks other clubs sharing it. Bounded at
+    five passes so a pathological cycle cannot spin.
 
     ``commit=False`` leaves the writes in the caller's open transaction, which
     is how the batch script's dry run reports what WOULD be filled — including
     the residual gap, which can only be measured before the rollback — without
     keeping a second copy of this loop that could drift from it.
     """
-    by_guid = by_name = 0
+    by_guid = by_name = by_directory = 0
     for _ in range(5):
         guid_rows = await propagate_by_grade_guid(db)
         name_rows = await propagate_by_club_grade_name(db)
+        dir_rows = await propagate_from_directory(db)
         by_guid += guid_rows
         by_name += name_rows
-        if not guid_rows and not name_rows:
+        by_directory += dir_rows
+        if not guid_rows and not name_rows and not dir_rows:
             break
     if commit:
         await db.commit()
-    return {"filled_by_grade_guid": by_guid, "filled_by_club_grade_name": by_name}
+    return {"filled_by_grade_guid": by_guid, "filled_by_club_grade_name": by_name,
+            "filled_by_directory": by_directory}
 
 
 async def outstanding_seasons(db: AsyncSession, org_id=None) -> list[dict]:

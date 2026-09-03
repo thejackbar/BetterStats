@@ -7,12 +7,14 @@ The sync writes that as it goes, but only for the seasons it scans, so every
 club onboarded before migration 283 carries a history with none — and doing it
 club by club is one Cricket Australia call per club per season.
 
-Two phases of PLAIN SQL over our own data do most of the work first
-(``services/association_backfill.py`` explains both): a CA grade guid is
+Three phases of PLAIN SQL over our own data do most of the work first
+(``services/association_backfill.py`` explains all three): a CA grade guid is
 competition-wide, so an association any club holds is the answer for every
-club's row carrying that guid; and a club's own grade NAME is its own
-competition, so one recent sync propagates backwards across every season of
-that name.
+club's row carrying that guid; a club's own grade NAME is its own competition,
+so one recent sync propagates backwards across every season of that name; and
+a club the Club Directory shows playing in exactly one association can have
+its WHOLE gap filled from that alone, matched by name since the Directory's
+own ids are a different namespace from Grassroots'.
 
 Only what is left after that is fetched, and every answer is applied across
 EVERY club immediately — so the first club processed in an association
@@ -114,6 +116,8 @@ async def main() -> None:
               f"{sql['filled_by_grade_guid']}")
         print(f"  from the club's own other seasons of that grade: "
               f"{sql['filled_by_club_grade_name']}")
+        print(f"  from the Club Directory, for a club playing in exactly one: "
+              f"{sql['filled_by_directory']}")
         print(f"  still missing after our own data: {mid}")
 
         # THE NUMBER THAT DECIDES HOW LONG THIS TAKES is not the grade rows
@@ -188,7 +192,7 @@ async def main() -> None:
           f"{fetched} grade row(s) filled ({skipped} season(s) already resolved "
           f"by another club, {failed} failed)")
     print(f"  a second pass over our own data filled "
-          f"{sql2['filled_by_grade_guid'] + sql2['filled_by_club_grade_name']} more")
+          f"{sql2['filled_by_grade_guid'] + sql2['filled_by_club_grade_name'] + sql2['filled_by_directory']} more")
     print(f"  still without an association: {after} "
           f"(Cricket Australia has none for these)")
 

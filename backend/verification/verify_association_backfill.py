@@ -14,6 +14,7 @@ Run:  DATABASE_URL=postgresql+asyncpg://postgres:pg@localhost/bsassoc \
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -64,6 +65,10 @@ SYNCED = uuid.uuid4()     # a club synced since migration 283 — it has answers
 OLD = uuid.uuid4()        # an established club with none at all
 MOVER = uuid.uuid4()      # a club that changed association under one name
 LONE = uuid.uuid4()       # a club nothing else in the database shares a grade with
+DIR_REUSE = uuid.uuid4()  # known only via the Directory, naming an association we already hold
+DIR_MINT = uuid.uuid4()   # known only via the Directory, naming one nobody has ever synced
+DIR_AMBIG = uuid.uuid4()  # the Directory's name means two different things elsewhere
+DIR_MULTI = uuid.uuid4()  # plays in more than one association per the Directory — not our call to make
 
 
 async def build() -> None:
@@ -93,13 +98,17 @@ async def seed(db) -> None:
         await db.execute(text(sql), kw)
 
     for oid, nm in ((SYNCED, "Synced Club"), (OLD, "Established Club"),
-                    (MOVER, "Moved Club"), (LONE, "Lone Club")):
+                    (MOVER, "Moved Club"), (LONE, "Lone Club"),
+                    (DIR_REUSE, "Directory Reuse Club"),
+                    (DIR_MINT, "Directory Mint Club"),
+                    (DIR_AMBIG, "Directory Ambiguous Club"),
+                    (DIR_MULTI, "Directory Multi Club")):
         await ex("INSERT INTO organisations (id, name, is_active)"
                  " VALUES (:i, :n, true)", i=oid, n=nm)
 
     # Seasons: three years each, sharing the CA season guids.
     seasons: dict[tuple, uuid.UUID] = {}
-    for org in (SYNCED, OLD, MOVER, LONE):
+    for org in (SYNCED, OLD, MOVER, LONE, DIR_REUSE, DIR_MINT, DIR_AMBIG, DIR_MULTI):
         for year in (2023, 2024, 2025):
             sid = uuid.uuid4()
             seasons[(org, year)] = sid
@@ -151,6 +160,44 @@ async def seed(db) -> None:
     # our own data cannot answer it, and it must not be guessed.
     for year in (2023, 2024, 2025):
         await grade(LONE, year, "Premier Grade", f"lone-{year}")
+
+    # A grade elsewhere carrying the SAME association_name under two different
+    # ids — the shape a name-based match must refuse, not pick a side of.
+    await grade(MOVER, 2023, "Ambiguous League Grade", "ambig-a-2023", A_PEEL)
+    await ex("UPDATE grades SET association_name = 'Ambiguous League'"
+             " WHERE grassroots_id = 'ambig-a-2023'")
+    await grade(LONE, 2023, "Ambiguous League Grade B", "ambig-b-2023", A_PSWL)
+    await ex("UPDATE grades SET association_name = 'Ambiguous League'"
+             " WHERE grassroots_id = 'ambig-b-2023'")
+
+    # Four clubs known to the Directory, none of which our own sync has ever
+    # given a grade association for.
+    for year in (2023, 2024, 2025):
+        await grade(DIR_REUSE, year, "1st Grade", f"dirreuse-{year}")
+        await grade(DIR_MINT, year, "1st Grade", f"dirmint-{year}")
+        await grade(DIR_AMBIG, year, "1st Grade", f"dirambig-{year}")
+        await grade(DIR_MULTI, year, "1st Grade", f"dirmulti-{year}")
+
+    async def directory(org, assocs):
+        await ex(
+            "INSERT INTO marketing_clubs (id, grassroots_guid, name, kind,"
+            " associations, existing_org_id) VALUES (:i, :g, :n, 'club',"
+            " CAST(:a AS JSONB), :o)",
+            i=uuid.uuid4(), g=str(org), n="dir-" + str(org)[:8],
+            a=json.dumps(assocs), o=org)
+
+    # Names an association a real grade elsewhere is already known by —
+    # should REUSE that id, never mint a new one for the same body.
+    await directory(DIR_REUSE, [{"id": "rc-wastca", "name": "WASTCA"}])
+    # Names an association nobody has ever synced anywhere — mint one.
+    await directory(DIR_MINT, [{"id": "rc-999", "name": "Nowhere Cricket Association"}])
+    # Names the SAME string two other clubs' real grades disagree about.
+    await directory(DIR_AMBIG, [{"id": "rc-amb", "name": "Ambiguous League"}])
+    # Plays in more than one — the Directory alone cannot say which one ran
+    # any given grade, so this club is left for the API phase entirely.
+    await directory(DIR_MULTI, [{"id": "rc-1", "name": "WASTCA"},
+                                 {"id": "rc-2", "name": "Peel"}])
+
     await db.commit()
 
 
@@ -180,7 +227,7 @@ async def main() -> None:
 
         before = (await db.execute(text(
             "SELECT COUNT(*) FROM grades WHERE association_id IS NULL"))).scalar()
-        check("the fixture starts with real gaps to close", before == 11, str(before))
+        check("the fixture starts with real gaps to close", before == 23, str(before))
 
         # The batch script's dry run fills inside an open transaction and
         # measures the residual gap BEFORE rolling back. Measuring after the
@@ -191,14 +238,15 @@ async def main() -> None:
         seen = (await db.execute(text(
             "SELECT COUNT(*) FROM grades WHERE association_id IS NULL"))).scalar()
         check("the residual gap is visible while the fill is uncommitted",
-              seen == 4, str(seen))
+              seen == 10, str(seen))
         check("and it reports the same fill the real run makes",
-              dry["filled_by_grade_guid"] + dry["filled_by_club_grade_name"] == 7,
+              dry["filled_by_grade_guid"] + dry["filled_by_club_grade_name"]
+              + dry["filled_by_directory"] == 13,
               str(dry))
         await db.rollback()
         still = (await db.execute(text(
             "SELECT COUNT(*) FROM grades WHERE association_id IS NULL"))).scalar()
-        check("but the rollback leaves the database untouched", still == 11, str(still))
+        check("but the rollback leaves the database untouched", still == 23, str(still))
 
         print("\n— our own data, no Cricket Australia call —")
         out = await ab.propagate_all(db)
@@ -223,6 +271,27 @@ async def main() -> None:
         check("the name phase reports what it filled",
               out["filled_by_club_grade_name"] >= 3, str(out))
 
+        print("\n— the Club Directory fills what a club plays in exactly one of —")
+        check("a directory name already meant somewhere reuses that id, never mints",
+              await assoc_of(db, "dirreuse-2023") == [A_WASTCA]
+              and await assoc_of(db, "dirreuse-2025") == [A_WASTCA],
+              str(await assoc_of(db, "dirreuse-2023")))
+        check("a directory name nobody has synced anywhere is minted, once",
+              (await assoc_of(db, "dirmint-2023"))[0] is not None
+              and await assoc_of(db, "dirmint-2023") == await assoc_of(db, "dirmint-2025"),
+              str(await assoc_of(db, "dirmint-2023")))
+        check("the minted id never collides with a real one",
+              (await assoc_of(db, "dirmint-2023"))[0]
+              not in (A_WASTCA, A_PEEL, A_PSWL))
+        check("the directory phase reports what it filled",
+              out["filled_by_directory"] >= 6, str(out))
+        check("a name that already means two different things is refused",
+              await assoc_of(db, "dirambig-2023") == [None],
+              str(await assoc_of(db, "dirambig-2023")))
+        check("a club playing in more than one association is left for the API",
+              await assoc_of(db, "dirmulti-2023") == [None],
+              str(await assoc_of(db, "dirmulti-2023")))
+
         print("\n— and it refuses to guess —")
         check("a club that moved association keeps its unknown year unknown",
               await assoc_of(db, "mover-a-2024") == [None],
@@ -235,8 +304,8 @@ async def main() -> None:
 
         after = (await db.execute(text(
             "SELECT COUNT(*) FROM grades WHERE association_id IS NULL"))).scalar()
-        check("so the gap closes from 11 to the 4 nobody can answer",
-              after == 4, str(after))
+        check("so the gap closes from 23 to the 10 nobody can answer",
+              after == 10, str(after))
 
         print("\n— it is safe to run again —")
         second = await ab.propagate_all(db)
@@ -249,8 +318,9 @@ async def main() -> None:
         print("\n— what is left is exactly what the API phase must fetch —")
         todo = await ab.outstanding_seasons(db)
         orgs = {str(t["org_id"]) for t in todo}
-        check("only the two clubs our own data could not finish are listed",
-              orgs == {str(MOVER), str(LONE)}, str(orgs))
+        check("only the clubs our own data could not finish are listed",
+              orgs == {str(MOVER), str(LONE), str(DIR_AMBIG), str(DIR_MULTI)},
+              str(orgs))
         check("and one club's list can be asked for on its own",
               len(await ab.outstanding_seasons(db, LONE)) == 3,
               str(len(await ab.outstanding_seasons(db, LONE))))
