@@ -344,6 +344,37 @@ async def get_org_grade_categories(org_id: str, db: AsyncSession = Depends(get_d
         "available": await grade_scope.org_available_categories(db, org_id),
         "default": list(await grade_scope.club_default_categories(db, org_id)),
         "available_formats": await grade_scope.org_available_formats(db, org_id),
+        # The club's competitions, so a page can draw the third filter row from
+        # the request it already makes. A club with fewer than two has nothing
+        # to choose between and the row doesn't render — the same rule the
+        # empty `available` above follows.
+        "available_competitions": await grade_scope.org_available_competitions(db, org_id),
+    }
+
+
+@router.get("/{org_id}/competitions")
+async def get_org_competitions(
+    org_id: str,
+    season_id: str | None = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """The club's record in each competition it has played, and its grades.
+
+    Answers "how did we go in the Border Cup" without switching a filter, and
+    is the CLUB half of the by-competition breakdown; ``grades`` is the TEAM
+    half, every grade listed under its own competition — which is what
+    separates a side that plays in more than one during a single season.
+
+    Public, and read from the per-innings scorecards, because Cricket
+    Australia's season aggregates carry no grade and so can say nothing about
+    which competition a run was scored in.
+    """
+    from app.services import competition_stats
+    club = await competition_stats.club_competition_breakdown(db, org_id, season_id)
+    return {
+        **club,
+        "grades": await competition_stats.competition_grade_breakdown(db, org_id, season_id),
+        "available": await grade_scope.org_available_competitions(db, org_id),
     }
 
 
@@ -416,12 +447,22 @@ async def get_org_summary(
             "Omit for no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     viewer: User | None = Depends(get_optional_user),
 ):
     # W/L/D/total_games/win_rate are computed from our own synced games inside
     # get_club_summary (DB-first) — the old PlayHQ Partner override is retired.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     summary = await get_club_summary(db, org_id, season_id, grade_id, scope=scope)
     summary["scope"] = scope.as_meta()
     # The club-level totals stay whole (a hidden player's runs still happened
@@ -697,6 +738,16 @@ async def get_org_results(
             "Omit for no format filter."
         ),
     ),
+    competitions: str | None = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     """Return all synced game results for the org from the DB, grouped-friendly flat list."""
@@ -798,7 +849,7 @@ async def get_org_results(
         query += " AND g.is_final = TRUE"
     # Grade-type / match-type scope. An explicitly picked grade beats it, the
     # same rule the leaderboards follow.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
+    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats, competitions=competitions)
     if grade_id:
         scope = scope.formats_only()
     if scope.active:

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { RateMark, RateFootnote } from '../components/RateCoverage'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { PbSpinner, TabBar, Label, AnimatedNum } from '../lib/presskit'
@@ -555,7 +556,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
               p.innings ?? '—',
               <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{fmtRuns(p.runs)}</span>,
               fmt(p.average),
-              fmt(p.strike_rate),
+              <>{fmt(p.strike_rate)}<RateMark coverage={p.strike_rate_coverage} /></>,
               p.high_score != null ? `${p.high_score}${p.hs_not_out ? '*' : ''}` : '—',
               p.fifties ?? '—',
               p.hundreds != null && p.hundreds > 0
@@ -564,6 +565,7 @@ function BattingTab({ orgId, seasonId, gradeId, clubSlug }) {
               p.ducks ?? '—',
             ])}
           />
+          <RateFootnote rows={data} />
         </SectionCard>
       )}
 
@@ -741,7 +743,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
               <span style={{ color: 'var(--pb-accent)', fontWeight: 600 }}>{p.wickets ?? '—'}</span>,
               fmtOvers(p.overs),
               fmt(p.average),
-              fmt(p.economy),
+              <>{fmt(p.economy)}<RateMark coverage={p.economy_coverage} unit="spells" /></>,
               fmt(p.strike_rate),
               p.best_figures || '—',
               p.five_fors > 0
@@ -749,6 +751,7 @@ function BowlingTab({ orgId, seasonId, gradeId, clubSlug }) {
                 : (p.five_fors ?? '—'),
             ])}
           />
+          <RateFootnote rows={data} field="economy_coverage" unit="spells" />
         </SectionCard>
       )}
 

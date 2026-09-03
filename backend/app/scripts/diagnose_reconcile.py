@@ -141,7 +141,8 @@ async def diagnose(org_id_str: str, player_id_str: str) -> None:
                 # The ACTUAL leaderboard function, called exactly like the live
                 # endpoint would (no hand-reconstructed SQL), filtered to this player.
                 board = await get_batting_leaderboard_extended(
-                    session, str(org_uuid), None, None, "total_runs", 5000, 0, grade,
+                    session, str(org_uuid), None, None, "total_runs", 5000,
+                    min_runs=0, grade_name=grade,
                 )
                 mine = next((r for r in board if str(r["player_id"]) == str(player_uuid)), None)
                 print(f"\nget_batting_leaderboard_extended(grade_name={grade!r}) row for this player: {mine}")

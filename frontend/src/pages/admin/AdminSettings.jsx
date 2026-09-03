@@ -238,6 +238,11 @@ export default function AdminSettings() {
         include_fill_ins_in_stats: !!s.include_fill_ins_in_stats,
         stats_grade_categories: s.effective_stats_grade_categories || [],
         stats_auto_show_played_grades: s.stats_auto_show_played_grades !== false,
+        // Blank means "no club preference", which is not the same as 0 (no
+        // qualification), so an unset value stays an empty string here rather
+        // than becoming a number.
+        stats_min_rate_innings: s.stats_min_rate_innings ?? '',
+        stats_min_rate_spells: s.stats_min_rate_spells ?? '',
         public_header_logo: !!s.public_header_logo,
         password_protected: !!s.password_protected,
       })
@@ -393,6 +398,13 @@ export default function AdminSettings() {
     setMsg('')
     try {
       const payload = { ...form, theme_config: theme, font_config: fontConfig }
+      // An empty box means "no club preference", which the server stores as
+      // null and reads as the platform default. A typed 0 is a different
+      // answer — no qualification — so it must survive as a real 0.
+      for (const k of ['stats_min_rate_innings', 'stats_min_rate_spells']) {
+        const raw = payload[k]
+        payload[k] = raw === '' || raw == null ? null : Math.max(0, parseInt(raw, 10) || 0)
+      }
       if (/^\d{4}$/.test(pinInput)) payload.access_pin = pinInput
       await api.adminPatchSettings(payload)
       setPinInput('')
@@ -833,6 +845,46 @@ export default function AdminSettings() {
                   </span>
                 </span>
               </label>
+
+              <div className="mt-4 pt-4 pb-hairline-t">
+                <label className={LABEL}>Before a strike rate or economy is published</label>
+                <p className="font-mono text-[10px] text-pb-faintest mb-3">
+                  A strike rate needs runs and balls faced from the same innings, and
+                  plenty of cricket is still scored in a book that never recorded balls.
+                  Rates are worked out from the innings that did, and say so. Set how many
+                  of those a player needs before they are ranked on a leaderboard. Leave
+                  blank to rank everyone; anyone reading a board can raise it for their own
+                  look without changing this.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="font-mono text-[10px] text-pb-faint block mb-1">
+                      Innings with balls faced
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="200"
+                      placeholder="No minimum"
+                      value={form.stats_min_rate_innings ?? ''}
+                      onChange={e => setForm(f => ({ ...f, stats_min_rate_innings: e.target.value }))}
+                      className={INPUT_CLS} />
+                  </div>
+                  <div>
+                    <label className="font-mono text-[10px] text-pb-faint block mb-1">
+                      Spells with overs recorded
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="200"
+                      placeholder="No minimum"
+                      value={form.stats_min_rate_spells ?? ''}
+                      onChange={e => setForm(f => ({ ...f, stats_min_rate_spells: e.target.value }))}
+                      className={INPUT_CLS} />
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 

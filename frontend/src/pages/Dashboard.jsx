@@ -131,13 +131,15 @@ export default function Dashboard() {
   const {
     gradeType, setGradeType, matchFormat, setMatchFormat,
     available: availableCategories, availableFormats, defaultCategories,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = gradeFilters
   const { games, loading: gamesLoading } = useRecentGames(orgId, {
     seasonId: selectedSeason,
     gradeId: selectedGrade,
     categories: categoriesParam,
     formats: formatsParam,
+    competitions: competitionsParam,
   })
 
   const [topBatters, setTopBatters] = useState([])
@@ -162,7 +164,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (!orgId) return
     setStatsLoading(true)
-    const scope = { categories: categoriesParam, formats: formatsParam }
+    const scope = { categories: categoriesParam, formats: formatsParam, competitions: competitionsParam }
     Promise.allSettled([
       api.battingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
       api.bowlingLeaderboard(orgId, { seasonId: selectedSeason, gradeId: selectedGrade, limit: 5, finalsOnly, ...scope }),
@@ -174,7 +176,7 @@ export default function Dashboard() {
         if (s.status === 'fulfilled') setSummary(s.value)
       })
       .finally(() => setStatsLoading(false))
-  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGrade, finalsOnly, categoriesParam, formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -254,9 +256,13 @@ export default function Dashboard() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
             showGenderFilter={false}

@@ -36,6 +36,7 @@ import uuid
 # what counts as a residual.
 from app.services.aggregations import _RESIDUAL_SOURCES
 from app.services.game_status import appearance_counts_as_match
+from app.services import rate_coverage as rc
 
 
 # ─── Grade type / match type scope ─────────────────────────────────────────────
@@ -1156,6 +1157,13 @@ def _player_agg_innings_cte(
                 COALESCE(SUM(bi.runs) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0)         AS runs,
                 COUNT(*) FILTER (WHERE bi.not_out = TRUE AND bi.did_not_bat IS NOT TRUE)    AS not_outs,
                 COALESCE(SUM(bi.balls) FILTER (WHERE bi.did_not_bat IS NOT TRUE), 0)        AS balls_faced,
+                -- Only the innings whose ball count can carry their runs. A
+                -- rate built from the two sums above blends innings that were
+                -- ball-counted with innings that were not. See
+                -- services/rate_coverage.py.
+                COALESCE(SUM(bi.runs) FILTER (WHERE (bi.did_not_bat IS NOT TRUE AND {rc.batting_covered_sql('bi')})), 0)   AS covered_runs,
+                COALESCE(SUM(bi.balls) FILTER (WHERE (bi.did_not_bat IS NOT TRUE AND {rc.batting_covered_sql('bi')})), 0)  AS covered_balls,
+                COUNT(*) FILTER (WHERE (bi.did_not_bat IS NOT TRUE AND {rc.batting_covered_sql('bi')}))                    AS covered_innings,
                 COUNT(*) FILTER (WHERE bi.runs >= 50 AND bi.runs < 100 AND bi.did_not_bat IS NOT TRUE) AS fifties,
                 COUNT(*) FILTER (WHERE bi.runs >= 100 AND bi.did_not_bat IS NOT TRUE)       AS hundreds,
                 COUNT(*) FILTER (
@@ -1183,6 +1191,7 @@ def _player_agg_innings_cte(
                 COALESCE(SUM(bs.overs), 0)                        AS overs,
                 COALESCE(SUM(bs.runs), 0)                         AS runs_conceded,
                 COALESCE(SUM(bs.maidens), 0)                      AS maidens,
+                {rc.bowling_rate_columns('bs')},
                 COUNT(*) FILTER (WHERE bs.wickets >= 5)           AS five_wicket_innings,
                 MAX(bs.wickets)                                   AS best_bowling_wickets,
                 COALESCE(SUM(bs.wides), 0)    AS wides,
@@ -1295,7 +1304,7 @@ async def query_player_career(
                     {_r('bat.not_outs')}                                              AS not_outs,
                     {_r('bat.balls_faced')}                                           AS balls_faced,
                     ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
-                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)     AS batting_strike_rate,
+                    ROUND(COALESCE(bat.covered_runs, 0)::numeric / NULLIF(COALESCE(bat.covered_balls, 0), 0) * 100, 2)     AS batting_strike_rate,
                     GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
                     {_r('bat.fifties')}                                               AS fifties,
                     {_r('bat.hundreds')}                                              AS hundreds,
@@ -1307,7 +1316,7 @@ async def query_player_career(
                     {_r('bowl.overs')}                                                AS overs,
                     {_r('bowl.runs_conceded')}                                        AS runs_conceded,
                     ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
-                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                    ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
                     ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
                     {_r('bowl.five_wicket_innings')}                                  AS five_wicket_innings,
                     {_r('bowl.maidens')}                                              AS maidens,
@@ -1333,7 +1342,26 @@ async def query_player_career(
     else:
         # Fast path — use pre-aggregated player_season_stats.
         sql = f"""
-            WITH agg AS (
+            WITH covered_bat AS (
+                -- A season row carries every run and only the balls somebody
+                -- typed in, so the rates below are re-derived from the
+                -- scorecards, where the two halves stay together. A player we
+                -- hold none for keeps the aggregate figure.
+                SELECT bi.player_id,
+                    """ + rc.batting_rate_columns("bi") + f"""
+                FROM v_effective_batting_innings bi
+                JOIN players cp ON cp.id = bi.player_id AND cp.organisation_id = :org_id
+                WHERE bi.did_not_bat IS NOT TRUE
+                GROUP BY bi.player_id
+            ),
+            covered_bowl AS (
+                SELECT bs.player_id,
+                    """ + rc.bowling_rate_columns("bs") + f"""
+                FROM v_effective_bowling_spells bs
+                JOIN players cp ON cp.id = bs.player_id AND cp.organisation_id = :org_id
+                GROUP BY bs.player_id
+            ),
+            agg AS (
                 SELECT
                     p.id::text                                                                    AS player_id,
                     COALESCE(p.display_name_override, p.name)                                    AS player_name,
@@ -1344,7 +1372,12 @@ async def query_player_career(
                     COALESCE(SUM(pss.not_outs), 0)                                               AS not_outs,
                     COALESCE(SUM(pss.balls_faced), 0)                                            AS balls_faced,
                     ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
-                    ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)     AS batting_strike_rate,
+                    CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+                         THEN ROUND(MAX(cb.covered_runs)::numeric
+                                    / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+                         ELSE ROUND(SUM(pss.runs)::numeric
+                                    / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)
+                    END                                                                          AS batting_strike_rate,
                     MAX(pss.high_score)                                                          AS high_score,
                     COALESCE(SUM(pss.fifties), 0)                                                AS fifties,
                     COALESCE(SUM(pss.hundreds), 0)                                               AS hundreds,
@@ -1356,7 +1389,12 @@ async def query_player_career(
                     COALESCE(SUM(pss.overs), 0)                                                  AS overs,
                     COALESCE(SUM(pss.runs_conceded), 0)                                          AS runs_conceded,
                     ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)      AS bowling_average,
-                    ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS bowling_economy,
+                    CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                         THEN ROUND(MAX(cw.covered_conceded)::numeric
+                                    / NULLIF(MAX(cw.covered_bowl_balls), 0) * 6, 2)
+                         ELSE ROUND(SUM(pss.runs_conceded)::numeric
+                                    / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)
+                    END                                                                          AS bowling_economy,
                     ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)      AS bowling_strike_rate,
                     COALESCE(SUM(pss.five_wicket_innings), 0)                                    AS five_wicket_innings,
                     COALESCE(SUM(pss.maidens), 0)                                                AS maidens,
@@ -1376,6 +1414,8 @@ async def query_player_career(
                 -- the migration-060 cross-club guard.
                 FROM v_effective_player_season_stats pss
                 JOIN players p ON p.id = pss.player_id
+                LEFT JOIN covered_bat cb ON cb.player_id = p.id
+                LEFT JOIN covered_bowl cw ON cw.player_id = p.id
                 -- LEFT: career-level rows (a manual career adjustment, an
                 -- import career residual) have no season and must still count
                 -- toward career totals, exactly as the player profile counts
@@ -1472,7 +1512,7 @@ async def query_player_season(
                     {_r('bat.not_outs')}                              AS not_outs,
                     {_r('bat.balls_faced')}                           AS balls_faced,
                     ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
-                    ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)             AS batting_strike_rate,
+                    ROUND(COALESCE(bat.covered_runs, 0)::numeric / NULLIF(COALESCE(bat.covered_balls, 0), 0) * 100, 2)             AS batting_strike_rate,
                     GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
                     {_r('bat.fifties')}                               AS fifties,
                     {_r('bat.hundreds')}                              AS hundreds,
@@ -1484,7 +1524,7 @@ async def query_player_season(
                     {_r('bowl.overs')}                                AS overs,
                     {_r('bowl.runs_conceded')}                        AS runs_conceded,
                     ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_average,
-                    ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                    ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
                     ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2) AS bowling_strike_rate,
                     {_r('bowl.five_wicket_innings')}                  AS five_wicket_innings,
                     {_r('bowl.maidens')}                              AS maidens,
@@ -1512,7 +1552,33 @@ async def query_player_season(
     else:
         season_filter = _pss_season_filter(context, params, "ctx_pss_")
         sql = f"""
-            WITH per_pss AS (
+            WITH covered_bat AS (
+                -- A season row carries every run and only the balls somebody
+                -- typed in, so the rates below are re-derived from the
+                -- scorecards, where the two halves stay together. A player we
+                -- hold none for keeps the aggregate figure.
+                SELECT bi.player_id,
+                    COALESCE(sa.canonical_season_id, g.season_id) AS sid,
+                    """ + rc.batting_rate_columns("bi") + f"""
+                FROM v_effective_batting_innings bi
+                JOIN v_effective_games g ON g.id = bi.game_id
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = g.season_id AND sa.undone_at IS NULL
+                WHERE bi.did_not_bat IS NOT TRUE AND g.season_id IS NOT NULL
+                GROUP BY 1, 2
+            ),
+            covered_bowl AS (
+                SELECT bs.player_id,
+                    COALESCE(sa.canonical_season_id, g.season_id) AS sid,
+                    """ + rc.bowling_rate_columns("bs") + f"""
+                FROM v_effective_bowling_spells bs
+                JOIN v_effective_games g ON g.id = bs.game_id
+                LEFT JOIN season_aliases sa
+                  ON sa.alias_season_id = g.season_id AND sa.undone_at IS NULL
+                WHERE g.season_id IS NOT NULL
+                GROUP BY 1, 2
+            ),
+            per_pss AS (
                 -- The effective view, not the base table: an imported season
                 -- delta or manual season adjustment only exists as a view
                 -- branch (see query_player_career's own note above). Season
@@ -1542,7 +1608,12 @@ async def query_player_season(
                     COALESCE(SUM(pss.not_outs), 0)                                                AS not_outs,
                     COALESCE(SUM(pss.balls_faced), 0)                                             AS balls_faced,
                     ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
-                    ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)     AS batting_strike_rate,
+                    CASE WHEN COALESCE(MAX(cb.covered_innings), 0) > 0
+                         THEN ROUND(MAX(cb.covered_runs)::numeric
+                                    / NULLIF(MAX(cb.covered_balls), 0) * 100, 2)
+                         ELSE ROUND(SUM(pss.runs)::numeric
+                                    / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)
+                    END                                                                          AS batting_strike_rate,
                     MAX(pss.high_score)                                                            AS high_score,
                     COALESCE(SUM(pss.fifties), 0)                                                 AS fifties,
                     COALESCE(SUM(pss.hundreds), 0)                                                AS hundreds,
@@ -1554,7 +1625,12 @@ async def query_player_season(
                     COALESCE(SUM(pss.overs), 0)                                                   AS overs,
                     COALESCE(SUM(pss.runs_conceded), 0)                                           AS runs_conceded,
                     ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.wickets), 0), 2)       AS bowling_average,
-                    ROUND(SUM(pss.runs_conceded)::numeric / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2) AS bowling_economy,
+                    CASE WHEN COALESCE(MAX(cw.covered_spells), 0) > 0
+                         THEN ROUND(MAX(cw.covered_conceded)::numeric
+                                    / NULLIF(MAX(cw.covered_bowl_balls), 0) * 6, 2)
+                         ELSE ROUND(SUM(pss.runs_conceded)::numeric
+                                    / NULLIF(SUM(pss.bowling_balls), 0) * 6, 2)
+                    END                                                                          AS bowling_economy,
                     ROUND(SUM(pss.bowling_balls)::numeric / NULLIF(SUM(pss.wickets), 0), 2)       AS bowling_strike_rate,
                     COALESCE(SUM(pss.five_wicket_innings), 0)                                     AS five_wicket_innings,
                     COALESCE(SUM(pss.maidens), 0)                                                 AS maidens,
@@ -1569,6 +1645,10 @@ async def query_player_season(
                 FROM per_pss pss
                 JOIN players p ON p.id = pss.player_id
                 JOIN seasons s ON s.id = pss.canonical_season_id
+                LEFT JOIN covered_bat cb
+                  ON cb.player_id = p.id AND cb.sid = pss.canonical_season_id
+                LEFT JOIN covered_bowl cw
+                  ON cw.player_id = p.id AND cw.sid = pss.canonical_season_id
                 WHERE p.organisation_id = :org_id AND s.organisation_id = :org_id {season_filter}
                 GROUP BY p.id, COALESCE(p.display_name_override, p.name), s.id, s.name, s.year
             )
@@ -1650,7 +1730,7 @@ async def query_player_grade(
                 {_r('bat.not_outs')}                                     AS not_outs,
                 {_r('bat.balls_faced')}                                  AS balls_faced,
                 ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.batting_innings')} - {_r('bat.not_outs')}, 0), 2) AS batting_average,
-                ROUND({_r('bat.runs')}::numeric / NULLIF({_r('bat.balls_faced')}, 0) * 100, 2)                     AS batting_strike_rate,
+                ROUND(COALESCE(bat.covered_runs, 0)::numeric / NULLIF(COALESCE(bat.covered_balls, 0), 0) * 100, 2)                     AS batting_strike_rate,
                 GREATEST(COALESCE(bat.high_score, 0){', COALESCE(resid.high_score, 0)' if residual_ok else ''}) AS high_score,
                 {_r('bat.fifties')}                                      AS fifties,
                 {_r('bat.hundreds')}                                     AS hundreds,
@@ -1662,7 +1742,7 @@ async def query_player_grade(
                 {_r('bowl.overs')}                                       AS overs,
                 {_r('bowl.runs_conceded')}                               AS runs_conceded,
                 ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.wickets')}, 0), 2)   AS bowling_average,
-                ROUND({_r('bowl.runs_conceded')}::numeric / NULLIF({_r('bowl.overs')} * 6, 0) * 6, 2) AS bowling_economy,
+                ROUND(COALESCE(bowl.covered_conceded, 0)::numeric / NULLIF(COALESCE(bowl.covered_bowl_balls, 0), 0) * 6, 2) AS bowling_economy,
                 ROUND({_r('bowl.overs')}::numeric * 6 / NULLIF({_r('bowl.wickets')}, 0), 2)        AS bowling_strike_rate,
                 {_r('bowl.five_wicket_innings')}                         AS five_wicket_innings,
                 {_r('bowl.maidens')}                                     AS maidens,
@@ -1725,6 +1805,11 @@ def _family_agg_select_cols() -> str:
         COALESCE(SUM(pss.not_outs), 0)                                                          AS not_outs,
         COALESCE(SUM(pss.balls_faced), 0)                                                       AS balls_faced,
         ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.batting_innings) - SUM(pss.not_outs), 0), 2) AS batting_average,
+        -- NOT re-derived from scorecards, unlike every other target here. A
+        -- family aggregate already ignores every other match-context filter
+        -- (see the family-target note in CLAUDE.md), so it is left summing the
+        -- season rows and reports itself as an aggregate figure rather than
+        -- being quietly half-fixed.
         ROUND(SUM(pss.runs)::numeric / NULLIF(SUM(pss.balls_faced), 0) * 100, 2)                AS batting_strike_rate,
         MAX(pss.high_score)                                                                     AS high_score,
         COALESCE(SUM(pss.fifties), 0)                                                           AS fifties,

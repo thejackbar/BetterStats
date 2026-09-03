@@ -1,3 +1,4 @@
+import { RateMark, RateFootnote, RateNote, isPartial } from '../components/RateCoverage'
 import { useParams, Link } from 'react-router-dom'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { api } from '../lib/api'
@@ -453,7 +454,7 @@ function BowlingTab({ bowling, seasonStats }) {
                     <td className="py-2.5 font-mono font-bold text-right pb-num" style={{ color: 'var(--pb-accent)' }}>{fmt(s.total_wickets)}</td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmtOvers(s.total_overs)}</td>
                     <td className="py-2.5 font-mono text-pb-text text-right">{fmt(s.bowling_average, true)}</td>
-                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}</td>
+                    <td className="py-2.5 font-mono text-pb-dim text-right">{fmtDec(s.economy)}<RateMark coverage={s.economy_coverage} unit="spells" /></td>
                     <td className="py-2.5 font-mono text-pb-dim text-right">{fmt(s.five_fors)}</td>
                     <td className="py-2.5 pr-5 font-mono text-pb-dim text-right">
                       {s.best_bowling_figures || (s.best_bowling_wickets ? `${s.best_bowling_wickets} wickets` : '—')}
@@ -964,6 +965,7 @@ const ANALYSIS_SUBTABS = [
   { key: 'batting',  label: 'BATTING' },
   { key: 'bowling',  label: 'BOWLING' },
   { key: 'formats',  label: 'FORMATS' },
+  { key: 'competitions', label: 'COMPETITIONS' },
   { key: 'team',     label: 'TEAM' },
   { key: 'teammates', label: 'TEAMMATES' },
   { key: 'captain',  label: 'CAPTAIN' },
@@ -979,18 +981,26 @@ const ANALYSIS_SUBTABS = [
 // routinely mixes one-day and two-day cricket, so this reads each match's own
 // recorded format. Matches we can't place get their own column rather than
 // being folded into one of the three.
-function FormatCompareTable({ rows, cols, title }) {
+// One column per thing being compared, one row per measure. `c.key` is the
+// column's identity — format columns supply `format`, competition columns
+// supply `key`, and both read the same table.
+function FormatCompareTable({ rows, cols, title, note }) {
   const shown = cols.filter(c => rows.some(r => r.value(c) != null && r.value(c) !== ''))
   if (!shown.length) return null
   return (
     <Card title={title} pad="p-0">
+      {note && (
+        <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-4 sm:px-[18px] pt-4">
+          {note}
+        </p>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-[13px]">
           <thead>
             <tr className="text-pb-faint font-mono text-[10px] tracking-wide3 text-left bg-pb-surface2/40">
               <th className="font-medium py-2.5 pl-4 sm:pl-[18px]"> </th>
               {shown.map(c => (
-                <th key={c.format} className="font-medium py-2.5 pr-4 text-right whitespace-nowrap">
+                <th key={c.key ?? c.format} className="font-medium py-2.5 pr-4 text-right whitespace-nowrap">
                   {c.label.toUpperCase()}
                 </th>
               ))}
@@ -1005,8 +1015,9 @@ function FormatCompareTable({ rows, cols, title }) {
                 {shown.map(c => {
                   const v = r.value(c)
                   return (
-                    <td key={c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
+                    <td key={c.key ?? c.format} className={`py-2 pr-4 font-mono text-right ${r.strong ? 'text-pb-text font-bold' : 'text-pb-dim'}`}>
                       {v == null || v === '' ? '—' : v}
+                      {r.coverage && <RateMark coverage={r.coverage(c)} unit={r.unit || 'innings'} />}
                     </td>
                   )
                 })}
@@ -1015,7 +1026,137 @@ function FormatCompareTable({ rows, cols, title }) {
           </tbody>
         </table>
       </div>
+      {rows.some(r => r.coverage && shown.some(c => isPartial(r.coverage(c)))) && (
+        <RateFootnote
+          rows={shown.flatMap(c => rows.filter(r => r.coverage).map(r => ({ cov: r.coverage(c) })))}
+          field="cov"
+        />
+      )}
     </Card>
+  )
+}
+
+// ── Competitions: which competition these runs were scored in ────────────
+// Self-fetching off the public /players/{id}/competitions endpoint, so a
+// visitor reading the batting tab never pays for the query.
+//
+// The COMPETITION FILTER in the header narrows every other panel to one
+// competition; this ENUMERATES them, which is the question a player in more
+// than one cannot otherwise answer — Hamilton Veterans' Over 60 Men play the
+// Border Cup and the VCV Over 60s competition in a single season.
+function CompetitionsSection({ playerId, seasonId }) {
+  const [data, setData] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api.playerCompetitions(playerId, seasonId)
+      .then(d => { if (!cancelled) setData(d) })
+      .catch(e => { if (!cancelled) setError(e.message) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [playerId, seasonId])
+
+  if (loading) return <PbSpinner message="Loading competitions…" />
+  if (error) return <p className="text-pb-red text-sm py-4">Couldn't load competitions: {error}</p>
+
+  const rows = data?.rows || []
+  const unattributed = data?.unattributed || 0
+  if (!rows.length) {
+    return (
+      <p className="text-pb-faint text-sm py-4">
+        No matches filed under a competition yet.{' '}
+        {unattributed > 0
+          ? `${unattributed} ${unattributed === 1 ? 'match is' : 'matches are'} recorded without a grade, so there is nothing to file them under. `
+          : ''}
+        A club groups its grades into competitions on Admin → Manage Grades.
+      </p>
+    )
+  }
+
+  // The columns the compare tables read. `key` is the competition's own id,
+  // null for the un-grouped bucket — which is why it falls back to the label.
+  const cols = rows.map(r => ({
+    key: r.competition_id || r.competition_name,
+    label: r.competition_name,
+    row: r,
+  }))
+  const total = rows.reduce((a, r) => a + (r.matches || 0), 0)
+
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        {rows.map(r => (
+          <Kpi
+            key={r.competition_id || r.competition_name}
+            label={r.competition_name.toUpperCase()}
+            value={r.matches}
+            sub={[
+              `${r.matches === 1 ? 'match' : 'matches'}`,
+              r.seasons ? `${r.seasons} season${r.seasons === 1 ? '' : 's'}` : null,
+            ].filter(Boolean).join(' · ')}
+          />
+        ))}
+      </div>
+
+      <FormatCompareTable
+        title="BATTING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'MATCHES', value: c => c.row.matches || null },
+          { label: 'INNINGS', value: c => c.row.batting?.innings || null },
+          { label: 'RUNS', value: c => fmtNum(c.row.batting?.runs), strong: true },
+          { label: 'AVERAGE', value: c => fmtDec(c.row.batting?.average), strong: true },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.row.batting?.strike_rate) },
+          { label: 'HIGH SCORE', value: c => fmtNum(c.row.batting?.high_score) },
+          { label: 'NOT OUTS', value: c => c.row.batting?.not_outs || null },
+          { label: '50s', value: c => c.row.batting?.fifties || null },
+          { label: '100s', value: c => c.row.batting?.hundreds || null },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="BOWLING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'WICKETS', value: c => fmtNum(c.row.bowling?.wickets), strong: true },
+          { label: 'OVERS', value: c => fmtDec(c.row.bowling?.overs) },
+          { label: 'AVERAGE', value: c => fmtDec(c.row.bowling?.average), strong: true },
+          { label: 'ECONOMY', value: c => fmtDec(c.row.bowling?.economy) },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.row.bowling?.strike_rate) },
+          { label: 'MAIDENS', value: c => c.row.bowling?.maidens || null },
+          { label: 'RUNS CONCEDED', value: c => fmtNum(c.row.bowling?.runs) },
+        ]}
+      />
+
+      <FormatCompareTable
+        title="FIELDING BY COMPETITION"
+        cols={cols}
+        rows={[
+          { label: 'CATCHES', value: c => fmtNum(c.row.fielding?.catches), strong: true },
+          { label: 'CT (WK)', value: c => c.row.fielding?.catches_wk || null },
+          { label: 'STUMPINGS', value: c => c.row.fielding?.stumpings || null },
+          { label: 'RUN OUTS', value: c => c.row.fielding?.run_outs || null },
+        ]}
+      />
+
+      {/* Said out loud rather than hidden: a competition figure comes from the
+          scorecards, and a career that arrived through BetterImport carries
+          rows with no grade and so no competition. Without this the tables
+          would simply not add up to the career total and nothing would say
+          why. */}
+      {unattributed > 0 && (
+        <p className="text-[11px] text-pb-faint">
+          {unattributed} {unattributed === 1 ? 'match is' : 'matches are'} recorded
+          without a grade, so {unattributed === 1 ? 'it belongs' : 'they belong'} to
+          no competition and {unattributed === 1 ? 'is' : 'are'} not counted above.
+          These {total} {total === 1 ? 'match' : 'matches'} are the ones we can place.
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -1103,7 +1244,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'INNINGS', value: c => c.batting.innings || null },
           { label: 'RUNS', value: c => fmtNum(c.batting.runs), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.batting.average), strong: true },
-          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate) },
+          { label: 'STRIKE RATE', value: c => fmtDec(c.batting.strike_rate), coverage: c => c.batting.strike_rate_coverage },
           { label: 'HIGH SCORE', value: c => fmtNum(c.batting.high_score) },
           { label: 'NOT OUTS', value: c => c.batting.not_outs || null },
           { label: '50s', value: c => c.batting.fifties || null },
@@ -1122,7 +1263,7 @@ function FormatsSection({ playerId, seasonId }) {
           { label: 'OVERS', value: c => fmtDec(c.bowling.overs, 1) },
           { label: 'WICKETS', value: c => fmtNum(c.bowling.wickets), strong: true },
           { label: 'AVERAGE', value: c => fmtDec(c.bowling.average), strong: true },
-          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy) },
+          { label: 'ECONOMY', value: c => fmtDec(c.bowling.economy), coverage: c => c.bowling.economy_coverage, unit: 'spells' },
           { label: 'STRIKE RATE', value: c => fmtDec(c.bowling.strike_rate, 1) },
           { label: 'BEST', value: c => (c.bowling.best_wickets ? `${c.bowling.best_wickets}w` : null) },
           { label: '5 WICKETS', value: c => c.bowling.five_fors || null },
@@ -1884,6 +2025,8 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
 
       {subTab === 'formats' && <FormatsSection playerId={playerId} seasonId={seasonId} />}
 
+      {subTab === 'competitions' && <CompetitionsSection playerId={playerId} seasonId={seasonId} />}
+
       {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
 
       {subTab === 'captain' && <CaptainTab captainStats={captainStats} />}
@@ -2524,14 +2667,17 @@ export default function PlayerProfile() {
   // hook no-ops on null and the pills simply aren't drawn until then.
   const [profileOrgId, setProfileOrgId] = useState(null)
   const {
-    available: availableCategories, availableFormats,
+    available: availableCategories, availableFormats, availableCompetitions,
     gradeType, setGradeType, matchFormat, setMatchFormat,
+    competition, setCompetition,
     categoriesParam: catParam, formatsParam: fmtParam,
+    competitionsParam: compParam,
   } = useGradeFilters(profileOrgId)
   const { data, loading, error } = usePlayerStats(playerId, {
     seasonId,
     categories: catParam,
     formats: fmtParam,
+    competitions: compParam,
   })
   const gradeScope = data?.grade_scope
   useEffect(() => {
@@ -2637,8 +2783,8 @@ export default function PlayerProfile() {
     // (a new object reference every time the season filter refetches career
     // stats) — so this only re-runs when the player changes or the Junior/
     // Senior/etc toggle actually changes, not on every unrelated re-render.
-    const scope = { categories: catParam, formats: fmtParam }
-    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}`
+    const scope = { categories: catParam, formats: fmtParam, competitions: compParam }
+    const key = `${playerId}|${catParam || ''}|${fmtParam || ''}|${compParam || ''}`
     if (lastAuxFetchRef.current === key) return
     lastAuxFetchRef.current = key
     // Reset stale state from previously-viewed player — otherwise navigating
@@ -2842,6 +2988,13 @@ export default function PlayerProfile() {
               setGradeType={setGradeType}
               matchFormat={matchFormat}
               setMatchFormat={setMatchFormat}
+              competition={competition}
+              setCompetition={setCompetition}
+              availableCompetitions={
+                availableCompetitions.length
+                  ? availableCompetitions
+                  : (gradeScope?.available_competitions || [])
+              }
               availableCategories={availableCategories.length ? availableCategories : (gradeScope?.available || [])}
               availableFormats={availableFormats}
             />

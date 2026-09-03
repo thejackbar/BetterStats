@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text
+from sqlalchemy import false, select, text
 from typing import Optional
 import logging
 import uuid
@@ -21,14 +21,32 @@ async def _fetch_manual_games_as_list(
     season_id: Optional[str],
     grade_id: Optional[str],
     finals_only: Optional[bool],
+    scope=None,
 ) -> list[dict]:
-    """Return manual_games for this org shaped like the API game-list entries."""
+    """Return manual_games for this org shaped like the API game-list entries.
+
+    THE COMPETITION HALF OF A SCOPE IS APPLIED HERE AND THE OTHER TWO ARE NOT,
+    and the asymmetry is the point. A grade-less manual game (Grade is optional
+    on Upload Scorecard) is deliberately kept by a category or format filter —
+    a row we cannot classify is not a row we know to be junior. A COMPETITION
+    filter is an INCLUSION, so the same row is not in the competition being
+    asked for and has to drop, or a club filtering to the Border Cup would find
+    an uploaded scorecard from another competition in the list.
+    """
     q = (
         select(ManualGame, Grade, Season)
         .join(Season, Season.id == ManualGame.season_id)
         .outerjoin(Grade, Grade.id == ManualGame.grade_id)
         .where(ManualGame.organisation_id == org_id)
     )
+    if scope is not None and getattr(scope, "competition_active", False):
+        if scope.competitions:
+            q = q.where(Grade.competition_id.in_(
+                [uuid.UUID(str(c)) for c in scope.competitions]))
+        else:
+            # Competitions were asked for and none of them are this club's.
+            # Nothing matches — never everything.
+            q = q.where(false())
     if season_id:
         q = q.where(ManualGame.season_id == uuid.UUID(season_id))
     if grade_id:
@@ -77,10 +95,32 @@ async def list_games(
             "Omitted applies no format filter."
         ),
     ),
+    competitions: Optional[str] = Query(
+        None,
+        description=(
+            "Comma-separated club competition ids to count. A competition is "
+            "the club's own named group of grades (services/competitions.py), "
+            "seeded one per association — so this is what tells one "
+            "association's cricket from another's, and one competition of an "
+            "association from the next. Omitted applies no competition filter."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    # Grade-type / match-type / competition scope. An explicitly picked grade
+    # beats the category half, the same rule the leaderboards follow. Resolved
+    # BEFORE the manual games are fetched because they need the competition
+    # half of it — see _fetch_manual_games_as_list for why that one axis
+    # reaches a grade-less manual game when the other two deliberately don't.
+    scope = await grade_scope.resolve_scope(
+        db, org_id, categories, formats=formats, competitions=competitions)
+    if grade_id:
+        # A picked grade beats the CATEGORY half only — a grade plays more than
+        # one format, so Match Type still has to bite inside it.
+        scope = scope.formats_only()
+
     manual_games = await _fetch_manual_games_as_list(
-        db, uuid.UUID(org_id), season_id, grade_id, finals_only,
+        db, uuid.UUID(org_id), season_id, grade_id, finals_only, scope,
     )
 
     # Recent games come from our own synced data (DB-first). Manual games are
@@ -141,16 +181,6 @@ async def list_games(
         params["grade_id"] = grade_id
     if finals_only:
         clauses.append("g.is_final = TRUE")
-    # Grade-type / match-type scope. An explicitly picked grade beats it, the
-    # same rule the leaderboards follow. Manual games are fetched separately
-    # above and a manual game may have no grade at all, so they are deliberately
-    # left alone — the scope clause's own `IS NULL OR` half makes the same call
-    # for a grade-less row on this side.
-    scope = await grade_scope.resolve_scope(db, org_id, categories, formats=formats)
-    if grade_id:
-        # A picked grade beats the CATEGORY half only — a grade plays more than
-        # one format, so Match Type still has to bite inside it.
-        scope = scope.formats_only()
     if scope.active:
         clauses.append(scope.clause("g.grade_id").removeprefix(" AND ").strip())
         scope.bind(params)

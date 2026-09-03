@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { RateMark, RateInfo } from '../components/RateCoverage'
 import { useParams, Link } from 'react-router-dom'
 import { useClub } from '../hooks/useClub'
 import { useClubTheme } from '../hooks/useClubTheme'
@@ -58,6 +59,29 @@ function RecordSection({ title, filter, empty, children }) {
   )
 }
 
+/**
+ * Why a rate record is filed by season and where a range of seasons is
+ * answered instead.
+ *
+ * An all-time strike rate would blend decades of differently scored cricket
+ * into one number nobody can check: older seasons rarely recorded balls faced
+ * at all. A season is a period that was scored one way, so it is a figure that
+ * can be stood behind. StatLab already takes several seasons at once, which is
+ * where a range belongs.
+ */
+function SeasonRateNote({ unit = 'innings', slug }) {
+  return (
+    <p className="px-5 py-2.5 pb-hairline-t font-mono text-[10px] text-pb-dim flex flex-wrap items-center gap-1.5">
+      <span>
+        Filed by season rather than all time, because how much was recorded
+        changed from one era to the next. For a range of seasons, use{' '}
+        <Link to={slug ? `/${slug}/statlab` : 'statlab'} className="underline hover:text-pb-accent">StatLab</Link>.
+      </span>
+      <RateInfo unit={unit} />
+    </p>
+  )
+}
+
 function RecordTable({ headers, rows }) {
   return (
     <table className="w-full text-[13px]">
@@ -83,7 +107,7 @@ function RecordTable({ headers, rows }) {
   )
 }
 
-function BattingTab({ data, latestSeason, fmt = n => n }) {
+function BattingTab({ data, latestSeason, fmt = n => n, slug }) {
   if (!data) return <PbSpinner />
   const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
@@ -150,6 +174,26 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
           />
         </RecordSection>
       )}
+      {data.best_strike_rate_season?.length > 0 && (
+        <RecordSection
+          title="BEST STRIKE RATE IN A SEASON"
+          filter="MIN. 10 INNINGS WITH BALLS FACED"
+        >
+          <RecordTable
+            headers={['Player', 'SR', 'Runs', 'Season']}
+            rows={(data.best_strike_rate_season || []).map((r, i) => [
+              <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
+              <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+                {r.strike_rate != null ? Number(r.strike_rate).toFixed(2) : '—'}
+                <RateMark coverage={r.strike_rate_coverage} />
+              </span>,
+              r.runs ?? '—',
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
+            ])}
+          />
+          <SeasonRateNote slug={slug} />
+        </RecordSection>
+      )}
       {data.most_sixes?.length > 0 && (
         <RecordSection title="MOST SIXES (CAREER)">
           <RecordTable
@@ -166,7 +210,7 @@ function BattingTab({ data, latestSeason, fmt = n => n }) {
   )
 }
 
-function BowlingTab({ data, latestSeason, fmt = n => n }) {
+function BowlingTab({ data, latestSeason, fmt = n => n, slug }) {
   if (!data) return <PbSpinner />
   const isNew = (seasonName) => latestSeason && seasonName && formatSeason(seasonName) === formatSeason(latestSeason)
   return (
@@ -206,11 +250,34 @@ function BowlingTab({ data, latestSeason, fmt = n => n }) {
           headers={['Player', 'Econ', 'Wkts', 'Ov']}
           rows={(data.top_economy || []).map((r, i) => [
             <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
-            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>{r.economy != null ? Number(r.economy).toFixed(2) : '—'}</span>,
+            <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+              {r.economy != null ? Number(r.economy).toFixed(2) : '—'}
+              <RateMark coverage={r.economy_coverage} unit="spells" />
+            </span>,
             r.wickets ?? '—', fmtOvers(r.overs),
           ])}
         />
       </RecordSection>
+      {data.best_economy_season?.length > 0 && (
+        <RecordSection
+          title="BEST ECONOMY IN A SEASON"
+          filter="MIN. 50 OVERS"
+        >
+          <RecordTable
+            headers={['Player', 'Econ', 'Wkts', 'Ov', 'Season']}
+            rows={(data.best_economy_season || []).map((r, i) => [
+              <span key={r.player_id}><RankNum rank={i+1} /><PlayerLink id={r.player_id} name={r.name} fmt={fmt} /></span>,
+              <span className="font-bold" style={{ color: 'var(--pb-accent)' }}>
+                {r.economy != null ? Number(r.economy).toFixed(2) : '—'}
+                <RateMark coverage={r.economy_coverage} unit="spells" />
+              </span>,
+              r.wickets ?? '—', fmtOvers(r.overs),
+              <span className="text-pb-faintest text-[11px]">{formatSeason(r.season_name)}{isNew(r.season_name) && <NewBadge />}</span>,
+            ])}
+          />
+          <SeasonRateNote unit="spells" slug={slug} />
+        </RecordSection>
+      )}
       {data.most_five_fors?.length > 0 && (
         <RecordSection title="MOST FIVE-WICKET HAULS">
           <RecordTable
@@ -727,7 +794,8 @@ export default function Records() {
   const {
     available: availableCategories, availableFormats, defaultCategories,
     gradeType, setGradeType, matchFormat, setMatchFormat,
-    categoriesParam, formatsParam,
+    categoriesParam, formatsParam, competitionsParam,
+    competition, setCompetition, availableCompetitions,
   } = useGradeFilters(orgId)
   const [tab, setTab] = useState('batting')
   const [records, setRecords] = useState(null)
@@ -748,11 +816,11 @@ export default function Records() {
   useEffect(() => {
     if (!orgId) return
     setLoading(true)
-    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam })
+    api.getRecords(orgId, { seasonId: selectedSeason, gradeName: selectedGradeName, finalsOnly, captainOnly, gender, categories: categoriesParam, formats: formatsParam, competitions: competitionsParam })
       .then(setRecords)
       .catch(() => setRecords(null))
       .finally(() => setLoading(false))
-  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam])
+  }, [orgId, selectedSeason, selectedGradeName, finalsOnly, captainOnly, gender, categoriesParam, formatsParam, competitionsParam])
 
   useEffect(() => {
     if (!orgId) return
@@ -796,9 +864,13 @@ export default function Records() {
             setGradeType={setGradeType}
             matchFormat={matchFormat}
             setMatchFormat={setMatchFormat}
+            competition={competition}
+            setCompetition={setCompetition}
+            availableCompetitions={availableCompetitions}
             availableCategories={availableCategories}
             availableFormats={availableFormats}
             defaultCategories={defaultCategories}
+            showCompetitionFilter
             showGradeTypeFilter
             showMatchFormatFilter
           />
@@ -823,8 +895,8 @@ export default function Records() {
           <p className="text-pb-faint text-sm py-8 text-center">No records data available.</p>
         ) : (
           <>
-            {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} fmt={fmt} />}
-            {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} />}
+            {tab === 'batting'      && <BattingTab      data={records.batting}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
+            {tab === 'bowling'      && <BowlingTab      data={records.bowling}       latestSeason={latestSeason} fmt={fmt} slug={clubSlug} />}
             {tab === 'partnerships' && <PartnershipsTab data={records.partnerships}  fmt={fmt} />}
             {tab === 'allrounders'  && <AllRoundersTab  data={records.allrounders}  fmt={fmt} />}
             {tab === 'milestones'   && <MilestonesTab   data={milestones} loading={milestonesLoading} gradeName={selectedGradeName} fmt={fmt} />}

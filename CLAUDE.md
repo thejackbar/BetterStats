@@ -1,5 +1,111 @@
 # BetterStats — Claude Session Notes
 
+## A rate is only as good as the innings behind it (migration 282, v9.59.0, Sep 2026)
+
+**Asked for as a RULE to set, not off a live report** — the 500 runs / 150 balls
+/ 333.33 below is a worked example chosen to make the arithmetic obvious, and
+nobody has measured how far a real club's figures move. What WAS established
+before building is that the mechanism is real: a season scored partly on an iPad
+and partly in a written book gives CA a runs total covering every innings and a
+balls total covering only the ones somebody typed in, every rate in the app
+summed those two halves separately, and `sync.py` wrote a missing ball count as
+a zero. **How much any club's figures actually shift is still unmeasured** —
+`SELECT` the innings where `balls = 0 AND runs > 0` against a real database to
+find out.
+
+- **RUNS AND BALLS MUST COME FROM THE SAME INNINGS, and that is the whole
+  rule.** Every rate in the app was `SUM(runs) / SUM(balls)` across a season or
+  career, which divides one population by another: the runs from the un-balled
+  innings land in the numerator with nothing behind them in the denominator.
+  `services/rate_coverage.py` is the one definition, mirroring `game_status` and
+  `grade_scope`. **This is the rule `sync._derive_partnerships_grassroots`
+  already applies to stands** — when the inputs do not reconcile, refuse to
+  derive a figure from them rather than publishing a wrong one.
+- **A ZERO BALL COUNT BEHIND REAL RUNS IS NOT A BALL COUNT, and that half is
+  load-bearing rather than defensive.** `sync.py` wrote
+  `balls=row.get("ballsFaced") or 0`, so a missing count from CA has ALWAYS
+  landed in the database as a zero rather than a NULL. Testing `balls IS NOT
+  NULL` alone would therefore read every one of those innings as covered and
+  reproduce the reported bug one level down. Covered is `balls IS NOT NULL AND
+  (balls > 0 OR runs = 0)`; the sync preserves NULL going forward, and the
+  zero-with-runs test is what covers the history already stored. **Found by
+  reading the writer, not the reader.**
+- **A GENUINE 0 OFF 0 IS COVERED.** A batter run out backing up without facing
+  is a real innings that contributes nothing to either half, and calling it
+  uncovered would understate the coverage fraction on every scorecard that
+  holds one.
+- **THE RATE CHANGES SOURCE; NOTHING ELSE DOES.** Runs, innings, wickets and
+  every average still come from wherever they came from before, so a career
+  header still reads 500 runs. Only the ratio is re-derived, from the
+  scorecards, where the two halves stay together. That is what lets the answer
+  be "500 runs, strike rate 100, from 3 of 10 innings" rather than a smaller
+  career.
+- **WHERE THERE ARE NO SCORECARDS THE AGGREGATE STANDS AND SAYS SO.** A
+  BetterImport season carries a runs total and a balls total and nothing that
+  can separate them, so `basis: "aggregate"` is reported instead of a fraction.
+  Withholding every historical club's strike rate would be a worse answer than
+  naming where the figure came from. Withholding is reserved for what genuinely
+  cannot be worked out.
+- **`_with_rate_coverage` IS PRESENCE-AWARE**, so a query that never asked for
+  coverage keeps its exact payload shape. That is what let one helper serve the
+  career header, both season paths, all twelve leaderboard branches, the
+  yearbook boards and the record book without any of them growing keys they do
+  not use.
+- **THE MINIMUM IS COUNTED ON COVERED INNINGS, NEVER ON INNINGS PLAYED.** Ten
+  innings with three ball counts is a three-innings strike rate, and letting
+  that clear a ten-innings bar is exactly what the bar exists to stop. The
+  suite asserts both directions (clears 3, fails 4) on every board branch.
+- **THE PLATFORM DEFAULT IS 0, DELIBERATELY.** Nothing has ever qualified these
+  boards, so switching a number on for every club would drop players off their
+  own leaderboard the day it deployed without anybody choosing it — and a
+  number we invented would be quoted back at us. Migration 282 gives a club its
+  own (`organisations.stats_min_rate_innings` / `.stats_min_rate_spells`, NULL
+  = no preference), read through `services/stats_display.py`, with viewer pills
+  above the board for a one-off look. **A viewer's explicit 0 is a real answer**
+  — it switches the bar off — so the resolver tests for None, not falsiness.
+- **A STRIKE RATE RECORD IS SEASON BY SEASON AND NEVER ALL TIME.** How much was
+  written down changed from one era to the next, so a career figure blends
+  decades of differently scored cricket into one number nobody can check. A
+  season was scored one way. The record book already sets its own qualification
+  floors (20 wickets for a bowling average, 50 overs for an economy) and these
+  are their siblings; the screen points at StatLab, which already takes several
+  seasons at once, for a range.
+- **THE NOTE ONLY APPEARS WHERE THE FIGURE IS SHORT, AND ONLY WHERE THE FIGURE
+  IS DRAWN.** A note on every rate in the app is noise that trains people to
+  stop reading it. `RateFootnote`'s `when` is what stops a leaderboard sorted by
+  runs carrying a footnote about a mark nobody can see — caught by the browser
+  suite, not by reading the code. The mark is a **dagger, not an asterisk**: an
+  asterisk already means "not out" on every scorecard in the world.
+- **Fixed while here**: the per-spell economy boards divided by `SUM(overs)` in
+  cricket notation, so 10.2 + 10.2 summed to 20.4 rather than 20 overs 4 balls.
+  Every economy now converts to balls first, the conversion `player_formats`
+  already documented.
+- **Verified against a real Postgres** (`backend/verification/verify_rate_coverage.py`,
+  105 checks through the shipped functions and route bodies: the reported case
+  replayed on the career header, both season paths, all five leaderboard
+  branches, the formats page, StatLab's fast and live paths, the yearbook and
+  the record book; the flattened zero excluded and the genuine 0(0) kept; the
+  scorecard-less season keeping its own figure; the minimum counted on covered
+  innings both ways; and the SQL and Python covered tests agreeing row by row)
+  **with a control run**: 42 fail against the previous commit, reporting 333.33
+  on every surface. **Driven in Chromium** (`verify_rate_coverage_browser.mjs`,
+  36: the new strike-rate board, the exact params on the wire for a pill and for
+  the club default, the marked and unmarked rows read off the rows themselves,
+  the explainer and Escape closing it, both season records and the StatLab link,
+  no footnote where nothing is short, and no overflow at 390px) **with a control
+  run**: 11 fail against the previous commit.
+- **A CHECK THAT COUNTS MARKS ON A PAGE CANNOT FAIL PROPERLY.** The first cut of
+  "the covered leader is not marked, the partial one is" counted daggers in the
+  whole document, which passes with BOTH marked. It reads the two rows.
+- **NOTICED, NOT FIXED**: StatLab's family targets (`family_career`,
+  `family_season`) still divide the season totals, and say so in a comment where
+  the rate is built. They already ignore every other match-context filter (the
+  pre-existing gap this file documents), so half-fixing them would have been
+  worse than leaving them named. A club's history that predates the sync also
+  needs a Full Rebuild before its ball counts read as NULL rather than zero;
+  until then the zero-with-runs test is what carries it, which is why that test
+  exists rather than being tidied away.
+
 ## A player's seasons drawn two and three times over (v9.53.10, Aug 2026)
 
 Reported off a live profile: Cameron Sawatzky's season table read "2025/26"
@@ -9565,6 +9671,264 @@ Branches never touch a shared file, so parallel work merges cleanly. `index.js` 
 **Open follow-ups worth investigating**:
 - `deep_sync_player` (admin-triggered per-player resync via PHQ Partner API) still has a UI surface but is low value now that Grassroots covers all seasons including 25/26. Could be retired or repointed at GR. Low priority — no data pollution.
 - Season-alias URL redirects: visiting `/yearbook/{alias_season_id}` still loads the alias's hidden yearbook record + alias-only stats. The stats queries auto-expand when visiting the canonical URL, but no redirect from alias URL → canonical URL exists yet. Old bookmarks to merged-away seasons are the corner case.
+
+## Stats by competition, and the association that runs a grade (migration 283, v9.60.0, Sep 2026)
+
+Asked for off two PlayHQ screenshots: Applecross plays Summer 2025/26 across
+THREE associations at once, and Hamilton Veterans field one side in several
+competitions of the SAME association in one season. Neither could be
+separated — the stats layer scoped to a season, a grade, a grade CATEGORY and
+a match FORMAT, and to nothing about who ran the competition.
+
+- **THE COMPETITION IS NOT IN THE GRASSROOTS FEED, AND ESTABLISHING THAT IS
+  WHAT DECIDED THE WHOLE DESIGN.** Checked live before a line was written, not
+  inferred: it is absent from `/fixturesladders/organisations/{org}/seasons`,
+  from `/teams`, from `/fixturesladders/grades/{id}`, from
+  `/scores/grades/{id}/matches` and from the full `/scores/matches/{id}`
+  record; six plausible competition endpoints on the proxy all answer 403
+  ("The API key you provided does not have access"), and PlayHQ's own
+  `api.playhq.com/graphql`, where "Border Cup" lives, is CloudFront-403 from
+  this environment — the thing this file already says never to hang a
+  club-facing button on. **A CA season GUID is also GLOBAL, not per
+  competition**: `Summer 2024/25` is `fc1465b6…` for Hamilton AND for Veterans
+  Cricket Victoria, so the season list cannot carry it either.
+- **THE ASSOCIATION IS EXACT, FREE, AND WAS ALREADY ON THE WIRE.**
+  `grade.owningOrganisation` rides on the teams payload `sync` ALREADY fetches
+  to seed its grades, and it was reading only `id` and `name` from it.
+  Verified back to **Summer 1975/76**, so a club's whole history is reachable
+  for ONE call per season. Applecross's 2025/26 resolves to WASTCA, the Perth
+  Scorchers Women's League and the WA Integrated Cricket League with no
+  guessing at all.
+- **SO A COMPETITION IS THE CLUB'S OWN NAMED GROUP OF GRADES, SEEDED ONE PER
+  ASSOCIATION.** The seed alone answers Applecross. It cannot answer Hamilton —
+  Veterans Cricket Victoria runs the Border Cup, an Over 60s competition and
+  the Echuca divisions, so the association is one bucket for three — which is
+  exactly why a club-owned split has to exist and why association-only was
+  rejected. `is_seeded` is cleared the moment a person edits a competition,
+  which is what stops the next sync putting our naming back over theirs.
+- **A GRADE BELONGS TO AT MOST ONE COMPETITION, and that is what makes this
+  expressible at all.** A team plays several (Hamilton's Over 60 Men are in
+  two in one season; Applecross's 7th XI plays One Day Grade 2 AND Grade 3),
+  but each is a DIFFERENT grade row — so grouping by grade separates them with
+  no per-game decision to make.
+- **THE FILTER IS AN INCLUSION, WHERE THE CATEGORY AXIS IS AN EXCLUSION, and
+  the asymmetry is deliberate.** A category filter has a club-wide DEFAULT, so
+  it must be "leave these out" or a club with nothing to exclude would still
+  get a clause. A competition filter is only ever asked for, so "show me only
+  these" is what it means — which also settles the two cases an exclusion
+  could not: a grade in NO competition drops out, and a career residual with
+  no grade drops out, the same call the format axis makes. Counting an import
+  residual towards a competition would invent a figure rather than filter one.
+- **It rides on `GradeScope`, so adding it changed NO query** — all ~35 call
+  sites already route through `clause()`/`bind()`, exactly as the format axis
+  did in v9.26.0. It survives `formats_only()` for the same reason format
+  does: it is never a default, so it can only be there because somebody asked.
+- **EXPRESSED AS A SUBQUERY ON `grades.competition_id`, not a resolved list of
+  grade ids.** An established club has hundreds of grade rows against a handful
+  of competitions, so this binds 1-5 uuids and reads `ix_grades_competition`.
+  **Measured at platform scale** (848 grade rows, 25,440 games, 76,320
+  innings): a competition-filtered leaderboard is **53ms against the existing
+  match-type filter's 292ms** on the same data — the subquery narrows the games
+  by index before the per-innings unions are scanned, where the format CASE has
+  to be evaluated per row.
+- **IT FAILS CLOSED.** An id that is junk, not a uuid, or another club's is
+  dropped in `resolve_scope` before it reaches SQL — and an all-junk selection
+  is then an ACTIVE filter matching NOTHING, never an inactive one matching
+  everything. Failing open on an id a browser got wrong would hand a club
+  figures it never asked for, which is the worse direction (the same lesson
+  v9.58.2's case-folding fix records).
+- **THE COMPETITION HALF REACHES A GRADE-LESS MANUAL GAME AND THE OTHER TWO
+  DELIBERATELY DO NOT.** `_fetch_manual_games_as_list` takes the scope now: a
+  manual game with no grade is rightly KEPT by a category or format filter ("a
+  row we cannot classify is not a row we know to be junior") and must DROP
+  under a competition one, or a club filtering to the Border Cup finds an
+  uploaded scorecard from another competition in the list. Resolving the scope
+  had to move ABOVE the manual fetch in `list_games` for that.
+- **A FILTER AND A BREAKDOWN ARE BOTH WANTED, AND THEY ARE DIFFERENT
+  QUESTIONS.** `services/competition_stats.py` enumerates: the club's record
+  per competition, every grade under its own competition (the TEAM half), and
+  a player's batting/bowling/fielding/appearances per competition. Every
+  average is recomputed from that competition's own counts, never an average
+  of averages, and overs are converted to balls before anything is divided.
+- **`unattributed` is on every player payload, and the screen says it out
+  loud.** A competition figure comes from the scorecards, so a BetterImport
+  career carries rows with no grade that belong to no competition — reported,
+  never folded into one, and the panel explains why the rows do not add up to
+  the career total.
+- **The un-grouped bucket is SHOWN, never dropped** ("Other grades"), the same
+  rule the `unattributed` column on the by-grade grid follows.
+- **`services/competition_ddl.py` is the ONE copy alembic and the lifespan
+  mirror both run**, per the `vote_medal_ddl` rule. **Numbered 283, not
+  282**: the rate-qualification work landed on `main` as 282 while this was
+  in flight, and two migrations sharing a revision id break Alembic
+  outright — check `origin/main` before numbering one.
+  `grades.competition_id` is **ON DELETE SET NULL**: deleting a competition
+  un-groups its grades and never deletes a grade or a game, and the confirm
+  says so rather than warning about a loss that cannot happen.
+- **The filter row is NOT drawn for a club with fewer than two competitions** —
+  a control that can only ever answer "everything" is worse than none, the same
+  call `ageFilterOptions` and the Fees/Training notes make. Most of the
+  platform therefore never sees it.
+- **`python -m app.scripts.backfill_grade_associations <org|all> [--apply]`**
+  fills in the history an incremental sync no longer scans — ONE call per
+  season, not per grade. Dry-run by default. **Run against the live CA feed for
+  both reported clubs**: Applecross 19 grades across its three associations,
+  Hamilton 6 across its one, and an idempotent re-run writes nothing.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_stats_by_competition.py`, 89 checks through the
+  shipped services and route bodies: migration 282 applied three times to a
+  populated pre-283 schema, the FK's referential action read out of
+  `pg_constraint`, the association written by the shipped `_resolve_org_grade`
+  on a new AND an existing grade and never erased by a blank, the seeding's
+  skip-don't-replace at both levels, the reported Hamilton split, every figure
+  of the club and player breakdowns, the filter on the leaderboard / games list
+  / player profile, two competitions at once, an import residual counted
+  unfiltered and in no competition, all four fail-closed cases, cross-club
+  refusal from both sides, and every admin route body) **with a control run**
+  reporting the feature absent, and **driven in Chromium**
+  (`frontend/verification/verify_competitions_browser.mjs`, 41: the row on all
+  five screens with the exact params on the wire, a single-competition club
+  offered no row at all, the profile's lazy COMPETITIONS panel and its
+  unattributed note, the Manage Grades panel's assign/rename/create/delete
+  payloads, a dismissed delete sending nothing, no page errors, no overflow at
+  390px) **with a control run**: 19 of the 41 fail against the previous commit.
+- **A HARNESS TABLE THAT MERELY LOOKS RIGHT IS WORSE THAN NONE.** The suite's
+  first `audit_logs` used `organisation_id` where the lifespan uses `org_id`;
+  `audit_log` swallows its own failure, so the caller's transaction was left
+  ABORTED and the competition it had just created silently vanished — three
+  unrelated checks failed with no hint why. Copy the lifespan's DDL column for
+  column.
+- **Also caught by running it**: `games` has no `organisation_id` of its own
+  (the effective view derives it), `manual_batting_innings` keys on
+  `manual_game_id`, and a manual game cannot have a `game_appearances` row.
+- **Two checks were measuring the harness rather than the code and had to be
+  fixed**: the control club was used as the OPPOSITION on every fixture, which
+  by the app's own `home_org_id`/`away_org_id` rule made all 15 genuinely its
+  own; and a `document.querySelectorAll('div')` row locator matched an ancestor
+  and drove the first `<select>` on the screen instead of the intended grade's.
+- **NOTICED, NOT FIXED**: `get_player_team_breakdown` (the season x grade grid)
+  is not grouped by competition — it is its own attribution pass with the
+  `max(held, claimed)` reconciliation against CA's per-grade rows, and threading
+  a third dimension through it is a bigger change than this. The grid's grades
+  are already separated per competition by the FILTER, and the new
+  Analysis -> Competitions panel answers the enumeration.
+- **Not built**: nothing reads PlayHQ's own competition name, and nothing
+  should until that API is reachable without a WAF in the way. The AFL silo is
+  untouched — `services/afl/grade_labels.py` has its own vocabulary and would
+  need its own pass.
+
+### The club groups its own older seasons, and reads them back (v9.61.0)
+
+Asked for straight after the filter shipped: a club admin should be able to run
+`backfill_grade_associations` themselves when the app notices a competition has
+been renamed or added, watch it happen, and come back later if they would
+rather. Plus the club-level breakdown, which existed as an endpoint nothing
+called.
+
+- **THE GAP IS REAL AND NOTHING SAID SO.** A competition can only hold a grade
+  Cricket Australia has told us the association for, and an incremental sync
+  only scans the seasons that could still have been in play — so an established
+  club's older seasons sit outside every competition it has just finished
+  naming, showing under "Other grades" with no explanation. Nothing was wrong
+  with those matches; they simply could not be found.
+- **`services/competition_grouping.run_grouping` IS THE ONE IMPLEMENTATION, and
+  the script now calls it rather than owning it.** Two copies of "fill in the
+  associations and re-seed" is how the button and the command line start
+  disagreeing about what grouping means. The script keeps its own reasons to
+  exist: it takes `all`, it has a dry run, and it needs nobody logged in.
+- **IT REUSES `sync_runs` UNDER A NEW KIND, `competition_grouping`, WHICH IS
+  DELIBERATELY NOT ONE OF THE TWO THE PLATFORM RESUMES.** `_FULL_SYNC_KINDS`
+  (`org_full`, `org_hard_refresh`) is an allowlist the Setup Wizard, All Clubs
+  and `wizard_analytics` all read as "this club's history has been pulled", so
+  a new kind can never be mistaken for it; and `main.py`'s restart self-heal
+  only resumes those two, so a run cut off by a deploy is finalised as errored
+  and started again rather than resumed behind an admin's back. That is right
+  here precisely because the job is cheap and idempotent. **No migration** —
+  progress rides in the run's own `stats` JSONB, which `update_sync_run`
+  merges rather than replaces.
+- **SAFE TO RUN TWICE, AND THAT IS WHAT LETS THE BUTTON CARRY NO WARNING.** Only
+  a grade with NO association is written, an association CA omits never erases
+  one we hold, and the seeder is skip-don't-replace — so a competition the club
+  has renamed or split keeps its own naming and a second run over a finished
+  club writes nothing at all.
+- **ONE RUN PER CLUB.** Two would fetch the same seasons twice and race each
+  other's writes for nothing, so `POST /admin/competitions/grouping` hands back
+  the IN-FLIGHT run rather than starting a second — which is also what lets a
+  screen reloading mid-job rejoin the same bar instead of launching another.
+- **ONE SEASON'S UPSTREAM HICCUP IS NOT THE JOB.** That season is counted as
+  failed and the rest of the club is still grouped, which beats an
+  all-or-nothing pass a flaky upstream can stop halfway. The result says how
+  many could not be read, so running it again later is an obvious next step
+  rather than a mystery.
+- **`needs_grouping` IS THE ONLY FIELD A SCREEN READS, and it is seasons the
+  job can ACT on, never grades left un-grouped.** An admin may have deliberately
+  left a grade out; a button that would write nothing is worse than no button.
+  `grades_ungrouped` is reported beside it for context and is never the trigger.
+- **DISMISSED, NEVER GONE.** "Not now" is a per-user, per-club localStorage flag
+  read in the state initialiser (never an effect, or the prompt renders for one
+  frame before snapping shut), and what it leaves behind is one quiet line
+  still offering the job. `useDismissed` is a local four-line twin of the
+  Clubhouse kit's `usePref` rather than an import, per the nets rule — that
+  module is a different bundle and a remembered dismissal should not pull it
+  into this page's first paint.
+- **CLUB ADMIN AND SUPER ADMIN ARE ONE PATH, not two.** The endpoints carry
+  `MANAGE_MERGES` — the capability Manage Grades already runs on, since
+  grouping a grade is the same kind of act as merging one — and a super admin
+  implies every capability, so acting as a club gives them the same button on
+  the same screen with no super-admin-only surface to keep in step. The command
+  line stays the operator's way in for the platform-wide sweep (`all`) and for
+  a club nobody is logged in to. There is deliberately NO Better HQ screen for
+  it: the club that has just named its competitions is the one who knows
+  whether the older seasons matter, and a sweep run for them from outside would
+  arrive with no explanation attached.
+- **`--no-group` WAS A SILENT NO-OP** in the first cut of the refactor (a
+  ternary whose branches were identical), so the flag is a real `group=False`
+  parameter on `run_grouping` now: fill the associations in and stop, for an
+  operator who does not want to touch a club's own naming. The button never
+  passes it.
+- **THE CLUB PAGE OPENS ON THE WHOLE HISTORY, not the newest season.** The
+  question it answers is which competitions the club plays in, and a club that
+  has moved between them has most of that answer outside the current year. It
+  draws a season picker and NO grade picker — the page IS the grade breakdown,
+  so a grade filter above it would be filtering the answer out.
+- **`/{slug}/competitions` is a club section, so four lists had to learn it**:
+  the Navbar's own `CLUB_SECTIONS` and `statsActive`, `SponsorFooter`'s copy and
+  `FaviconManager`'s. None is a reserved ROOT segment question — the route is
+  two segments deep — but a club page whose crest and sponsor footer go missing
+  is the same class of bug the `/videos` note records.
+- **Verified against a real Postgres** (the suite is 117 checks now: both team
+  payload shapes and a grade with no owning organisation skipped, the gap and
+  its `needs_grouping` trigger, the association and its short name stored,
+  `group=False` leaving the competitions alone, grouping then placing the
+  newly-filled grade, a second run writing nothing, a blank association not
+  erasing one held, a failed season counted rather than raised, a dry run
+  writing nothing, the two route bodies, one background task queued, a second
+  press handed the same run, a screen rejoining it, and another club's run never
+  picked up as this club's) **with a control run**: the grouping half reports
+  itself missing against the previous commit while all 89 earlier checks still
+  pass.
+- **A `check` FOR `triggered_by_user_id` NEEDS A REAL `users` ROW.** `sync_runs`
+  has a foreign key on it, so the stand-in object with an invented id every
+  other route check in this suite uses cannot start a run.
+- **Driven in Chromium** (the suite is 70 checks now: the prompt and the number
+  it names, "Not now" and the quiet line it leaves, the dismissal surviving a
+  reload and clearing bringing it back, the POST on the wire, the bar carrying
+  a real percentage and MOVING between two reads, the season it is on, the
+  result naming what it did, no prompt at all for a club with nothing to fetch,
+  and the public page's competitions, records and grades at 1440 and 390 with a
+  grade measured as sitting inside its own competition's card) **with a control
+  run**: 23 of the 70 fail against the previous commit.
+- **THE FINISHED JOB'S OWN RESULT WENT MISSING, AND ONLY THE BROWSER FOUND
+  IT.** `CompetitionManager.load()` put the whole section back into its loading
+  state on every refresh, so the panel's `onDone` unmounted the very component
+  that was about to report. The spinner belongs to the FIRST load; a refresh
+  after an edit swaps the data in place, which also stops every assign, rename
+  and delete blanking the section on its way through.
+- **A CONTROL RUN MUST REPORT, NOT CRASH.** The first cut clicked "Not now"
+  unguarded, so the control run died on a missing button after two failures and
+  said nothing about the other twenty-one. Every interaction in that block is
+  behind a presence check now, and "the bar moved" treats a locator that finds
+  nothing from the start as a failure rather than as an unchanged bar.
 
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
