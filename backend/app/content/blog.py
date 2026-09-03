@@ -119,7 +119,7 @@ BLOG_POSTS: list[dict] = [
         "faq": [
             {
                 "q": "Why does a strike rate on my club's site say the data may be incomplete?",
-                "a": "Because some of the innings behind it did not record a ball count. A strike rate is runs divided by balls faced, and both halves have to come from the same innings, so the figure is worked out from the innings that recorded both and the note tells you how many that was. Runs, average and every other figure on the page still count every innings.",
+                "a": "Because some of the innings behind it did not record a ball count. A strike rate is runs divided by balls faced, and the runs and the balls have to be counted from the same innings, so the figure is worked out from the innings where both were recorded and the note tells you how many that was. Runs, average and every other figure on the page still count every innings.",
             },
             {
                 "q": "Why not just divide all the runs by all the balls on file?",
