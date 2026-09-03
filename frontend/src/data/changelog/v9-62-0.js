@@ -11,5 +11,6 @@ export default {
     'On the Competitions panel they are filed under the club’s own competition rather than reading as "Other grades".',
     'Competitions also reads grades the way Manage Grades does: a grade you have merged shows as one row rather than one per old name, and the season count is the number of seasons played rather than one per club involved.',
     'A player’s season-by-season table opens in season order again. A winter season was sorting to the top of the list.',
+    'Grades are now grouped into competitions by the sync itself. An established club used to find its older seasons sitting outside every competition until someone pressed the button on Manage Grades; that happens on its own now, once, and the button stays for anyone who wants it done immediately.',
   ],
 }

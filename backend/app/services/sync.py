@@ -1173,6 +1173,24 @@ async def _sync_organisation_impl(
             logger.warning(f"Competition seeding failed for {org_id_str}: {e}")
             await session.rollback()
 
+        # And fetch the associations for the seasons this run did not scan, so
+        # an ESTABLISHED club's history is grouped without anybody pressing
+        # anything. The seeding above only reaches grades whose association we
+        # already hold, which on an incremental run is the current season
+        # alone — a club with fifty seasons behind it would otherwise open
+        # Manage Grades and find every one of them outside a competition.
+        #
+        # `maybe_group_after_sync` owns the decision AND the guard that stops
+        # this re-fetching, every week for ever, the seasons Cricket Australia
+        # has no association for. It runs on its own session and never raises.
+        try:
+            from app.services.competition_grouping import maybe_group_after_sync
+            grouping = await maybe_group_after_sync(org_id)
+            if grouping.get("ran"):
+                stats["competition_grouping"] = grouping
+        except Exception as e:
+            logger.warning(f"Competition grouping failed for {org_id_str}: {e}")
+
         # Recompute milestones. _compute_milestones runs a query per player, so
         # a full run over an established club is a loop over ~1,500 of them —
         # fine once a week, wasteful twice a week for a club where only this

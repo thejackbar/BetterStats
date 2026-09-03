@@ -1150,6 +1150,110 @@ async def main() -> None:
                 other_club = await session.get(Organisation, OTHER)
                 check("another club's run is never picked up as this club's",
                       await grouping.running_run_id(session, other_club.id) is None)
+
+            # ---- it groups itself, without anybody pressing the button -----
+            print("\n— an established club is grouped automatically —")
+            new_season = uuid.uuid4()
+            new_grade = uuid.uuid4()
+
+            async def _auto(org):
+                # Reported, never crashed: a control run against code without
+                # the automatic path must say so and keep going.
+                fn = getattr(grouping, "maybe_group_after_sync", None)
+                if fn is None:
+                    return {"ran": None, "reason": "maybe_group_after_sync is absent"}
+                return await fn(org)
+
+            async def reset(clear_runs=True):
+                async with Session() as session:
+                    if clear_runs:
+                        await session.execute(text(
+                            "DELETE FROM sync_runs WHERE org_id = :o AND kind = :k"),
+                            {"o": ACC, "k": grouping.RUN_KIND})
+                    await session.execute(text(
+                        "UPDATE grades SET association_id = NULL,"
+                        " association_name = NULL, competition_id = NULL"
+                        " WHERE id = :g"), {"g": G_UNGROUPED})
+                    await session.commit()
+
+            # Cricket Australia has no association for this club's old seasons.
+            # The job must still run once, and then STOP running.
+            grouping.playhq_client.get_teams = teams_blank
+            await reset()
+            first = await _auto(ACC)
+            check("a club whose seasons carry no association is grouped on sync,"
+                  " with no button pressed",
+                  first.get("ran") is True, str(first))
+            check("and it records what Cricket Australia could not answer",
+                  first.get("seasons_unresolved", 0) >= 1, str(first))
+
+            second = await _auto(ACC)
+            check("a second sync does not re-fetch what CA has no answer for",
+                  second.get("ran") is False
+                  and second.get("reason") == "no_new_seasons", str(second))
+
+            async with Session() as session:
+                await session.execute(text(
+                    "INSERT INTO seasons (id, organisation_id, name, year)"
+                    " VALUES (:i, :o, 'Summer 2099/00', 2099)"),
+                    {"i": new_season, "o": ACC})
+                await session.execute(text(
+                    "INSERT INTO grades (id, season_id, name) "
+                    "VALUES (:i, :s, 'Brand New Grade')"),
+                    {"i": new_grade, "s": new_season})
+                await session.commit()
+            third = await _auto(ACC)
+            check("but a season that turns up later does bring it back",
+                  third.get("ran") is True, str(third))
+
+            # And once CA does answer, the club ends up grouped and it stops.
+            # The 2099 season goes first — the stub only answers for the one
+            # grade, so leaving it in would keep the club legitimately unfinished
+            # and prove nothing about the job settling.
+            async with Session() as session:
+                await session.execute(text("DELETE FROM grades WHERE id = :g"),
+                                      {"g": new_grade})
+                await session.execute(text("DELETE FROM seasons WHERE id = :s"),
+                                      {"s": new_season})
+                await session.commit()
+            grouping.playhq_client.get_teams = teams_ok
+            await reset()
+            fourth = await _auto(ACC)
+            check("once CA answers, the grade is filled in and grouped",
+                  fourth.get("ran") is True and fourth.get("grades_filled", 0) >= 1,
+                  str(fourth))
+            async with Session() as session:
+                gap = await grouping.grouping_gap(session, ACC)
+                check("leaving nothing for it to act on",
+                      gap["seasons_missing"] == 0, str(gap))
+            fifth = await _auto(ACC)
+            check("so the next sync skips it outright",
+                  fifth.get("ran") is False
+                  and fifth.get("reason") == "nothing_missing", str(fifth))
+
+            # A job already in flight is never doubled up by a sync.
+            await reset()
+            async with Session() as session:
+                await session.execute(text(
+                    "INSERT INTO sync_runs (id, org_id, kind, status, stats,"
+                    " started_at) VALUES (gen_random_uuid(), :o, :k, 'running',"
+                    " '{}'::jsonb, NOW())"), {"o": ACC, "k": grouping.RUN_KIND})
+                await session.commit()
+            busy = await _auto(ACC)
+            check("and a run already in flight is never doubled up",
+                  busy.get("ran") is False
+                  and busy.get("reason") == "already_running", str(busy))
+            async with Session() as session:
+                await session.execute(text(
+                    "UPDATE sync_runs SET status = 'success' WHERE org_id = :o"
+                    " AND kind = :k AND status = 'running'"),
+                    {"o": ACC, "k": grouping.RUN_KIND})
+                await session.commit()
+            src = (Path(__file__).resolve().parent.parent
+                   / "app" / "services" / "sync.py").read_text()
+            body = src[src.index("async def sync_organisation("):]
+            check("and it is the SYNC that calls it, not only the button",
+                  "maybe_group_after_sync" in body)
         finally:
             grouping.playhq_client.get_teams = real_get_teams
 

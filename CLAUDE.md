@@ -285,6 +285,38 @@ slice of the real season.
   one synced club. Which of the two readings a club wants is a product decision,
   not a bug this fix should settle on its own.
 
+### Grouping is a job the platform does, not a button a club must find (v9.62.1)
+
+Reported off Applecross: Manage Grades showed **0 competitions** and every
+grade it has ever played under "not in a competition", with a button offering
+to fix it. A club should not have to know that button exists.
+
+- **THE SYNC ALREADY FILLS THE ASSOCIATION IN — FOR THE SEASONS IT SCANS.**
+  `_resolve_org_grade` writes it on an existing grade as well as a new one, so
+  a fresh club that syncs its whole history (Shoalwater Bay) comes out fully
+  grouped. An ESTABLISHED club syncs incrementally, so only the current season
+  is reached and the other fifty are not. That is the entire gap.
+- **`competition_grouping.maybe_group_after_sync` is called from
+  `sync_organisation`**, beside the seeding that was already there. Its own
+  try/except and its own session: a grouping failure must never fail a sync.
+- **IT IS A JOB THAT FINISHES, and that is the whole design problem.** Running
+  it every sync would re-fetch, for the life of the club, the seasons CA simply
+  has no association for. So `run_grouping` now reports **`seasons_unresolved`**
+  — what is still missing once it has done all it can — and the trigger fires
+  only when the current gap is GREATER than the last completed run's residual.
+  True the first time, true again when a new season turns up without one, false
+  for ever after on a club whose remaining gap is CA's own.
+- **A run in flight is never doubled up** (`running_run_id`), so a sync landing
+  while an admin has pressed the button joins nothing and starts nothing.
+- **The button stays as the escape hatch**, for a club that wants it now rather
+  than after the next sync, and the copy says which is which.
+- **Verified**: the competitions suite is 126 checks now — the club grouped
+  with nothing pressed, the residual recorded, a second sync skipping, a later
+  season bringing it back, the club settling once CA answers, the in-flight
+  guard, and a structural check that the SYNC is what calls it — **with a
+  control run**: all 9 fail against the previous commit, reported rather than
+  crashed.
+
 ### The grade leaderboard and the profile under it (v9.53.13)
 
 Reported off Records with a grade picked: the board read 61 where the
