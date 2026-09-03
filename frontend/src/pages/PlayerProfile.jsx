@@ -333,7 +333,11 @@ function WicketsByGradeChart({ bowlingByGrade }) {
 
 // ── Batting tab ─────────────────────────────────────────────────────────
 function BattingTab({ batting, seasonStats, seasons }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!batting) return <PbSpinner />
 
   return (
@@ -405,7 +409,11 @@ function BattingTab({ batting, seasonStats, seasons }) {
 
 // ── Bowling tab ──────────────────────────────────────────────────────────
 function BowlingTab({ bowling, seasonStats }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!bowling) return <PbSpinner />
 
   return (
@@ -472,7 +480,11 @@ function BowlingTab({ bowling, seasonStats }) {
 
 // ── Fielding tab ─────────────────────────────────────────────────────────
 function FieldingTab({ fielding, seasonStats }) {
-  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, 'season_name', 'desc')
+  // No default sort key: the server already returns these newest-first, and it
+  // orders on the season's YEAR. Sorting the raw name here instead put a
+  // "Winter 2013" row above "Summer 2025/26" (W sorts after S), which is what
+  // drew 2013/14 at the top of the table. Clicking a column still sorts.
+  const { sorted, sortKey, sortDir, request } = useSortable(seasonStats, null, 'desc')
   if (!fielding) return <PbSpinner />
 
   return (
