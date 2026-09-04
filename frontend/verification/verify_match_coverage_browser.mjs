@@ -65,9 +65,31 @@ const AGREES = JSON.parse(JSON.stringify(SURPLUS))
 AGREES.career_batting = career(212)
 delete AGREES.match_coverage
 
+// The reported player's shape, reduced. The grid reconciles per season and
+// grade and takes whichever source is higher, so its total is a THIRD number:
+// 8 grade rows we hold a scorecard for, plus 5 Cricket Australia counts in a
+// grade we hold none for = 13, against a header of 12 held / 9 CA.
+const TEAM_BREAKDOWN = {
+  rows: [
+    { grade_name: '6th Grade', matches: 5, scorecard_matches: 5,
+      attributed_unknown: 0, seasons: 3, won: 3, lost: 2, drawn: 0, win_pct: 60 },
+    { grade_name: '8th Grade', matches: 3, scorecard_matches: 3,
+      attributed_unknown: 0, seasons: 2, won: 1, lost: 2, drawn: 0, win_pct: 33 },
+    { grade_name: 'One Day Grade 1', matches: 5, scorecard_matches: 0,
+      attributed_unknown: 5, seasons: 2, won: 0, lost: 0, drawn: 0, win_pct: null },
+  ],
+  season_rows: [], unattributed: 0,
+}
+// Held 12 against CA's 9, so the header reads a surplus AND the grid sits
+// above both — the exact three-number case that was reported.
+const GRID = JSON.parse(JSON.stringify(SURPLUS))
+GRID.career_batting = career(9)
+GRID.match_coverage = { career_matches: 9, breakdown_matches: 12,
+                        without_scorecard: 0, extra_scorecards: 3 }
+
 const browser = await chromium.launch(existsSync(EXECUTABLE) ? { executablePath: EXECUTABLE } : {})
 
-async function open(stats, { width = 1440 } = {}) {
+async function open(stats, { width = 1440, team = null } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height: 1400 } })
   const page = await ctx.newPage()
   const errors = []
@@ -84,6 +106,10 @@ async function open(stats, { width = 1440 } = {}) {
     // The profile fans out to ~20 endpoints and most of them return a LIST.
     // A stub answering `{}` everywhere takes the page down on the first
     // `achievements is not iterable` — a broken page measures nothing.
+    if (team && /\/team-breakdown$/.test(path)) {
+      return route.fulfill({ status: 200, contentType: 'application/json',
+                             body: JSON.stringify(team) })
+    }
     const obj = /team-breakdown|grade-categories|captain-stats|self-serve|usage/.test(path)
     return route.fulfill({ status: 200, contentType: 'application/json',
                            body: obj ? '{}' : '[]' })
@@ -201,6 +227,70 @@ try {
     ck('NO note is drawn on a player the two sources agree on — a note on '
        + 'everybody is noise that teaches people to stop reading notes',
        !!tile && !tile.hasButton && !/scorecard/.test(tile.text), tile?.text)
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- and the grid is a THIRD number again --')
+  {
+    const { page, ctx, errors } = await open(GRID, { team: TEAM_BREAKDOWN })
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    await page.click('text=Team').catch(() => {})
+    await page.waitForSelector('text=MATCHES BY GRADE', { timeout: 10000 })
+      .catch(() => {})
+    const grid = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('.pb-card')]
+        .find(e => /MATCHES BY GRADE/.test(e.innerText || ''))
+      if (!card) return null
+      const rows = [...card.querySelectorAll('tr')].map(
+        tr => (tr.innerText || '').replace(/\s+/g, ' ').trim())
+      return { total: rows.find(r => /^TOTAL/.test(r)) || '',
+               text: (card.innerText || '').replace(/\s+/g, ' ').trim() }
+    })
+    ck('the grid draws with its own total', !!grid && /^TOTAL 13\b/.test(grid.total),
+       grid?.total)
+    ck('THE GRID SAYS WHY ITS TOTAL IS NEITHER HEADER FIGURE, rather than '
+       + 'leaving a third number to be found by adding the rows up',
+       !!grid && /whichever is higher/.test(grid.text), grid?.text?.slice(0, 300))
+    ck('and shows the arithmetic off its own rows: 8 held + 5 added = 13',
+       !!grid && /8 we hold a scorecard for/.test(grid.text)
+       && /\+ 5 Cricket Australia counts/.test(grid.text)
+       && /= 13\./.test(grid.text), grid?.text?.slice(0, 500))
+    ck('the scorecards with no grade at all are accounted for too — 12 held on '
+       + 'the header against 8 on a row here', !!grid
+       && /A further 4 matches have a scorecard but no grade recorded/.test(grid.text),
+       grid?.text?.slice(0, 600))
+    ck('the asterisk is explained without claiming a rule it does not follow',
+       !!grid && /Cricket Australia counts in this grade that we hold no scorecard for/
+         .test(grid.text))
+    ck('no page errors', errors.length === 0, errors.join(' | '))
+    await ctx.close()
+  }
+
+  console.log('\n-- a grid with nothing to reconcile says nothing --')
+  {
+    const clean = { rows: TEAM_BREAKDOWN.rows.slice(0, 2), season_rows: [],
+                    unattributed: 0 }
+    const stats = JSON.parse(JSON.stringify(GRID))
+    // Header and grid agree: 8 held, 8 on rows, so no note anywhere.
+    stats.career_batting = career(8)
+    delete stats.match_coverage
+    const { page, ctx, errors } = await open(stats, { team: clean })
+    await page.click('text=Analysis').catch(() => {})
+    await page.waitForTimeout(400)
+    await page.click('text=Team').catch(() => {})
+    await page.waitForSelector('text=MATCHES BY GRADE', { timeout: 10000 })
+      .catch(() => {})
+    const text = await page.evaluate(() => {
+      const card = [...document.querySelectorAll('.pb-card')]
+        .find(e => /MATCHES BY GRADE/.test(e.innerText || ''))
+      return card ? (card.innerText || '').replace(/\s+/g, ' ').trim() : null
+    })
+    ck('the grid still draws', !!text && /TOTAL 8\b/.test(text), text?.slice(0, 200))
+    ck('NO reconciliation note where the rows already add up — the same rule '
+       + 'the header note keeps', !!text && !/whichever is higher/.test(text),
+       text?.slice(0, 300))
     ck('no page errors', errors.length === 0, errors.join(' | '))
     await ctx.close()
   }

@@ -88,3 +88,62 @@ export function MatchCoverageNote({ coverage, filtered = false, className = '' }
 }
 
 export default MatchCoverageNote
+
+/**
+ * Why the by-grade grid's TOTAL is a third number again.
+ *
+ * The grid is neither of the two figures on the header, and by construction it
+ * cannot be. It reconciles PER SEASON AND GRADE, taking whichever is higher —
+ * the scorecards we hold for that grade, or Cricket Australia's own per-grade
+ * figure — and adds a season's unplaceable shortfall on the end. That is the
+ * right rule for a grade breakdown (it is the most complete per-grade picture
+ * available, and `max` is what stops a shared fixture the other club synced
+ * first vanishing off a row), and it is the reason the total sits above both.
+ *
+ * EVERY FIGURE HERE IS DERIVED FROM THE GRID'S OWN ROWS, never asserted: the
+ * scorecard column is what the rows carry, the added column is the sum of the
+ * asterisks, and the two add up to the printed total. A sentence that merely
+ * claimed the total was "worked out differently" would tell a reader nothing
+ * they could check.
+ */
+export function GradeTotalNote({ rows = [], unattributed = 0, coverage = null,
+                                 className = '' }) {
+  const held = rows.reduce((n, r) => n + (r.scorecard_matches || 0), 0)
+  const added = rows.reduce((n, r) => n + (r.attributed_unknown || 0), 0)
+  const total = held + added + unattributed
+  // Matches we hold a scorecard for that carry no grade — an uploaded card with
+  // the grade left blank. They belong to no row here at all, so without this
+  // line the grid quietly holds fewer scorecards than the header says we have.
+  const noGrade = coverage
+    ? Math.max((coverage.breakdown_matches || 0) - held, 0)
+    : 0
+  if (!added && !unattributed && !noGrade) return null
+
+  return (
+    <div className={`font-mono text-[10px] text-pb-dim tracking-wide2 space-y-1 ${className}`}>
+      <p>
+        This total is worked out season by season and grade by grade, taking
+        whichever is higher: the scorecards we hold, or Cricket Australia's own
+        figure for that grade. It is its own number, and does not have to match
+        the career total above.
+      </p>
+      <p>
+        {held.toLocaleString()} we hold a scorecard for
+        {added > 0 && <> {' '}+ {added.toLocaleString()} Cricket Australia counts in
+          a grade we hold no scorecard for (marked *)</>}
+        {unattributed > 0 && <> {' '}+ {unattributed.toLocaleString()} it counts in
+          a season we cannot place in one grade</>}
+        {' '}= {total.toLocaleString()}.
+      </p>
+      {noGrade > 0 && (
+        <p>
+          A further {noGrade.toLocaleString()}{' '}
+          {noGrade === 1 ? 'match has' : 'matches have'} a scorecard but no grade
+          recorded, so {noGrade === 1 ? 'it appears' : 'they appear'} on no row
+          here. {noGrade === 1 ? 'It is' : 'They are'} still counted in the
+          career figures above.
+        </p>
+      )}
+    </div>
+  )
+}

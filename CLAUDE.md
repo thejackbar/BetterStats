@@ -10761,10 +10761,42 @@ discover that the numbers don't add up. That looks like a mistake."
   `MATCHES187` mid-animation. The suite waits for the figure to stop moving and
   reads it out of its own `.pb-num`, never out of the tile's whole text — the
   note beside it quotes numbers too.
-- **NOTICED, NOT FIXED**: the by-grade grid still applies `max(held, claimed)`
-  while the career header does not, so the two can legitimately disagree for a
-  player CA counts short of. That is the pre-existing attribution split this
-  note documents rather than resolves.
+- **AND THE BY-GRADE GRID IS A THIRD NUMBER (v9.63.2).** Reported straight
+  after: Applecross's Tristram Fletcher reads **309** on the career header,
+  **313** in the note beside it, and **314** on Analysis -> Team. Three rules,
+  three questions, none of them wrong:
+  - **309** is `SUM(player_season_stats.matches)`, Cricket Australia's count of
+    matches played, with no grade on it at all.
+  - **313** is the matches we hold a game row for, which is what any filter
+    counts from — grade-less uploads included.
+  - **314** is `get_player_team_breakdown`'s own reconciliation: per season AND
+    grade it takes `max(scorecards held, CA's per-grade figure)`, adds a
+    season's unplaceable shortfall, and INNER JOINS `grades`, so it drops a
+    grade-less game and adds a match CA credits to a grade we hold no scorecard
+    for. The `5 *` on One Day Grade 1 is exactly that second half.
+  **The grid's rule is the right one for a grade breakdown** — `max` is what
+  keeps it self-healing when a shared fixture the other club synced first drops
+  off the scorecard side — so the fix is again to SAY SO, not to renumber.
+- **THE GRID'S NOTE IS SUMMED FROM ITS OWN ROWS, never asserted.** `held` is the
+  rows' `scorecard_matches`, `added` is the sum of the asterisks, and the two
+  plus `unattributed` equal the printed total, so a reader can check every part
+  of it against the table above. A sentence merely claiming the total is "worked
+  out differently" tells nobody anything. The grade-less line is
+  `breakdown_matches - held`, which is the one figure that needs the header's
+  own coverage block — both are season-scoped the same way
+  (`resolve_season_filter(..., include_shared=True)`) and neither is
+  grade-scoped, so they are comparable.
+- **A GRID THAT ALREADY ADDS UP SAYS NOTHING**, the same rule as the header.
+- **THE ASTERISK FOOTNOTE WAS WRONG AND IS CORRECTED IN PLACE.** It claimed the
+  figure is "attributed to a grade only when the player played in a single grade
+  that season" — true of the gap heuristic, and NOT of the `exact` branch, which
+  sets `attributed_unknown` from `claimed > held` with no such condition. It now
+  states what the mark means and confines the single-grade rule to the branch
+  that actually applies it.
+- **NOTICED, NOT FIXED**: the grid carries no grade-type, format or competition
+  scope at all, so the Men's/Women's pills above it move the header and leave
+  the grid alone. Right for "every grade this player has appeared in", wrong the
+  moment somebody reads the two as the same question; it needs its own look.
 
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 

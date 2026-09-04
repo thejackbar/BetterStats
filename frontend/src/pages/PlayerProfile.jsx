@@ -16,7 +16,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
-import { MatchCoverageNote } from '../components/MatchCoverage'
+import { GradeTotalNote, MatchCoverageNote } from '../components/MatchCoverage'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
@@ -2255,12 +2255,23 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
                     </tbody>
                   </table>
                 </div>
-                {(rows.some(r => r.attributed_unknown > 0) || unattributed > 0) && (
-                  <p className="font-mono text-[10px] text-pb-faint tracking-wide2 px-5 pb-4 pt-2">
-                    * = matches counted by CA&apos;s season aggregate but with no scorecard captured yet; attributed to a grade only when the player played in a single grade that season.
-                    {unattributed > 0 && ` ${unattributed.toLocaleString()} ${unattributed === 1 ? 'match' : 'matches'} couldn't be attributed (mixed-grade season).`}
-                  </p>
-                )}
+                <div className="px-5 pb-4 pt-3 space-y-2">
+                  {rows.some(r => r.attributed_unknown > 0) && (
+                    <p className="font-mono text-[10px] text-pb-faint tracking-wide2">
+                      * = matches Cricket Australia counts in this grade that we hold
+                      no scorecard for. Where it has not broken a season down by grade
+                      at all, the shortfall is only placed when the player turned out
+                      in a single grade that season.
+                    </p>
+                  )}
+                  {/* Why this total is a THIRD number, said here rather than left
+                      to be discovered: the grid reconciles per season and grade and
+                      takes whichever source is higher, so it is neither the career
+                      total nor the matches we hold a scorecard for. Every figure in
+                      it is summed from the rows above. */}
+                  <GradeTotalNote rows={rows} unattributed={unattributed}
+                                  coverage={matchCoverage} />
+                </div>
               </Card>
             ) : (
               <p className="text-pb-faint text-sm py-4">No grade appearances recorded{seasonLabel ? ` for ${seasonLabel}` : ''}.</p>
