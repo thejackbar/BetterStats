@@ -4844,6 +4844,20 @@ async def hard_refresh_org(
                 except Exception as ye:
                     _logger.warning(f"HardRefresh: yearbook auto-generate failed for {org_id_str}: {ye}")
 
+                # And group the club's grades into competitions, for the same
+                # reason and on the same true-success branch: a rebuild rewrites
+                # every grade, so this is the moment the associations behind the
+                # grouping are freshest. `maybe_group_club` owns the decision and
+                # never raises — a club whose remaining gap is Cricket Australia's
+                # own is skipped without a single call.
+                try:
+                    from app.services import competition_grouping
+                    grp = await competition_grouping.maybe_group_club(club.id)
+                    if grp.get("ran"):
+                        _logger.info(f"HardRefresh: competition grouping for {org_id_str}: {grp}")
+                except Exception as ge:
+                    _logger.warning(f"HardRefresh: competition grouping failed for {org_id_str}: {ge}")
+
             # Refresh planner statistics. A hard refresh delete+reinserts the
             # org's whole game-level dataset and rewrites player_season_stats,
             # which leaves Postgres' statistics stale until autovacuum catches

@@ -16,6 +16,7 @@ import {
   AnimatedNum, Sparkline, Label, Card, Btn, Kpi,
   ResultPill, PageHeader, PbSpinner, TabBar,
 } from '../lib/presskit'
+import { MatchCoverageNote } from '../components/MatchCoverage'
 import '../styles/honour-badge.css'
 import { countryFlagUrl } from '../data/countries'
 import { CAP } from '../lib/capabilities'
@@ -1056,7 +1057,7 @@ function FormatCompareTable({ rows, cols, title, note }) {
 // competition; this ENUMERATES them, which is the question a player in more
 // than one cannot otherwise answer — Hamilton Veterans' Over 60 Men play the
 // Border Cup and the VCV Over 60s competition in a single season.
-function CompetitionsSection({ playerId, seasonId }) {
+function CompetitionsSection({ playerId, seasonId, matchCoverage = null }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -1077,6 +1078,12 @@ function CompetitionsSection({ playerId, seasonId }) {
 
   const rows = data?.rows || []
   const unattributed = data?.unattributed || 0
+  // Matches Cricket Australia counts that we hold no game row for at all.
+  // Said here as well as on the header tile, because this panel is where the
+  // figures visibly fail to add up and the reader is owed the reason at the
+  // point they'd otherwise start doing the arithmetic themselves.
+  const noScorecard = matchCoverage?.without_scorecard || 0
+  const careerTotal = matchCoverage?.career_matches || 0
   if (!rows.length) {
     return (
       <p className="text-pb-faint text-sm py-4">
@@ -1160,13 +1167,28 @@ function CompetitionsSection({ playerId, seasonId }) {
           rows with no grade and so no competition. Without this the tables
           would simply not add up to the career total and nothing would say
           why. */}
-      {unattributed > 0 && (
-        <p className="text-[11px] text-pb-faint">
-          {unattributed} {unattributed === 1 ? 'match is' : 'matches are'} recorded
-          without a grade, so {unattributed === 1 ? 'it belongs' : 'they belong'} to
-          no competition and {unattributed === 1 ? 'is' : 'are'} not counted above.
-          These {total} {total === 1 ? 'match' : 'matches'} are the ones we can place.
-        </p>
+      {(unattributed > 0 || noScorecard > 0) && (
+        <div className="text-[11px] text-pb-faint space-y-1">
+          <p>
+            These {total} {total === 1 ? 'match' : 'matches'} are the ones we can place
+            in a competition{careerTotal ? `, out of ${careerTotal} in the career total` : ''}.
+          </p>
+          {unattributed > 0 && (
+            <p>
+              {unattributed} {unattributed === 1 ? 'match is' : 'matches are'} recorded
+              without a grade, so {unattributed === 1 ? 'it belongs' : 'they belong'} to
+              no competition and {unattributed === 1 ? 'is' : 'are'} not counted above.
+            </p>
+          )}
+          {noScorecard > 0 && (
+            <p>
+              Another {noScorecard} {noScorecard === 1 ? 'match is' : 'matches are'} counted
+              in the career total from Cricket Australia's season figures, which we hold no
+              scorecard for. There is nothing to file {noScorecard === 1 ? 'it' : 'them'}{' '}
+              under.
+            </p>
+          )}
+        </div>
       )}
     </div>
   )
@@ -1689,7 +1711,7 @@ function MatchesBySeasonGrade({ rows = [], seasonRows = [] }) {
   )
 }
 
-function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null }) {
+function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGrade, byPosition, seasonStats, bowlingByGrade, bowlingDismissals = [], bowlingByBatterPosition = [], battingInnings = [], bowlingSpells = [], teamBreakdown = { rows: [], season_rows: [], unattributed: 0 }, seasonLabel = null, captainStats, byVenue = [], byOpposition = [], careerBatting = null, careerBowling = null, careerFielding = null, matchCoverage = null }) {
   const [subTab, setSubTab] = useState('profile')
 
   const hasBattingData = dismissals?.length || partnerships?.length || byGrade?.length || byPosition?.length || seasonStats?.some(s => (s.total_runs ?? 0) > 0)
@@ -2037,7 +2059,7 @@ function AnalysisTab({ playerId, seasonId = null, dismissals, partnerships, byGr
 
       {subTab === 'formats' && <FormatsSection playerId={playerId} seasonId={seasonId} />}
 
-      {subTab === 'competitions' && <CompetitionsSection playerId={playerId} seasonId={seasonId} />}
+      {subTab === 'competitions' && <CompetitionsSection playerId={playerId} seasonId={seasonId} matchCoverage={matchCoverage} />}
 
       {subTab === 'teammates' && <TeammatesSection playerId={playerId} />}
 
@@ -2692,6 +2714,12 @@ export default function PlayerProfile() {
     competitions: compParam,
   })
   const gradeScope = data?.grade_scope
+  // Why the career total and the per-competition figures differ. Sent only
+  // when they genuinely do, so the note draws on nobody it has nothing to
+  // tell. `scopeActive` only changes the wording — the note itself shows
+  // either way, so nobody has to discover the gap by adding the rows up.
+  const matchCoverage = data?.match_coverage
+  const scopeActive = !!gradeScope?.active
   useEffect(() => {
     const oid = data?.player?.organisation_id
     if (oid && oid !== profileOrgId) setProfileOrgId(oid)
@@ -3023,13 +3051,22 @@ export default function PlayerProfile() {
           <div className="space-y-3 mb-6">
             {/* Row 1 — Matches + optional overseas info */}
             <div className="flex gap-3">
-              <div className="pb-card p-4 flex items-center gap-4 flex-1">
-                <div>
-                  <Label>MATCHES</Label>
-                  <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
-                    <AnimatedNum value={batting?.games || bowling?.games || 0} />
-                  </span>
+              <div className="pb-card p-4 flex-1">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <Label>MATCHES</Label>
+                    <span className="font-mono text-[36px] font-bold pb-num leading-none mt-1 text-pb-text">
+                      <AnimatedNum value={batting?.games || bowling?.games || 0} />
+                    </span>
+                  </div>
                 </div>
+                {/* Said before anyone has to notice: with no filter this is
+                    Cricket Australia's season total, and anything filtered is
+                    counted from the scorecards we hold, so the competitions do
+                    not sum to it. Drawn on the unfiltered view too, which is
+                    the whole point — nobody should discover this themselves
+                    and read it as a mistake. */}
+                <MatchCoverageNote coverage={matchCoverage} filtered={scopeActive} />
               </div>
               {player.is_overseas && (
                 <div className="pb-card p-4 flex items-center gap-3" style={{ borderColor: 'color-mix(in srgb, var(--pb-amber) 30%, transparent)' }}>
@@ -3150,7 +3187,7 @@ export default function PlayerProfile() {
         {tab === 'batting' && <BattingTab batting={batting} seasonStats={seasonStats} seasons={seasons} />}
         {tab === 'bowling' && <BowlingTab bowling={bowling} seasonStats={seasonStats} />}
         {tab === 'fielding' && <FieldingTab fielding={fielding} seasonStats={seasonStats} />}
-        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} />}
+        {tab === 'analysis' && <AnalysisTab playerId={playerId} seasonId={seasonId} dismissals={dismissals} partnerships={partnerships} byGrade={byGrade} byPosition={byPosition} seasonStats={seasonStats} bowlingByGrade={bowlingByGrade} bowlingDismissals={bowlingDismissals} bowlingByBatterPosition={bowlingByBatterPosition} battingInnings={battingInnings} bowlingSpells={bowlingSpells} teamBreakdown={teamBreakdown} seasonLabel={seasonId ? (seasons.find(s => s.id === seasonId)?.name || null) : null} captainStats={captainStats} byVenue={byVenue} byOpposition={byOpposition} careerBatting={batting} careerBowling={bowling} careerFielding={fielding} matchCoverage={matchCoverage} />}
         {tab === 'milestones' && <MilestonesTab playerId={playerId} upcomingMilestones={upcomingMilestones} milestones={milestones} />}
         {tab === 'achievements' && <AchievementsSection playerId={playerId} orgId={player.organisation_id} playerName={player.display_name || player.name} />}
       </main>

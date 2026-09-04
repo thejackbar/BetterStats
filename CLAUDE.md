@@ -10666,6 +10666,106 @@ incoherent however it is explained.
   question.
 
 
+### Say the two figures differ before anybody adds them up (v9.63.1)
+
+Asked for directly after the diagnosis above: "the concept of ALL being one
+number, then the sum of all matches display for each competition filter
+tallying to a different number is confusing... tell the user about it
+pre-emptively and explain why the numbers dont add up — don't allow the user to
+discover that the numbers don't add up. That looks like a mistake."
+
+- **NOTHING IS RENUMBERED, AND THE PLATFORM MEASUREMENT IS WHY.** The obvious
+  fix is `max(held, claimed)`, the rule the by-grade grid already applies. It
+  was measured before it was believed
+  (`ops/diagnostics/career_matches_sources.sql`, all 95,151 players): the two
+  sources agree for 41%, we hold MORE than CA counts for 20% (worst **+221**)
+  and CA counts more for 39% (worst **-484**). Adopting the higher figure
+  rewrites the headline career match count for **19,439 players** and does
+  nothing for the 36,917 whose filtered view already reads LOWER, which is the
+  larger half of the same problem. **The grid can do it because it compares per
+  season AND grade against CA's own `player_season_grade_stats` and carries an
+  `attributed_unknown` column for what it cannot place. The career header has
+  neither.** So the figures stay and the page explains itself.
+- **`services/match_coverage.py` READS BOTH FIGURES ITSELF, never the caller's
+  current one, and that is the whole design.** With a filter on, the caller's
+  figure has ALREADY switched to the scorecards — so a note derived from it
+  compares them against themselves and draws nothing at exactly the moment
+  somebody is looking at a moved number. The difference is a fact about the
+  career, not about the view, so the note reads identically either way.
+  Asserted, not assumed: the suite drives a genuinely active scope and compares
+  the two payloads.
+- **A GRADE-LESS GAME COUNTS AS HELD.** An uploaded scorecard with no grade
+  belongs to no competition, but we DO have the match — filing it under "we
+  hold no scorecard for this" blames the wrong thing and sends an admin looking
+  for a game that is right there. The first cut inner-joined `grades` and got
+  this wrong; season now comes from `v_effective_games.season_id`, the house
+  rule migration 169 already set. That is what makes the panel's own arithmetic
+  close: **rows + unattributed == breakdown_matches**, leaving only the career
+  total to explain.
+- **THE SURPLUS IS ITS OWN FIGURE, never a negative "missing" one.** `337 of
+  333` is the shape of a bug, not an explanation, so `without_scorecard` and
+  `extra_scorecards` are separate and every line of copy branches on which
+  applies. Both directions are ordinary — 20% of players against 39% — so
+  neither is the "normal" one.
+- **THE NOTE DRAWS ONLY WHERE THE TWO GENUINELY DIFFER**, the rule
+  `rate_coverage` already keeps: a note on every player is noise that teaches
+  people to stop reading notes. The payload is presence-aware, so a career with
+  nothing to explain keeps its exact shape.
+- **A LAST-N-GAMES OR DATE WINDOW DRAWS NOTHING.** That headline is a slice of a
+  career rather than the career, so comparing it against a career total would
+  mean nothing.
+- **THE COPY MAKES NO CAUSAL CLAIM IT CANNOT PROVE.** The first cut said a
+  missing scorecard is "usually an older season the club's records never
+  reached" — plausible, unverified, and quoted back at us the first time it is
+  wrong. It says what the query actually establishes: we hold no game row for
+  it at all, so there is nothing waiting to be filed.
+- **THIS IS NOT THE COMPETITION FEATURE'S DOING.** `?categories=senior`
+  reproduces it exactly, and that axis shipped with migration 228. Also ruled
+  out empirically: Applecross (22 grades), Payneham (112) and Hamilton Veterans
+  (4) each have ZERO grades outside a competition and their per-competition
+  figures sum exactly, and no manual game duplicates a synced one anywhere on
+  the platform (0 rows).
+- **A NEW CLUB IS GROUPED THE MOMENT ITS FIRST SYNC LANDS**, not at 02:30.
+  `_sync_safe` calls `maybe_group_club` on the SUCCESS path only — after
+  `finish_sync_run` and above the pause/cancel and crash handlers, so a sync
+  that did not complete never triggers it — and both onboarding paths (self-
+  serve registration and a super admin's New Club) reach it through
+  `_onboard_club_core`. A Full Rebuild does the same on its own true-success
+  branch, since a rebuild rewrites every grade and that is when the
+  associations are freshest. `maybe_group_club` owns the decision and settles,
+  so calling it after every full sync costs nothing once a club is done. **The
+  nightly job stays** — a club that played nothing in a period never reaches a
+  sync at all, which is the entire reason that pass exists.
+- **Verified against a real Postgres**
+  (`backend/verification/verify_match_coverage.py`, 33 checks through the
+  shipped service and route bodies: both directions, the grade-less boundary,
+  the silence where the two agree, a season-total-only career, cross-club both
+  ways, the season scope, the career figure the note quotes being the headline
+  the page draws, the note surviving an active filter, and a last-N window
+  drawing none; plus the competitions suite is 136 now, with the onboarding and
+  rebuild hooks pinned structurally) **with control runs**: with the service
+  absent the suite reports it rather than crashing; with the route left unwired
+  5 of the 33 fail; with the two hooks neutered 4 of the 136 fail.
+- **A CHECK THAT MATCHES THE WORD RATHER THAN THE CALL CANNOT FAIL.** Every
+  hook site carries a comment naming `maybe_group_club`, so the first cut
+  passed with the call itself renamed away. It matches
+  `competition_grouping.maybe_group_club(` now, and the ordering checks return
+  False for an absent part rather than raising, so a control run REPORTS them.
+- **Driven in Chromium** (`verify_match_coverage_browser.mjs`, 22: the note on
+  the UNFILTERED view, the headline read out of its own element, both
+  directions' wording, the explainer opening and closing, nothing drawn where
+  the two agree, and no overflow at 390px) **with a control run**: 10 of the 22
+  fail against the previous commit.
+- **`MATCHES212` HAS NO WORD BOUNDARY**, so `/\b212\b/` fails on a correct
+  page; and the headline COUNTS UP, so reading it straight away catches
+  `MATCHES187` mid-animation. The suite waits for the figure to stop moving and
+  reads it out of its own `.pb-num`, never out of the tile's whole text — the
+  note beside it quotes numbers too.
+- **NOTICED, NOT FIXED**: the by-grade grid still applies `max(held, claimed)`
+  while the career header does not, so the two can legitimately disagree for a
+  player CA counts short of. That is the pre-existing attribution split this
+  note documents rather than resolves.
+
 ## Naming a club or a contact outright (v9.58.3, Sep 2026)
 
 Asked for on the internal Segments screen straight after the rules above:

@@ -1263,6 +1263,69 @@ async def main() -> None:
                         / "app" / "services" / "sync.py").read_text()
             check("the sync itself does not carry it",
                   "maybe_group_club" not in sync_src)
+
+            # A NIGHTLY PASS IS NOT SOON ENOUGH FOR A BRAND-NEW CLUB. A club
+            # that has just self-served, or that a super admin has just
+            # created, opens Manage Grades on "not in a competition" and waits
+            # until 02:30 for the platform to do a job it could have done the
+            # moment the first sync landed. Both onboarding paths go through
+            # `_onboard_club_core`, which queues `_sync_safe`, so hooking that
+            # one function covers registration, New Club, the restart
+            # self-heal and every later full sync.
+            root = Path(__file__).resolve().parent.parent
+            orgs_src = (root / "app" / "routers" / "organisations.py").read_text()
+            body = orgs_src[orgs_src.index("async def _sync_safe("):]
+            body = body[:body.index("@router.post(")]
+            # Matched on the CALL, never the bare word: every one of these
+            # sites carries a comment naming the function, so a check written
+            # against the word passes with the call itself renamed away.
+            CALL = "competition_grouping.maybe_group_club("
+
+            def ordered(src: str, *parts: str) -> bool:
+                """True when every part is present, in this order.
+
+                Returns False for an absent part rather than raising, so a
+                CONTROL RUN reports the check instead of dying on it and
+                saying nothing about the ones after it.
+                """
+                at = -1
+                for part in parts:
+                    nxt = src.find(part, at + 1)
+                    if nxt < 0:
+                        return False
+                    at = nxt
+                return True
+
+            check("the first full sync groups the club itself", CALL in body)
+            # Order matters: before `finish_sync_run` the run is still open and
+            # `start_sync_run` for the grouping would sit beside an unfinished
+            # one; after the `except` clauses it would fire on a paused,
+            # cancelled or crashed sync, when the associations it reads have
+            # not all been written.
+            check("ON THE SUCCESS PATH ONLY — after the run is finished, and "
+                  "above the pause/cancel and crash handlers, so a sync that "
+                  "did not complete never triggers it",
+                  ordered(body, "finish_sync_run(run_id, stats", CALL,
+                          "except SyncControlSignal"))
+            check("and in its own try/except, so a grouping failure can never "
+                  "read as a sync failure — the run is already recorded as a "
+                  "success by this point",
+                  "Competition grouping after full sync failed" in body)
+            check("self-serve registration reaches it through _onboard_club_core",
+                  "_onboard_club_core" in
+                  (root / "app" / "routers" / "self_serve_trial.py").read_text())
+            admin_src = (root / "app" / "routers" / "club_admin.py").read_text()
+            check("and so does a super admin creating a club",
+                  "_onboard_club_core" in admin_src)
+            check("_onboard_club_core is what queues the sync both of them wait on",
+                  "background_tasks.add_task(_sync_safe" in orgs_src)
+            hr = admin_src[admin_src.index("async def hard_refresh_org("):]
+            hr = hr[:hr.index("\n@router.", 1)] if "\n@router." in hr[1:] else hr
+            check("a Full Rebuild groups the club too — it rewrites every "
+                  "grade, so that is when the associations are freshest",
+                  CALL in hr)
+            check("and only on ITS true-success branch, after the yearbooks",
+                  ordered(hr, "yearbook auto-generate failed", CALL))
         finally:
             grouping.playhq_client.get_teams = real_get_teams
 

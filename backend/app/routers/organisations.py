@@ -690,6 +690,28 @@ async def _sync_safe(org_id: str, run_id: uuid.UUID, kind: str = "org_full", aut
                 logging.getLogger(__name__).info(f"Self-serve yearbook auto-generate for {org_id}: {yb_result}")
             except Exception as ye:
                 logging.getLogger(__name__).warning(f"Self-serve yearbook auto-generate failed for {org_id}: {ye}")
+
+        # Group the club's grades into competitions the moment its first full
+        # sync lands, rather than leaving a brand-new club to wait for the
+        # 02:30 nightly pass and open Manage Grades on "not in a competition".
+        # The sync writes each grade's association as it goes, so by here the
+        # club has everything the grouping needs.
+        #
+        # `maybe_group_club` owns the decision and never raises: it skips a
+        # club whose remaining gap is Cricket Australia's own, and skips a run
+        # already in flight, so calling it after every full sync costs nothing
+        # once a club has settled. The nightly job stays as it is — a club that
+        # played nothing in a period never reaches a sync at all, which is why
+        # that pass exists.
+        try:
+            from app.services import competition_grouping
+            grouped = await competition_grouping.maybe_group_club(org_id)
+            if grouped.get("ran"):
+                logging.getLogger(__name__).info(
+                    f"Competition grouping after full sync for {org_id}: {grouped}")
+        except Exception as ge:
+            logging.getLogger(__name__).warning(
+                f"Competition grouping after full sync failed for {org_id}: {ge}")
     except SyncControlSignal as sig:
         # Pause/Cancel from the Super Admin All Clubs page — not a crash.
         if sig.action == "pause":

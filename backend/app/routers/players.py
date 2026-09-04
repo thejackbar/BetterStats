@@ -227,6 +227,27 @@ async def get_player_stats(
     batting_innings = await get_player_batting_innings(db, player_id, season_id, grade_id, scope=scope)
     bowling_spells = await get_player_bowling_spells(db, player_id, season_id, grade_id, scope=scope)
 
+    # How much of this career a breakdown can reach at all. Told UP FRONT, on
+    # the unfiltered view as well as a filtered one, so nobody discovers for
+    # themselves that the per-competition figures do not sum to the career
+    # total and reads it as a mistake. None when the two sources agree, which
+    # is the common case and draws nothing. Skipped for a last-N-games or
+    # date window, where the headline is a slice of a career rather than the
+    # career and the comparison would mean nothing.
+    # See services/match_coverage.py.
+    coverage = None
+    if player.organisation_id and not use_game_filter:
+        try:
+            from app.services import match_coverage
+            coverage = await match_coverage.career_coverage(
+                db, player_id, player.organisation_id, season_id)
+        except Exception:
+            # A note about the figures must never take the figures down.
+            await db.rollback()
+            import logging
+            logging.getLogger(__name__).exception(
+                "match coverage failed for player %s", player_id)
+
     return {
         "player": {"id": str(player.id), "name": player.name, "display_name": player.display_name, "claimed": player.claimed, "organisation_id": str(player.organisation_id), "playhq_id": player.playhq_id, "photo_url": player.photo_url, "is_overseas": player.is_overseas, "overseas_country": player.overseas_country, **(await _public_player_attrs(db, player))},
         "career_batting": _str_keys(batting),
@@ -234,6 +255,10 @@ async def get_player_stats(
         "career_fielding": _str_keys(fielding),
         "batting_innings": [_str_keys(i) for i in batting_innings],
         "bowling_spells": [_str_keys(s) for s in bowling_spells],
+        # Present only when the career total and what a filter can count from
+        # differ, so a payload that has nothing to explain keeps its exact
+        # shape — the presence-aware rule `_with_rate_coverage` already uses.
+        **({"match_coverage": coverage} if coverage else {}),
         # Lets the profile say which categories these figures cover, and offer
         # only the toggles this club's grades actually justify.
         "grade_scope": {
